@@ -7,15 +7,9 @@ Rule: Do not check an item until it is **final and game-ready**.
 
 ## Player
 
-- [✅] Player idle (loop)
-    Frame size: 64×96
-    Frames: 6
-    Order: [0,1,2,1,3,1]
-    Recommended idle FPS: 7–8
-    Anchor: bottom-center (boots)
-
-- [ ] Player run
-- [ ] Player jump (up)
+- [✅] Player idle
+- [✅] Player run
+- [ ] Player jump
 - [ ] Player fall
 - [ ] Player dash
 - [ ] Player land
