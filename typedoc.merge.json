@@ -18,8 +18,8 @@
   },
   "navigationLinks": {
     "Home": "/index.html",
-    "mickeyf.org": "https://mickeyf.org",
-    "GitHub": "https://github.com/Good-Loops/mickeyf.org"
+    "mickeyf.com": "https://mickeyf.com",
+    "GitHub": "https://github.com/Good-Loops/mickeyf.com"
   },
   "customCss": ["./docs-src/typedoc.css"]
 }
