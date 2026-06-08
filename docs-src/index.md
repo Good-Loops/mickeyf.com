@@ -1,4 +1,4 @@
-Contract-first API documentation for **mickeyf.org**, covering frontend and backend
+Contract-first API documentation for **mickeyf.com**, covering frontend and backend
 TypeScript code that is intended to be reused, reasoned about, and depended on.
 
 ## What this documentation is
@@ -24,5 +24,5 @@ These are considered implementation details, not public contracts.
 - Documentation favors intent and contracts over implementation narration.
 
 ## Links
-- Website: https://mickeyf.org
-- Repository: https://github.com/Good-Loops/mickeyf.org
+- Website: https://mickeyf.com
+- Repository: https://github.com/Good-Loops/mickeyf.com

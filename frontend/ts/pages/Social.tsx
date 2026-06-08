@@ -24,7 +24,7 @@ const Social: React.FC = () => {
                         <use href="assets/img/social.svg#youtube"></use>
                     </svg>
                 </a>
-                <a className="social-media__grid-anchor" href="https://github.com/Good-Loops/mickeyf.org" target="_blank">
+                <a className="social-media__grid-anchor" href="https://github.com/Good-Loops/mickeyf.com" target="_blank">
                     <svg className="social-media__grid-btn--github floating" aria-hidden="true">
                         <use href="assets/img/social.svg#github"></use>
                     </svg>

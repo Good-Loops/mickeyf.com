@@ -1,11 +1,11 @@
-# mickeyf.org — BeatCalc Web App
+# mickeyf.com — BeatCalc Web App
 
 This is a dynamic web platform designed to entertain and educate, featuring a curated selection of games, animations, and educational resources focused on music and math. The site aims to be a resource for learning, offering users the ability to explore new concepts through interactive content.
 
 ## Documentation
 
 📚 **API Documentation (TypeDoc)**  
-https://good-loops.github.io/mickeyf.org/
+https://good-loops.github.io/mickeyf.com/
 
 The documentation covers frontend and backend modules, animation systems, shaders, controllers, and configuration contracts. It is generated directly from the source and published automatically on each push to `main`.
 
@@ -18,7 +18,7 @@ The documentation covers frontend and backend modules, animation systems, shader
 
 ## Using the Website
 
-Access [mickeyf.org](https://mickeyf.org) directly from your browser to discover all that it has to offer. Create an account to save your progress in games and see how you rank on leaderboards.
+Access [mickeyf.com](https://mickeyf.com) directly from your browser to discover all that it has to offer. Create an account to save your progress in games and see how you rank on leaderboards.
 
 ## Educational Content
 

@@ -65,7 +65,7 @@ app.use(
             connectSrc: [
                 "'self'",
                 "data:",
-                "https://mickeyf.org",
+                "https://mickeyf.com",
                 "http://localhost:5173",
                 `${apiUrl!}/api/users`,
                 `${apiUrl}/auth/verify-token`
@@ -73,33 +73,33 @@ app.use(
             imgSrc: [
                 "'self'",
                 "data:",
-                "https://mickeyf.org",
+                "https://mickeyf.com",
                 "http://localhost:5173"
             ],
             scriptSrc: [
                 "'self'",
                 "'unsafe-inline'",
                 "'unsafe-eval'",
-                "https://mickeyf.org",
+                "https://mickeyf.com",
                 "http://localhost:5173"
             ],
             workerSrc: [
                 "'self'",
                 "blob:",
-                "https://mickeyf.org",
+                "https://mickeyf.com",
                 "http://localhost:5173"
             ],
             styleSrc: [
                 "'self'",
                 "'unsafe-inline'",
                 "https://fonts.googleapis.com",
-                "https://mickeyf.org",
+                "https://mickeyf.com",
                 "http://localhost:5173"
             ],
             fontSrc: [
                 "'self'",
                 "https://fonts.gstatic.com",
-                "https://mickeyf.org",
+                "https://mickeyf.com",
                 "http://localhost:5173"
             ],
         }
@@ -112,7 +112,8 @@ app.use(express.json()); // Parse JSON bodies
 /** Global CORS policy: governs cross-origin access and credentialed requests. */
 app.use(cors({
     origin: [ // Allowed origins
-        "https://mickeyf.org",
+        "https://mickeyf.com",
+        "https://www.mickeyf.com",
         "http://localhost:5173", 
         `${apiUrl!}/api/users`, // Allow the /api/users route to be accessed from the frontend
         `${apiUrl!}/auth/verify-token` // Allow the /auth/verify-token route to be accessed from the frontend
