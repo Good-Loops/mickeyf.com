@@ -74,16 +74,14 @@ Speedrun readability always takes priority over visual detail.
 ## Player Character
 - Theme: **Masked runner**
 - Silhouette priority: clear and readable at speed
-- Size: **64px tall**
+- Size: **96px tall**
 - Pivot point: **Feet center**
 - Outline: 1px
 - Required animations (v1):
   - Idle
   - Run
   - Jump
-  - Double Jump
   - Dash
-  - Hurt
   - Death
 
 ---
