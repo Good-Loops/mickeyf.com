@@ -9,4 +9,4 @@ RUN curl -Lo /usr/local/bin/cloud-sql-proxy \
       https://storage.googleapis.com/cloud-sql-connectors/cloud-sql-proxy/v2.11.4/cloud-sql-proxy.linux.amd64 \
   && chmod +x /usr/local/bin/cloud-sql-proxy
 
-WORKDIR /workspaces/mickeyf.org
+WORKDIR /workspaces/mickeyf.com

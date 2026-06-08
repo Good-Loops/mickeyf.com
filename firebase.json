@@ -18,18 +18,18 @@
         },
         "redirects": [
             {
-                "source": "http://www.mickeyf.org",
-                "destination": "https://mickeyf.org",
+                "source": "http://www.mickeyf.com",
+                "destination": "https://mickeyf.com",
                 "type": 301
             },
             {
-                "source": "http://mickeyf.org",
-                "destination": "https://mickeyf.org",
+                "source": "http://mickeyf.com",
+                "destination": "https://mickeyf.com",
                 "type": 301
             },
             {
-                "source": "https://www.mickeyf.org",
-                "destination": "https://mickeyf.org",
+                "source": "https://www.mickeyf.com",
+                "destination": "https://mickeyf.com",
                 "type": 301
             }
         ],
@@ -56,7 +56,7 @@
                     },
                     {
                         "key": "Content-Security-Policy",
-                        "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data:; font-src 'self' https://fonts.gstatic.com; connect-src 'self' data: https://mickeyf.org https://mickeyf-org-j7yuum4tiq-uc.a.run.app; worker-src 'self' blob: https://mickeyf.org;"
+                        "value": "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; img-src 'self' data:; font-src 'self' https://fonts.gstatic.com; connect-src 'self' data: https://mickeyf.com https://mickeyf-org-j7yuum4tiq-uc.a.run.app; worker-src 'self' blob: https://mickeyf.com;"
                     },
                     {
                         "key": "X-Content-Type-Options",
