@@ -34,7 +34,7 @@ C:\Users\User\Desktop\Pastas\Code\mickeyf.com
 ### Prerequisites
 
 - Git for Windows
-- Node.js 22 and npm
+- Node.js 22 (CI/runtime pinned at 22.23.2) and npm 11.6.2
 - Visual Studio Code for Windows
 - Docker Desktop using Linux containers
 - Google Cloud CLI when local Cloud SQL access is needed
@@ -186,6 +186,11 @@ for controls, verification steps, and licensing links.
 - Cloud Run serves the Express API.
 - Cloud SQL stores application data.
 - Production secrets are referenced through Secret Manager.
+
+Firebase Hosting path redirects cannot canonicalize hostnames. The
+`www.mickeyf.com` → `mickeyf.com` redirect is maintained in Firebase's external
+custom-domain configuration and must be reverified there after domain or Hosting
+changes.
 
 Production deployments and IAM changes are separate, approval-gated tasks and
 are not part of the local development workflow.

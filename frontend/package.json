@@ -1,6 +1,11 @@
 {
     "name": "frontend",
     "version": "0.5.0",
+    "packageManager": "npm@11.6.2",
+    "engines": {
+        "node": ">=22.0.0 <23.0.0",
+        "npm": ">=11.0.0 <12.0.0"
+    },
     "scripts": {
         "dev": "vite",
         "test": "tsc -p tsconfig.json --noEmit",
@@ -13,9 +18,6 @@
         "@capacitor/android": "^8.5.0",
         "@capacitor/core": "^8.5.0",
         "@capacitor/ios": "^8.5.0",
-        "cross-env": "^7.0.3",
-        "dotenv": "^16.4.5",
-        "firebase": "^12.17.1",
         "pitchy": "^4.0.7",
         "pixi-filters": "^6.0.3",
         "pixi.js": "^8.1.5",
