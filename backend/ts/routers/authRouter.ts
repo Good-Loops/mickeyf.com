@@ -13,13 +13,13 @@
  * - Route path + method pairs form a stable external contract.
  */
 import { Router } from 'express';
-import { authController } from '../controllers/authController';
+import { createAuthController } from '../controllers/authController';
 
-import { handleLogout } from './authRouter.handlers';
+import { createLogoutHandler } from './authRouter.handlers';
 
 export { authRoutesContract } from './authRouter.contract';
 
-export function createAuthRouter(): Router {
+export function createAuthRouter(sessionSecret: string, isProduction: boolean): Router {
     /**
      * Configured Express router for authentication routes.
      *
@@ -32,10 +32,10 @@ export function createAuthRouter(): Router {
     const router: Router = Router();
 
     /** GET /verify-token — validates auth context for the current request. */
-    router.get('/verify-token', authController);
+    router.get('/verify-token', createAuthController(sessionSecret));
 
     /** POST /logout — clears the session cookie, ending the authenticated session. */
-    router.post('/logout', handleLogout);
+    router.post('/logout', createLogoutHandler(isProduction));
 
     return router;
 }

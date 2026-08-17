@@ -30,21 +30,21 @@ export type PostUsersRequest =
                     /** Operation: create a new user account. */
           type: 'signup';
 
-                    /** Required; must be non-empty (server returns `EMPTY_FIELDS` when missing/empty). */
+                    /** Required; trimmed, non-empty, no control characters, at most 64 characters. */
           user_name: string;
 
                     /**
                      * Required; must be non-empty.
                      *
-                     * Validation quirk (as implemented): `INVALID_EMAIL` is returned only if the email is
-                     * simultaneously missing `@`, missing `.`, and shorter than 5 characters.
+                     * Trimmed and normalized to lowercase; must have a basic local@domain form and be at most
+                     * 254 characters.
                      */
           email: string;
 
                     /**
                      * Required.
                      *
-                     * Validation (as implemented): length must be 8–16 characters, else `INVALID_PASSWORD`.
+                     * Validation: at least 8 characters and at most 72 UTF-8 bytes; control characters are rejected.
                      */
           user_password: string;
       }
@@ -55,7 +55,7 @@ export type PostUsersRequest =
                     /** Required. */
           user_name: string;
 
-                    /** Required. */
+                    /** Required; at most 72 UTF-8 bytes to match bcrypt's effective input boundary. */
           user_password: string;
       }
     | {
@@ -89,6 +89,7 @@ export type PostUsersRequest =
 export type ApiErrorCode =
     | 'INVALID_TYPE'
     | 'EMPTY_FIELDS'
+    | 'INVALID_USERNAME'
     | 'INVALID_PASSWORD'
     | 'INVALID_EMAIL'
     | 'DUPLICATE_USER'
@@ -96,6 +97,10 @@ export type ApiErrorCode =
     | 'UNAUTHORIZED'
     | 'INVALID_SCORE'
     | 'IDENTITY_MISMATCH'
+    | 'RATE_LIMITED'
+    | 'PAYLOAD_TOO_LARGE'
+    | 'INVALID_REQUEST'
+    | 'NOT_FOUND'
     | 'SERVER_ERROR'
     | 'UNEXPECTED_ERROR';
 

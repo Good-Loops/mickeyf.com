@@ -29,19 +29,21 @@ import { authenticateRequest } from '../security/requestAuthentication';
  * - Body: `{ loggedIn: boolean, user_name?: string | null }`.
  *
  * Side effects:
- * - Performs JWT signature verification using `process.env.SESSION_SECRET`.
+ * - Performs JWT signature verification using the validated startup secret supplied by the router.
  *
  * Failure modes:
  * - Missing/invalid token yields `{ loggedIn: false }`.
  */
-export function authController(req: Request, res: Response) {
-    const authentication = authenticateRequest(req);
-    if (!authentication.authenticated) {
-        return res.json({ loggedIn: false });
-    }
+export function createAuthController(sessionSecret: string) {
+    return function authController(req: Request, res: Response) {
+        const authentication = authenticateRequest(req, sessionSecret);
+        if (!authentication.authenticated) {
+            return res.json({ loggedIn: false });
+        }
 
-    return res.json({
-        loggedIn: true,
-        user_name: authentication.identity.userName,
-    });
+        return res.json({
+            loggedIn: true,
+            user_name: authentication.identity.userName,
+        });
+    };
 }

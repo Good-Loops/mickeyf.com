@@ -1,11 +1,9 @@
 import { Request, Response } from 'express';
+import { sessionCookieOptions } from '../security/sessionCookie';
 
-export function handleLogout(_req: Request, res: Response) {
-    res.clearCookie('session', {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
-        signed: true,
-    });
-    res.json({ loggedOut: true });
+export function createLogoutHandler(isProduction: boolean) {
+    return function handleLogout(_req: Request, res: Response) {
+        res.clearCookie('session', sessionCookieOptions(isProduction));
+        return res.json({ loggedOut: true });
+    };
 }
