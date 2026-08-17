@@ -1,5 +1,8 @@
 version: 2
 
+# Keep routine version PRs to patch/minor releases. Dependabot security updates
+# are unaffected by allow.update-types and may still cross a major boundary.
+
 updates:
   - package-ecosystem: npm
     directory: /
@@ -10,6 +13,11 @@ updates:
       timezone: America/Sao_Paulo
     open-pull-requests-limit: 5
     versioning-strategy: increase-if-necessary
+    allow:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-patch
     groups:
       root-npm:
         patterns:
@@ -27,6 +35,11 @@ updates:
       timezone: America/Sao_Paulo
     open-pull-requests-limit: 5
     versioning-strategy: increase-if-necessary
+    allow:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-patch
     groups:
       frontend-npm:
         patterns:
@@ -44,6 +57,11 @@ updates:
       timezone: America/Sao_Paulo
     open-pull-requests-limit: 5
     versioning-strategy: increase-if-necessary
+    allow:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-patch
     groups:
       backend-npm:
         patterns:
@@ -60,6 +78,11 @@ updates:
       time: "09:30"
       timezone: America/Sao_Paulo
     open-pull-requests-limit: 5
+    allow:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-patch
     groups:
       github-actions:
         patterns:
@@ -73,3 +96,8 @@ updates:
       time: "09:40"
       timezone: America/Sao_Paulo
     open-pull-requests-limit: 5
+    allow:
+      - dependency-name: "*"
+        update-types:
+          - version-update:semver-minor
+          - version-update:semver-patch
