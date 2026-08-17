@@ -1,10 +1,19 @@
-# Ignore build artifacts and dependencies
-node_modules/
+# The production image only builds the backend. Deny everything else so local
+# configuration, credentials, Git metadata, frontend files, and Unity assets
+# cannot enter the Docker build context.
+**
+!Dockerfile
+!.dockerignore
+!backend/
+!backend/**
+
+# Backend dependencies, generated output, and local configuration are not
+# image inputs.
+backend/node_modules/
 backend/dist/
-frontend/dist/
+backend/.env
+backend/.env.*
+!backend/.env.example
 
-# Ignore log files
-*.log
-
-# Ignore temporary files
-*.tmp
+# Kept explicit for auditability even though the allowlist already excludes it.
+unity/
