@@ -24,6 +24,9 @@ docker-compose.yml
 # Temporary typedoc output
 .typedoc-tmp/
 
+# Firebase CLI cache
+.firebase/
+
 # Unity project caches and generated outputs. Keep Assets, Packages,
 # ProjectSettings, and every .meta file tracked.
 /unity/three-bosses/.utmp/

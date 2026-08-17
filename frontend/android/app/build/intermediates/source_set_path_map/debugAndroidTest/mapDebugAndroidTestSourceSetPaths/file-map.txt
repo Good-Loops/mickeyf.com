@@ -1,6 +1,0 @@
-org.mickeyf.app.test.app-annotation-experimental-1.3.0-0 C:\Users\pc\.gradle\caches\transforms-4\c3f29cc482c5505c30ee93e8490dad4f\transformed\annotation-experimental-1.3.0\res
-org.mickeyf.app.test.app-core-1.5.0-1 C:\Users\pc\.gradle\caches\transforms-4\f9dfead36295d18f8594a557659d6bca\transformed\core-1.5.0\res
-org.mickeyf.app.test.app-androidTest-2 C:\Users\pc\Desktop\Pastas\Code\mickeyf.org\frontend\android\app\build\generated\res\resValues\androidTest\debug
-org.mickeyf.app.test.app-mergeDebugAndroidTestResources-3 C:\Users\pc\Desktop\Pastas\Code\mickeyf.org\frontend\android\app\build\intermediates\incremental\debugAndroidTest\mergeDebugAndroidTestResources\merged.dir
-org.mickeyf.app.test.app-mergeDebugAndroidTestResources-4 C:\Users\pc\Desktop\Pastas\Code\mickeyf.org\frontend\android\app\build\intermediates\incremental\debugAndroidTest\mergeDebugAndroidTestResources\stripped.dir
-org.mickeyf.app.test.app-debugAndroidTest-5 C:\Users\pc\Desktop\Pastas\Code\mickeyf.org\frontend\android\app\build\intermediates\merged_res\debugAndroidTest\mergeDebugAndroidTestResources
