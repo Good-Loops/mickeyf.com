@@ -1,34 +1,4 @@
 {
-    "restoreTerminals.terminals": [
-        {
-            "splitTerminals": [
-                {
-                    "name": "front",
-                    "commands": [
-                        "cd frontend && npm run dev"
-                    ]
-                }
-            ]
-        },
-        {
-            "splitTerminals": [
-                {
-                    "name": "docs",
-                    "commands": [
-                        "npm run docs:dev"
-                    ]
-                }
-            ]
-        },
-        {
-            "splitTerminals": [
-                {
-                    "name": "general",
-                }
-            ]
-        },
-    ],
-    "terminal.integrated.defaultProfile.linux": "rbash",
     "editor.inlineSuggest.enabled": true,
     "editor.suggest.preview": true,
     "editor.tabCompletion": "onlySnippets"

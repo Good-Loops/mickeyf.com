@@ -51,8 +51,7 @@ import {
 } from 'pixi.js';
 
 type P4VegaAuth = {
-  isAuthenticated?: boolean;
-  userName?: string | null;
+  isAuthenticated?: () => boolean;
 };
 
 /**
@@ -188,7 +187,9 @@ export async function p4Vega(container?: HTMLElement, auth?: P4VegaAuth): Promis
             }
             BlackHole.bHAnimArray.push(bhAnim!);
         }
-        new BlackHole(stage, p4Anim);
+        if (!BlackHole.spawn(stage, p4Anim)) {
+            throw new Error('Black hole animation pool is empty');
+        }
 
         p4 = new P4(stage, p4Anim);
         water = new Water(stage, waterAnim);
@@ -217,7 +218,7 @@ export async function p4Vega(container?: HTMLElement, auth?: P4VegaAuth): Promis
 
         if (!gameLive) {
             ticker.stop();
-            const isAuthenticated = auth?.isAuthenticated || false;
+            const isAuthenticated = auth?.isAuthenticated?.() ?? false;
             if (isAuthenticated) {
                 await submitScore();
             }
@@ -257,8 +258,6 @@ export async function p4Vega(container?: HTMLElement, auth?: P4VegaAuth): Promis
     const restart = async (): Promise<void> => {
         gameLive = true;
 
-        BlackHole.bHAnimArray = [];
-
         p4.destroy();
         water.destroy();
         BlackHole.destroy();
@@ -278,15 +277,15 @@ export async function p4Vega(container?: HTMLElement, auth?: P4VegaAuth): Promis
     const submitScore = async () => {
         const p4_score = p4.totalWater;
 
-        const loggedInUsername = auth?.userName;
-
         await fetch(`${API_BASE}/api/users`, {
             method: 'POST',
             credentials: 'include',
+            headers: {
+                'Content-Type': 'application/json',
+            },
             body: JSON.stringify({
                 type: 'submit_score',
                 p4_score: p4_score,
-                user_name: loggedInUsername,
             }),
         })
             .then((response) => {

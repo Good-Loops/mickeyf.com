@@ -3,29 +3,51 @@ name: Docs (TypeDoc -> /docs)
 on:
   push:
     branches: [main]
+    paths:
+      - 'frontend/**'
+      - 'backend/**'
+      - 'docs-src/**'
+      - 'scripts/clean-docs.mjs'
+      - 'scripts/copy-doc-assets.mjs'
+      - 'typedoc.merge.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/docs.yml'
   workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 concurrency:
   group: docs-main
   cancel-in-progress: true
 
 jobs:
-  build-and-commit:
+  build:
+    name: Build documentation
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI: "true"
+      NPM_CONFIG_FUND: "false"
     steps:
       - name: Checkout
-        uses: actions/checkout@v4
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          fetch-depth: 0
+          persist-credentials: false
 
       - name: Setup Node
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 20
+          node-version: 22.23.2
           cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+            backend/package-lock.json
+
+      - name: Use project npm version
+        run: npm install --global npm@11.6.2 --no-audit --no-fund
 
       - name: Install root deps
         run: npm ci
@@ -39,15 +61,52 @@ jobs:
       - name: Build docs
         run: npm run docs
 
+      - name: Upload generated docs
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: generated-docs
+          path: docs
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 1
+
+  commit:
+    name: Commit documentation
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+
+      - name: Download generated docs
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: generated-docs
+          path: ${{ runner.temp }}/generated-docs
+
       - name: Commit /docs if changed
+        env:
+          GENERATED_DOCS: ${{ runner.temp }}/generated-docs
         run: |
-          if git diff --quiet -- docs; then
+          set -euo pipefail
+
+          test -f "$GENERATED_DOCS/index.html"
+          git rm --recursive --ignore-unmatch -- docs
+          mkdir --parents docs
+          cp --archive "$GENERATED_DOCS"/. docs/
+          git add --all -- docs
+
+          if git diff --cached --quiet -- docs; then
             echo "No docs changes."
             exit 0
           fi
 
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
-          git add docs
           git commit -m "docs: update TypeDoc output [skip ci]"
-          git push
+          git push origin "HEAD:${GITHUB_REF_NAME}"

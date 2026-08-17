@@ -23,3 +23,48 @@ docker-compose.yml
 
 # Temporary typedoc output
 .typedoc-tmp/
+
+# Firebase CLI cache
+.firebase/
+
+# Unity project caches and generated outputs. Keep Assets, Packages,
+# ProjectSettings, and every .meta file tracked.
+/unity/three-bosses/.utmp/
+/unity/three-bosses/[Ll]ibrary/
+/unity/three-bosses/[Tt]emp/
+/unity/three-bosses/[Oo]bj/
+/unity/three-bosses/[Bb]in/
+/unity/three-bosses/[Bb]uild/
+/unity/three-bosses/[Bb]uilds/
+/unity/three-bosses/[Ll]ogs/
+/unity/three-bosses/[Uu]ser[Ss]ettings/
+/unity/three-bosses/Assets/_Recovery/
+/unity/three-bosses/Assets/_Recovery.meta
+/unity/three-bosses/[Mm]emoryCaptures/
+/unity/three-bosses/[Rr]ecordings/
+
+# Unity-generated IDE/project files.
+/unity/three-bosses/.vs/
+/unity/three-bosses/.vscode/
+/unity/three-bosses/.idea/
+/unity/three-bosses/.gradle/
+/unity/three-bosses/ExportedObj/
+/unity/three-bosses/.consulo/
+/unity/three-bosses/*.csproj
+/unity/three-bosses/*.unityproj
+/unity/three-bosses/*.sln
+/unity/three-bosses/*.slnx
+/unity/three-bosses/*.suo
+/unity/three-bosses/*.user
+/unity/three-bosses/*.userprefs
+/unity/three-bosses/*.DotSettings.user
+/unity/three-bosses/*.pidb
+/unity/three-bosses/*.booproj
+/unity/three-bosses/*.svd
+/unity/three-bosses/*.pdb
+/unity/three-bosses/*.mdb
+/unity/three-bosses/*.opendb
+/unity/three-bosses/*.VC.db
+/unity/three-bosses/sysinfo.txt
+/unity/three-bosses/mono_crash.*
+/unity/three-bosses/crashlytics-build.properties

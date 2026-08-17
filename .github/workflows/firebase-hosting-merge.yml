@@ -4,57 +4,84 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'frontend/**'
+      - 'firebase.json'
+      - '.firebaserc'
+      - '.github/workflows/firebase-hosting-merge.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: firebase-hosting-live
+  cancel-in-progress: false
 
 jobs:
   build_and_deploy:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI: "true"
+      NPM_CONFIG_FUND: "false"
     steps:
-      - uses: actions/checkout@v4
-
-      - name: Cache Node.js modules
-        uses: actions/cache@v3
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
-          path: ~/.npm
-          key: ${{ runner.os }}-node-${{ hashFiles('**/package-lock.json') }}
-          restore-keys: |
-            ${{ runner.os }}-node-
+          persist-credentials: false
 
       - name: Set up Node.js
-        uses: actions/setup-node@v3
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: '20'
+          node-version: 22.23.2
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Use project npm version
+        run: npm install --global npm@11.6.2 --no-audit --no-fund
 
       - name: Install dependencies
-        run: npm install
+        run: npm ci
         working-directory: frontend
 
       - name: Build the project
         run: npm run build
         working-directory: frontend
         env:
-          NODE_ENV: 'production'
-          VITE_DEV_API_URL: ${{ secrets.DEV_API_URL }}
-          VITE_PROD_API_URL: ${{ secrets.PROD_API_URL }}
+          VITE_PROD_API_URL: https://mickeyf-org-j7yuum4tiq-uc.a.run.app
 
       - name: Deploy to Firebase Hosting
-        uses: FirebaseExtended/action-hosting-deploy@v0
+        uses: FirebaseExtended/action-hosting-deploy@500ac625ca2dd40cbd15f7659af953801858032a # v0.11.0
         with:
-          repoToken: ${{ secrets.GITHUB_TOKEN }}
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_NOTED_REEF_387021 }}
+          firebaseToolsVersion: 15.27.0
           channelId: live
           projectId: noted-reef-387021
-      
+
       - name: Notify Slack (result)
         if: always()
+        continue-on-error: true
+        env:
+          DEPLOY_STATUS: ${{ job.status }}
+          SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
-          if [ "${{ job.status }}" = "success" ]; then
-            MSG="✅ Frontend deployed to Firebase Hosting. Commit: ${GITHUB_SHA:0:7}"
-          else
-            MSG="❌ Frontend deploy FAILED (Firebase Hosting). Commit: ${GITHUB_SHA:0:7}. Check GitHub Actions logs."
+          set -euo pipefail
+
+          if [[ -z "${SLACK_WEBHOOK_URL:-}" ]]; then
+            echo "Slack notification skipped because no webhook is configured."
+            exit 0
           fi
 
-          curl -X POST -H 'Content-type: application/json' \
-          --data "{\"text\":\"$MSG\"}" \
-          ${{ secrets.SLACK_WEBHOOK_URL }}
+          if [[ "$DEPLOY_STATUS" == "success" ]]; then
+            message="Frontend deployed to Firebase Hosting. Commit: ${GITHUB_SHA:0:7}"
+          else
+            message="Frontend deploy failed. Commit: ${GITHUB_SHA:0:7}. Check GitHub Actions logs."
+          fi
 
-
+          payload="$(jq -cn --arg text "$message" '{text: $text}')"
+          curl --fail --silent --show-error --retry 3 --max-time 15 \
+            --proto '=https' --tlsv1.2 \
+            --request POST \
+            --header 'Content-Type: application/json' \
+            --data "$payload" \
+            "$SLACK_WEBHOOK_URL"

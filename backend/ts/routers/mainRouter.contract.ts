@@ -30,21 +30,21 @@ export type PostUsersRequest =
                     /** Operation: create a new user account. */
           type: 'signup';
 
-                    /** Required; must be non-empty (server returns `EMPTY_FIELDS` when missing/empty). */
+                    /** Required; trimmed, non-empty, no control characters, at most 64 characters. */
           user_name: string;
 
                     /**
                      * Required; must be non-empty.
                      *
-                     * Validation quirk (as implemented): `INVALID_EMAIL` is returned only if the email is
-                     * simultaneously missing `@`, missing `.`, and shorter than 5 characters.
+                     * Trimmed and normalized to lowercase; must have a basic local@domain form and be at most
+                     * 254 characters.
                      */
           email: string;
 
                     /**
                      * Required.
                      *
-                     * Validation (as implemented): length must be 8–16 characters, else `INVALID_PASSWORD`.
+                     * Validation: at least 8 characters and at most 72 UTF-8 bytes; control characters are rejected.
                      */
           user_password: string;
       }
@@ -55,22 +55,23 @@ export type PostUsersRequest =
                     /** Required. */
           user_name: string;
 
-                    /** Required. */
+                    /** Required; at most 72 UTF-8 bytes to match bcrypt's effective input boundary. */
           user_password: string;
       }
     | {
                     /** Operation: submit a p4-Vega score. */
           type: 'submit_score';
 
-                    /** Required; missing value yields HTTP 401 with `UNAUTHORIZED`. */
-          user_name: string;
+                    /**
+                     * Legacy compatibility field. The server derives identity from verified authentication and
+                     * returns HTTP 403 with `IDENTITY_MISMATCH` if this value conflicts with that identity.
+                     */
+          user_name?: string;
 
                     /**
-                     * Score value (game-defined units). Nullable to indicate “no score”.
-                     *
-                     * Validation: not currently enforced server-side; callers should send a finite number.
+                     * Score value in the range 0–990 (inclusive), in increments of 10.
                      */
-          p4_score: number | null;
+          p4_score: number;
       }
     | {
                     /** Operation: fetch the leaderboard. */
@@ -88,11 +89,18 @@ export type PostUsersRequest =
 export type ApiErrorCode =
     | 'INVALID_TYPE'
     | 'EMPTY_FIELDS'
+    | 'INVALID_USERNAME'
     | 'INVALID_PASSWORD'
     | 'INVALID_EMAIL'
     | 'DUPLICATE_USER'
     | 'AUTH_FAILED'
     | 'UNAUTHORIZED'
+    | 'INVALID_SCORE'
+    | 'IDENTITY_MISMATCH'
+    | 'RATE_LIMITED'
+    | 'PAYLOAD_TOO_LARGE'
+    | 'INVALID_REQUEST'
+    | 'NOT_FOUND'
     | 'SERVER_ERROR'
     | 'UNEXPECTED_ERROR';
 

@@ -33,6 +33,7 @@ import { Container, ContainerChild, AnimatedSprite } from 'pixi.js';
 export class Water extends Entity<AnimatedSprite> {
     private startX = CANVAS_WIDTH - Entity.gap;
     private startY = CANVAS_HEIGHT * .5;
+    private collectibleEnabled = true;
 
     private noteSelector = new GameplayNoteSelector();
 
@@ -67,16 +68,38 @@ export class Water extends Entity<AnimatedSprite> {
         notesPlaying: boolean,
         stage: Container<ContainerChild>
     ) {
+        if (!this.collectibleEnabled) return;
+
+        if (!BlackHole.hasSpawnCapacity()) {
+            this.disableCollectible();
+            return;
+        }
+
         if (isColliding(p4.p4Anim, waterAnim)) {
+            const blackHole = BlackHole.spawn(stage, p4.p4Anim);
+            if (!blackHole) {
+                this.disableCollectible();
+                return;
+            }
+
             if (notesPlaying) this.noteSelector.playNote();
 
-            new BlackHole(stage, p4.p4Anim);
-
-            waterAnim.x = getRandomX(waterAnim.width + Entity.gap);
-            waterAnim.y = getRandomY(waterAnim.height + Entity.gap);
-
             p4.totalWater += 10;
+
+            if (BlackHole.hasSpawnCapacity()) {
+                waterAnim.x = getRandomX(waterAnim.width + Entity.gap);
+                waterAnim.y = getRandomY(waterAnim.height + Entity.gap);
+            } else {
+                this.disableCollectible();
+            }
         }
+    }
+
+    /** Stops further collisions once no black-hole animation remains for a valid pickup. */
+    private disableCollectible(): void {
+        this.collectibleEnabled = false;
+        this.waterAnim.visible = false;
+        this.waterAnim.stop();
     }
 
     /** Destroys the water sprite. Caller is responsible for removing it from the stage if needed. */

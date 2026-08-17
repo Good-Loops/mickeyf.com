@@ -1,0 +1,29 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b79b32262caed6c4298ae814598c974c, type: 3}
+  m_Name: WD_RicochetDisk
+  m_EditorClassIdentifier: Assembly-CSharp::WeaponData
+  weaponId: ricochet_disk
+  weaponSprite: {fileID: 21300000, guid: 48f9413fc3f2acb44bdc37b6fcf58e73, type: 3}
+  cooldownSeconds: 0.28
+  maxShots: 7
+  projectilePrefab: {fileID: 3643375496226751357, guid: 3e3fca9d1c844e044a628e0d0eb5f999, type: 3}
+  projectileSpeed: 18
+  pelletCount: 1
+  spreadDegrees: 0
+  muzzleForwardOffset: 0.22
+  muzzleVerticalOffset: 0.02
+  impactPrefab: {fileID: 5887161415428975763, guid: 75fe590980653454eb0c6df1239fb80c, type: 3}
+  fireSfx: {fileID: 8300000, guid: bc2f6af9721fdf94ea91a276312827a5, type: 3}
+  impactSfx: {fileID: 8300000, guid: 7188e5c195b9afc4d9e9d68cabac3fc9, type: 3}
+  fireSfxVolume: 0.58
+  impactSfxVolume: 0.28

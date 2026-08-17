@@ -1,3 +1,0 @@
-org.mickeyf.app.test
-style WhiteBackgroundDialogTheme
-style WhiteBackgroundTheme

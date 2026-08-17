@@ -1,0 +1,78 @@
+# Normalize text in Git while leaving detected binary files untouched.
+* text=auto
+
+# Source and documentation.
+.gitattributes text eol=lf
+.gitignore text eol=lf
+.dockerignore text eol=lf
+.gcloudignore text eol=lf
+Dockerfile text eol=lf
+*.cs text eol=lf
+*.json text eol=lf
+*.yml text eol=lf
+*.yaml text eol=lf
+*.ts text eol=lf
+*.tsx text eol=lf
+*.scss text eol=lf
+*.md text eol=lf
+/resources/project-structure.txt text eol=lf
+
+# Unity serialized assets. text=auto protects unexpected binary serialization;
+# textual assets use LF.
+*.unity eol=lf
+*.prefab eol=lf
+*.asset eol=lf
+*.meta text eol=lf
+*.mat eol=lf
+*.anim eol=lf
+*.controller eol=lf
+*.overrideController eol=lf
+*.physicMaterial eol=lf
+*.physicsMaterial2D eol=lf
+*.playable eol=lf
+*.mask eol=lf
+*.guiskin eol=lf
+*.terrainlayer eol=lf
+*.spriteatlas eol=lf
+*.lighting eol=lf
+*.preset eol=lf
+*.renderTexture eol=lf
+*.mixer eol=lf
+*.signal eol=lf
+*.fontsettings eol=lf
+*.scenetemplate text eol=lf
+*.asmdef text eol=lf
+*.asmref text eol=lf
+*.inputactions text eol=lf
+unity/three-bosses/**/*.txt text eol=lf
+*.shader text eol=lf
+*.shadergraph text eol=lf
+*.compute text eol=lf
+*.cginc text eol=lf
+*.hlsl text eol=lf
+*.uxml text eol=lf
+*.uss text eol=lf
+
+# Platform scripts.
+*.sh text eol=lf
+/frontend/android/gradlew text eol=lf
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Common binary assets.
+*.png -text
+*.jpg -text
+*.jpeg -text
+*.gif -text
+*.webp -text
+*.ico -text
+*.mp3 -text
+*.wav -text
+*.ogg -text
+*.fbx -text
+*.blend -text
+*.psd -text
+*.ttf -text
+*.otf -text
+*.dll -text
+*.jar -text

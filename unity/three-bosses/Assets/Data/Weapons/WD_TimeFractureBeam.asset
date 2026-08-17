@@ -1,0 +1,29 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b79b32262caed6c4298ae814598c974c, type: 3}
+  m_Name: WD_TimeFractureBeam
+  m_EditorClassIdentifier: Assembly-CSharp::WeaponData
+  weaponId: time_fracture_beam
+  weaponSprite: {fileID: 21300000, guid: 33ab1e9f18186814e8a65f6eb70869d1, type: 3}
+  cooldownSeconds: 0.5
+  maxShots: 2
+  projectilePrefab: {fileID: 8550432024279031623, guid: 3ef905573ff06ea4588ef49fcb39953e, type: 3}
+  projectileSpeed: 40
+  pelletCount: 1
+  spreadDegrees: 0
+  muzzleForwardOffset: 0.2
+  muzzleVerticalOffset: -0.08
+  impactPrefab: {fileID: 3293963573369904213, guid: 1032f0c61bcd8b84e9aa2423535b1bf2, type: 3}
+  fireSfx: {fileID: 8300000, guid: 80d47997c91e6a84588ec0d29c0dce2b, type: 3}
+  impactSfx: {fileID: 8300000, guid: f792da7e4780ff649a8c2cd30bdc47db, type: 3}
+  fireSfxVolume: 0.62
+  impactSfxVolume: 0.52

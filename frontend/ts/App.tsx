@@ -3,6 +3,7 @@
  * Composes the top-level layout (header/footer) and the client-side route table.
  * Ownership: this module wires pages and navigation only; domain logic lives in feature modules, hooks, and services.
  */
+import "pixi.js/unsafe-eval";
 import React from "react";
 import { Routes, Route } from "react-router-dom";
 import Header from "@/Header";

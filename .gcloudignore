@@ -1,10 +1,21 @@
-# Ignore build artifacts and dependencies
-node_modules/
+# Local `gcloud builds submit` needs only the build configuration and backend
+# image inputs. Deny everything else so secrets, Git metadata, frontend files,
+# and Unity assets are never uploaded with a manual build context.
+**
+!.gcloudignore
+!cloudbuild.yaml
+!Dockerfile
+!.dockerignore
+!backend/
+!backend/**
+
+# Backend dependencies, generated output, and local configuration are not
+# Cloud Build inputs.
+backend/node_modules/
 backend/dist/
-frontend/dist/
+backend/.env
+backend/.env.*
+!backend/.env.example
 
-# Ignore log files
-*.log
-
-# Ignore temporary files
-*.tmp
+# Kept explicit for auditability even though the allowlist already excludes it.
+unity/

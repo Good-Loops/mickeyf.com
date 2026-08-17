@@ -13,10 +13,16 @@
  * - Route path + method pairs form a stable external contract.
  */
 import { Router } from 'express';
-import { mainController } from '../controllers/mainController';
+import { createMainController } from '../controllers/mainController';
+import { pool } from '../db/dbConfig';
+import { asyncHandler } from '../middleware/errorHandling';
+import {
+    createAuthenticationIpRateLimiter,
+    createLoginAccountRateLimiter,
+} from '../security/requestRateLimits';
 import { handleGetUsersNotSupported } from './mainRouter.handlers';
 
-export function createMainRouter(): Router {
+export function createMainRouter(sessionSecret: string, isProduction: boolean): Router {
     /**
      * Configured Express router for core API routes.
      *
@@ -24,9 +30,19 @@ export function createMainRouter(): Router {
      * - Exports a fully-configured router; the base mount path is owned by app bootstrap.
      */
     const router = Router();
+    const mainController = createMainController({
+        database: pool,
+        sessionSecret,
+        isProduction,
+    });
 
     /** POST /users — core API request multiplexer (mutating/command-style). */
-    router.post('/users', mainController);
+    router.post(
+        '/users',
+        createAuthenticationIpRateLimiter(),
+        createLoginAccountRateLimiter(),
+        asyncHandler(mainController)
+    );
 
     /** GET /users — read-only endpoint explicitly not supported (returns guidance message). */
     router.get('/users', handleGetUsersNotSupported);

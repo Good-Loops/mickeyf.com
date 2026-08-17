@@ -48,23 +48,12 @@ export class BlackHole extends Entity<AnimatedSprite> {
     static bHAnimArray: AnimatedSprite[] = [];
     static bHArray: BlackHole[] = [];
 
-    /**
-     * @param stage - Container that will own the black hole sprite in the scene graph.
-     * @param p4Anim - Player sprite used only to choose an initial placement that is not too close.
-     */
-    constructor(
+    private constructor(
         stage: Container<ContainerChild>,
-        p4Anim: AnimatedSprite
+        p4Anim: AnimatedSprite,
+        blackHoleAnim: AnimatedSprite
     ) {
-        let index: number;
-        do {
-            index = getRandomInt(0, BlackHole.bHAnimArray.length - 1);
-        } while (BlackHole.addedIndexes.includes(index));
-        BlackHole.addedIndexes.push(index);
-
-        const newBHAnim = BlackHole.bHAnimArray[index];
-        if (!newBHAnim) throw new Error('Black hole animation not found');
-        super(newBHAnim);
+        super(blackHoleAnim);
 
         this.anim.y = getRandomY(this.anim.height);
         this.anim.x = getRandomX(this.anim.width);
@@ -76,6 +65,37 @@ export class BlackHole extends Entity<AnimatedSprite> {
         stage.addChild(this.anim);
 
         BlackHole.bHArray.push(this);
+    }
+
+    /** Returns whether an unused animation remains in the shared spawn pool. */
+    static hasSpawnCapacity(): boolean {
+        return BlackHole.addedIndexes.length < BlackHole.bHAnimArray.length;
+    }
+
+    /**
+     * Spawns a black hole from an unused animation, or returns `null` when the pool is exhausted.
+     *
+     * Selection is made from a finite list of unused indexes, so exhaustion cannot cause an unbounded retry loop.
+     */
+    static spawn(
+        stage: Container<ContainerChild>,
+        p4Anim: AnimatedSprite
+    ): BlackHole | null {
+        const unusedIndexes = BlackHole.bHAnimArray
+            .map((_, index) => index)
+            .filter((index) => !BlackHole.addedIndexes.includes(index));
+
+        if (unusedIndexes.length === 0) return null;
+
+        const unusedIndex = unusedIndexes[
+            getRandomInt(0, unusedIndexes.length - 1)
+        ];
+        const blackHoleAnim = BlackHole.bHAnimArray[unusedIndex];
+
+        if (!blackHoleAnim) return null;
+
+        BlackHole.addedIndexes.push(unusedIndex);
+        return new BlackHole(stage, p4Anim, blackHoleAnim);
     }
 
     /** Chooses an initial axis-aligned movement direction and speed (pixels per update call). */
@@ -147,5 +167,6 @@ export class BlackHole extends Entity<AnimatedSprite> {
         }
         BlackHole.bHArray = [];
         BlackHole.bHAnimArray = [];
+        BlackHole.addedIndexes = [];
     }
 }

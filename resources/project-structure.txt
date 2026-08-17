@@ -13,8 +13,6 @@ mickeyf.com
 │   ├── routers
 │   │   ├── authRouter.ts
 │   │   └── mainRouter.ts
-│   ├── scripts
-│   │   └── dev-db.sh
 │   ├── types
 │   │   └── customTypes.ts
 │   ├── app.ts
@@ -553,17 +551,36 @@ mickeyf.com
 │   ├── typedoc.json
 │   ├── vite-env.d.ts
 │   └── vite.config.ts
+├── unity
+│   └── three-bosses
+│       ├── Assets  [all .meta files tracked]
+│       │   ├── Animations
+│       │   ├── Audio
+│       │   ├── Data
+│       │   ├── Materials
+│       │   ├── Prefabs
+│       │   ├── Scenes
+│       │   ├── Scripts
+│       │   ├── Settings
+│       │   ├── Sprites
+│       │   ├── TextMesh Pro
+│       │   ├── DefaultVolumeProfile.asset
+│       │   ├── PlayerInputActions.inputactions
+│       │   └── UniversalRenderPipelineGlobalSettings.asset
+│       ├── Packages
+│       ├── ProjectSettings
+│       ├── ASSET_PROVENANCE.md
+│       ├── README.md
+│       ├── THIRD_PARTY_NOTICES.md
+│       └── UNITY_COMPANION_LICENSE.md
 ├── resources
 │   ├── colors.txt
 │   └── project-structure.txt
 ├── scripts
-│   ├── dev-down.sh
-│   ├── dev-start.sh
-│   ├── dev-up.sh
-│   └── devcontainer-backend-start.sh
+│   └── clean-docs.mjs
 ├── Dockerfile
 ├── README.md
 ├── cloudbuild.yaml
-├── docker-compose.yml
+├── compose.yaml
 ├── firebase.json
 └── install-scout.sh
