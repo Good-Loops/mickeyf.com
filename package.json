@@ -8,7 +8,7 @@
 		"docs:json:frontend": "typedoc --options frontend/typedoc.json --tsconfig frontend/tsconfig.typedoc.json --json .typedoc-tmp/frontend.json",
 		"docs:json:backend": "typedoc --options backend/typedoc.json --tsconfig backend/tsconfig.typedoc.json --json .typedoc-tmp/backend.json",
 		"docs:json": "npm run docs:json:frontend && npm run docs:json:backend",
-		"docs:assets": "cpx \"docs-src/assets/**/*\" docs/assets",
+		"docs:assets": "node scripts/copy-doc-assets.mjs",
 		"docs:build": "typedoc --options typedoc.merge.json && npm run docs:assets",
 		"docs": "npm run docs:clean && npm run docs:json && npm run docs:build",
 		"docs:serve": "http-server docs -p 8081",
@@ -17,9 +17,8 @@
 	},
 	"devDependencies": {
 		"chokidar-cli": "^3.0.0",
-		"concurrently": "^9.2.1",
-		"cpx": "^1.5.0",
+		"concurrently": "^9.2.4",
 		"http-server": "^14.1.1",
-		"typedoc": "^0.28.16"
+		"typedoc": "^0.28.20"
 	}
 }
