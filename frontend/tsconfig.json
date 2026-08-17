@@ -5,9 +5,8 @@
         "module": "esnext",
         "moduleResolution": "bundler",
         "outDir": "public/dist",
-        "baseUrl": "./",
         "paths": {
-            "@/*": ["ts/*"]
+            "@/*": ["./ts/*"]
         },
         "sourceMap": true,
         "allowJs": true,

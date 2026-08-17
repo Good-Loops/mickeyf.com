@@ -11,28 +11,40 @@ import Dropdown from '@/components/Dropdown';
 
 const P4Vega: React.FC = () => {
     const canvasWrapperRef = useRef<HTMLDivElement | null>(null);
-    const { isAuthenticated, userName } = useAuth();
+    const { isAuthenticated, loading } = useAuth();
+    const isAuthenticatedRef = useRef(isAuthenticated);
+
+    isAuthenticatedRef.current = isAuthenticated;
 
     const [selectedKey, setSelectedKey] = useState<string>('C');
     const [selectedScale, setSelectedScale] = useState<string>('Major');
 
     useEffect(() => {
-        if (!canvasWrapperRef.current) return;
+        if (loading || !canvasWrapperRef.current) return;
 
         let dispose: (() => void) | undefined;
+        let cancelled = false;
+        const container = canvasWrapperRef.current;
 
         (async () => {
-            dispose = await p4Vega(canvasWrapperRef.current!, {
-                isAuthenticated,
-                userName,
+            const nextDispose = await p4Vega(container, {
+                isAuthenticated: () => isAuthenticatedRef.current,
             });
+
+            if (cancelled) {
+                nextDispose();
+                return;
+            }
+
+            dispose = nextDispose;
         })();
 
         return () => {
             // Must dispose on unmount to prevent duplicate loops.
+            cancelled = true;
             dispose?.();
         };
-    }, []);
+    }, [loading]);
 
     return (
         <section className='p4-vega' data-p4-vega>
