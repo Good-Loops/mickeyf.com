@@ -1,3 +1,4 @@
+# The main-branch trigger is connected to the renamed Good-Loops/mickeyf.com repository.
 steps:
   # Build the Docker image for the backend.
   - id: 'Build backend image'
