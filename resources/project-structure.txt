@@ -551,6 +551,28 @@ mickeyf.com
 │   ├── typedoc.json
 │   ├── vite-env.d.ts
 │   └── vite.config.ts
+├── unity
+│   └── three-bosses
+│       ├── Assets  [all .meta files tracked]
+│       │   ├── Animations
+│       │   ├── Audio
+│       │   ├── Data
+│       │   ├── Materials
+│       │   ├── Prefabs
+│       │   ├── Scenes
+│       │   ├── Scripts
+│       │   ├── Settings
+│       │   ├── Sprites
+│       │   ├── TextMesh Pro
+│       │   ├── DefaultVolumeProfile.asset
+│       │   ├── PlayerInputActions.inputactions
+│       │   └── UniversalRenderPipelineGlobalSettings.asset
+│       ├── Packages
+│       ├── ProjectSettings
+│       ├── ASSET_PROVENANCE.md
+│       ├── README.md
+│       ├── THIRD_PARTY_NOTICES.md
+│       └── UNITY_COMPANION_LICENSE.md
 ├── resources
 │   ├── colors.txt
 │   └── project-structure.txt

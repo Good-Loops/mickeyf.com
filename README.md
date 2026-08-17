@@ -14,6 +14,7 @@ documentation workflow.
 
 - Frontend: React, TypeScript, Sass, and Vite
 - Backend: Node.js, Express, and MySQL
+- Unity game: Unity 6.3 LTS (6000.3.8f1), 2D URP, and the Input System
 - Hosting: Firebase Hosting and Google Cloud Run
 - Database: Cloud SQL for MySQL
 - Local database connectivity: Cloud SQL Auth Proxy in Docker Desktop
@@ -37,7 +38,7 @@ C:\Users\User\Desktop\Pastas\Code\mickeyf.com
 - Visual Studio Code for Windows
 - Docker Desktop using Linux containers
 - Google Cloud CLI when local Cloud SQL access is needed
-- Unity Hub and Unity 6.3 LTS for the Three Bosses project when it is added
+- Unity Hub and Unity 6.3 LTS editor version 6000.3.8f1 for Three Bosses
 
 ### Install dependencies
 
@@ -159,15 +160,25 @@ npm --prefix backend run prod
 
 ## Unity project location
 
-When Three Bosses is added to this monorepo, its project root will be:
+The Three Bosses Unity project is stored at:
 
 ```text
 unity/three-bosses
 ```
 
-That directory must directly contain `Assets/`, `Packages/`, and
-`ProjectSettings/`. Unity source migration and verification are handled in
-later migration phases.
+Open that exact directory from Unity Hub with editor version 6000.3.8f1 and
+allow the first import to finish. The project uses Visible Meta Files and Force
+Text serialization. Its enabled build scenes are, in order:
+
+1. `Assets/Scenes/Level1_BeeBoss.unity`
+2. `Assets/Scenes/Level2_CyborgBoss.unity`
+3. `Assets/Scenes/Level3_Kraken.unity`
+
+Track `Assets/` with every `.meta` file, plus `Packages/`, `ProjectSettings/`,
+and the project documentation. Unity-generated `Library/`, `Temp/`, `Logs/`,
+`UserSettings/`, IDE project files, and builds are ignored and must not be
+committed. See [`unity/three-bosses/README.md`](unity/three-bosses/README.md)
+for controls, verification steps, and licensing links.
 
 ## Production architecture
 

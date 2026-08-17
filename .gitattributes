@@ -15,6 +15,7 @@ Dockerfile text eol=lf
 *.tsx text eol=lf
 *.scss text eol=lf
 *.md text eol=lf
+/resources/project-structure.txt text eol=lf
 
 # Unity serialized assets. text=auto protects unexpected binary serialization;
 # textual assets use LF.
@@ -39,10 +40,13 @@ Dockerfile text eol=lf
 *.mixer eol=lf
 *.signal eol=lf
 *.fontsettings eol=lf
+*.scenetemplate text eol=lf
 *.asmdef text eol=lf
 *.asmref text eol=lf
 *.inputactions text eol=lf
+unity/three-bosses/**/*.txt text eol=lf
 *.shader text eol=lf
+*.shadergraph text eol=lf
 *.compute text eol=lf
 *.cginc text eol=lf
 *.hlsl text eol=lf

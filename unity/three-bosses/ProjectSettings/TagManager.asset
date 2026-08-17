@@ -1,0 +1,58 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!78 &1
+TagManager:
+  serializedVersion: 3
+  tags:
+  - Boss
+  layers:
+  - Default
+  - TransparentFX
+  - Ignore Raycast
+  - Ground
+  - Water
+  - UI
+  - Projectile
+  - Player
+  - Boss
+  - Enemy Projectile
+  - Boss Remains
+  - Background
+  - Weapon Crate
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  - 
+  m_SortingLayers:
+  - name: Default
+    uniqueID: 0
+    locked: 0
+  - name: Player
+    uniqueID: 3058166421
+    locked: 0
+  - name: Boss
+    uniqueID: 3637151423
+    locked: 0
+  - name: Impact
+    uniqueID: 4117744633
+    locked: 0
+  - name: Projectile
+    uniqueID: 2576595927
+    locked: 0
+  m_RenderingLayers:
+  - Default

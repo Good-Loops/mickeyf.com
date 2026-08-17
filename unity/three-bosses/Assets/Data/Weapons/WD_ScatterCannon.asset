@@ -1,0 +1,29 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b79b32262caed6c4298ae814598c974c, type: 3}
+  m_Name: WD_ScatterCannon
+  m_EditorClassIdentifier: Assembly-CSharp::WeaponData
+  weaponId: scatter_cannon
+  weaponSprite: {fileID: 21300000, guid: 81fdf36eb66591e49ab58bfd16ea700c, type: 3}
+  cooldownSeconds: 0.55
+  maxShots: 10
+  projectilePrefab: {fileID: 3643375496226751357, guid: 0671691b89378364ea0a94fe61ee484c, type: 3}
+  projectileSpeed: 15
+  pelletCount: 5
+  spreadDegrees: 18
+  muzzleForwardOffset: 0.2
+  muzzleVerticalOffset: -0.08
+  impactPrefab: {fileID: 5035368315638516546, guid: 1be045e19fcc2a34d9d1cf9764c90929, type: 3}
+  fireSfx: {fileID: 8300000, guid: c4f49e61b459ef04b90d39506d50fe49, type: 3}
+  impactSfx: {fileID: 8300000, guid: c0b1fe63635269948a04c002976e9620, type: 3}
+  fireSfxVolume: 0.7
+  impactSfxVolume: 0.15

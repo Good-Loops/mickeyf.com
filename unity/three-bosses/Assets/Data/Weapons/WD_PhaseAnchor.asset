@@ -1,0 +1,29 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b79b32262caed6c4298ae814598c974c, type: 3}
+  m_Name: WD_PhaseAnchor
+  m_EditorClassIdentifier: Assembly-CSharp::WeaponData
+  weaponId: phase_anchor
+  weaponSprite: {fileID: 21300000, guid: 6ab2d6dac542eff47ae1bc133af5baa3, type: 3}
+  cooldownSeconds: 0.45
+  maxShots: 5
+  projectilePrefab: {fileID: 8550432024279031623, guid: b5c4b28a6d8bcb741bc74ac2f15eba63, type: 3}
+  projectileSpeed: 18
+  pelletCount: 1
+  spreadDegrees: 0
+  muzzleForwardOffset: 0.2
+  muzzleVerticalOffset: -0.08
+  impactPrefab: {fileID: 3293963573369904213, guid: dd7c60b754ff9e049bdf790b5aa5ab4a, type: 3}
+  fireSfx: {fileID: 8300000, guid: ab5d8565e3b61544fa45bd1633e4741f, type: 3}
+  impactSfx: {fileID: 8300000, guid: 57bf232d1eda1c2479ab1d178b11aa21, type: 3}
+  fireSfxVolume: 0.55
+  impactSfxVolume: 0.62

@@ -1,0 +1,29 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: b79b32262caed6c4298ae814598c974c, type: 3}
+  m_Name: WD_VoidLance
+  m_EditorClassIdentifier: Assembly-CSharp::WeaponData
+  weaponId: void_lance
+  weaponSprite: {fileID: 21300000, guid: 2c51d3dc18c9d5a469a4ad51718ced23, type: 3}
+  cooldownSeconds: 0.8
+  maxShots: 6
+  projectilePrefab: {fileID: 8550432024279031623, guid: 2af41bc237d493c4a867dcf5e2d032ad, type: 3}
+  projectileSpeed: 24
+  pelletCount: 1
+  spreadDegrees: 0
+  muzzleForwardOffset: 0
+  muzzleVerticalOffset: 0
+  impactPrefab: {fileID: 8229193484382631119, guid: 0277cd0cf34764c42a8f4b3a06c36c5d, type: 3}
+  fireSfx: {fileID: 8300000, guid: bbbbc49230426e8418b7abcb116bd32b, type: 3}
+  impactSfx: {fileID: 8300000, guid: 3dec342725cbb3241b34bcbb1e4e7a87, type: 3}
+  fireSfxVolume: 0.75
+  impactSfxVolume: 0.72
