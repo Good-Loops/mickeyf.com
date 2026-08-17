@@ -17,11 +17,12 @@
  * - Treats inbound request data as untrusted; authorization assumptions must be enforced by middleware.
  */
 import { Request, Response } from 'express';
-import { RowDataPacket } from 'mysql2';
+import { ResultSetHeader, RowDataPacket } from 'mysql2';
 import { User } from '../types/customTypes';
 import { pool } from '../db/dbConfig';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { authorizeScoreSubmission } from '../security/scoreSubmissionAuthorization';
 
 /**
  * Main request multiplexer for `/api/users`.
@@ -191,10 +192,13 @@ const loginUser = async (req: Request, res: Response) => {
  * Submits a user's p4-Vega score.
  *
  * Request contract:
- * - Reads: `req.body.user_name`, `req.body.p4_score`.
+ * - Reads: `req.body.p4_score` and optional legacy `req.body.user_name`.
+ * - Authenticates: signed `session` cookie or Bearer JWT.
  *
  * Response contract:
- * - Status: 401 when `user_name` is missing; otherwise implicit 200 on success.
+ * - Status: 400 for invalid scores, 401 for missing/invalid authentication,
+ *   403 for a legacy body username that conflicts with the authenticated identity,
+ *   otherwise 200 on success.
  * - Body: `{ success: true, personalBest: boolean }` on success.
  *
  * Side effects:
@@ -204,34 +208,23 @@ const loginUser = async (req: Request, res: Response) => {
  * - Persistence/other errors return status 500 with `{ error: 'SERVER_ERROR' }`.
  */
 const submitScore = async (req: Request, res: Response) => {
-    const { user_name, p4_score } = req.body;
-
-    let personalBest: boolean = false; 
-              
-    if (!user_name) {
-        return res.status(401).json({ error: 'UNAUTHORIZED' });
+    const authorization = authorizeScoreSubmission(req);
+    if (!authorization.authorized) {
+        return res.status(authorization.status).json({ error: authorization.error });
     }
 
     try {
-        const [rows] = await pool.query(
-            'SELECT p4_score FROM users WHERE user_name = ?',
-            [user_name]
+        const [result] = await pool.query<ResultSetHeader>(
+            `UPDATE users
+                SET p4_score = ?
+                WHERE user_id = ?
+                AND (p4_score IS NULL OR p4_score < ?)`,
+            [authorization.score, authorization.identity.userId, authorization.score]
         );
 
-        if ((Array.isArray(rows)
-        && rows.length > 0
-        && (rows[0] as RowDataPacket).p4_score < p4_score)
-        && p4_score !== null) {
-            await pool.query(
-                'UPDATE users SET p4_score = ? WHERE user_name = ?',
-                [p4_score, user_name]
-            );
-            personalBest = true;
-        }
-
-        res.json({ success: true, personalBest: personalBest });
+        return res.json({ success: true, personalBest: result.affectedRows === 1 });
     } catch (error) {
-        res.status(500).json({ error: 'SERVER_ERROR' });
+        return res.status(500).json({ error: 'SERVER_ERROR' });
     }
 };
 

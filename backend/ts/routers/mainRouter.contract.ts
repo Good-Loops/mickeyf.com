@@ -62,15 +62,16 @@ export type PostUsersRequest =
                     /** Operation: submit a p4-Vega score. */
           type: 'submit_score';
 
-                    /** Required; missing value yields HTTP 401 with `UNAUTHORIZED`. */
-          user_name: string;
+                    /**
+                     * Legacy compatibility field. The server derives identity from verified authentication and
+                     * returns HTTP 403 with `IDENTITY_MISMATCH` if this value conflicts with that identity.
+                     */
+          user_name?: string;
 
                     /**
-                     * Score value (game-defined units). Nullable to indicate “no score”.
-                     *
-                     * Validation: not currently enforced server-side; callers should send a finite number.
+                     * Score value in the range 0–990 (inclusive), in increments of 10.
                      */
-          p4_score: number | null;
+          p4_score: number;
       }
     | {
                     /** Operation: fetch the leaderboard. */
@@ -93,6 +94,8 @@ export type ApiErrorCode =
     | 'DUPLICATE_USER'
     | 'AUTH_FAILED'
     | 'UNAUTHORIZED'
+    | 'INVALID_SCORE'
+    | 'IDENTITY_MISMATCH'
     | 'SERVER_ERROR'
     | 'UNEXPECTED_ERROR';
 
