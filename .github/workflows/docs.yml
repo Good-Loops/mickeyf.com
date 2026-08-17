@@ -96,7 +96,7 @@ jobs:
           set -euo pipefail
 
           test -f "$GENERATED_DOCS/index.html"
-          git rm --recursive --ignore-unmatch -- docs
+          git rm -r --ignore-unmatch -- docs
           mkdir --parents docs
           cp --archive "$GENERATED_DOCS"/. docs/
           git add --all -- docs
