@@ -1,109 +1,180 @@
 # mickeyf.com — BeatCalc Web App
 
-This is a dynamic web platform designed to entertain and educate, featuring a curated selection of games, animations, and educational resources focused on music and math. The site aims to be a resource for learning, offering users the ability to explore new concepts through interactive content.
+mickeyf.com is an interactive music-and-math platform with games, animations,
+educational resources, authentication, and leaderboards.
 
 ## Documentation
 
-📚 **API Documentation (TypeDoc)**  
-https://good-loops.github.io/mickeyf.com/
+The generated TypeDoc site is published at
+[good-loops.github.io/mickeyf.com](https://good-loops.github.io/mickeyf.com/).
+It covers the frontend and backend modules and is updated from `main` by the
+documentation workflow.
 
-The documentation covers frontend and backend modules, animation systems, shaders, controllers, and configuration contracts. It is generated directly from the source and published automatically on each push to `main`.
+## Technology
 
-## Features
+- Frontend: React, TypeScript, Sass, and Vite
+- Backend: Node.js, Express, and MySQL
+- Hosting: Firebase Hosting and Google Cloud Run
+- Database: Cloud SQL for MySQL
+- Local database connectivity: Cloud SQL Auth Proxy in Docker Desktop
 
-- In-browser games for entertainment and educational purposes.
-- A curated selection of animations to inspire and engage.
-- Educational resources aimed at teaching music theory and math concepts.
-- Leaderboards and rankings to encourage friendly competition.
+The application processes run with native Node.js. Docker is used only for
+local infrastructure.
 
-## Using the Website
+## Native Windows development
 
-Access [mickeyf.com](https://mickeyf.com) directly from your browser to discover all that it has to offer. Create an account to save your progress in games and see how you rank on leaderboards.
+Native Windows 11 is the supported development environment. The maintained
+checkout is expected at:
 
-## Educational Content
-
-The app aims to blend learning with play, providing resources that make music and math enjoyable and accessible. Engage with interactive lessons and activities designed to cater to different learning styles.
-
-## Tech Stack
-
-**Client:** React, TypeScript, SASS (Vite)  
-**Server:** Node.js, Express  
-**Database:** MySQL
-
-## Architecture Overview
-
-The application follows a clear separation of concerns between frontend, backend, and infrastructure:
-
-- **Frontend**
-  - Built with React and Vite.
-  - Runs entirely in the browser.
-  - Communicates with the backend via HTTP APIs.
-  - Deployed to Firebase Hosting.
-
-- **Backend**
-  - Node.js + Express API.
-  - Handles authentication, game data, leaderboards, and persistence.
-  - Connects to MySQL via Cloud SQL.
-  - Deployed to Google Cloud Run.
-
-- **Database**
-  - MySQL hosted on Google Cloud SQL.
-  - Accessed locally through the Cloud SQL Proxy.
-  - Accessed in production via Cloud Run’s managed connection.
-
-- **Local Development Infrastructure**
-  - Docker is used **only** to run the Cloud SQL Proxy.
-  - Application processes (frontend and backend) run directly in the developer environment.
-  - VS Code restores terminals via workspace settings and starts services automatically.
-
-This design keeps infrastructure concerns isolated from application code while allowing fast local development without containerizing the application itself.
-
-## Local Development
+```text
+C:\Users\User\Desktop\Pastas\Code\mickeyf.com
+```
 
 ### Prerequisites
 
-- Docker
-- Node.js (for frontend & backend)
-- WSL (on Windows)
+- Git for Windows
+- Node.js 22 and npm
+- Visual Studio Code for Windows
+- Docker Desktop using Linux containers
+- Google Cloud CLI when local Cloud SQL access is needed
+- Unity Hub and Unity 6.3 LTS for the Three Bosses project when it is added
 
-### Environment setup
+### Install dependencies
 
-Create environment files from the examples:
+Open PowerShell in the repository root and run:
 
-```bash
-cp .env.example .env
-cp frontend/.env.example frontend/.env
+```powershell
+$env:NODE_USE_SYSTEM_CA = "1"
+npm ci
+npm --prefix frontend ci
+npm --prefix backend ci
 ```
 
-There are two environment files:
+`NODE_USE_SYSTEM_CA=1` keeps TLS verification enabled while allowing Node and
+npm to use the trusted certificates from Windows. Do not disable npm's strict
+SSL verification.
 
-- `.env` (project root) — backend and infrastructure
-- `frontend/.env` — frontend (Vite)
+These are three independent npm projects; the repository does not use npm
+workspaces.
 
-Example files are provided:
-- `.env.example`
-- `frontend/.env.example`
+### Configure local environment files
 
-Fill in the required values before starting development.
+Create the ignored local files when they do not already exist:
+
+```powershell
+Copy-Item .env.example .env
+Copy-Item frontend\.env.example frontend\.env
+```
+
+Fill in the required local values. Never commit `.env`, `frontend/.env`,
+database credentials, session secrets, Firebase credentials, or ADC files.
+
+The tracked `compose.yaml` expects the Cloud SQL connection name in the root
+`.env`:
+
+```text
+CLOUD_SQL_CONNECTION_NAME=project:region:instance
+```
+
+On native Windows, Compose finds the ADC file under `%APPDATA%` automatically.
+Set `GOOGLE_APPLICATION_CREDENTIALS_HOST` in `.env` only to override that
+location; use forward slashes in an override path. Create or refresh
+Application Default Credentials interactively when required:
+
+```powershell
+gcloud auth application-default login
+```
+
+The ADC file is mounted read-only into the proxy container and must never be
+copied into Git.
 
 ### Start development
 
-From the project root (WSL):
+1. Start Docker Desktop.
+2. Start the Cloud SQL Auth Proxy from the repository root:
 
-```bash
-./scripts/dev-up.sh
-code .
+   ```powershell
+   npm run infra:up
+   ```
+
+3. Open the native Windows folder in VS Code:
+
+   ```powershell
+   code "C:\Users\User\Desktop\Pastas\Code\mickeyf.com"
+   ```
+
+4. Run `Terminal: Run Task`, then select `Development: app`.
+
+The compound task starts the frontend Vite server, backend webpack watcher,
+and backend nodemon server in separate terminals. It does not start the
+documentation server or infrastructure implicitly.
+
+The equivalent manual commands, each in its own terminal, are:
+
+```powershell
+npm --prefix frontend run dev
+npm --prefix backend run watch
+npm --prefix backend run dev
 ```
 
-This starts required infrastructure (Cloud SQL Proxy via Docker Compose) and opens VS Code.
-Frontend and backend processes are started automatically via restored terminals.
+Default local ports are:
 
-### End development session
+- Frontend: `http://localhost:5173`
+- Backend: `http://localhost:8080`
+- Cloud SQL Proxy: `127.0.0.1:3306`
+- TypeDoc server: `http://localhost:8081`
 
-From the project root (WSL):
+If port 8080 is occupied, identify its owning process before stopping it. The
+backend start command deliberately does not kill unrelated processes.
 
-```bash
-./scripts/dev-down.sh
+### Documentation development
+
+Run the `Documentation: dev` VS Code task or:
+
+```powershell
+npm run docs:dev
 ```
 
-This stops local infrastructure (Cloud SQL Proxy).
+The command rebuilds the tracked `docs/` output before serving it. Review the
+resulting Git diff and do not commit generated changes accidentally.
+
+### Stop development
+
+Stop the active VS Code tasks with `Terminal: Terminate Task` or `Ctrl+C`, then
+stop the proxy:
+
+```powershell
+npm run infra:down
+```
+
+### Checks and production builds
+
+```powershell
+npm run docs
+npm --prefix frontend run test
+npm --prefix frontend run build
+npm --prefix backend run test
+npm --prefix backend run prod
+```
+
+## Unity project location
+
+When Three Bosses is added to this monorepo, its project root will be:
+
+```text
+unity/three-bosses
+```
+
+That directory must directly contain `Assets/`, `Packages/`, and
+`ProjectSettings/`. Unity source migration and verification are handled in
+later migration phases.
+
+## Production architecture
+
+- Firebase Hosting serves the frontend.
+- Cloud Run serves the Express API.
+- Cloud SQL stores application data.
+- Production secrets are referenced through Secret Manager.
+
+Production deployments and IAM changes are separate, approval-gated tasks and
+are not part of the local development workflow.
