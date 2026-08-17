@@ -12,17 +12,14 @@
         "bcryptjs": "^2.4.3",
         "bindings": "^1.5.0",
         "cardinal": "^2.1.1",
-        "connect-mysql2": "^2.2.6",
         "cookie-parser": "^1.4.7",
         "cors": "^2.8.5",
         "dotenv": "^16.4.5",
-        "express": "^4.22.1",
+        "express": "^4.22.2",
         "express-session": "^1.18.2",
-        "firebase-admin": "^12.1.0",
-        "firebase-functions": "^5.0.1",
         "helmet": "^7.1.0",
         "jsonwebtoken": "^9.0.2",
-        "mysql2": "^3.9.3"
+        "mysql2": "^3.23.3"
     },
     "devDependencies": {
         "@types/bcryptjs": "^2.4.6",
@@ -30,6 +27,7 @@
         "@types/cors": "^2.8.17",
         "@types/express": "^4.17.21",
         "@types/express-session": "^1.18.0",
+        "@types/jsonwebtoken": "^9.0.10",
         "@types/node": "^20.12.5",
         "node-loader": "^2.0.0",
         "nodemon": "^3.1.0",
@@ -39,8 +37,5 @@
         "webpack": "^5.104.1",
         "webpack-cli": "^5.0.2",
         "webpack-node-externals": "^3.0.0"
-    },
-    "overrides": {
-        "form-data": "^2.5.4"
     }
 }
