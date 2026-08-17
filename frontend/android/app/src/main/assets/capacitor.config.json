@@ -1,5 +1,5 @@
 {
 	"appId": "org.mickeyf.app",
 	"appName": "BeatCalc",
-	"webDir": "./public"
+	"webDir": "./dist"
 }
