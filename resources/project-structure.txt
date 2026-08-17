@@ -13,8 +13,6 @@ mickeyf.com
 │   ├── routers
 │   │   ├── authRouter.ts
 │   │   └── mainRouter.ts
-│   ├── scripts
-│   │   └── dev-db.sh
 │   ├── types
 │   │   └── customTypes.ts
 │   ├── app.ts
@@ -557,13 +555,10 @@ mickeyf.com
 │   ├── colors.txt
 │   └── project-structure.txt
 ├── scripts
-│   ├── dev-down.sh
-│   ├── dev-start.sh
-│   ├── dev-up.sh
-│   └── devcontainer-backend-start.sh
+│   └── clean-docs.mjs
 ├── Dockerfile
 ├── README.md
 ├── cloudbuild.yaml
-├── docker-compose.yml
+├── compose.yaml
 ├── firebase.json
 └── install-scout.sh

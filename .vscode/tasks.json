@@ -2,23 +2,99 @@
   "version": "2.0.0",
   "tasks": [
     {
-      "label": "Backend: dev (nodemon)",
-      "type": "shell",
-      "command": "bash -lc 'cd backend && npm run dev'",
-      "problemMatcher": [],
-      "isBackground": true,
-      "presentation": { "reveal": "always", "panel": "dedicated" }
+      "label": "Infrastructure: up",
+      "type": "npm",
+      "script": "infra:up",
+      "problemMatcher": []
     },
     {
-      "label": "Backend: watch (webpack)",
-      "type": "shell",
-      "command": "bash -lc 'cd backend && npm run watch'",
+      "label": "Infrastructure: down",
+      "type": "npm",
+      "script": "infra:down",
+      "problemMatcher": []
+    },
+    {
+      "label": "Frontend: dev",
+      "type": "npm",
+      "script": "dev",
+      "path": "frontend",
       "isBackground": true,
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "runOptions": { "instanceLimit": 1 }
+    },
+    {
+      "label": "Frontend: typecheck",
+      "type": "npm",
+      "script": "test",
+      "path": "frontend",
+      "problemMatcher": ["$tsc"]
+    },
+    {
+      "label": "Frontend: build",
+      "type": "npm",
+      "script": "build",
+      "path": "frontend",
+      "problemMatcher": []
+    },
+    {
+      "label": "Backend: dev",
+      "type": "npm",
+      "script": "dev",
+      "path": "backend",
+      "problemMatcher": [],
+      "isBackground": true,
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "runOptions": { "instanceLimit": 1 }
+    },
+    {
+      "label": "Backend: watch",
+      "type": "npm",
+      "script": "watch",
+      "path": "backend",
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "runOptions": { "instanceLimit": 1 }
+    },
+    {
+      "label": "Backend: typecheck",
+      "type": "npm",
+      "script": "test",
+      "path": "backend",
+      "problemMatcher": ["$tsc"]
+    },
+    {
+      "label": "Backend: build",
+      "type": "npm",
+      "script": "prod",
+      "path": "backend",
+      "problemMatcher": []
+    },
+    {
+      "label": "Documentation: dev",
+      "type": "npm",
+      "script": "docs:dev",
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "runOptions": { "instanceLimit": 1 }
+    },
+    {
+      "label": "Documentation: build",
+      "type": "npm",
+      "script": "docs",
       "problemMatcher": []
     },
     {
       "label": "Backend: dev + watch",
-      "dependsOn": ["Backend: watch (webpack)", "Backend: dev (nodemon)"],
+      "dependsOn": ["Backend: watch", "Backend: dev"],
+      "dependsOrder": "parallel",
+      "problemMatcher": []
+    },
+    {
+      "label": "Development: app",
+      "dependsOn": ["Frontend: dev", "Backend: watch", "Backend: dev"],
       "dependsOrder": "parallel",
       "problemMatcher": []
     }
