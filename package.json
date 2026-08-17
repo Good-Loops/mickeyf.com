@@ -1,6 +1,11 @@
 {
 	"name": "mickeyf-root",
 	"private": true,
+	"packageManager": "npm@11.6.2",
+	"engines": {
+		"node": ">=22.0.0 <23.0.0",
+		"npm": ">=11.0.0 <12.0.0"
+	},
 	"scripts": {
 		"infra:up": "docker compose -f compose.yaml up -d cloud-sql-proxy",
 		"infra:down": "docker compose -f compose.yaml down",

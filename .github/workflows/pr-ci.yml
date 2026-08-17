@@ -1,0 +1,78 @@
+name: Pull request checks
+
+on:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: pr-checks-${{ github.event.pull_request.number || github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  web:
+    name: Web audit, test, and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI: "true"
+      NPM_CONFIG_FUND: "false"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.23.2
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            frontend/package-lock.json
+            backend/package-lock.json
+
+      - name: Use project npm version
+        run: npm install --global npm@11.6.2 --no-audit --no-fund
+
+      - name: Install locked dependencies
+        run: |
+          npm ci --no-audit
+          npm --prefix frontend ci --no-audit
+          npm --prefix backend ci --no-audit
+
+      - name: Audit npm dependencies
+        run: |
+          npm audit --audit-level=low
+          npm --prefix frontend audit --audit-level=low
+          npm --prefix backend audit --audit-level=low
+
+      - name: Type-check and build frontend
+        run: |
+          npm --prefix frontend test
+          npm --prefix frontend run build
+
+      - name: Test and build backend
+        run: |
+          npm --prefix backend test
+          npm --prefix backend run test:unit
+          npm --prefix backend run prod
+
+      - name: Build documentation
+        run: npm run docs
+
+  unity-static:
+    name: Unity source integrity
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Check Unity source integrity
+        run: python3 .github/scripts/check-unity-project.py
