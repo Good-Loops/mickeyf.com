@@ -1,20 +1,33 @@
 steps:
-  # Build the Docker image for the backend
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['build', '-t', 'us-central1-docker.pkg.dev/${_GCP_PROJECT_ID}/${_REPO_NAME}/${_REPO_NAME}:$SHORT_SHA', '.']
+  # Build the Docker image for the backend.
+  - id: 'Build backend image'
+    name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'build'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/${_GCP_PROJECT_ID}/${_REPO_NAME}/${_REPO_NAME}:$SHORT_SHA'
+      - '.'
     dir: '.'
 
-  # Push the Docker image to Google Artifact Registry
-  - name: 'gcr.io/cloud-builders/docker'
-    args: ['push', 'us-central1-docker.pkg.dev/${_GCP_PROJECT_ID}/${_REPO_NAME}/${_REPO_NAME}:$SHORT_SHA']
+  # Push the Docker image to Google Artifact Registry.
+  - id: 'Push backend image'
+    name: 'gcr.io/cloud-builders/docker'
+    args:
+      - 'push'
+      - 'us-central1-docker.pkg.dev/${_GCP_PROJECT_ID}/${_REPO_NAME}/${_REPO_NAME}:$SHORT_SHA'
 
-  # Deploy the image to Google Cloud Run
-  - name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:alpine'
+  # Deploy the image to Cloud Run.
+  # DB_PASS and SESSION_SECRET are referenced directly from Secret Manager by
+  # Cloud Run, so their plaintext values never need to enter the build step.
+  - id: 'Deploy backend'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:alpine'
     entrypoint: 'gcloud'
     args:
       - 'run'
       - 'deploy'
       - '${_SERVICE_NAME}'
+      - '--project'
+      - '${_GCP_PROJECT_ID}'
       - '--image'
       - 'us-central1-docker.pkg.dev/${_GCP_PROJECT_ID}/${_REPO_NAME}/${_REPO_NAME}:$SHORT_SHA'
       - '--region'
@@ -26,37 +39,32 @@ steps:
       - '8080'
       - '--add-cloudsql-instances'
       - '${_CLOUD_SQL_CONNECTION_NAME}'
-      - '--set-env-vars'
-      - >-
-        CLOUD_SQL_CONNECTION_NAME=${_CLOUD_SQL_CONNECTION_NAME},
-        DB_USER=${_DB_USER},
-        DB_NAME=${_DB_NAME},
-        # Note: $$ syntax references secret environment variables defined in this step's secretEnv
-        DB_PASS=$$DB_PASS,
-        SESSION_SECRET=$$SESSION_SECRET
-    secretEnv: ['DB_PASS', 'SESSION_SECRET']
+      - '--update-env-vars'
+      - 'CLOUD_SQL_CONNECTION_NAME=${_CLOUD_SQL_CONNECTION_NAME},DB_USER=${_DB_USER},DB_NAME=${_DB_NAME}'
+      - '--update-secrets'
+      - 'DB_PASS=DB_PASS:latest,SESSION_SECRET=SESSION_SECRET:latest'
+      - '--quiet'
 
-  # Notify Slack
-  - name: 'gcr.io/cloud-builders/curl'
+  # Notify Slack after a successful deployment.
+  - id: 'Notify Slack'
+    name: 'gcr.io/cloud-builders/curl'
     entrypoint: 'bash'
     args:
-      - -lc
+      - '-lc'
       - |
-        payload=$(printf '{"text":"✅ Backend deployed to Cloud Run. Commit: %s"}' "$COMMIT_SHA")
-        curl -fsS -X POST -H 'Content-type: application/json' \
-          --data-raw "$payload" \
+        set -euo pipefail
+        payload=$$(printf '{"text":"✅ Backend deployed to Cloud Run. Commit: %s"}' "$COMMIT_SHA")
+        curl -fsS -X POST \
+          -H 'Content-type: application/json' \
+          --data-raw "$$payload" \
           "$$SLACK_WEBHOOK_URL"
-    secretEnv: ['SLACK_WEBHOOK_URL']
-
+    secretEnv:
+      - 'SLACK_WEBHOOK_URL'
 
 availableSecrets:
   secretManager:
-    - versionName: projects/${_GCP_PROJECT_ID}/secrets/DB_PASS/versions/latest
-      env: DB_PASS
-    - versionName: projects/${_GCP_PROJECT_ID}/secrets/SESSION_SECRET/versions/latest
-      env: SESSION_SECRET
-    - versionName: projects/${_GCP_PROJECT_ID}/secrets/SLACK_WEBHOOK_URL/versions/latest
-      env: SLACK_WEBHOOK_URL
+    - versionName: 'projects/${_GCP_PROJECT_ID}/secrets/SLACK_WEBHOOK_URL/versions/latest'
+      env: 'SLACK_WEBHOOK_URL'
 
 substitutions:
   _GCP_PROJECT_ID: 'noted-reef-387021'
@@ -68,4 +76,4 @@ substitutions:
   _DB_NAME: 'cms'
 
 options:
-  logging: CLOUD_LOGGING_ONLY
+  logging: 'CLOUD_LOGGING_ONLY'
