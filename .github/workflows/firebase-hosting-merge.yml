@@ -4,6 +4,11 @@ on:
   push:
     branches:
       - main
+    paths:
+      - 'frontend/**'
+      - 'firebase.json'
+      - '.firebaserc'
+      - '.github/workflows/firebase-hosting-merge.yml'
 
 jobs:
   build_and_deploy:
@@ -43,7 +48,7 @@ jobs:
           firebaseServiceAccount: ${{ secrets.FIREBASE_SERVICE_ACCOUNT_NOTED_REEF_387021 }}
           channelId: live
           projectId: noted-reef-387021
-      
+
       - name: Notify Slack (result)
         if: always()
         run: |
@@ -56,5 +61,3 @@ jobs:
           curl -X POST -H 'Content-type: application/json' \
           --data "{\"text\":\"$MSG\"}" \
           ${{ secrets.SLACK_WEBHOOK_URL }}
-
-

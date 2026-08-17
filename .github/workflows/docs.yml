@@ -3,6 +3,16 @@ name: Docs (TypeDoc -> /docs)
 on:
   push:
     branches: [main]
+    paths:
+      - 'frontend/**'
+      - 'backend/**'
+      - 'docs-src/**'
+      - 'scripts/clean-docs.mjs'
+      - 'scripts/copy-doc-assets.mjs'
+      - 'typedoc.merge.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/docs.yml'
   workflow_dispatch:
 
 permissions:
