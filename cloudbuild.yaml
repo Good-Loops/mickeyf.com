@@ -30,6 +30,8 @@ steps:
       - '${_GCP_PROJECT_ID}'
       - '--image'
       - 'us-central1-docker.pkg.dev/${_GCP_PROJECT_ID}/${_REPO_NAME}/${_REPO_NAME}:$SHORT_SHA'
+      - '--service-account'
+      - '${_RUNTIME_SERVICE_ACCOUNT}'
       - '--region'
       - '${_REGION}'
       - '--platform'
@@ -43,6 +45,9 @@ steps:
       - 'NODE_ENV=production,CLOUD_SQL_CONNECTION_NAME=${_CLOUD_SQL_CONNECTION_NAME},DB_USER=${_DB_USER},DB_NAME=${_DB_NAME}'
       - '--update-secrets'
       - 'DB_PASS=DB_PASS:${_DB_PASS_SECRET_VERSION},SESSION_SECRET=SESSION_SECRET:${_SESSION_SECRET_VERSION}'
+      - '--no-traffic'
+      - '--tag'
+      - '${_CANDIDATE_TAG}'
       - '--quiet'
 
   # Notify Slack after a successful deployment.
@@ -53,7 +58,7 @@ steps:
       - '-lc'
       - |
         set -euo pipefail
-        payload=$$(printf '{"text":"✅ Backend deployed to Cloud Run. Commit: %s"}' "$COMMIT_SHA")
+        payload=$$(printf '{"text":"✅ Backend candidate deployed to Cloud Run with zero traffic. Commit: %s"}' "$COMMIT_SHA")
         curl -fsS -X POST \
           -H 'Content-type: application/json' \
           --data-raw "$$payload" \
@@ -71,6 +76,8 @@ substitutions:
   _REPO_NAME: 'cloud-run-source-deploy'
   _SERVICE_NAME: 'mickeyf-org'
   _REGION: 'us-central1'
+  _RUNTIME_SERVICE_ACCOUNT: 'mickeyf-runtime@noted-reef-387021.iam.gserviceaccount.com'
+  _CANDIDATE_TAG: 'phase10-candidate'
   _CLOUD_SQL_CONNECTION_NAME: 'noted-reef-387021:us-central1:cms-mickeyf'
   _DB_USER: 'cms_mickeyf'
   _DB_NAME: 'cms'
