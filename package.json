@@ -2,14 +2,16 @@
 	"name": "mickeyf-root",
 	"private": true,
 	"scripts": {
-		"docs:clean": "rm -rf .typedoc-tmp docs",
-		"docs:json:frontend": "npx typedoc --options frontend/typedoc.json --tsconfig frontend/tsconfig.typedoc.json --json .typedoc-tmp/frontend.json",
-		"docs:json:backend": "npx typedoc --options backend/typedoc.json --tsconfig backend/tsconfig.typedoc.json --json .typedoc-tmp/backend.json",
+		"infra:up": "docker compose -f compose.yaml up -d cloud-sql-proxy",
+		"infra:down": "docker compose -f compose.yaml down",
+		"docs:clean": "node scripts/clean-docs.mjs",
+		"docs:json:frontend": "typedoc --options frontend/typedoc.json --tsconfig frontend/tsconfig.typedoc.json --json .typedoc-tmp/frontend.json",
+		"docs:json:backend": "typedoc --options backend/typedoc.json --tsconfig backend/tsconfig.typedoc.json --json .typedoc-tmp/backend.json",
 		"docs:json": "npm run docs:json:frontend && npm run docs:json:backend",
-		"docs:assets": "cpx \"docs-src/assets/**/*\" docs/assets",      
-		"docs:build": "npx typedoc --options typedoc.merge.json && npm run docs:assets",
+		"docs:assets": "cpx \"docs-src/assets/**/*\" docs/assets",
+		"docs:build": "typedoc --options typedoc.merge.json && npm run docs:assets",
 		"docs": "npm run docs:clean && npm run docs:json && npm run docs:build",
-		"docs:serve": "npx http-server docs -p 8081",
+		"docs:serve": "http-server docs -p 8081",
 		"docs:watch": "chokidar \"typedoc.merge.json\" \"docs-src/index.md\" \"docs-src/typedoc.css\" \"docs-src/assets/**/*\" \"frontend/ts/**/*.ts\" \"frontend/ts/**/*.tsx\" \"backend/ts/**/*.ts\" -c \"npm run docs\"",
 		"docs:dev": "npm run docs && concurrently \"npm:docs:watch\" \"npm:docs:serve\""
 	},
@@ -17,6 +19,7 @@
 		"chokidar-cli": "^3.0.0",
 		"concurrently": "^9.2.1",
 		"cpx": "^1.5.0",
+		"http-server": "^14.1.1",
 		"typedoc": "^0.28.16"
 	}
 }

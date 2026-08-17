@@ -1,0 +1,18 @@
+name: mickeyf-local
+
+services:
+  cloud-sql-proxy:
+    image: gcr.io/cloud-sql-connectors/cloud-sql-proxy:2.11.4
+    command:
+      - "--address=0.0.0.0"
+      - "--port=3306"
+      - "${CLOUD_SQL_CONNECTION_NAME:?Set CLOUD_SQL_CONNECTION_NAME in .env}"
+    environment:
+      GOOGLE_APPLICATION_CREDENTIALS: /secrets/application_default_credentials.json
+    volumes:
+      - type: bind
+        source: "${GOOGLE_APPLICATION_CREDENTIALS_HOST:-${APPDATA:-}/gcloud/application_default_credentials.json}"
+        target: /secrets/application_default_credentials.json
+        read_only: true
+    ports:
+      - "127.0.0.1:3306:3306"

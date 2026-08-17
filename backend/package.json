@@ -5,7 +5,7 @@
         "test": "tsc -p tsconfig.json --noEmit",
         "watch": "webpack --mode development --watch",
         "prod": "webpack --mode production",
-        "dev": "fuser -k 8080/tcp 2>/dev/null || true && nodemon dist/server.min.js",
+        "dev": "nodemon dist/server.min.js",
         "docs:json": "typedoc --options typedoc.json"
     },
     "dependencies": {
