@@ -1,7 +1,7 @@
 steps:
   # Build the Docker image for the backend.
   - id: 'Build backend image'
-    name: 'gcr.io/cloud-builders/docker'
+    name: 'gcr.io/cloud-builders/docker:latest@sha256:661e95acd923514f71f47ce7b390e06a8d31b15febecf772e506babf62960528'
     args:
       - 'build'
       - '-t'
@@ -11,7 +11,7 @@ steps:
 
   # Push the Docker image to Google Artifact Registry.
   - id: 'Push backend image'
-    name: 'gcr.io/cloud-builders/docker'
+    name: 'gcr.io/cloud-builders/docker:latest@sha256:661e95acd923514f71f47ce7b390e06a8d31b15febecf772e506babf62960528'
     args:
       - 'push'
       - 'us-central1-docker.pkg.dev/${_GCP_PROJECT_ID}/${_REPO_NAME}/${_REPO_NAME}:$SHORT_SHA'
@@ -20,7 +20,7 @@ steps:
   # DB_PASS and SESSION_SECRET are referenced directly from Secret Manager by
   # Cloud Run, so their plaintext values never need to enter the build step.
   - id: 'Deploy backend'
-    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:alpine'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:alpine@sha256:de1a989b158694a614852e7b53673097da3bdb394b8186d6102386b7a10d73c7'
     entrypoint: 'gcloud'
     args:
       - 'run'
@@ -40,14 +40,14 @@ steps:
       - '--add-cloudsql-instances'
       - '${_CLOUD_SQL_CONNECTION_NAME}'
       - '--update-env-vars'
-      - 'CLOUD_SQL_CONNECTION_NAME=${_CLOUD_SQL_CONNECTION_NAME},DB_USER=${_DB_USER},DB_NAME=${_DB_NAME}'
+      - 'NODE_ENV=production,CLOUD_SQL_CONNECTION_NAME=${_CLOUD_SQL_CONNECTION_NAME},DB_USER=${_DB_USER},DB_NAME=${_DB_NAME}'
       - '--update-secrets'
-      - 'DB_PASS=DB_PASS:latest,SESSION_SECRET=SESSION_SECRET:latest'
+      - 'DB_PASS=DB_PASS:${_DB_PASS_SECRET_VERSION},SESSION_SECRET=SESSION_SECRET:${_SESSION_SECRET_VERSION}'
       - '--quiet'
 
   # Notify Slack after a successful deployment.
   - id: 'Notify Slack'
-    name: 'gcr.io/cloud-builders/curl'
+    name: 'gcr.io/cloud-builders/curl:latest@sha256:62ac4efe39d7ce5fe6ec104e75d6b3c369e52f8f622718fb846abde54e1cf714'
     entrypoint: 'bash'
     args:
       - '-lc'
@@ -74,6 +74,10 @@ substitutions:
   _CLOUD_SQL_CONNECTION_NAME: 'noted-reef-387021:us-central1:cms-mickeyf'
   _DB_USER: 'cms_mickeyf'
   _DB_NAME: 'cms'
+  # Rotate by adding a new enabled version, reviewing these numbers, and then
+  # deploying. Numeric references make the deployed configuration repeatable.
+  _DB_PASS_SECRET_VERSION: '1'
+  _SESSION_SECRET_VERSION: '1'
 
 options:
   logging: 'CLOUD_LOGGING_ONLY'
