@@ -1,18 +1,17 @@
-# Stage B canonical inline configuration.
+# Stage B canonical source-less inline configuration.
 #
-# This file is checked in for review, but the Pub/Sub trigger must store these
-# contents inline and must not attach repository source. Configure exactly two
-# payload bindings on that trigger:
+# Store these contents inline on the Pub/Sub trigger; do not attach repository
+# source. Configure exactly these two payload bindings:
 #   _SOURCE_BUILD_ID = $(body.message.attributes.buildId)
 #   _SOURCE_STATUS   = $(body.message.attributes.status)
-# and require the trigger filter
-# `_SOURCE_STATUS == "SUCCESS" && _SOURCE_BUILD_ID != ""`.
+# and this exact filter:
+#   _SOURCE_STATUS == "SUCCESS" && _SOURCE_BUILD_ID != ""
 #
-# Configure the source-less trigger itself to run as the dedicated
-# mickeyf-backend-deploy service account. Trigger-level identity is authoritative
-# for triggered builds; Cloud Build ignores a config-level serviceAccount value.
+# The trigger itself must run as mickeyf-backend-deploy. Trigger-level identity
+# is authoritative for triggered builds, so this config intentionally omits the
+# ignored config-level serviceAccount field.
 steps:
-  - id: 'Verify Stage A and deploy immutable candidate'
+  - id: 'Validate authoritative Stage A build'
     name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:alpine@sha256:de1a989b158694a614852e7b53673097da3bdb394b8186d6102386b7a10d73c7'
     entrypoint: 'bash'
     env:
@@ -22,85 +21,40 @@ steps:
       - '-lc'
       - |
         set -euo pipefail
+        umask 077
 
         readonly PROJECT_ID='noted-reef-387021'
         readonly PROJECT_NUMBER='1012884798546'
         readonly BUILD_REGION='global'
-        readonly EXPECTED_TRIGGER_ID='ef5a2981-95be-4f4d-af91-f997fde73356'
-        readonly EXPECTED_REPOSITORY_OWNER='Good-Loops'
-        readonly EXPECTED_REPOSITORY_NAME='mickeyf.com'
-        readonly EXPECTED_REPOSITORY_URL='https://github.com/Good-Loops/mickeyf.com.git'
-        readonly EXPECTED_REPOSITORY_FULL_NAME='Good-Loops/mickeyf.com'
-        readonly EXPECTED_BRANCH='main'
-        readonly EXPECTED_CONFIG_PATH='cloudbuild.yaml'
-        readonly EXPECTED_TRIGGER_NAME='main-push-mickeyf-com'
-        readonly EXPECTED_BUILD_SERVICE_ACCOUNT_EMAIL='cloud-build@noted-reef-387021.iam.gserviceaccount.com'
-        readonly EXPECTED_IMAGE='us-central1-docker.pkg.dev/noted-reef-387021/cloud-run-source-deploy/cloud-run-source-deploy'
-
-        readonly SERVICE_NAME='mickeyf-org'
-        readonly RUN_REGION='us-central1'
-        readonly RUNTIME_SERVICE_ACCOUNT='mickeyf-runtime@noted-reef-387021.iam.gserviceaccount.com'
-        readonly CANDIDATE_TAG_PREFIX='phase10-candidate'
-        readonly CLOUD_SQL_CONNECTION_NAME='noted-reef-387021:us-central1:cms-mickeyf'
-        readonly DB_USER='cms_mickeyf'
-        readonly DB_NAME='cms'
-        readonly DB_PASS_SECRET_VERSION='1'
-        readonly SESSION_SECRET_VERSION='1'
-
-        fail() {
-          printf 'Stage B rejected the event: %s\n' "$$1" >&2
-          exit 1
-        }
-
-        [[ "$$SOURCE_BUILD_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$$ ]] || fail 'source build ID is not a canonical UUID.'
-        [[ "$$SOURCE_STATUS" == 'SUCCESS' ]] || fail 'Pub/Sub status is not SUCCESS.'
-
+        readonly TRIGGER_ID='ef5a2981-95be-4f4d-af91-f997fde73356'
+        readonly TRIGGER_NAME='main-push-mickeyf-com'
+        readonly BUILD_SA='cloud-build@noted-reef-387021.iam.gserviceaccount.com'
+        readonly REPOSITORY_URL='https://github.com/Good-Loops/mickeyf.com.git'
+        readonly IMAGE='us-central1-docker.pkg.dev/noted-reef-387021/cloud-run-source-deploy/cloud-run-source-deploy'
         readonly BUILD_JSON='/workspace/source-build.json'
         readonly TRIGGER_JSON='/workspace/source-trigger.json'
-        readonly SERVICE_BEFORE_JSON='/workspace/service-before.json'
-        readonly SERVICE_AFTER_JSON='/workspace/service-after.json'
-        readonly REVISION_JSON='/workspace/revision.json'
+        readonly STATE_JSON='/workspace/verified-stage-a.json'
+
+        fail() { printf 'Stage B rejected the event: %s\n' "$$1" >&2; exit 1; }
+        [[ "$$SOURCE_BUILD_ID" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$$ ]] \
+          || fail 'source build ID is not a canonical UUID.'
+        [[ "$$SOURCE_STATUS" == 'SUCCESS' ]] || fail 'Pub/Sub status is not SUCCESS.'
 
         gcloud builds describe "$$SOURCE_BUILD_ID" \
-          --project="$$PROJECT_ID" \
-          --region="$$BUILD_REGION" \
-          --format=json > "$$BUILD_JSON"
+          --project="$$PROJECT_ID" --region="$$BUILD_REGION" --format=json > "$$BUILD_JSON"
+        gcloud builds triggers describe "$$TRIGGER_ID" \
+          --project="$$PROJECT_ID" --region="$$BUILD_REGION" --format=json > "$$TRIGGER_JSON"
 
-        gcloud builds triggers describe "$$EXPECTED_TRIGGER_ID" \
-          --project="$$PROJECT_ID" \
-          --region="$$BUILD_REGION" \
-          --format=json > "$$TRIGGER_JSON"
-
-        require_newest_stage_a() {
-          local newest_build_id
-          newest_build_id="$$(gcloud builds list \
-            --project="$$PROJECT_ID" \
-            --region="$$BUILD_REGION" \
-            --filter="trigger_id=\"$$EXPECTED_TRIGGER_ID\"" \
-            --sort-by='~createTime' \
-            --limit=1 \
-            --format='value(id)')"
-          [[ "$$newest_build_id" == "$$SOURCE_BUILD_ID" ]] \
-            || fail 'source build is not the newest Stage A build.'
-        }
-
-        require_newest_stage_a
-
-        export PROJECT_ID PROJECT_NUMBER BUILD_REGION EXPECTED_TRIGGER_ID
-        export EXPECTED_REPOSITORY_OWNER EXPECTED_REPOSITORY_NAME
-        export EXPECTED_REPOSITORY_URL EXPECTED_REPOSITORY_FULL_NAME
-        export EXPECTED_BRANCH EXPECTED_CONFIG_PATH EXPECTED_TRIGGER_NAME
-        export EXPECTED_BUILD_SERVICE_ACCOUNT_EMAIL
-        export EXPECTED_IMAGE SOURCE_BUILD_ID SOURCE_STATUS
-
-        readonly VERIFIED_OUTPUT="$$(python3 - "$$BUILD_JSON" "$$TRIGGER_JSON" <<'PY'
+        export PROJECT_ID PROJECT_NUMBER BUILD_REGION TRIGGER_ID TRIGGER_NAME BUILD_SA
+        export REPOSITORY_URL IMAGE SOURCE_BUILD_ID SOURCE_STATUS
+        python3 - "$$BUILD_JSON" "$$TRIGGER_JSON" "$$STATE_JSON" <<'PY'
         import json
         import os
         import re
         import sys
         from datetime import datetime, timedelta, timezone
 
-        build_path, trigger_path = sys.argv[1:]
+        build_path, trigger_path, state_path = sys.argv[1:]
         with open(build_path, encoding="utf-8") as handle:
             build = json.load(handle)
         with open(trigger_path, encoding="utf-8") as handle:
@@ -113,26 +67,20 @@ steps:
         project_number = os.environ["PROJECT_NUMBER"]
         region = os.environ["BUILD_REGION"]
         build_id = os.environ["SOURCE_BUILD_ID"]
-        trigger_id = os.environ["EXPECTED_TRIGGER_ID"]
-        repository_owner = os.environ["EXPECTED_REPOSITORY_OWNER"]
-        repository_name = os.environ["EXPECTED_REPOSITORY_NAME"]
-        repository_url = os.environ["EXPECTED_REPOSITORY_URL"]
-        repository_full_name = os.environ["EXPECTED_REPOSITORY_FULL_NAME"]
-        branch = os.environ["EXPECTED_BRANCH"]
-        config_path = os.environ["EXPECTED_CONFIG_PATH"]
-        trigger_name = os.environ["EXPECTED_TRIGGER_NAME"]
-        build_service_account_email = os.environ["EXPECTED_BUILD_SERVICE_ACCOUNT_EMAIL"]
-        image = os.environ["EXPECTED_IMAGE"]
+        trigger_id = os.environ["TRIGGER_ID"]
+        trigger_name = os.environ["TRIGGER_NAME"]
+        build_sa = os.environ["BUILD_SA"]
+        repo_url = os.environ["REPOSITORY_URL"]
+        image = os.environ["IMAGE"]
+        config_path = "cloudbuild.yaml"
 
-        expected_build_name = f"projects/{project_number}/locations/{region}/builds/{build_id}"
-        expected_trigger_name = f"projects/{project}/locations/{region}/triggers/{trigger_id}"
-
-        if build.get("id") != build_id or build.get("name") != expected_build_name:
-            reject("build identity or regional resource name does not match")
-        if build.get("projectId") != project:
-            reject("project does not match")
+        if build.get("id") != build_id:
+            reject("build ID does not match")
+        expected_name = f"projects/{project_number}/locations/{region}/builds/{build_id}"
+        if build.get("name") != expected_name or build.get("projectId") != project:
+            reject("build project or regional resource name does not match")
         if build.get("status") != "SUCCESS" or os.environ["SOURCE_STATUS"] != "SUCCESS":
-            reject("authoritative build status is not SUCCESS")
+            reject("authoritative status is not SUCCESS")
 
         timestamps = []
         for field in ("createTime", "startTime", "finishTime"):
@@ -140,359 +88,418 @@ steps:
             if not isinstance(raw, str):
                 reject(f"{field} is missing")
             try:
-                timestamps.append(datetime.fromisoformat(raw.replace("Z", "+00:00")))
+                value = datetime.fromisoformat(raw.replace("Z", "+00:00"))
             except ValueError:
                 reject(f"{field} is malformed")
+            if value.tzinfo is None:
+                reject(f"{field} has no timezone")
+            timestamps.append(value)
         created, started, finished = timestamps
+        now = datetime.now(timezone.utc)
         if not created <= started <= finished:
             reject("build timestamps are not ordered")
-        now = datetime.now(timezone.utc)
-        if finished > now + timedelta(minutes=5):
-            reject("build finish time is implausibly in the future")
-        if finished < now - timedelta(hours=2):
-            reject("build event is stale")
-        if build.get("buildTriggerId") != trigger_id:
-            reject("build was not created by the pinned Stage A trigger")
-        expected_build_service_account = f"projects/-/serviceAccounts/{build_service_account_email}"
-        if build.get("serviceAccount") != expected_build_service_account:
-            reject("build did not use the pinned keyless build identity")
+        if finished > now + timedelta(minutes=5) or finished < now - timedelta(hours=2):
+            reject("build finish time is stale or implausible")
+
+        exact_sa = f"projects/-/serviceAccounts/{build_sa}"
+        if build.get("buildTriggerId") != trigger_id or build.get("serviceAccount") != exact_sa:
+            reject("build trigger or keyless identity does not match")
         if build.get("options", {}).get("requestedVerifyOption") != "VERIFIED":
-            reject("build did not request verified provenance")
+            reject("verified provenance was not required")
 
-        if trigger.get("id") != trigger_id or trigger.get("resourceName") != expected_trigger_name:
-            reject("trigger identity or regional resource name does not match")
-        if trigger.get("disabled") is True:
-            reject("Stage A trigger is disabled")
-        if trigger.get("name") != trigger_name:
-            reject("Stage A trigger name does not match")
-        expected_trigger_service_account = f"projects/-/serviceAccounts/{build_service_account_email}"
-        if trigger.get("serviceAccount") != expected_trigger_service_account:
-            reject("Stage A trigger uses a different build identity")
-        if trigger.get("filename") != config_path:
-            reject("Stage A trigger does not use the pinned config path")
-        expected_included_files = sorted([
-            ".dockerignore",
-            "Dockerfile",
-            "backend/**",
-            "cloudbuild.yaml",
-        ])
-        if sorted(trigger.get("includedFiles") or []) != expected_included_files:
-            reject("Stage A trigger path filters do not match the reviewed backend inputs")
+        trigger_resource = f"projects/{project}/locations/{region}/triggers/{trigger_id}"
+        if trigger.get("id") != trigger_id or trigger.get("resourceName") != trigger_resource:
+            reject("trigger identity does not match")
+        if trigger.get("disabled") is True or trigger.get("name") != trigger_name:
+            reject("trigger is disabled or renamed")
+        if trigger.get("serviceAccount") != exact_sa or trigger.get("filename") != config_path:
+            reject("trigger identity or config path does not match")
+        expected_inputs = sorted([".dockerignore", "Dockerfile", "backend/**", config_path])
+        if sorted(trigger.get("includedFiles") or []) != expected_inputs:
+            reject("trigger path filters do not match")
         if trigger.get("ignoredFiles") not in (None, []):
-            reject("Stage A trigger has unexpected ignored-file filters")
-
-        github = trigger.get("github")
-        if not isinstance(github, dict):
-            reject("Stage A is not the pinned GitHub App trigger type")
-        if github.get("owner") != repository_owner or github.get("name") != repository_name:
-            reject("trigger GitHub repository does not match")
+            reject("trigger has unexpected ignored-file filters")
+        github = trigger.get("github") or {}
+        if github.get("owner") != "Good-Loops" or github.get("name") != "mickeyf.com":
+            reject("trigger repository does not match")
         push = github.get("push") or {}
-        if push.get("branch") != f"^{branch}" + chr(36) or push.get("invertRegex") is True:
-            reject("trigger is not limited to the exact main branch")
+        if push.get("branch") != "^main" + chr(36) or push.get("invertRegex") is True:
+            reject("trigger is not limited to main")
 
         substitutions = build.get("substitutions") or {}
         commit = substitutions.get("COMMIT_SHA")
         if not isinstance(commit, str) or re.fullmatch(r"[0-9a-f]{40}", commit) is None:
-            reject("COMMIT_SHA is not a full lowercase Git commit")
-        if substitutions.get("REVISION_ID") != commit:
-            reject("REVISION_ID does not equal COMMIT_SHA")
-        if substitutions.get("SHORT_SHA") != commit[:7]:
-            reject("SHORT_SHA is not the seven-character COMMIT_SHA prefix")
-        if substitutions.get("BRANCH_NAME") != branch:
-            reject("build branch is not main")
-        if substitutions.get("REF_NAME") != branch:
-            reject("build ref is not main")
-        if substitutions.get("REPO_FULL_NAME") != repository_full_name:
-            reject("build repository full name does not match")
-        if substitutions.get("TRIGGER_NAME") != trigger_name:
-            reject("build record has a different trigger name")
-        if substitutions.get("TRIGGER_BUILD_CONFIG_PATH") != config_path:
-            reject("build record does not retain the pinned config path")
+            reject("COMMIT_SHA is not a full lowercase commit")
+        expected_substitutions = {
+            "REVISION_ID": commit,
+            "SHORT_SHA": commit[:7],
+            "BRANCH_NAME": "main",
+            "REF_NAME": "main",
+            "REPO_FULL_NAME": "Good-Loops/mickeyf.com",
+            "TRIGGER_NAME": trigger_name,
+            "TRIGGER_BUILD_CONFIG_PATH": config_path,
+        }
+        for key, expected in expected_substitutions.items():
+            if substitutions.get(key) != expected:
+                reject(f"{key} does not match")
 
         expected_tag = f"{image}:{commit}"
         if build.get("images") != [expected_tag]:
-            reject("top-level images list is not the one full-commit image tag")
-
+            reject("top-level image is not the full-commit tag")
         result_images = (build.get("results") or {}).get("images") or []
         if len(result_images) != 1 or result_images[0].get("name") != expected_tag:
-            reject("results.images does not contain exactly the expected image")
+            reject("results.images does not contain the expected image")
         digest = result_images[0].get("digest")
         if not isinstance(digest, str) or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None:
             reject("results.images digest is missing or malformed")
 
-        source = build.get("source") or {}
-        provenance = build.get("sourceProvenance") or {}
-        resolved = None
-
-        git_source = source.get("gitSource")
-        resolved_git = provenance.get("resolvedGitSource")
-        if not isinstance(git_source, dict) or not isinstance(resolved_git, dict):
-            reject("source does not have Git source provenance")
-        if git_source.get("url") != repository_url or resolved_git.get("url") != repository_url:
+        source = build.get("source", {}).get("gitSource") or {}
+        resolved = build.get("sourceProvenance", {}).get("resolvedGitSource") or {}
+        if source.get("url") != repo_url or resolved.get("url") != repo_url:
             reject("Git source URL does not match")
-        if git_source.get("revision") != commit:
-            reject("requested source revision does not equal COMMIT_SHA")
-        resolved = resolved_git.get("revision")
+        if source.get("revision") != commit or resolved.get("revision") != commit:
+            reject("requested or resolved source revision does not equal COMMIT_SHA")
 
-        if resolved != commit:
-            reject("resolved source revision does not equal COMMIT_SHA")
-
-        print(f"{commit} {digest}")
+        compact_id = build_id.replace("-", "")
+        state = {
+            "build_id": build_id,
+            "candidate_tag": f"phase10-candidate-{compact_id}",
+            "commit": commit,
+            "digest": digest,
+            "revision_name": f"mickeyf-org-build-{compact_id}",
+            "revision_suffix": f"build-{compact_id}",
+            "target_image": f"{image}@{digest}",
+        }
+        with open(state_path, "w", encoding="utf-8") as handle:
+            json.dump(state, handle, sort_keys=True)
         PY
-        )" || fail 'authoritative Stage A validation failed.'
 
-        read -r COMMIT_SHA IMAGE_DIGEST <<< "$$VERIFIED_OUTPUT"
-        [[ "$$COMMIT_SHA" =~ ^[0-9a-f]{40}$$ ]] || fail 'validated commit output is malformed.'
-        [[ "$$IMAGE_DIGEST" =~ ^sha256:[0-9a-f]{64}$$ ]] || fail 'validated digest output is malformed.'
+        newest="$$(gcloud builds list --project="$$PROJECT_ID" --region="$$BUILD_REGION" \
+          --filter="trigger_id=\"$$TRIGGER_ID\"" --sort-by='~createTime' --limit=1 --format='value(id)')"
+        [[ "$$newest" == "$$SOURCE_BUILD_ID" ]] || fail 'source build is not the newest Stage A build.'
 
-        readonly TARGET_IMAGE="$$EXPECTED_IMAGE@$$IMAGE_DIGEST"
-        readonly REVISION_SUFFIX="build-$${SOURCE_BUILD_ID//-/}"
-        readonly REVISION_NAME="$$SERVICE_NAME-$$REVISION_SUFFIX"
-        readonly CANDIDATE_TAG="$$CANDIDATE_TAG_PREFIX-$${SOURCE_BUILD_ID//-/}"
+  - id: 'Deploy deterministic zero-traffic candidate'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:alpine@sha256:de1a989b158694a614852e7b53673097da3bdb394b8186d6102386b7a10d73c7'
+    entrypoint: 'bash'
+    args:
+      - '-lc'
+      - |
+        set -euo pipefail
+        umask 077
 
-        gcloud run services describe "$$SERVICE_NAME" \
-          --project="$$PROJECT_ID" \
-          --region="$$RUN_REGION" \
-          --platform=managed \
-          --format=json > "$$SERVICE_BEFORE_JSON"
+        readonly PROJECT_ID='noted-reef-387021'
+        readonly BUILD_REGION='global'
+        readonly TRIGGER_ID='ef5a2981-95be-4f4d-af91-f997fde73356'
+        readonly IMAGE='us-central1-docker.pkg.dev/noted-reef-387021/cloud-run-source-deploy/cloud-run-source-deploy'
+        readonly STATE_JSON='/workspace/verified-stage-a.json'
+        readonly DEPLOY_STATE_JSON='/workspace/deployment-state.json'
+        readonly SERVICE_BEFORE_JSON='/workspace/service-before.json'
+        readonly REVISION_JSON='/workspace/revision.json'
+        readonly SERVICE_NAME='mickeyf-org'
+        readonly RUN_REGION='us-central1'
+        readonly RUNTIME_SA='mickeyf-runtime@noted-reef-387021.iam.gserviceaccount.com'
+        readonly CLOUD_SQL='noted-reef-387021:us-central1:cms-mickeyf'
 
-        revision_preexisted_before_deploy=false
-        deployed_by_this_invocation=false
-        if gcloud run revisions describe "$$REVISION_NAME" \
-          --project="$$PROJECT_ID" \
-          --region="$$RUN_REGION" \
-          --platform=managed \
-          --format=json > "$$REVISION_JSON" 2>/dev/null; then
-          revision_preexisted_before_deploy=true
+        fail() { printf 'Stage B deployment rejected: %s\n' "$$1" >&2; exit 1; }
+        STATE_TSV="$$(python3 - "$$STATE_JSON" <<'PY'
+        import json
+        import re
+        import sys
+
+        with open(sys.argv[1], encoding="utf-8") as handle:
+            state = json.load(handle)
+        keys = {"build_id", "candidate_tag", "commit", "digest", "revision_name", "revision_suffix", "target_image"}
+        if set(state) != keys:
+            raise SystemExit("verified state has unexpected fields")
+        build_id = state["build_id"]
+        compact = build_id.replace("-", "")
+        image = "us-central1-docker.pkg.dev/noted-reef-387021/cloud-run-source-deploy/cloud-run-source-deploy"
+        if re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", build_id) is None:
+            raise SystemExit("state build ID is malformed")
+        if re.fullmatch(r"[0-9a-f]{40}", state["commit"]) is None:
+            raise SystemExit("state commit is malformed")
+        if re.fullmatch(r"sha256:[0-9a-f]{64}", state["digest"]) is None:
+            raise SystemExit("state digest is malformed")
+        expected = {
+            "candidate_tag": f"phase10-candidate-{compact}",
+            "revision_name": f"mickeyf-org-build-{compact}",
+            "revision_suffix": f"build-{compact}",
+            "target_image": f"{image}@{state['digest']}",
+        }
+        if any(state[key] != value for key, value in expected.items()):
+            raise SystemExit("derived deployment state does not match")
+        print("\t".join(state[key] for key in (
+            "build_id", "commit", "digest", "target_image", "revision_suffix", "revision_name", "candidate_tag"
+        )))
+        PY
+        )" || fail 'verified state validation failed.'
+        readonly STATE_TSV
+        IFS=$$'\t' read -r SOURCE_BUILD_ID COMMIT_SHA IMAGE_DIGEST TARGET_IMAGE \
+          REVISION_SUFFIX REVISION_NAME CANDIDATE_TAG <<< "$$STATE_TSV"
+
+        newest="$$(gcloud builds list --project="$$PROJECT_ID" --region="$$BUILD_REGION" \
+          --filter="trigger_id=\"$$TRIGGER_ID\"" --sort-by='~createTime' --limit=1 --format='value(id)')"
+        [[ "$$newest" == "$$SOURCE_BUILD_ID" ]] || fail 'a newer Stage A build exists.'
+
+        gcloud run services describe "$$SERVICE_NAME" --project="$$PROJECT_ID" \
+          --region="$$RUN_REGION" --platform=managed --format=json > "$$SERVICE_BEFORE_JSON"
+
+        revision_preexisted=false
+        deployed_here=false
+        if gcloud run revisions describe "$$REVISION_NAME" --project="$$PROJECT_ID" \
+          --region="$$RUN_REGION" --platform=managed --format=json > "$$REVISION_JSON" 2>/dev/null; then
+          revision_preexisted=true
         fi
 
-        # Re-check immediately before the only deployment mutation. Pub/Sub is
-        # unordered, so an older successful build must never run while any newer
-        # Stage A build exists. The tag is build-specific as a race-safe guard.
-        require_newest_stage_a
+        newest="$$(gcloud builds list --project="$$PROJECT_ID" --region="$$BUILD_REGION" \
+          --filter="trigger_id=\"$$TRIGGER_ID\"" --sort-by='~createTime' --limit=1 --format='value(id)')"
+        [[ "$$newest" == "$$SOURCE_BUILD_ID" ]] || fail 'a newer Stage A build appeared before deployment.'
 
-        if [[ "$$revision_preexisted_before_deploy" == 'false' ]]; then
-          if gcloud run deploy "$$SERVICE_NAME" \
-            --project="$$PROJECT_ID" \
-            --region="$$RUN_REGION" \
-            --platform=managed \
-            --image="$$TARGET_IMAGE" \
-            --revision-suffix="$$REVISION_SUFFIX" \
-            --service-account="$$RUNTIME_SERVICE_ACCOUNT" \
-            --port=8080 \
-            --cpu=1 \
-            --memory=512Mi \
-            --no-use-http2 \
-            --concurrency=80 \
-            --timeout=300s \
-            --max-instances=10 \
-            --cpu-boost \
-            --ingress=all \
+        if [[ "$$revision_preexisted" == 'false' ]]; then
+          if gcloud run deploy "$$SERVICE_NAME" --project="$$PROJECT_ID" --region="$$RUN_REGION" \
+            --platform=managed --image="$$TARGET_IMAGE" --revision-suffix="$$REVISION_SUFFIX" \
+            --service-account="$$RUNTIME_SA" --port=8080 --cpu=1 --memory=512Mi --no-use-http2 \
+            --concurrency=80 --timeout=300s --max-instances=10 --cpu-boost --ingress=all \
             --startup-probe='timeoutSeconds=240,periodSeconds=240,failureThreshold=1,tcpSocket.port=8080' \
-            --liveness-probe='' \
-            --set-cloudsql-instances="$$CLOUD_SQL_CONNECTION_NAME" \
-            --set-env-vars="NODE_ENV=production,CLOUD_SQL_CONNECTION_NAME=$$CLOUD_SQL_CONNECTION_NAME,DB_USER=$$DB_USER,DB_NAME=$$DB_NAME" \
-            --set-secrets="DB_PASS=DB_PASS:$$DB_PASS_SECRET_VERSION,SESSION_SECRET=SESSION_SECRET:$$SESSION_SECRET_VERSION" \
+            --liveness-probe='' --set-cloudsql-instances="$$CLOUD_SQL" \
+            --set-env-vars="NODE_ENV=production,CLOUD_SQL_CONNECTION_NAME=$$CLOUD_SQL,DB_USER=cms_mickeyf,DB_NAME=cms" \
+            --set-secrets='DB_PASS=DB_PASS:1,SESSION_SECRET=SESSION_SECRET:1' \
             --update-labels="source-build-id=$$SOURCE_BUILD_ID,source-commit=$$COMMIT_SHA" \
-            --no-traffic \
-            --tag="$$CANDIDATE_TAG" \
-            --quiet; then
-            deployed_by_this_invocation=true
+            --no-traffic --tag="$$CANDIDATE_TAG" --quiet; then
+            deployed_here=true
           else
-            # A duplicate Pub/Sub delivery can race the first one. Only accept
-            # the failure when the deterministic revision now exists.
-            gcloud run revisions describe "$$REVISION_NAME" \
-              --project="$$PROJECT_ID" \
-              --region="$$RUN_REGION" \
-              --platform=managed \
-              --format=json > "$$REVISION_JSON" 2>/dev/null \
-              || fail 'Cloud Run deployment failed before creating the deterministic revision.'
+            gcloud run revisions describe "$$REVISION_NAME" --project="$$PROJECT_ID" \
+              --region="$$RUN_REGION" --platform=managed --format=json > "$$REVISION_JSON" 2>/dev/null \
+              || fail 'Cloud Run failed before creating the deterministic revision.'
           fi
         fi
 
         for attempt in $$(seq 1 30); do
-          gcloud run revisions describe "$$REVISION_NAME" \
-            --project="$$PROJECT_ID" \
-            --region="$$RUN_REGION" \
-            --platform=managed \
-            --format=json > "$$REVISION_JSON" 2>/dev/null || true
+          gcloud run revisions describe "$$REVISION_NAME" --project="$$PROJECT_ID" \
+            --region="$$RUN_REGION" --platform=managed --format=json > "$$REVISION_JSON" 2>/dev/null || true
           if python3 - "$$REVISION_JSON" <<'PY'
         import json
         import sys
-
         try:
             with open(sys.argv[1], encoding="utf-8") as handle:
                 revision = json.load(handle)
         except (FileNotFoundError, json.JSONDecodeError):
             raise SystemExit(1)
-
-        conditions = revision.get("status", {}).get("conditions", [])
-        ready = next((item for item in conditions if item.get("type") == "Ready"), None)
+        ready = next((item for item in revision.get("status", {}).get("conditions", []) if item.get("type") == "Ready"), None)
         raise SystemExit(0 if ready and ready.get("status") == "True" else 1)
         PY
-          then
-            break
-          fi
-          [[ "$$attempt" -lt 30 ]] || fail 'new Cloud Run revision did not become ready.'
+          then break; fi
+          [[ "$$attempt" -lt 30 ]] || fail 'revision did not become ready.'
           sleep 2
         done
 
-        gcloud run services describe "$$SERVICE_NAME" \
-          --project="$$PROJECT_ID" \
-          --region="$$RUN_REGION" \
-          --platform=managed \
-          --format=json > "$$SERVICE_AFTER_JSON"
-
-        export TARGET_IMAGE REVISION_NAME RUNTIME_SERVICE_ACCOUNT CANDIDATE_TAG COMMIT_SHA
-        export CLOUD_SQL_CONNECTION_NAME DB_USER DB_NAME
-        export DB_PASS_SECRET_VERSION SESSION_SECRET_VERSION
-        python3 - "$$SERVICE_BEFORE_JSON" "$$SERVICE_AFTER_JSON" "$$REVISION_JSON" <<'PY'
+        export REVISION_PREEXISTED="$$revision_preexisted" DEPLOYED_HERE="$$deployed_here"
+        python3 - "$$DEPLOY_STATE_JSON" <<'PY'
         import json
         import os
         import sys
+        state = {
+            "deployed_here": os.environ["DEPLOYED_HERE"] == "true",
+            "revision_preexisted": os.environ["REVISION_PREEXISTED"] == "true",
+        }
+        with open(sys.argv[1], "w", encoding="utf-8") as handle:
+            json.dump(state, handle, sort_keys=True)
+        PY
 
-        before_path, after_path, revision_path = sys.argv[1:]
-        with open(before_path, encoding="utf-8") as handle:
-            before = json.load(handle)
-        with open(after_path, encoding="utf-8") as handle:
-            after = json.load(handle)
-        with open(revision_path, encoding="utf-8") as handle:
-            revision = json.load(handle)
+  - id: 'Verify runtime and unchanged traffic'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:alpine@sha256:de1a989b158694a614852e7b53673097da3bdb394b8186d6102386b7a10d73c7'
+    entrypoint: 'bash'
+    args:
+      - '-lc'
+      - |
+        set -euo pipefail
+        umask 077
+
+        readonly PROJECT_ID='noted-reef-387021'
+        readonly BUILD_REGION='global'
+        readonly TRIGGER_ID='ef5a2981-95be-4f4d-af91-f997fde73356'
+        readonly RUN_REGION='us-central1'
+        readonly SERVICE_NAME='mickeyf-org'
+        readonly STATE_JSON='/workspace/verified-stage-a.json'
+        readonly DEPLOY_STATE_JSON='/workspace/deployment-state.json'
+        readonly SERVICE_BEFORE_JSON='/workspace/service-before.json'
+        readonly SERVICE_AFTER_JSON='/workspace/service-after.json'
+        readonly REVISION_JSON='/workspace/revision-after.json'
+        readonly NOTIFICATION_JSON='/workspace/slack-notification.json'
+
+        fail() { printf 'Stage B verification failed: %s\n' "$$1" >&2; exit 1; }
+        STATE_TSV="$$(python3 - "$$STATE_JSON" <<'PY'
+        import json
+        import re
+        import sys
+        with open(sys.argv[1], encoding="utf-8") as handle:
+            state = json.load(handle)
+        keys = {"build_id", "candidate_tag", "commit", "digest", "revision_name", "revision_suffix", "target_image"}
+        if set(state) != keys or not all(isinstance(value, str) for value in state.values()):
+            raise SystemExit("verified state fields or types do not match")
+        build_id = state["build_id"]
+        if re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", build_id) is None:
+            raise SystemExit("verified state build ID is malformed")
+        if re.fullmatch(r"[0-9a-f]{40}", state["commit"]) is None:
+            raise SystemExit("verified state commit is malformed")
+        if re.fullmatch(r"sha256:[0-9a-f]{64}", state["digest"]) is None:
+            raise SystemExit("verified state digest is malformed")
+        compact = build_id.replace("-", "")
+        image = "us-central1-docker.pkg.dev/noted-reef-387021/cloud-run-source-deploy/cloud-run-source-deploy"
+        expected = {
+            "candidate_tag": f"phase10-candidate-{compact}",
+            "revision_name": f"mickeyf-org-build-{compact}",
+            "revision_suffix": f"build-{compact}",
+            "target_image": f"{image}@{state['digest']}",
+        }
+        if any(state[key] != value for key, value in expected.items()):
+            raise SystemExit("verified state derived values do not match")
+        print("\t".join([state["build_id"], state["revision_name"], state["candidate_tag"]]))
+        PY
+        )" || fail 'state read failed.'
+        readonly STATE_TSV
+        IFS=$$'\t' read -r SOURCE_BUILD_ID REVISION_NAME CANDIDATE_TAG <<< "$$STATE_TSV"
+
+        gcloud run revisions describe "$$REVISION_NAME" --project="$$PROJECT_ID" \
+          --region="$$RUN_REGION" --platform=managed --format=json > "$$REVISION_JSON"
+        gcloud run services describe "$$SERVICE_NAME" --project="$$PROJECT_ID" \
+          --region="$$RUN_REGION" --platform=managed --format=json > "$$SERVICE_AFTER_JSON"
+
+        python3 - "$$STATE_JSON" "$$DEPLOY_STATE_JSON" "$$SERVICE_BEFORE_JSON" \
+          "$$SERVICE_AFTER_JSON" "$$REVISION_JSON" <<'PY'
+        import json
+        import sys
+
+        paths = sys.argv[1:]
+        objects = []
+        for path in paths:
+            with open(path, encoding="utf-8") as handle:
+                objects.append(json.load(handle))
+        state, deployment, before, after, revision = objects
 
         def reject(message):
             raise SystemExit(f"Stage B post-deployment verification failed: {message}")
+
+        if set(deployment) != {"deployed_here", "revision_preexisted"}:
+            reject("deployment state fields do not match")
+        if not all(isinstance(value, bool) for value in deployment.values()):
+            reject("deployment state values are not booleans")
+        if deployment["deployed_here"] and deployment["revision_preexisted"]:
+            reject("deployment state is internally inconsistent")
 
         def positive_traffic(service):
             latest = service.get("status", {}).get("latestReadyRevisionName")
             allocations = []
             for item in service.get("status", {}).get("traffic", []):
                 percent = int(item.get("percent") or 0)
-                if percent <= 0:
-                    continue
-                revision_name = item.get("revisionName")
-                if item.get("latestRevision") is True:
-                    revision_name = latest
-                allocations.append((revision_name, percent))
+                if percent > 0:
+                    revision_name = latest if item.get("latestRevision") is True else item.get("revisionName")
+                    allocations.append((revision_name, percent))
             return sorted(allocations)
-
-        target_image = os.environ["TARGET_IMAGE"]
-        revision_name = os.environ["REVISION_NAME"]
-        runtime_service_account = os.environ["RUNTIME_SERVICE_ACCOUNT"]
-        candidate_tag = os.environ["CANDIDATE_TAG"]
-        cloud_sql_connection_name = os.environ["CLOUD_SQL_CONNECTION_NAME"]
 
         if positive_traffic(before) != positive_traffic(after):
             reject("positive production traffic allocations changed")
         if sum(percent for _, percent in positive_traffic(after)) != 100:
-            reject("positive traffic no longer totals 100 percent")
+            reject("positive traffic does not total 100 percent")
 
+        revision_name = state["revision_name"]
+        candidate_tag = state["candidate_tag"]
+        target_image = state["target_image"]
         if revision.get("metadata", {}).get("name") != revision_name:
             reject("deterministic revision identity does not match")
-        spec = revision.get("spec", {})
-        if spec.get("serviceAccountName") != runtime_service_account:
-            reject("revision does not use the dedicated runtime identity")
-        if int(spec.get("containerConcurrency") or 0) != 80:
-            reject("revision concurrency is not exactly 80")
-        if int(spec.get("timeoutSeconds") or 0) != 300:
-            reject("revision timeout is not exactly 300 seconds")
+        ready = next((item for item in revision.get("status", {}).get("conditions", []) if item.get("type") == "Ready"), None)
+        if not ready or ready.get("status") != "True":
+            reject("revision is not ready")
+        spec = revision.get("spec") or {}
+        if spec.get("serviceAccountName") != "mickeyf-runtime@noted-reef-387021.iam.gserviceaccount.com":
+            reject("dedicated runtime identity does not match")
+        if int(spec.get("containerConcurrency") or 0) != 80 or int(spec.get("timeoutSeconds") or 0) != 300:
+            reject("concurrency or timeout does not match")
         containers = spec.get("containers") or []
         if len(containers) != 1:
             reject("revision does not have exactly one container")
-        ports = containers[0].get("ports") or []
-        if len(ports) != 1 or ports[0].get("name") != "http1" or int(ports[0].get("containerPort") or 0) != 8080:
-            reject("revision container port is not exactly http1 on 8080")
-        limits = (containers[0].get("resources") or {}).get("limits") or {}
-        if limits != {"cpu": "1000m", "memory": "512Mi"}:
-            reject("revision CPU or memory limits do not match")
-        startup_probe = containers[0].get("startupProbe") or {}
-        if (
-            int(startup_probe.get("failureThreshold") or 0) != 1
-            or int(startup_probe.get("periodSeconds") or 0) != 240
-            or int(startup_probe.get("timeoutSeconds") or 0) != 240
-            or int((startup_probe.get("tcpSocket") or {}).get("port") or 0) != 8080
-        ):
-            reject("revision startup probe does not match")
-        if "livenessProbe" in containers[0]:
-            reject("revision unexpectedly has a liveness probe")
-        actual_image = revision.get("status", {}).get("imageDigest") or containers[0].get("image")
-        if actual_image != target_image:
-            reject("revision image digest does not match the verified Stage A result")
+        container = containers[0]
+        if container.get("image") != target_image or revision.get("status", {}).get("imageDigest") != target_image:
+            reject("runtime image is not the verified digest")
+        if container.get("ports") != [{"containerPort": 8080, "name": "http1"}]:
+            reject("HTTP port configuration does not match")
+        if (container.get("resources") or {}).get("limits") != {"cpu": "1000m", "memory": "512Mi"}:
+            reject("CPU or memory limits do not match")
+        probe = container.get("startupProbe") or {}
+        if (int(probe.get("failureThreshold") or 0), int(probe.get("periodSeconds") or 0),
+                int(probe.get("timeoutSeconds") or 0), int((probe.get("tcpSocket") or {}).get("port") or 0)) != (1, 240, 240, 8080):
+            reject("startup probe does not match")
+        if "livenessProbe" in container:
+            reject("unexpected liveness probe is configured")
 
         annotations = revision.get("metadata", {}).get("annotations") or {}
-        if annotations.get("run.googleapis.com/cloudsql-instances") != cloud_sql_connection_name:
-            reject("revision Cloud SQL attachment does not match")
-        if annotations.get("autoscaling.knative.dev/maxScale") != "10":
-            reject("revision maximum instance count is not exactly 10")
-        if annotations.get("run.googleapis.com/startup-cpu-boost") != "true":
-            reject("revision startup CPU boost is not enabled")
-
+        expected_annotations = {
+            "run.googleapis.com/cloudsql-instances": "noted-reef-387021:us-central1:cms-mickeyf",
+            "autoscaling.knative.dev/maxScale": "10",
+            "run.googleapis.com/startup-cpu-boost": "true",
+        }
+        for key, value in expected_annotations.items():
+            if annotations.get(key) != value:
+                reject(f"revision annotation {key} does not match")
         service_annotations = after.get("metadata", {}).get("annotations") or {}
-        if service_annotations.get("run.googleapis.com/ingress") != "all":
-            reject("service ingress is not the preserved all setting")
-        if service_annotations.get("run.googleapis.com/ingress-status") != "all":
-            reject("effective service ingress is not all")
+        if service_annotations.get("run.googleapis.com/ingress") != "all" or service_annotations.get("run.googleapis.com/ingress-status") != "all":
+            reject("service ingress does not match")
 
-        env_items = containers[0].get("env") or []
+        env_items = container.get("env") or []
         if len(env_items) != 6 or len({item.get("name") for item in env_items}) != 6:
-            reject("revision environment is not the exact six-variable production configuration")
+            reject("environment is not the exact six-variable configuration")
         env = {item.get("name"): item for item in env_items}
-        plain_expected = {
+        plain = {
             "NODE_ENV": "production",
-            "CLOUD_SQL_CONNECTION_NAME": cloud_sql_connection_name,
-            "DB_USER": os.environ["DB_USER"],
-            "DB_NAME": os.environ["DB_NAME"],
+            "CLOUD_SQL_CONNECTION_NAME": "noted-reef-387021:us-central1:cms-mickeyf",
+            "DB_USER": "cms_mickeyf",
+            "DB_NAME": "cms",
         }
-        for name, expected_value in plain_expected.items():
-            if env.get(name) != {"name": name, "value": expected_value}:
-                reject(f"revision {name} value does not match")
-
-        secret_expected = {
-            "DB_PASS": ("DB_PASS", os.environ["DB_PASS_SECRET_VERSION"]),
-            "SESSION_SECRET": ("SESSION_SECRET", os.environ["SESSION_SECRET_VERSION"]),
-        }
-        for env_name, (secret_name, version) in secret_expected.items():
-            item = env.get(env_name) or {}
+        for name, value in plain.items():
+            if env.get(name) != {"name": name, "value": value}:
+                reject(f"environment value {name} does not match")
+        for name in ("DB_PASS", "SESSION_SECRET"):
+            item = env.get(name) or {}
             ref = (item.get("valueFrom") or {}).get("secretKeyRef") or {}
-            if item.get("name") != env_name or ref.get("name") != secret_name or str(ref.get("key")) != version:
-                reject(f"revision {env_name} is not pinned to the expected numeric secret version")
+            if item.get("name") != name or ref != {"key": "1", "name": name}:
+                reject(f"numeric secret reference {name} does not match")
 
-        revision_percent = sum(
-            int(item.get("percent") or 0)
-            for item in after.get("status", {}).get("traffic", [])
-            if item.get("revisionName") == revision_name
-        )
+        revision_percent = sum(int(item.get("percent") or 0) for item in after.get("status", {}).get("traffic", []) if item.get("revisionName") == revision_name)
         if revision_percent != 0:
             reject("new revision received production traffic")
-
-        candidate_entries = [
-            item for item in after.get("status", {}).get("traffic", [])
-            if item.get("tag") == candidate_tag
-        ]
-        if len(candidate_entries) != 1 or candidate_entries[0].get("revisionName") != revision_name:
-            reject("candidate tag does not point to the verified revision")
+        tagged = [item for item in after.get("status", {}).get("traffic", []) if item.get("tag") == candidate_tag]
+        if len(tagged) != 1 or tagged[0].get("revisionName") != revision_name:
+            reject("candidate tag does not target the verified revision")
         PY
 
-        if [[ "$$revision_preexisted_before_deploy" == 'true' || "$$deployed_by_this_invocation" == 'false' ]]; then
-          printf 'Duplicate delivery verified; deterministic candidate already exists.\n'
+        duplicate="$$(python3 - "$$DEPLOY_STATE_JSON" <<'PY'
+        import json
+        import sys
+        with open(sys.argv[1], encoding="utf-8") as handle:
+            state = json.load(handle)
+        print("true" if state["revision_preexisted"] or not state["deployed_here"] else "false")
+        PY
+        )"
+        if [[ "$$duplicate" == 'true' ]]; then
+          printf 'Duplicate delivery verified; Slack notification skipped.\n'
           exit 0
         fi
 
-        # If a newer Stage A build completed during deployment, leave this
-        # zero-traffic, build-specific candidate in place but suppress the
-        # success notification. Its tag cannot move any newer candidate.
-        require_newest_stage_a
+        newest="$$(gcloud builds list --project="$$PROJECT_ID" --region="$$BUILD_REGION" \
+          --filter="trigger_id=\"$$TRIGGER_ID\"" --sort-by='~createTime' --limit=1 --format='value(id)')"
+        [[ "$$newest" == "$$SOURCE_BUILD_ID" ]] || fail 'a newer Stage A build completed during deployment.'
 
-        python3 - <<'PY' > /workspace/slack-notification.json
+        python3 - "$$STATE_JSON" "$$NOTIFICATION_JSON" <<'PY'
         import json
-        import os
-
-        message = {
-            "text": (
-                "Backend candidate deployed to Cloud Run with zero traffic after "
-                f"verified provenance checks. Commit: {os.environ['COMMIT_SHA']}"
-            )
-        }
-        print(json.dumps(message))
+        import sys
+        with open(sys.argv[1], encoding="utf-8") as handle:
+            state = json.load(handle)
+        message = {"text": (
+            "Backend candidate deployed to Cloud Run with zero traffic after "
+            f"verified provenance checks. Commit: {state['commit']}"
+        )}
+        with open(sys.argv[2], "w", encoding="utf-8") as handle:
+            json.dump(message, handle)
         PY
 
   - id: 'Notify Slack after verified deployment'
@@ -505,29 +512,22 @@ steps:
       - |
         set -euo pipefail
         readonly NOTIFICATION_JSON='/workspace/slack-notification.json'
-
         if [[ ! -s "$$NOTIFICATION_JSON" ]]; then
           printf 'No new verified candidate; Slack notification skipped.\n'
           exit 0
         fi
-
         python3 - "$$NOTIFICATION_JSON" <<'PY'
         import json
         import os
         import sys
         import urllib.request
-
         with open(sys.argv[1], encoding="utf-8") as handle:
             message = json.load(handle)
         if set(message) != {"text"} or not isinstance(message["text"], str):
             raise SystemExit("Slack notification payload is malformed")
-
         request = urllib.request.Request(
-            os.environ["SLACK_WEBHOOK_URL"],
-            data=json.dumps(message).encode("utf-8"),
-            headers={"Content-Type": "application/json"},
-            method="POST",
-        )
+            os.environ["SLACK_WEBHOOK_URL"], data=json.dumps(message).encode("utf-8"),
+            headers={"Content-Type": "application/json"}, method="POST")
         with urllib.request.urlopen(request, timeout=15) as response:
             if not 200 <= response.status < 300:
                 raise SystemExit(f"Slack notification failed with HTTP {response.status}")
