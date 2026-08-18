@@ -106,11 +106,20 @@ copied into Git.
    code .
    ```
 
-4. Run `Terminal: Run Task`, then select `Development: app`.
+4. Install the recommended **Restore Terminals** extension if VS Code prompts
+   for it, then reload the workspace. VS Code automatically opens:
 
-The compound task starts the frontend Vite server, backend webpack watcher,
-and backend nodemon server in separate terminals. It does not start the
-documentation server or infrastructure implicitly.
+   - `front`, running the frontend Vite server;
+   - `docs`, running the TypeDoc development server; and
+   - `general`, an idle shell at the repository root.
+
+5. For backend development, run `Terminal: Run Task`, then select
+   `Backend: dev + watch`.
+
+If you do not use the recommended extension, the `Development: app` compound
+task starts the frontend Vite server, backend webpack watcher, and backend
+nodemon server in separate terminals. Infrastructure is never started
+implicitly.
 
 The equivalent manual commands, each in its own terminal, are:
 
