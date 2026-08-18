@@ -9,6 +9,8 @@ The generated TypeDoc site is published at
 [good-loops.github.io/mickeyf.com](https://good-loops.github.io/mickeyf.com/).
 It covers the frontend and backend modules and is updated from `main` by the
 documentation workflow.
+Pull requests that change documentation inputs build the site for validation,
+while only `main` can publish it.
 
 ## Technology
 
