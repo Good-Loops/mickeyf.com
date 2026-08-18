@@ -106,20 +106,21 @@ copied into Git.
    code .
    ```
 
-4. Install the recommended **Restore Terminals** extension if VS Code prompts
-   for it, then reload the workspace. VS Code automatically opens:
+4. VS Code automatically starts three native workspace tasks when the trusted
+   repository opens:
 
-   - `front`, running the frontend Vite server;
-   - `docs`, running the TypeDoc development server; and
-   - `general`, an idle shell at the repository root.
+   - `front`, running the frontend Vite server with a cyan browser icon;
+   - `docs`, running the TypeDoc development server with a green book icon; and
+   - `general`, an idle PowerShell at the repository root with the historical
+     orange terminal tint (`terminal.ansiBlue` in the Monokai Spectrum theme).
 
 5. For backend development, run `Terminal: Run Task`, then select
    `Backend: dev + watch`.
 
-If you do not use the recommended extension, the `Development: app` compound
-task starts the frontend Vite server, backend webpack watcher, and backend
-nodemon server in separate terminals. Infrastructure is never started
-implicitly.
+The `Workspace: startup` compound task owns the automatic layout. You can
+also run it manually from `Terminal: Run Task`. The separate `Development: app`
+compound task starts the frontend Vite server, backend webpack watcher, and
+backend nodemon server. Infrastructure is never started implicitly.
 
 The equivalent manual commands, each in its own terminal, are:
 
@@ -141,7 +142,7 @@ backend start command deliberately does not kill unrelated processes.
 
 ### Documentation development
 
-Run the `Documentation: dev` VS Code task or:
+Run the `docs` VS Code task or:
 
 ```powershell
 npm run docs:dev

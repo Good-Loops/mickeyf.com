@@ -14,14 +14,16 @@
       "problemMatcher": []
     },
     {
-      "label": "Frontend: dev",
+      "label": "front",
+      "detail": "Frontend Vite development server",
       "type": "npm",
       "script": "dev",
       "path": "frontend",
       "isBackground": true,
       "problemMatcher": [],
       "presentation": { "reveal": "always", "panel": "dedicated" },
-      "runOptions": { "instanceLimit": 1 }
+      "icon": { "id": "browser", "color": "terminal.ansiCyan" },
+      "runOptions": { "instanceLimit": 1, "instancePolicy": "silent" }
     },
     {
       "label": "Frontend: typecheck",
@@ -72,13 +74,15 @@
       "problemMatcher": []
     },
     {
-      "label": "Documentation: dev",
+      "label": "docs",
+      "detail": "TypeDoc development server",
       "type": "npm",
       "script": "docs:dev",
       "isBackground": true,
       "problemMatcher": [],
       "presentation": { "reveal": "always", "panel": "dedicated" },
-      "runOptions": { "instanceLimit": 1 }
+      "icon": { "id": "book", "color": "terminal.ansiGreen" },
+      "runOptions": { "instanceLimit": 1, "instancePolicy": "silent" }
     },
     {
       "label": "Documentation: build",
@@ -94,9 +98,40 @@
     },
     {
       "label": "Development: app",
-      "dependsOn": ["Frontend: dev", "Backend: watch", "Backend: dev"],
+      "dependsOn": ["front", "Backend: watch", "Backend: dev"],
       "dependsOrder": "parallel",
       "problemMatcher": []
+    },
+    {
+      "label": "general",
+      "detail": "Idle PowerShell at the repository root",
+      "type": "process",
+      "command": "powershell.exe",
+      "args": ["-NoLogo", "-NoExit"],
+      "isBackground": true,
+      "options": { "cwd": "${workspaceFolder}" },
+      "problemMatcher": [],
+      "presentation": {
+        "reveal": "always",
+        "panel": "dedicated",
+        "focus": false,
+        "echo": false,
+        "showReuseMessage": false
+      },
+      "icon": { "id": "terminal-powershell", "color": "terminal.ansiBlue" },
+      "runOptions": { "instanceLimit": 1, "instancePolicy": "silent" }
+    },
+    {
+      "label": "Workspace: startup",
+      "detail": "Open the frontend, documentation, and general terminals",
+      "dependsOn": ["front", "docs", "general"],
+      "dependsOrder": "parallel",
+      "problemMatcher": [],
+      "runOptions": {
+        "runOn": "folderOpen",
+        "instanceLimit": 1,
+        "instancePolicy": "silent"
+      }
     }
   ]
 }
