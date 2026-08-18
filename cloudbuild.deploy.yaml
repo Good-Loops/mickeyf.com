@@ -898,6 +898,571 @@ steps:
             json.dump(message, handle)
         PY
 
+  - id: 'Plan bounded candidate tag expiry'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:alpine@sha256:de1a989b158694a614852e7b53673097da3bdb394b8186d6102386b7a10d73c7'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        umask 077
+        readonly STATE_JSON='/workspace/verified-stage-a.json'
+        readonly PLAN_JSON='/workspace/candidate-tag-expiry-plan.json'
+        printf '%s%s' "$$1" "$$2" | python3 - "$$STATE_JSON" "$$PLAN_JSON"
+      - '_'
+      - |2
+        import json, os, re, subprocess, sys, urllib.error, urllib.request
+        from datetime import datetime
+
+        PROJECT = "noted-reef-387021"
+        PROJECT_NUMBER = "1012884798546"
+        REGION = "us-central1"
+        TRIGGER = "ef5a2981-95be-4f4d-af91-f997fde73356"
+        BUILD_SA = "projects/-/serviceAccounts/cloud-build@noted-reef-387021.iam.gserviceaccount.com"
+        SERVICE = "mickeyf-org"
+        SERVICE_NAME = f"projects/{PROJECT}/locations/{REGION}/services/{SERVICE}"
+        IMAGE = f"{REGION}-docker.pkg.dev/{PROJECT}/cloud-run-source-deploy/cloud-run-source-deploy"
+        STATE_KEYS = {"build_id", "candidate_tag", "commit", "digest", "revision_name", "revision_suffix", "target_image"}
+        TARGET_KEYS = {"type", "revision", "percent", "tag"}
+        STATUS_KEYS = TARGET_KEYS | {"uri"}
+        CANDIDATE = re.compile(r"c-([0-9a-f]{32})")
+
+        def reject(message):
+            raise SystemExit(f"Candidate tag expiry plan rejected: {message}")
+
+        def parse_time(raw, field):
+            if not isinstance(raw, str):
+                reject(f"{field} is missing")
+            try:
+                value = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            except ValueError:
+                reject(f"{field} is malformed")
+            if value.tzinfo is None:
+                reject(f"{field} has no timezone")
+            return value
+
+        def gcloud_json(arguments):
+            try:
+                result = subprocess.run(["gcloud", *arguments], capture_output=True, text=True, timeout=60)
+            except (OSError, subprocess.TimeoutExpired):
+                reject("gcloud command did not complete")
+            if result.returncode:
+                reject("gcloud command failed")
+            try:
+                value = json.loads(result.stdout)
+            except json.JSONDecodeError:
+                reject("gcloud returned malformed JSON")
+            if not isinstance(value, dict):
+                reject("gcloud JSON is not an object")
+            return value
+
+        def build_info(build_id):
+            build = gcloud_json(["builds", "describe", build_id, f"--project={PROJECT}", "--region=global", "--format=json"])
+            expected_name = f"projects/{PROJECT_NUMBER}/locations/global/builds/{build_id}"
+            if (build.get("id") != build_id or build.get("name") != expected_name
+                    or build.get("projectId") != PROJECT or build.get("buildTriggerId") != TRIGGER
+                    or build.get("serviceAccount") != BUILD_SA or build.get("status") != "SUCCESS"
+                    or (build.get("options") or {}).get("requestedVerifyOption") != "VERIFIED"):
+                reject("candidate build is not an authoritative successful Stage A build")
+            substitutions = build.get("substitutions") or {}
+            commit = substitutions.get("COMMIT_SHA")
+            if (not isinstance(commit, str) or re.fullmatch(r"[0-9a-f]{40}", commit) is None
+                    or substitutions.get("BRANCH_NAME") != "main"
+                    or substitutions.get("REPO_FULL_NAME") != "Good-Loops/mickeyf.com"
+                    or substitutions.get("TRIGGER_BUILD_CONFIG_PATH") != "cloudbuild.yaml"):
+                reject("candidate build substitutions do not match Stage A")
+            source = (build.get("source") or {}).get("gitSource") or {}
+            resolved = (build.get("sourceProvenance") or {}).get("resolvedGitSource") or {}
+            repository = "https://github.com/Good-Loops/mickeyf.com.git"
+            if (source.get("url") != repository or resolved.get("url") != repository
+                    or source.get("revision") != commit or resolved.get("revision") != commit):
+                reject("candidate build source is not authoritative")
+            images = (build.get("results") or {}).get("images") or []
+            digest = images[0].get("digest") if len(images) == 1 else None
+            if (not isinstance(digest, str) or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None
+                    or images[0].get("name") != f"{IMAGE}:{commit}"):
+                reject("candidate build image result does not match")
+            return {"commit": commit, "digest": digest, "finish": parse_time(build.get("finishTime"), "finishTime")}
+
+        try:
+            token_result = subprocess.run(["gcloud", "auth", "print-access-token"], capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.TimeoutExpired):
+            reject("short-lived access token command failed")
+        token = token_result.stdout.strip()
+        if token_result.returncode or not 20 <= len(token) <= 8192 or any(value.isspace() for value in token):
+            reject("short-lived access token is unavailable")
+
+        def api_get(name, allow_missing=False):
+            request = urllib.request.Request(
+                "https://run.googleapis.com/v2/" + name,
+                headers={"Authorization": f"Bearer {token}"})
+            try:
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    raw = response.read(16 * 1024 * 1024 + 1)
+                    if response.status != 200 or len(raw) > 16 * 1024 * 1024:
+                        reject("Cloud Run API response is invalid")
+            except urllib.error.HTTPError as error:
+                if allow_missing and error.code == 404:
+                    return None
+                reject(f"Cloud Run API read failed ({error.code})")
+            except (urllib.error.URLError, TimeoutError):
+                reject("Cloud Run API read did not complete")
+            try:
+                value = json.loads(raw)
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                reject("Cloud Run API returned malformed JSON")
+            if not isinstance(value, dict):
+                reject("Cloud Run API JSON is not an object")
+            return value
+
+        def traffic(items, allowed, label):
+            if not isinstance(items, list) or not items:
+                reject(f"{label} is missing")
+            tags = {}
+            for item in items:
+                if not isinstance(item, dict) or not set(item) <= allowed:
+                    reject(f"{label} schema does not match")
+                kind = item.get("type")
+                revision = item.get("revision")
+                if kind not in ("TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION", "TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST"):
+                    reject(f"{label} target type is invalid")
+                if kind.endswith("REVISION") and (not isinstance(revision, str) or not revision):
+                    reject(f"{label} revision is malformed")
+                percent = item.get("percent", 0)
+                if isinstance(percent, bool) or not isinstance(percent, int) or not 0 <= percent <= 100:
+                    reject(f"{label} percent is malformed")
+                tag = item.get("tag")
+                if tag is not None:
+                    if (not isinstance(tag, str) or re.fullmatch(r"[a-z][a-z0-9-]{0,62}", tag) is None or tag in tags):
+      - |2
+                        reject(f"{label} tag is malformed or duplicated")
+                    tags[tag] = item
+                uri = item.get("uri")
+                if uri is not None and (not isinstance(uri, str) or not uri.startswith("https://")):
+                    reject(f"{label} URI is malformed")
+            return tags
+
+        def validate_service(service, state):
+            generation = service.get("generation")
+            etag = service.get("etag")
+            if (service.get("name") != SERVICE_NAME or not isinstance(generation, str) or not generation.isdigit()
+                    or service.get("observedGeneration") != generation or not isinstance(etag, str) or not etag
+                    or len(etag) > 1024):
+                reject("Cloud Run service identity or concurrency state does not match")
+            condition = service.get("terminalCondition") or {}
+            if condition.get("type") != "Ready" or condition.get("state") != "CONDITION_SUCCEEDED":
+                reject("Cloud Run service is not Ready")
+            current_revision = f"{SERVICE_NAME}/revisions/{state['revision_name']}"
+            if (service.get("latestReadyRevision") != current_revision
+                    or service.get("latestCreatedRevision") != current_revision):
+                reject("latest ready or created revision is not the current candidate")
+            targets = service.get("traffic")
+            statuses = service.get("trafficStatuses")
+            target_tags = traffic(targets, TARGET_KEYS, "traffic")
+            status_tags = traffic(statuses, STATUS_KEYS, "trafficStatuses")
+            if set(target_tags) != set(status_tags):
+                reject("traffic and trafficStatuses tag sets differ")
+            positive = [item for item in statuses if item.get("percent", 0) > 0]
+            if sum(item.get("percent", 0) for item in positive) != 100:
+                reject("positive production traffic does not total 100 percent")
+            candidates = {}
+            for tag in target_tags:
+                match = CANDIDATE.fullmatch(tag)
+                if not match:
+                    if tag.startswith("c-"):
+                        reject("candidate-like tag is not canonical")
+                    continue
+                revision = f"{SERVICE}-build-{match.group(1)}"
+                for item in (target_tags[tag], status_tags[tag]):
+                    if (item.get("type") != "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION"
+                            or item.get("revision") != revision or item.get("percent", 0) != 0):
+                        reject("candidate tag is not an exact zero-traffic revision mapping")
+                candidates[tag] = revision
+            if candidates.get(state["candidate_tag"]) != state["revision_name"]:
+                reject("current verified candidate tag is missing or changed")
+            candidate_revisions = set(candidates.values())
+            if any(item.get("percent", 0) > 0 and item.get("revision") in candidate_revisions for item in statuses):
+                reject("a managed candidate revision also receives positive traffic")
+            if not isinstance(service.get("template"), dict):
+                reject("service template is missing")
+            return candidates
+
+        with open(sys.argv[1], encoding="utf-8") as handle:
+            state = json.load(handle)
+        if set(state) != STATE_KEYS or not all(isinstance(value, str) for value in state.values()):
+            reject("verified state fields or types do not match")
+        build_id = state["build_id"]
+        compact = build_id.replace("-", "")
+        if re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", build_id) is None:
+            reject("verified build ID is malformed")
+        if (re.fullmatch(r"[0-9a-f]{40}", state["commit"]) is None
+                or re.fullmatch(r"sha256:[0-9a-f]{64}", state["digest"]) is None):
+            reject("verified commit or digest is malformed")
+        expected = {"candidate_tag": f"c-{compact}", "revision_name": f"{SERVICE}-build-{compact}",
+                    "revision_suffix": f"build-{compact}", "target_image": f"{IMAGE}@{state['digest']}"}
+        if any(state[key] != value for key, value in expected.items()):
+            reject("verified state derivations do not match")
+        current_build = build_info(build_id)
+        if current_build["commit"] != state["commit"] or current_build["digest"] != state["digest"]:
+            reject("current authoritative build does not match verified state")
+        service = api_get(SERVICE_NAME)
+        candidates = validate_service(service, state)
+        removals = sorted(set(candidates) - {state["candidate_tag"]})
+        if len(removals) > 5:
+            reject("more than five stale candidate tags require manual review")
+        stale_builds = []
+        for tag in removals:
+            compact_old = CANDIDATE.fullmatch(tag).group(1)
+            old_id = f"{compact_old[:8]}-{compact_old[8:12]}-{compact_old[12:16]}-{compact_old[16:20]}-{compact_old[20:]}"
+            old_build = build_info(old_id)
+            if old_build["finish"] >= current_build["finish"]:
+                reject("candidate selected for expiry is not from an older build")
+            revision_name = candidates[tag]
+            revision_path = f"{SERVICE_NAME}/revisions/{revision_name}"
+            revision = api_get(revision_path, allow_missing=True)
+            if revision is not None:
+                labels = revision.get("labels") or {}
+                containers = revision.get("containers") or []
+                ready = [item for item in revision.get("conditions", []) if item.get("type") == "Ready"]
+                if (revision.get("name") != revision_path or revision.get("service") != SERVICE
+                        or labels.get("source-build-id") != old_id or labels.get("source-commit") != old_build["commit"]
+                        or len(containers) != 1 or containers[0].get("image") != f"{IMAGE}@{old_build['digest']}"
+                        or len(ready) != 1 or ready[0].get("state") != "CONDITION_SUCCEEDED"):
+                    reject("existing stale revision does not match its authoritative build")
+            stale_builds.append(old_id)
+        plan = {
+            "before_etag": service["etag"], "before_generation": service["generation"],
+            "before_latest_created": service["latestCreatedRevision"],
+            "before_latest_ready": service["latestReadyRevision"], "before_template": service["template"],
+            "before_traffic": service["traffic"], "before_traffic_statuses": service["trafficStatuses"],
+            "current_finish_time": current_build["finish"].isoformat(), "current_revision": state["revision_name"],
+            "current_tag": state["candidate_tag"], "remove_tags": removals, "schema_version": 1,
+            "source_build_id": build_id, "stale_build_ids": stale_builds,
+        }
+        temporary = sys.argv[2] + ".tmp"
+        with open(temporary, "w", encoding="utf-8") as handle:
+            json.dump(plan, handle, sort_keys=True)
+        os.replace(temporary, sys.argv[2])
+    timeout: '600s'
+
+  - id: 'Apply candidate tag expiry with etag'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:alpine@sha256:de1a989b158694a614852e7b53673097da3bdb394b8186d6102386b7a10d73c7'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        umask 077
+        readonly STATE_JSON='/workspace/verified-stage-a.json'
+        readonly PLAN_JSON='/workspace/candidate-tag-expiry-plan.json'
+        printf '%s%s' "$$1" "$$2" | python3 - "$$STATE_JSON" "$$PLAN_JSON"
+      - '_'
+      - |2
+        import json, re, subprocess, sys, time, urllib.error, urllib.parse, urllib.request
+        from datetime import datetime
+
+        PROJECT = "noted-reef-387021"
+        PROJECT_NUMBER = "1012884798546"
+        REGION = "us-central1"
+        TRIGGER = "ef5a2981-95be-4f4d-af91-f997fde73356"
+        BUILD_SA = "projects/-/serviceAccounts/cloud-build@noted-reef-387021.iam.gserviceaccount.com"
+        SERVICE = "mickeyf-org"
+        SERVICE_NAME = f"projects/{PROJECT}/locations/{REGION}/services/{SERVICE}"
+        IMAGE = f"{REGION}-docker.pkg.dev/{PROJECT}/cloud-run-source-deploy/cloud-run-source-deploy"
+        STATE_KEYS = {"build_id", "candidate_tag", "commit", "digest", "revision_name", "revision_suffix", "target_image"}
+        PLAN_KEYS = {"before_etag", "before_generation", "before_latest_created", "before_latest_ready",
+                     "before_template", "before_traffic", "before_traffic_statuses", "current_finish_time",
+                     "current_revision", "current_tag", "remove_tags", "schema_version", "source_build_id",
+                     "stale_build_ids"}
+        CANDIDATE = re.compile(r"c-([0-9a-f]{32})")
+
+        def reject(message):
+            raise SystemExit(f"Candidate tag expiry rejected: {message}")
+
+        def command(arguments):
+            try:
+                result = subprocess.run(["gcloud", *arguments], capture_output=True, text=True, timeout=60)
+            except (OSError, subprocess.TimeoutExpired):
+                reject("gcloud command did not complete")
+            if result.returncode:
+                reject("gcloud command failed")
+            return result
+
+        def newest_build():
+            value = command(["builds", "list", f"--project={PROJECT}", "--region=global",
+                             f'--filter=trigger_id="{TRIGGER}"', "--sort-by=~createTime", "--limit=1",
+                             "--format=value(id)"]).stdout.strip()
+            if re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", value) is None:
+                reject("newest Stage A build ID is malformed")
+            return value
+
+        def authoritative_build(build_id):
+            result = command(["builds", "describe", build_id, f"--project={PROJECT}", "--region=global", "--format=json"])
+            try:
+                build = json.loads(result.stdout)
+            except json.JSONDecodeError:
+                reject("build record is malformed")
+            expected_name = f"projects/{PROJECT_NUMBER}/locations/global/builds/{build_id}"
+            if (not isinstance(build, dict) or build.get("id") != build_id or build.get("name") != expected_name
+                    or build.get("projectId") != PROJECT or build.get("buildTriggerId") != TRIGGER
+                    or build.get("serviceAccount") != BUILD_SA or build.get("status") != "SUCCESS"
+                    or (build.get("options") or {}).get("requestedVerifyOption") != "VERIFIED"):
+                reject("planned candidate build is not authoritative")
+            substitutions = build.get("substitutions") or {}
+            commit = substitutions.get("COMMIT_SHA")
+            if (not isinstance(commit, str) or re.fullmatch(r"[0-9a-f]{40}", commit) is None
+                    or substitutions.get("BRANCH_NAME") != "main"
+                    or substitutions.get("REPO_FULL_NAME") != "Good-Loops/mickeyf.com"
+                    or substitutions.get("TRIGGER_BUILD_CONFIG_PATH") != "cloudbuild.yaml"):
+                reject("planned candidate build commit is malformed")
+            images = (build.get("results") or {}).get("images") or []
+            digest = images[0].get("digest") if len(images) == 1 else None
+            if (not isinstance(digest, str) or re.fullmatch(r"sha256:[0-9a-f]{64}", digest) is None
+                    or images[0].get("name") != f"{IMAGE}:{commit}"):
+                reject("planned candidate build image is malformed")
+            try:
+                finished = datetime.fromisoformat(build["finishTime"].replace("Z", "+00:00"))
+            except (KeyError, ValueError, AttributeError):
+                reject("planned candidate build finish time is malformed")
+            if finished.tzinfo is None:
+                reject("planned candidate build finish time has no timezone")
+            return {"finish": finished, "commit": commit, "digest": digest}
+
+        with open(sys.argv[1], encoding="utf-8") as handle:
+            state = json.load(handle)
+        with open(sys.argv[2], encoding="utf-8") as handle:
+            plan = json.load(handle)
+        if (not isinstance(state, dict) or set(state) != STATE_KEYS
+                or not all(isinstance(value, str) for value in state.values())
+                or not isinstance(plan, dict) or set(plan) != PLAN_KEYS):
+            reject("state or plan schema does not match")
+        build_id = state.get("build_id")
+        compact = build_id.replace("-", "") if isinstance(build_id, str) else ""
+        if (re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", build_id or "") is None
+                or re.fullmatch(r"[0-9a-f]{40}", state["commit"]) is None
+                or re.fullmatch(r"sha256:[0-9a-f]{64}", state["digest"]) is None
+                or plan.get("schema_version") != 1 or plan.get("source_build_id") != build_id
+                or plan.get("current_tag") != f"c-{compact}" or plan.get("current_revision") != f"{SERVICE}-build-{compact}"
+                or state["candidate_tag"] != f"c-{compact}" or state["revision_name"] != f"{SERVICE}-build-{compact}"
+                or state["revision_suffix"] != f"build-{compact}"
+                or state["target_image"] != f"{IMAGE}@{state['digest']}"):
+            reject("plan identity does not match verified state")
+        removals = plan.get("remove_tags")
+        stale_builds = plan.get("stale_build_ids")
+        if (not isinstance(removals, list) or removals != sorted(set(removals)) or len(removals) > 5
+                or not isinstance(stale_builds, list) or len(stale_builds) != len(removals)):
+            reject("planned removal set is malformed")
+        derived_builds = []
+        for tag in removals:
+            match = CANDIDATE.fullmatch(tag) if isinstance(tag, str) else None
+            if not match or tag == plan["current_tag"]:
+                reject("planned removal contains an invalid or current tag")
+            value = match.group(1)
+            derived_builds.append(f"{value[:8]}-{value[8:12]}-{value[12:16]}-{value[16:20]}-{value[20:]}")
+        if derived_builds != stale_builds:
+            reject("planned tags and build IDs do not correspond")
+        current_record = authoritative_build(build_id)
+        current_finish = current_record["finish"]
+        if current_record["commit"] != state["commit"] or current_record["digest"] != state["digest"]:
+            reject("authoritative current build does not match verified state")
+        try:
+            planned_finish = datetime.fromisoformat(plan["current_finish_time"].replace("Z", "+00:00"))
+        except (ValueError, AttributeError):
+            reject("planned current finish time is malformed")
+        if planned_finish != current_finish:
+            reject("planned current build finish time changed")
+        stale_records = {}
+        for old_id in stale_builds:
+            stale_records[old_id] = authoritative_build(old_id)
+            if stale_records[old_id]["finish"] >= current_finish:
+                reject("planned stale tag does not belong to an older build")
+
+        try:
+            token_result = subprocess.run(["gcloud", "auth", "print-access-token"], capture_output=True, text=True, timeout=30)
+        except (OSError, subprocess.TimeoutExpired):
+            reject("short-lived access token command failed")
+        token = token_result.stdout.strip()
+        if token_result.returncode or not 20 <= len(token) <= 8192 or any(value.isspace() for value in token):
+            reject("short-lived access token is unavailable")
+        base_url = "https://run.googleapis.com/v2/"
+
+        def api_get(name, allow_missing=False):
+            request = urllib.request.Request(base_url + name, headers={"Authorization": f"Bearer {token}"})
+            try:
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    raw = response.read(16 * 1024 * 1024 + 1)
+                    if response.status != 200 or len(raw) > 16 * 1024 * 1024:
+                        reject("Cloud Run read response is invalid")
+            except urllib.error.HTTPError as error:
+                if allow_missing and error.code == 404:
+                    return None
+                reject(f"Cloud Run read failed ({error.code})")
+            except (urllib.error.URLError, TimeoutError):
+                reject("Cloud Run read did not complete")
+            try:
+                value = json.loads(raw)
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                reject("Cloud Run read returned malformed JSON")
+            if not isinstance(value, dict):
+                reject("Cloud Run read JSON is not an object")
+            return value
+
+        for tag, old_id in zip(removals, stale_builds):
+            revision_name = f"{SERVICE}-build-{CANDIDATE.fullmatch(tag).group(1)}"
+            revision_path = f"{SERVICE_NAME}/revisions/{revision_name}"
+            revision = api_get(revision_path, allow_missing=True)
+            if revision is not None:
+                labels = revision.get("labels") or {}
+                containers = revision.get("containers") or []
+                record = stale_records[old_id]
+                if (revision.get("name") != revision_path or revision.get("service") != SERVICE
+      - |2
+                        or labels.get("source-build-id") != old_id or labels.get("source-commit") != record["commit"]
+                        or len(containers) != 1 or containers[0].get("image") != f"{IMAGE}@{record['digest']}"):
+                    reject("planned stale revision does not match its authoritative build")
+
+        def canonical(items):
+            return sorted(json.dumps(item, sort_keys=True, separators=(",", ":")) for item in items)
+
+        def validate_snapshot(service):
+            if service.get("name") != SERVICE_NAME or service.get("terminalCondition", {}).get("state") != "CONDITION_SUCCEEDED":
+                reject("Cloud Run service is not the expected Ready service")
+            generation = service.get("generation")
+            if (not isinstance(generation, str) or not generation.isdigit()
+                    or service.get("observedGeneration") != generation or not isinstance(service.get("etag"), str)
+                    or not service.get("etag")):
+                reject("Cloud Run concurrency state is invalid")
+            if (service.get("latestReadyRevision") != plan["before_latest_ready"]
+                    or service.get("latestCreatedRevision") != plan["before_latest_created"]
+                    or service.get("template") != plan["before_template"]):
+                reject("latest revisions or service template changed")
+            targets = service.get("traffic")
+            statuses = service.get("trafficStatuses")
+            if not isinstance(targets, list) or not isinstance(statuses, list):
+                reject("Cloud Run traffic is malformed")
+            for item in targets + statuses:
+                percent = item.get("percent", 0) if isinstance(item, dict) else None
+                if (not isinstance(item, dict) or isinstance(percent, bool)
+                        or not isinstance(percent, int) or not 0 <= percent <= 100):
+                    reject("Cloud Run traffic target is malformed")
+            target_tags = {item.get("tag"): item for item in targets if isinstance(item, dict) and item.get("tag")}
+            status_tags = {item.get("tag"): item for item in statuses if isinstance(item, dict) and item.get("tag")}
+            if len(target_tags) != sum(1 for item in targets if isinstance(item, dict) and item.get("tag")) or set(target_tags) != set(status_tags):
+                reject("Cloud Run tags are duplicated or unresolved")
+            current = plan["current_tag"]
+            for item in (target_tags.get(current), status_tags.get(current)):
+                if (not isinstance(item, dict) or item.get("revision") != plan["current_revision"]
+                        or item.get("type") != "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION" or item.get("percent", 0) != 0):
+                    reject("current candidate tag changed")
+            positive = canonical([item for item in statuses if isinstance(item, dict) and item.get("percent", 0) > 0])
+            if sum(item.get("percent", 0) for item in statuses if isinstance(item, dict)) != 100:
+                reject("resolved positive traffic does not total 100 percent")
+            managed_revisions = {plan["current_revision"]}
+            managed_revisions.update(f"{SERVICE}-build-{CANDIDATE.fullmatch(tag).group(1)}" for tag in removals)
+            if any(item.get("percent", 0) > 0 and item.get("revision") in managed_revisions for item in statuses):
+                reject("a managed candidate revision receives positive traffic")
+            return targets, statuses, positive, target_tags, status_tags
+
+        original_targets = plan.get("before_traffic")
+        original_statuses = plan.get("before_traffic_statuses")
+        if (not isinstance(original_targets, list) or not isinstance(original_statuses, list)
+                or not isinstance(plan.get("before_etag"), str) or not plan.get("before_etag")
+                or not isinstance(plan.get("before_generation"), str) or not plan.get("before_generation").isdigit()):
+            reject("planned service snapshot is malformed")
+        removal_set = set(removals)
+        final_targets = [item for item in original_targets if item.get("tag") not in removal_set]
+        final_statuses = [item for item in original_statuses if item.get("tag") not in removal_set]
+        original_positive = canonical([item for item in original_statuses if item.get("percent", 0) > 0])
+
+        def safe_recompute(service):
+            targets, statuses, positive, target_tags, status_tags = validate_snapshot(service)
+            present = {item.get("tag") for item in targets if isinstance(item, dict)} & removal_set
+            expected_targets = [item for item in original_targets if item.get("tag") not in removal_set - present]
+            expected_statuses = [item for item in original_statuses if item.get("tag") not in removal_set - present]
+            if canonical(targets) != canonical(expected_targets) or canonical(statuses) != canonical(expected_statuses):
+                reject("service drift is not a safe subset of the authorized stale tags")
+            if positive != original_positive:
+                reject("positive or protected traffic changed")
+            for tag in present:
+                revision = f"{SERVICE}-build-{CANDIDATE.fullmatch(tag).group(1)}"
+                for item in (target_tags.get(tag), status_tags.get(tag)):
+                    if (not isinstance(item, dict) or item.get("type") != "TRAFFIC_TARGET_ALLOCATION_TYPE_REVISION"
+                            or item.get("revision") != revision or item.get("percent", 0) != 0):
+                        reject("authorized stale tag is no longer an exact zero-traffic mapping")
+            return sorted(present), targets
+
+        def patch(service, tags):
+            desired = [item for item in service["traffic"] if item.get("tag") not in set(tags)]
+            body = json.dumps({"name": SERVICE_NAME, "etag": service["etag"], "traffic": desired},
+                              separators=(",", ":")).encode()
+            query = urllib.parse.urlencode({"updateMask": "traffic"})
+            request = urllib.request.Request(
+                base_url + SERVICE_NAME + "?" + query, data=body,
+                headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"}, method="PATCH")
+            try:
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    raw = response.read(16 * 1024 * 1024 + 1)
+                    if response.status != 200 or len(raw) > 16 * 1024 * 1024:
+                        reject("Cloud Run patch response is invalid")
+            except urllib.error.HTTPError as error:
+                if error.code == 409:
+                    return None
+                reject(f"Cloud Run patch failed ({error.code})")
+            except (urllib.error.URLError, TimeoutError):
+                reject("Cloud Run patch completion is ambiguous")
+            try:
+                operation = json.loads(raw)
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                reject("Cloud Run patch returned malformed JSON")
+            name = operation.get("name") if isinstance(operation, dict) else None
+            operation_pattern = rf"projects/{re.escape(PROJECT)}/locations/{re.escape(REGION)}/operations/[^/]+"
+            if not isinstance(name, str) or re.fullmatch(operation_pattern, name) is None:
+                reject("Cloud Run patch operation name is malformed")
+            for _ in range(100):
+                operation = api_get(name)
+                if operation.get("done") is True:
+                    if operation.get("error"):
+                        reject("Cloud Run traffic operation failed")
+                    return desired
+                if operation.get("done") not in (None, False):
+                    reject("Cloud Run operation status is malformed")
+                time.sleep(3)
+            reject("Cloud Run traffic operation timed out")
+
+        service = api_get(SERVICE_NAME)
+        if (service.get("etag") != plan["before_etag"]
+                or service.get("generation") != plan["before_generation"]):
+            reject("service changed between the authoritative plan and apply steps")
+        for attempt in range(2):
+            remaining, _ = safe_recompute(service)
+            if not remaining:
+                if newest_build() != build_id:
+                    reject("a newer Stage A build appeared during the no-op check")
+                print("No stale candidate tags; expiry skipped.")
+                raise SystemExit(0)
+            if newest_build() != build_id:
+                reject("a newer Stage A build appeared before tag expiry")
+            generation = int(service["generation"])
+            desired = patch(service, remaining)
+            if desired is not None:
+                break
+            if attempt:
+                reject("Cloud Run etag conflicted twice")
+            service = api_get(SERVICE_NAME)
+        after = api_get(SERVICE_NAME)
+        _, _, after_positive, _, _ = validate_snapshot(after)
+        if canonical(after.get("traffic", [])) != canonical(final_targets):
+            reject("post-expiry traffic differs from the traffic-only plan")
+        if canonical(after.get("trafficStatuses", [])) != canonical(final_statuses):
+            reject("post-expiry resolved traffic differs from the traffic-only plan")
+        if (after_positive != original_positive or int(after["generation"]) != generation + 1
+                or after.get("etag") == service.get("etag")):
+            reject("post-expiry traffic or generation changed unexpectedly")
+        if newest_build() != build_id:
+            reject("a newer Stage A build appeared during tag expiry")
+        print(f"Expired {len(removals)} stale candidate tag(s); revisions were retained.")
+    timeout: '600s'
+
   - id: 'Notify Slack after verified deployment'
     name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:alpine@sha256:de1a989b158694a614852e7b53673097da3bdb394b8186d6102386b7a10d73c7'
     entrypoint: 'bash'
