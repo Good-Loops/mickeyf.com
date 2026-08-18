@@ -163,7 +163,7 @@ steps:
         compact_id = build_id.replace("-", "")
         state = {
             "build_id": build_id,
-            "candidate_tag": f"phase10-candidate-{compact_id}",
+            "candidate_tag": f"c-{compact_id}",
             "commit": commit,
             "digest": digest,
             "revision_name": f"mickeyf-org-build-{compact_id}",
@@ -221,7 +221,7 @@ steps:
         if re.fullmatch(r"sha256:[0-9a-f]{64}", state["digest"]) is None:
             raise SystemExit("state digest is malformed")
         expected = {
-            "candidate_tag": f"phase10-candidate-{compact}",
+            "candidate_tag": f"c-{compact}",
             "revision_name": f"mickeyf-org-build-{compact}",
             "revision_suffix": f"build-{compact}",
             "target_image": f"{image}@{state['digest']}",
@@ -347,7 +347,7 @@ steps:
         compact = build_id.replace("-", "")
         image = "us-central1-docker.pkg.dev/noted-reef-387021/cloud-run-source-deploy/cloud-run-source-deploy"
         expected = {
-            "candidate_tag": f"phase10-candidate-{compact}",
+            "candidate_tag": f"c-{compact}",
             "revision_name": f"mickeyf-org-build-{compact}",
             "revision_suffix": f"build-{compact}",
             "target_image": f"{image}@{state['digest']}",
