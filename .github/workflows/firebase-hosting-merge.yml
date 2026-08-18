@@ -8,35 +8,37 @@ on:
       - 'frontend/**'
       - 'firebase.json'
       - '.firebaserc'
+      - '.github/firebase-deploy/**'
       - '.github/workflows/firebase-hosting-merge.yml'
 
-permissions:
-  contents: read
-  id-token: write
+permissions: {}
 
 concurrency:
   group: firebase-hosting-live
   cancel-in-progress: false
 
+env:
+  FIREBASE_PROJECT_ID: noted-reef-387021
+  FIREBASE_SITE_ID: noted-reef-387021
+
 jobs:
-  build_and_deploy:
+  build:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
     env:
       CI: "true"
       NPM_CONFIG_FUND: "false"
+      ARTIFACT_NAME: frontend-dist-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+    outputs:
+      artifact-id: ${{ steps.upload.outputs.artifact-id }}
+      artifact-digest: ${{ steps.upload.outputs.artifact-digest }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-
-      - name: Authenticate to Google Cloud
-        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
-        with:
-          project_id: noted-reef-387021
-          workload_identity_provider: projects/1012884798546/locations/global/workloadIdentityPools/github-actions-firebase/providers/github-mickeyf-com-main
-          service_account: github-action-635373308@noted-reef-387021.iam.gserviceaccount.com
 
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -58,19 +60,1029 @@ jobs:
         env:
           VITE_PROD_API_URL: https://mickeyf-org-j7yuum4tiq-uc.a.run.app
 
-      - name: Deploy to Firebase Hosting
-        run: >-
-          npm exec --yes --package=firebase-tools@15.27.0 --
-          firebase deploy
-          --only hosting
-          --project noted-reef-387021
-          --non-interactive
+      - name: Upload immutable frontend artifact
+        id: upload
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: frontend/dist
+          if-no-files-found: error
+          include-hidden-files: true
+          retention-days: 1
+          overwrite: false
 
-      - name: Notify Slack (result)
-        if: always()
+  build_and_deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 55
+    permissions:
+      actions: read
+      contents: read
+      id-token: write
+    env:
+      CI: "true"
+      NPM_CONFIG_FUND: "false"
+      DEPLOY_MARKER: github-actions/${{ github.run_id }}/${{ github.run_attempt }}/${{ github.sha }}
+      PREVIEW_CHANNEL: gha-${{ github.run_id }}-${{ github.run_attempt }}
+    steps:
+      - name: Checkout deployment configuration only
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            .firebaserc
+            firebase.json
+            .github/firebase-deploy
+          sparse-checkout-cone-mode: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.23.2
+          cache: npm
+          cache-dependency-path: .github/firebase-deploy/package-lock.json
+
+      - name: Use project npm version
+        run: npm install --global npm@11.6.2 --no-audit --no-fund
+
+      - name: Install locked deployment tool without lifecycle scripts
+        run: |
+          set -euo pipefail
+          npm ci --ignore-scripts --no-audit --no-fund
+          npm audit --audit-level=high --omit=dev
+          npm ls --omit=dev
+
+          version="$(./node_modules/.bin/firebase --version)"
+          if [[ "$version" != "15.27.0" ]]; then
+            echo "Unexpected Firebase CLI version: $version" >&2
+            exit 1
+          fi
+        working-directory: .github/firebase-deploy
+
+      - name: Download and validate immutable frontend artifact
+        env:
+          DOWNLOAD_TOKEN: ${{ github.token }}
+          EXPECTED_ARTIFACT_ID: ${{ needs.build.outputs.artifact-id }}
+          EXPECTED_ARTIFACT_DIGEST: ${{ needs.build.outputs.artifact-digest }}
+          EXPECTED_ARTIFACT_NAME: frontend-dist-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          EXPECTED_HEAD_SHA: ${{ github.sha }}
+          EXPECTED_REPOSITORY_ID: ${{ github.repository_id }}
+          EXPECTED_RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          umask 077
+
+          if [[ ! "$EXPECTED_ARTIFACT_ID" =~ ^[1-9][0-9]*$ ]]; then
+            echo "Artifact ID is not canonical." >&2
+            exit 1
+          fi
+          if [[ ! "$EXPECTED_ARTIFACT_DIGEST" =~ ^(sha256:)?[0-9a-f]{64}$ ]]; then
+            echo "Artifact digest is not a canonical SHA-256 value." >&2
+            exit 1
+          fi
+
+          metadata="$RUNNER_TEMP/frontend-artifact.json"
+          archive="$RUNNER_TEMP/frontend-artifact.zip"
+          api="https://api.github.com/repos/${GITHUB_REPOSITORY}/actions/artifacts/${EXPECTED_ARTIFACT_ID}"
+
+          curl --fail --silent --show-error --retry 3 --max-time 30 \
+            --proto '=https' --tlsv1.2 \
+            --header "Authorization: Bearer $DOWNLOAD_TOKEN" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            --output "$metadata" \
+            "$api"
+
+          python3 - "$metadata" <<'PY'
+          import json
+          import os
+          import re
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              artifact = json.load(handle)
+
+          expected_id = int(os.environ["EXPECTED_ARTIFACT_ID"])
+          expected_name = os.environ["EXPECTED_ARTIFACT_NAME"]
+          expected_digest = os.environ["EXPECTED_ARTIFACT_DIGEST"].removeprefix("sha256:")
+          expected_run = int(os.environ["EXPECTED_RUN_ID"])
+          expected_repo = int(os.environ["EXPECTED_REPOSITORY_ID"])
+          expected_sha = os.environ["EXPECTED_HEAD_SHA"]
+
+          if artifact.get("id") != expected_id:
+              raise SystemExit("Artifact metadata ID mismatch.")
+          if artifact.get("name") != expected_name:
+              raise SystemExit("Artifact metadata name mismatch.")
+          if artifact.get("expired") is not False:
+              raise SystemExit("Artifact is expired or has malformed expiry state.")
+          size = artifact.get("size_in_bytes")
+          if type(size) is not int or not (0 < size <= 128 * 1024 * 1024):
+              raise SystemExit("Artifact size is outside the allowed range.")
+          api_digest = artifact.get("digest")
+          if not isinstance(api_digest, str) or not re.fullmatch(r"sha256:[0-9a-f]{64}", api_digest):
+              raise SystemExit("Artifact API digest is missing or malformed.")
+          if api_digest.removeprefix("sha256:") != expected_digest:
+              raise SystemExit("Artifact API and upload digests differ.")
+
+          run = artifact.get("workflow_run")
+          if not isinstance(run, dict):
+              raise SystemExit("Artifact workflow-run identity is missing.")
+          if run.get("id") != expected_run:
+              raise SystemExit("Artifact belongs to a different workflow run.")
+          if run.get("repository_id") != expected_repo or run.get("head_repository_id") != expected_repo:
+              raise SystemExit("Artifact belongs to a different repository.")
+          if run.get("head_sha") != expected_sha or run.get("head_branch") != "main":
+              raise SystemExit("Artifact source revision is not the triggering main commit.")
+          PY
+
+          curl --fail --silent --show-error --location --retry 3 --max-time 120 \
+            --proto '=https' --tlsv1.2 \
+            --header "Authorization: Bearer $DOWNLOAD_TOKEN" \
+            --header 'Accept: application/vnd.github+json' \
+            --header 'X-GitHub-Api-Version: 2022-11-28' \
+            --output "$archive" \
+            "$api/zip"
+
+          actual_digest="$(sha256sum "$archive" | awk '{print $1}')"
+          expected_digest="${EXPECTED_ARTIFACT_DIGEST#sha256:}"
+          if [[ "$actual_digest" != "$expected_digest" ]]; then
+            echo "Downloaded artifact digest mismatch." >&2
+            exit 1
+          fi
+
+          mkdir -p frontend/dist
+          python3 - "$archive" frontend/dist <<'PY'
+          import pathlib
+          import shutil
+          import stat
+          import sys
+          import zipfile
+
+          archive = pathlib.Path(sys.argv[1])
+          destination = pathlib.Path(sys.argv[2]).resolve()
+          seen = set()
+          seen_folded = set()
+          file_count = 0
+          total_size = 0
+
+          with zipfile.ZipFile(archive) as bundle:
+              entries = bundle.infolist()
+              if not entries or len(entries) > 2_000:
+                  raise SystemExit("Artifact entry count is outside the allowed range.")
+
+              for entry in entries:
+                  raw = entry.filename
+                  if not raw or "\\" in raw or "\x00" in raw:
+                      raise SystemExit("Artifact contains a malformed path.")
+                  path = pathlib.PurePosixPath(raw)
+                  if path.is_absolute() or any(part in ("", ".", "..") for part in path.parts):
+                      raise SystemExit("Artifact contains an unsafe path.")
+                  normalized = path.as_posix().rstrip("/")
+                  folded = normalized.casefold()
+                  if normalized in seen or folded in seen_folded:
+                      raise SystemExit("Artifact contains duplicate or case-colliding paths.")
+                  seen.add(normalized)
+                  seen_folded.add(folded)
+
+                  mode = (entry.external_attr >> 16) & 0xFFFF
+                  is_directory = entry.is_dir()
+                  if mode and not (stat.S_ISDIR(mode) if is_directory else stat.S_ISREG(mode)):
+                      raise SystemExit("Artifact contains a link or non-regular entry.")
+                  if entry.flag_bits & 0x1:
+                      raise SystemExit("Artifact contains an encrypted entry.")
+
+                  target = destination.joinpath(*path.parts).resolve()
+                  if target != destination and destination not in target.parents:
+                      raise SystemExit("Artifact extraction escaped its destination.")
+                  if is_directory:
+                      target.mkdir(parents=True, exist_ok=True)
+                      continue
+
+                  file_count += 1
+                  total_size += entry.file_size
+                  if entry.file_size > 16 * 1024 * 1024 or total_size > 64 * 1024 * 1024:
+                      raise SystemExit("Artifact expands beyond the allowed size.")
+                  target.parent.mkdir(parents=True, exist_ok=True)
+                  with bundle.open(entry) as source, target.open("xb") as output:
+                      shutil.copyfileobj(source, output, length=1024 * 1024)
+
+          if file_count == 0 or not (destination / "index.html").is_file():
+              raise SystemExit("Artifact is empty or lacks index.html.")
+          PY
+
+      - name: Authenticate to Google Cloud
+        id: auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: noted-reef-387021
+          workload_identity_provider: projects/1012884798546/locations/global/workloadIdentityPools/github-actions-firebase/providers/github-mickeyf-com-main
+          service_account: github-action-635373308@noted-reef-387021.iam.gserviceaccount.com
+          token_format: access_token
+          access_token_lifetime: 3600s
+
+      - name: Capture current live release
+        id: baseline
+        env:
+          FIREBASE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+          umask 077
+
+          channel="$RUNNER_TEMP/firebase-channel-before.json"
+          curl --fail --silent --show-error --retry 3 --max-time 30 \
+            --proto '=https' --tlsv1.2 \
+            --header "Authorization: Bearer $FIREBASE_ACCESS_TOKEN" \
+            --header "x-goog-user-project: $FIREBASE_PROJECT_ID" \
+            --output "$channel" \
+            "https://firebasehosting.googleapis.com/v1beta1/sites/${FIREBASE_SITE_ID}/channels/live"
+
+          mapfile -t release < <(python3 - "$channel" "$FIREBASE_SITE_ID" <<'PY'
+          import json
+          import re
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              body = json.load(handle)
+          raw_site = sys.argv[2]
+          site = re.escape(raw_site)
+          if body.get("name") != f"sites/{raw_site}/channels/live":
+              raise SystemExit("Firebase returned a foreign live channel.")
+          if body.get("url") != f"https://{raw_site}.web.app":
+              raise SystemExit("Firebase live-channel URL is unexpected.")
+          if body.get("url") != f"https://{raw_site}.web.app":
+              raise SystemExit("Firebase live-channel URL is unexpected.")
+          release = body.get("release")
+          if not isinstance(release, dict):
+              raise SystemExit("Current live release is missing.")
+          release_name = release.get("name")
+          if not isinstance(release_name, str) or not re.fullmatch(
+              rf"sites/{site}/channels/live/releases/[0-9]+", release_name
+          ):
+              raise SystemExit("Current live release name is malformed.")
+          if release.get("type") not in ("DEPLOY", "ROLLBACK"):
+              raise SystemExit("Current live release type is unexpected.")
+          release_time = release.get("releaseTime")
+          if not isinstance(release_time, str) or not re.fullmatch(
+              r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[^\n]+Z", release_time
+          ):
+              raise SystemExit("Current live release time is malformed.")
+          version = release.get("version")
+          if not isinstance(version, dict) or version.get("status") != "FINALIZED":
+              raise SystemExit("Current live version is not finalized.")
+          name = version.get("name")
+          if not isinstance(name, str) or not re.fullmatch(rf"sites/{site}/versions/[A-Za-z0-9_-]+", name):
+              raise SystemExit("Current live version name is malformed.")
+          print(name)
+          print(name.rsplit("/", 1)[-1])
+          print(release_name)
+          PY
+          )
+          if [[ "${#release[@]}" -ne 3 ]]; then
+            echo "Could not capture the current Firebase release." >&2
+            exit 1
+          fi
+
+          baseline_body="$RUNNER_TEMP/firebase-live-before.html"
+          baseline_code="$(curl --silent --show-error --max-time 20 --connect-timeout 10 \
+            --proto '=https' --tlsv1.2 --max-redirs 0 \
+            --output "$baseline_body" --write-out '%{http_code}' \
+            "https://mickeyf.com/?baseline=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}")"
+          if [[ "$baseline_code" != "200" ]]; then
+            echo "The live site was not healthy before deployment." >&2
+            exit 1
+          fi
+
+          echo "previous-version-name=${release[0]}" >> "$GITHUB_OUTPUT"
+          echo "previous-version-id=${release[1]}" >> "$GITHUB_OUTPUT"
+          echo "previous-release-name=${release[2]}" >> "$GITHUB_OUTPUT"
+          echo "previous-index-sha256=$(sha256sum "$baseline_body" | awk '{print $1}')" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy and verify isolated preview
+        id: preview
+        env:
+          FIREBASE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+          umask 077
+
+          if [[ ! "$PREVIEW_CHANNEL" =~ ^gha-[1-9][0-9]*-[1-9][0-9]*$ ]]; then
+            echo "Preview channel ID is not canonical." >&2
+            exit 1
+          fi
+
+          preview_api="https://firebasehosting.googleapis.com/v1beta1/sites/${FIREBASE_SITE_ID}/channels/${PREVIEW_CHANNEL}"
+          preflight_body="$RUNNER_TEMP/firebase-preview-preflight.json"
+          preflight_code="$(curl --silent --show-error --max-time 30 \
+            --proto '=https' --tlsv1.2 \
+            --header "Authorization: Bearer $FIREBASE_ACCESS_TOKEN" \
+            --header "x-goog-user-project: $FIREBASE_PROJECT_ID" \
+            --output "$preflight_body" --write-out '%{http_code}' \
+            "$preview_api")"
+          if [[ "$preflight_code" != "404" ]]; then
+            echo "The unique preview channel already exists or could not be checked." >&2
+            exit 1
+          fi
+          echo "cleanup-authorized=true" >> "$GITHUB_OUTPUT"
+
+          timeout --signal=TERM --kill-after=30s 8m \
+            .github/firebase-deploy/node_modules/.bin/firebase hosting:channel:deploy "$PREVIEW_CHANNEL" \
+              --expires 1h \
+              --no-authorized-domains \
+              --project "$FIREBASE_PROJECT_ID" \
+              --non-interactive
+
+          preview_file="$RUNNER_TEMP/firebase-preview-channel.json"
+          preview_version=""
+          preview_url=""
+          for attempt in $(seq 1 12); do
+            code="$(curl --silent --show-error --max-time 10 \
+              --proto '=https' --tlsv1.2 \
+              --header "Authorization: Bearer $FIREBASE_ACCESS_TOKEN" \
+              --header "x-goog-user-project: $FIREBASE_PROJECT_ID" \
+              --output "$preview_file" --write-out '%{http_code}' \
+              "$preview_api" || true)"
+            if [[ "$code" == "404" ]]; then
+              sleep 5
+              continue
+            fi
+            if [[ "$code" != "200" ]]; then
+              echo "Firebase preview-channel lookup failed." >&2
+              exit 1
+            fi
+
+            mapfile -t preview < <(python3 - "$preview_file" "$FIREBASE_SITE_ID" "$PREVIEW_CHANNEL" <<'PY'
+          import datetime
+          import json
+          import re
+          import sys
+          import urllib.parse
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              body = json.load(handle)
+          site = sys.argv[2]
+          channel = sys.argv[3]
+          if body.get("name") != f"sites/{site}/channels/{channel}":
+              raise SystemExit("Firebase returned a foreign preview channel.")
+
+          url = body.get("url")
+          if not isinstance(url, str):
+              raise SystemExit("Preview URL is missing.")
+          parsed = urllib.parse.urlsplit(url)
+          expected_host = re.fullmatch(
+              rf"{re.escape(site)}--{re.escape(channel)}-[a-z0-9]+[.]web[.]app",
+              parsed.hostname or "",
+          )
+          if (
+              parsed.scheme != "https"
+              or not expected_host
+              or parsed.username is not None
+              or parsed.password is not None
+              or parsed.port is not None
+              or parsed.path not in ("", "/")
+              or parsed.query
+              or parsed.fragment
+          ):
+              raise SystemExit("Preview URL is not an exact trusted Firebase host.")
+
+          expire_time = body.get("expireTime")
+          if not isinstance(expire_time, str) or not expire_time.endswith("Z"):
+              raise SystemExit("Preview expiration is missing.")
+          expires = datetime.datetime.fromisoformat(expire_time.replace("Z", "+00:00"))
+          remaining = expires - datetime.datetime.now(datetime.timezone.utc)
+          if not datetime.timedelta(minutes=30) <= remaining <= datetime.timedelta(hours=2):
+              raise SystemExit("Preview expiration is outside the expected one-hour window.")
+
+          release = body.get("release")
+          if not isinstance(release, dict) or release.get("type") != "DEPLOY":
+              raise SystemExit("Preview release is missing or is not a deployment.")
+          raw_site = re.escape(site)
+          raw_channel = re.escape(channel)
+          release_name = release.get("name")
+          if not isinstance(release_name, str) or not re.fullmatch(
+              rf"sites/{raw_site}/channels/{raw_channel}/releases/[0-9]+", release_name
+          ):
+              raise SystemExit("Preview release name is malformed.")
+          version = release.get("version")
+          if not isinstance(version, dict) or version.get("status") != "FINALIZED":
+              raise SystemExit("Preview version is not finalized.")
+          version_name = version.get("name")
+          if not isinstance(version_name, str) or not re.fullmatch(
+              rf"sites/{raw_site}/versions/[A-Za-z0-9_-]+", version_name
+          ):
+              raise SystemExit("Preview version name is malformed.")
+          print(version_name)
+          print(url.rstrip("/"))
+          PY
+            )
+            if [[ "${#preview[@]}" -ne 2 ]]; then
+              echo "Could not parse the Firebase preview channel." >&2
+              exit 1
+            fi
+            preview_version="${preview[0]}"
+            preview_url="${preview[1]}"
+            break
+          done
+          if [[ -z "$preview_version" || -z "$preview_url" ]]; then
+            echo "Timed out waiting for the Firebase preview channel." >&2
+            exit 1
+          fi
+
+          expected_hash="$(sha256sum frontend/dist/index.html | awk '{print $1}')"
+          preview_body="$RUNNER_TEMP/firebase-preview.html"
+          preview_headers="$RUNNER_TEMP/firebase-preview.headers"
+          verified="false"
+          for attempt in $(seq 1 12); do
+            code="$(curl --silent --show-error --max-time 10 --connect-timeout 5 \
+              --proto '=https' --tlsv1.2 --max-redirs 0 \
+              --dump-header "$preview_headers" --output "$preview_body" --write-out '%{http_code}' \
+              "${preview_url}/?release=${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" || true)"
+            if [[ "$code" == "200" ]] && [[ "$(sha256sum "$preview_body" | awk '{print $1}')" == "$expected_hash" ]] && \
+              python3 - "$preview_headers" firebase.json <<'PY'
+          import json
+          import re
+          import sys
+
+          text = open(sys.argv[1], encoding="iso-8859-1").read()
+          blocks = [block for block in re.split(r"\r?\n\r?\n", text) if block.startswith("HTTP/")]
+          if len(blocks) != 1:
+              raise SystemExit(1)
+          actual = {}
+          for line in blocks[0].splitlines()[1:]:
+              if ":" not in line:
+                  continue
+              key, value = line.split(":", 1)
+              actual.setdefault(key.strip().lower(), []).append(value.strip())
+
+          config = json.load(open(sys.argv[2], encoding="utf-8"))
+          global_rules = [rule for rule in config["hosting"]["headers"] if rule.get("regex") == ".*"]
+          if len(global_rules) != 1:
+              raise SystemExit(1)
+          expected = {item["key"].lower(): item["value"] for item in global_rules[0]["headers"]}
+          if len(expected) != len(global_rules[0]["headers"]):
+              raise SystemExit(1)
+          for key, value in expected.items():
+              if key == "strict-transport-security":
+                  values = actual.get(key, [])
+                  if len(values) != 1:
+                      raise SystemExit(1)
+                  hsts = values[0].lower()
+                  max_age = re.search(r"(?:^|;)\s*max-age=([0-9]+)(?:;|$)", hsts)
+                  if (
+                      max_age is None
+                      or int(max_age.group(1)) < 31_536_000
+                      or "includesubdomains" not in hsts
+                      or "preload" not in hsts
+                  ):
+                      raise SystemExit(1)
+              elif key == "cache-control":
+                  values = actual.get(key, [])
+                  if len(values) != 1:
+                      raise SystemExit(1)
+                  current = sorted(part.strip().lower() for part in values[0].split(","))
+                  configured = sorted(part.strip().lower() for part in value.split(","))
+                  if current != configured:
+                      raise SystemExit(1)
+              elif actual.get(key) != [value]:
+                  raise SystemExit(1)
+          if len(actual.get("content-type", [])) != 1 or not actual["content-type"][0].lower().startswith("text/html"):
+              raise SystemExit(1)
+          if "set-cookie" in actual:
+              raise SystemExit(1)
+          PY
+            then
+              verified="true"
+              break
+            fi
+            sleep 5
+          done
+          if [[ "$verified" != "true" ]]; then
+            echo "The isolated Firebase preview failed artifact or header verification." >&2
+            exit 1
+          fi
+
+          echo "version-name=$preview_version" >> "$GITHUB_OUTPUT"
+          echo "url=$preview_url" >> "$GITHUB_OUTPUT"
+
+      - name: Promote and verify Firebase Hosting
+        id: deploy
+        env:
+          FIREBASE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          PREVIOUS_RELEASE_NAME: ${{ steps.baseline.outputs.previous-release-name }}
+          PREVIOUS_VERSION_NAME: ${{ steps.baseline.outputs.previous-version-name }}
+          PREVIEW_VERSION_NAME: ${{ steps.preview.outputs.version-name }}
+        run: |
+          set -euo pipefail
+          umask 077
+
+          if [[ ! "$PREVIEW_VERSION_NAME" =~ ^sites/${FIREBASE_SITE_ID}/versions/[A-Za-z0-9_-]+$ ]]; then
+            echo "Preview version is not canonical." >&2
+            exit 1
+          fi
+
+          prepromotion_file="$RUNNER_TEMP/firebase-live-prepromotion.json"
+          curl --fail --silent --show-error --max-time 30 \
+            --proto '=https' --tlsv1.2 \
+            --header "Authorization: Bearer $FIREBASE_ACCESS_TOKEN" \
+            --header "x-goog-user-project: $FIREBASE_PROJECT_ID" \
+            --output "$prepromotion_file" \
+            "https://firebasehosting.googleapis.com/v1beta1/sites/${FIREBASE_SITE_ID}/channels/live"
+          python3 - "$prepromotion_file" "$FIREBASE_SITE_ID" "$PREVIOUS_RELEASE_NAME" "$PREVIOUS_VERSION_NAME" <<'PY'
+          import json
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              channel = json.load(handle)
+          site = sys.argv[2]
+          if channel.get("name") != f"sites/{site}/channels/live":
+              raise SystemExit("Firebase returned a foreign live channel before promotion.")
+          release = channel.get("release")
+          if not isinstance(release, dict) or release.get("name") != sys.argv[3]:
+              raise SystemExit("The live release changed before promotion.")
+          version = release.get("version")
+          if (
+              not isinstance(version, dict)
+              or version.get("name") != sys.argv[4]
+              or version.get("status") != "FINALIZED"
+          ):
+              raise SystemExit("The live version changed before promotion.")
+          PY
+
+          promotion_payload="$(jq -cn --arg message "$DEPLOY_MARKER" '{message: $message}')"
+          promotion_response="$RUNNER_TEMP/firebase-live-promotion.json"
+          curl --fail --silent --show-error --max-time 60 \
+            --proto '=https' --tlsv1.2 \
+            --request POST \
+            --header "Authorization: Bearer $FIREBASE_ACCESS_TOKEN" \
+            --header "x-goog-user-project: $FIREBASE_PROJECT_ID" \
+            --header 'Content-Type: application/json' \
+            --data "$promotion_payload" \
+            --output "$promotion_response" \
+            "https://firebasehosting.googleapis.com/v1beta1/sites/${FIREBASE_SITE_ID}/channels/live/releases?versionName=${PREVIEW_VERSION_NAME}"
+
+          promotion_release_name="$(python3 - "$promotion_response" "$FIREBASE_SITE_ID" "$PREVIEW_VERSION_NAME" "$DEPLOY_MARKER" <<'PY'
+          import json
+          import re
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              release = json.load(handle)
+          site = re.escape(sys.argv[2])
+          expected_version = sys.argv[3]
+          marker = sys.argv[4]
+          name = release.get("name")
+          if not isinstance(name, str) or not re.fullmatch(
+              rf"sites/{site}/channels/live/releases/[0-9]+", name
+          ):
+              raise SystemExit("Promotion returned a malformed release name.")
+          if release.get("type") not in ("DEPLOY", "ROLLBACK") or release.get("message") != marker:
+              raise SystemExit("Promotion response identity is incorrect.")
+          version = release.get("version")
+          if (
+              not isinstance(version, dict)
+              or version.get("name") != expected_version
+              or version.get("status") != "FINALIZED"
+          ):
+              raise SystemExit("Promotion response does not bind the verified preview version.")
+          print(name)
+          PY
+          )"
+          echo "release-name=$promotion_release_name" >> "$GITHUB_OUTPUT"
+
+          release_file="$RUNNER_TEMP/firebase-release-after.json"
+          deployed_version=""
+          for attempt in $(seq 1 12); do
+            curl --fail --silent --show-error --retry 2 --retry-delay 2 --retry-connrefused --max-time 10 \
+              --proto '=https' --tlsv1.2 \
+              --header "Authorization: Bearer $FIREBASE_ACCESS_TOKEN" \
+              --header "x-goog-user-project: $FIREBASE_PROJECT_ID" \
+              --output "$release_file" \
+              "https://firebasehosting.googleapis.com/v1beta1/sites/${FIREBASE_SITE_ID}/channels/live"
+
+            mapfile -t latest < <(python3 - "$release_file" "$FIREBASE_SITE_ID" <<'PY'
+          import json
+          import re
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              body = json.load(handle)
+          raw_site = sys.argv[2]
+          site = re.escape(raw_site)
+          if body.get("name") != f"sites/{raw_site}/channels/live":
+              raise SystemExit("Firebase returned a foreign live channel.")
+          release = body.get("release")
+          if not isinstance(release, dict):
+              raise SystemExit("Latest live release is missing.")
+          release_name = release.get("name")
+          release_type = release.get("type")
+          release_time = release.get("releaseTime")
+          if not isinstance(release_name, str) or not re.fullmatch(
+              rf"sites/{site}/channels/live/releases/[0-9]+", release_name
+          ):
+              raise SystemExit("Latest release name is malformed.")
+          if release_type not in ("DEPLOY", "ROLLBACK"):
+              raise SystemExit("Latest release type is unexpected.")
+          if not isinstance(release_time, str) or not re.fullmatch(
+              r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[^\n]+Z", release_time
+          ):
+              raise SystemExit("Latest release time is malformed.")
+          version = release.get("version")
+          if not isinstance(version, dict):
+              raise SystemExit("Latest release version is malformed.")
+          name = version.get("name")
+          status = version.get("status")
+          message = release.get("message")
+          if message is None:
+              message = ""
+          if not isinstance(name, str) or not re.fullmatch(rf"sites/{site}/versions/[A-Za-z0-9_-]+", name):
+              raise SystemExit("Latest release version name is malformed.")
+          if not isinstance(status, str) or not isinstance(message, str) or "\n" in message:
+              raise SystemExit("Latest release metadata is malformed.")
+          print(name)
+          print(status)
+          print(message)
+          print(release_type)
+          print(release_name)
+          PY
+            )
+
+            if [[ "${#latest[@]}" -ne 5 ]]; then
+              echo "Could not parse the latest Firebase release." >&2
+              exit 1
+            fi
+            if [[ "${latest[2]}" == "$DEPLOY_MARKER" ]]; then
+              if [[ "${latest[1]}" != "FINALIZED" || "${latest[0]}" != "$PREVIEW_VERSION_NAME" || "${latest[0]}" == "$PREVIOUS_VERSION_NAME" || "${latest[4]}" != "$promotion_release_name" ]]; then
+                echo "Owned Firebase release is not a new finalized version." >&2
+                exit 1
+              fi
+              deployed_version="${latest[0]}"
+              break
+            fi
+            if [[ "${latest[0]}" != "$PREVIOUS_VERSION_NAME" || "${latest[4]}" != "$PREVIOUS_RELEASE_NAME" ]]; then
+              echo "A foreign Firebase release appeared during deployment." >&2
+              exit 1
+            fi
+            sleep 5
+          done
+          if [[ -z "$deployed_version" ]]; then
+            echo "Timed out waiting for the owned Firebase release." >&2
+            exit 1
+          fi
+
+          expected_hash="$(sha256sum frontend/dist/index.html | awk '{print $1}')"
+          live_body="$RUNNER_TEMP/firebase-live-after.html"
+          live_headers="$RUNNER_TEMP/firebase-live-after.headers"
+          verified="false"
+
+          for attempt in $(seq 1 12); do
+            code="$(curl --silent --show-error --max-time 10 --connect-timeout 5 \
+              --proto '=https' --tlsv1.2 --max-redirs 0 \
+              --dump-header "$live_headers" --output "$live_body" --write-out '%{http_code}' \
+              "https://mickeyf.com/?release=${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" || true)"
+            if [[ "$code" == "200" ]] && [[ "$(sha256sum "$live_body" | awk '{print $1}')" == "$expected_hash" ]] && \
+              python3 - "$live_headers" firebase.json <<'PY'
+          import json
+          import re
+          import sys
+
+          text = open(sys.argv[1], encoding="iso-8859-1").read()
+          blocks = [block for block in re.split(r"\r?\n\r?\n", text) if block.startswith("HTTP/")]
+          if len(blocks) != 1:
+              raise SystemExit(1)
+          actual = {}
+          for line in blocks[0].splitlines()[1:]:
+              if ":" not in line:
+                  continue
+              key, value = line.split(":", 1)
+              actual.setdefault(key.strip().lower(), []).append(value.strip())
+
+          config = json.load(open(sys.argv[2], encoding="utf-8"))
+          global_rules = [rule for rule in config["hosting"]["headers"] if rule.get("regex") == ".*"]
+          if len(global_rules) != 1:
+              raise SystemExit(1)
+          expected = {item["key"].lower(): item["value"] for item in global_rules[0]["headers"]}
+          if len(expected) != len(global_rules[0]["headers"]):
+              raise SystemExit(1)
+          for key, value in expected.items():
+              if key == "cache-control":
+                  values = actual.get(key, [])
+                  if len(values) != 1:
+                      raise SystemExit(1)
+                  current = sorted(part.strip().lower() for part in values[0].split(","))
+                  configured = sorted(part.strip().lower() for part in value.split(","))
+                  if current != configured:
+                      raise SystemExit(1)
+              elif actual.get(key) != [value]:
+                  raise SystemExit(1)
+          if len(actual.get("content-type", [])) != 1 or not actual["content-type"][0].lower().startswith("text/html"):
+              raise SystemExit(1)
+          if "set-cookie" in actual:
+              raise SystemExit(1)
+          PY
+            then
+              verified="true"
+              break
+            fi
+            sleep 5
+          done
+          if [[ "$verified" != "true" ]]; then
+            echo "The live Firebase response did not match the verified artifact and headers." >&2
+            exit 1
+          fi
+
+          redirect_headers="$RUNNER_TEMP/firebase-www-redirect.headers"
+          redirect_code="$(curl --silent --show-error --max-time 20 --connect-timeout 10 \
+            --proto '=https' --tlsv1.2 --max-redirs 0 \
+            --head --dump-header "$redirect_headers" --output /dev/null --write-out '%{http_code}' \
+            'https://www.mickeyf.com/')"
+          redirect_location="$(awk 'BEGIN{IGNORECASE=1} /^location:/{sub(/^[^:]+:[[:space:]]*/, ""); sub(/\r$/, ""); print; exit}' "$redirect_headers")"
+          if [[ "$redirect_code" != "301" || "$redirect_location" != "https://mickeyf.com/" ]]; then
+            echo "The www redirect contract failed after deployment." >&2
+            exit 1
+          fi
+
+          echo "deployed-version-id=${deployed_version##*/}" >> "$GITHUB_OUTPUT"
+
+      - name: Restore previous Firebase release on failure
+        if: ${{ failure() && steps.auth.outcome == 'success' && steps.baseline.outcome == 'success' }}
+        env:
+          FIREBASE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          PREVIOUS_INDEX_SHA256: ${{ steps.baseline.outputs.previous-index-sha256 }}
+          PREVIOUS_RELEASE_NAME: ${{ steps.baseline.outputs.previous-release-name }}
+          PREVIOUS_VERSION_NAME: ${{ steps.baseline.outputs.previous-version-name }}
+          PROMOTED_RELEASE_NAME: ${{ steps.deploy.outputs.release-name }}
+          PROMOTED_VERSION_NAME: ${{ steps.preview.outputs.version-name }}
+        run: |
+          set -euo pipefail
+          umask 077
+
+          release_file="$RUNNER_TEMP/firebase-release-before-rollback.json"
+          read_live_state() {
+            curl --fail --silent --show-error --retry 2 --retry-delay 2 --retry-connrefused --max-time 10 \
+              --proto '=https' --tlsv1.2 \
+              --header "Authorization: Bearer $FIREBASE_ACCESS_TOKEN" \
+              --header "x-goog-user-project: $FIREBASE_PROJECT_ID" \
+              --output "$release_file" \
+              "https://firebasehosting.googleapis.com/v1beta1/sites/${FIREBASE_SITE_ID}/channels/live"
+            python3 - "$release_file" "$FIREBASE_SITE_ID" <<'PY'
+          import json
+          import re
+          import sys
+
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              body = json.load(handle)
+          raw_site = sys.argv[2]
+          site = re.escape(raw_site)
+          if body.get("name") != f"sites/{raw_site}/channels/live":
+              raise SystemExit("Firebase returned a foreign live channel.")
+          if body.get("url") != f"https://{raw_site}.web.app":
+              raise SystemExit("Firebase live-channel URL is unexpected.")
+          release = body.get("release")
+          if not isinstance(release, dict):
+              raise SystemExit("Latest live release is missing before rollback.")
+          release_name = release.get("name")
+          release_type = release.get("type")
+          release_time = release.get("releaseTime")
+          if not isinstance(release_name, str) or not re.fullmatch(
+              rf"sites/{site}/channels/live/releases/[0-9]+", release_name
+          ):
+              raise SystemExit("Latest release name is malformed before rollback.")
+          if release_type not in ("DEPLOY", "ROLLBACK"):
+              raise SystemExit("Latest release type is unexpected before rollback.")
+          if not isinstance(release_time, str) or not re.fullmatch(
+              r"[0-9]{4}-[0-9]{2}-[0-9]{2}T[^\n]+Z", release_time
+          ):
+              raise SystemExit("Latest release time is malformed before rollback.")
+          version = release.get("version")
+          if not isinstance(version, dict) or version.get("status") != "FINALIZED":
+              raise SystemExit("Latest release version is malformed.")
+          name = version.get("name")
+          message = release.get("message")
+          if message is None:
+              message = ""
+          if not isinstance(name, str) or not re.fullmatch(rf"sites/{site}/versions/[A-Za-z0-9_-]+", name):
+              raise SystemExit("Latest release version name is malformed.")
+          if not isinstance(message, str) or "\n" in message:
+              raise SystemExit("Latest release message is malformed.")
+          print(name)
+          print(message)
+          print(release_type)
+          print(release_name)
+          PY
+          }
+
+          mapfile -t latest < <(read_live_state)
+          if [[ "${#latest[@]}" -ne 4 ]]; then
+            echo "Could not establish rollback ownership." >&2
+            exit 1
+          fi
+
+          rollback_release_name=""
+          rollback_marker="rollback/$DEPLOY_MARKER"
+          rollback_payload="$(jq -cn --arg message "$rollback_marker" '{message: $message}')"
+          rollback_response="$RUNNER_TEMP/firebase-rollback-response.json"
+
+          send_rollback() {
+            rollback_http_code="$(curl --silent --show-error --max-time 60 \
+              --proto '=https' --tlsv1.2 \
+              --request POST \
+              --header "Authorization: Bearer $FIREBASE_ACCESS_TOKEN" \
+              --header "x-goog-user-project: $FIREBASE_PROJECT_ID" \
+              --header 'Content-Type: application/json' \
+              --data "$rollback_payload" \
+              --output "$rollback_response" --write-out '%{http_code}' \
+              "https://firebasehosting.googleapis.com/v1beta1/sites/${FIREBASE_SITE_ID}/channels/live/releases?versionName=${PREVIOUS_VERSION_NAME}" || true)"
+          }
+
+          parse_rollback_response() {
+            python3 - "$rollback_response" "$FIREBASE_SITE_ID" "$PREVIOUS_VERSION_NAME" "$rollback_marker" <<'PY'
+          import json
+          import re
+          import sys
+
+          release = json.load(open(sys.argv[1], encoding="utf-8"))
+          site = re.escape(sys.argv[2])
+          expected_version = sys.argv[3]
+          marker = sys.argv[4]
+          name = release.get("name")
+          if not isinstance(name, str) or not re.fullmatch(
+              rf"sites/{site}/channels/live/releases/[0-9]+", name
+          ):
+              raise SystemExit("Rollback returned a malformed release name.")
+          if release.get("type") not in ("DEPLOY", "ROLLBACK") or release.get("message") != marker:
+              raise SystemExit("Rollback response identity is incorrect.")
+          version = release.get("version")
+          if (
+              not isinstance(version, dict)
+              or version.get("name") != expected_version
+              or version.get("status") != "FINALIZED"
+          ):
+              raise SystemExit("Rollback response does not bind the previous version.")
+          print(name)
+          PY
+          }
+
+          rollback_is_transient() {
+            [[ "$rollback_http_code" == "000" || "$rollback_http_code" == "408" || \
+              "$rollback_http_code" == "425" || "$rollback_http_code" == "429" || \
+              "$rollback_http_code" =~ ^5[0-9][0-9]$ ]]
+          }
+
+          if [[ "${latest[0]}" == "$PREVIOUS_VERSION_NAME" ]]; then
+            echo "Firebase never moved away from the previous version; no rollback write is needed."
+          elif [[ "${latest[1]}" == "$DEPLOY_MARKER" && "${latest[0]}" == "$PROMOTED_VERSION_NAME" ]] && \
+            [[ -z "$PROMOTED_RELEASE_NAME" || "${latest[3]}" == "$PROMOTED_RELEASE_NAME" ]]; then
+            send_rollback
+            if [[ "$rollback_http_code" == "200" ]]; then
+              rollback_release_name="$(parse_rollback_response)"
+            elif rollback_is_transient; then
+              echo "Rollback response was ambiguous; checking live ownership before one bounded retry."
+              still_owned_checks=0
+              already_restored="false"
+              for check in 1 2 3; do
+                sleep 5
+                mapfile -t rollback_state < <(read_live_state)
+                if [[ "${#rollback_state[@]}" -ne 4 ]]; then
+                  echo "Could not establish Firebase state after an ambiguous rollback response." >&2
+                  exit 1
+                fi
+                if [[ "${rollback_state[0]}" == "$PREVIOUS_VERSION_NAME" ]]; then
+                  if [[ "${rollback_state[1]}" == "$rollback_marker" ]]; then
+                    rollback_release_name="${rollback_state[3]}"
+                  else
+                    echo "A separate release already restored the captured previous version; not overwriting it."
+                    rollback_release_name=""
+                  fi
+                  already_restored="true"
+                  break
+                fi
+                if [[ "${rollback_state[0]}" != "$PROMOTED_VERSION_NAME" || "${rollback_state[1]}" != "$DEPLOY_MARKER" || \
+                  "${rollback_state[3]}" != "${latest[3]}" ]]; then
+                  echo "A foreign Firebase release appeared after an ambiguous rollback response." >&2
+                  exit 1
+                fi
+                still_owned_checks=$((still_owned_checks + 1))
+              done
+
+              if [[ "$already_restored" != "true" ]]; then
+                if [[ "$still_owned_checks" -ne 3 ]]; then
+                  echo "Firebase rollback state did not stabilize safely." >&2
+                  exit 1
+                fi
+                send_rollback
+                if [[ "$rollback_http_code" == "200" ]]; then
+                  rollback_release_name="$(parse_rollback_response)"
+                elif rollback_is_transient; then
+                  echo "The single conditional rollback retry was also ambiguous; verifying the live pointer."
+                  rollback_release_name=""
+                else
+                  echo "Firebase rejected the conditional rollback retry with HTTP $rollback_http_code." >&2
+                  exit 1
+                fi
+              fi
+            else
+              echo "Firebase rejected rollback with HTTP $rollback_http_code." >&2
+              exit 1
+            fi
+          else
+            echo "Refusing to overwrite a Firebase release not owned by this workflow run." >&2
+            exit 1
+          fi
+
+          restored="false"
+          for attempt in $(seq 1 12); do
+            mapfile -t restored_release < <(read_live_state)
+            if [[ "${#restored_release[@]}" -ne 4 ]]; then
+              echo "Could not parse the restored Firebase release." >&2
+              exit 1
+            fi
+            if [[ "${restored_release[0]}" == "$PREVIOUS_VERSION_NAME" ]] && \
+              { [[ -z "$rollback_release_name" ]] || [[ "${restored_release[3]}" == "$rollback_release_name" && "${restored_release[1]}" == "$rollback_marker" ]]; }; then
+              restored="true"
+              break
+            fi
+            sleep 5
+          done
+          if [[ "$restored" != "true" ]]; then
+            echo "Firebase did not return to the captured previous version." >&2
+            exit 1
+          fi
+
+          restored_body="$RUNNER_TEMP/firebase-live-restored.html"
+          for attempt in $(seq 1 12); do
+            code="$(curl --silent --show-error --max-time 10 --connect-timeout 5 \
+              --proto '=https' --tlsv1.2 --max-redirs 0 \
+              --output "$restored_body" --write-out '%{http_code}' \
+              "https://mickeyf.com/?rollback=${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" || true)"
+            if [[ "$code" == "200" ]] && [[ "$(sha256sum "$restored_body" | awk '{print $1}')" == "$PREVIOUS_INDEX_SHA256" ]]; then
+              echo "Previous Firebase release restored and verified."
+              exit 0
+            fi
+            sleep 5
+          done
+          echo "Firebase release pointer rolled back, but the public response did not converge." >&2
+          exit 1
+
+      - name: Delete temporary preview channel
+        if: ${{ always() && steps.auth.outcome == 'success' && steps.preview.outputs.cleanup-authorized == 'true' }}
         continue-on-error: true
         env:
-          DEPLOY_STATUS: ${{ job.status }}
+          FIREBASE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+        run: |
+          set -euo pipefail
+
+          if [[ ! "$PREVIEW_CHANNEL" =~ ^gha-[1-9][0-9]*-[1-9][0-9]*$ || "$PREVIEW_CHANNEL" == "live" ]]; then
+            echo "Refusing to delete a non-canonical preview channel." >&2
+            exit 1
+          fi
+
+          preview_api="https://firebasehosting.googleapis.com/v1beta1/sites/${FIREBASE_SITE_ID}/channels/${PREVIEW_CHANNEL}"
+          response="$RUNNER_TEMP/firebase-preview-delete.json"
+          code="$(curl --silent --show-error --max-time 30 \
+            --proto '=https' --tlsv1.2 \
+            --request DELETE \
+            --header "Authorization: Bearer $FIREBASE_ACCESS_TOKEN" \
+            --header "x-goog-user-project: $FIREBASE_PROJECT_ID" \
+            --output "$response" --write-out '%{http_code}' \
+            "$preview_api" || true)"
+          if [[ "$code" != "200" && "$code" != "204" && "$code" != "404" ]]; then
+            echo "Temporary Firebase preview deletion failed; its one-hour expiry remains active." >&2
+            exit 1
+          fi
+
+          for attempt in $(seq 1 6); do
+            code="$(curl --silent --show-error --max-time 10 \
+              --proto '=https' --tlsv1.2 \
+              --header "Authorization: Bearer $FIREBASE_ACCESS_TOKEN" \
+              --header "x-goog-user-project: $FIREBASE_PROJECT_ID" \
+              --output "$response" --write-out '%{http_code}' \
+              "$preview_api" || true)"
+            if [[ "$code" == "404" ]]; then
+              echo "Temporary Firebase preview channel removed."
+              exit 0
+            fi
+            if [[ "$code" != "200" ]]; then
+              echo "Temporary Firebase preview cleanup could not be confirmed." >&2
+              exit 1
+            fi
+            sleep 5
+          done
+          echo "Temporary Firebase preview cleanup did not converge before timeout." >&2
+          exit 1
+
+  notify:
+    needs:
+      - build
+      - build_and_deploy
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions: {}
+    steps:
+      - name: Notify Slack (result)
+        continue-on-error: true
+        env:
+          BUILD_RESULT: ${{ needs.build.result }}
+          DEPLOY_RESULT: ${{ needs.build_and_deploy.result }}
           SLACK_WEBHOOK_URL: ${{ secrets.SLACK_WEBHOOK_URL }}
         run: |
           set -euo pipefail
@@ -80,7 +1092,7 @@ jobs:
             exit 0
           fi
 
-          if [[ "$DEPLOY_STATUS" == "success" ]]; then
+          if [[ "$BUILD_RESULT" == "success" && "$DEPLOY_RESULT" == "success" ]]; then
             message="Frontend deployed to Firebase Hosting. Commit: ${GITHUB_SHA:0:7}"
           else
             message="Frontend deploy failed. Commit: ${GITHUB_SHA:0:7}. Check GitHub Actions logs."
