@@ -178,6 +178,352 @@ steps:
           --filter="trigger_id=\"$$TRIGGER_ID\"" --sort-by='~createTime' --limit=1 --format='value(id)')"
         [[ "$$newest" == "$$SOURCE_BUILD_ID" ]] || fail 'source build is not the newest Stage A build.'
 
+  - id: 'Require successful Artifact Analysis scan'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:alpine@sha256:de1a989b158694a614852e7b53673097da3bdb394b8186d6102386b7a10d73c7'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        umask 077
+        readonly PROJECT_ID='noted-reef-387021'
+        readonly LOCATION='us-central1'
+        readonly IMAGE='us-central1-docker.pkg.dev/noted-reef-387021/cloud-run-source-deploy/cloud-run-source-deploy'
+        readonly STATE_JSON='/workspace/verified-stage-a.json'
+        readonly DISCOVERY_JSON='/workspace/artifact-discovery-receipt.json'
+        export PROJECT_ID LOCATION IMAGE
+        python3 - "$$STATE_JSON" "$$DISCOVERY_JSON" <<'PY'
+        import json, os, re, subprocess, sys, time, urllib.error, urllib.parse, urllib.request
+        from datetime import datetime, timedelta, timezone
+
+        STATE_KEYS = {"build_id", "candidate_tag", "commit", "digest", "revision_name", "revision_suffix", "target_image"}
+        BODY_KEYS = {"continuousAnalysis", "analysisStatus", "lastScanTime", "analysisCompleted", "analysisError", "analysisStatusError"}
+        BASE_KEYS = {"name", "resourceUri", "noteName", "kind", "createTime", "updateTime"}
+        WAITING = {"PENDING", "SCANNING"}
+        started = datetime.now(timezone.utc)
+        deadline = time.monotonic() + 900
+
+        def reject(message):
+            raise SystemExit(f"Artifact Analysis scan rejected the candidate: {message}")
+
+        def parse_time(raw, field, future_minutes=5):
+            if not isinstance(raw, str):
+                reject(f"{field} is missing")
+            try:
+                value = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            except ValueError:
+                reject(f"{field} is malformed")
+            if value.tzinfo is None or value > datetime.now(timezone.utc) + timedelta(minutes=future_minutes):
+                reject(f"{field} is invalid")
+            return value
+
+        def wait_or_reject(message):
+            remaining = deadline - time.monotonic()
+            if remaining <= 0:
+                reject(message)
+            time.sleep(min(15, remaining))
+
+        with open(sys.argv[1], encoding="utf-8") as handle:
+            state = json.load(handle)
+        if set(state) != STATE_KEYS or not all(isinstance(value, str) for value in state.values()):
+            reject("verified state fields or types do not match")
+        build_id = state["build_id"]
+        compact = build_id.replace("-", "")
+        if re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", build_id) is None:
+            reject("build ID is malformed")
+        if re.fullmatch(r"[0-9a-f]{40}", state["commit"]) is None or re.fullmatch(r"sha256:[0-9a-f]{64}", state["digest"]) is None:
+            reject("commit or digest is malformed")
+        expected = {
+            "candidate_tag": f"c-{compact}", "revision_name": f"mickeyf-org-build-{compact}",
+            "revision_suffix": f"build-{compact}", "target_image": f"{os.environ['IMAGE']}@{state['digest']}",
+        }
+        if any(state[key] != value for key, value in expected.items()):
+            reject("derived state does not match")
+        resource_uri = f"https://{state['target_image']}"
+
+        result = subprocess.run(["gcloud", "auth", "print-access-token"], capture_output=True, text=True, timeout=30)
+        token = result.stdout.strip()
+        if result.returncode or not 20 <= len(token) <= 8192 or any(char.isspace() for char in token):
+            reject("short-lived access token is unavailable")
+
+        def list_discoveries():
+            query = {"filter": f'kind="DISCOVERY" AND resourceUrl="{resource_uri}"', "pageSize": "1000"}
+            endpoint = ("https://containeranalysis.googleapis.com/v1/projects/" + os.environ["PROJECT_ID"]
+                        + "/locations/" + os.environ["LOCATION"] + "/occurrences")
+            items, tokens, pages = [], set(), 0
+            while pages < 100:
+                request = urllib.request.Request(endpoint + "?" + urllib.parse.urlencode(query),
+                                                 headers={"Authorization": f"Bearer {token}"})
+                try:
+                    with urllib.request.urlopen(request, timeout=30) as response:
+                        raw = response.read(16 * 1024 * 1024 + 1)
+                        if response.status != 200 or len(raw) > 16 * 1024 * 1024:
+                            reject("discovery response is invalid")
+                        if time.monotonic() > deadline:
+                            reject("discovery query exceeded the shared deadline")
+                except urllib.error.HTTPError as error:
+                    if error.code != 429 and not 500 <= error.code < 600:
+                        reject(f"discovery query failed ({error.code})")
+                    wait_or_reject("discovery query did not recover within 15 minutes")
+                    continue
+                except (urllib.error.URLError, TimeoutError):
+                    wait_or_reject("discovery query did not recover within 15 minutes")
+                    continue
+                try:
+                    payload = json.loads(raw)
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    reject("discovery response is not JSON")
+                if not isinstance(payload, dict) or not set(payload) <= {"occurrences", "nextPageToken"}:
+                    reject("discovery response schema does not match")
+                page = payload.get("occurrences", [])
+                next_token = payload.get("nextPageToken", "")
+                if not isinstance(page, list) or not isinstance(next_token, str):
+                    reject("discovery page is malformed")
+                items.extend(page)
+                pages += 1
+                if not next_token:
+                    return items
+                if next_token in tokens:
+                    reject("discovery page token repeated")
+                tokens.add(next_token)
+                query["pageToken"] = next_token
+            reject("discovery pagination limit exceeded")
+
+        while True:
+            items = list_discoveries()
+            if len(items) > 1:
+                reject("multiple discovery occurrences exist")
+            if items:
+                item = items[0]
+                if not isinstance(item, dict) or set(item) != BASE_KEYS | {"discovery"}:
+                    reject("discovery occurrence schema does not match")
+                occurrence = rf"projects/{re.escape(os.environ['PROJECT_ID'])}/locations/{os.environ['LOCATION']}/occurrences/[0-9a-f]{{8}}-[0-9a-f]{{4}}-[1-5][0-9a-f]{{3}}-[89ab][0-9a-f]{{3}}-[0-9a-f]{{12}}"
+                if re.fullmatch(occurrence, item.get("name", "")) is None:
+                    reject("discovery occurrence name does not match")
+                expected_note = "projects/goog-analysis/locations/us-central1/notes/PACKAGE_VULNERABILITY"
+                if (item.get("kind") != "DISCOVERY" or item.get("resourceUri") != resource_uri
+                        or item.get("noteName") != expected_note):
+                    reject("discovery identity does not match")
+                if parse_time(item.get("createTime"), "createTime") > parse_time(item.get("updateTime"), "updateTime"):
+                    reject("discovery timestamps are unordered")
+                body = item.get("discovery")
+                if not isinstance(body, dict) or not set(body) <= BODY_KEYS:
+                    reject("discovery body schema does not match")
+                if any(body.get(key) not in (None, "", [], {}) for key in ("analysisError", "analysisStatusError")):
+                    reject("scanner reported an error")
+                status = body.get("analysisStatus")
+                if status == "FINISHED_SUCCESS":
+                    break
+                if status not in WAITING:
+                    reject(f"scanner returned non-success status {status!r}")
+            wait_or_reject("scanner did not finish successfully within 15 minutes")
+
+        if body.get("continuousAnalysis") != "ACTIVE":
+            reject("continuous analysis is not active")
+        last_scan = parse_time(body.get("lastScanTime"), "lastScanTime")
+        completed = body.get("analysisCompleted")
+        if not isinstance(completed, dict) or set(completed) != {"analysisType"}:
+            reject("completed analysis schema does not match")
+        types = completed.get("analysisType")
+        if not isinstance(types, list) or not all(isinstance(value, str) and value for value in types):
+            reject("analysis types are malformed")
+        types = sorted(set(types))
+        if not {"OS", "NPM", "SECRET"} <= set(types):
+            reject("OS, NPM, and secret analysis did not complete")
+        receipt = {
+            "analysis_status": "FINISHED_SUCCESS", "analysis_types": types, "build_id": build_id,
+            "continuous_analysis": "ACTIVE", "digest": state["digest"], "last_scan_time": last_scan.isoformat(),
+            "policy_deadline": (started + timedelta(seconds=900)).isoformat(), "policy_started_at": started.isoformat(),
+            "resource_uri": resource_uri, "schema_version": 1, "target_image": state["target_image"],
+        }
+        temporary = sys.argv[2] + ".tmp"
+        with open(temporary, "w", encoding="utf-8") as handle:
+            json.dump(receipt, handle, sort_keys=True)
+        os.replace(temporary, sys.argv[2])
+        PY
+    timeout: '960s'
+
+  - id: 'Enforce Artifact Analysis severity policy'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:alpine@sha256:de1a989b158694a614852e7b53673097da3bdb394b8186d6102386b7a10d73c7'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        umask 077
+        readonly PROJECT_ID='noted-reef-387021'
+        readonly LOCATION='us-central1'
+        readonly IMAGE='us-central1-docker.pkg.dev/noted-reef-387021/cloud-run-source-deploy/cloud-run-source-deploy'
+        readonly STATE_JSON='/workspace/verified-stage-a.json'
+        readonly DISCOVERY_JSON='/workspace/artifact-discovery-receipt.json'
+        readonly RECEIPT_JSON='/workspace/artifact-scan-receipt.json'
+        export PROJECT_ID LOCATION IMAGE
+        python3 - "$$STATE_JSON" "$$DISCOVERY_JSON" "$$RECEIPT_JSON" <<'PY'
+        import json, os, re, subprocess, sys, time, urllib.error, urllib.parse, urllib.request
+        from datetime import datetime, timedelta, timezone
+
+        STATE_KEYS = {"build_id", "candidate_tag", "commit", "digest", "revision_name", "revision_suffix", "target_image"}
+        DISCOVERY_KEYS = {"analysis_status", "analysis_types", "build_id", "continuous_analysis", "digest", "last_scan_time", "policy_deadline", "policy_started_at", "resource_uri", "schema_version", "target_image"}
+        BASE_KEYS = {"name", "resourceUri", "noteName", "kind", "createTime", "updateTime"}
+        SEVERITIES = {"MINIMAL": 0, "LOW": 1, "MEDIUM": 2, "HIGH": 3, "CRITICAL": 4}
+
+        def reject(message):
+            raise SystemExit(f"Artifact Analysis policy rejected the candidate: {message}")
+
+        def parse_time(raw, field, future_minutes=5):
+            if not isinstance(raw, str):
+                reject(f"{field} is missing")
+            try:
+                value = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+            except ValueError:
+                reject(f"{field} is malformed")
+            if value.tzinfo is None or value > datetime.now(timezone.utc) + timedelta(minutes=future_minutes):
+                reject(f"{field} is invalid")
+            return value
+
+        with open(sys.argv[1], encoding="utf-8") as handle:
+            state = json.load(handle)
+        with open(sys.argv[2], encoding="utf-8") as handle:
+            discovery = json.load(handle)
+        if set(state) != STATE_KEYS or not all(isinstance(value, str) for value in state.values()):
+            reject("verified state fields or types do not match")
+        build_id = state["build_id"]
+        compact = build_id.replace("-", "")
+        if re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", build_id) is None:
+            reject("build ID is malformed")
+        if re.fullmatch(r"[0-9a-f]{40}", state["commit"]) is None or re.fullmatch(r"sha256:[0-9a-f]{64}", state["digest"]) is None:
+            reject("commit or digest is malformed")
+        expected = {
+            "candidate_tag": f"c-{compact}", "revision_name": f"mickeyf-org-build-{compact}",
+            "revision_suffix": f"build-{compact}", "target_image": f"{os.environ['IMAGE']}@{state['digest']}",
+        }
+        if any(state[key] != value for key, value in expected.items()):
+            reject("derived state does not match")
+        if not isinstance(discovery, dict) or set(discovery) != DISCOVERY_KEYS:
+            reject("discovery receipt fields do not match")
+        if discovery.get("schema_version") != 1 or discovery.get("analysis_status") != "FINISHED_SUCCESS" or discovery.get("continuous_analysis") != "ACTIVE":
+            reject("discovery receipt status does not match")
+        if any(discovery.get(key) != state[key] for key in ("build_id", "digest", "target_image")):
+            reject("discovery receipt candidate does not match")
+        resource_uri = f"https://{state['target_image']}"
+        if discovery.get("resource_uri") != resource_uri:
+            reject("discovery receipt resource does not match")
+        types = discovery.get("analysis_types")
+        if (not isinstance(types, list) or types != sorted(set(types))
+                or not all(isinstance(value, str) and value for value in types)
+                or not {"OS", "NPM", "SECRET"} <= set(types)):
+            reject("discovery receipt analysis types do not match")
+        started = parse_time(discovery.get("policy_started_at"), "policy_started_at")
+        deadline_at = parse_time(discovery.get("policy_deadline"), "policy_deadline", 20)
+        last_scan = parse_time(discovery.get("last_scan_time"), "last_scan_time")
+        if deadline_at - started != timedelta(seconds=900):
+            reject("shared policy deadline does not match")
+        remaining = (deadline_at - datetime.now(timezone.utc)).total_seconds()
+        if remaining <= 0:
+            reject("shared 15-minute policy deadline expired")
+        deadline = time.monotonic() + remaining
+
+        result = subprocess.run(["gcloud", "auth", "print-access-token"], capture_output=True, text=True, timeout=30)
+        token = result.stdout.strip()
+        if result.returncode or not 20 <= len(token) <= 8192 or any(char.isspace() for char in token):
+            reject("short-lived access token is unavailable")
+
+        query = {"filter": f'kind="VULNERABILITY" AND resourceUrl="{resource_uri}"', "pageSize": "1000"}
+        endpoint = ("https://containeranalysis.googleapis.com/v1/projects/" + os.environ["PROJECT_ID"]
+                    + "/locations/" + os.environ["LOCATION"] + "/occurrences")
+        vulnerabilities, tokens, pages = [], set(), 0
+        while pages < 100:
+            request = urllib.request.Request(endpoint + "?" + urllib.parse.urlencode(query),
+                                             headers={"Authorization": f"Bearer {token}"})
+            try:
+                with urllib.request.urlopen(request, timeout=30) as response:
+                    raw = response.read(16 * 1024 * 1024 + 1)
+                    if response.status != 200 or len(raw) > 16 * 1024 * 1024:
+                        reject("vulnerability response is invalid")
+                    if time.monotonic() > deadline:
+                        reject("vulnerability query exceeded the shared deadline")
+            except urllib.error.HTTPError as error:
+                if error.code != 429 and not 500 <= error.code < 600:
+                    reject(f"vulnerability query failed ({error.code})")
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    reject("vulnerability query did not recover within 15 minutes")
+                time.sleep(min(15, remaining))
+                continue
+            except (urllib.error.URLError, TimeoutError):
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    reject("vulnerability query did not recover within 15 minutes")
+                time.sleep(min(15, remaining))
+                continue
+            try:
+                payload = json.loads(raw)
+            except (UnicodeDecodeError, json.JSONDecodeError):
+                reject("vulnerability response is not JSON")
+            if not isinstance(payload, dict) or not set(payload) <= {"occurrences", "nextPageToken"}:
+                reject("vulnerability response schema does not match")
+            page = payload.get("occurrences", [])
+            next_token = payload.get("nextPageToken", "")
+            if not isinstance(page, list) or not isinstance(next_token, str):
+                reject("vulnerability page is malformed")
+            vulnerabilities.extend(page)
+            pages += 1
+            if not next_token:
+                break
+            if next_token in tokens:
+                reject("vulnerability page token repeated")
+            tokens.add(next_token)
+            query["pageToken"] = next_token
+        else:
+            reject("vulnerability pagination limit exceeded")
+
+        counts = {severity: 0 for severity in SEVERITIES}
+        occurrence = rf"projects/{re.escape(os.environ['PROJECT_ID'])}/locations/{os.environ['LOCATION']}/occurrences/[0-9a-f]{{8}}-[0-9a-f]{{4}}-[1-5][0-9a-f]{{3}}-[89ab][0-9a-f]{{3}}-[0-9a-f]{{12}}"
+        note_prefix = "projects/goog-vulnz/locations/us-central1/notes/"
+        for item in vulnerabilities:
+            allowed = BASE_KEYS | {"vulnerability"}
+            if not isinstance(item, dict) or not (set(item) == allowed or set(item) == allowed | {"remediation"}):
+                reject("vulnerability occurrence schema does not match")
+            if "remediation" in item and not isinstance(item["remediation"], str):
+                reject("vulnerability remediation is malformed")
+            if (re.fullmatch(occurrence, item.get("name", "")) is None or item.get("kind") != "VULNERABILITY"
+                    or item.get("resourceUri") != resource_uri
+                    or re.fullmatch(re.escape(note_prefix) + r"[^/]+", item.get("noteName", "")) is None):
+                reject("vulnerability occurrence identity does not match")
+            if parse_time(item.get("createTime"), "createTime") > parse_time(item.get("updateTime"), "updateTime"):
+                reject("vulnerability timestamps are unordered")
+            body = item.get("vulnerability")
+            if not isinstance(body, dict) or body.get("effectiveSeverity") not in SEVERITIES:
+                reject("vulnerability effective severity is missing or unknown")
+            issues = body.get("packageIssue")
+            if not isinstance(issues, list) or not issues:
+                reject("vulnerability package issues are missing")
+            effective = body["effectiveSeverity"]
+            for issue in issues:
+                if not isinstance(issue, dict) or issue.get("effectiveSeverity") not in SEVERITIES:
+                    reject("package issue effective severity is missing or unknown")
+                if "fixAvailable" in issue and not isinstance(issue["fixAvailable"], bool):
+                    reject("package issue fixAvailable is malformed")
+                if SEVERITIES[issue["effectiveSeverity"]] > SEVERITIES[effective]:
+                    effective = issue["effectiveSeverity"]
+            counts[effective] += 1
+        if counts["HIGH"] or counts["CRITICAL"]:
+            reject("HIGH or CRITICAL effective-severity vulnerabilities were found")
+        receipt = {
+            "analysis_status": "FINISHED_SUCCESS", "analysis_types": types,
+            "blocking_effective_severities": ["HIGH", "CRITICAL"], "blocking_vulnerability_count": 0,
+            "build_id": build_id, "continuous_analysis": "ACTIVE", "digest": state["digest"],
+            "last_scan_time": last_scan.isoformat(), "policy": "artifact-analysis-effective-severity-high-critical-v1",
+            "resource_uri": resource_uri, "schema_version": 1, "target_image": state["target_image"],
+            "vulnerability_counts": counts,
+        }
+        temporary = sys.argv[3] + ".tmp"
+        with open(temporary, "w", encoding="utf-8") as handle:
+            json.dump(receipt, handle, sort_keys=True)
+        os.replace(temporary, sys.argv[3])
+        PY
+    timeout: '960s'
+
   - id: 'Deploy deterministic zero-traffic candidate'
     name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:alpine@sha256:de1a989b158694a614852e7b53673097da3bdb394b8186d6102386b7a10d73c7'
     entrypoint: 'bash'
@@ -192,6 +538,7 @@ steps:
         readonly TRIGGER_ID='ef5a2981-95be-4f4d-af91-f997fde73356'
         readonly IMAGE='us-central1-docker.pkg.dev/noted-reef-387021/cloud-run-source-deploy/cloud-run-source-deploy'
         readonly STATE_JSON='/workspace/verified-stage-a.json'
+        readonly RECEIPT_JSON='/workspace/artifact-scan-receipt.json'
         readonly DEPLOY_STATE_JSON='/workspace/deployment-state.json'
         readonly SERVICE_BEFORE_JSON='/workspace/service-before.json'
         readonly REVISION_JSON='/workspace/revision.json'
@@ -201,16 +548,19 @@ steps:
         readonly CLOUD_SQL='noted-reef-387021:us-central1:cms-mickeyf'
 
         fail() { printf 'Stage B deployment rejected: %s\n' "$$1" >&2; exit 1; }
-        STATE_TSV="$$(python3 - "$$STATE_JSON" <<'PY'
+        STATE_TSV="$$(python3 - "$$STATE_JSON" "$$RECEIPT_JSON" <<'PY'
+        from datetime import datetime, timedelta, timezone
         import json
         import re
         import sys
 
         with open(sys.argv[1], encoding="utf-8") as handle:
             state = json.load(handle)
+        with open(sys.argv[2], encoding="utf-8") as handle:
+            receipt = json.load(handle)
         keys = {"build_id", "candidate_tag", "commit", "digest", "revision_name", "revision_suffix", "target_image"}
-        if set(state) != keys:
-            raise SystemExit("verified state has unexpected fields")
+        if set(state) != keys or not all(isinstance(value, str) for value in state.values()):
+            raise SystemExit("verified state has unexpected fields or types")
         build_id = state["build_id"]
         compact = build_id.replace("-", "")
         image = "us-central1-docker.pkg.dev/noted-reef-387021/cloud-run-source-deploy/cloud-run-source-deploy"
@@ -228,6 +578,47 @@ steps:
         }
         if any(state[key] != value for key, value in expected.items()):
             raise SystemExit("derived deployment state does not match")
+        receipt_keys = {
+            "analysis_status", "analysis_types", "blocking_effective_severities",
+            "blocking_vulnerability_count", "build_id", "continuous_analysis", "digest",
+            "last_scan_time", "policy", "resource_uri", "schema_version", "target_image",
+            "vulnerability_counts",
+        }
+        if not isinstance(receipt, dict) or set(receipt) != receipt_keys:
+            raise SystemExit("Artifact Analysis receipt fields do not match")
+        if receipt.get("schema_version") != 1 or receipt.get("policy") != "artifact-analysis-effective-severity-high-critical-v1":
+            raise SystemExit("Artifact Analysis receipt policy does not match")
+        if receipt.get("analysis_status") != "FINISHED_SUCCESS" or receipt.get("continuous_analysis") != "ACTIVE":
+            raise SystemExit("Artifact Analysis receipt status does not match")
+        if any(receipt.get(key) != state[key] for key in ("build_id", "digest", "target_image")):
+            raise SystemExit("Artifact Analysis receipt candidate does not match")
+        if receipt.get("resource_uri") != f"https://{state['target_image']}":
+            raise SystemExit("Artifact Analysis receipt resource URI does not match")
+        types = receipt.get("analysis_types")
+        if (not isinstance(types, list) or types != sorted(set(types))
+                or not all(isinstance(item, str) and item for item in types)
+                or not {"OS", "NPM", "SECRET"} <= set(types)):
+            raise SystemExit("Artifact Analysis receipt types do not match")
+        if receipt.get("blocking_effective_severities") != ["HIGH", "CRITICAL"]:
+            raise SystemExit("Artifact Analysis blocking policy does not match")
+        counts = receipt.get("vulnerability_counts")
+        severity_keys = {"MINIMAL", "LOW", "MEDIUM", "HIGH", "CRITICAL"}
+        if (not isinstance(counts, dict) or set(counts) != severity_keys
+                or any(isinstance(value, bool) or not isinstance(value, int) or value < 0 for value in counts.values())):
+            raise SystemExit("Artifact Analysis vulnerability counts are malformed")
+        blocking_count = receipt.get("blocking_vulnerability_count")
+        if (isinstance(blocking_count, bool) or not isinstance(blocking_count, int)
+                or blocking_count != counts["HIGH"] + counts["CRITICAL"] or blocking_count != 0):
+            raise SystemExit("Artifact Analysis blocking count is not zero")
+        raw_time = receipt.get("last_scan_time")
+        if not isinstance(raw_time, str):
+            raise SystemExit("Artifact Analysis scan time is missing")
+        try:
+            scan_time = datetime.fromisoformat(raw_time.replace("Z", "+00:00"))
+        except ValueError:
+            raise SystemExit("Artifact Analysis scan time is malformed")
+        if scan_time.tzinfo is None or scan_time > datetime.now(timezone.utc) + timedelta(minutes=5):
+            raise SystemExit("Artifact Analysis scan time is invalid")
         print("\t".join(state[key] for key in (
             "build_id", "commit", "digest", "target_image", "revision_suffix", "revision_name", "candidate_tag"
         )))
@@ -501,7 +892,7 @@ steps:
             state = json.load(handle)
         message = {"text": (
             "Backend candidate deployed to Cloud Run with zero traffic after "
-            f"verified provenance checks. Commit: {state['commit']}"
+            f"verified provenance and Artifact Analysis checks. Commit: {state['commit']}"
         )}
         with open(sys.argv[2], "w", encoding="utf-8") as handle:
             json.dump(message, handle)
@@ -546,6 +937,8 @@ availableSecrets:
 substitutions:
   _SOURCE_BUILD_ID: 'INVALID'
   _SOURCE_STATUS: 'INVALID'
+
+timeout: '1800s'
 
 options:
   logging: 'CLOUD_LOGGING_ONLY'
