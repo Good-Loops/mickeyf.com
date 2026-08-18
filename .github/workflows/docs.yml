@@ -1,4 +1,4 @@
-name: Docs (TypeDoc -> /docs)
+name: Docs (TypeDoc -> GitHub Pages)
 
 on:
   push:
@@ -13,20 +13,34 @@ on:
       - 'package.json'
       - 'package-lock.json'
       - '.github/workflows/docs.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'frontend/**'
+      - 'backend/**'
+      - 'docs-src/**'
+      - 'scripts/clean-docs.mjs'
+      - 'scripts/copy-doc-assets.mjs'
+      - 'typedoc.merge.json'
+      - 'package.json'
+      - 'package-lock.json'
+      - '.github/workflows/docs.yml'
   workflow_dispatch:
 
-permissions:
-  contents: read
+permissions: {}
 
 concurrency:
-  group: docs-main
-  cancel-in-progress: true
+  group: docs-${{ github.ref }}
+  cancel-in-progress: false
 
 jobs:
   build:
     name: Build documentation
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    permissions:
+      contents: read
+      pages: read
     env:
       CI: "true"
       NPM_CONFIG_FUND: "false"
@@ -35,6 +49,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Configure GitHub Pages
+        uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
 
       - name: Setup Node
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
@@ -61,52 +78,26 @@ jobs:
       - name: Build docs
         run: npm run docs
 
-      - name: Upload generated docs
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      - name: Upload GitHub Pages artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          name: generated-docs
           path: docs
-          if-no-files-found: error
           include-hidden-files: true
           retention-days: 1
 
-  commit:
-    name: Commit documentation
+  deploy:
+    name: Deploy documentation
     needs: build
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
-      contents: write
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
     steps:
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          fetch-depth: 0
-
-      - name: Download generated docs
-        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
-        with:
-          name: generated-docs
-          path: ${{ runner.temp }}/generated-docs
-
-      - name: Commit /docs if changed
-        env:
-          GENERATED_DOCS: ${{ runner.temp }}/generated-docs
-        run: |
-          set -euo pipefail
-
-          test -f "$GENERATED_DOCS/index.html"
-          git rm -r --ignore-unmatch -- docs
-          mkdir --parents docs
-          cp --archive "$GENERATED_DOCS"/. docs/
-          git add --all -- docs
-
-          if git diff --cached --quiet -- docs; then
-            echo "No docs changes."
-            exit 0
-          fi
-
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git commit -m "docs: update TypeDoc output [skip ci]"
-          git push origin "HEAD:${GITHUB_REF_NAME}"
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@cd2ce8fcbc39b97be8ca5fce6e763baed58fa128 # v5.0.0
