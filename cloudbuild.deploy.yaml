@@ -898,6 +898,210 @@ steps:
             json.dump(message, handle)
         PY
 
+  - id: 'Smoke test tagged candidate anonymously'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:alpine@sha256:de1a989b158694a614852e7b53673097da3bdb394b8186d6102386b7a10d73c7'
+    entrypoint: 'bash'
+    args:
+      - '-c'
+      - |
+        set -euo pipefail
+        umask 077
+
+        readonly STATE_JSON='/workspace/verified-stage-a.json'
+        readonly SERVICE_JSON='/workspace/service-after.json'
+        python3 - "$$STATE_JSON" "$$SERVICE_JSON" <<'PY'
+        import json
+        import errno
+        import math
+        import re
+        import socket
+        import ssl
+        import sys
+        import time
+        import urllib.error
+        import urllib.parse
+        import urllib.request
+
+        MAX_BODY = 64 * 1024
+        DEADLINE = time.monotonic() + 90
+        RETRYABLE_STATUS = {408, 425, 429, 500, 502, 503, 504}
+
+        def reject(message):
+            raise SystemExit(f"Tagged candidate smoke test failed: {message}")
+
+        def load(path, label):
+            try:
+                with open(path, encoding="utf-8") as handle:
+                    value = json.load(handle)
+            except (OSError, UnicodeError, json.JSONDecodeError):
+                reject(f"{label} could not be read")
+            if not isinstance(value, dict):
+                reject(f"{label} is malformed")
+            return value
+
+        state = load(sys.argv[1], "verified state")
+        service = load(sys.argv[2], "verified service")
+        state_keys = {"build_id", "candidate_tag", "commit", "digest", "revision_name", "revision_suffix", "target_image"}
+        if set(state) != state_keys or not all(isinstance(value, str) for value in state.values()):
+            reject("verified state fields do not match")
+        build_id = state["build_id"]
+        if re.fullmatch(r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}", build_id) is None:
+            reject("verified build ID is malformed")
+        compact = build_id.replace("-", "")
+        if (state["candidate_tag"] != f"c-{compact}"
+                or state["revision_name"] != f"mickeyf-org-build-{compact}"):
+            reject("candidate identity does not match the verified build")
+        if service.get("metadata", {}).get("name") != "mickeyf-org":
+            reject("verified service identity does not match")
+        traffic = service.get("status", {}).get("traffic")
+        if not isinstance(traffic, list) or not all(isinstance(item, dict) for item in traffic):
+            reject("verified service traffic is malformed")
+        tagged = [item for item in traffic if item.get("tag") == state["candidate_tag"]]
+        if (len(tagged) != 1 or tagged[0].get("revisionName") != state["revision_name"]
+                or int(tagged[0].get("percent") or 0) != 0):
+            reject("candidate tag is not a unique zero-traffic mapping")
+
+        candidate_url = tagged[0].get("url")
+        if not isinstance(candidate_url, str):
+            reject("candidate URL is missing")
+        if sum(item.get("url") == candidate_url for item in traffic) != 1:
+            reject("candidate URL is not unique")
+        service_url = service.get("status", {}).get("url")
+        if not isinstance(service_url, str):
+            reject("service URL is missing")
+        try:
+            parsed = urllib.parse.urlsplit(candidate_url)
+            service_parsed = urllib.parse.urlsplit(service_url)
+            candidate_port = parsed.port
+            service_port = service_parsed.port
+        except ValueError:
+            reject("candidate or service URL is malformed")
+        host = parsed.hostname or ""
+        service_host = service_parsed.hostname or ""
+        expected_service_url = f"https://{service_host}"
+        expected_candidate_url = f"https://{state['candidate_tag']}---{service_host}"
+        if (parsed.scheme != "https" or parsed.username is not None or parsed.password is not None
+                or candidate_port is not None or parsed.path not in ("", "/") or parsed.query or parsed.fragment
+                or service_parsed.scheme != "https" or service_parsed.username is not None
+                or service_parsed.password is not None or service_port is not None
+                or service_parsed.path not in ("", "/") or service_parsed.query or service_parsed.fragment
+                or re.fullmatch(r"mickeyf-org-[a-z0-9]{10}-uc\.a\.run\.app", service_host) is None
+                or service_url != expected_service_url or candidate_url != expected_candidate_url
+                or host != f"{state['candidate_tag']}---{service_host}"):
+            reject("candidate URL is not an exact Cloud Run tag URL")
+        origin = expected_candidate_url
+
+        class NoRedirect(urllib.request.HTTPRedirectHandler):
+            def redirect_request(self, req, fp, code, msg, headers, newurl):
+                return None
+
+        opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+
+        def no_store(headers):
+            directives = []
+            for value in headers.get_all("Cache-Control", []):
+                directives.extend(part.strip().lower() for part in value.split(","))
+            return "no-store" in directives
+
+        def read_response(response):
+            content_length = response.headers.get("Content-Length")
+            if content_length is not None:
+                try:
+                    parsed_length = int(content_length)
+                except ValueError:
+                    reject("response content length is malformed")
+                if parsed_length < 0:
+                    reject("response content length is malformed")
+                if parsed_length > MAX_BODY:
+                    reject("response exceeded the body limit")
+            if response.headers.get("Content-Encoding", "identity").lower() not in ("", "identity"):
+                reject("response content encoding is not identity")
+            body = response.read(MAX_BODY + 1)
+            if len(body) > MAX_BODY:
+                reject("response exceeded the body limit")
+            content_type = response.headers.get_content_type().lower()
+            if content_type != "application/json":
+                reject("response is not JSON")
+            try:
+                return json.loads(body.decode("utf-8"))
+            except (UnicodeError, json.JSONDecodeError):
+                reject("response JSON is malformed")
+
+        def transient(error):
+            reason = error.reason if isinstance(error, urllib.error.URLError) else error
+            if isinstance(reason, (ssl.SSLError, ssl.CertificateError)):
+                return False
+            if isinstance(reason, (TimeoutError, socket.timeout, socket.gaierror, ConnectionError)):
+                return True
+            return isinstance(reason, OSError) and reason.errno in {
+                errno.ECONNREFUSED, errno.ECONNRESET, errno.EHOSTUNREACH,
+                errno.ENETUNREACH, errno.EPIPE, errno.ETIMEDOUT,
+            }
+
+        def request(path, expected_status, payload=None):
+            url = origin + path
+            data = None if payload is None else json.dumps(payload, separators=(",", ":")).encode("ascii")
+            headers = {"Accept": "application/json", "Accept-Encoding": "identity", "User-Agent": "mickeyf-stage-b-smoke/1"}
+            if data is not None:
+                headers["Content-Type"] = "application/json"
+            attempt = 0
+            while True:
+                remaining = DEADLINE - time.monotonic()
+                if remaining <= 0:
+                    reject("transient request failures exceeded 90 seconds")
+                req = urllib.request.Request(url, data=data, headers=headers,
+                                             method="POST" if data is not None else "GET")
+                try:
+                    response = opener.open(req, timeout=min(10, remaining))
+                except urllib.error.HTTPError as error:
+                    response = error
+                except (urllib.error.URLError, OSError) as error:
+                    if not transient(error):
+                        reject(f"{path} failed before receiving an HTTP response")
+                    response = None
+                if response is not None:
+                    with response:
+                        status = response.status
+                        if status == expected_status:
+                            return read_response(response), response.headers
+                        if status not in RETRYABLE_STATUS:
+                            reject(f"{path} returned unexpected HTTP status")
+                attempt += 1
+                delay = min(2 ** attempt, 10, max(0, DEADLINE - time.monotonic()))
+                if delay <= 0:
+                    reject("transient request failures exceeded 90 seconds")
+                time.sleep(delay)
+
+        root, root_headers = request("/", 404)
+        if root != {"error": "NOT_FOUND"}:
+            reject("root response contract does not match")
+        if root_headers.get_all("Set-Cookie"):
+            reject("root response unexpectedly sets a cookie")
+
+        auth, auth_headers = request("/auth/verify-token", 200)
+        if auth != {"loggedIn": False}:
+            reject("anonymous authentication response contract does not match")
+        if not no_store(auth_headers) or auth_headers.get_all("Set-Cookie"):
+            reject("anonymous authentication response headers are unsafe")
+
+        board, board_headers = request("/api/users", 200, {"type": "get_leaderboard"})
+        if (not isinstance(board, dict) or set(board) != {"success", "leaderboard"}
+                or board.get("success") is not True or not isinstance(board.get("leaderboard"), list)
+                or len(board["leaderboard"]) > 10):
+            reject("leaderboard response contract does not match")
+        for row in board["leaderboard"]:
+            score = row.get("p4_score") if isinstance(row, dict) else None
+            if (not isinstance(row, dict) or set(row) != {"user_name", "p4_score"}
+                    or not isinstance(row.get("user_name"), str)
+                    or isinstance(score, bool) or not isinstance(score, (int, float))
+                    or (isinstance(score, float) and not math.isfinite(score))):
+                reject("leaderboard row contract does not match")
+        if not no_store(board_headers) or board_headers.get_all("Set-Cookie"):
+            reject("leaderboard response headers are unsafe")
+        print("Tagged candidate anonymous HTTP and database-read smoke tests passed.")
+        PY
+    timeout: '120s'
+
   - id: 'Plan bounded candidate tag expiry'
     name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:alpine@sha256:de1a989b158694a614852e7b53673097da3bdb394b8186d6102386b7a10d73c7'
     entrypoint: 'bash'
