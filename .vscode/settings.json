@@ -1,4 +1,38 @@
 {
+    "restoreTerminals.runOnStartup": true,
+    "restoreTerminals.keepExistingTerminalsOpen": false,
+    "restoreTerminals.terminals": [
+        {
+            "cwd": "${workspaceFolder}/frontend",
+            "splitTerminals": [
+                {
+                    "name": "front",
+                    "commands": [
+                        "npm run dev"
+                    ]
+                }
+            ]
+        },
+        {
+            "cwd": "${workspaceFolder}",
+            "splitTerminals": [
+                {
+                    "name": "docs",
+                    "commands": [
+                        "npm run docs:dev"
+                    ]
+                }
+            ]
+        },
+        {
+            "cwd": "${workspaceFolder}",
+            "splitTerminals": [
+                {
+                    "name": "general"
+                }
+            ]
+        }
+    ],
     "editor.inlineSuggest.enabled": true,
     "editor.suggest.preview": true,
     "editor.tabCompletion": "onlySnippets"
