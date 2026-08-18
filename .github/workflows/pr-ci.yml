@@ -34,6 +34,7 @@ jobs:
             package-lock.json
             frontend/package-lock.json
             backend/package-lock.json
+            .github/firebase-deploy/package-lock.json
 
       - name: Use project npm version
         run: npm install --global npm@11.6.2 --no-audit --no-fund
@@ -43,12 +44,14 @@ jobs:
           npm ci --no-audit
           npm --prefix frontend ci --no-audit
           npm --prefix backend ci --no-audit
+          npm --prefix .github/firebase-deploy ci --ignore-scripts --no-audit --no-fund
 
       - name: Audit npm dependencies
         run: |
           npm audit --audit-level=low
           npm --prefix frontend audit --audit-level=low
           npm --prefix backend audit --audit-level=low
+          npm --prefix .github/firebase-deploy audit --audit-level=high --omit=dev
 
       - name: Type-check and build frontend
         run: |
