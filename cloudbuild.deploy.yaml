@@ -654,7 +654,7 @@ steps:
             --startup-probe='timeoutSeconds=240,periodSeconds=240,failureThreshold=1,tcpSocket.port=8080' \
             --liveness-probe='' --set-cloudsql-instances="$$CLOUD_SQL" \
             --set-env-vars="NODE_ENV=production,CLOUD_SQL_CONNECTION_NAME=$$CLOUD_SQL,DB_USER=cms_mickeyf,DB_NAME=cms" \
-            --set-secrets='DB_PASS=DB_PASS:1,SESSION_SECRET=SESSION_SECRET:1' \
+            --set-secrets='DB_PASS=DB_PASS:1,SESSION_SECRET=SESSION_SECRET:2' \
             --update-labels="source-build-id=$$SOURCE_BUILD_ID,source-commit=$$COMMIT_SHA" \
             --no-traffic --tag="$$CANDIDATE_TAG" --quiet; then
             deployed_here=true
@@ -854,10 +854,14 @@ steps:
         for name, value in plain.items():
             if env.get(name) != {"name": name, "value": value}:
                 reject(f"environment value {name} does not match")
-        for name in ("DB_PASS", "SESSION_SECRET"):
+        secret_versions = {
+            "DB_PASS": "1",
+            "SESSION_SECRET": "2",
+        }
+        for name, version in secret_versions.items():
             item = env.get(name) or {}
             ref = (item.get("valueFrom") or {}).get("secretKeyRef") or {}
-            if item.get("name") != name or ref != {"key": "1", "name": name}:
+            if item.get("name") != name or ref != {"key": version, "name": name}:
                 reject(f"numeric secret reference {name} does not match")
 
         revision_percent = sum(int(item.get("percent") or 0) for item in after.get("status", {}).get("traffic", []) if item.get("revisionName") == revision_name)
