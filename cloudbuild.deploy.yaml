@@ -423,7 +423,12 @@ steps:
             reject("runtime image is not the verified digest")
         if container.get("ports") != [{"containerPort": 8080, "name": "http1"}]:
             reject("HTTP port configuration does not match")
-        if (container.get("resources") or {}).get("limits") != {"cpu": "1000m", "memory": "512Mi"}:
+        limits = (container.get("resources") or {}).get("limits") or {}
+        if (
+            set(limits) != {"cpu", "memory"}
+            or limits.get("cpu") not in ("1", "1000m")
+            or limits.get("memory") != "512Mi"
+        ):
             reject("CPU or memory limits do not match")
         probe = container.get("startupProbe") or {}
         if (int(probe.get("failureThreshold") or 0), int(probe.get("periodSeconds") or 0),
