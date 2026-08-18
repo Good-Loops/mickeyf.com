@@ -5,10 +5,10 @@ monorepo.
 
 ## Open the project
 
-In Unity Hub, add and open this exact directory:
+In Unity Hub, add and open this directory from the repository root:
 
 ```text
-C:\Users\User\Desktop\Pastas\Code\mickeyf.com\unity\three-bosses
+unity\three-bosses
 ```
 
 Use Unity 6.3 LTS editor version 6000.3.8f1. Do not upgrade the editor as part

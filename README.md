@@ -26,11 +26,11 @@ local infrastructure.
 
 ## Native Windows development
 
-Native Windows 11 is the supported development environment. The maintained
-checkout is expected at:
+Native Windows 11 is the supported development environment. The checkout can
+live in any local folder; the commands below assume this repository root:
 
 ```text
-C:\Users\User\Desktop\Pastas\Code\mickeyf.com
+<path-to-your-checkout>\mickeyf.com
 ```
 
 ### Prerequisites
@@ -103,7 +103,7 @@ copied into Git.
 3. Open the native Windows folder in VS Code:
 
    ```powershell
-   code "C:\Users\User\Desktop\Pastas\Code\mickeyf.com"
+   code .
    ```
 
 4. Run `Terminal: Run Task`, then select `Development: app`.
