@@ -1155,7 +1155,7 @@ steps:
         umask 077
         readonly STATE_JSON='/workspace/verified-stage-a.json'
         readonly PLAN_JSON='/workspace/candidate-tag-expiry-plan.json'
-        printf '%s%s' "$$1" "$$2" | python3 - "$$STATE_JSON" "$$PLAN_JSON"
+        printf '%s%s%s' "$$1" "$$2" "$$3" | python3 - "$$STATE_JSON" "$$PLAN_JSON"
       - '_'
       - |2
         import json, re, subprocess, sys, time, urllib.error, urllib.parse, urllib.request
@@ -1290,6 +1290,7 @@ steps:
             request = urllib.request.Request(base_url + name, headers={"Authorization": f"Bearer {token}"})
             try:
                 with urllib.request.urlopen(request, timeout=30) as response:
+      - |2
                     raw = response.read(16 * 1024 * 1024 + 1)
                     if response.status != 200 or len(raw) > 16 * 1024 * 1024:
                         reject("Cloud Run read response is invalid")
@@ -1307,6 +1308,35 @@ steps:
                 reject("Cloud Run read JSON is not an object")
             return value
 
+        def reconciliation_get(deadline):
+            request = urllib.request.Request(
+                base_url + SERVICE_NAME, headers={"Authorization": f"Bearer {token}"})
+            while True:
+                try:
+                    with urllib.request.urlopen(request, timeout=30) as response:
+                        raw = response.read(16 * 1024 * 1024 + 1)
+                        if response.status != 200 or len(raw) > 16 * 1024 * 1024:
+                            reject("Cloud Run reconciliation response is invalid")
+                except urllib.error.HTTPError as error:
+                    if error.code != 429 and not 500 <= error.code < 600:
+                        reject(f"Cloud Run reconciliation read failed ({error.code})")
+                    if time.monotonic() >= deadline:
+                        reject("Cloud Run reconciliation read retries timed out")
+                    time.sleep(min(3, max(0, deadline - time.monotonic())))
+                    continue
+                except (urllib.error.URLError, TimeoutError):
+                    if time.monotonic() >= deadline:
+                        reject("Cloud Run reconciliation transport retries timed out")
+                    time.sleep(min(3, max(0, deadline - time.monotonic())))
+                    continue
+                try:
+                    value = json.loads(raw)
+                except (UnicodeDecodeError, json.JSONDecodeError):
+                    reject("Cloud Run reconciliation returned malformed JSON")
+                if not isinstance(value, dict):
+                    reject("Cloud Run reconciliation JSON is not an object")
+                return value
+
         for tag, old_id in zip(removals, stale_builds):
             revision_name = f"{SERVICE}-build-{CANDIDATE.fullmatch(tag).group(1)}"
             revision_path = f"{SERVICE_NAME}/revisions/{revision_name}"
@@ -1316,7 +1346,6 @@ steps:
                 containers = revision.get("containers") or []
                 record = stale_records[old_id]
                 if (revision.get("name") != revision_path or revision.get("service") != SERVICE
-      - |2
                         or labels.get("source-build-id") != old_id or labels.get("source-commit") != record["commit"]
                         or len(containers) != 1 or containers[0].get("image") != f"{IMAGE}@{record['digest']}"):
                     reject("planned stale revision does not match its authoritative build")
@@ -1381,6 +1410,7 @@ steps:
             expected_statuses = [item for item in original_statuses if item.get("tag") not in removal_set - present]
             if canonical(targets) != canonical(expected_targets) or canonical(statuses) != canonical(expected_statuses):
                 reject("service drift is not a safe subset of the authorized stale tags")
+      - |2
             if positive != original_positive:
                 reject("positive or protected traffic changed")
             for tag in present:
@@ -1392,7 +1422,42 @@ steps:
             return sorted(present), targets
 
         def patch(service, tags):
-            desired = [item for item in service["traffic"] if item.get("tag") not in set(tags)]
+            tag_set = set(tags)
+            desired = [item for item in service["traffic"] if item.get("tag") not in tag_set]
+            desired_statuses = [item for item in service["trafficStatuses"] if item.get("tag") not in tag_set]
+            old_generation = int(service["generation"])
+            target_generation = str(old_generation + 1)
+            old_etag = service["etag"]
+
+            def safe_progress_statuses(items):
+                if not isinstance(items, list) or any(not isinstance(item, dict) for item in items):
+                    return False
+                present = {item.get("tag") for item in items if item.get("tag") in tag_set}
+                expected = [
+                    item for item in service["trafficStatuses"]
+                    if item.get("tag") not in tag_set - present
+                ]
+                return canonical(items) == canonical(expected)
+
+            def settled_service(value):
+                condition = value.get("terminalCondition") or {}
+                reconciling = value.get("reconciling", False)
+                return (
+                    value.get("name") == SERVICE_NAME
+                    and value.get("generation") == target_generation
+                    and value.get("observedGeneration") == target_generation
+                    and isinstance(value.get("etag"), str) and bool(value.get("etag"))
+                    and value.get("etag") != old_etag
+                    and canonical(value.get("traffic", [])) == canonical(desired)
+                    and canonical(value.get("trafficStatuses", [])) == canonical(desired_statuses)
+                    and value.get("template") == service.get("template")
+                    and value.get("latestReadyRevision") == service.get("latestReadyRevision")
+                    and value.get("latestCreatedRevision") == service.get("latestCreatedRevision")
+                    and condition.get("type") == "Ready"
+                    and condition.get("state") == "CONDITION_SUCCEEDED"
+                    and isinstance(reconciling, bool) and not reconciling
+                )
+
             body = json.dumps({"name": SERVICE_NAME, "etag": service["etag"], "traffic": desired},
                               separators=(",", ":")).encode()
             query = urllib.parse.urlencode({"updateMask": "traffic"})
@@ -1418,16 +1483,66 @@ steps:
             operation_pattern = rf"projects/{re.escape(PROJECT)}/locations/{re.escape(REGION)}/operations/[^/]+"
             if not isinstance(name, str) or re.fullmatch(operation_pattern, name) is None:
                 reject("Cloud Run patch operation name is malformed")
-            for _ in range(100):
-                operation = api_get(name)
-                if operation.get("done") is True:
-                    if operation.get("error"):
-                        reject("Cloud Run traffic operation failed")
-                    return desired
-                if operation.get("done") not in (None, False):
-                    reject("Cloud Run operation status is malformed")
-                time.sleep(3)
-            reject("Cloud Run traffic operation timed out")
+            done_present = "done" in operation
+            done = operation.get("done", False)
+            if done_present and type(done) is not bool:
+                reject("Cloud Run patch operation completion flag is malformed")
+            if "error" in operation:
+                reject("Cloud Run patch operation reports failure")
+            if not done and "response" in operation:
+                reject("unfinished Cloud Run patch operation contains a result")
+            if done:
+                result = operation.get("response")
+                if (not isinstance(result, dict)
+                        or result.get("@type") != "type.googleapis.com/google.cloud.run.v2.Service"
+                        or not settled_service(result)):
+                    reject("completed Cloud Run patch operation has an invalid service result")
+            deadline = time.monotonic() + 300
+            while time.monotonic() < deadline:
+                observed = reconciliation_get(deadline)
+                if observed.get("name") != SERVICE_NAME:
+                    reject("Cloud Run reconciliation returned the wrong service")
+                generation = observed.get("generation")
+                etag = observed.get("etag")
+                if (not isinstance(generation, str) or not generation.isdigit()
+                        or not isinstance(etag, str) or not etag):
+                    reject("Cloud Run reconciliation identity is malformed")
+                if generation == str(old_generation):
+                    if observed != service:
+                        reject("Cloud Run drifted while the accepted patch was propagating")
+                    time.sleep(min(3, max(0, deadline - time.monotonic())))
+                    continue
+                if generation != target_generation:
+                    reject("Cloud Run generation drifted during reconciliation")
+                if etag == old_etag:
+                    reject("Cloud Run etag did not advance with the traffic generation")
+                if (canonical(observed.get("traffic", [])) != canonical(desired)
+                        or observed.get("template") != service.get("template")
+                        or observed.get("latestReadyRevision") != service.get("latestReadyRevision")
+                        or observed.get("latestCreatedRevision") != service.get("latestCreatedRevision")):
+                    reject("Cloud Run reconciled foreign service state")
+                condition = observed.get("terminalCondition") or {}
+                state = condition.get("state")
+                reconciling = observed.get("reconciling", False)
+                if not isinstance(reconciling, bool):
+                    reject("Cloud Run reconciling state is malformed")
+                if condition.get("type") != "Ready" or state == "CONDITION_FAILED":
+                    reject("Cloud Run traffic reconciliation failed")
+                if state not in ("CONDITION_PENDING", "CONDITION_RECONCILING", "CONDITION_SUCCEEDED"):
+                    reject("Cloud Run reconciliation status is malformed")
+                observed_generation = observed.get("observedGeneration")
+                statuses = observed.get("trafficStatuses")
+                if (observed_generation not in (str(old_generation), target_generation)
+                        or not safe_progress_statuses(statuses)):
+                    reject("Cloud Run reconciliation progress is inconsistent")
+                if reconciling:
+                    time.sleep(min(3, max(0, deadline - time.monotonic())))
+                    continue
+                if (state != "CONDITION_SUCCEEDED" or observed_generation != target_generation
+                        or canonical(statuses) != canonical(desired_statuses)):
+                    reject("Cloud Run reconciliation settled inconsistently")
+                return {"etag": etag, "generation": target_generation, "traffic": desired}
+            reject("Cloud Run service reconciliation timed out")
 
         service = api_get(SERVICE_NAME)
         if (service.get("etag") != plan["before_etag"]
@@ -1443,8 +1558,8 @@ steps:
             if newest_build() != build_id:
                 reject("a newer Stage A build appeared before tag expiry")
             generation = int(service["generation"])
-            desired = patch(service, remaining)
-            if desired is not None:
+            mutation = patch(service, remaining)
+            if mutation is not None:
                 break
             if attempt:
                 reject("Cloud Run etag conflicted twice")
@@ -1455,8 +1570,8 @@ steps:
             reject("post-expiry traffic differs from the traffic-only plan")
         if canonical(after.get("trafficStatuses", [])) != canonical(final_statuses):
             reject("post-expiry resolved traffic differs from the traffic-only plan")
-        if (after_positive != original_positive or int(after["generation"]) != generation + 1
-                or after.get("etag") == service.get("etag")):
+        if (after_positive != original_positive or after.get("generation") != mutation["generation"]
+                or after.get("etag") != mutation["etag"] or int(after["generation"]) != generation + 1):
             reject("post-expiry traffic or generation changed unexpectedly")
         if newest_build() != build_id:
             reject("a newer Stage A build appeared during tag expiry")
