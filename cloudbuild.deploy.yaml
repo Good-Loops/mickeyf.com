@@ -18,7 +18,7 @@ steps:
       - 'SOURCE_BUILD_ID=${_SOURCE_BUILD_ID}'
       - 'SOURCE_STATUS=${_SOURCE_STATUS}'
     args:
-      - '-lc'
+      - '-c'
       - |
         set -euo pipefail
         umask 077
@@ -182,7 +182,7 @@ steps:
     name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:alpine@sha256:de1a989b158694a614852e7b53673097da3bdb394b8186d6102386b7a10d73c7'
     entrypoint: 'bash'
     args:
-      - '-lc'
+      - '-c'
       - |
         set -euo pipefail
         umask 077
@@ -310,7 +310,7 @@ steps:
     name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:alpine@sha256:de1a989b158694a614852e7b53673097da3bdb394b8186d6102386b7a10d73c7'
     entrypoint: 'bash'
     args:
-      - '-lc'
+      - '-c'
       - |
         set -euo pipefail
         umask 077
@@ -508,7 +508,7 @@ steps:
     secretEnv:
       - 'SLACK_WEBHOOK_URL'
     args:
-      - '-lc'
+      - '-c'
       - |
         set -euo pipefail
         readonly NOTIFICATION_JSON='/workspace/slack-notification.json'
