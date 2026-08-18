@@ -106,8 +106,9 @@ copied into Git.
    code .
    ```
 
-4. VS Code automatically starts three native workspace tasks when the trusted
-   repository opens:
+4. On first use, allow the automatic workspace tasks when VS Code prompts in
+   this trusted repository. VS Code then starts three native workspace tasks
+   whenever the repository opens:
 
    - `front`, running the frontend Vite server with a cyan browser icon;
    - `docs`, running the TypeDoc development server with a green book icon; and

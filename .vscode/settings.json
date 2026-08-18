@@ -1,5 +1,4 @@
 {
-    "task.allowAutomaticTasks": "on",
     "editor.inlineSuggest.enabled": true,
     "editor.suggest.preview": true,
     "editor.tabCompletion": "onlySnippets"
