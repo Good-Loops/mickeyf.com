@@ -155,3 +155,34 @@ test('score submission still accepts the Bearer token fallback and authenticated
     assert.deepEqual(queryValues, [990, 42, 990]);
     assert.equal((queryOptions as { timeout?: number }).timeout, 10_000);
 });
+
+test('leaderboard smoke operation remains a bounded read-only query', async () => {
+    let queryCount = 0;
+    let queryOptions: unknown;
+    let queryValues: unknown[] | undefined;
+    const database = {
+        query: async (options: unknown, values?: unknown[]) => {
+            queryCount += 1;
+            queryOptions = options;
+            queryValues = values;
+            return [[{ user_name: 'player', p4_score: 990 }], []];
+        },
+    } as unknown as Pick<Pool, 'query'>;
+    const controller = createMainController({ database, sessionSecret, isProduction: false });
+    const { response, state } = responseRecorder();
+
+    await controller(request({ type: 'get_leaderboard' }), response);
+
+    assert.equal(queryCount, 1);
+    assert.equal(queryValues, undefined);
+    const options = queryOptions as { sql?: string; timeout?: number };
+    assert.equal(options.timeout, 10_000);
+    assert.equal(
+        options.sql?.replace(/\s+/g, ' ').trim(),
+        'SELECT user_name, p4_score FROM users WHERE p4_score IS NOT NULL ORDER BY p4_score DESC LIMIT 10'
+    );
+    assert.deepEqual(state.body, {
+        success: true,
+        leaderboard: [{ user_name: 'player', p4_score: 990 }],
+    });
+});
