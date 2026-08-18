@@ -1,0 +1,16 @@
+{
+  "name": "mickeyf-firebase-deploy",
+  "version": "1.0.0",
+  "private": true,
+  "engines": {
+    "node": "22.23.2",
+    "npm": "11.6.2"
+  },
+  "packageManager": "npm@11.6.2",
+  "dependencies": {
+    "firebase-tools": "15.27.0"
+  },
+  "overrides": {
+    "re2": "1.26.1"
+  }
+}
