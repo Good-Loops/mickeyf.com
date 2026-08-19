@@ -1,5 +1,6 @@
 {
     "editor.inlineSuggest.enabled": true,
     "editor.suggest.preview": true,
-    "editor.tabCompletion": "onlySnippets"
+    "editor.tabCompletion": "onlySnippets",
+    "terminal.integrated.shellIntegration.enabled": true
 }
