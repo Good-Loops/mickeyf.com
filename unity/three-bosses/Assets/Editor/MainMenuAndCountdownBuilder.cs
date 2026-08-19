@@ -11,7 +11,7 @@ using UnityEngine.InputSystem.UI;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
-public static class Phase12UiSceneBuilder
+public static class MainMenuAndCountdownBuilder
 {
     private const string MenuScenePath = "Assets/Scenes/UI/MainMenu.unity";
     private const string LevelOneScenePath = "Assets/Scenes/Level1_BeeBoss.unity";
@@ -20,7 +20,7 @@ public static class Phase12UiSceneBuilder
 
     private static readonly Vector2 ArtReferenceResolution = new(1672f, 941f);
 
-    [MenuItem("Three Bosses/Phase 12/Build Main Menu and Countdown")]
+    [MenuItem("Three Bosses/UI/Build Main Menu and Countdown")]
     public static void Build()
     {
         if (EditorApplication.isPlayingOrWillChangePlaymode)
@@ -49,7 +49,7 @@ public static class Phase12UiSceneBuilder
         }
     }
 
-    [MenuItem("Three Bosses/Phase 12/Open Main Menu")]
+    [MenuItem("Three Bosses/UI/Open Main Menu")]
     public static void OpenMainMenu()
     {
         if (EditorApplication.isPlayingOrWillChangePlaymode)
@@ -61,7 +61,7 @@ public static class Phase12UiSceneBuilder
         EditorSceneManager.OpenScene(MenuScenePath, OpenSceneMode.Single);
     }
 
-    [MenuItem("Three Bosses/Phase 12/Rebuild Main Menu")]
+    [MenuItem("Three Bosses/UI/Rebuild Main Menu")]
     public static void RebuildMainMenu()
     {
         if (EditorApplication.isPlayingOrWillChangePlaymode)

@@ -11,7 +11,7 @@ using UnityEngine.InputSystem.UI;
 using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
-public static class Phase12ResultSceneBuilder
+public static class RunOutcomeSceneBuilder
 {
     private const string MainMenuPath = "Assets/Scenes/UI/MainMenu.unity";
     private const string LevelOnePath = "Assets/Scenes/Level1_BeeBoss.unity";
@@ -32,7 +32,7 @@ public static class Phase12ResultSceneBuilder
 
     private static readonly Vector2 ArtReferenceResolution = new(1672f, 941f);
 
-    [MenuItem("Three Bosses/Phase 12/Build Transitions and Results")]
+    [MenuItem("Three Bosses/Results/Build Transitions and Results")]
     public static void Build()
     {
         if (EditorApplication.isPlayingOrWillChangePlaymode)
