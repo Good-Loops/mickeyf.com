@@ -1,0 +1,396 @@
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using TMPro;
+using UnityEditor;
+using UnityEditor.SceneManagement;
+using UnityEngine;
+using UnityEngine.EventSystems;
+using UnityEngine.InputSystem;
+using UnityEngine.InputSystem.UI;
+using UnityEngine.SceneManagement;
+using UnityEngine.UI;
+
+public static class Phase12UiSceneBuilder
+{
+    private const string MenuScenePath = "Assets/Scenes/UI/MainMenu.unity";
+    private const string LevelOneScenePath = "Assets/Scenes/Level1_BeeBoss.unity";
+    private const string MenuSpritePath = "Assets/Art/UI/Screens/Menu.png";
+    private const string CountdownObjectName = "Phase12_CountdownOverlay";
+
+    private static readonly Vector2 ArtReferenceResolution = new(1672f, 941f);
+
+    [MenuItem("Three Bosses/Phase 12/Build Main Menu and Countdown")]
+    public static void Build()
+    {
+        if (EditorApplication.isPlayingOrWillChangePlaymode)
+            throw new InvalidOperationException("Exit Play Mode before building Phase 12 UI scenes.");
+
+        Scene originalScene = SceneManager.GetActiveScene();
+        if (originalScene.isDirty)
+            throw new InvalidOperationException("Save the active scene before building Phase 12 UI scenes.");
+
+        string originalScenePath = originalScene.path;
+
+        try
+        {
+            EnsureAssetFolder("Assets/Scenes/UI");
+            BuildMainMenuScene();
+            AddCountdownToLevelOne();
+            UpdateBuildSettings();
+            AssetDatabase.SaveAssets();
+            AssetDatabase.Refresh();
+            Debug.Log("Phase 12 Main Menu and Level 1 countdown were built successfully.");
+        }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(originalScenePath))
+                EditorSceneManager.OpenScene(originalScenePath, OpenSceneMode.Single);
+        }
+    }
+
+    [MenuItem("Three Bosses/Phase 12/Open Main Menu")]
+    public static void OpenMainMenu()
+    {
+        if (EditorApplication.isPlayingOrWillChangePlaymode)
+            throw new InvalidOperationException("Exit Play Mode before opening the Main Menu scene.");
+
+        if (SceneManager.GetActiveScene().isDirty)
+            throw new InvalidOperationException("Save the active scene before opening the Main Menu scene.");
+
+        EditorSceneManager.OpenScene(MenuScenePath, OpenSceneMode.Single);
+    }
+
+    [MenuItem("Three Bosses/Phase 12/Rebuild Main Menu")]
+    public static void RebuildMainMenu()
+    {
+        if (EditorApplication.isPlayingOrWillChangePlaymode)
+            throw new InvalidOperationException("Exit Play Mode before rebuilding the Main Menu scene.");
+
+        if (SceneManager.GetActiveScene().isDirty)
+            throw new InvalidOperationException("Save the active scene before rebuilding the Main Menu scene.");
+
+        EnsureAssetFolder("Assets/Scenes/UI");
+        BuildMainMenuScene();
+        UpdateBuildSettings();
+        AssetDatabase.SaveAssets();
+        AssetDatabase.Refresh();
+        Debug.Log("Phase 12 Main Menu was rebuilt successfully.");
+    }
+
+    private static void BuildMainMenuScene()
+    {
+        Sprite menuSprite = AssetDatabase.LoadAssetAtPath<Sprite>(MenuSpritePath);
+        if (menuSprite == null)
+            throw new InvalidOperationException($"Menu sprite was not imported at {MenuSpritePath}.");
+
+        Scene scene = EditorSceneManager.NewScene(NewSceneSetup.EmptyScene, NewSceneMode.Single);
+
+        CreateCamera();
+        EventSystem eventSystem = CreateEventSystem();
+        Canvas canvas = CreateCanvas("Menu Canvas", ArtReferenceResolution, 0);
+
+        Image blackBacking = CreateImage("Black Backing", canvas.transform, Color.black);
+        Stretch(blackBacking.rectTransform);
+        blackBacking.raycastTarget = false;
+
+        GameObject artRootObject = CreateUiObject("Art Root", canvas.transform);
+        RectTransform artRoot = artRootObject.GetComponent<RectTransform>();
+        Stretch(artRoot);
+
+        AspectRatioFitter aspectFitter = artRootObject.AddComponent<AspectRatioFitter>();
+        aspectFitter.aspectMode = AspectRatioFitter.AspectMode.FitInParent;
+        aspectFitter.aspectRatio = ArtReferenceResolution.x / ArtReferenceResolution.y;
+
+        Image background = CreateImage("Background", artRoot, Color.white);
+        Stretch(background.rectTransform);
+        background.sprite = menuSprite;
+        background.type = Image.Type.Simple;
+        background.preserveAspect = false;
+        background.raycastTarget = false;
+
+        Button playButton = CreateButton(
+            "Play Button",
+            artRoot,
+            new Rect(590f, 735f, 490f, 125f),
+            "PLAY",
+            58f);
+
+        Button audioButton = CreateButton(
+            "Audio Button",
+            artRoot,
+            new Rect(1472f, 76f, 142f, 78f),
+            "AUDIO ON",
+            18f);
+
+        TMP_Text audioLabel = audioButton.GetComponentInChildren<TMP_Text>(true);
+
+        Image fadeImage = CreateImage("Scene Fade", canvas.transform, new Color(0f, 0f, 0f, 0f));
+        Stretch(fadeImage.rectTransform);
+        fadeImage.raycastTarget = false;
+        ScreenFade screenFade = fadeImage.gameObject.AddComponent<ScreenFade>();
+        SetObjectReference(screenFade, "fadeImage", fadeImage);
+        SetFloat(screenFade, "initialAlpha", 0f);
+
+        GameObject controllerObject = new("Main Menu Controller");
+        MainMenuController controller = controllerObject.AddComponent<MainMenuController>();
+        SetObjectReference(controller, "playButton", playButton);
+        SetObjectReference(controller, "audioButton", audioButton);
+        SetObjectReference(controller, "audioButtonLabel", audioLabel);
+        SetObjectReference(controller, "screenFade", screenFade);
+        SetString(controller, "firstLevelSceneName", "Level1_BeeBoss");
+
+        eventSystem.firstSelectedGameObject = playButton.gameObject;
+
+        if (!EditorSceneManager.SaveScene(scene, MenuScenePath))
+            throw new InvalidOperationException($"Unity could not save {MenuScenePath}.");
+    }
+
+    private static void AddCountdownToLevelOne()
+    {
+        Scene scene = EditorSceneManager.OpenScene(LevelOneScenePath, OpenSceneMode.Single);
+
+        GameObject existingCountdown = scene.GetRootGameObjects()
+            .SelectMany(root => root.GetComponentsInChildren<Transform>(true))
+            .Select(transform => transform.gameObject)
+            .FirstOrDefault(gameObject => gameObject.name == CountdownObjectName);
+
+        if (existingCountdown != null)
+        {
+            Debug.Log("Level 1 countdown already exists; preserving the verified scene wiring.");
+            return;
+        }
+
+        Canvas uiCanvas = scene.GetRootGameObjects()
+            .SelectMany(root => root.GetComponentsInChildren<Canvas>(true))
+            .FirstOrDefault(candidate => candidate.gameObject.name == "UI");
+
+        if (uiCanvas == null)
+            throw new InvalidOperationException("Level 1 is missing its expected UI Canvas.");
+
+        ScreenFade screenFade = scene.GetRootGameObjects()
+            .SelectMany(root => root.GetComponentsInChildren<ScreenFade>(true))
+            .FirstOrDefault();
+
+        PlayerInput playerInput = scene.GetRootGameObjects()
+            .SelectMany(root => root.GetComponentsInChildren<PlayerInput>(true))
+            .FirstOrDefault();
+
+        PlayerWeaponController playerWeapon = scene.GetRootGameObjects()
+            .SelectMany(root => root.GetComponentsInChildren<PlayerWeaponController>(true))
+            .FirstOrDefault();
+
+        if (screenFade == null || playerInput == null || playerWeapon == null)
+            throw new InvalidOperationException(
+                "Level 1 must contain ScreenFade, PlayerInput, and PlayerWeaponController components.");
+
+        GameObject overlayObject = CreateUiObject(CountdownObjectName, uiCanvas.transform);
+        RectTransform overlayRect = overlayObject.GetComponent<RectTransform>();
+        Stretch(overlayRect);
+
+        CanvasGroup canvasGroup = overlayObject.AddComponent<CanvasGroup>();
+        canvasGroup.alpha = 1f;
+        canvasGroup.interactable = false;
+        canvasGroup.blocksRaycasts = true;
+
+        Image dimmer = CreateImage("Dimmer", overlayRect, new Color(0f, 0f, 0f, 0.55f));
+        Stretch(dimmer.rectTransform);
+        dimmer.raycastTarget = true;
+
+        TMP_Text countdownText = CreateText("Countdown Text", overlayRect, "3", 180f);
+        Stretch(countdownText.rectTransform);
+        countdownText.color = Color.white;
+        countdownText.alignment = TextAlignmentOptions.Center;
+        countdownText.enableAutoSizing = true;
+        countdownText.fontSizeMin = 72f;
+        countdownText.fontSizeMax = 180f;
+
+        RunCountdownController countdownController = overlayObject.AddComponent<RunCountdownController>();
+        SetObjectReference(countdownController, "countdownLabel", countdownText);
+        SetObjectReference(countdownController, "canvasGroup", canvasGroup);
+        SetObjectReference(countdownController, "screenFade", screenFade);
+        SetObjectReference(countdownController, "playerInput", playerInput);
+        SetObjectReference(countdownController, "playerWeapon", playerWeapon);
+
+        overlayRect.SetSiblingIndex(screenFade.transform.GetSiblingIndex());
+        SetFloat(screenFade, "initialAlpha", 1f);
+
+        EditorUtility.SetDirty(screenFade);
+        EditorUtility.SetDirty(countdownController);
+
+        if (!EditorSceneManager.SaveScene(scene, LevelOneScenePath))
+            throw new InvalidOperationException($"Unity could not save {LevelOneScenePath}.");
+    }
+
+    private static void UpdateBuildSettings()
+    {
+        var scenes = new List<EditorBuildSettingsScene>
+        {
+            new(MenuScenePath, true)
+        };
+
+        scenes.AddRange(EditorBuildSettings.scenes.Where(scene => scene.path != MenuScenePath));
+        EditorBuildSettings.scenes = scenes.ToArray();
+    }
+
+    private static void CreateCamera()
+    {
+        GameObject cameraObject = new("Main Camera", typeof(Camera), typeof(AudioListener));
+        cameraObject.tag = "MainCamera";
+        Camera camera = cameraObject.GetComponent<Camera>();
+        camera.clearFlags = CameraClearFlags.SolidColor;
+        camera.backgroundColor = Color.black;
+        camera.orthographic = true;
+        cameraObject.transform.position = new Vector3(0f, 0f, -10f);
+    }
+
+    private static EventSystem CreateEventSystem()
+    {
+        GameObject eventSystemObject = new("EventSystem", typeof(EventSystem), typeof(InputSystemUIInputModule));
+        return eventSystemObject.GetComponent<EventSystem>();
+    }
+
+    private static Canvas CreateCanvas(string name, Vector2 referenceResolution, int sortingOrder)
+    {
+        GameObject canvasObject = new(name, typeof(RectTransform), typeof(Canvas), typeof(CanvasScaler), typeof(GraphicRaycaster));
+        Canvas canvas = canvasObject.GetComponent<Canvas>();
+        canvas.renderMode = RenderMode.ScreenSpaceOverlay;
+        canvas.sortingOrder = sortingOrder;
+
+        CanvasScaler scaler = canvasObject.GetComponent<CanvasScaler>();
+        scaler.uiScaleMode = CanvasScaler.ScaleMode.ScaleWithScreenSize;
+        scaler.referenceResolution = referenceResolution;
+        scaler.screenMatchMode = CanvasScaler.ScreenMatchMode.MatchWidthOrHeight;
+        scaler.matchWidthOrHeight = 0.5f;
+
+        return canvas;
+    }
+
+    private static Button CreateButton(
+        string name,
+        Transform parent,
+        Rect topLeftRect,
+        string labelText,
+        float fontSize)
+    {
+        GameObject buttonObject = CreateUiObject(name, parent);
+        RectTransform rectTransform = buttonObject.GetComponent<RectTransform>();
+        SetTopLeftRect(rectTransform, topLeftRect);
+
+        Image image = buttonObject.AddComponent<Image>();
+        image.color = Color.white;
+        image.raycastTarget = true;
+
+        Button button = buttonObject.AddComponent<Button>();
+        button.targetGraphic = image;
+        button.transition = Selectable.Transition.ColorTint;
+
+        ColorBlock colors = button.colors;
+        colors.normalColor = new Color(0.35f, 0f, 0f, 0.08f);
+        colors.highlightedColor = new Color(1f, 0.12f, 0.08f, 0.32f);
+        colors.pressedColor = new Color(1f, 0.85f, 0.8f, 0.4f);
+        colors.selectedColor = new Color(1f, 0.12f, 0.08f, 0.24f);
+        colors.disabledColor = new Color(0.2f, 0.2f, 0.2f, 0.1f);
+        colors.colorMultiplier = 1f;
+        colors.fadeDuration = 0.08f;
+        button.colors = colors;
+
+        TMP_Text label = CreateText("Label", rectTransform, labelText, fontSize);
+        Stretch(label.rectTransform);
+        label.color = Color.white;
+        label.fontStyle = FontStyles.Bold;
+        label.alignment = TextAlignmentOptions.Center;
+        label.textWrappingMode = TextWrappingModes.NoWrap;
+        label.enableAutoSizing = true;
+        label.fontSizeMin = Mathf.Max(12f, fontSize * 0.5f);
+        label.fontSizeMax = fontSize;
+        label.raycastTarget = false;
+
+        return button;
+    }
+
+    private static TMP_Text CreateText(string name, Transform parent, string value, float fontSize)
+    {
+        GameObject textObject = CreateUiObject(name, parent);
+        TextMeshProUGUI text = textObject.AddComponent<TextMeshProUGUI>();
+        text.text = value;
+        text.font = TMP_Settings.defaultFontAsset;
+        text.fontSize = fontSize;
+        text.raycastTarget = false;
+        return text;
+    }
+
+    private static Image CreateImage(string name, Transform parent, Color color)
+    {
+        GameObject imageObject = CreateUiObject(name, parent);
+        Image image = imageObject.AddComponent<Image>();
+        image.color = color;
+        return image;
+    }
+
+    private static GameObject CreateUiObject(string name, Transform parent)
+    {
+        GameObject gameObject = new(name, typeof(RectTransform));
+        gameObject.transform.SetParent(parent, false);
+        return gameObject;
+    }
+
+    private static void SetTopLeftRect(RectTransform rectTransform, Rect rect)
+    {
+        rectTransform.anchorMin = new Vector2(0f, 1f);
+        rectTransform.anchorMax = new Vector2(0f, 1f);
+        rectTransform.pivot = new Vector2(0f, 1f);
+        rectTransform.anchoredPosition = new Vector2(rect.x, -rect.y);
+        rectTransform.sizeDelta = new Vector2(rect.width, rect.height);
+    }
+
+    private static void Stretch(RectTransform rectTransform)
+    {
+        rectTransform.anchorMin = Vector2.zero;
+        rectTransform.anchorMax = Vector2.one;
+        rectTransform.offsetMin = Vector2.zero;
+        rectTransform.offsetMax = Vector2.zero;
+    }
+
+    private static void EnsureAssetFolder(string assetPath)
+    {
+        string[] segments = assetPath.Split('/');
+        string current = segments[0];
+
+        for (int index = 1; index < segments.Length; index++)
+        {
+            string next = $"{current}/{segments[index]}";
+            if (!AssetDatabase.IsValidFolder(next))
+                AssetDatabase.CreateFolder(current, segments[index]);
+
+            current = next;
+        }
+    }
+
+    private static void SetObjectReference(UnityEngine.Object target, string propertyName, UnityEngine.Object value)
+    {
+        SerializedObject serializedObject = new(target);
+        SerializedProperty property = serializedObject.FindProperty(propertyName)
+            ?? throw new InvalidOperationException($"{target.GetType().Name} is missing {propertyName}.");
+        property.objectReferenceValue = value;
+        serializedObject.ApplyModifiedPropertiesWithoutUndo();
+    }
+
+    private static void SetString(UnityEngine.Object target, string propertyName, string value)
+    {
+        SerializedObject serializedObject = new(target);
+        SerializedProperty property = serializedObject.FindProperty(propertyName)
+            ?? throw new InvalidOperationException($"{target.GetType().Name} is missing {propertyName}.");
+        property.stringValue = value;
+        serializedObject.ApplyModifiedPropertiesWithoutUndo();
+    }
+
+    private static void SetFloat(UnityEngine.Object target, string propertyName, float value)
+    {
+        SerializedObject serializedObject = new(target);
+        SerializedProperty property = serializedObject.FindProperty(propertyName)
+            ?? throw new InvalidOperationException($"{target.GetType().Name} is missing {propertyName}.");
+        property.floatValue = value;
+        serializedObject.ApplyModifiedPropertiesWithoutUndo();
+    }
+}

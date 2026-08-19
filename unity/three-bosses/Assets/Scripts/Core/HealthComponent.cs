@@ -12,6 +12,7 @@ public sealed class HealthComponent : MonoBehaviour
     public int MaxHealth => maxHealth;
     public int CurrentHealth => currentHealth;
     public bool IsDead => currentHealth <= 0;
+    public bool IsInvulnerable { get; private set; }
 
     public event Action<int, int> HealthChanged; // (current, max)
     public event Action Died;
@@ -30,7 +31,7 @@ public sealed class HealthComponent : MonoBehaviour
 
     public bool TryTakeDamage(int amount)
     {
-        if (IsDead) return false;
+        if (IsDead || IsInvulnerable) return false;
 
         int clamped = Mathf.Max(0, amount);
         if (clamped == 0) return false;
@@ -88,5 +89,10 @@ public sealed class HealthComponent : MonoBehaviour
     public void ResetToMax()
     {
         SetHealth(maxHealth);
+    }
+
+    public void SetInvulnerable(bool value)
+    {
+        IsInvulnerable = value;
     }
 }

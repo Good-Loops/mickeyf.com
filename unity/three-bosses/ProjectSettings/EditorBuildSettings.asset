@@ -6,14 +6,35 @@ EditorBuildSettings:
   serializedVersion: 2
   m_Scenes:
   - enabled: 1
+    path: Assets/Scenes/UI/MainMenu.unity
+    guid: 00e798c0b682cf849982f0e4c4ca954a
+  - enabled: 1
     path: Assets/Scenes/Level1_BeeBoss.unity
     guid: 31a4a58f185c6724c846af4c2b2ac85f
+  - enabled: 1
+    path: Assets/Scenes/UI/Transition_BeeToCyborg.unity
+    guid: 787cd88eb5bda6e4bbf2dffd4085dbd4
   - enabled: 1
     path: Assets/Scenes/Level2_CyborgBoss.unity
     guid: b9a81236a13417649971b8b88248d4ab
   - enabled: 1
+    path: Assets/Scenes/UI/Transition_CyborgToKraken.unity
+    guid: 56cd32a7e83e1c94e8ab8834ffc476f9
+  - enabled: 1
     path: Assets/Scenes/Level3_Kraken.unity
     guid: ee792dfd5408c5f439a680c359c39de8
+  - enabled: 1
+    path: Assets/Scenes/UI/Defeat_Bee.unity
+    guid: dcd6582998288ca4f8cae2a49b8eb957
+  - enabled: 1
+    path: Assets/Scenes/UI/Defeat_Cyborg.unity
+    guid: c2e12de6d361ef64b8525817b927ab52
+  - enabled: 1
+    path: Assets/Scenes/UI/Defeat_Kraken.unity
+    guid: 558a505b309fa774990ba03d36f9607e
+  - enabled: 1
+    path: Assets/Scenes/UI/End.unity
+    guid: d81b9ac939a20aa4fa6d15352306385a
   m_configObjects:
     com.unity.input.settings.actions: {fileID: -944628639613478452, guid: f1bc524f0dad7e2429eff65a71ef2801, type: 3}
   m_UseUCBPForAssetBundles: 0

@@ -1,0 +1,239 @@
+using System;
+using NUnit.Framework;
+
+namespace ThreeBosses.Run.Tests
+{
+    public sealed class RunSessionTests
+    {
+        private FakeClock clock;
+        private RunSession session;
+
+        [SetUp]
+        public void SetUp()
+        {
+            clock = new FakeClock();
+            session = new RunSession(clock);
+        }
+
+        [Test]
+        public void CountdownIsExcludedAndTimerStartsAtGo()
+        {
+            session.BeginNewRun();
+            clock.Advance(3d);
+
+            Assert.That(session.ElapsedSeconds, Is.Zero);
+            Assert.That(session.StartRun(), Is.True);
+
+            clock.Advance(1.25d);
+            Assert.That(session.ElapsedSeconds, Is.EqualTo(1.25d).Within(0.0001d));
+        }
+
+        [Test]
+        public void StartRunCanOnlySucceedOnce()
+        {
+            session.BeginNewRun();
+
+            Assert.That(session.StartRun(), Is.True);
+            clock.Advance(2d);
+            Assert.That(session.StartRun(), Is.False);
+            Assert.That(session.ElapsedSeconds, Is.EqualTo(2d).Within(0.0001d));
+        }
+
+        [Test]
+        public void TimerContinuesAcrossBossTransitions()
+        {
+            StartRun();
+            clock.Advance(10d);
+
+            Assert.That(
+                session.RecordBossDefeat(BossId.Bee),
+                Is.EqualTo(BossDefeatResult.AdvanceToNextBoss));
+
+            clock.Advance(5d);
+            Assert.That(session.ElapsedSeconds, Is.EqualTo(15d).Within(0.0001d));
+            Assert.That(session.GetBossSplitSeconds(BossId.Bee), Is.EqualTo(10d).Within(0.0001d));
+            Assert.That(session.Phase, Is.EqualTo(RunPhase.Transitioning));
+            Assert.That(session.CurrentBoss, Is.EqualTo(BossId.Bee));
+            Assert.That(session.PendingBoss, Is.EqualTo(BossId.Cyborg));
+            Assert.That(session.EnterNextBoss(BossId.Cyborg), Is.True);
+            Assert.That(session.CurrentBoss, Is.EqualTo(BossId.Cyborg));
+        }
+
+        [Test]
+        public void DeathIsIgnoredDuringBossTransition()
+        {
+            StartRun();
+            clock.Advance(6d);
+
+            Assert.That(session.RecordBossDefeat(BossId.Bee), Is.EqualTo(BossDefeatResult.AdvanceToNextBoss));
+            clock.Advance(2d);
+
+            Assert.That(session.RecordDeath(), Is.False);
+            Assert.That(session.Phase, Is.EqualTo(RunPhase.Transitioning));
+            Assert.That(session.ElapsedSeconds, Is.EqualTo(8d).Within(0.0001d));
+            Assert.That(session.EnterNextBoss(BossId.Kraken), Is.False);
+            Assert.That(session.EnterNextBoss(BossId.Cyborg), Is.True);
+        }
+
+        [Test]
+        public void DuplicateOrOutOfOrderBossEventsAreIgnored()
+        {
+            StartRun();
+            clock.Advance(4d);
+
+            Assert.That(session.RecordBossDefeat(BossId.Bee), Is.Not.EqualTo(BossDefeatResult.Rejected));
+            Assert.That(session.RecordBossDefeat(BossId.Bee), Is.EqualTo(BossDefeatResult.Rejected));
+            Assert.That(session.RecordBossDefeat(BossId.Kraken), Is.EqualTo(BossDefeatResult.Rejected));
+            Assert.That(session.BossesDefeated, Is.EqualTo(1));
+        }
+
+        [Test]
+        public void DeathFreezesTimeAndRejectsLaterCompletion()
+        {
+            StartRun();
+            clock.Advance(12.5d);
+
+            Assert.That(session.RecordDeath(), Is.True);
+            clock.Advance(20d);
+
+            Assert.That(session.ElapsedSeconds, Is.EqualTo(12.5d).Within(0.0001d));
+            Assert.That(session.RecordDeath(), Is.False);
+            Assert.That(session.RecordBossDefeat(BossId.Bee), Is.EqualTo(BossDefeatResult.Rejected));
+            Assert.That(session.Phase, Is.EqualTo(RunPhase.Defeated));
+        }
+
+        [Test]
+        public void FinalBossCompletionFreezesTimeAndAcceptsOneResult()
+        {
+            StartRun();
+            DefeatCurrentBossAfter(10d, BossId.Bee);
+            DefeatCurrentBossAfter(20d, BossId.Cyborg);
+
+            clock.Advance(30d);
+            Assert.That(
+                session.RecordBossDefeat(BossId.Kraken),
+                Is.EqualTo(BossDefeatResult.RunCompleted));
+
+            int score = RunScoreCalculator.Calculate(session.ElapsedSeconds);
+            Assert.That(session.TrySetResult(score, "UNRANKED"), Is.True);
+            Assert.That(session.TrySetResult(score + 1, "OTHER"), Is.False);
+
+            clock.Advance(100d);
+            Assert.That(session.ElapsedSeconds, Is.EqualTo(60d).Within(0.0001d));
+            Assert.That(session.Score, Is.EqualTo(1667));
+            Assert.That(session.Rank, Is.EqualTo("UNRANKED"));
+        }
+
+        [Test]
+        public void CompletionAndDeathUseFirstTerminalEvent()
+        {
+            session.BeginPractice(BossId.Kraken);
+            clock.Advance(7d);
+
+            Assert.That(session.RecordBossDefeat(BossId.Kraken), Is.EqualTo(BossDefeatResult.RunCompleted));
+            Assert.That(session.RecordDeath(), Is.False);
+            Assert.That(session.Phase, Is.EqualTo(RunPhase.Completed));
+        }
+
+        [Test]
+        public void PracticeRunCannotBeSubmitted()
+        {
+            session.BeginPractice(BossId.Kraken);
+            clock.Advance(7d);
+
+            Assert.That(session.RecordBossDefeat(BossId.Kraken), Is.EqualTo(BossDefeatResult.RunCompleted));
+            Assert.That(session.TrySetResult(RunScoreCalculator.Calculate(session.ElapsedSeconds), "UNRANKED"), Is.True);
+            Assert.That(session.IsEligibleForSubmission, Is.False);
+            Assert.That(session.MarkSubmitted(), Is.False);
+        }
+
+        [Test]
+        public void EligibleCompletedRunCanOnlyBeMarkedSubmittedOnce()
+        {
+            StartRun();
+            DefeatCurrentBossAfter(10d, BossId.Bee);
+            DefeatCurrentBossAfter(10d, BossId.Cyborg);
+            clock.Advance(10d);
+
+            Assert.That(session.RecordBossDefeat(BossId.Kraken), Is.EqualTo(BossDefeatResult.RunCompleted));
+            Assert.That(session.MarkSubmitted(), Is.False, "A result must exist before submission succeeds.");
+            Assert.That(session.TrySetResult(RunScoreCalculator.Calculate(session.ElapsedSeconds), "UNRANKED"), Is.True);
+            Assert.That(session.IsEligibleForSubmission, Is.True);
+            Assert.That(session.MarkSubmitted(), Is.True);
+            Assert.That(session.MarkSubmitted(), Is.False);
+        }
+
+        [Test]
+        public void SnapshotKeepsItsOwnBossSplitsAfterSessionChanges()
+        {
+            StartRun();
+            clock.Advance(8d);
+            Assert.That(session.RecordBossDefeat(BossId.Bee), Is.EqualTo(BossDefeatResult.AdvanceToNextBoss));
+
+            RunSessionSnapshot snapshot = session.CreateSnapshot();
+            Assert.That(snapshot.GetBossSplitSeconds(BossId.Bee), Is.EqualTo(8d).Within(0.0001d));
+
+            session.BeginNewRun();
+            Assert.That(session.GetBossSplitSeconds(BossId.Bee), Is.Zero);
+            Assert.That(snapshot.GetBossSplitSeconds(BossId.Bee), Is.EqualTo(8d).Within(0.0001d));
+            Assert.That(snapshot.Phase, Is.EqualTo(RunPhase.Transitioning));
+        }
+
+        [Test]
+        public void NewRunClearsPriorTerminalState()
+        {
+            StartRun();
+            clock.Advance(9d);
+            session.RecordDeath();
+
+            session.BeginNewRun();
+
+            Assert.That(session.Phase, Is.EqualTo(RunPhase.Countdown));
+            Assert.That(session.CurrentBoss, Is.EqualTo(BossId.Bee));
+            Assert.That(session.BossesDefeated, Is.Zero);
+            Assert.That(session.ElapsedSeconds, Is.Zero);
+            Assert.That(session.HasResult, Is.False);
+            Assert.That(session.Submitted, Is.False);
+        }
+
+        [TestCase(100d, 1000)]
+        [TestCase(60d, 1667)]
+        [TestCase(40d, 2500)]
+        public void ScoreFormulaIsDeterministic(double seconds, int expected)
+        {
+            Assert.That(RunScoreCalculator.Calculate(seconds), Is.EqualTo(expected));
+        }
+
+        [TestCase(0d)]
+        [TestCase(-1d)]
+        [TestCase(double.NaN)]
+        [TestCase(double.PositiveInfinity)]
+        public void ScoreRejectsInvalidTimes(double seconds)
+        {
+            Assert.Throws<ArgumentOutOfRangeException>(() => RunScoreCalculator.Calculate(seconds));
+        }
+
+        private void StartRun()
+        {
+            session.BeginNewRun();
+            Assert.That(session.StartRun(), Is.True);
+        }
+
+        private void DefeatCurrentBossAfter(double seconds, BossId boss)
+        {
+            clock.Advance(seconds);
+            Assert.That(session.RecordBossDefeat(boss), Is.EqualTo(BossDefeatResult.AdvanceToNextBoss));
+            Assert.That(session.EnterNextBoss((BossId)((int)boss + 1)), Is.True);
+        }
+
+        private sealed class FakeClock : IMonotonicClock
+        {
+            public double NowSeconds { get; private set; }
+
+            public void Advance(double seconds)
+            {
+                NowSeconds += seconds;
+            }
+        }
+    }
+}

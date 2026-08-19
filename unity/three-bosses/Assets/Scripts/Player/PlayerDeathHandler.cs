@@ -66,8 +66,31 @@ public sealed class PlayerDeathHandler : MonoBehaviour
         if (deadCollider != null) deadCollider.enabled = true;
     }
 
+    /// <summary>
+    /// Ends player interaction once a boss defeat has been accepted while
+    /// leaving the boss death animation and other presentation running.
+    /// </summary>
+    public void LockForBossDefeat()
+    {
+        if (health != null) health.SetInvulnerable(true);
+        if (playerInput != null) playerInput.enabled = false;
+        if (motor != null) motor.enabled = false;
+        if (weapon != null) weapon.enabled = false;
+        if (playerAnimatorScript != null) playerAnimatorScript.enabled = false;
+
+        if (rb != null)
+        {
+            rb.linearVelocity = Vector2.zero;
+            rb.simulated = false;
+        }
+
+        if (aliveCollider != null) aliveCollider.enabled = false;
+        if (deadCollider != null) deadCollider.enabled = false;
+    }
+
     public void Revive()
     {
+        if (health != null) health.SetInvulnerable(false);
         if (health != null) health.ResetToMax();
         if (animator != null) animator.SetBool(IsDeadHash, false);
 

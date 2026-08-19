@@ -40,6 +40,7 @@ public sealed class ScreenFade : MonoBehaviour
         if (duration <= 0f)
         {
             SetAlpha(to);
+            activeFade = null;
             yield break;
         }
 
@@ -48,7 +49,7 @@ public sealed class ScreenFade : MonoBehaviour
 
         while (elapsed < duration)
         {
-            elapsed += Time.deltaTime;
+            elapsed += Time.unscaledDeltaTime;
             float t = Mathf.Clamp01(elapsed / duration);
             SetAlpha(Mathf.Lerp(from, to, t));
             yield return null;
@@ -71,8 +72,10 @@ public sealed class ScreenFade : MonoBehaviour
         if (fadeImage == null)
             return;
 
+        alpha = Mathf.Clamp01(alpha);
         Color color = fadeImage.color;
         color.a = alpha;
         fadeImage.color = color;
+        fadeImage.raycastTarget = alpha > 0.001f;
     }
 }

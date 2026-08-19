@@ -19,6 +19,7 @@ namespace ThreeBosses.Tests
             yield return null;
 
             Assert.That(SceneManager.GetActiveScene().path, Is.EqualTo(LevelThreeScenePath));
+            ResetKrakenPracticeRun();
         }
 
         [UnityTest]
@@ -75,6 +76,99 @@ namespace ThreeBosses.Tests
             yield return null;
         }
 
+        [UnityTest]
+        public IEnumerator BossDefeatLockProtectsPlayerWithoutFreezingPresentation()
+        {
+            yield return new WaitForSecondsRealtime(1.2f);
+
+            Type handlerType = RequireRuntimeType("PlayerDeathHandler");
+            MonoBehaviour[] behaviours = UnityEngine.Object.FindObjectsByType<MonoBehaviour>(
+                FindObjectsInactive.Include,
+                FindObjectsSortMode.None);
+            MonoBehaviour handler = Array.Find(behaviours, behaviour => behaviour.GetType() == handlerType);
+            Assert.That(handler, Is.Not.Null, "PlayerDeathHandler was not found in Level 3.");
+
+            FieldInfo healthField = handlerType.GetField("health", BindingFlags.Instance | BindingFlags.NonPublic);
+            FieldInfo rigidbodyField = handlerType.GetField("rb", BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(healthField, Is.Not.Null);
+            Assert.That(rigidbodyField, Is.Not.Null);
+
+            Component health = (Component)healthField.GetValue(handler);
+            Rigidbody2D playerBody = (Rigidbody2D)rigidbodyField.GetValue(handler);
+            Assert.That(health, Is.Not.Null);
+            Assert.That(playerBody, Is.Not.Null);
+
+            Type healthType = health.GetType();
+            PropertyInfo currentHealth = RequireProperty(healthType, "CurrentHealth");
+            PropertyInfo isInvulnerable = RequireProperty(healthType, "IsInvulnerable");
+            MethodInfo tryTakeDamage = RequireMethod(
+                healthType,
+                "TryTakeDamage",
+                BindingFlags.Instance | BindingFlags.Public);
+            MethodInfo lockForBossDefeat = RequireMethod(
+                handlerType,
+                "LockForBossDefeat",
+                BindingFlags.Instance | BindingFlags.Public);
+
+            float timeScaleBeforeLock = Time.timeScale;
+            int healthBeforeLock = (int)currentHealth.GetValue(health);
+            lockForBossDefeat.Invoke(handler, null);
+
+            bool damageApplied = (bool)tryTakeDamage.Invoke(health, new object[] { 1 });
+            Assert.That((bool)isInvulnerable.GetValue(health), Is.True);
+            Assert.That(damageApplied, Is.False);
+            Assert.That((int)currentHealth.GetValue(health), Is.EqualTo(healthBeforeLock));
+            Assert.That(playerBody.simulated, Is.False);
+            Assert.That(Time.timeScale, Is.EqualTo(timeScaleBeforeLock));
+
+            yield return null;
+        }
+
+        private static void ResetKrakenPracticeRun()
+        {
+            Type serviceType = RequireRuntimeType("RunSessionService");
+            PropertyInfo instanceProperty = serviceType.GetProperty(
+                "Instance",
+                BindingFlags.Static | BindingFlags.Public);
+            PropertyInfo sessionProperty = serviceType.GetProperty(
+                "Session",
+                BindingFlags.Instance | BindingFlags.Public);
+            Assert.That(instanceProperty, Is.Not.Null);
+            Assert.That(sessionProperty, Is.Not.Null);
+
+            object service = instanceProperty.GetValue(null);
+            object session = sessionProperty.GetValue(service);
+            MethodInfo beginPractice = session.GetType().GetMethod(
+                "BeginPractice",
+                BindingFlags.Instance | BindingFlags.Public);
+            Assert.That(beginPractice, Is.Not.Null);
+
+            Type bossIdType = beginPractice.GetParameters()[0].ParameterType;
+            object kraken = Enum.Parse(bossIdType, "Kraken");
+            beginPractice.Invoke(session, new[] { kraken });
+        }
+
+        private static Type RequireRuntimeType(string typeName)
+        {
+            Type type = Type.GetType($"{typeName}, Assembly-CSharp");
+            Assert.That(type, Is.Not.Null, $"Runtime type {typeName} was not found.");
+            return type;
+        }
+
+        private static MethodInfo RequireMethod(Type type, string name, BindingFlags bindingFlags)
+        {
+            MethodInfo method = type.GetMethod(name, bindingFlags);
+            Assert.That(method, Is.Not.Null, $"Method {type.FullName}.{name} was not found.");
+            return method;
+        }
+
+        private static PropertyInfo RequireProperty(Type type, string name)
+        {
+            PropertyInfo property = type.GetProperty(name, BindingFlags.Instance | BindingFlags.Public);
+            Assert.That(property, Is.Not.Null, $"Property {type.FullName}.{name} was not found.");
+            return property;
+        }
+
         private sealed class Boss3Fixture
         {
             private readonly Component boss;
@@ -124,9 +218,9 @@ namespace ThreeBosses.Tests
 
             public static Boss3Fixture Find()
             {
-                Type bossType = RequireRuntimeType("Boss3Controller");
-                Type healthType = RequireRuntimeType("HealthComponent");
-                Type runeAttackType = RequireRuntimeType("Boss3RuneAttack");
+                Type bossType = Boss3PhaseTwoTests.RequireRuntimeType("Boss3Controller");
+                Type healthType = Boss3PhaseTwoTests.RequireRuntimeType("HealthComponent");
+                Type runeAttackType = Boss3PhaseTwoTests.RequireRuntimeType("Boss3RuneAttack");
 
                 MonoBehaviour[] behaviours = UnityEngine.Object.FindObjectsByType<MonoBehaviour>(
                     FindObjectsInactive.Include,
@@ -141,13 +235,6 @@ namespace ThreeBosses.Tests
                 Assert.That(runeAttack, Is.Not.Null, "Boss3RuneAttack was not found on Boss 3.");
 
                 return new Boss3Fixture(boss, health, runeAttack);
-            }
-
-            private static Type RequireRuntimeType(string typeName)
-            {
-                Type type = Type.GetType($"{typeName}, Assembly-CSharp");
-                Assert.That(type, Is.Not.Null, $"Runtime type {typeName} was not found.");
-                return type;
             }
 
             private static MethodInfo RequireMethod(Type type, string name, BindingFlags bindingFlags)
