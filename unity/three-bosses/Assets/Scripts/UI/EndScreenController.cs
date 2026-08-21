@@ -29,6 +29,10 @@ public sealed class EndScreenController : MonoBehaviour
 
     private void Awake()
     {
+        UiButtonStyle.Apply(tryAgainButton);
+        UiButtonStyle.Apply(backToMenuButton);
+        UiButtonStyle.Apply(submitScoreButton);
+
         // Phase 13 will connect this button to the dedicated Three Bosses API.
         // Keep it inert before the first rendered frame as well as after Start.
         if (submitScoreButton != null)

@@ -16,6 +16,12 @@ public sealed class MainMenuController : MonoBehaviour
 
     private bool isLoading;
 
+    private void Awake()
+    {
+        UiButtonStyle.Apply(playButton);
+        UiButtonStyle.Apply(audioButton);
+    }
+
     private void OnEnable()
     {
         if (playButton != null)

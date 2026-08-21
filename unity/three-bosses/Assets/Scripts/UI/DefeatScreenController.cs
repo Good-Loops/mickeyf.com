@@ -22,6 +22,12 @@ public sealed class DefeatScreenController : MonoBehaviour
 
     private bool isNavigating;
 
+    private void Awake()
+    {
+        UiButtonStyle.Apply(tryAgainButton);
+        UiButtonStyle.Apply(backToMenuButton);
+    }
+
     private void OnEnable()
     {
         tryAgainButton.onClick.AddListener(TryAgain);
