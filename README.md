@@ -12,6 +12,8 @@ documentation workflow.
 Pull requests that change documentation inputs build the site for validation,
 while only `main` can publish it.
 
+The active cross-project roadmap is tracked in [PROJECT_PLAN.md](PROJECT_PLAN.md).
+
 ## Technology
 
 - Frontend: React, TypeScript, Sass, and Vite
