@@ -6,6 +6,11 @@ using UnityEngine.InputSystem;
 
 public sealed class RunCountdownController : MonoBehaviour
 {
+    private static readonly Color ThreeColor = new(0.72f, 1f, 0.08f, 1f);
+    private static readonly Color TwoColor = new(1f, 0.16f, 0.1f, 1f);
+    private static readonly Color OneColor = new(0.72f, 0.3f, 1f, 1f);
+    private static readonly Color GoColor = new(0.72f, 0.96f, 1f, 1f);
+
     [SerializeField] private TMP_Text countdownLabel;
     [SerializeField] private CanvasGroup canvasGroup;
     [SerializeField] private ScreenFade screenFade;
@@ -55,6 +60,7 @@ public sealed class RunCountdownController : MonoBehaviour
 
         GateGameplayComponents();
         PauseGameplay();
+        SetLabel("3", ThreeColor, false);
         SetVisible(true);
 
         if (screenFade != null)
@@ -63,9 +69,9 @@ public sealed class RunCountdownController : MonoBehaviour
         if (entryFadeSeconds > 0f)
             yield return new WaitForSecondsRealtime(entryFadeSeconds);
 
-        yield return ShowForDuration("3", numberDurationSeconds);
-        yield return ShowForDuration("2", numberDurationSeconds);
-        yield return ShowForDuration("1", numberDurationSeconds);
+        yield return AnimateLabel(numberDurationSeconds, false);
+        yield return ShowForDuration("2", TwoColor, numberDurationSeconds, false);
+        yield return ShowForDuration("1", OneColor, numberDurationSeconds, false);
 
         if (!session.StartRun())
         {
@@ -75,24 +81,54 @@ public sealed class RunCountdownController : MonoBehaviour
             yield break;
         }
 
-        SetLabel("GO!");
+        SetLabel("GO!", GoColor, true);
         RestoreTimeScale();
         RestoreGameplayComponents();
 
-        if (goDurationSeconds > 0f)
-            yield return new WaitForSecondsRealtime(goDurationSeconds);
+        yield return AnimateLabel(goDurationSeconds, true);
 
         SetVisible(false);
         countdownRoutine = null;
         enabled = false;
     }
 
-    private IEnumerator ShowForDuration(string value, float durationSeconds)
+    private IEnumerator ShowForDuration(
+        string value,
+        Color color,
+        float durationSeconds,
+        bool isGo)
     {
-        SetLabel(value);
+        SetLabel(value, color, isGo);
+        yield return AnimateLabel(durationSeconds, isGo);
+    }
 
-        if (durationSeconds > 0f)
-            yield return new WaitForSecondsRealtime(durationSeconds);
+    private IEnumerator AnimateLabel(float durationSeconds, bool isGo)
+    {
+        if (countdownLabel == null || durationSeconds <= 0f)
+            yield break;
+
+        RectTransform labelTransform = countdownLabel.rectTransform;
+        float elapsed = 0f;
+        float startScale = isGo ? 0.78f : 1.28f;
+        float endScale = isGo ? 1.08f : 0.94f;
+
+        while (elapsed < durationSeconds)
+        {
+            float progress = Mathf.Clamp01(elapsed / durationSeconds);
+            float eased = 1f - Mathf.Pow(1f - progress, 3f);
+            float scale = Mathf.LerpUnclamped(startScale, endScale, eased);
+
+            float fadeIn = Mathf.Clamp01(progress / 0.12f);
+            float fadeOut = Mathf.Clamp01((1f - progress) / (isGo ? 0.22f : 0.16f));
+            countdownLabel.alpha = Mathf.Min(fadeIn, fadeOut);
+            labelTransform.localScale = Vector3.one * scale;
+
+            elapsed += Time.unscaledDeltaTime;
+            yield return null;
+        }
+
+        countdownLabel.alpha = 0f;
+        labelTransform.localScale = Vector3.one;
     }
 
     private void PauseGameplay()
@@ -158,9 +194,23 @@ public sealed class RunCountdownController : MonoBehaviour
         canvasGroup.blocksRaycasts = visible;
     }
 
-    private void SetLabel(string value)
+    private void SetLabel(string value, Color color, bool isGo)
     {
-        if (countdownLabel != null)
-            countdownLabel.text = value;
+        if (countdownLabel == null)
+            return;
+
+        Color topColor = Color.Lerp(color, Color.white, 0.34f);
+        Color bottomColor = Color.Lerp(color, Color.black, 0.16f);
+
+        countdownLabel.text = value;
+        countdownLabel.color = Color.white;
+        countdownLabel.enableVertexGradient = true;
+        countdownLabel.colorGradient = new VertexGradient(topColor, topColor, bottomColor, bottomColor);
+        countdownLabel.fontStyle = FontStyles.Bold;
+        countdownLabel.characterSpacing = isGo ? 8f : 0f;
+        countdownLabel.outlineColor = new Color32(0, 0, 0, 230);
+        countdownLabel.outlineWidth = 0.17f;
+        countdownLabel.alpha = 0f;
+        countdownLabel.rectTransform.localScale = Vector3.one;
     }
 }
