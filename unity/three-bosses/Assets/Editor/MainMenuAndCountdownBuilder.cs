@@ -16,7 +16,10 @@ public static class MainMenuAndCountdownBuilder
     private const string MenuScenePath = "Assets/Scenes/UI/MainMenu.unity";
     private const string LevelOneScenePath = "Assets/Scenes/Level1_BeeBoss.unity";
     private const string MenuSpritePath = "Assets/Art/UI/Screens/Menu.png";
+    private const string CountdownFontAssetPath = "Assets/Art/UI/Fonts/Oxanium-Bold SDF.asset";
     private const string CountdownObjectName = "Phase12_CountdownOverlay";
+    private const string CountdownTextName = "Countdown Text";
+    private const string CountdownDimmerName = "Dimmer";
 
     private static readonly Vector2 ArtReferenceResolution = new(1672f, 941f);
 
@@ -24,23 +27,24 @@ public static class MainMenuAndCountdownBuilder
     public static void Build()
     {
         if (EditorApplication.isPlayingOrWillChangePlaymode)
-            throw new InvalidOperationException("Exit Play Mode before building Phase 12 UI scenes.");
+            throw new InvalidOperationException("Exit Play Mode before building the Main Menu and Level 1 countdown.");
 
         Scene originalScene = SceneManager.GetActiveScene();
         if (originalScene.isDirty)
-            throw new InvalidOperationException("Save the active scene before building Phase 12 UI scenes.");
+            throw new InvalidOperationException("Save the active scene before building the Main Menu and Level 1 countdown.");
 
         string originalScenePath = originalScene.path;
 
         try
         {
+            TMP_FontAsset countdownFont = LoadCountdownFont();
             EnsureAssetFolder("Assets/Scenes/UI");
             BuildMainMenuScene();
-            AddCountdownToLevelOne();
+            AddOrUpdateCountdownInLevelOne(countdownFont);
             UpdateBuildSettings();
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
-            Debug.Log("Phase 12 Main Menu and Level 1 countdown were built successfully.");
+            Debug.Log("Main Menu and Level 1 countdown were built successfully.");
         }
         finally
         {
@@ -75,7 +79,7 @@ public static class MainMenuAndCountdownBuilder
         UpdateBuildSettings();
         AssetDatabase.SaveAssets();
         AssetDatabase.Refresh();
-        Debug.Log("Phase 12 Main Menu was rebuilt successfully.");
+        Debug.Log("Main Menu was rebuilt successfully.");
     }
 
     private static void BuildMainMenuScene()
@@ -146,7 +150,7 @@ public static class MainMenuAndCountdownBuilder
             throw new InvalidOperationException($"Unity could not save {MenuScenePath}.");
     }
 
-    private static void AddCountdownToLevelOne()
+    private static void AddOrUpdateCountdownInLevelOne(TMP_FontAsset countdownFont)
     {
         Scene scene = EditorSceneManager.OpenScene(LevelOneScenePath, OpenSceneMode.Single);
 
@@ -155,71 +159,118 @@ public static class MainMenuAndCountdownBuilder
             .Select(transform => transform.gameObject)
             .FirstOrDefault(gameObject => gameObject.name == CountdownObjectName);
 
+        TMP_Text countdownText;
+        Image dimmer;
+
         if (existingCountdown != null)
         {
-            Debug.Log("Level 1 countdown already exists; preserving the verified scene wiring.");
-            return;
+            countdownText = existingCountdown.GetComponentsInChildren<TMP_Text>(true)
+                .FirstOrDefault(candidate => candidate.gameObject.name == CountdownTextName);
+            if (countdownText == null)
+                throw new InvalidOperationException(
+                    $"{CountdownObjectName} is missing its expected {CountdownTextName} object.");
+
+            dimmer = existingCountdown.GetComponentsInChildren<Image>(true)
+                .FirstOrDefault(candidate => candidate.gameObject.name == CountdownDimmerName);
+            if (dimmer == null)
+                throw new InvalidOperationException(
+                    $"{CountdownObjectName} is missing its expected {CountdownDimmerName} object.");
+
+            Debug.Log("Level 1 countdown already exists; updating its presentation and preserving its scene wiring.");
+        }
+        else
+        {
+            Canvas uiCanvas = scene.GetRootGameObjects()
+                .SelectMany(root => root.GetComponentsInChildren<Canvas>(true))
+                .FirstOrDefault(candidate => candidate.gameObject.name == "UI");
+
+            if (uiCanvas == null)
+                throw new InvalidOperationException("Level 1 is missing its expected UI Canvas.");
+
+            ScreenFade screenFade = scene.GetRootGameObjects()
+                .SelectMany(root => root.GetComponentsInChildren<ScreenFade>(true))
+                .FirstOrDefault();
+
+            PlayerInput playerInput = scene.GetRootGameObjects()
+                .SelectMany(root => root.GetComponentsInChildren<PlayerInput>(true))
+                .FirstOrDefault();
+
+            PlayerWeaponController playerWeapon = scene.GetRootGameObjects()
+                .SelectMany(root => root.GetComponentsInChildren<PlayerWeaponController>(true))
+                .FirstOrDefault();
+
+            if (screenFade == null || playerInput == null || playerWeapon == null)
+                throw new InvalidOperationException(
+                    "Level 1 must contain ScreenFade, PlayerInput, and PlayerWeaponController components.");
+
+            GameObject overlayObject = CreateUiObject(CountdownObjectName, uiCanvas.transform);
+            RectTransform overlayRect = overlayObject.GetComponent<RectTransform>();
+            Stretch(overlayRect);
+
+            CanvasGroup canvasGroup = overlayObject.AddComponent<CanvasGroup>();
+            canvasGroup.alpha = 1f;
+            canvasGroup.interactable = false;
+            canvasGroup.blocksRaycasts = true;
+
+            dimmer = CreateImage(CountdownDimmerName, overlayRect, new Color(0f, 0f, 0f, 0.55f));
+            Stretch(dimmer.rectTransform);
+            dimmer.raycastTarget = true;
+
+            countdownText = CreateText(CountdownTextName, overlayRect, "3", 180f);
+            Stretch(countdownText.rectTransform);
+            countdownText.color = Color.white;
+
+            RunCountdownController countdownController = overlayObject.AddComponent<RunCountdownController>();
+            SetObjectReference(countdownController, "countdownLabel", countdownText);
+            SetObjectReference(countdownController, "canvasGroup", canvasGroup);
+            SetObjectReference(countdownController, "screenFade", screenFade);
+            SetObjectReference(countdownController, "playerInput", playerInput);
+            SetObjectReference(countdownController, "playerWeapon", playerWeapon);
+
+            overlayRect.SetSiblingIndex(screenFade.transform.GetSiblingIndex());
+            SetFloat(screenFade, "initialAlpha", 1f);
+
+            EditorUtility.SetDirty(screenFade);
+            EditorUtility.SetDirty(countdownController);
         }
 
-        Canvas uiCanvas = scene.GetRootGameObjects()
-            .SelectMany(root => root.GetComponentsInChildren<Canvas>(true))
-            .FirstOrDefault(candidate => candidate.gameObject.name == "UI");
-
-        if (uiCanvas == null)
-            throw new InvalidOperationException("Level 1 is missing its expected UI Canvas.");
-
-        ScreenFade screenFade = scene.GetRootGameObjects()
-            .SelectMany(root => root.GetComponentsInChildren<ScreenFade>(true))
-            .FirstOrDefault();
-
-        PlayerInput playerInput = scene.GetRootGameObjects()
-            .SelectMany(root => root.GetComponentsInChildren<PlayerInput>(true))
-            .FirstOrDefault();
-
-        PlayerWeaponController playerWeapon = scene.GetRootGameObjects()
-            .SelectMany(root => root.GetComponentsInChildren<PlayerWeaponController>(true))
-            .FirstOrDefault();
-
-        if (screenFade == null || playerInput == null || playerWeapon == null)
-            throw new InvalidOperationException(
-                "Level 1 must contain ScreenFade, PlayerInput, and PlayerWeaponController components.");
-
-        GameObject overlayObject = CreateUiObject(CountdownObjectName, uiCanvas.transform);
-        RectTransform overlayRect = overlayObject.GetComponent<RectTransform>();
-        Stretch(overlayRect);
-
-        CanvasGroup canvasGroup = overlayObject.AddComponent<CanvasGroup>();
-        canvasGroup.alpha = 1f;
-        canvasGroup.interactable = false;
-        canvasGroup.blocksRaycasts = true;
-
-        Image dimmer = CreateImage("Dimmer", overlayRect, new Color(0f, 0f, 0f, 0.55f));
-        Stretch(dimmer.rectTransform);
-        dimmer.raycastTarget = true;
-
-        TMP_Text countdownText = CreateText("Countdown Text", overlayRect, "3", 180f);
-        Stretch(countdownText.rectTransform);
-        countdownText.color = Color.white;
-        countdownText.alignment = TextAlignmentOptions.Center;
-        countdownText.enableAutoSizing = true;
-        countdownText.fontSizeMin = 72f;
-        countdownText.fontSizeMax = 180f;
-
-        RunCountdownController countdownController = overlayObject.AddComponent<RunCountdownController>();
-        SetObjectReference(countdownController, "countdownLabel", countdownText);
-        SetObjectReference(countdownController, "canvasGroup", canvasGroup);
-        SetObjectReference(countdownController, "screenFade", screenFade);
-        SetObjectReference(countdownController, "playerInput", playerInput);
-        SetObjectReference(countdownController, "playerWeapon", playerWeapon);
-
-        overlayRect.SetSiblingIndex(screenFade.transform.GetSiblingIndex());
-        SetFloat(screenFade, "initialAlpha", 1f);
-
-        EditorUtility.SetDirty(screenFade);
-        EditorUtility.SetDirty(countdownController);
+        ApplyCountdownPresentation(countdownText, dimmer, countdownFont);
+        EditorUtility.SetDirty(countdownText);
+        EditorUtility.SetDirty(dimmer);
 
         if (!EditorSceneManager.SaveScene(scene, LevelOneScenePath))
             throw new InvalidOperationException($"Unity could not save {LevelOneScenePath}.");
+    }
+
+    private static TMP_FontAsset LoadCountdownFont()
+    {
+        TMP_FontAsset countdownFont =
+            AssetDatabase.LoadAssetAtPath<TMP_FontAsset>(CountdownFontAssetPath);
+
+        if (countdownFont == null)
+            throw new InvalidOperationException(
+                $"The committed countdown font asset is missing at {CountdownFontAssetPath}.");
+
+        return countdownFont;
+    }
+
+    private static void ApplyCountdownPresentation(
+        TMP_Text countdownText,
+        Image dimmer,
+        TMP_FontAsset countdownFont)
+    {
+        countdownText.font = countdownFont;
+        countdownText.fontSize = 220f;
+        countdownText.fontSizeMin = 96f;
+        countdownText.fontSizeMax = 220f;
+        countdownText.fontStyle = FontStyles.Bold;
+        countdownText.enableAutoSizing = true;
+        countdownText.textWrappingMode = TextWrappingModes.NoWrap;
+        countdownText.alignment = TextAlignmentOptions.Center;
+        countdownText.extraPadding = true;
+        countdownText.raycastTarget = false;
+
+        dimmer.color = new Color(0f, 0f, 0f, 0.62f);
     }
 
     private static void UpdateBuildSettings()
