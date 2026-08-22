@@ -150,7 +150,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::BossTransitionScreenController
   expectedPendingBoss: 3
   destinationSceneName: Level3_Kraken
-  displaySeconds: 3
+  displaySeconds: 4
   fadeDurationSeconds: 0.35
   screenFade: {fileID: 1944806778}
 --- !u!4 &419978804

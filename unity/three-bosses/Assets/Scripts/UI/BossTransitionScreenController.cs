@@ -11,7 +11,7 @@ public sealed class BossTransitionScreenController : MonoBehaviour
 {
     [SerializeField] private BossId expectedPendingBoss = BossId.Cyborg;
     [SerializeField] private string destinationSceneName = "Level2_CyborgBoss";
-    [SerializeField, Min(0f)] private float displaySeconds = 3f;
+    [SerializeField, Min(0f)] private float displaySeconds = 4f;
     [SerializeField, Min(0f)] private float fadeDurationSeconds = 0.35f;
     [SerializeField] private ScreenFade screenFade;
 

@@ -29,6 +29,8 @@ public static class RunOutcomeSceneBuilder
     private const string BossLoaderObjectName = "Phase12_BossOutcome";
     private const string PlayerLoaderObjectName = "Phase12_PlayerOutcome";
     private const string LevelEntryObjectName = "Phase12_LevelEntry";
+    private const float TransitionDisplaySeconds = 4f;
+    private const float TransitionFadeDurationSeconds = 0.35f;
 
     private static readonly Vector2 ArtReferenceResolution = new(1672f, 941f);
 
@@ -36,11 +38,11 @@ public static class RunOutcomeSceneBuilder
     public static void Build()
     {
         if (EditorApplication.isPlayingOrWillChangePlaymode)
-            throw new InvalidOperationException("Exit Play Mode before building Phase 12 result scenes.");
+            throw new InvalidOperationException("Exit Play Mode before building transition and result scenes.");
 
         Scene originalScene = SceneManager.GetActiveScene();
         if (originalScene.isDirty)
-            throw new InvalidOperationException("Save the active scene before building Phase 12 result scenes.");
+            throw new InvalidOperationException("Save the active scene before building transition and result scenes.");
 
         string originalPath = originalScene.path;
 
@@ -115,7 +117,7 @@ public static class RunOutcomeSceneBuilder
             UpdateBuildSettings();
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
-            Debug.Log("Phase 12 transition, defeat, and end scenes were built successfully.");
+            Debug.Log("Transition and result scenes were built successfully.");
         }
         finally
         {
@@ -136,6 +138,8 @@ public static class RunOutcomeSceneBuilder
         BossTransitionScreenController controller = controllerObject.AddComponent<BossTransitionScreenController>();
         SetEnum(controller, "expectedPendingBoss", expectedPendingBoss);
         SetString(controller, "destinationSceneName", destinationSceneName);
+        SetFloat(controller, "displaySeconds", TransitionDisplaySeconds);
+        SetFloat(controller, "fadeDurationSeconds", TransitionFadeDurationSeconds);
         SetObjectReference(controller, "screenFade", screenFade);
 
         SaveScene(scene, scenePath);
