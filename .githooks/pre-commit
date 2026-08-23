@@ -1,0 +1,7 @@
+#!/usr/bin/env sh
+set -e
+
+repo_root=$(git rev-parse --show-toplevel)
+cd "$repo_root"
+
+node scripts/normalize-unity-yaml-whitespace.mjs --staged
