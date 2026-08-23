@@ -15,5 +15,12 @@
     "terminal.integrated.defaultProfile.windows": "Git Bash",
     "editor.inlineSuggest.enabled": true,
     "editor.suggest.preview": true,
-    "editor.tabCompletion": "onlySnippets"
+    "editor.tabCompletion": "onlySnippets",
+    "dotnet.defaultSolution": "unity/three-bosses/three-bosses.slnx",
+    "files.associations": {
+        "*.asset": "yaml",
+        "*.meta": "yaml",
+        "*.prefab": "yaml",
+        "*.unity": "yaml"
+    }
 }
