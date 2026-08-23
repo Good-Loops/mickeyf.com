@@ -173,6 +173,30 @@ npm --prefix backend run test
 npm --prefix backend run prod
 ```
 
+## Developer tooling
+
+Run once after cloning, from the repository root:
+
+```powershell
+npm run hooks:install
+```
+
+This activates the tracked `.githooks/pre-commit` hook, which normalizes
+Unity-generated trailing spaces and tabs in staged Unity text assets under
+`unity/three-bosses` before a commit is created. If normalization changes
+anything, the hook intentionally stops that commit so you can review the
+result and commit again; a Unity file that is only partially staged is
+rejected instead of being modified. Unity can remain open as long as any
+edited scene is saved before you start the commit and is not saved again
+while the hook runs. See [`.githooks/README.md`](.githooks/README.md) for
+details, including the `--no-verify` bypass.
+
+Test the normalizer itself with:
+
+```powershell
+npm run test:unity-yaml-normalizer
+```
+
 ## Unity project location
 
 The Three Bosses Unity project is stored at:
