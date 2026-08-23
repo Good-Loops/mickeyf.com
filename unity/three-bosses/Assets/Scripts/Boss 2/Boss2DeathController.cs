@@ -51,7 +51,10 @@ public sealed class Boss2DeathController : MonoBehaviour
             movement.enabled = false;
 
         if (animator != null)
+        {
+            animator.speed = 1f;
             animator.SetTrigger(deathTriggerName);
+        }
 
         StartCoroutine(DeathRoutine());
     }

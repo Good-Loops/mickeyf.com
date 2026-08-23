@@ -361,6 +361,8 @@ public sealed class BossController : MonoBehaviour, IBossEffectReceiver
         if (state == BossState.Dying) return;
 
         state = BossState.Dying;
+        freezeUntil = -1f;
+        ClearFreezeVisuals();
 
         if (attackLoop != null) StopCoroutine(attackLoop);
         attackLoop = null;
@@ -375,6 +377,7 @@ public sealed class BossController : MonoBehaviour, IBossEffectReceiver
         animator.ResetTrigger(AnimHurt);
         animator.ResetTrigger(AnimTransition);
 
+        animator.speed = 1f;
         animator.SetTrigger(AnimDie);
     }
 
