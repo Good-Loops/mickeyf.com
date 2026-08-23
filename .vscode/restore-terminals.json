@@ -1,0 +1,49 @@
+{
+  "artificialDelayMilliseconds": 1000,
+  "keepExistingTerminalsOpen": false,
+  "runOnStartup": true,
+  "terminals": [
+    {
+      "cwd": "${workspaceFolder}/frontend",
+      "splitTerminals": [
+        {
+          "name": "front",
+          "icon": "browser",
+          "color": "terminal.ansiCyan",
+          "commands": [
+            "cd \"$(git rev-parse --show-toplevel)/frontend\" && npm run dev"
+          ],
+          "shouldRunCommands": true
+        }
+      ]
+    },
+    {
+      "cwd": "${workspaceFolder}",
+      "splitTerminals": [
+        {
+          "name": "docs",
+          "icon": "book",
+          "color": "terminal.ansiGreen",
+          "commands": [
+            "npm run docs:dev"
+          ],
+          "shouldRunCommands": true
+        }
+      ]
+    },
+    {
+      "cwd": "${workspaceFolder}",
+      "splitTerminals": [
+        {
+          "name": "general",
+          "icon": "terminal-bash",
+          "color": "terminal.ansiBlue",
+          "commands": [
+            "copilot"
+          ],
+          "shouldRunCommands": true
+        }
+      ]
+    }
+  ]
+}

@@ -18,7 +18,8 @@
 		"docs": "npm run docs:clean && npm run docs:json && npm run docs:build",
 		"docs:serve": "http-server docs -p 8081",
 		"docs:watch": "chokidar \"typedoc.merge.json\" \"docs-src/index.md\" \"docs-src/typedoc.css\" \"docs-src/assets/**/*\" \"frontend/ts/**/*.ts\" \"frontend/ts/**/*.tsx\" \"backend/ts/**/*.ts\" -c \"npm run docs\"",
-		"docs:dev": "npm run docs && concurrently \"npm:docs:watch\" \"npm:docs:serve\""
+		"docs:dev": "concurrently \"npm:docs:watch\" \"npm:docs:serve\"",
+		"docs:dev:fresh": "npm run docs && npm run docs:dev"
 	},
 	"devDependencies": {
 		"chokidar-cli": "^3.0.0",
