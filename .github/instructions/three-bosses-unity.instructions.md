@@ -6,10 +6,13 @@ applyTo: "unity/three-bosses/**"
 
 - The repository root is a monorepo, not a Unity project.
 - The Unity project is located at `unity/three-bosses`.
-- From the repository root, always pass that path explicitly to
-  project-scoped Unity CLI commands.
+- On Windows, resolve that directory to an absolute Windows path before
+  project-scoped Unity CLI commands. The current CLI can fail to match a live
+  Editor when `--project-path` receives the relative monorepo path. In
+  PowerShell use `(Resolve-Path 'unity/three-bosses').Path`; in Git Bash use
+  `cygpath -w "$(pwd)/unity/three-bosses"`.
 - Before changing scenes, GameObjects, prefabs, or Unity assets, run
-  `unity status --project-path unity/three-bosses`.
+  `unity status --project-path "<resolved absolute project path>"`.
 - When Pipeline reports a ready Editor, prefer live `unity command`
   operations and save through Unity instead of hand-editing serialized YAML.
 - If no Editor is reachable, say so explicitly before falling back to file
