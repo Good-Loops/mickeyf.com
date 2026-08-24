@@ -11,6 +11,12 @@ applyTo: "unity/three-bosses/**"
   Editor when `--project-path` receives the relative monorepo path. In
   PowerShell use `(Resolve-Path 'unity/three-bosses').Path`; in Git Bash use
   `cygpath -w "$(pwd)/unity/three-bosses"`.
+- Treat `--yes` as a command-specific flag, not a global flag. Pass it only
+  when the exact command's help or reference documents it; collaboration
+  commands reject it as an unknown option.
+- `--non-interactive` does not suppress every `unity projects create` prompt
+  on an interactive terminal. For a fully unattended invocation, also pass
+  `--path`, `--editor-version`, and `--template`, or use `projects new`.
 - Before changing scenes, GameObjects, prefabs, or Unity assets, run
   `unity status --project-path "<resolved absolute project path>"`.
 - When Pipeline reports a ready Editor, prefer live `unity command`
