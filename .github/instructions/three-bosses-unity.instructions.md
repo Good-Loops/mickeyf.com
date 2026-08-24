@@ -19,6 +19,11 @@ applyTo: "unity/three-bosses/**"
   `--path`, `--editor-version`, and `--template`, or use `projects new`.
 - Before changing scenes, GameObjects, prefabs, or Unity assets, run
   `unity status --project-path "<resolved absolute project path>"`.
+- For continuous Pipeline or MCP command sessions, launch the Editor with
+  `unity open "<resolved absolute project path>" --args "-automated" --non-interactive`.
+  The Editor flag suppresses Pipeline's automated-mode warning, but it does
+  not prevent or dismiss modal dialogs; unattended commands must still avoid
+  modal-producing actions and use bounded waits.
 - When Pipeline reports a ready Editor, prefer live `unity command`
   operations and save through Unity instead of hand-editing serialized YAML.
 - If no Editor is reachable, say so explicitly before falling back to file
