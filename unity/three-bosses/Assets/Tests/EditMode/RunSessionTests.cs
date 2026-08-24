@@ -40,7 +40,7 @@ namespace ThreeBosses.Run.Tests
         }
 
         [Test]
-        public void TimerContinuesAcrossBossTransitions()
+        public void TimerExcludesBossDeathAndTransitionTime()
         {
             StartRun();
             clock.Advance(10d);
@@ -50,13 +50,16 @@ namespace ThreeBosses.Run.Tests
                 Is.EqualTo(BossDefeatResult.AdvanceToNextBoss));
 
             clock.Advance(5d);
-            Assert.That(session.ElapsedSeconds, Is.EqualTo(15d).Within(0.0001d));
+            Assert.That(session.ElapsedSeconds, Is.EqualTo(10d).Within(0.0001d));
             Assert.That(session.GetBossSplitSeconds(BossId.Bee), Is.EqualTo(10d).Within(0.0001d));
             Assert.That(session.Phase, Is.EqualTo(RunPhase.Transitioning));
             Assert.That(session.CurrentBoss, Is.EqualTo(BossId.Bee));
             Assert.That(session.PendingBoss, Is.EqualTo(BossId.Cyborg));
             Assert.That(session.EnterNextBoss(BossId.Cyborg), Is.True);
             Assert.That(session.CurrentBoss, Is.EqualTo(BossId.Cyborg));
+
+            clock.Advance(2d);
+            Assert.That(session.ElapsedSeconds, Is.EqualTo(12d).Within(0.0001d));
         }
 
         [Test]
@@ -70,7 +73,7 @@ namespace ThreeBosses.Run.Tests
 
             Assert.That(session.RecordDeath(), Is.False);
             Assert.That(session.Phase, Is.EqualTo(RunPhase.Transitioning));
-            Assert.That(session.ElapsedSeconds, Is.EqualTo(8d).Within(0.0001d));
+            Assert.That(session.ElapsedSeconds, Is.EqualTo(6d).Within(0.0001d));
             Assert.That(session.EnterNextBoss(BossId.Kraken), Is.False);
             Assert.That(session.EnterNextBoss(BossId.Cyborg), Is.True);
         }
@@ -106,8 +109,8 @@ namespace ThreeBosses.Run.Tests
         public void FinalBossCompletionFreezesTimeAndAcceptsOneResult()
         {
             StartRun();
-            DefeatCurrentBossAfter(10d, BossId.Bee);
-            DefeatCurrentBossAfter(20d, BossId.Cyborg);
+            DefeatCurrentBossAfter(10d, BossId.Bee, 5d);
+            DefeatCurrentBossAfter(20d, BossId.Cyborg, 7d);
 
             clock.Advance(30d);
             Assert.That(
@@ -173,6 +176,10 @@ namespace ThreeBosses.Run.Tests
             RunSessionSnapshot snapshot = session.CreateSnapshot();
             Assert.That(snapshot.GetBossSplitSeconds(BossId.Bee), Is.EqualTo(8d).Within(0.0001d));
 
+            clock.Advance(25d);
+            Assert.That(session.ElapsedSeconds, Is.EqualTo(8d).Within(0.0001d));
+            Assert.That(snapshot.ElapsedSeconds, Is.EqualTo(8d).Within(0.0001d));
+
             session.BeginNewRun();
             Assert.That(session.GetBossSplitSeconds(BossId.Bee), Is.Zero);
             Assert.That(snapshot.GetBossSplitSeconds(BossId.Bee), Is.EqualTo(8d).Within(0.0001d));
@@ -219,10 +226,18 @@ namespace ThreeBosses.Run.Tests
             Assert.That(session.StartRun(), Is.True);
         }
 
-        private void DefeatCurrentBossAfter(double seconds, BossId boss)
+        private void DefeatCurrentBossAfter(
+            double activeCombatSeconds,
+            BossId boss,
+            double transitionSeconds = 0d)
         {
-            clock.Advance(seconds);
+            clock.Advance(activeCombatSeconds);
             Assert.That(session.RecordBossDefeat(boss), Is.EqualTo(BossDefeatResult.AdvanceToNextBoss));
+
+            double elapsedAtDefeat = session.ElapsedSeconds;
+            clock.Advance(transitionSeconds);
+            Assert.That(session.ElapsedSeconds, Is.EqualTo(elapsedAtDefeat).Within(0.0001d));
+
             Assert.That(session.EnterNextBoss((BossId)((int)boss + 1)), Is.True);
         }
 

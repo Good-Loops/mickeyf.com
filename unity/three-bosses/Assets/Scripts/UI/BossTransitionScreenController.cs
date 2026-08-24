@@ -5,7 +5,7 @@ using UnityEngine.SceneManagement;
 
 /// <summary>
 /// Shared behavior for the two lightweight transition scenes. Each scene owns
-/// only its one background texture, while the run timer continues.
+/// only its one background texture, while active-combat timing remains paused.
 /// </summary>
 public sealed class BossTransitionScreenController : MonoBehaviour
 {

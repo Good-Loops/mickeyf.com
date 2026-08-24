@@ -39,7 +39,8 @@ namespace ThreeBosses.Run
         private readonly IMonotonicClock clock;
         private readonly double[] bossSplitSeconds = new double[BossCount];
 
-        private double startedAtSeconds;
+        private double activeCombatStartedAtSeconds;
+        private double accumulatedCombatSeconds;
         private double finalElapsedSeconds;
         private bool hasResult;
 
@@ -65,8 +66,16 @@ namespace ThreeBosses.Run
         {
             get
             {
-                if (Phase == RunPhase.Running || Phase == RunPhase.Transitioning)
-                    return Math.Max(0d, clock.NowSeconds - startedAtSeconds);
+                if (Phase == RunPhase.Running)
+                {
+                    double activeCombatSeconds = Math.Max(
+                        0d,
+                        clock.NowSeconds - activeCombatStartedAtSeconds);
+                    return accumulatedCombatSeconds + activeCombatSeconds;
+                }
+
+                if (Phase == RunPhase.Transitioning)
+                    return accumulatedCombatSeconds;
 
                 if (Phase == RunPhase.Defeated || Phase == RunPhase.Completed)
                     return finalElapsedSeconds;
@@ -88,7 +97,7 @@ namespace ThreeBosses.Run
             if (Phase != RunPhase.Countdown)
                 return false;
 
-            startedAtSeconds = clock.NowSeconds;
+            activeCombatStartedAtSeconds = clock.NowSeconds;
             Phase = RunPhase.Running;
             return true;
         }
@@ -104,7 +113,7 @@ namespace ThreeBosses.Run
             PendingBoss = BossId.None;
             BossesDefeated = (int)boss - 1;
             IsPracticeRun = true;
-            startedAtSeconds = clock.NowSeconds;
+            activeCombatStartedAtSeconds = clock.NowSeconds;
             Phase = RunPhase.Running;
         }
 
@@ -114,6 +123,7 @@ namespace ThreeBosses.Run
                 return BossDefeatResult.Rejected;
 
             double elapsed = ElapsedSeconds;
+            accumulatedCombatSeconds = elapsed;
             bossSplitSeconds[(int)boss - 1] = elapsed;
             BossesDefeated++;
 
@@ -138,6 +148,7 @@ namespace ThreeBosses.Run
 
             CurrentBoss = boss;
             PendingBoss = BossId.None;
+            activeCombatStartedAtSeconds = clock.NowSeconds;
             Phase = RunPhase.Running;
             return true;
         }
@@ -200,7 +211,8 @@ namespace ThreeBosses.Run
         private void ResetMutableState()
         {
             Array.Clear(bossSplitSeconds, 0, bossSplitSeconds.Length);
-            startedAtSeconds = 0d;
+            activeCombatStartedAtSeconds = 0d;
+            accumulatedCombatSeconds = 0d;
             finalElapsedSeconds = 0d;
             RunId = Guid.Empty;
             Phase = RunPhase.NotStarted;

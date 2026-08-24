@@ -24,9 +24,11 @@ each phase boundary.
   - Step 12.11E — tune boss-defeat visibility, fade timing, and transition
     screen duration.
   - Step 12.11F — add a read-only live timer at the top center of all three
-    gameplay scenes using the existing run session and time formatter.
-  - Step 12.11G — decide and implement whether non-playable boss transitions
-    count toward completion time and score.
+    gameplay scenes using the existing run session and time formatter:
+    **completed** in commit `248cfa51`.
+  - Step 12.11G — exclude boss-death presentation, fades, illustrated
+    transitions, loading, and next-level reveal from completion time and score;
+    only active combat time counts: **completed** on the gameplay branch.
   - Step 12.11H — complete the full three-boss route, defeat-screen, button,
     audio-persistence, duplicate-event, and interrupted-run smoke tests.
 
