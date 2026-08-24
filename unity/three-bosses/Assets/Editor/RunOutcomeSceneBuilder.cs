@@ -327,6 +327,8 @@ public static class RunOutcomeSceneBuilder
             SetEnum(entry, "bossId", bossId);
         }
 
+        RunTimerDisplayBuilder.AddOrUpdateRunTimer(scene);
+
         SaveScene(scene, scenePath);
     }
 
