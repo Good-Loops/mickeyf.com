@@ -471,6 +471,7 @@ public static class RunOutcomeSceneBuilder
         label.enableAutoSizing = true;
         label.fontSizeMin = Mathf.Max(16f, fontSize * 0.55f);
         label.fontSizeMax = fontSize;
+        UiButtonStyle.Apply(button);
         return button;
     }
 

@@ -82,6 +82,32 @@ public static class MainMenuAndCountdownBuilder
         Debug.Log("Main Menu was rebuilt successfully.");
     }
 
+    [MenuItem("Three Bosses/UI/Rebuild Level 1 Countdown")]
+    public static void RebuildLevelOneCountdown()
+    {
+        if (EditorApplication.isPlayingOrWillChangePlaymode)
+            throw new InvalidOperationException("Exit Play Mode before rebuilding the Level 1 countdown.");
+
+        Scene originalScene = SceneManager.GetActiveScene();
+        if (originalScene.isDirty)
+            throw new InvalidOperationException("Save the active scene before rebuilding the Level 1 countdown.");
+
+        string originalScenePath = originalScene.path;
+
+        try
+        {
+            AddOrUpdateCountdownInLevelOne(LoadCountdownFont());
+            AssetDatabase.SaveAssets();
+            AssetDatabase.Refresh();
+            Debug.Log("Level 1 countdown was rebuilt successfully.");
+        }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(originalScenePath))
+                EditorSceneManager.OpenScene(originalScenePath, OpenSceneMode.Single);
+        }
+    }
+
     private static void BuildMainMenuScene()
     {
         Sprite menuSprite = AssetDatabase.LoadAssetAtPath<Sprite>(MenuSpritePath);
@@ -161,9 +187,15 @@ public static class MainMenuAndCountdownBuilder
 
         TMP_Text countdownText;
         Image dimmer;
+        RunCountdownController countdownController;
 
         if (existingCountdown != null)
         {
+            countdownController = existingCountdown.GetComponent<RunCountdownController>();
+            if (countdownController == null)
+                throw new InvalidOperationException(
+                    $"{CountdownObjectName} is missing its RunCountdownController component.");
+
             countdownText = existingCountdown.GetComponentsInChildren<TMP_Text>(true)
                 .FirstOrDefault(candidate => candidate.gameObject.name == CountdownTextName);
             if (countdownText == null)
@@ -220,7 +252,7 @@ public static class MainMenuAndCountdownBuilder
             Stretch(countdownText.rectTransform);
             countdownText.color = Color.white;
 
-            RunCountdownController countdownController = overlayObject.AddComponent<RunCountdownController>();
+            countdownController = overlayObject.AddComponent<RunCountdownController>();
             SetObjectReference(countdownController, "countdownLabel", countdownText);
             SetObjectReference(countdownController, "canvasGroup", canvasGroup);
             SetObjectReference(countdownController, "screenFade", screenFade);
@@ -234,7 +266,9 @@ public static class MainMenuAndCountdownBuilder
             EditorUtility.SetDirty(countdownController);
         }
 
+        SetObjectReference(countdownController, "dimmer", dimmer);
         ApplyCountdownPresentation(countdownText, dimmer, countdownFont);
+        EditorUtility.SetDirty(countdownController);
         EditorUtility.SetDirty(countdownText);
         EditorUtility.SetDirty(dimmer);
 
@@ -260,17 +294,42 @@ public static class MainMenuAndCountdownBuilder
         TMP_FontAsset countdownFont)
     {
         countdownText.font = countdownFont;
+        countdownText.text = "3";
+        countdownText.color = Color.white;
         countdownText.fontSize = 220f;
-        countdownText.fontSizeMin = 96f;
+        countdownText.fontSizeMin = 220f;
         countdownText.fontSizeMax = 220f;
         countdownText.fontStyle = FontStyles.Bold;
-        countdownText.enableAutoSizing = true;
+        countdownText.enableAutoSizing = false;
         countdownText.textWrappingMode = TextWrappingModes.NoWrap;
         countdownText.alignment = TextAlignmentOptions.Center;
         countdownText.extraPadding = true;
         countdownText.raycastTarget = false;
+        countdownText.enableVertexGradient = true;
+        Color threeTop = new Color32(215, 255, 105, 255);
+        Color threeBottom = new Color32(130, 201, 0, 255);
+        countdownText.colorGradient = new VertexGradient(
+            threeTop,
+            threeTop,
+            threeBottom,
+            threeBottom);
+        countdownText.characterSpacing = 0f;
+        countdownText.outlineColor = new Color32(5, 8, 13, 242);
+        countdownText.outlineWidth = 0.12f;
+        countdownText.alpha = 0f;
+        countdownText.rectTransform.localScale = Vector3.one;
 
-        dimmer.color = new Color(0f, 0f, 0f, 0.62f);
+        Shadow[] shadows = countdownText.GetComponents<Shadow>();
+        if (shadows.Length > 1)
+            throw new InvalidOperationException(
+                $"{CountdownTextName} has more than one Shadow component.");
+
+        Shadow shadow = shadows.FirstOrDefault() ?? countdownText.gameObject.AddComponent<Shadow>();
+        shadow.effectColor = new Color(0f, 0f, 0f, 0.68f);
+        shadow.effectDistance = new Vector2(3f, -4f);
+        shadow.useGraphicAlpha = true;
+
+        dimmer.color = new Color(0f, 0f, 0f, 0.56f);
     }
 
     private static void UpdateBuildSettings()
@@ -356,6 +415,8 @@ public static class MainMenuAndCountdownBuilder
         label.fontSizeMin = Mathf.Max(12f, fontSize * 0.5f);
         label.fontSizeMax = fontSize;
         label.raycastTarget = false;
+
+        UiButtonStyle.Apply(button);
 
         return button;
     }

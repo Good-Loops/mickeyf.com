@@ -342,6 +342,73 @@ Transform:
   - {fileID: 503033940}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!21 &248368894
+Material:
+  serializedVersion: 8
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_Name: Oxanium-Bold Material (Instance)
+  m_Shader: {fileID: 4800000, guid: fe393ace9b354375a9cb14cdbbc28be4, type: 3}
+  m_Parent: {fileID: 0}
+  m_ModifiedSerializedProperties: 0
+  m_ValidKeywords: []
+  m_InvalidKeywords: []
+  m_LightmapFlags: 4
+  m_EnableInstancingVariants: 0
+  m_DoubleSidedGI: 0
+  m_CustomRenderQueue: -1
+  stringTagMap: {}
+  disabledShaderPasses: []
+  m_LockedProperties:
+  m_SavedProperties:
+    serializedVersion: 3
+    m_TexEnvs:
+    - _MainTex:
+        m_Texture: {fileID: -6376582516436674513, guid: 7dc0dfd1c5790e948ac661df2a787896, type: 2}
+        m_Scale: {x: 1, y: 1}
+        m_Offset: {x: 0, y: 0}
+    m_Ints: []
+    m_Floats:
+    - _ColorMask: 15
+    - _CullMode: 0
+    - _FaceDilate: 0
+    - _GradientScale: 11
+    - _MaskSoftnessX: 0
+    - _MaskSoftnessY: 0
+    - _OutlineSoftness: 0
+    - _OutlineWidth: 0.12
+    - _PerspectiveFilter: 0.875
+    - _ScaleRatioA: 0.90909094
+    - _ScaleRatioB: 1
+    - _ScaleRatioC: 0.7386364
+    - _ScaleX: 1
+    - _ScaleY: 1
+    - _ShaderFlags: 0
+    - _Sharpness: 0
+    - _Stencil: 0
+    - _StencilComp: 8
+    - _StencilOp: 0
+    - _StencilReadMask: 255
+    - _StencilWriteMask: 255
+    - _TextureHeight: 1024
+    - _TextureWidth: 1024
+    - _UnderlayDilate: 0
+    - _UnderlayOffsetX: 0
+    - _UnderlayOffsetY: 0
+    - _UnderlaySoftness: 0
+    - _VertexOffsetX: 0
+    - _VertexOffsetY: 0
+    - _WeightBold: 0.75
+    - _WeightNormal: 0
+    m_Colors:
+    - _ClipRect: {r: -32767, g: -32767, b: 32767, a: 32767}
+    - _FaceColor: {r: 1, g: 1, b: 1, a: 1}
+    - _OutlineColor: {r: 0.019607844, g: 0.03137255, b: 0.050980393, a: 0.9490196}
+    - _UnderlayColor: {r: 0, g: 0, b: 0, a: 0.5}
+  m_BuildTextureStacks: []
+  m_AllowLocking: 1
 --- !u!224 &251517337 stripped
 RectTransform:
   m_CorrespondingSourceObject: {fileID: 2268560211004022333, guid: e71391d173d13e740aff2eebf0e4fdeb, type: 3}
@@ -509,6 +576,7 @@ GameObject:
   - component: {fileID: 387815759}
   - component: {fileID: 387815761}
   - component: {fileID: 387815760}
+  - component: {fileID: 387815762}
   m_Layer: 0
   m_Name: Countdown Text
   m_TagString: Untagged
@@ -558,21 +626,21 @@ MonoBehaviour:
   m_text: 3
   m_isRightToLeft: 0
   m_fontAsset: {fileID: 11400000, guid: 7dc0dfd1c5790e948ac661df2a787896, type: 2}
-  m_sharedMaterial: {fileID: 1219347246323611891, guid: 7dc0dfd1c5790e948ac661df2a787896, type: 2}
+  m_sharedMaterial: {fileID: 248368894}
   m_fontSharedMaterials: []
-  m_fontMaterial: {fileID: 0}
+  m_fontMaterial: {fileID: 248368894}
   m_fontMaterials: []
   m_fontColor32:
     serializedVersion: 2
     rgba: 4294967295
-  m_fontColor: {r: 1, g: 1, b: 1, a: 1}
-  m_enableVertexGradient: 0
+  m_fontColor: {r: 1, g: 1, b: 1, a: 0}
+  m_enableVertexGradient: 1
   m_colorMode: 3
   m_fontColorGradient:
-    topLeft: {r: 1, g: 1, b: 1, a: 1}
-    topRight: {r: 1, g: 1, b: 1, a: 1}
-    bottomLeft: {r: 1, g: 1, b: 1, a: 1}
-    bottomRight: {r: 1, g: 1, b: 1, a: 1}
+    topLeft: {r: 0.84313726, g: 1, b: 0.4117647, a: 1}
+    topRight: {r: 0.84313726, g: 1, b: 0.4117647, a: 1}
+    bottomLeft: {r: 0.50980395, g: 0.7882353, b: 0, a: 1}
+    bottomRight: {r: 0.50980395, g: 0.7882353, b: 0, a: 1}
   m_fontColorGradientPreset: {fileID: 0}
   m_spriteAsset: {fileID: 0}
   m_tintAllSprites: 0
@@ -585,8 +653,8 @@ MonoBehaviour:
   m_fontSize: 220
   m_fontSizeBase: 180
   m_fontWeight: 400
-  m_enableAutoSizing: 1
-  m_fontSizeMin: 96
+  m_enableAutoSizing: 0
+  m_fontSizeMin: 220
   m_fontSizeMax: 220
   m_fontStyle: 1
   m_HorizontalAlignment: 2
@@ -635,6 +703,21 @@ CanvasRenderer:
   m_PrefabAsset: {fileID: 0}
   m_GameObject: {fileID: 387815758}
   m_CullTransparentMesh: 1
+--- !u!114 &387815762
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 387815758}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: cfabb0440166ab443bba8876756fdfa9, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Shadow
+  m_EffectColor: {r: 0, g: 0, b: 0, a: 0.68}
+  m_EffectDistance: {x: 3, y: -4}
+  m_UseGraphicAlpha: 1
 --- !u!21 &394289280
 Material:
   serializedVersion: 8
@@ -11327,7 +11410,7 @@ MonoBehaviour:
   m_Name:
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Image
   m_Material: {fileID: 0}
-  m_Color: {r: 0, g: 0, b: 0, a: 0.62}
+  m_Color: {r: 0, g: 0, b: 0, a: 0.56}
   m_RaycastTarget: 1
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1
@@ -11482,6 +11565,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::RunCountdownController
   countdownLabel: {fileID: 387815760}
   canvasGroup: {fileID: 1674762438}
+  dimmer: {fileID: 1265700868}
   screenFade: {fileID: 562904240}
   playerInput: {fileID: 5307331602542309124}
   playerWeapon: {fileID: 5307331602542309123}

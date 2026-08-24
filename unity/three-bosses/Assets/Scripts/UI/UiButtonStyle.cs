@@ -17,10 +17,16 @@ public static class UiButtonStyle
         if (label == null)
             return;
 
-        Color serializedAccent = button.colors.highlightedColor;
+        ButtonHoverFeedback feedback = button.GetComponent<ButtonHoverFeedback>();
+        if (feedback == null)
+            feedback = button.gameObject.AddComponent<ButtonHoverFeedback>();
+
+        Color serializedAccent = feedback.HasConfiguredAccent
+            ? feedback.AccentColor
+            : button.colors.highlightedColor;
         Color accent = new(serializedAccent.r, serializedAccent.g, serializedAccent.b, 1f);
         Color normal = new(0.89f, 0.91f, 0.94f, 1f);
-        Color focused = Color.white;
+        Color focused = Color.Lerp(Color.white, accent, 0.18f);
         Color pressed = Color.Lerp(Color.white, accent, 0.55f);
 
         Image hitArea = button.GetComponent<Image>();
@@ -28,6 +34,7 @@ public static class UiButtonStyle
             hitArea.color = Color.clear;
 
         label.color = normal;
+        label.raycastTarget = false;
         button.targetGraphic = label;
         button.transition = Selectable.Transition.ColorTint;
 
@@ -41,10 +48,6 @@ public static class UiButtonStyle
         colors.fadeDuration = 0.1f;
         button.colors = colors;
 
-        ButtonHoverFeedback feedback = button.GetComponent<ButtonHoverFeedback>();
-        if (feedback == null)
-            feedback = button.gameObject.AddComponent<ButtonHoverFeedback>();
-
-        feedback.Configure(label.rectTransform);
+        feedback.Configure(label.rectTransform, accent);
     }
 }

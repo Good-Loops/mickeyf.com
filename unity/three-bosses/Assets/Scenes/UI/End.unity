@@ -335,7 +335,7 @@ MonoBehaviour:
   m_spriteAsset: {fileID: 0}
   m_tintAllSprites: 0
   m_StyleSheet: {fileID: 0}
-  m_TextStyleHashCode: 0
+  m_TextStyleHashCode: -1183493901
   m_overrideHtmlColors: 0
   m_faceColor:
     serializedVersion: 2
@@ -452,7 +452,7 @@ MonoBehaviour:
   m_fontColor32:
     serializedVersion: 2
     rgba: 4294967295
-  m_fontColor: {r: 1, g: 1, b: 1, a: 1}
+  m_fontColor: {r: 0.89, g: 0.91, b: 0.94, a: 1}
   m_enableVertexGradient: 0
   m_colorMode: 3
   m_fontColorGradient:
@@ -464,7 +464,7 @@ MonoBehaviour:
   m_spriteAsset: {fileID: 0}
   m_tintAllSprites: 0
   m_StyleSheet: {fileID: 0}
-  m_TextStyleHashCode: 0
+  m_TextStyleHashCode: -1183493901
   m_overrideHtmlColors: 0
   m_faceColor:
     serializedVersion: 2
@@ -589,7 +589,7 @@ MonoBehaviour:
   m_fontColor32:
     serializedVersion: 2
     rgba: 4294967295
-  m_fontColor: {r: 1, g: 1, b: 1, a: 1}
+  m_fontColor: {r: 0.89, g: 0.91, b: 0.94, a: 1}
   m_enableVertexGradient: 0
   m_colorMode: 3
   m_fontColorGradient:
@@ -601,7 +601,7 @@ MonoBehaviour:
   m_spriteAsset: {fileID: 0}
   m_tintAllSprites: 0
   m_StyleSheet: {fileID: 0}
-  m_TextStyleHashCode: 0
+  m_TextStyleHashCode: -1183493901
   m_overrideHtmlColors: 0
   m_faceColor:
     serializedVersion: 2
@@ -763,6 +763,7 @@ GameObject:
   - component: {fileID: 764434365}
   - component: {fileID: 764434364}
   - component: {fileID: 764434366}
+  - component: {fileID: 764434367}
   m_Layer: 0
   m_Name: Try Again Button
   m_TagString: Untagged
@@ -803,7 +804,7 @@ MonoBehaviour:
   m_Name:
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Image
   m_Material: {fileID: 0}
-  m_Color: {r: 1, g: 1, b: 1, a: 1}
+  m_Color: {r: 0, g: 0, b: 0, a: 0}
   m_RaycastTarget: 1
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1
@@ -849,13 +850,13 @@ MonoBehaviour:
     m_SelectOnRight: {fileID: 0}
   m_Transition: 1
   m_Colors:
-    m_NormalColor: {r: 0.58, g: 0.86, b: 0, a: 0.03}
-    m_HighlightedColor: {r: 0.58, g: 0.86, b: 0, a: 0.28}
-    m_PressedColor: {r: 1, g: 1, b: 1, a: 0.35}
-    m_SelectedColor: {r: 0.58, g: 0.86, b: 0, a: 0.2}
-    m_DisabledColor: {r: 0.2, g: 0.2, b: 0.2, a: 0.08}
+    m_NormalColor: {r: 0.89, g: 0.91, b: 0.94, a: 1}
+    m_HighlightedColor: {r: 0.9244, g: 0.9748, b: 0.82, a: 1}
+    m_PressedColor: {r: 0.769, g: 0.923, b: 0.45, a: 1}
+    m_SelectedColor: {r: 0.9244, g: 0.9748, b: 0.82, a: 1}
+    m_DisabledColor: {r: 0.46, g: 0.46, b: 0.5, a: 0.62}
     m_ColorMultiplier: 1
-    m_FadeDuration: 0.08
+    m_FadeDuration: 0.1
   m_SpriteState:
     m_HighlightedSprite: {fileID: 0}
     m_PressedSprite: {fileID: 0}
@@ -868,10 +869,25 @@ MonoBehaviour:
     m_SelectedTrigger: Selected
     m_DisabledTrigger: Disabled
   m_Interactable: 1
-  m_TargetGraphic: {fileID: 764434364}
+  m_TargetGraphic: {fileID: 1210882731}
   m_OnClick:
     m_PersistentCalls:
       m_Calls: []
+--- !u!114 &764434367
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 764434362}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d262633f963a55942b3aba5d96b1fc35, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::ButtonHoverFeedback
+  visualTarget: {fileID: 1210882730}
+  accentColor: {r: 0.58, g: 0.86, b: 0, a: 1}
+  hasConfiguredAccent: 1
 --- !u!1 &974741858
 GameObject:
   m_ObjectHideFlags: 0
@@ -959,7 +975,7 @@ MonoBehaviour:
   m_spriteAsset: {fileID: 0}
   m_tintAllSprites: 0
   m_StyleSheet: {fileID: 0}
-  m_TextStyleHashCode: 0
+  m_TextStyleHashCode: -1183493901
   m_overrideHtmlColors: 0
   m_faceColor:
     serializedVersion: 2
@@ -1096,7 +1112,7 @@ MonoBehaviour:
   m_spriteAsset: {fileID: 0}
   m_tintAllSprites: 0
   m_StyleSheet: {fileID: 0}
-  m_TextStyleHashCode: 0
+  m_TextStyleHashCode: -1183493901
   m_overrideHtmlColors: 0
   m_faceColor:
     serializedVersion: 2
@@ -1367,7 +1383,7 @@ MonoBehaviour:
   m_fontColor32:
     serializedVersion: 2
     rgba: 4294967295
-  m_fontColor: {r: 1, g: 1, b: 1, a: 1}
+  m_fontColor: {r: 0.89, g: 0.91, b: 0.94, a: 1}
   m_enableVertexGradient: 0
   m_colorMode: 3
   m_fontColorGradient:
@@ -1379,7 +1395,7 @@ MonoBehaviour:
   m_spriteAsset: {fileID: 0}
   m_tintAllSprites: 0
   m_StyleSheet: {fileID: 0}
-  m_TextStyleHashCode: 0
+  m_TextStyleHashCode: -1183493901
   m_overrideHtmlColors: 0
   m_faceColor:
     serializedVersion: 2
@@ -1536,7 +1552,7 @@ Canvas:
   m_OverridePixelPerfect: 0
   m_SortingBucketNormalizedSize: 0
   m_VertexColorAlwaysGammaSpace: 0
-  m_AdditionalShaderChannelsFlag: 0
+  m_AdditionalShaderChannelsFlag: 25
   m_UpdateRectTransformForStandalone: 0
   m_SortingLayerID: 0
   m_SortingOrder: 0
@@ -1700,6 +1716,7 @@ GameObject:
   - component: {fileID: 1357576515}
   - component: {fileID: 1357576514}
   - component: {fileID: 1357576516}
+  - component: {fileID: 1357576517}
   m_Layer: 0
   m_Name: Back To Menu Button
   m_TagString: Untagged
@@ -1740,7 +1757,7 @@ MonoBehaviour:
   m_Name:
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Image
   m_Material: {fileID: 0}
-  m_Color: {r: 1, g: 1, b: 1, a: 1}
+  m_Color: {r: 0, g: 0, b: 0, a: 0}
   m_RaycastTarget: 1
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1
@@ -1786,13 +1803,13 @@ MonoBehaviour:
     m_SelectOnRight: {fileID: 0}
   m_Transition: 1
   m_Colors:
-    m_NormalColor: {r: 1, g: 0.12, b: 0.08, a: 0.03}
-    m_HighlightedColor: {r: 1, g: 0.12, b: 0.08, a: 0.28}
-    m_PressedColor: {r: 1, g: 1, b: 1, a: 0.35}
-    m_SelectedColor: {r: 1, g: 0.12, b: 0.08, a: 0.2}
-    m_DisabledColor: {r: 0.2, g: 0.2, b: 0.2, a: 0.08}
+    m_NormalColor: {r: 0.89, g: 0.91, b: 0.94, a: 1}
+    m_HighlightedColor: {r: 1, g: 0.8416, b: 0.8344, a: 1}
+    m_PressedColor: {r: 1, g: 0.516, b: 0.494, a: 1}
+    m_SelectedColor: {r: 1, g: 0.8416, b: 0.8344, a: 1}
+    m_DisabledColor: {r: 0.46, g: 0.46, b: 0.5, a: 0.62}
     m_ColorMultiplier: 1
-    m_FadeDuration: 0.08
+    m_FadeDuration: 0.1
   m_SpriteState:
     m_HighlightedSprite: {fileID: 0}
     m_PressedSprite: {fileID: 0}
@@ -1805,10 +1822,25 @@ MonoBehaviour:
     m_SelectedTrigger: Selected
     m_DisabledTrigger: Disabled
   m_Interactable: 1
-  m_TargetGraphic: {fileID: 1357576514}
+  m_TargetGraphic: {fileID: 321951177}
   m_OnClick:
     m_PersistentCalls:
       m_Calls: []
+--- !u!114 &1357576517
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1357576512}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d262633f963a55942b3aba5d96b1fc35, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::ButtonHoverFeedback
+  visualTarget: {fileID: 321951176}
+  accentColor: {r: 1, g: 0.12, b: 0.08, a: 1}
+  hasConfiguredAccent: 1
 --- !u!1 &1878082827
 GameObject:
   m_ObjectHideFlags: 0
@@ -1821,6 +1853,7 @@ GameObject:
   - component: {fileID: 1878082830}
   - component: {fileID: 1878082829}
   - component: {fileID: 1878082831}
+  - component: {fileID: 1878082832}
   m_Layer: 0
   m_Name: Submit Score Button
   m_TagString: Untagged
@@ -1861,7 +1894,7 @@ MonoBehaviour:
   m_Name:
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Image
   m_Material: {fileID: 0}
-  m_Color: {r: 1, g: 1, b: 1, a: 1}
+  m_Color: {r: 0, g: 0, b: 0, a: 0}
   m_RaycastTarget: 1
   m_RaycastPadding: {x: 0, y: 0, z: 0, w: 0}
   m_Maskable: 1
@@ -1907,13 +1940,13 @@ MonoBehaviour:
     m_SelectOnRight: {fileID: 0}
   m_Transition: 1
   m_Colors:
-    m_NormalColor: {r: 0.68, g: 0.24, b: 1, a: 0.03}
-    m_HighlightedColor: {r: 0.68, g: 0.24, b: 1, a: 0.28}
-    m_PressedColor: {r: 1, g: 1, b: 1, a: 0.35}
-    m_SelectedColor: {r: 0.68, g: 0.24, b: 1, a: 0.2}
-    m_DisabledColor: {r: 0.2, g: 0.2, b: 0.2, a: 0.08}
+    m_NormalColor: {r: 0.89, g: 0.91, b: 0.94, a: 1}
+    m_HighlightedColor: {r: 0.9424, g: 0.8632, b: 1, a: 1}
+    m_PressedColor: {r: 0.824, g: 0.582, b: 1, a: 1}
+    m_SelectedColor: {r: 0.9424, g: 0.8632, b: 1, a: 1}
+    m_DisabledColor: {r: 0.46, g: 0.46, b: 0.5, a: 0.62}
     m_ColorMultiplier: 1
-    m_FadeDuration: 0.08
+    m_FadeDuration: 0.1
   m_SpriteState:
     m_HighlightedSprite: {fileID: 0}
     m_PressedSprite: {fileID: 0}
@@ -1926,10 +1959,25 @@ MonoBehaviour:
     m_SelectedTrigger: Selected
     m_DisabledTrigger: Disabled
   m_Interactable: 0
-  m_TargetGraphic: {fileID: 1878082829}
+  m_TargetGraphic: {fileID: 497074133}
   m_OnClick:
     m_PersistentCalls:
       m_Calls: []
+--- !u!114 &1878082832
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1878082827}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d262633f963a55942b3aba5d96b1fc35, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::ButtonHoverFeedback
+  visualTarget: {fileID: 497074132}
+  accentColor: {r: 0.68, g: 0.24, b: 1, a: 1}
+  hasConfiguredAccent: 1
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

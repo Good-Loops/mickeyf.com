@@ -11,28 +11,44 @@ public sealed class ButtonHoverFeedback : MonoBehaviour,
     IPointerEnterHandler,
     IPointerExitHandler,
     IPointerDownHandler,
-    IPointerUpHandler
+    IPointerUpHandler,
+    ISelectHandler,
+    IDeselectHandler
 {
     private const float HoveredScale = 1.045f;
+    private const float SelectedScale = 1.035f;
     private const float PressedScale = 0.975f;
     private const float ResponseSpeed = 18f;
 
     private Button button;
-    private RectTransform visualTarget;
+    [SerializeField] private RectTransform visualTarget;
+    [SerializeField] private Color accentColor = Color.white;
+    [SerializeField] private bool hasConfiguredAccent;
     private Vector3 restingScale = Vector3.one;
     private bool isPointerInside;
     private bool isPressed;
+    private bool isSelected;
 
     private void Awake()
     {
         button = GetComponent<Button>();
+
+        if (visualTarget == null && button.targetGraphic != null)
+            visualTarget = button.targetGraphic.rectTransform;
+
+        CaptureRestingScale();
     }
 
-    public void Configure(RectTransform target)
+    public Color AccentColor => accentColor;
+
+    public bool HasConfiguredAccent => hasConfiguredAccent;
+
+    public void Configure(RectTransform target, Color accent)
     {
         visualTarget = target;
-        if (visualTarget != null)
-            restingScale = visualTarget.localScale;
+        accentColor = new Color(accent.r, accent.g, accent.b, 1f);
+        hasConfiguredAccent = true;
+        CaptureRestingScale();
     }
 
     private void Update()
@@ -47,7 +63,9 @@ public sealed class ButtonHoverFeedback : MonoBehaviour,
             ? PressedScale
             : isPointerInside
                 ? HoveredScale
-                : 1f;
+                : isSelected
+                    ? SelectedScale
+                    : 1f;
 
         Vector3 targetScale = restingScale * multiplier;
         float blend = 1f - Mathf.Exp(-ResponseSpeed * Time.unscaledDeltaTime);
@@ -72,9 +90,16 @@ public sealed class ButtonHoverFeedback : MonoBehaviour,
     {
         isPointerInside = false;
         isPressed = false;
+        isSelected = false;
 
         if (visualTarget != null)
             visualTarget.localScale = restingScale;
+    }
+
+    private void CaptureRestingScale()
+    {
+        if (visualTarget != null)
+            restingScale = visualTarget.localScale;
     }
 
     public void OnPointerEnter(PointerEventData _)
@@ -101,5 +126,16 @@ public sealed class ButtonHoverFeedback : MonoBehaviour,
     {
         if (TryUsePointerFeedback())
             isPressed = false;
+    }
+
+    public void OnSelect(BaseEventData _)
+    {
+        if (TryUsePointerFeedback())
+            isSelected = true;
+    }
+
+    public void OnDeselect(BaseEventData _)
+    {
+        isSelected = false;
     }
 }
