@@ -81,17 +81,38 @@ namespace ThreeBosses.Tests
         {
             yield return new WaitForSecondsRealtime(1.2f);
 
+            Boss3Fixture bossFixture = Boss3Fixture.Find();
             Type handlerType = RequireRuntimeType("PlayerDeathHandler");
+            Type loaderType = RequireRuntimeType("BossDefeatSceneLoader");
+            Type remainsType = RequireRuntimeType("BossRemains");
             MonoBehaviour[] behaviours = UnityEngine.Object.FindObjectsByType<MonoBehaviour>(
                 FindObjectsInactive.Include,
                 FindObjectsSortMode.None);
             MonoBehaviour handler = Array.Find(behaviours, behaviour => behaviour.GetType() == handlerType);
+            MonoBehaviour loader = Array.Find(behaviours, behaviour => behaviour.GetType() == loaderType);
             Assert.That(handler, Is.Not.Null, "PlayerDeathHandler was not found in Level 3.");
+            Assert.That(loader, Is.Not.Null, "BossDefeatSceneLoader was not found in Level 3.");
 
             FieldInfo healthField = handlerType.GetField("health", BindingFlags.Instance | BindingFlags.NonPublic);
             FieldInfo rigidbodyField = handlerType.GetField("rb", BindingFlags.Instance | BindingFlags.NonPublic);
+            FieldInfo loaderHandlerField = loaderType.GetField(
+                "playerDeathHandler",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            FieldInfo loadDelayField = loaderType.GetField(
+                "loadDelaySeconds",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            FieldInfo fadeStartField = loaderType.GetField(
+                "fadeStartDelaySeconds",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            FieldInfo fadeDurationField = loaderType.GetField(
+                "fadeDurationSeconds",
+                BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.That(healthField, Is.Not.Null);
             Assert.That(rigidbodyField, Is.Not.Null);
+            Assert.That(loaderHandlerField, Is.Not.Null);
+            Assert.That(loadDelayField, Is.Not.Null);
+            Assert.That(fadeStartField, Is.Not.Null);
+            Assert.That(fadeDurationField, Is.Not.Null);
 
             Component health = (Component)healthField.GetValue(handler);
             Rigidbody2D playerBody = (Rigidbody2D)rigidbodyField.GetValue(handler);
@@ -105,14 +126,16 @@ namespace ThreeBosses.Tests
                 healthType,
                 "TryTakeDamage",
                 BindingFlags.Instance | BindingFlags.Public);
-            MethodInfo lockForBossDefeat = RequireMethod(
-                handlerType,
-                "LockForBossDefeat",
-                BindingFlags.Instance | BindingFlags.Public);
+
+            Assert.That(loaderHandlerField.GetValue(loader), Is.SameAs(handler));
+            Assert.That((float)fadeStartField.GetValue(loader), Is.EqualTo(0.9f));
+            Assert.That((float)fadeDurationField.GetValue(loader), Is.EqualTo(0.5f));
+            Assert.That((float)loadDelayField.GetValue(loader), Is.EqualTo(1.4f));
 
             float timeScaleBeforeLock = Time.timeScale;
             int healthBeforeLock = (int)currentHealth.GetValue(health);
-            lockForBossDefeat.Invoke(handler, null);
+            int remainsBeforeDeath = CountBehavioursOfType(remainsType);
+            bossFixture.SetHealth(0);
 
             bool damageApplied = (bool)tryTakeDamage.Invoke(health, new object[] { 1 });
             Assert.That((bool)isInvulnerable.GetValue(health), Is.True);
@@ -121,7 +144,38 @@ namespace ThreeBosses.Tests
             Assert.That(playerBody.simulated, Is.False);
             Assert.That(Time.timeScale, Is.EqualTo(timeScaleBeforeLock));
 
-            yield return null;
+            yield return new WaitForSecondsRealtime(0.5f);
+
+            Assert.That(bossFixture.IsDeathVisualActive, Is.False);
+            Assert.That(
+                CountBehavioursOfType(remainsType),
+                Is.GreaterThan(remainsBeforeDeath),
+                "Kraken's final death frame should hand off to visible remains before the fade begins.");
+            Assert.That(GetScreenFadeAlpha(), Is.EqualTo(0f).Within(0.001f));
+        }
+
+        private static int CountBehavioursOfType(Type type)
+        {
+            MonoBehaviour[] behaviours = UnityEngine.Object.FindObjectsByType<MonoBehaviour>(
+                FindObjectsInactive.Include,
+                FindObjectsSortMode.None);
+            return Array.FindAll(behaviours, behaviour => behaviour.GetType() == type).Length;
+        }
+
+        private static float GetScreenFadeAlpha()
+        {
+            Type screenFadeType = RequireRuntimeType("ScreenFade");
+            MonoBehaviour[] behaviours = UnityEngine.Object.FindObjectsByType<MonoBehaviour>(
+                FindObjectsInactive.Include,
+                FindObjectsSortMode.None);
+            MonoBehaviour screenFade = Array.Find(
+                behaviours,
+                behaviour => behaviour.GetType() == screenFadeType);
+            Assert.That(screenFade, Is.Not.Null, "ScreenFade was not found in Level 3.");
+
+            UnityEngine.UI.Image image = screenFade.GetComponent<UnityEngine.UI.Image>();
+            Assert.That(image, Is.Not.Null, "ScreenFade is missing its Image.");
+            return image.color.a;
         }
 
         private static void ResetKrakenPracticeRun()
@@ -176,6 +230,7 @@ namespace ThreeBosses.Tests
             private readonly Component runeAttack;
             private readonly MethodInfo setHealth;
             private readonly MethodInfo selectAnchors;
+            private readonly Animator animator;
             private readonly PropertyInfo maxHealth;
             private readonly PropertyInfo isInPhaseTwo;
             private readonly PropertyInfo isInvulnerable;
@@ -185,6 +240,10 @@ namespace ThreeBosses.Tests
                 this.boss = boss;
                 this.health = health;
                 this.runeAttack = runeAttack;
+                animator = (Animator)RequireField(
+                    boss.GetType(),
+                    "animator").GetValue(boss);
+                Assert.That(animator, Is.Not.Null, "Boss 3 Animator was not configured.");
 
                 Type healthType = health.GetType();
                 setHealth = RequireMethod(healthType, "SetHealth", BindingFlags.Instance | BindingFlags.Public);
@@ -203,6 +262,7 @@ namespace ThreeBosses.Tests
             public int MaxHealth => (int)maxHealth.GetValue(health);
             public bool IsInPhaseTwo => (bool)isInPhaseTwo.GetValue(boss);
             public bool IsInvulnerable => (bool)isInvulnerable.GetValue(boss);
+            public bool IsDeathVisualActive => animator.gameObject.activeSelf;
 
             public void SetHealth(int value)
             {
@@ -249,6 +309,13 @@ namespace ThreeBosses.Tests
                 PropertyInfo property = type.GetProperty(name, BindingFlags.Instance | BindingFlags.Public);
                 Assert.That(property, Is.Not.Null, $"Property {type.FullName}.{name} was not found.");
                 return property;
+            }
+
+            private static FieldInfo RequireField(Type type, string name)
+            {
+                FieldInfo field = type.GetField(name, BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.That(field, Is.Not.Null, $"Field {type.FullName}.{name} was not found.");
+                return field;
             }
         }
     }

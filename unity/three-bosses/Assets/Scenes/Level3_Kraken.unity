@@ -607,7 +607,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 7e64ec7655c306e4ca7102e18be98420, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: Assembly-CSharp::Boss3RuneGroundAnchor
   isEnabled: 1
 --- !u!224 &251517337 stripped
@@ -657,7 +657,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 7e64ec7655c306e4ca7102e18be98420, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: Assembly-CSharp::Boss3RuneGroundAnchor
   isEnabled: 1
 --- !u!1 &311261644
@@ -751,7 +751,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 557e8bf4d5bf956459417e51b8973721, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: Assembly-CSharp::HealthComponent
 --- !u!1 &432769899
 GameObject:
@@ -802,7 +802,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 7bfa26f2881cab6488e89709ed3e95fa, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: Assembly-CSharp::SceneFadeInOnStart
   screenFade: {fileID: 432769902}
   fadeOutDuration: 0.9
@@ -817,7 +817,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: a771baee925346d4aa0bfe64bdc5f805, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: Assembly-CSharp::ScreenFade
   fadeImage: {fileID: 432769903}
   initialAlpha: 1
@@ -831,7 +831,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: fe87c0e1cc204ed48ad3b37840f39efc, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.Image
   m_Material: {fileID: 0}
   m_Color: {r: 0, g: 0, b: 0, a: 0}
@@ -930,7 +930,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 557e8bf4d5bf956459417e51b8973721, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: Assembly-CSharp::HealthComponent
 --- !u!4 &443463614 stripped
 Transform:
@@ -1011,8 +1011,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: a79441f348de89743a2939f4d699eac1, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Name:
+  m_EditorClassIdentifier:
   m_RenderShadows: 1
   m_RequiresDepthTextureOption: 2
   m_RequiresOpaqueTextureOption: 2
@@ -1121,7 +1121,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: c88f5cead0c0b2a4eb05b5900433f8d1, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: Unity.RenderPipelines.Universal.2D.Runtime::UnityEngine.Rendering.Universal.PixelPerfectCamera
   m_ComponentVersion: 1
   m_AssetsPPU: 32
@@ -1260,8 +1260,8 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 073797afb82c5a1438f328866b10b3f0, type: 3}
-  m_Name: 
-  m_EditorClassIdentifier: 
+  m_Name:
+  m_EditorClassIdentifier:
   m_ComponentVersion: 2
   m_LightType: 4
   m_BlendStyleIndex: 0
@@ -11319,7 +11319,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 7e64ec7655c306e4ca7102e18be98420, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: Assembly-CSharp::Boss3RuneGroundAnchor
   isEnabled: 1
 --- !u!1 &1183622003
@@ -11349,7 +11349,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 3495f33b300e47f418fad14fd21e7675, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: Assembly-CSharp::WeaponCrateSpawner
   weaponCratePrefab: {fileID: 2890884011471952736, guid: dc38a6c2e3b5ecc49ac56a3daa4ffedf, type: 3}
   spawnIntervalSeconds: 2
@@ -11468,7 +11468,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 7e64ec7655c306e4ca7102e18be98420, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: Assembly-CSharp::Boss3RuneGroundAnchor
   isEnabled: 1
 --- !u!1 &1443143855
@@ -11554,7 +11554,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 7e64ec7655c306e4ca7102e18be98420, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: Assembly-CSharp::Boss3RuneGroundAnchor
   isEnabled: 1
 --- !u!1 &1533031820
@@ -11894,7 +11894,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 7e64ec7655c306e4ca7102e18be98420, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: Assembly-CSharp::Boss3RuneGroundAnchor
   isEnabled: 1
 --- !u!1 &1770686771
@@ -12120,7 +12120,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: dc42784cf147c0c48a680349fa168899, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.GraphicRaycaster
   m_IgnoreReversedGraphics: 1
   m_BlockingObjects: 0
@@ -12137,7 +12137,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 0cd44c1031e13a943bb63640046fad76, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.CanvasScaler
   m_UiScaleMode: 1
   m_ReferencePixelsPerUnit: 100
@@ -12238,7 +12238,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 7e64ec7655c306e4ca7102e18be98420, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: Assembly-CSharp::Boss3RuneGroundAnchor
   isEnabled: 1
 --- !u!1 &1922656396
@@ -12305,10 +12305,11 @@ MonoBehaviour:
   bossId: 3
   transitionSceneName:
   endSceneName: End
-  loadDelaySeconds: 1.25
+  loadDelaySeconds: 1.4
   fadeDurationSeconds: 0.5
-  fadeStartDelaySeconds: 0.75
+  fadeStartDelaySeconds: 0.9
   screenFade: {fileID: 432769902}
+  playerDeathHandler: {fileID: 5307331602542309123}
 --- !u!4 &2070157416
 Transform:
   m_ObjectHideFlags: 0
@@ -12366,7 +12367,7 @@ MonoBehaviour:
   m_Enabled: 1
   m_EditorHideFlags: 0
   m_Script: {fileID: 11500000, guid: 7e64ec7655c306e4ca7102e18be98420, type: 3}
-  m_Name: 
+  m_Name:
   m_EditorClassIdentifier: Assembly-CSharp::Boss3RuneGroundAnchor
   isEnabled: 1
 --- !u!1 &2145539465
@@ -14311,51 +14312,51 @@ PrefabInstance:
     m_Modifications:
     - target: {fileID: 3562478533935132425, guid: 780c9e927613e4c448bd5fc0142c8514, type: 3}
       propertyPath: playerTarget
-      value: 
+      value:
       objectReference: {fileID: 443463614}
     - target: {fileID: 3562478533935132425, guid: 780c9e927613e4c448bd5fc0142c8514, type: 3}
       propertyPath: anchorContainer
-      value: 
+      value:
       objectReference: {fileID: 1443143856}
     - target: {fileID: 3562478533935132425, guid: 780c9e927613e4c448bd5fc0142c8514, type: 3}
       propertyPath: 'groundAnchors.Array.data[0]'
-      value: 
+      value:
       objectReference: {fileID: 1259489354}
     - target: {fileID: 3562478533935132425, guid: 780c9e927613e4c448bd5fc0142c8514, type: 3}
       propertyPath: 'groundAnchors.Array.data[1]'
-      value: 
+      value:
       objectReference: {fileID: 274836557}
     - target: {fileID: 3562478533935132425, guid: 780c9e927613e4c448bd5fc0142c8514, type: 3}
       propertyPath: 'groundAnchors.Array.data[2]'
-      value: 
+      value:
       objectReference: {fileID: 1756782139}
     - target: {fileID: 3562478533935132425, guid: 780c9e927613e4c448bd5fc0142c8514, type: 3}
       propertyPath: 'groundAnchors.Array.data[3]'
-      value: 
+      value:
       objectReference: {fileID: 2075961796}
     - target: {fileID: 3562478533935132425, guid: 780c9e927613e4c448bd5fc0142c8514, type: 3}
       propertyPath: 'groundAnchors.Array.data[4]'
-      value: 
+      value:
       objectReference: {fileID: 219862611}
     - target: {fileID: 3562478533935132425, guid: 780c9e927613e4c448bd5fc0142c8514, type: 3}
       propertyPath: 'groundAnchors.Array.data[5]'
-      value: 
+      value:
       objectReference: {fileID: 195977254}
     - target: {fileID: 3562478533935132425, guid: 780c9e927613e4c448bd5fc0142c8514, type: 3}
       propertyPath: 'groundAnchors.Array.data[6]'
-      value: 
+      value:
       objectReference: {fileID: 64100735}
     - target: {fileID: 3562478533935132425, guid: 780c9e927613e4c448bd5fc0142c8514, type: 3}
       propertyPath: 'groundAnchors.Array.data[7]'
-      value: 
+      value:
       objectReference: {fileID: 1889590816}
     - target: {fileID: 3562478533935132425, guid: 780c9e927613e4c448bd5fc0142c8514, type: 3}
       propertyPath: 'groundAnchors.Array.data[8]'
-      value: 
+      value:
       objectReference: {fileID: 1473916167}
     - target: {fileID: 3562478533935132425, guid: 780c9e927613e4c448bd5fc0142c8514, type: 3}
       propertyPath: 'groundAnchors.Array.data[9]'
-      value: 
+      value:
       objectReference: {fileID: 1134128576}
     - target: {fileID: 5611514302884848568, guid: 780c9e927613e4c448bd5fc0142c8514, type: 3}
       propertyPath: m_LocalPosition.x
@@ -14399,27 +14400,27 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 6291071611755828136, guid: 780c9e927613e4c448bd5fc0142c8514, type: 3}
       propertyPath: 'anchors.Array.data[0]'
-      value: 
+      value:
       objectReference: {fileID: 1533031821}
     - target: {fileID: 6291071611755828136, guid: 780c9e927613e4c448bd5fc0142c8514, type: 3}
       propertyPath: 'anchors.Array.data[1]'
-      value: 
+      value:
       objectReference: {fileID: 1652878425}
     - target: {fileID: 6291071611755828136, guid: 780c9e927613e4c448bd5fc0142c8514, type: 3}
       propertyPath: 'anchors.Array.data[2]'
-      value: 
+      value:
       objectReference: {fileID: 523307211}
     - target: {fileID: 6291071611755828136, guid: 780c9e927613e4c448bd5fc0142c8514, type: 3}
       propertyPath: 'anchors.Array.data[3]'
-      value: 
+      value:
       objectReference: {fileID: 907357895}
     - target: {fileID: 6291071611755828136, guid: 780c9e927613e4c448bd5fc0142c8514, type: 3}
       propertyPath: 'anchors.Array.data[4]'
-      value: 
+      value:
       objectReference: {fileID: 1922656397}
     - target: {fileID: 6291071611755828136, guid: 780c9e927613e4c448bd5fc0142c8514, type: 3}
       propertyPath: 'anchors.Array.data[5]'
-      value: 
+      value:
       objectReference: {fileID: 1785919324}
     - target: {fileID: 7144671342579868446, guid: 780c9e927613e4c448bd5fc0142c8514, type: 3}
       propertyPath: m_Name
@@ -14431,15 +14432,15 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 8420348612108221015, guid: 780c9e927613e4c448bd5fc0142c8514, type: 3}
       propertyPath: 'particleSystemsToStop.Array.data[0]'
-      value: 
+      value:
       objectReference: {fileID: 1985960315238784078, guid: 83cf026ed15f67346a0585224bfb5974, type: 3}
     - target: {fileID: 8420348612108221015, guid: 780c9e927613e4c448bd5fc0142c8514, type: 3}
       propertyPath: 'particleSystemsToStop.Array.data[1]'
-      value: 
+      value:
       objectReference: {fileID: 2584618638324963504, guid: bd44de15c680a984b96ba297cc7b9093, type: 3}
     - target: {fileID: 9094034380337690614, guid: 780c9e927613e4c448bd5fc0142c8514, type: 3}
       propertyPath: playerTarget
-      value: 
+      value:
       objectReference: {fileID: 443463614}
     m_RemovedComponents: []
     m_RemovedGameObjects: []
@@ -14456,7 +14457,7 @@ PrefabInstance:
     m_Modifications:
     - target: {fileID: 329036500521947354, guid: e71391d173d13e740aff2eebf0e4fdeb, type: 3}
       propertyPath: health
-      value: 
+      value:
       objectReference: {fileID: 443463597}
     - target: {fileID: 2268560211004022333, guid: e71391d173d13e740aff2eebf0e4fdeb, type: 3}
       propertyPath: m_Pivot.x
@@ -14604,6 +14605,17 @@ PrefabInstance:
     m_AddedGameObjects: []
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 1eb6ca90e9706364d9dd1f9c2625e359, type: 3}
+--- !u!114 &5307331602542309123 stripped
+MonoBehaviour:
+  m_CorrespondingSourceObject: {fileID: 3025007772032398655, guid: 1eb6ca90e9706364d9dd1f9c2625e359, type: 3}
+  m_PrefabInstance: {fileID: 5307331602542309122}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 05ee7a7a17d29574895ce3257f7dc78e, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::PlayerDeathHandler
 --- !u!1001 &5409199719126289604
 PrefabInstance:
   m_ObjectHideFlags: 0
@@ -14614,11 +14626,11 @@ PrefabInstance:
     m_Modifications:
     - target: {fileID: 135352923265672851, guid: 001ef4266dce44141a16173844cb212a, type: 3}
       propertyPath: m_Sprite
-      value: 
+      value:
       objectReference: {fileID: 21300000, guid: 958b35d18661f81419b2ae674867e497, type: 3}
     - target: {fileID: 1768843249421247731, guid: 001ef4266dce44141a16173844cb212a, type: 3}
       propertyPath: sheenMask
-      value: 
+      value:
       objectReference: {fileID: 525886817}
     - target: {fileID: 2268560211004022333, guid: 001ef4266dce44141a16173844cb212a, type: 3}
       propertyPath: m_Pivot.x
@@ -14714,7 +14726,7 @@ PrefabInstance:
       objectReference: {fileID: 0}
     - target: {fileID: 4528471446410766014, guid: 001ef4266dce44141a16173844cb212a, type: 3}
       propertyPath: health
-      value: 
+      value:
       objectReference: {fileID: 413541756}
     - target: {fileID: 5010765635567882237, guid: 001ef4266dce44141a16173844cb212a, type: 3}
       propertyPath: m_Name

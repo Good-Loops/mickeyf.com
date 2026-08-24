@@ -109,8 +109,8 @@ public static class RunOutcomeSceneBuilder
                 BossId.Kraken,
                 string.Empty,
                 KrakenDefeatPath,
-                1.25f,
-                0.75f,
+                1.4f,
+                0.9f,
                 0.5f,
                 true);
 
@@ -310,6 +310,7 @@ public static class RunOutcomeSceneBuilder
         SetFloat(bossLoader, "fadeStartDelaySeconds", bossFadeStartDelay);
         SetFloat(bossLoader, "fadeDurationSeconds", bossFadeDuration);
         SetObjectReference(bossLoader, "screenFade", screenFade);
+        SetObjectReference(bossLoader, "playerDeathHandler", deathHandler);
 
         GameObject playerOutcomeObject = FindOrCreateRoot(scene, PlayerLoaderObjectName);
         RunPlayerDefeatSceneLoader playerLoader = playerOutcomeObject.GetComponent<RunPlayerDefeatSceneLoader>()
