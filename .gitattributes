@@ -76,3 +76,6 @@ unity/three-bosses/**/*.txt text eol=lf
 *.otf -text
 *.dll -text
 *.jar -text
+
+# Unity CLI skill files are generated verbatim by `unity skill refresh`.
+.agents/skills/unity-cli/** whitespace=-trailing-space
