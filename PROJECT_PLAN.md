@@ -16,21 +16,28 @@ each phase boundary.
   - Step 12.11A — rename permanent Unity Editor utilities: **completed** in
     commit `46c3c775`.
   - Step 12.11B — review and stabilize the existing local UI changes:
-    **in progress**.
-  - Step 12.11C — normalize button hover behavior, including Try Again, Retry,
-    and the disabled Submit Score button.
+    **completed** across commits `ac7ecd84`, `4c20b87d`, and `fa23f916`.
+  - Step 12.11C — normalize button hover behavior, including Try Again, Back to
+    Menu, and the disabled Submit Score button: **completed** in commits
+    `ac7ecd84` and `fa23f916`.
   - Step 12.11D — fix countdown presentation so `3` begins green with no white
-    flash and all `3`, `2`, `1`, and `GO!` states use consistent styling.
+    flash and all `3`, `2`, `1`, and `GO!` states use consistent styling:
+    **completed** in commits `4c20b87d` and `fa23f916`.
   - Step 12.11E — tune boss-defeat visibility, fade timing, and transition
-    screen duration.
+    screen duration: **completed** in commits `b3308dfa`, `957c8cd7`, and
+    `93df8334`.
   - Step 12.11F — add a read-only live timer at the top center of all three
     gameplay scenes using the existing run session and time formatter:
     **completed** in commit `248cfa51`.
   - Step 12.11G — exclude boss-death presentation, fades, illustrated
     transitions, loading, and next-level reveal from completion time and score;
-    only active combat time counts: **completed** on the gameplay branch.
+    only active combat time counts: **completed** in commit `5549f30a`.
   - Step 12.11H — complete the full three-boss route, defeat-screen, button,
-    audio-persistence, duplicate-event, and interrupted-run smoke tests.
+    audio-persistence, duplicate-event, and interrupted-run smoke tests:
+    **controlled full-route validation completed on 2026-08-24**. Automated
+    coverage passed 19 EditMode and 18 PlayMode tests, with clean Unity source
+    integrity and no Console warnings or errors. Mike's continuous hands-on
+    combat-feel and audible mute/unmute check remains before Phase 12 closes.
 
 Phase 12 closes only after Steps 12.10 and 12.11 are complete, Unity compilation
 and automated tests pass, asset/meta integrity passes, and the complete manual

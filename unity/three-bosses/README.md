@@ -22,9 +22,16 @@ every `.meta` file and do not regenerate GUIDs unnecessarily.
 
 The enabled build scenes are:
 
-1. `Assets/Scenes/Level1_BeeBoss.unity`
-2. `Assets/Scenes/Level2_CyborgBoss.unity`
-3. `Assets/Scenes/Level3_Kraken.unity`
+1. `Assets/Scenes/UI/MainMenu.unity`
+2. `Assets/Scenes/Level1_BeeBoss.unity`
+3. `Assets/Scenes/UI/Transition_BeeToCyborg.unity`
+4. `Assets/Scenes/Level2_CyborgBoss.unity`
+5. `Assets/Scenes/UI/Transition_CyborgToKraken.unity`
+6. `Assets/Scenes/Level3_Kraken.unity`
+7. `Assets/Scenes/UI/Defeat_Bee.unity`
+8. `Assets/Scenes/UI/Defeat_Cyborg.unity`
+9. `Assets/Scenes/UI/Defeat_Kraken.unity`
+10. `Assets/Scenes/UI/End.unity`
 
 Baseline keyboard controls are:
 
@@ -36,20 +43,23 @@ Baseline keyboard controls are:
 
 ## Play Mode verification
 
-Before publishing gameplay changes, check all three scenes and confirm:
+Before publishing gameplay changes, traverse the complete enabled route and
+confirm:
 
 - horizontal movement, double jump, dash, player damage, and player death;
 - crate spawning and pickup behavior;
 - all ten weapons, including fire and impact behavior;
 - all 21 weapon-related audio clips, including the Phase Anchor loop and end;
-- boss health, phase changes, death, and the Level 1 to Level 2 and Level 2 to
-  Level 3 transitions;
+- boss health, phase changes, death, both illustrated boss transitions, and the
+  final result flow;
+- each boss-specific defeat screen, Try Again and Back to Menu navigation,
+  countdown gating, active-combat timer behavior, and audio persistence;
 - no missing scripts, prefabs, references, or Console errors.
 
 Boss 3 enters phase two at 50% health and expands its rune attack from two
-anchors to three. The current project intentionally has no scene transition
-after the Level 3 boss; that completion flow is deferred until its artwork and
-scene design are integrated.
+anchors to three. Defeating Boss 3 now freezes the active-combat timer and opens
+the final result scene. Rank calibration and score submission remain deferred;
+completed runs display `UNRANKED`, and Submit Score remains disabled.
 
 ## Repository boundaries
 
@@ -59,10 +69,10 @@ the project documentation. Unity regenerates `Library/`, `Temp/`, `Obj/`,
 `Recordings/`, and IDE project files locally; those paths are ignored and must
 not be committed. `Assets/_Recovery` is deliberately excluded.
 
-The project includes four focused Play Mode regression tests for Boss 3's
-phase-two threshold, one-way latch, lethal-damage path, and rune expansion.
-Passing those tests and the headless script compile does not replace the
-hands-on Play Mode checks above.
+The project includes focused EditMode and PlayMode regression suites covering
+the run session, combat-only timer, countdown, UI feedback, death-animation
+handoffs, and Boss 3 phase-two behavior. Passing those tests and source
+integrity checks does not replace the hands-on Play Mode checks above.
 
 ## Licensing and provenance
 
