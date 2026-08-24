@@ -11,7 +11,9 @@ each phase boundary.
 - Step 12.10 — rank calibration: **deferred by owner decision on 2026-08-18**.
   Keep results `UNRANKED`; do not invent thresholds. Resume after several
   representative normal human completion times are available and after run
-  timing semantics and transition pacing are finalized.
+  timing semantics and transition pacing are finalized. This remains a
+  pre-release gate but does not block Phase 13 implementation while rank output
+  stays `UNRANKED` and score submission stays disabled.
 - Step 12.11 — edge cases and presentation polish:
   - Step 12.11A — rename permanent Unity Editor utilities: **completed** in
     commit `46c3c775`.
@@ -36,16 +38,22 @@ each phase boundary.
     audio-persistence, duplicate-event, and interrupted-run smoke tests:
     **controlled full-route validation completed on 2026-08-24**. Automated
     coverage passed 19 EditMode and 18 PlayMode tests, with clean Unity source
-    integrity and no Console warnings or errors. Mike's continuous hands-on
-    combat-feel and audible mute/unmute check remains before Phase 12 closes.
+    integrity and no Console warnings or errors. Mike confirmed audible
+    mute/unmute behavior on 2026-08-24. His continuous hands-on combat-feel,
+    weapon, pickup, and full normal-route check remains before release.
 
-Phase 12 closes only after Steps 12.10 and 12.11 are complete, Unity compilation
-and automated tests pass, asset/meta integrity passes, and the complete manual
-route is verified.
+Phase 12 release acceptance still requires Step 12.10, the remaining hands-on
+gameplay check, passing Unity compilation and automated tests, clean asset/meta
+integrity, and a verified complete normal route. Per the owner's sequencing
+decision, those release gates may remain open while Phase 13 is implemented,
+provided ranks remain `UNRANKED` and submission remains disabled.
 
 ## Phase 13 — Website and leaderboard integration
 
-Begin only after the local Three Bosses result flow is stable.
+The local Three Bosses result flow is stable enough for integration work.
+Continue Phase 13 on the existing feature branch; do not merge or push these
+changes to `main` until Phase 13 is complete and the remaining Phase 12 release
+gates above have been satisfied.
 
 ### Multi-game leaderboard redesign
 
