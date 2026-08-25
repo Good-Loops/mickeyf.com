@@ -38,7 +38,8 @@ live in any local folder; the commands below assume this repository root:
 ### Prerequisites
 
 - Git for Windows
-- Node.js 22 (CI/runtime pinned at 22.23.2) and npm 11.6.2
+- Node.js 22.15 or newer, but lower than 23 (CI/runtime pinned at 22.23.2), and
+  npm 11.6.2
 - Visual Studio Code for Windows
 - Docker Desktop using Linux containers
 - Google Cloud CLI when local Cloud SQL access is needed
@@ -102,9 +103,11 @@ copied into Git.
    code .
    ```
 
-3. Trust the repository and install the recommended Restore Terminals extension
-   when VS Code prompts. The tracked terminal layout then starts four terminals
-   whenever the repository opens:
+3. Review the tracked VS Code configuration, trust the repository, and install
+   the recommended extensions when VS Code prompts. See
+   [`.vscode/README.md`](.vscode/README.md) for the extension and MCP security
+   boundaries. The tracked terminal layout then starts four terminals whenever
+   the repository opens:
 
    - `front`, running the frontend Vite server with a cyan browser icon;
    - `back`, starting the pinned Cloud SQL Auth Proxy, backend compiler/watch,
@@ -206,6 +209,12 @@ npm --prefix backend run prod
 ```
 
 ## Developer tooling
+
+See [`.vscode/README.md`](.vscode/README.md) for the tracked VS Code extension
+recommendations, scoped MCP servers, authentication steps, security boundaries,
+and verification workflow.
+
+### Git hooks
 
 Run once after cloning, from the repository root:
 
