@@ -150,10 +150,15 @@ public static class MainMenuAndCountdownBuilder
             "Audio Button",
             artRoot,
             new Rect(1472f, 76f, 142f, 78f),
-            "AUDIO ON",
+            string.Empty,
             18f);
 
         TMP_Text audioLabel = audioButton.GetComponentInChildren<TMP_Text>(true);
+        if (audioLabel != null)
+            UnityEngine.Object.DestroyImmediate(audioLabel.gameObject);
+
+        AudioToggleIcon audioIcon = CreateAudioIcon(audioButton.transform);
+        UiButtonStyle.ApplyToGraphic(audioButton, audioIcon);
 
         Image fadeImage = CreateImage("Scene Fade", canvas.transform, new Color(0f, 0f, 0f, 0f));
         Stretch(fadeImage.rectTransform);
@@ -166,7 +171,7 @@ public static class MainMenuAndCountdownBuilder
         MainMenuController controller = controllerObject.AddComponent<MainMenuController>();
         SetObjectReference(controller, "playButton", playButton);
         SetObjectReference(controller, "audioButton", audioButton);
-        SetObjectReference(controller, "audioButtonLabel", audioLabel);
+        SetObjectReference(controller, "audioButtonIcon", audioIcon);
         SetObjectReference(controller, "screenFade", screenFade);
         SetString(controller, "firstLevelSceneName", "Level1_BeeBoss");
 
@@ -430,6 +435,22 @@ public static class MainMenuAndCountdownBuilder
         text.fontSize = fontSize;
         text.raycastTarget = false;
         return text;
+    }
+
+    private static AudioToggleIcon CreateAudioIcon(Transform parent)
+    {
+        GameObject iconObject = CreateUiObject("Audio Icon", parent);
+        RectTransform rectTransform = iconObject.GetComponent<RectTransform>();
+        rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+        rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+        rectTransform.pivot = new Vector2(0.5f, 0.5f);
+        rectTransform.anchoredPosition = Vector2.zero;
+        rectTransform.sizeDelta = new Vector2(64f, 44f);
+
+        AudioToggleIcon icon = iconObject.AddComponent<AudioToggleIcon>();
+        icon.raycastTarget = false;
+        icon.SetAudioEnabled(true);
+        return icon;
     }
 
     private static Image CreateImage(string name, Transform parent, Color color)

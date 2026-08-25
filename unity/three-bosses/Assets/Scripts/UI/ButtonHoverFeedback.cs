@@ -102,40 +102,72 @@ public sealed class ButtonHoverFeedback : MonoBehaviour,
             restingScale = visualTarget.localScale;
     }
 
+    private void FadeVisualTo(Color targetColor)
+    {
+        if (button.targetGraphic == null)
+            return;
+
+        button.targetGraphic.CrossFadeColor(
+            targetColor * button.colors.colorMultiplier,
+            button.colors.fadeDuration,
+            true,
+            true);
+    }
+
     public void OnPointerEnter(PointerEventData _)
     {
         if (TryUsePointerFeedback())
+        {
             isPointerInside = true;
+            FadeVisualTo(button.colors.highlightedColor);
+        }
     }
 
     public void OnPointerExit(PointerEventData _)
     {
         isPointerInside = false;
 
-        if (!button.isActiveAndEnabled || !button.IsInteractable())
+        if (button.isActiveAndEnabled && button.IsInteractable())
+            FadeVisualTo(button.colors.normalColor);
+        else
             RestoreRestingState();
     }
 
     public void OnPointerDown(PointerEventData _)
     {
         if (TryUsePointerFeedback())
+        {
             isPressed = true;
+            FadeVisualTo(button.colors.pressedColor);
+        }
     }
 
     public void OnPointerUp(PointerEventData _)
     {
         if (TryUsePointerFeedback())
+        {
             isPressed = false;
+            FadeVisualTo(isPointerInside
+                ? button.colors.highlightedColor
+                : button.colors.normalColor);
+        }
     }
 
     public void OnSelect(BaseEventData _)
     {
         if (TryUsePointerFeedback())
+        {
             isSelected = true;
+            if (!isPointerInside)
+                FadeVisualTo(button.colors.normalColor);
+        }
     }
 
     public void OnDeselect(BaseEventData _)
     {
         isSelected = false;
+        FadeVisualTo(isPointerInside
+            ? button.colors.highlightedColor
+            : button.colors.normalColor);
     }
 }

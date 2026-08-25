@@ -13,8 +13,12 @@ public static class UiButtonStyle
         if (button == null)
             return;
 
-        TMP_Text label = button.GetComponentInChildren<TMP_Text>(true);
-        if (label == null)
+        ApplyToGraphic(button, button.GetComponentInChildren<TMP_Text>(true));
+    }
+
+    public static void ApplyToGraphic(Button button, Graphic visualTarget)
+    {
+        if (button == null || visualTarget == null)
             return;
 
         ButtonHoverFeedback feedback = button.GetComponent<ButtonHoverFeedback>();
@@ -33,21 +37,21 @@ public static class UiButtonStyle
         if (hitArea != null)
             hitArea.color = Color.clear;
 
-        label.color = normal;
-        label.raycastTarget = false;
-        button.targetGraphic = label;
+        visualTarget.color = normal;
+        visualTarget.raycastTarget = false;
+        button.targetGraphic = visualTarget;
         button.transition = Selectable.Transition.ColorTint;
 
         ColorBlock colors = button.colors;
         colors.normalColor = normal;
         colors.highlightedColor = focused;
-        colors.selectedColor = focused;
+        colors.selectedColor = normal;
         colors.pressedColor = pressed;
         colors.disabledColor = new Color(0.46f, 0.46f, 0.5f, 0.62f);
         colors.colorMultiplier = 1f;
         colors.fadeDuration = 0.1f;
         button.colors = colors;
 
-        feedback.Configure(label.rectTransform, accent);
+        feedback.Configure(visualTarget.rectTransform, accent);
     }
 }

@@ -1,5 +1,4 @@
 using System.Collections;
-using TMPro;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
@@ -9,7 +8,7 @@ public sealed class MainMenuController : MonoBehaviour
 {
     [SerializeField] private Button playButton;
     [SerializeField] private Button audioButton;
-    [SerializeField] private TMP_Text audioButtonLabel;
+    [SerializeField] private AudioToggleIcon audioButtonIcon;
     [SerializeField] private string firstLevelSceneName = "Level1_BeeBoss";
     [SerializeField] private ScreenFade screenFade;
     [SerializeField, Min(0f)] private float fadeDurationSeconds = 0.35f;
@@ -19,7 +18,7 @@ public sealed class MainMenuController : MonoBehaviour
     private void Awake()
     {
         UiButtonStyle.Apply(playButton);
-        UiButtonStyle.Apply(audioButton);
+        UiButtonStyle.ApplyToGraphic(audioButton, audioButtonIcon);
     }
 
     private void OnEnable()
@@ -36,7 +35,7 @@ public sealed class MainMenuController : MonoBehaviour
     private void Start()
     {
         Time.timeScale = 1f;
-        RefreshAudioLabel();
+        RefreshAudioIcon();
 
         if (playButton != null && EventSystem.current != null)
             EventSystem.current.SetSelectedGameObject(playButton.gameObject);
@@ -84,17 +83,17 @@ public sealed class MainMenuController : MonoBehaviour
     private void ToggleAudio()
     {
         GameAudioSettings.Toggle();
-        RefreshAudioLabel();
+        RefreshAudioIcon();
     }
 
     private void OnAudioChanged(bool _)
     {
-        RefreshAudioLabel();
+        RefreshAudioIcon();
     }
 
-    private void RefreshAudioLabel()
+    private void RefreshAudioIcon()
     {
-        if (audioButtonLabel != null)
-            audioButtonLabel.text = GameAudioSettings.IsEnabled ? "AUDIO ON" : "AUDIO OFF";
+        if (audioButtonIcon != null)
+            audioButtonIcon.SetAudioEnabled(GameAudioSettings.IsEnabled);
     }
 }

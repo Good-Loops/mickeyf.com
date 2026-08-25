@@ -53,8 +53,29 @@ namespace ThreeBosses.Tests
                 Assert.That(rectTransform.anchorMin, Is.EqualTo(new Vector2(0.5f, 1f)), sceneName);
                 Assert.That(rectTransform.anchorMax, Is.EqualTo(new Vector2(0.5f, 1f)), sceneName);
                 Assert.That(rectTransform.pivot, Is.EqualTo(new Vector2(0.5f, 1f)), sceneName);
-                Assert.That(rectTransform.anchoredPosition, Is.EqualTo(new Vector2(0f, -14f)), sceneName);
-                Assert.That(rectTransform.sizeDelta, Is.EqualTo(new Vector2(280f, 48f)), sceneName);
+                Assert.That(rectTransform.anchoredPosition, Is.EqualTo(new Vector2(0f, -2f)), sceneName);
+                Assert.That(rectTransform.sizeDelta, Is.EqualTo(new Vector2(210f, 24f)), sceneName);
+                Assert.That(GetProperty<float>(label, "fontSize"), Is.EqualTo(22f), sceneName);
+                Assert.That(GetProperty<float>(label, "characterSpacing"), Is.EqualTo(2f), sceneName);
+                Assert.That(GetProperty<object>(label, "fontStyle").ToString(), Is.EqualTo("Normal"), sceneName);
+
+                UnityEngine.Object font = GetProperty<UnityEngine.Object>(label, "font");
+                Assert.That(font, Is.Not.Null, sceneName);
+                Assert.That(font.name, Is.EqualTo("Oxanium-Bold Timer SDF"), sceneName);
+                Material fontMaterial = GetProperty<Material>(label, "fontSharedMaterial");
+                Assert.That(fontMaterial, Is.Not.Null, sceneName);
+                Assert.That(
+                    fontMaterial.mainTexture,
+                    Is.SameAs(GetProperty<Texture>(font, "atlasTexture")),
+                    sceneName);
+                MethodInfo hasCharacters = font.GetType().GetMethod(
+                    "HasCharacters",
+                    BindingFlags.Instance | BindingFlags.Public,
+                    null,
+                    new[] { typeof(string) },
+                    null);
+                Assert.That(hasCharacters, Is.Not.Null, sceneName);
+                Assert.That((bool)hasCharacters.Invoke(font, new object[] { "00:00.000" }), Is.True, sceneName);
 
                 Transform sceneFade = display.transform.parent.Find("SceneFade");
                 Assert.That(sceneFade, Is.Not.Null, sceneName);

@@ -58,6 +58,7 @@ namespace ThreeBosses.Tests
             Assert.That(label.raycastTarget, Is.False);
             Assert.That(button.colors.highlightedColor, Is.EqualTo(firstFocusedColor));
             Assert.That(button.colors.pressedColor, Is.EqualTo(firstPressedColor));
+            Assert.That(button.colors.selectedColor, Is.EqualTo(button.colors.normalColor));
 
             Type feedbackType = RequireType("ButtonHoverFeedback, Assembly-CSharp");
             Component feedback = button.GetComponent(feedbackType);
@@ -67,7 +68,6 @@ namespace ThreeBosses.Tests
                 GetProperty<Color>(feedback, "AccentColor"),
                 Is.EqualTo(new Color(accent.r, accent.g, accent.b, 1f)));
 
-            Color preHoverRendererColor = label.canvasRenderer.GetColor();
             PointerEventData pointerData = new(eventSystem);
             button.OnPointerEnter(pointerData);
             RequireMethod(feedbackType, "OnPointerEnter").Invoke(
@@ -77,7 +77,7 @@ namespace ThreeBosses.Tests
 
             Assert.That(
                 label.canvasRenderer.GetColor(),
-                Is.Not.EqualTo(preHoverRendererColor));
+                Is.Not.EqualTo(button.colors.normalColor));
             Assert.That(label.transform.localScale.x, Is.GreaterThan(1.03f));
             Assert.That(buttonObject.transform.localScale, Is.EqualTo(Vector3.one));
 
@@ -87,11 +87,13 @@ namespace ThreeBosses.Tests
                 new object[] { pointerData });
             yield return new WaitForSecondsRealtime(0.12f);
             Assert.That(label.transform.localScale.x, Is.EqualTo(1f).Within(0.01f));
+            AssertColorApproximately(label.canvasRenderer.GetColor(), button.colors.normalColor);
 
             eventSystem.SetSelectedGameObject(buttonObject);
             yield return new WaitForSecondsRealtime(0.12f);
             Assert.That(label.transform.localScale.x, Is.GreaterThan(1.02f));
             Assert.That(buttonObject.transform.localScale, Is.EqualTo(Vector3.one));
+            AssertColorApproximately(label.canvasRenderer.GetColor(), button.colors.normalColor);
 
             eventSystem.SetSelectedGameObject(null);
             yield return new WaitForSecondsRealtime(0.12f);
@@ -105,6 +107,73 @@ namespace ThreeBosses.Tests
             UnityEngine.Object.Destroy(buttonObject);
             if (eventSystemObject != null)
                 UnityEngine.Object.Destroy(eventSystemObject);
+        }
+
+        [UnityTest]
+        public IEnumerator MainMenuAudioButtonUsesStatefulIconAndRestoresItsSavedPreference()
+        {
+            SceneManager.LoadScene("MainMenu");
+            yield return null;
+
+            Button audioButton = UnityEngine.Object.FindObjectsByType<Button>(
+                    FindObjectsInactive.Include,
+                    FindObjectsSortMode.None)
+                .Single(button => button.gameObject.name == "Audio Button");
+            Assert.That(audioButton, Is.Not.Null);
+
+            Type textType = RequireType("TMPro.TextMeshProUGUI, Unity.TextMeshPro");
+            Assert.That(audioButton.GetComponentsInChildren(textType, true), Is.Empty);
+
+            Type iconType = RequireType("AudioToggleIcon, Assembly-CSharp");
+            Component icon = audioButton.GetComponentInChildren(iconType, true);
+            Assert.That(icon, Is.Not.Null);
+            Assert.That(audioButton.targetGraphic, Is.SameAs(icon));
+            Assert.That(audioButton.targetGraphic.raycastTarget, Is.False);
+            Assert.That(audioButton.GetComponent<Image>().raycastTarget, Is.True);
+            Assert.That(audioButton.GetComponent<Image>().color, Is.EqualTo(Color.clear));
+            Assert.That(audioButton.colors.selectedColor, Is.EqualTo(audioButton.colors.normalColor));
+
+            Type controllerType = RequireType("MainMenuController, Assembly-CSharp");
+            Component controller = UnityEngine.Object.FindFirstObjectByType(controllerType) as Component;
+            Assert.That(controller, Is.Not.Null);
+            FieldInfo iconField = controllerType.GetField(
+                "audioButtonIcon",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(iconField, Is.Not.Null);
+            Assert.That(iconField.GetValue(controller), Is.SameAs(icon));
+
+            Type audioSettingsType = RequireType("GameAudioSettings, Assembly-CSharp");
+            PropertyInfo isEnabledProperty = audioSettingsType.GetProperty(
+                "IsEnabled",
+                BindingFlags.Public | BindingFlags.Static);
+            Assert.That(isEnabledProperty, Is.Not.Null);
+            MethodInfo setEnabledMethod = audioSettingsType.GetMethod(
+                "SetEnabled",
+                BindingFlags.Public | BindingFlags.Static,
+                null,
+                new[] { typeof(bool) },
+                null);
+            Assert.That(setEnabledMethod, Is.Not.Null);
+            bool originalPreference = (bool)isEnabledProperty.GetValue(null);
+
+            try
+            {
+                Assert.That(GetProperty<bool>(icon, "IsAudioEnabled"), Is.EqualTo(originalPreference));
+
+                audioButton.onClick.Invoke();
+                yield return null;
+                Assert.That((bool)isEnabledProperty.GetValue(null), Is.EqualTo(!originalPreference));
+                Assert.That(GetProperty<bool>(icon, "IsAudioEnabled"), Is.EqualTo(!originalPreference));
+
+                audioButton.onClick.Invoke();
+                yield return null;
+                Assert.That((bool)isEnabledProperty.GetValue(null), Is.EqualTo(originalPreference));
+                Assert.That(GetProperty<bool>(icon, "IsAudioEnabled"), Is.EqualTo(originalPreference));
+            }
+            finally
+            {
+                setEnabledMethod.Invoke(null, new object[] { originalPreference });
+            }
         }
 
         [UnityTest]
@@ -211,6 +280,14 @@ namespace ThreeBosses.Tests
                 BindingFlags.Instance | BindingFlags.Public);
             Assert.That(property, Is.Not.Null, $"Property {target.GetType().FullName}.{name} was not found.");
             return (T)property.GetValue(target);
+        }
+
+        private static void AssertColorApproximately(Color actual, Color expected)
+        {
+            Assert.That(actual.r, Is.EqualTo(expected.r).Within(0.01f));
+            Assert.That(actual.g, Is.EqualTo(expected.g).Within(0.01f));
+            Assert.That(actual.b, Is.EqualTo(expected.b).Within(0.01f));
+            Assert.That(actual.a, Is.EqualTo(expected.a).Within(0.01f));
         }
     }
 }

@@ -12,10 +12,11 @@ public static class RunTimerDisplayBuilder
     private const string LevelTwoPath = "Assets/Scenes/Level2_CyborgBoss.unity";
     private const string LevelThreePath = "Assets/Scenes/Level3_Kraken.unity";
     private const string TimerObjectName = "Phase12_RunTimer";
+    private const string TimerFontAssetPath = "Assets/Art/UI/Fonts/Oxanium-Bold Timer SDF.asset";
 
     private static readonly Vector2 TimerAnchor = new(0.5f, 1f);
-    private static readonly Vector2 TimerPosition = new(0f, -14f);
-    private static readonly Vector2 TimerSize = new(280f, 48f);
+    private static readonly Vector2 TimerPosition = new(0f, -2f);
+    private static readonly Vector2 TimerSize = new(210f, 24f);
     private static readonly Color TimerTopColor = new(0.9725f, 0.9922f, 1f, 1f);
     private static readonly Color TimerBottomColor = new(0.5608f, 0.851f, 0.9686f, 1f);
 
@@ -107,18 +108,28 @@ public static class RunTimerDisplayBuilder
 
         TextMeshProUGUI label = timerObject.GetComponent<TextMeshProUGUI>()
             ?? timerObject.AddComponent<TextMeshProUGUI>();
-        if (TMP_Settings.defaultFontAsset == null)
-            throw new InvalidOperationException("TextMesh Pro has no default font asset configured.");
+        TMP_FontAsset timerFont = AssetDatabase.LoadAssetAtPath<TMP_FontAsset>(TimerFontAssetPath);
+        if (timerFont == null)
+            throw new InvalidOperationException(
+                $"The committed timer font asset is missing at {TimerFontAssetPath}.");
+
+        string timerCharacters = RunUiFormatter.FormatTime(0d);
+        if (!timerFont.HasCharacters(timerCharacters))
+            throw new InvalidOperationException(
+                $"The timer font is missing characters required by {timerCharacters}.");
 
         label.text = RunUiFormatter.FormatTime(0d);
-        label.font = TMP_Settings.defaultFontAsset;
-        label.fontSize = 34f;
+        label.font = timerFont;
+        ClearInstancedFontMaterial(label);
+        label.fontSharedMaterial = timerFont.material;
+        label.fontSize = 22f;
         label.enableAutoSizing = false;
-        label.fontStyle = FontStyles.Bold;
+        label.fontStyle = FontStyles.Normal;
         label.alignment = TextAlignmentOptions.Center;
         label.textWrappingMode = TextWrappingModes.NoWrap;
         label.overflowMode = TextOverflowModes.Overflow;
         label.extraPadding = true;
+        label.characterSpacing = 2f;
         label.raycastTarget = false;
         label.color = Color.white;
         label.enableVertexGradient = true;
@@ -128,8 +139,8 @@ public static class RunTimerDisplayBuilder
             TimerBottomColor,
             TimerBottomColor);
         label.outlineColor = new Color32(5, 8, 13, 230);
-        label.outlineWidth = 0.12f;
-        label.margin = new Vector4(8f, 0f, 8f, 0f);
+        label.outlineWidth = 0.08f;
+        label.margin = new Vector4(4f, 0f, 4f, 0f);
 
         RunTimerDisplay display = timerObject.GetComponent<RunTimerDisplay>()
             ?? timerObject.AddComponent<RunTimerDisplay>();
@@ -146,6 +157,15 @@ public static class RunTimerDisplayBuilder
 
         EditorUtility.SetDirty(label);
         EditorUtility.SetDirty(display);
+    }
+
+    private static void ClearInstancedFontMaterial(TextMeshProUGUI label)
+    {
+        SerializedObject serializedLabel = new(label);
+        SerializedProperty fontMaterial = serializedLabel.FindProperty("m_fontMaterial")
+            ?? throw new InvalidOperationException("TextMeshProUGUI is missing m_fontMaterial.");
+        fontMaterial.objectReferenceValue = null;
+        serializedLabel.ApplyModifiedPropertiesWithoutUndo();
     }
 
     private static void BuildScene(string scenePath)

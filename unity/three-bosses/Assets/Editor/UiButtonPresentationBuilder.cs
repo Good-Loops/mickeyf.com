@@ -61,10 +61,22 @@ public static class UiButtonPresentationBuilder
 
         foreach (Button button in buttons)
         {
-            if (button.GetComponentInChildren<TMP_Text>(true) == null)
-                throw new InvalidOperationException($"{button.name} in {scene.name} is missing its label.");
+            if (scene.name == "MainMenu" && button.name == "Audio Button")
+            {
+                AudioToggleIcon icon = button.GetComponentInChildren<AudioToggleIcon>(true)
+                    ?? throw new InvalidOperationException(
+                        $"{button.name} in {scene.name} is missing its audio icon.");
+                UiButtonStyle.ApplyToGraphic(button, icon);
+            }
+            else
+            {
+                if (button.GetComponentInChildren<TMP_Text>(true) == null)
+                    throw new InvalidOperationException(
+                        $"{button.name} in {scene.name} is missing its label.");
 
-            UiButtonStyle.Apply(button);
+                UiButtonStyle.Apply(button);
+            }
+
             EditorUtility.SetDirty(button);
         }
 
