@@ -17,6 +17,14 @@ Dockerfile text eol=lf
 *.md text eol=lf
 /resources/project-structure.txt text eol=lf
 
+# TypeDoc source and generated text use LF on every platform.
+/docs-src/typedoc.css text eol=lf
+/docs/**/*.html text eol=lf
+/docs/**/*.js text eol=lf
+/docs/**/*.css text eol=lf
+/docs/**/*.svg text eol=lf
+/docs/.nojekyll text eol=lf
+
 # Unity serialized assets. text=auto protects unexpected binary serialization;
 # textual assets use LF.
 *.unity eol=lf

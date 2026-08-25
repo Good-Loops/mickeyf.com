@@ -1,6 +1,8 @@
 {
   "tsconfig": "./tsconfig.typedoc.json",
   "basePath": "..",
+  "gitRevision": "main",
+  "sourceLinkTemplate": "https://github.com/Good-Loops/mickeyf.com/blob/main/{path}#L{line}",
   "entryPoints": [
     "ts/public/contracts.ts"
   ],
