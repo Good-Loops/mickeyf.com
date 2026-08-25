@@ -90,6 +90,15 @@ const readManifest = async (signal: AbortSignal): Promise<UnityWebGlManifest> =>
         );
     }
 
+    if (response.status === 500) {
+        // Vite's local proxy converts an unavailable asset server into an
+        // empty HTTP 500 response, so surface the same actionable message as
+        // a direct network failure.
+        throw new Error(
+            'The local Three Bosses WebGL server is unavailable. Start it and rebuild the game if needed.',
+        );
+    }
+
     if (!response.ok) {
         throw new Error(
             `The local Three Bosses WebGL build is unavailable (HTTP ${response.status}).`,
