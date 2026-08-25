@@ -96,41 +96,36 @@ copied into Git.
 ### Start development
 
 1. Start Docker Desktop.
-2. Start the Cloud SQL Auth Proxy from the repository root:
-
-   ```powershell
-   npm run infra:up
-   ```
-
-3. Open the native Windows folder in VS Code:
+2. Open the native Windows folder in VS Code:
 
    ```powershell
    code .
    ```
 
-4. On first use, allow the automatic workspace tasks when VS Code prompts in
-   this trusted repository. VS Code then starts three native workspace tasks
+3. Trust the repository and install the recommended Restore Terminals extension
+   when VS Code prompts. The tracked terminal layout then starts four terminals
    whenever the repository opens:
 
    - `front`, running the frontend Vite server with a cyan browser icon;
+   - `back`, starting the pinned Cloud SQL Auth Proxy, backend compiler/watch,
+     and nodemon server together with prefixed logs and a red server icon;
    - `docs`, running the TypeDoc development server with a green book icon; and
-   - `general`, an idle PowerShell at the repository root with the historical
-     orange terminal tint (`terminal.ansiBlue` in the Monokai Spectrum theme).
+   - `general`, running Copilot CLI in Git Bash at the repository root with the
+     historical orange terminal tint (`terminal.ansiBlue` in the Monokai
+     Spectrum theme).
 
-5. For backend development, run `Terminal: Run Task`, then select
-   `Backend: dev + watch`.
-
-The `Workspace: startup` compound task owns the automatic layout. You can
-also run it manually from `Terminal: Run Task`. The separate `Development: app`
-compound task starts the frontend Vite server, backend webpack watcher, and
-backend nodemon server. Infrastructure is never started implicitly.
+The tracked `.vscode/restore-terminals.json` owns the automatic layout. The
+existing `Infrastructure: up`, `Backend: dev`, `Backend: watch`, and
+`Backend: dev + watch` entries remain available from `Terminal: Run Task` for
+granular recovery. `Backend: local stack` starts the combined backend terminal,
+and `Development: app` starts that local stack together with the frontend.
 
 The equivalent manual commands, each in its own terminal, are:
 
 ```powershell
 npm --prefix frontend run dev
-npm --prefix backend run watch
-npm --prefix backend run dev
+npm run backend:dev:local
+npm run docs:dev
 ```
 
 Default local ports are:

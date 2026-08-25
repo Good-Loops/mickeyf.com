@@ -21,6 +21,20 @@
       "cwd": "${workspaceFolder}",
       "splitTerminals": [
         {
+          "name": "back",
+          "icon": "server",
+          "color": "terminal.ansiRed",
+          "commands": [
+            "npm run backend:dev:local"
+          ],
+          "shouldRunCommands": true
+        }
+      ]
+    },
+    {
+      "cwd": "${workspaceFolder}",
+      "splitTerminals": [
+        {
           "name": "docs",
           "icon": "book",
           "color": "terminal.ansiGreen",

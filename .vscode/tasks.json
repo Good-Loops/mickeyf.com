@@ -93,8 +93,17 @@
       "problemMatcher": []
     },
     {
+      "label": "Backend: local stack",
+      "type": "npm",
+      "script": "backend:dev:local",
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "runOptions": { "instanceLimit": 1 }
+    },
+    {
       "label": "Development: app",
-      "dependsOn": ["Frontend: dev", "Backend: watch", "Backend: dev"],
+      "dependsOn": ["Frontend: dev", "Backend: local stack"],
       "dependsOrder": "parallel",
       "problemMatcher": []
     }
