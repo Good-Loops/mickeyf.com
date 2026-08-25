@@ -137,6 +137,11 @@ network errors, and that the rest of the website still works. Record any
 remaining hands-on gameplay or browser-specific defects before public-release
 work begins.
 
+Future gameplay polish, deferred until after the current local playability
+work: add an in-game pause button and a simple pause menu. Pausing must freeze
+gameplay, active-combat timing, and audio consistently, and Resume must restore
+them cleanly.
+
 ### Multi-game leaderboard redesign
 
 Redesign `/leaderboard` as a multi-game experience rather than extending the
