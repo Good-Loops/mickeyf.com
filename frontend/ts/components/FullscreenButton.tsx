@@ -7,6 +7,7 @@ import React, { useEffect, useState, useRef } from "react";
 
 interface FullscreenButtonProps {
     targetRef?: React.RefObject<HTMLElement | HTMLDivElement | null>;
+    focusRef?: React.RefObject<HTMLElement | null>;
     className?: string;
     label?: string;
 }
@@ -60,6 +61,7 @@ const FullscreenExitIcon: React.FC = () => (
 
 const FullscreenButton: React.FC<FullscreenButtonProps> = ({
     targetRef,
+    focusRef,
     className = "",
     label,
 }) => {
@@ -75,6 +77,8 @@ const FullscreenButton: React.FC<FullscreenButtonProps> = ({
             } else {
                 await target.requestFullscreen();
             }
+
+            focusRef?.current?.focus({ preventScroll: true });
         } catch (error) {
             // Browsers can deny fullscreen when the click is not considered a
             // direct user gesture. Leave the control retryable and avoid an

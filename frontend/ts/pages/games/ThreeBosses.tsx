@@ -108,6 +108,7 @@ const ThreeBosses: React.FC = () => {
 
                 <FullscreenButton
                     targetRef={frameRef}
+                    focusRef={canvasRef}
                     className="three-bosses__fullscreen-btn"
                 />
             </div>

@@ -77,8 +77,18 @@
     }
 
     & &__canvas-wrapper:fullscreen &__fullscreen-btn {
-        right: max(.45rem, env(safe-area-inset-right));
-        bottom: max(.45rem, env(safe-area-inset-bottom));
+        // Keep the control attached to the letterboxed 16:9 canvas instead of
+        // the viewport edge on portrait and ultrawide displays.
+        right: max(
+            .45rem,
+            env(safe-area-inset-right),
+            calc((100vw - (100vh * 16 / 9)) / 2 + .45rem)
+        );
+        bottom: max(
+            .45rem,
+            env(safe-area-inset-bottom),
+            calc((100vh - (100vw * 9 / 16)) / 2 + .45rem)
+        );
     }
 
     // Unity continuously synchronizes its drawing buffer to the CSS canvas
