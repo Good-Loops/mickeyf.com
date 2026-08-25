@@ -1,8 +1,10 @@
 # Multi-game leaderboard design
 
 Status: Phase 13.1 contract approved by Mike on 2026-08-24. The sanitized live
-schema preflight completed on the same date. This document does not authorize a
-production schema or data change.
+schema preflight completed on the same date. On 2026-08-25, Mike approved the
+end state in which p4-Vega uses the generic leaderboard storage and the legacy
+`users.p4_score` column is retired after a verified cutover. This document does
+not authorize a production schema or data change.
 
 ## Invariants
 
@@ -10,9 +12,12 @@ production schema or data change.
 - The backend owns validation, score derivation, ranking order, submission
   enablement, and rules versions.
 - Existing `submit_score` and `get_leaderboard` requests and their p4-Vega
-  response bodies remain compatible throughout the migration.
-- Existing `users.p4_score` values are preserved. The column is not altered or
-  dropped during Phase 13.
+  response bodies remain compatible throughout the migration, including after
+  their storage implementation moves to `game_personal_bests`.
+- Existing `users.p4_score` values are preserved until every non-null score is
+  backfilled and reconciled. The initial additive migrations do not alter the
+  column; a later immutable migration drops it only after the verified cutover
+  gates below are satisfied.
 - Three Bosses remains `UNRANKED` and its submission endpoint remains disabled
   until the remaining Phase 12 release gates are approved.
 - A player identity always comes from verified authentication, never a client
@@ -43,7 +48,9 @@ on `/api/users`:
   game. Version one has no client-controlled limit or sort parameter.
 - `POST /api/leaderboards/three-bosses/runs` accepts an authenticated run only
   after Three Bosses submission is enabled. p4-Vega continues to write through
-  its legacy operation and has no generic run endpoint in version one.
+  its legacy operation and has no generic run endpoint in version one. The
+  legacy operation keeps its HTTP contract while its persistence moves to
+  `game_personal_bests`.
 
 Exact version-one DTOs and mechanical bounds are defined in
 `ts/leaderboards/leaderboardContract.ts`. New responses carry
@@ -229,9 +236,23 @@ backfill, credential rotation, or deployment.
    idempotent backfill to close the rolling-deployment window.
 7. Reconcile with server-side missing, extra, and mismatched-row joins plus
    counts, minimum, maximum, and sum. Do not export player identities.
-8. Add the generic read API and the direct-linkable multi-game frontend.
-9. Keep Three Bosses writes disabled until its release and validation policy is
-   approved.
+8. Add the generic read API and the direct-linkable multi-game frontend. Switch
+   the existing p4-Vega `submit_score` and `get_leaderboard` implementations to
+   `game_personal_bests` without changing their request or response contracts.
+9. Stop writing `users.p4_score`, drain every dual-write revision, observe the
+   cutover, and rerun the complete reconciliation against the now-static legacy
+   column.
+10. Prove that no deployable backend revision, job, operational query, or
+    rollback candidate still reads or writes `users.p4_score`. Retain at least
+    one schema-compatible rollback revision and record a fresh named backup plus
+    point-in-time-recovery evidence.
+11. Add and separately review a new immutable migration that drops
+    `users.p4_score`; do not rewrite the already-applied additive migrations.
+    Apply it only after Mike explicitly approves the production contract step.
+12. Verify the current p4-Vega submission and leaderboard paths, generic reads,
+    migration history, and recovery procedure against the contracted schema.
+13. Keep Three Bosses writes disabled until its release and validation policy is
+    approved.
 
 Transactions must use one acquired MySQL connection; transaction statements
 must not be issued through unrelated pooled queries.
@@ -252,11 +273,20 @@ only serialization mechanism.
   tables are empty. It atomically drops `game_personal_bests`, `game_runs`, and
   their initial `schema_migrations` history so a clean reapplication is
   possible. It refuses partial, unknown, checksum-drifted, or populated state.
-- After generic traffic, roll back application code but preserve the ledger and
-  best tables. The previous backend continues to operate from
-  `users.p4_score`, but the new personal-best table becomes stale while old code
-  serves writes. Generic routes must stay disabled until the backfill and full
-  reconciliation run again.
+- During dual writes, application code may roll back to the last dual-write
+  revision while preserving both domain tables. A legacy-only revision makes
+  `game_personal_bests` stale and must not receive traffic again until the
+  backfill and full reconciliation have rerun.
+- After writes to `users.p4_score` stop, never roll back to a legacy-only
+  revision: the column is stale even before it is dropped. Prefer the last
+  schema-compatible dual-write revision or a forward fix. Restoring the legacy
+  source of truth would first require an explicitly reviewed reverse
+  reconciliation from `game_personal_bests`.
+- After the column is dropped, old backend revisions are schema-incompatible
+  and must never receive traffic. Roll back with a compatible application
+  revision or forward fix; recover data into a separate instance from the
+  verified personal-best data, backup, or point-in-time state rather than
+  assuming the legacy column still exists.
 - Disable new routes before reconciliation rather than deleting submitted data.
 - If data recovery is required, restore the recorded backup or point-in-time
   state into a separate recovery instance first; do not overwrite production

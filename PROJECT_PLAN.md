@@ -78,6 +78,15 @@ alter `users.p4_score`. Applying DDL, backfilling data, changing production
 credentials, or deploying the new API still requires a separate reviewed
 approval.
 
+The approved Phase 13 storage end state is for both the existing p4-Vega API
+operations and the generic leaderboard read to use `game_personal_bests` as
+their source of truth. After transactional dual writes, a complete backfill,
+old-revision drain, reconciliation, API cutover, and proof that no deployed or
+rollback code depends on the legacy column, a separately reviewed immutable
+migration will drop `users.p4_score`. The initial additive migrations remain
+unchanged, and the drop requires its own production approval and recovery
+evidence.
+
 ### Step 13.2 — local Three Bosses website playability prototype (no publication)
 
 Status: In progress. The development-only Games card, route, external asset
