@@ -1,8 +1,8 @@
 # Multi-game leaderboard design
 
-Status: Phase 13.1 draft prepared on 2026-08-24. It awaits Mike's approval and
-the live schema preflight. This document does not authorize a production schema
-or data change.
+Status: Phase 13.1 contract approved by Mike on 2026-08-24. The sanitized live
+schema preflight completed on the same date. This document does not authorize a
+production schema or data change.
 
 ## Invariants
 
@@ -153,25 +153,52 @@ source run and no fabricated historical ledger entry.
 
 Foreign-key types must exactly match the live `users.user_id` definition.
 Machine identifiers use an ASCII binary collation; display text remains
-`utf8mb4`. Exact SQL is deliberately deferred until the live metadata preflight
-below is complete.
+`utf8mb4`. Exact SQL is a separate reviewed implementation step based on the
+completed live metadata preflight below; applying it remains separately
+approval-gated.
 
-## Required live metadata preflight
+## Completed live metadata preflight
 
-The repository has no current schema or migration runner. Before migration SQL
-is written, capture sanitized output for:
+The approved read-only preflight on 2026-08-24 confirmed:
 
-- MySQL version, SQL mode, transaction isolation, and `CHECK` enforcement;
-- `SHOW CREATE TABLE users`, storage engine, size, and row count;
-- relevant `information_schema.COLUMNS`, `STATISTICS`, `TABLE_CONSTRAINTS`,
-  and `KEY_COLUMN_USAGE` rows;
-- aggregate-only user and score counts, minimum, maximum, and sum;
-- current backup and point-in-time-recovery configuration; and
-- server and table capabilities relevant to online DDL and metadata locks.
+- Cloud SQL runs MySQL `8.0.31-google` as a regional high-availability
+  instance with deletion protection, encrypted-only transport, eight retained
+  successful backups, binary logging, and seven-day point-in-time recovery;
+- database defaults are `utf8mb4` and `utf8mb4_unicode_ci`, transaction
+  isolation is `REPEATABLE-READ`, strict SQL modes are active, and foreign-key
+  and unique checks are enabled;
+- `users` is the only current application table and uses InnoDB;
+- `users.user_id` is `INT NOT NULL AUTO_INCREMENT PRIMARY KEY`, while
+  `user_name`, `email`, and `user_password` are non-null `VARCHAR(255)` values
+  and `p4_score` is a nullable `INT`;
+- `email` is unique, but `user_name` is not schema-enforced unique, so every
+  new relationship must use immutable `user_id` rather than display names;
+- no foreign keys, `CHECK` constraints, triggers, migration-history table, or
+  leaderboard tables currently exist; and
+- aggregate-only checks found that every stored non-null p4-Vega score satisfies
+  the current integer, range, and divisibility contract. Player identities and
+  row-level data were not selected or recorded.
 
-This preflight requires database-level read access. Cloud project access alone
-does not expose table DDL, and secret payloads must not be read merely to bypass
-that boundary.
+The snapshot also found no competing transaction, table-in-use signal,
+metadata-lock waiter, or in-flight Cloud SQL operation. `performance_schema` is
+disabled, so direct inspection of `metadata_locks` was unavailable; repeat the
+alternate checks immediately before applying any statement. The server's
+default metadata-lock timeout is one year and statement execution is otherwise
+unbounded, so the migration connection must set a short session
+`lock_wait_timeout` and the runner must enforce its own fail-fast operation
+deadline.
+
+The inspected application database account currently has broad DDL and DML
+privileges. Do not reuse it as the long-term migration boundary. Before
+production rollout, create or canary a least-privilege runtime database identity
+and use a separate short-lived migration principal. Credential changes and
+privilege revocation require their own reviewed approval. The preflight made no
+database, configuration, or repository change and returned the local proxy to
+its original stopped state.
+
+This evidence satisfies the metadata gate for drafting exact SQL and local
+migration tests. It does not authorize DDL, backfill, credential rotation, or a
+production deployment.
 
 ## Expand, backfill, and cutover
 

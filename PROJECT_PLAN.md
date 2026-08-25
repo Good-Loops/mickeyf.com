@@ -59,8 +59,8 @@ gates above have been satisfied.
 
 ### Step 13.1 — multi-game contract and migration design
 
-**Drafted on 2026-08-24; awaiting owner approval and the live schema
-preflight.** The server-owned contract uses stable
+**Approved by Mike and live-schema-preflighted on 2026-08-24.** The
+server-owned contract uses stable
 `p4-vega` and `three-bosses` identifiers. p4-Vega remains score-descending on
 its unchanged legacy endpoint. Three Bosses is completion-time-ascending but
 remains `UNRANKED` with submission disabled. Persistence will use an immutable
@@ -69,10 +69,59 @@ rules version so incompatible future rules are never compared.
 
 The additive migration, backfill, reconciliation, compatibility, security,
 and rollback contract is recorded in
-[`backend/LEADERBOARD_DESIGN.md`](backend/LEADERBOARD_DESIGN.md). Exact SQL is
-blocked until a sanitized live `users` table metadata preflight confirms the
-foreign-key column types and constraints. No migration or production data
-change is authorized by this design baseline.
+[`backend/LEADERBOARD_DESIGN.md`](backend/LEADERBOARD_DESIGN.md). The sanitized
+live preflight confirmed the foreign-key type and current schema constraints,
+so exact migration SQL may now be drafted and tested locally. Applying DDL,
+backfilling data, changing production credentials, or deploying the new API
+still requires a separate reviewed approval.
+
+### Step 13.2 — local Three Bosses website playability prototype (no publication)
+
+Before any public release, add Three Bosses to the website on the feature
+branch and prove that the actual Unity WebGL game is playable through the
+local site. This is a local integration and evaluation step only: do not merge
+it to `main`, publish the WebGL build, change Firebase Hosting, or expose a
+production game route until Mike separately approves release.
+
+Use the stable local route `/games/three-bosses`. Rebuilding the Unity game
+must not change that route or require a new link. Keep generated WebGL output
+outside the repository at
+`%LOCALAPPDATA%\mickeyf.com\three-bosses-webgl`, serve it only on loopback at
+`127.0.0.1:4174`, and proxy it through the Vite development server at
+`/__local/three-bosses/`. Gate the card and route behind an explicit local
+environment flag so CI and production builds do not expose them. The
+integration must:
+
+- add a Three Bosses entry to the local Games page and a dedicated game page
+  that follows the existing site's layout, typography, spacing, controls, and
+  responsive conventions;
+- load the Unity WebGL build from a deterministic local asset location through
+  a small React-owned loader that reports loading progress and useful failures,
+  disposes the Unity instance when the route unmounts, and never creates a
+  second running instance during development remounts;
+- provide an appropriately sized game frame plus clear focus and fullscreen
+  controls without trapping normal website navigation;
+- keep ranks `UNRANKED` and score submission disabled during this prototype;
+- keep generated build output separate from hand-authored source and document
+  the repeatable external build and local-serve commands before deciding which
+  artifacts, if any, should later be versioned or deployed; and
+- identify any Content Security Policy, compression, caching, MIME-type, or
+  static-path changes that a future deployment would require, but do not apply
+  production hosting changes during local playability testing.
+
+Test the production-style WebGL build through the real local frontend rather
+than opening Unity's generated `index.html` directly. Run the normal local
+frontend, backend, database proxy, and WebGL asset server together so existing
+authentication checks are healthy; a disconnected-backend `Failed to fetch`
+message is not an acceptable clean-console result. Use the local browser to
+inspect the new Games entry and game page at desktop, narrow/mobile, and
+ultrawide sizes. Verify direct navigation and refresh, loading and error states,
+canvas scaling, focus recovery, keyboard controls, fullscreen enter/exit,
+audio on/off persistence, pause/background behavior, all three boss levels,
+defeat/retry/menu flows, completion, route exit/re-entry, browser Console and
+network errors, and that the rest of the website still works. Record any
+remaining hands-on gameplay or browser-specific defects before public-release
+work begins.
 
 ### Multi-game leaderboard redesign
 
