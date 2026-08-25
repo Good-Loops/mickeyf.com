@@ -3,7 +3,7 @@ import test from 'node:test';
 import bcrypt from 'bcryptjs';
 import { Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
-import { Pool } from 'mysql2/promise';
+import { Pool, PoolConnection } from 'mysql2/promise';
 import { createMainController } from '../controllers/mainController';
 
 const sessionSecret = 'unit-test-session-secret-that-is-not-a-credential';
@@ -46,7 +46,7 @@ test('invalid signup input is rejected before any database or bcrypt work', asyn
             queryCount += 1;
             throw new Error('database must not be called');
         },
-    } as unknown as Pick<Pool, 'query'>;
+    } as unknown as Pick<Pool, 'getConnection' | 'query'>;
     const controller = createMainController({ database, sessionSecret, isProduction: false });
     const { response, state } = responseRecorder();
 
@@ -63,7 +63,7 @@ test('invalid login input returns the generic authentication failure before pers
             queryCount += 1;
             throw new Error('database must not be called');
         },
-    } as unknown as Pick<Pool, 'query'>;
+    } as unknown as Pick<Pool, 'getConnection' | 'query'>;
     const controller = createMainController({ database, sessionSecret, isProduction: false });
     const { response, state } = responseRecorder();
 
@@ -79,7 +79,7 @@ test('database failures reject for the async wrapper and central error handler',
         query: async () => {
             throw databaseFailure;
         },
-    } as unknown as Pick<Pool, 'query'>;
+    } as unknown as Pick<Pool, 'getConnection' | 'query'>;
     const controller = createMainController({ database, sessionSecret, isProduction: false });
     const { response } = responseRecorder();
 
@@ -102,7 +102,7 @@ test('successful login preserves the JWT response and signed session cookie cont
             user_name: 'player',
             user_password: passwordHash,
         }], []],
-    } as unknown as Pick<Pool, 'query'>;
+    } as unknown as Pick<Pool, 'getConnection' | 'query'>;
     const controller = createMainController({ database, sessionSecret, isProduction: false });
     const { response, state } = responseRecorder();
 
@@ -128,15 +128,35 @@ test('successful login preserves the JWT response and signed session cookie cont
 });
 
 test('score submission still accepts the Bearer token fallback and authenticated identity', async () => {
-    let queryValues: unknown[] | undefined;
-    let queryOptions: unknown;
-    const database = {
-        query: async (options: unknown, values?: unknown[]) => {
-            queryOptions = options;
-            queryValues = values;
+    const transactionEvents: string[] = [];
+    const queryValues: Array<unknown[] | undefined> = [];
+    const queryOptions: unknown[] = [];
+    const connection = {
+        async beginTransaction() {
+            transactionEvents.push('begin');
+        },
+        async query(options: unknown, values?: unknown[]) {
+            queryOptions.push(options);
+            queryValues.push(values);
+            transactionEvents.push('query');
             return [{ affectedRows: 1 }, []];
         },
-    } as unknown as Pick<Pool, 'query'>;
+        async commit() {
+            transactionEvents.push('commit');
+        },
+        async rollback() {
+            transactionEvents.push('rollback');
+        },
+        release() {
+            transactionEvents.push('release');
+        },
+    } as unknown as PoolConnection;
+    const database = {
+        query: async () => {
+            throw new Error('score transaction must not use pool.query');
+        },
+        getConnection: async () => connection,
+    } as unknown as Pick<Pool, 'getConnection' | 'query'>;
     const controller = createMainController({ database, sessionSecret, isProduction: false });
     const { response, state } = responseRecorder();
     const token = jwt.sign({ user_id: 42, user_name: 'player' }, sessionSecret, {
@@ -152,8 +172,48 @@ test('score submission still accepts the Bearer token fallback and authenticated
 
     assert.equal(state.status, 200);
     assert.deepEqual(state.body, { success: true, personalBest: true });
-    assert.deepEqual(queryValues, [990, 42, 990]);
-    assert.equal((queryOptions as { timeout?: number }).timeout, 10_000);
+    assert.deepEqual(transactionEvents, ['begin', 'query', 'query', 'commit', 'release']);
+    assert.deepEqual(queryValues, [
+        [990, 42, 990],
+        ['p4-vega', 1, 42, 990],
+    ]);
+    assert.equal((queryOptions[0] as { timeout?: number }).timeout, 10_000);
+    assert.equal((queryOptions[1] as { timeout?: number }).timeout, 10_000);
+});
+
+test('non-improving score preserves the exact legacy success response', async () => {
+    let queryCount = 0;
+    const connection = {
+        async beginTransaction() {},
+        async query() {
+            queryCount += 1;
+            return [{ affectedRows: 0 }, []];
+        },
+        async commit() {},
+        async rollback() {},
+        release() {},
+    } as unknown as PoolConnection;
+    const database = {
+        query: async () => {
+            throw new Error('score transaction must not use pool.query');
+        },
+        getConnection: async () => connection,
+    } as unknown as Pick<Pool, 'getConnection' | 'query'>;
+    const controller = createMainController({ database, sessionSecret, isProduction: false });
+    const { response, state } = responseRecorder();
+    const token = jwt.sign({ user_id: 42, user_name: 'player' }, sessionSecret, {
+        algorithm: 'HS256',
+        expiresIn: '5m',
+    });
+
+    await controller(request({
+        type: 'submit_score',
+        p4_score: 900,
+    }, `Bearer ${token}`), response);
+
+    assert.equal(state.status, 200);
+    assert.deepEqual(state.body, { success: true, personalBest: false });
+    assert.equal(queryCount, 1);
 });
 
 test('leaderboard smoke operation remains a bounded read-only query', async () => {
@@ -167,7 +227,7 @@ test('leaderboard smoke operation remains a bounded read-only query', async () =
             queryValues = values;
             return [[{ user_name: 'player', p4_score: 990 }], []];
         },
-    } as unknown as Pick<Pool, 'query'>;
+    } as unknown as Pick<Pool, 'getConnection' | 'query'>;
     const controller = createMainController({ database, sessionSecret, isProduction: false });
     const { response, state } = responseRecorder();
 

@@ -6,6 +6,11 @@ end state in which p4-Vega uses the generic leaderboard storage and the legacy
 `users.p4_score` column is retired after a verified cutover. This document does
 not authorize a production schema or data change.
 
+The transitional p4-Vega dual-write repository was implemented and verified
+locally on 2026-08-25 with unit, rollback, and concurrent MySQL 8.0.31 tests. It
+has not been deployed and must not receive traffic until migrations `0001` and
+`0002` have been applied and verified on the target database.
+
 ## Invariants
 
 - Stable game identifiers are `p4-vega` and `three-bosses`.

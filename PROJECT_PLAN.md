@@ -87,6 +87,15 @@ migration will drop `users.p4_score`. The initial additive migrations remain
 unchanged, and the drop requires its own production approval and recovery
 evidence.
 
+The transitional p4-Vega write path was implemented and verified locally on
+2026-08-25. Strict improvements now update `users.p4_score` and
+`game_personal_bests` atomically on one acquired connection; either write
+failure rolls the transaction back, concurrent submissions converge on the
+same maximum, and the legacy HTTP response remains unchanged. This code has
+not been deployed and must remain behind the additive schema migration gate.
+Backfill, reconciliation, read cutover, and legacy-column removal remain later
+reviewed steps.
+
 ### Step 13.2 — local Three Bosses website playability prototype (no publication)
 
 Status: In progress. The development-only Games card, route, external asset

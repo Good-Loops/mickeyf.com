@@ -6,7 +6,8 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { Pool, RowDataPacket } from 'mysql2/promise';
+import { submitP4VegaScore } from '../leaderboards/p4VegaScoreRepository';
 import { User } from '../types/customTypes';
 import { authorizeScoreSubmission } from '../security/scoreSubmissionAuthorization';
 import { sessionCookieOptions } from '../security/sessionCookie';
@@ -17,7 +18,7 @@ import {
 } from '../security/userRequestValidation';
 
 type ControllerDependencies = {
-    database: Pick<Pool, 'query'>;
+    database: Pick<Pool, 'getConnection' | 'query'>;
     sessionSecret: string;
     isProduction: boolean;
 };
@@ -114,18 +115,13 @@ export function createMainController({
             return res.status(authorization.status).json({ error: authorization.error });
         }
 
-        const [result] = await database.query<ResultSetHeader>(
-            {
-                sql: `UPDATE users
-                    SET p4_score = ?
-                    WHERE user_id = ?
-                    AND (p4_score IS NULL OR p4_score < ?)`,
-                timeout: DATABASE_QUERY_TIMEOUT_MS,
-            },
-            [authorization.score, authorization.identity.userId, authorization.score]
+        const personalBest = await submitP4VegaScore(
+            database,
+            authorization.identity.userId,
+            authorization.score
         );
 
-        return res.json({ success: true, personalBest: result.affectedRows === 1 });
+        return res.json({ success: true, personalBest });
     }
 
     async function getLeaderboard(_req: Request, res: Response) {

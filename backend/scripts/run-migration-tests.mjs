@@ -22,6 +22,20 @@ export const MIGRATION_INTEGRATION_TEST_COMMAND = Object.freeze({
     "ts/migrations/leaderboardMigration.integration.test.ts",
   ]),
 });
+export const P4_VEGA_DUAL_WRITE_INTEGRATION_TEST_COMMAND = Object.freeze({
+  executable: process.execPath,
+  args: Object.freeze([
+    "--test",
+    "-r",
+    "ts-node/register",
+    "ts/leaderboards/p4VegaScoreRepository.integration.test.ts",
+  ]),
+});
+
+const INTEGRATION_TEST_COMMANDS = Object.freeze([
+  MIGRATION_INTEGRATION_TEST_COMMAND,
+  P4_VEGA_DUAL_WRITE_INTEGRATION_TEST_COMMAND,
+]);
 
 const MYSQL_SERVICE = "mysql";
 const MYSQL_IMAGE =
@@ -234,14 +248,16 @@ export const runMigrationTests = async () => {
       MYSQL_SERVICE,
     ]);
     const mysqlPort = await inspectMigrationContainer();
-    await runProcess(
-      MIGRATION_INTEGRATION_TEST_COMMAND.executable,
-      MIGRATION_INTEGRATION_TEST_COMMAND.args,
-      {
-        cwd: BACKEND_DIRECTORY,
-        env: getMigrationTestEnvironment(mysqlPort),
-      },
-    );
+    for (const command of INTEGRATION_TEST_COMMANDS) {
+      await runProcess(
+        command.executable,
+        command.args,
+        {
+          cwd: BACKEND_DIRECTORY,
+          env: getMigrationTestEnvironment(mysqlPort),
+        },
+      );
+    }
   } catch (error) {
     failure = error;
   } finally {
