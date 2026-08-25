@@ -11,8 +11,7 @@
         margin-bottom: 0;
     }
 
-    &__local-note,
-    &__control-note {
+    &__local-note {
         color: $white-darker;
         text-align: center;
     }
@@ -38,6 +37,7 @@
         width: 100%;
         height: 100%;
         outline: none;
+        cursor: $cursor !important;
     }
 
     &__canvas:focus-visible {
@@ -57,28 +57,18 @@
         pointer-events: none;
     }
 
-    &__controls {
-        display: flex;
-        flex-wrap: wrap;
-        align-items: center;
-        justify-content: center;
-        gap: 1rem 2rem;
-    }
-
-    &__focus-btn {
-        @include default-btn;
-
-        &:hover {
-            @include default-btn-hover;
-        }
-
-        &:active {
-            @include default-btn-active;
-        }
-    }
-
     @include canvas-fullscreen-button-position('three-bosses');
     @include block-canvas-fullscreen('three-bosses');
+
+    // Unity continuously synchronizes its drawing buffer to the CSS canvas
+    // size. Force the canvas itself to remain 16:9 in fullscreen so portrait
+    // and ultrawide viewports letterbox instead of changing the game camera/UI.
+    &__canvas-wrapper:fullscreen &__canvas {
+        width: min(100vw, calc(100vh * 16 / 9)) !important;
+        height: min(100vh, calc(100vw * 9 / 16)) !important;
+        aspect-ratio: 16 / 9;
+        flex: 0 0 auto;
+    }
 }
 
 @media only screen and (max-width: $bp-m) {
@@ -91,9 +81,6 @@
             width: calc(100vw - 2rem);
         }
 
-        &__control-note {
-            max-width: 28rem;
-        }
     }
 }
 

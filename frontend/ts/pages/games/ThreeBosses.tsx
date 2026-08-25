@@ -78,7 +78,6 @@ const ThreeBosses: React.FC = () => {
         };
     }, []);
 
-    const focusGame = () => canvasRef.current?.focus();
     const progressPercent = loadState.kind === 'loading'
         ? Math.round(loadState.progress * 100)
         : 100;
@@ -111,15 +110,6 @@ const ThreeBosses: React.FC = () => {
                     targetRef={frameRef}
                     className="three-bosses__fullscreen-btn"
                 />
-            </div>
-
-            <div className="three-bosses__controls">
-                <button type="button" className="three-bosses__focus-btn" onClick={focusGame}>
-                    Focus game
-                </button>
-                <p className="three-bosses__control-note">
-                    Click the game or use Focus game before using keyboard controls.
-                </p>
             </div>
         </section>
     );
