@@ -11569,6 +11569,7 @@ MonoBehaviour:
   screenFade: {fileID: 562904240}
   playerInput: {fileID: 5307331602542309124}
   playerWeapon: {fileID: 5307331602542309123}
+  bossController: {fileID: 4000000001}
   entryFadeSeconds: 0.75
   numberDurationSeconds: 1
   goDurationSeconds: 0.6
@@ -12848,8 +12849,8 @@ RectTransform:
   - {fileID: 251517337}
   - {fileID: 902705038}
   - {fileID: 367177106}
-  - {fileID: 1674762436}
   - {fileID: 562904243}
+  - {fileID: 1674762436}
   m_Father: {fileID: 0}
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
   m_AnchorMin: {x: 0, y: 0}
@@ -15912,6 +15913,17 @@ PrefabInstance:
     m_AddedGameObjects: []
     m_AddedComponents: []
   m_SourcePrefab: {fileID: 100100000, guid: 001ef4266dce44141a16173844cb212a, type: 3}
+--- !u!114 &4000000001 stripped
+MonoBehaviour:
+  m_CorrespondingSourceObject: {fileID: 197227967971319884, guid: b2637e141cad48d4ba53acc15f6997a9, type: 3}
+  m_PrefabInstance: {fileID: 3424450980860272256}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: a468e407af7ef284283cac42437733b0, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::BossController
 --- !u!1660057539 &9223372036854775807
 SceneRoots:
   m_ObjectHideFlags: 0

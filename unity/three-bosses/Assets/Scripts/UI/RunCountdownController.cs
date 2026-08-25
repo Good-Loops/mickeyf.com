@@ -5,6 +5,7 @@ using UnityEngine;
 using UnityEngine.InputSystem;
 using UnityEngine.UI;
 
+[DefaultExecutionOrder(-1100)]
 public sealed class RunCountdownController : MonoBehaviour
 {
     private const float DimmerAlpha = 0.56f;
@@ -24,6 +25,7 @@ public sealed class RunCountdownController : MonoBehaviour
     [SerializeField] private ScreenFade screenFade;
     [SerializeField] private PlayerInput playerInput;
     [SerializeField] private PlayerWeaponController playerWeapon;
+    [SerializeField] private BossController bossController;
     [SerializeField, Min(0f)] private float entryFadeSeconds = 0.75f;
     [SerializeField, Min(0.1f)] private float numberDurationSeconds = 1f;
     [SerializeField, Min(0f)] private float goDurationSeconds = 0.6f;
@@ -33,9 +35,15 @@ public sealed class RunCountdownController : MonoBehaviour
     private bool ownsTimePause;
     private bool previousPlayerInputEnabled;
     private bool previousPlayerWeaponEnabled;
+    private bool previousBossControllerEnabled;
     private bool ownsGameplayGate;
 
-    private void OnEnable()
+    private void Awake()
+    {
+        PrepareCountdown();
+    }
+
+    private void Start()
     {
         countdownRoutine = StartCoroutine(RunCountdown());
     }
@@ -56,10 +64,7 @@ public sealed class RunCountdownController : MonoBehaviour
     private IEnumerator RunCountdown()
     {
         RunSession session = RunSessionService.Instance.Session;
-        if (session.Phase == RunPhase.NotStarted)
-            session.BeginNewRun();
-
-        if (session.Phase != RunPhase.Countdown)
+        if (!PrepareCountdown())
         {
             SetVisible(false);
             countdownRoutine = null;
@@ -67,16 +72,8 @@ public sealed class RunCountdownController : MonoBehaviour
             yield break;
         }
 
-        GateGameplayComponents();
-        PauseGameplay();
-        SetLabel("3", ThreeTopColor, ThreeBottomColor, false);
-        SetVisible(true);
-
         if (screenFade != null)
             screenFade.FadeOut(entryFadeSeconds);
-
-        if (entryFadeSeconds > 0f)
-            yield return new WaitForSecondsRealtime(entryFadeSeconds);
 
         yield return AnimateLabel(numberDurationSeconds, false);
         yield return ShowForDuration(
@@ -110,6 +107,22 @@ public sealed class RunCountdownController : MonoBehaviour
         SetVisible(false);
         countdownRoutine = null;
         enabled = false;
+    }
+
+    private bool PrepareCountdown()
+    {
+        RunSession session = RunSessionService.Instance.Session;
+        if (session.Phase == RunPhase.NotStarted)
+            session.BeginNewRun();
+
+        if (session.Phase != RunPhase.Countdown)
+            return false;
+
+        GateGameplayComponents();
+        PauseGameplay();
+        SetLabel("3", ThreeTopColor, ThreeBottomColor, false);
+        SetVisible(true);
+        return true;
     }
 
     private IEnumerator ShowForDuration(
@@ -221,6 +234,15 @@ public sealed class RunCountdownController : MonoBehaviour
             playerWeapon.enabled = false;
         }
 
+        if (bossController == null)
+            bossController = FindFirstObjectByType<BossController>();
+
+        if (bossController != null)
+        {
+            previousBossControllerEnabled = bossController.enabled;
+            bossController.enabled = false;
+        }
+
         ownsGameplayGate = true;
     }
 
@@ -234,6 +256,9 @@ public sealed class RunCountdownController : MonoBehaviour
 
         if (playerWeapon != null)
             playerWeapon.enabled = previousPlayerWeaponEnabled;
+
+        if (bossController != null)
+            bossController.enabled = previousBossControllerEnabled;
 
         ownsGameplayGate = false;
     }

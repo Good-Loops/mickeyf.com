@@ -190,6 +190,18 @@ public static class MainMenuAndCountdownBuilder
             .Select(transform => transform.gameObject)
             .FirstOrDefault(gameObject => gameObject.name == CountdownObjectName);
 
+        ScreenFade screenFade = scene.GetRootGameObjects()
+            .SelectMany(root => root.GetComponentsInChildren<ScreenFade>(true))
+            .FirstOrDefault();
+        if (screenFade == null)
+            throw new InvalidOperationException("Level 1 is missing its expected ScreenFade component.");
+
+        BossController bossController = scene.GetRootGameObjects()
+            .SelectMany(root => root.GetComponentsInChildren<BossController>(true))
+            .FirstOrDefault();
+        if (bossController == null)
+            throw new InvalidOperationException("Level 1 is missing its expected BossController component.");
+
         TMP_Text countdownText;
         Image dimmer;
         RunCountdownController countdownController;
@@ -224,10 +236,6 @@ public static class MainMenuAndCountdownBuilder
             if (uiCanvas == null)
                 throw new InvalidOperationException("Level 1 is missing its expected UI Canvas.");
 
-            ScreenFade screenFade = scene.GetRootGameObjects()
-                .SelectMany(root => root.GetComponentsInChildren<ScreenFade>(true))
-                .FirstOrDefault();
-
             PlayerInput playerInput = scene.GetRootGameObjects()
                 .SelectMany(root => root.GetComponentsInChildren<PlayerInput>(true))
                 .FirstOrDefault();
@@ -236,9 +244,9 @@ public static class MainMenuAndCountdownBuilder
                 .SelectMany(root => root.GetComponentsInChildren<PlayerWeaponController>(true))
                 .FirstOrDefault();
 
-            if (screenFade == null || playerInput == null || playerWeapon == null)
+            if (playerInput == null || playerWeapon == null)
                 throw new InvalidOperationException(
-                    "Level 1 must contain ScreenFade, PlayerInput, and PlayerWeaponController components.");
+                    "Level 1 must contain PlayerInput and PlayerWeaponController components.");
 
             GameObject overlayObject = CreateUiObject(CountdownObjectName, uiCanvas.transform);
             RectTransform overlayRect = overlayObject.GetComponent<RectTransform>();
@@ -264,15 +272,15 @@ public static class MainMenuAndCountdownBuilder
             SetObjectReference(countdownController, "playerInput", playerInput);
             SetObjectReference(countdownController, "playerWeapon", playerWeapon);
 
-            overlayRect.SetSiblingIndex(screenFade.transform.GetSiblingIndex());
-            SetFloat(screenFade, "initialAlpha", 1f);
-
-            EditorUtility.SetDirty(screenFade);
             EditorUtility.SetDirty(countdownController);
         }
 
+        countdownController.transform.SetSiblingIndex(screenFade.transform.GetSiblingIndex() + 1);
+        SetFloat(screenFade, "initialAlpha", 1f);
+        SetObjectReference(countdownController, "bossController", bossController);
         SetObjectReference(countdownController, "dimmer", dimmer);
         ApplyCountdownPresentation(countdownText, dimmer, countdownFont);
+        EditorUtility.SetDirty(screenFade);
         EditorUtility.SetDirty(countdownController);
         EditorUtility.SetDirty(countdownText);
         EditorUtility.SetDirty(dimmer);

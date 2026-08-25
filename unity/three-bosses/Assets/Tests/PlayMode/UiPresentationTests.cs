@@ -177,6 +177,85 @@ namespace ThreeBosses.Tests
         }
 
         [UnityTest]
+        public IEnumerator CountdownGatesGameplayBeforeTheBossCanAdvance()
+        {
+            Time.timeScale = 1f;
+            SceneManager.LoadScene("Level1_BeeBoss");
+            yield return null;
+
+            Type countdownType = RequireType("RunCountdownController, Assembly-CSharp");
+            DefaultExecutionOrder executionOrder = countdownType
+                .GetCustomAttribute<DefaultExecutionOrder>();
+            Assert.That(executionOrder, Is.Not.Null);
+            Assert.That(executionOrder.order, Is.LessThan(0));
+
+            GameObject overlay = GameObject.Find("Phase12_CountdownOverlay");
+            Assert.That(overlay, Is.Not.Null);
+            Assert.That(overlay.GetComponent<CanvasGroup>().alpha, Is.GreaterThan(0.99f));
+            Assert.That(Time.timeScale, Is.EqualTo(0f));
+
+            Type screenFadeType = RequireType("ScreenFade, Assembly-CSharp");
+            Component screenFade = UnityEngine.Object.FindFirstObjectByType(screenFadeType) as Component;
+            Assert.That(screenFade, Is.Not.Null);
+            Assert.That(
+                overlay.transform.GetSiblingIndex(),
+                Is.GreaterThan(screenFade.transform.GetSiblingIndex()));
+
+            Behaviour countdown = UnityEngine.Object.FindFirstObjectByType(countdownType) as Behaviour;
+            Assert.That(countdown, Is.Not.Null);
+            Assert.That(countdown.enabled, Is.True);
+
+            Type playerInputType = RequireType("UnityEngine.InputSystem.PlayerInput, Unity.InputSystem");
+            Behaviour playerInput = UnityEngine.Object.FindFirstObjectByType(playerInputType) as Behaviour;
+            Assert.That(playerInput, Is.Not.Null);
+            Assert.That(playerInput.enabled, Is.False);
+
+            Type playerWeaponType = RequireType("PlayerWeaponController, Assembly-CSharp");
+            Behaviour playerWeapon = UnityEngine.Object.FindFirstObjectByType(playerWeaponType) as Behaviour;
+            Assert.That(playerWeapon, Is.Not.Null);
+            Assert.That(playerWeapon.enabled, Is.False);
+
+            Type bossType = RequireType("BossController, Assembly-CSharp");
+            Behaviour boss = UnityEngine.Object.FindFirstObjectByType(bossType) as Behaviour;
+            Assert.That(boss, Is.Not.Null);
+            FieldInfo bossControllerField = countdownType.GetField(
+                "bossController",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(bossControllerField, Is.Not.Null);
+            Assert.That(bossControllerField.GetValue(countdown), Is.SameAs(boss));
+            Assert.That(boss.enabled, Is.False);
+            Vector3 initialBossPosition = boss.transform.position;
+
+            Animator bossAnimator = boss.GetComponentInChildren<Animator>();
+            Assert.That(bossAnimator, Is.Not.Null);
+            Assert.That(bossAnimator.updateMode, Is.EqualTo(AnimatorUpdateMode.Normal));
+
+            Type textType = RequireType("TMPro.TextMeshProUGUI, Unity.TextMeshPro");
+            Component countdownLabel = overlay.GetComponentsInChildren(textType, true)
+                .First(component => component.gameObject.name == "Countdown Text");
+            for (int frame = 0;
+                 frame < 3 && GetProperty<float>(countdownLabel, "alpha") <= 0f;
+                 frame++)
+            {
+                yield return null;
+            }
+
+            Assert.That(GetProperty<string>(countdownLabel, "text"), Is.EqualTo("3"));
+            Assert.That(GetProperty<float>(countdownLabel, "alpha"), Is.GreaterThan(0f));
+
+            float entryFadeDeadline = Time.realtimeSinceStartup + 0.75f;
+            while (Time.realtimeSinceStartup < entryFadeDeadline)
+            {
+                Assert.That(Time.timeScale, Is.EqualTo(0f));
+                Assert.That(boss.transform.position, Is.EqualTo(initialBossPosition));
+                yield return null;
+            }
+
+            Assert.That(Time.timeScale, Is.EqualTo(0f));
+            Assert.That(boss.transform.position, Is.EqualTo(initialBossPosition));
+        }
+
+        [UnityTest]
         public IEnumerator CountdownKeepsTimerAtZeroUntilVisibleGo()
         {
             SceneManager.LoadScene("Level1_BeeBoss");
@@ -223,6 +302,10 @@ namespace ThreeBosses.Tests
                         GetProperty<object>(session, "Phase").ToString(),
                         Is.EqualTo("Running"));
                     Assert.That(Time.timeScale, Is.EqualTo(1f));
+                    Type bossType = RequireType("BossController, Assembly-CSharp");
+                    Behaviour boss = UnityEngine.Object.FindFirstObjectByType(bossType) as Behaviour;
+                    Assert.That(boss, Is.Not.Null);
+                    Assert.That(boss.enabled, Is.True);
                     break;
                 }
 
