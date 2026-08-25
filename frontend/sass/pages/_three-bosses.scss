@@ -60,6 +60,27 @@
     @include canvas-fullscreen-button-position('three-bosses');
     @include block-canvas-fullscreen('three-bosses');
 
+    // Keep the control discreet over the game artwork while preserving the
+    // shared fullscreen button behavior used by the other canvas pages.
+    & &__fullscreen-btn {
+        right: .45rem;
+        bottom: .45rem;
+        width: 2.4rem;
+        height: 2.4rem;
+        padding: .4rem;
+        border-radius: .45rem;
+
+        &:focus-visible {
+            outline: .2rem solid $white;
+            outline-offset: .15rem;
+        }
+    }
+
+    & &__canvas-wrapper:fullscreen &__fullscreen-btn {
+        right: max(.45rem, env(safe-area-inset-right));
+        bottom: max(.45rem, env(safe-area-inset-bottom));
+    }
+
     // Unity continuously synchronizes its drawing buffer to the CSS canvas
     // size. Force the canvas itself to remain 16:9 in fullscreen so portrait
     // and ultrawide viewports letterbox instead of changing the game camera/UI.
