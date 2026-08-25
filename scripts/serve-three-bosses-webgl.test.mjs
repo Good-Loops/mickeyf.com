@@ -6,8 +6,10 @@ import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { brotliCompressSync } from "node:zlib";
 import {
+  invalidateBuildCompletionMarker,
   createThreeBossesWebGlServer,
   readBuildManifest,
+  writeBuildCompletionMarker,
 } from "./serve-three-bosses-webgl.mjs";
 
 let rootPath;
@@ -15,6 +17,7 @@ let outsidePath;
 let baseUrl;
 let server;
 let serverPort;
+let buildId;
 
 const rawRequest = (requestPath, { headers = {}, method = "GET", port = serverPort } = {}) =>
   new Promise((resolvePromise, reject) => {
@@ -51,6 +54,8 @@ before(async () => {
     join(rootPath, "Build", "escaped"),
     process.platform === "win32" ? "junction" : "dir",
   );
+  await writeBuildCompletionMarker(rootPath);
+  buildId = (await readBuildManifest(rootPath)).buildId;
 
   server = createThreeBossesWebGlServer({ rootPath });
   await new Promise((resolvePromise) => server.listen(0, "127.0.0.1", resolvePromise));
@@ -75,14 +80,14 @@ test("returns a synthetic manifest without absolute host paths", async () => {
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("cache-control"), "no-store");
   const manifest = await response.json();
-  assert.equal(manifest.loaderUrl, "Build/test.loader.js");
-  assert.equal(manifest.dataUrl, "Build/test.data.br");
+  assert.equal(manifest.loaderUrl, `Build/test.loader.js?buildId=${manifest.buildId}`);
+  assert.equal(manifest.dataUrl, `Build/test.data.br?buildId=${manifest.buildId}`);
   assert.match(manifest.buildId, /^[a-f0-9]{64}$/u);
   assert.equal(JSON.stringify(manifest).includes(rootPath), false);
 });
 
 test("serves compressed WebAssembly with Unity-compatible headers", async () => {
-  const response = await fetch(`${baseUrl}/Build/test.wasm.br`);
+  const response = await fetch(`${baseUrl}/Build/test.wasm.br?buildId=${buildId}`);
   assert.equal(response.status, 200);
   assert.equal(response.headers.get("content-type"), "application/wasm");
   assert.equal(response.headers.get("content-encoding"), "br");
@@ -90,7 +95,7 @@ test("serves compressed WebAssembly with Unity-compatible headers", async () => 
 });
 
 test("supports HEAD without sending an asset body", async () => {
-  const response = await rawRequest("/Build/test.wasm.br", { method: "HEAD" });
+  const response = await rawRequest(`/Build/test.wasm.br?buildId=${buildId}`, { method: "HEAD" });
   assert.equal(response.status, 200);
   assert.equal(response.headers["content-type"], "application/wasm");
   assert.equal(response.headers["content-encoding"], "br");
@@ -99,9 +104,9 @@ test("supports HEAD without sending an asset body", async () => {
 
 test("rejects traversal and symlink escapes", async () => {
   for (const requestPath of [
-    "/Build/%2e%2e/%2e%2e/secret.txt",
-    "/Build/%5c..%5csecret.txt",
-    "/Build/escaped/secret.txt",
+    `/Build/%2e%2e/%2e%2e/secret.txt?buildId=${buildId}`,
+    `/Build/%5c..%5csecret.txt?buildId=${buildId}`,
+    `/Build/escaped/secret.txt?buildId=${buildId}`,
   ]) {
     const response = await rawRequest(requestPath);
     assert.equal(response.status, 404);
@@ -129,6 +134,12 @@ test("rejects non-loopback Host headers", async () => {
   assert.equal(response.status, 421);
 });
 
+test("rejects Build asset requests without the manifest build ID", async () => {
+  const response = await rawRequest("/Build/test.wasm.br");
+  assert.equal(response.status, 409);
+  assert.match(response.body, /STALE_BUILD/u);
+});
+
 test("rejects mismatched and partially refreshed build files", async () => {
   const incompleteRoot = await mkdtemp(join(tmpdir(), "three-bosses-webgl-incomplete-"));
   const buildPath = join(incompleteRoot, "Build");
@@ -153,6 +164,56 @@ test("rejects mismatched and partially refreshed build files", async () => {
   } finally {
     await rm(incompleteRoot, { recursive: true, force: true });
   }
+});
+
+test("accepts incremental output only after an exact completion marker", async () => {
+  const incrementalRoot = await mkdtemp(join(tmpdir(), "three-bosses-webgl-incremental-"));
+  const buildPath = join(incrementalRoot, "Build");
+  await mkdir(buildPath);
+
+  try {
+    await writeFile(join(buildPath, "incremental.loader.js"), "loader");
+    await writeFile(join(buildPath, "incremental.framework.js.br"), "framework");
+    await writeFile(join(buildPath, "incremental.data.br"), "new data");
+    await writeFile(join(buildPath, "incremental.wasm.br"), "wasm");
+    const oldTime = new Date("2026-01-01T00:00:00Z");
+    const newTime = new Date("2026-01-02T00:00:00Z");
+    await utimes(join(buildPath, "incremental.loader.js"), oldTime, oldTime);
+    await utimes(join(buildPath, "incremental.framework.js.br"), oldTime, oldTime);
+    await utimes(join(buildPath, "incremental.wasm.br"), oldTime, oldTime);
+    await utimes(join(buildPath, "incremental.data.br"), newTime, newTime);
+
+    await assert.rejects(() => readBuildManifest(incrementalRoot), /still being finalized/u);
+    await writeBuildCompletionMarker(incrementalRoot);
+    const manifest = await readBuildManifest(incrementalRoot);
+    assert.match(manifest.dataUrl, new RegExp(`buildId=${manifest.buildId}$`, "u"));
+
+    await writeFile(join(buildPath, "incremental.data.br"), "new data changed");
+    await assert.rejects(() => readBuildManifest(incrementalRoot), /still being finalized/u);
+
+    await invalidateBuildCompletionMarker(incrementalRoot);
+    await assert.rejects(() => readBuildManifest(incrementalRoot), /still being finalized/u);
+  } finally {
+    await rm(incrementalRoot, { recursive: true, force: true });
+  }
+});
+
+test("rejects old asset URLs while a build is invalidated and after marker rollover", async () => {
+  const oldManifest = await (await fetch(`${baseUrl}/build-manifest.json`)).json();
+  const oldAssetPath = `/${oldManifest.codeUrl}`;
+
+  await invalidateBuildCompletionMarker(rootPath);
+  let response = await rawRequest(oldAssetPath);
+  assert.equal(response.status, 503);
+
+  await writeFile(join(rootPath, "Build", "test.data.br"), brotliCompressSync("replacement data"));
+  await writeBuildCompletionMarker(rootPath);
+  const newManifest = await readBuildManifest(rootPath);
+  assert.notEqual(newManifest.buildId, oldManifest.buildId);
+
+  response = await rawRequest(oldAssetPath);
+  assert.equal(response.status, 409);
+  assert.match(response.body, /STALE_BUILD/u);
 });
 
 test("sanitizes missing-build responses", async () => {

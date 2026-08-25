@@ -1,11 +1,21 @@
 import { createServer as createHttpServer } from "node:http";
-import { createHash } from "node:crypto";
-import { open, readdir, realpath, stat } from "node:fs/promises";
-import { extname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
+import { createHash, randomUUID } from "node:crypto";
+import {
+  open,
+  readFile,
+  readdir,
+  realpath,
+  rename,
+  stat,
+  unlink,
+  writeFile,
+} from "node:fs/promises";
+import { basename, extname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 
 export const LOOPBACK_HOST = "127.0.0.1";
 export const DEFAULT_PORT = 4174;
+export const BUILD_COMPLETION_MARKER = ".mickeyf-webgl-build-complete.json";
 
 const defaultRoot = () => {
   const localAppData = process.env.LOCALAPPDATA;
@@ -63,7 +73,7 @@ const buildStem = (fileName) => fileName.replace(
   "",
 );
 
-export const readBuildManifest = async (rootPath) => {
+const inspectBuildFiles = async (rootPath) => {
   const buildDirectory = join(rootPath, "Build");
   const entries = (await readdir(buildDirectory, { withFileTypes: true }))
     .filter((entry) => entry.isFile())
@@ -90,27 +100,99 @@ export const readBuildManifest = async (rootPath) => {
     throw new Error("Unity WebGL build contains an empty or invalid file.");
   }
 
-  // Unity writes the large payloads before finalizing the framework and
-  // loader. Reject a same-name rebuild while those final files are still from
-  // the previous build, rather than returning a mixed manifest.
-  const statsByName = new Map(fileStats.map(({ fileName, stats }) => [fileName, stats]));
-  const newestPayloadTime = Math.max(
-    statsByName.get(data).mtimeMs,
-    statsByName.get(code).mtimeMs,
-  );
-  if (
-    statsByName.get(loader).mtimeMs < newestPayloadTime
-    || statsByName.get(framework).mtimeMs < newestPayloadTime
-  ) {
+  return {
+    buildDirectory,
+    code,
+    data,
+    fileStats,
+    framework,
+    loader,
+  };
+};
+
+const completionMarkerPayload = async (buildDirectory, fileStats) => {
+  const files = await Promise.all(fileStats.map(async ({ fileName, stats }) => ({
+    fileName,
+    hash: createHash("sha256").update(await readFile(join(buildDirectory, fileName))).digest("hex"),
+    mtimeMs: stats.mtimeMs,
+    size: stats.size,
+  })));
+  const buildId = createHash("sha256")
+    .update(files.map(({ fileName, hash, size }) => `${fileName}:${size}:${hash}`).join("|"))
+    .digest("hex");
+  return { buildId, files, version: 1 };
+};
+
+const completionMarkerMatches = (marker, expected) => {
+  if (marker?.version !== 1 || !Array.isArray(marker.files)) return false;
+  return marker.buildId === expected.buildId
+    && expected.files.length === marker.files.length
+    && expected.files.every((file, index) =>
+    file.fileName === marker.files[index]?.fileName
+    && file.hash === marker.files[index]?.hash
+    && file.size === marker.files[index]?.size
+    && file.mtimeMs === marker.files[index]?.mtimeMs);
+};
+
+const readCompletionMarker = async (rootPath) => {
+  try {
+    return {
+      exists: true,
+      value: JSON.parse(await readFile(join(rootPath, BUILD_COMPLETION_MARKER), "utf8")),
+    };
+  } catch (error) {
+    if (error.code === "ENOENT") return { exists: false, value: null };
+    return { exists: true, value: null };
+  }
+};
+
+export const invalidateBuildCompletionMarker = async (rootPath) => {
+  await unlink(join(rootPath, BUILD_COMPLETION_MARKER)).catch((error) => {
+    if (error.code !== "ENOENT") throw error;
+  });
+};
+
+export const writeBuildCompletionMarker = async (rootPath) => {
+  const { buildDirectory, fileStats } = await inspectBuildFiles(rootPath);
+  const payload = await completionMarkerPayload(buildDirectory, fileStats);
+  const markerPath = join(rootPath, BUILD_COMPLETION_MARKER);
+  const temporaryPath = join(rootPath, `.${BUILD_COMPLETION_MARKER}.${randomUUID()}.tmp`);
+  try {
+    await writeFile(
+      temporaryPath,
+      `${JSON.stringify(payload)}\n`,
+      { encoding: "utf8", flag: "wx", mode: 0o600 },
+    );
+    await rename(temporaryPath, markerPath);
+  } finally {
+    await unlink(temporaryPath).catch((error) => {
+      if (error.code !== "ENOENT") throw error;
+    });
+  }
+};
+
+export const readBuildManifest = async (rootPath) => {
+  const {
+    buildDirectory,
+    code,
+    data,
+    fileStats,
+    files,
+    framework,
+    loader,
+  } = await inspectBuildFiles(rootPath);
+
+  // The marker is removed before a guarded build and rewritten atomically only
+  // after Unity and repository cleanup succeed. Requiring it keeps same-name
+  // incremental builds fail-closed while payload files are being replaced.
+  const marker = await readCompletionMarker(rootPath);
+  const expectedMarker = await completionMarkerPayload(buildDirectory, fileStats);
+  if (!marker.exists || !completionMarkerMatches(marker.value, expectedMarker)) {
     throw new Error("Unity WebGL build is still being finalized.");
   }
 
-  const buildId = createHash("sha256")
-    .update(fileStats
-      .map(({ fileName, stats }) => `${fileName}:${stats.size}:${stats.mtimeMs}`)
-      .join("|"))
-    .digest("hex");
-  const toUrl = (fileName) => `Build/${encodeURIComponent(fileName)}`;
+  const buildId = expectedMarker.buildId;
+  const toUrl = (fileName) => `Build/${encodeURIComponent(fileName)}?buildId=${buildId}`;
 
   return {
     buildId,
@@ -209,9 +291,35 @@ export const createThreeBossesWebGlServer = ({ rootPath = defaultRoot() } = {}) 
         return;
       }
 
+      let markerFile;
+      if (requestUrl.pathname.startsWith("/Build/")) {
+        const marker = await readCompletionMarker(rootPath);
+        if (!marker.exists || marker.value?.version !== 1) {
+          sendJson(response, 503, { error: "BUILD_UNAVAILABLE" }, method);
+          return;
+        }
+        if (requestUrl.searchParams.get("buildId") !== marker.value.buildId) {
+          sendJson(response, 409, { error: "STALE_BUILD" }, method);
+          return;
+        }
+        markerFile = marker.value.files?.find((entry) => entry.fileName === basename(filePath));
+        if (!markerFile) {
+          sendJson(response, 404, { error: "NOT_FOUND" }, method);
+          return;
+        }
+      }
+
       const { contentEncoding, contentType } = getContentMetadata(filePath);
       const fileHandle = await open(filePath, "r");
       const fileStats = await fileHandle.stat();
+      if (
+        markerFile
+        && (markerFile.size !== fileStats.size || markerFile.mtimeMs !== fileStats.mtimeMs)
+      ) {
+        await fileHandle.close();
+        sendJson(response, 409, { error: "STALE_BUILD" }, method);
+        return;
+      }
       response.statusCode = 200;
       setCommonHeaders(response);
       response.setHeader("Content-Type", contentType);

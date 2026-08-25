@@ -64,25 +64,22 @@ completed runs display `UNRANKED`, and Submit Score remains disabled.
 ## Local website WebGL build
 
 The local website prototype reads generated WebGL output from outside the
-repository. Before building, confirm the Editor is ready, stopped, not
-compiling, and opened on this exact project. From the repository root, run:
+repository. Before building, leave the Editor open on this exact project and
+do not edit or stage Unity settings while the build is running. From the
+repository root, run:
 
 ```powershell
-$project = (Resolve-Path 'unity/three-bosses').Path
-$output = Join-Path $env:LOCALAPPDATA 'mickeyf.com\three-bosses-webgl'
-
-unity command build --project-path "$project" `
-  --target WebGL `
-  --outputPath "$output" `
-  --confirm true `
-  --format json
+npm run three-bosses:webgl:build
 ```
 
-Poll `unity command build_status --project-path "$project" --format json`
-until the build completes. Immediately inspect Git status and reject incidental
-scene, asset, `.meta`, package, or Project Settings changes. Serve the output
-with `npm run three-bosses:webgl:serve`; do not open or publish Unity's generated
-HTML directly. The stable local website URL is
+The guarded wrapper confirms that the Editor is ready and stopped, waits for
+the asynchronous build to finish, restores the exact pre-build bytes of the
+three known Unity/URP settings files, reloads those files in the Editor, and
+fails if any other Unity source changes. It preserves legitimate existing
+working-tree bytes rather than restoring from Git. Serve the output with
+`npm run three-bosses:webgl:serve`; do not open or publish Unity's generated
+HTML directly. Set `THREE_BOSSES_WEBGL_DIR` to override the default external
+output directory. The stable local website URL is
 `http://localhost:5173/games/three-bosses`.
 
 ## Repository boundaries

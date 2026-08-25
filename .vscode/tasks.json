@@ -38,6 +38,14 @@
       "problemMatcher": []
     },
     {
+      "label": "Three Bosses: WebGL build",
+      "type": "npm",
+      "script": "three-bosses:webgl:build",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "runOptions": { "instanceLimit": 1 }
+    },
+    {
       "label": "Three Bosses: WebGL assets",
       "type": "npm",
       "script": "three-bosses:webgl:serve",
