@@ -15,6 +15,11 @@ import DancingFractals from "@/pages/animations/DancingFractals";
 
 import Games from "@/pages/Games";
 import P4Vega from "@/pages/games/P4Vega";
+import ThreeBosses from "@/pages/games/ThreeBosses";
+import {
+	isThreeBossesLocalEnabled,
+	THREE_BOSSES_LOCAL_ROUTE,
+} from '@/config/featureFlags';
 
 import Leaderboard from "@/pages/Leaderboard";
 import Social from "@/pages/Social";
@@ -34,8 +39,11 @@ const App: React.FC = () => {
 				<Route path="/animations/dancing-circles" element={<DancingCircles />} />
 				<Route path="/animations/dancing-fractals" element={<DancingFractals />} />
 				
-				<Route path="/games/*" element={<Games />} />
+				<Route path="/games" element={<Games />} />
 				<Route path="/games/p4-Vega" element={<P4Vega />} />
+				{isThreeBossesLocalEnabled && (
+					<Route path={THREE_BOSSES_LOCAL_ROUTE} element={<ThreeBosses />} />
+				)}
 
 				<Route path="/leaderboard" element={<Leaderboard />} />
 				<Route path="/social" element={<Social />} />

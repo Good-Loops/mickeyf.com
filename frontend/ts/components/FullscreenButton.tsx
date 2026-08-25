@@ -65,20 +65,27 @@ const FullscreenButton: React.FC<FullscreenButtonProps> = ({
 }) => {
     const [isFullscreen, setIsFullscreen] = useState(false);
 
-    const target = targetRef?.current ?? document.documentElement;
-
     const toggle = async () => {
+        const target = targetRef?.current ?? document.documentElement;
         if (!target) return;
 
-        if (document.fullscreenElement) {
-            await document.exitFullscreen();
-        } else {
-            await target.requestFullscreen();
+        try {
+            if (document.fullscreenElement) {
+                await document.exitFullscreen();
+            } else {
+                await target.requestFullscreen();
+            }
+        } catch (error) {
+            // Browsers can deny fullscreen when the click is not considered a
+            // direct user gesture. Leave the control retryable and avoid an
+            // unhandled rejection disrupting the page.
+            console.warn("Fullscreen request was denied.", error);
         }
     };
 
     useEffect(() => {
         const update = () => {
+            const target = targetRef?.current ?? document.documentElement;
             setIsFullscreen(document.fullscreenElement === target);
         };
 
@@ -87,7 +94,7 @@ const FullscreenButton: React.FC<FullscreenButtonProps> = ({
 
         return () =>
             document.removeEventListener("fullscreenchange", update);
-    }, [target]);
+    }, [targetRef]);
 
     return (
         <button

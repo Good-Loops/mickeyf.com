@@ -58,6 +58,9 @@ jobs:
           npm --prefix frontend test
           npm --prefix frontend run build
 
+      - name: Test local WebGL asset server
+        run: npm run test:three-bosses-webgl-server
+
       - name: Test and build backend
         run: |
           npm --prefix backend test

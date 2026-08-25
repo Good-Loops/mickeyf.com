@@ -1,0 +1,104 @@
+@use '../abstracts' as *;
+
+.three-bosses {
+    @include default-component;
+
+    width: min(100%, 96rem);
+    row-gap: 1.5rem;
+    margin-inline: auto;
+
+    &__title {
+        margin-bottom: 0;
+    }
+
+    &__local-note,
+    &__control-note {
+        color: $white-darker;
+        text-align: center;
+    }
+
+    &__local-note {
+        font-size: $font-size-xxs;
+        opacity: .8;
+    }
+
+    &__canvas-wrapper {
+        position: relative;
+        width: min(100%, 80rem);
+        aspect-ratio: 16 / 9;
+        overflow: hidden;
+        background: #050508;
+        border: .12rem solid rgba($primary-light, .45);
+        border-radius: $default-border-radius;
+        box-shadow: $canvas-shadow;
+    }
+
+    &__canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+        outline: none;
+    }
+
+    &__canvas:focus-visible {
+        box-shadow: 0 0 0 .18rem $white inset;
+    }
+
+    &__status {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        padding: 2rem;
+        color: $white;
+        background: rgba(#050508, .88);
+        text-align: center;
+        font-size: $font-size-xxs;
+        pointer-events: none;
+    }
+
+    &__controls {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        justify-content: center;
+        gap: 1rem 2rem;
+    }
+
+    &__focus-btn {
+        @include default-btn;
+
+        &:hover {
+            @include default-btn-hover;
+        }
+
+        &:active {
+            @include default-btn-active;
+        }
+    }
+
+    @include canvas-fullscreen-button-position('three-bosses');
+    @include block-canvas-fullscreen('three-bosses');
+}
+
+@media only screen and (max-width: $bp-m) {
+    .three-bosses {
+        &__title {
+            font-size: $font-size-m;
+        }
+
+        &__canvas-wrapper {
+            width: calc(100vw - 2rem);
+        }
+
+        &__control-note {
+            max-width: 28rem;
+        }
+    }
+}
+
+@media only screen and (max-width: $bp-s) {
+    .three-bosses__title {
+        font-size: $font-size-s;
+    }
+}

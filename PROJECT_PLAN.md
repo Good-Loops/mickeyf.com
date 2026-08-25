@@ -77,6 +77,11 @@ still requires a separate reviewed approval.
 
 ### Step 13.2 — local Three Bosses website playability prototype (no publication)
 
+Status: In progress. The development-only Games card, route, external asset
+server, Unity loader, and first live browser launch/re-entry/fullscreen checks
+were implemented on 2026-08-25. The full three-level hands-on browser matrix
+below remains a release gate; no WebGL build or route has been published.
+
 Before any public release, add Three Bosses to the website on the feature
 branch and prove that the actual Unity WebGL game is playable through the
 local site. This is a local integration and evaluation step only: do not merge

@@ -10,6 +10,8 @@
 		"infra:up": "docker compose -f compose.yaml up -d cloud-sql-proxy",
 		"infra:down": "docker compose -f compose.yaml down",
 		"backend:dev:local": "npm run infra:up && concurrently --kill-others-on-fail --names proxy,watch,server --prefix-colors yellow,magenta,red \"docker compose -f compose.yaml logs --tail=20 -f cloud-sql-proxy\" \"npm --prefix backend run watch\" \"node scripts/wait-for-port.mjs 127.0.0.1 3306 60000 && npm --prefix backend run dev\"",
+		"three-bosses:webgl:serve": "node scripts/serve-three-bosses-webgl.mjs",
+		"test:three-bosses-webgl-server": "node --test scripts/serve-three-bosses-webgl.test.mjs",
 		"docs:clean": "node scripts/clean-docs.mjs",
 		"docs:json:frontend": "typedoc --options frontend/typedoc.json --tsconfig frontend/tsconfig.typedoc.json --json .typedoc-tmp/frontend.json",
 		"docs:json:backend": "typedoc --options backend/typedoc.json --tsconfig backend/tsconfig.typedoc.json --json .typedoc-tmp/backend.json",

@@ -134,6 +134,7 @@ Default local ports are:
 - Backend: `http://localhost:8080`
 - Cloud SQL Proxy: `127.0.0.1:3306`
 - TypeDoc server: `http://localhost:8081`
+- Three Bosses WebGL assets (when enabled): `http://127.0.0.1:4174`
 
 If port 8080 is occupied, identify its owning process before stopping it. The
 backend start command deliberately does not kill unrelated processes.
@@ -148,6 +149,42 @@ npm run docs:dev
 
 The command rebuilds the tracked `docs/` output before serving it. Review the
 resulting Git diff and do not commit generated changes accidentally.
+
+### Local Three Bosses WebGL prototype
+
+Three Bosses is available on the local Games page only when the development
+feature flag is explicitly enabled. It is not included in the public site.
+
+1. Build the Unity project to the external, ignored location documented in
+   [`unity/three-bosses/README.md`](unity/three-bosses/README.md).
+2. Add this untracked local setting to `frontend/.env.development.local`:
+
+   ```dotenv
+   VITE_ENABLE_THREE_BOSSES_LOCAL=1
+   ```
+
+3. Start the external asset server in a separate terminal:
+
+   ```powershell
+   npm run three-bosses:webgl:serve
+   ```
+
+4. Start or restart the frontend, then open
+   `http://localhost:5173/games/three-bosses`.
+
+The Games page and route exist only in Vite development mode with that exact
+flag. The frontend proxies generated assets through
+`/__local/three-bosses/`; nothing is copied into `frontend/`, committed, or
+published. Rebuilding in the same external folder does not change the browser
+URL because the local manifest discovers the current Unity filenames.
+
+Publishing remains a separate, approval-gated design task. A future Hosting
+integration must serve precompressed `.br` files with their original content
+type plus `Content-Encoding: br`, support WebAssembly in the Content Security
+Policy, use hashed/versioned caching safely, preserve the SPA rewrite, and
+recheck Firebase artifact-size limits. Cross-origin isolation headers are only
+needed if a future Unity build enables WebGL threads; they must not be added
+blindly because they affect every embedded resource on the page.
 
 ### Stop development
 
