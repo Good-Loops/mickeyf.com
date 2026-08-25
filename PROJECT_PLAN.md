@@ -107,6 +107,14 @@ extra rows, metadata anomalies, run-ledger rows, and unexpected rules versions
 rather than guessing how to repair them. Every pass reuses the verified
 personal-best migration timestamp, so retries remain stable.
 
+The existing p4-Vega `get_leaderboard` read path was switched locally to
+`game_personal_bests` and verified on 2026-08-25. Its anonymous legacy route,
+request, response fields, ten-row bound, cache behavior, and numeric historical
+scores remain compatible; game/rules scoping and tie order now follow the
+approved generic contract. This code has not been deployed or activated in
+production. The generic HTTP routes, multi-game frontend, generic-only write
+cutover, and `users.p4_score` removal remain incomplete.
+
 Neither a production backfill nor a production reconciliation has been
 performed. Production execution requires the additive schema, an explicitly
 approved short-lived least-privilege principal, exact target confirmation, and

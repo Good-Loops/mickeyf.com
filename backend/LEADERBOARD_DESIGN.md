@@ -17,6 +17,14 @@ aggregate reconciliation command were implemented and verified locally on
 cutover, or removal of `users.p4_score`; each production step retains the
 approval and evidence gates below.
 
+The existing p4-Vega `get_leaderboard` implementation was switched locally to
+the versioned `game_personal_bests` source and verified on 2026-08-25 without
+changing its request or response contract. This code has not been deployed or
+activated in production. It remains gated on the additive schema, completed
+backfill, legacy-revision drain, and zero-discrepancy reconciliation. The
+generic HTTP API, multi-game frontend, generic-only write cutover, and legacy
+column removal remain later steps.
+
 ## Invariants
 
 - Stable game identifiers are `p4-vega` and `three-bosses`.

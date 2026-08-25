@@ -141,7 +141,7 @@ export type GetLeaderboardResponse =
           success: true;
           leaderboard: Array<{
               user_name: string;
-              p4_score: number | null;
+              p4_score: number;
           }>;
       }
     | ApiError;

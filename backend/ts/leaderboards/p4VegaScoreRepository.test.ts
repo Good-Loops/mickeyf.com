@@ -3,6 +3,7 @@ import test from 'node:test';
 import { Pool, PoolConnection } from 'mysql2/promise';
 import {
     P4VegaScoreRollbackError,
+    readP4VegaLeaderboard,
     submitP4VegaScore,
 } from './p4VegaScoreRepository';
 
@@ -74,6 +75,67 @@ function createFakeDatabase(options: FakeDatabaseOptions = {}) {
         acquisitions: () => acquisitions,
     };
 }
+
+function createFakeLeaderboardDatabase(
+    rows: readonly Record<string, unknown>[] = [],
+    queryError?: Error
+) {
+    const queries: QueryCall[] = [];
+    const database = {
+        async query(
+            queryOptions: { sql: string; timeout?: number },
+            values?: unknown[]
+        ) {
+            queries.push({
+                sql: queryOptions.sql.replace(/\s+/g, ' ').trim(),
+                timeout: queryOptions.timeout,
+                values,
+            });
+            if (queryError) throw queryError;
+            return [rows, []];
+        },
+    } as unknown as Pick<Pool, 'query'>;
+
+    return { database, queries };
+}
+
+test('reads the bounded current p4-Vega leaderboard from generic storage', async () => {
+    const fake = createFakeLeaderboardDatabase([
+        { userName: 'legacy-outlier', score: 1_200, internalId: 88 },
+        { userName: 'player', score: 990, internalId: 42 },
+    ]);
+
+    const rows = await readP4VegaLeaderboard(fake.database);
+
+    assert.deepEqual(rows, [
+        { userName: 'legacy-outlier', score: 1_200 },
+        { userName: 'player', score: 990 },
+    ]);
+    assert.equal(fake.queries.length, 1);
+    assert.equal(fake.queries[0].timeout, 10_000);
+    assert.equal(
+        fake.queries[0].sql,
+        'SELECT users.user_name AS userName, game_personal_bests.score AS score FROM game_personal_bests INNER JOIN users ON users.user_id = game_personal_bests.user_id WHERE game_personal_bests.game_id = ? AND game_personal_bests.rules_version = ? ORDER BY game_personal_bests.score DESC, game_personal_bests.recorded_at ASC, game_personal_bests.user_id ASC LIMIT 10'
+    );
+    assert.deepEqual(fake.queries[0].values, ['p4-vega', 1]);
+});
+
+test('returns an empty generic leaderboard unchanged', async () => {
+    const fake = createFakeLeaderboardDatabase();
+
+    assert.deepEqual(await readP4VegaLeaderboard(fake.database), []);
+    assert.equal(fake.queries.length, 1);
+});
+
+test('propagates generic leaderboard query failures', async () => {
+    const queryError = new Error('leaderboard query failed');
+    const fake = createFakeLeaderboardDatabase([], queryError);
+
+    await assert.rejects(
+        () => readP4VegaLeaderboard(fake.database),
+        queryError
+    );
+});
 
 test('writes an improving score to both stores on one committed connection', async () => {
     const fake = createFakeDatabase({ affectedRows: 1 });

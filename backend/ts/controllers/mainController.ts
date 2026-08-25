@@ -7,7 +7,10 @@ import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { Pool, RowDataPacket } from 'mysql2/promise';
-import { submitP4VegaScore } from '../leaderboards/p4VegaScoreRepository';
+import {
+    readP4VegaLeaderboard,
+    submitP4VegaScore,
+} from '../leaderboards/p4VegaScoreRepository';
 import { User } from '../types/customTypes';
 import { authorizeScoreSubmission } from '../security/scoreSubmissionAuthorization';
 import { sessionCookieOptions } from '../security/sessionCookie';
@@ -125,17 +128,14 @@ export function createMainController({
     }
 
     async function getLeaderboard(_req: Request, res: Response) {
-        const [rows] = await database.query<RowDataPacket[]>(
-            {
-                sql: `SELECT user_name, p4_score
-                    FROM users
-                    WHERE p4_score IS NOT NULL
-                    ORDER BY p4_score DESC
-                    LIMIT 10`,
-                timeout: DATABASE_QUERY_TIMEOUT_MS,
-            }
-        );
-        return res.json({ success: true, leaderboard: rows });
+        const rows = await readP4VegaLeaderboard(database);
+        return res.json({
+            success: true,
+            leaderboard: rows.map(({ userName, score }) => ({
+                user_name: userName,
+                p4_score: score,
+            })),
+        });
     }
 
     return async function mainController(req: Request, res: Response) {

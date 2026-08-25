@@ -10,7 +10,10 @@ import { loadMigrationConfig } from '../config/migrationConfig';
 import type { MigrationConnection } from '../migrations/leaderboardSchema';
 import { loadMigrationManifest } from '../migrations/migrationManifest';
 import { applyMigrations } from '../migrations/migrationRunner';
-import { submitP4VegaScore } from './p4VegaScoreRepository';
+import {
+    readP4VegaLeaderboard,
+    submitP4VegaScore,
+} from './p4VegaScoreRepository';
 
 const migrationTestPort = Number(process.env.MIGRATION_TEST_PORT);
 const EXPECTED_TEST_TARGET = Object.freeze({
@@ -246,6 +249,84 @@ test('a pre-backfill no-op does not fabricate generic history', async () => {
         completionTimeMs: null,
         sourceGameRunId: null,
     });
+});
+
+test('leaderboard reads only current generic p4-Vega bests in deterministic order', async () => {
+    for (let userId = 2; userId <= 13; userId += 1) {
+        await observer.query(
+            `INSERT INTO users (user_name, email, user_password, p4_score)
+             VALUES (?, ?, 'test-only-hash', ?)`,
+            [`player-${userId}`, `player-${userId}@example.test`, userId * 10]
+        );
+    }
+    await observer.query(
+        `UPDATE users
+         SET p4_score = CASE user_id
+             WHEN 1 THEN -500
+             WHEN 13 THEN 2147483647
+             ELSE p4_score
+         END
+         WHERE user_id IN (1, 13)`
+    );
+
+    const currentRows = [
+        [1, 1_200, '2000-01-01 00:00:03.000000'],
+        [2, 990, '2000-01-01 00:00:02.000000'],
+        [3, 900, '2000-01-01 00:00:02.000000'],
+        [4, 900, '2000-01-01 00:00:01.000000'],
+        [5, 900, '2000-01-01 00:00:01.000000'],
+        [6, 800, '2000-01-01 00:00:06.000000'],
+        [7, 700, '2000-01-01 00:00:07.000000'],
+        [8, 600, '2000-01-01 00:00:08.000000'],
+        [9, 500, '2000-01-01 00:00:09.000000'],
+        [10, 400, '2000-01-01 00:00:10.000000'],
+        [11, 300, '2000-01-01 00:00:11.000000'],
+        [12, 200, '2000-01-01 00:00:12.000000'],
+    ] as const;
+    for (const [userId, score, recordedAt] of currentRows) {
+        await observer.query(
+            `INSERT INTO game_personal_bests (
+                game_id,
+                rules_version,
+                user_id,
+                score,
+                completion_time_ms,
+                recorded_at,
+                source_game_run_id
+             ) VALUES ('p4-vega', 1, ?, ?, NULL, ?, NULL)`,
+            [userId, score, recordedAt]
+        );
+    }
+
+    await observer.query(
+        `INSERT INTO game_personal_bests (
+            game_id,
+            rules_version,
+            user_id,
+            score,
+            completion_time_ms,
+            recorded_at,
+            source_game_run_id
+         ) VALUES
+            ('p4-vega', 2, 13, 2147483647, NULL, '1999-01-01 00:00:00.000000', NULL),
+            ('three-bosses', 1, 13, 2147483646, 1, '1999-01-01 00:00:00.000000', NULL)`
+    );
+
+    const expected = [
+        { userName: 'player', score: 1_200 },
+        { userName: 'player-2', score: 990 },
+        { userName: 'player-4', score: 900 },
+        { userName: 'player-5', score: 900 },
+        { userName: 'player-3', score: 900 },
+        { userName: 'player-6', score: 800 },
+        { userName: 'player-7', score: 700 },
+        { userName: 'player-8', score: 600 },
+        { userName: 'player-9', score: 500 },
+        { userName: 'player-10', score: 400 },
+    ];
+
+    assert.deepEqual(await readP4VegaLeaderboard(applicationPool), expected);
+    assert.deepEqual(await readP4VegaLeaderboard(applicationPool), expected);
 });
 
 test('equal concurrent submissions produce one personal best and one generic row', {
