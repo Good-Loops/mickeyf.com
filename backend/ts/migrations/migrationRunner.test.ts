@@ -11,12 +11,17 @@ type QueryResultFactory = (
 
 class FakeConnection implements MigrationConnection {
     readonly calls: Array<{ sql: string; values: unknown[] }> = [];
+    destroyed = false;
 
     constructor(private readonly resultFactory: QueryResultFactory) {}
 
     async query(sql: string, values: unknown[] = []): Promise<[unknown, unknown]> {
         this.calls.push({ sql, values });
         return [this.resultFactory(sql, values), []];
+    }
+
+    destroy(): void {
+        this.destroyed = true;
     }
 }
 
@@ -89,6 +94,23 @@ test('plan releases the advisory lock when inspection fails', async () => {
         /synthetic metadata failure/
     );
     assert.equal(connection.calls.at(-1)?.sql.includes('RELEASE_LOCK'), true);
+});
+
+test('a failed lock release invalidates the session even after an operation error', async () => {
+    const connection = new FakeConnection((sql) => {
+        if (sql.includes('GET_LOCK')) return [{ acquired: 1 }];
+        if (sql.includes('RELEASE_LOCK')) throw new Error('synthetic release failure');
+        if (sql.includes('information_schema.TABLES')) {
+            throw new Error('synthetic metadata failure');
+        }
+        return {};
+    });
+
+    await assert.rejects(
+        () => planMigrations(connection, loadMigrationManifest(), settings),
+        /synthetic metadata failure/
+    );
+    assert.equal(connection.destroyed, true);
 });
 
 test('migration lock name is stable, scoped, and within MySQL limits', () => {

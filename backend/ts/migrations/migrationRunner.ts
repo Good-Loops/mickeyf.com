@@ -8,7 +8,7 @@ import {
 } from './leaderboardSchema';
 import type { MigrationDefinition } from './migrationManifest';
 
-type RunnerSettings = Pick<
+export type MigrationRunnerSettings = Pick<
     MigrationConfig,
     'database' | 'advisoryLockTimeoutSeconds' | 'lockWaitTimeoutSeconds'
 >;
@@ -76,7 +76,7 @@ async function configureSession(
 
 async function withMigrationLock<T>(
     connection: MigrationConnection,
-    settings: RunnerSettings,
+    settings: MigrationRunnerSettings,
     operation: () => Promise<T>
 ): Promise<T> {
     await configureSession(connection, settings.lockWaitTimeoutSeconds);
@@ -103,10 +103,12 @@ async function withMigrationLock<T>(
                 'SELECT RELEASE_LOCK(?) AS released',
                 [lockName]
             );
-            if (!operationFailed && Number(releaseRows[0]?.released) !== 1) {
+            if (Number(releaseRows[0]?.released) !== 1) {
                 throw new Error('Database migration lock was not released cleanly');
             }
         } catch (releaseError) {
+            // A session-scoped lock must never leak into a reusable caller.
+            connection.destroy?.();
             if (!operationFailed) throw releaseError;
         }
     }
@@ -196,7 +198,7 @@ async function inspectMigrationState(
 export async function planMigrations(
     connection: MigrationConnection,
     migrations: readonly MigrationDefinition[],
-    settings: RunnerSettings
+    settings: MigrationRunnerSettings
 ): Promise<MigrationPlan> {
     return withMigrationLock(connection, settings, async () => {
         const hasHistory = await tableExists(connection, 'schema_migrations');
@@ -208,7 +210,7 @@ export async function planMigrations(
 export async function applyMigrations(
     connection: MigrationConnection,
     migrations: readonly MigrationDefinition[],
-    settings: RunnerSettings
+    settings: MigrationRunnerSettings
 ): Promise<MigrationPlan> {
     return withMigrationLock(connection, settings, async () => {
         await createHistoryTable(connection);
@@ -239,10 +241,47 @@ export async function applyMigrations(
     });
 }
 
+/**
+ * Runs an operational data command only after the complete reviewed migration
+ * set and its exact table shapes have been verified under the migration lock.
+ */
+export async function withVerifiedLeaderboardSchema<T>(
+    connection: MigrationConnection,
+    migrations: readonly MigrationDefinition[],
+    settings: MigrationRunnerSettings,
+    operation: () => Promise<T>
+): Promise<T> {
+    return withMigrationLock(connection, settings, async () => {
+        await assertCompleteReviewedMigrationSet(connection, migrations);
+        const result = await operation();
+        // Detect out-of-band DDL that raced the initial verification before
+        // reporting a data operation as successful.
+        await assertCompleteReviewedMigrationSet(connection, migrations);
+        return result;
+    });
+}
+
+async function assertCompleteReviewedMigrationSet(
+    connection: MigrationConnection,
+    migrations: readonly MigrationDefinition[]
+): Promise<void> {
+    if (!(await tableExists(connection, 'schema_migrations'))) {
+        throw new Error('Leaderboard data operation requires schema_migrations');
+    }
+
+    await verifyHistoryTable(connection);
+    const plan = await inspectMigrationState(connection, migrations, true);
+    if (plan.pending.length > 0 || plan.recoverable.length > 0) {
+        throw new Error(
+            'Leaderboard data operation requires the complete reviewed migration set'
+        );
+    }
+}
+
 export async function rollbackEmptyLeaderboardSchema(
     connection: MigrationConnection,
     migrations: readonly MigrationDefinition[],
-    settings: RunnerSettings
+    settings: MigrationRunnerSettings
 ): Promise<void> {
     await withMigrationLock(connection, settings, async () => {
         if (!(await tableExists(connection, 'schema_migrations'))) {

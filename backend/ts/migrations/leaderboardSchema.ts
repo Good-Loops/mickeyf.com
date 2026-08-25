@@ -2,6 +2,7 @@ import type { LeaderboardTableName } from './migrationManifest';
 
 export interface MigrationConnection {
     query(sql: string, values?: unknown[]): Promise<[unknown, unknown]>;
+    destroy?(): void;
 }
 
 type ExpectedColumn = Readonly<{

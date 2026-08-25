@@ -1,5 +1,6 @@
 import mysql, { type Connection, type RowDataPacket } from 'mysql2/promise';
 import {
+    assertP4VegaDataOperationAuthorized,
     assertMutationAuthorized,
     loadMigrationConfig,
     type MigrationConfig,
@@ -7,27 +8,57 @@ import {
 import type { MigrationConnection } from './leaderboardSchema';
 import { loadMigrationManifest } from './migrationManifest';
 import {
+    backfillP4VegaScores,
+    type P4VegaBackfillConnection,
+    reconcileP4VegaScores,
+} from './p4VegaBackfill';
+import {
     applyMigrations,
     planMigrations,
     rollbackEmptyLeaderboardSchema,
     type MigrationPlan,
 } from './migrationRunner';
 
-type MigrationCommand = 'plan' | 'apply' | 'rollback-empty';
+type MigrationCommand =
+    | 'plan'
+    | 'apply'
+    | 'rollback-empty'
+    | 'backfill-p4-vega'
+    | 'reconcile-p4-vega';
+
+class P4VegaReconciliationDriftError extends Error {
+    constructor(command: 'backfill-p4-vega' | 'reconcile-p4-vega') {
+        super(`${command} found unresolved aggregate drift`);
+        this.name = 'P4VegaReconciliationDriftError';
+    }
+}
 
 function parseCommand(args: readonly string[]): MigrationCommand {
     if (args.length !== 1) {
-        throw new Error('Usage: runMigrations.ts <plan|apply|rollback-empty>');
+        throw new Error(
+            'Usage: runMigrations.ts '
+            + '<plan|apply|rollback-empty|backfill-p4-vega|reconcile-p4-vega>'
+        );
     }
     const [command] = args;
-    if (command !== 'plan' && command !== 'apply' && command !== 'rollback-empty') {
-        throw new Error('Migration command must be plan, apply, or rollback-empty');
+    if (
+        command !== 'plan'
+        && command !== 'apply'
+        && command !== 'rollback-empty'
+        && command !== 'backfill-p4-vega'
+        && command !== 'reconcile-p4-vega'
+    ) {
+        throw new Error('Unknown migration command');
     }
     return command;
 }
 
 function asMigrationConnection(connection: Connection): MigrationConnection {
     return connection as unknown as MigrationConnection;
+}
+
+function asP4VegaBackfillConnection(connection: Connection): P4VegaBackfillConnection {
+    return connection as unknown as P4VegaBackfillConnection;
 }
 
 async function assertConnectedDatabase(
@@ -92,6 +123,32 @@ async function executeCommand(
         return;
     }
 
+    if (command === 'backfill-p4-vega') {
+        const result = await backfillP4VegaScores(
+            asP4VegaBackfillConnection(connection),
+            migrations,
+            config
+        );
+        console.log(JSON.stringify({ command, ...result }, null, 2));
+        if (!result.reconciliation.consistent) {
+            throw new P4VegaReconciliationDriftError(command);
+        }
+        return;
+    }
+
+    if (command === 'reconcile-p4-vega') {
+        const report = await reconcileP4VegaScores(
+            asP4VegaBackfillConnection(connection),
+            migrations,
+            config
+        );
+        console.log(JSON.stringify({ command, report }, null, 2));
+        if (!report.consistent) {
+            throw new P4VegaReconciliationDriftError(command);
+        }
+        return;
+    }
+
     await rollbackEmptyLeaderboardSchema(migrationConnection, migrations, config);
     console.log('Empty leaderboard schema rolled back');
 }
@@ -104,9 +161,12 @@ function safeErrorMessage(error: unknown, password: string): string {
 async function main(): Promise<void> {
     const command = parseCommand(process.argv.slice(2));
     const config = loadMigrationConfig();
-    if (command !== 'plan') {
+    if (command === 'apply' || command === 'rollback-empty') {
         // Refuse before opening a socket, not merely before the first DDL.
         assertMutationAuthorized(command, config);
+    } else if (command === 'backfill-p4-vega' || command === 'reconcile-p4-vega') {
+        // Data commands have separate approvals and also refuse before connecting.
+        assertP4VegaDataOperationAuthorized(command, config);
     }
     const connection = await mysql.createConnection({
         host: config.host,
@@ -117,13 +177,17 @@ async function main(): Promise<void> {
         connectTimeout: Math.min(config.operationTimeoutMs, 10_000),
         multipleStatements: false,
         dateStrings: true,
+        supportBigNumbers: true,
+        bigNumberStrings: true,
     });
 
     try {
         await assertConnectedDatabase(connection, config.database);
         await withOperationDeadline(
             connection,
-            config.operationTimeoutMs,
+            command === 'backfill-p4-vega' || command === 'reconcile-p4-vega'
+                ? config.p4VegaOperationTimeoutMs
+                : config.operationTimeoutMs,
             () => executeCommand(command, connection, config)
         );
     } finally {
@@ -143,5 +207,5 @@ main().catch((error: unknown) => {
         // Configuration errors are already secret-safe.
     }
     console.error(safeErrorMessage(error, password));
-    process.exitCode = 1;
+    process.exitCode = error instanceof P4VegaReconciliationDriftError ? 2 : 1;
 });

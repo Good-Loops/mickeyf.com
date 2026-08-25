@@ -93,8 +93,30 @@ The transitional p4-Vega write path was implemented and verified locally on
 failure rolls the transaction back, concurrent submissions converge on the
 same maximum, and the legacy HTTP response remains unchanged. This code has
 not been deployed and must remain behind the additive schema migration gate.
-Backfill, reconciliation, read cutover, and legacy-column removal remain later
-reviewed steps.
+
+The Phase 13.1 repeatable, privileged p4-Vega historical-backfill CLI and
+separate read-only aggregate reconciliation gate were implemented and verified
+locally on 2026-08-25. The backfill is operational tooling rather than an HTTP
+endpoint or numbered schema migration so it can run once after dual writes
+deploy and again after every legacy-only revision drains. It copies all
+non-null historical scores monotonically without fabricating run history; the
+reconciliation reports only aggregate equality and missing, extra, score, and
+metadata discrepancy counts plus unexpected p4-Vega run/rules counts, never
+player identities. Before writing, the command refuses target-ahead scores,
+extra rows, metadata anomalies, run-ledger rows, and unexpected rules versions
+rather than guessing how to repair them. Every pass reuses the verified
+personal-best migration timestamp, so retries remain stable.
+
+Neither a production backfill nor a production reconciliation has been
+performed. Production execution requires the additive schema, an explicitly
+approved short-lived least-privilege principal, exact target confirmation, and
+recovery evidence.
+Only a zero-discrepancy post-drain reconciliation permits the later read/write
+cutover to `game_personal_bests`. After that cutover is observed, all
+dual-writing revisions drain, the now-static legacy column reconciles again,
+and every code/job/tool reference is removed, a new immutable migration may
+drop `users.p4_score` under separate production approval. The initial additive
+migrations remain unchanged.
 
 ### Step 13.2 — local Three Bosses website playability prototype (no publication)
 

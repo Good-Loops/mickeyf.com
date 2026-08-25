@@ -11,6 +11,12 @@ locally on 2026-08-25 with unit, rollback, and concurrent MySQL 8.0.31 tests. It
 has not been deployed and must not receive traffic until migrations `0001` and
 `0002` have been applied and verified on the target database.
 
+The repeatable, privileged p4-Vega historical-backfill CLI and read-only
+aggregate reconciliation command were implemented and verified locally on
+2026-08-25. This does not authorize or constitute a production backfill, read
+cutover, or removal of `users.p4_score`; each production step retains the
+approval and evidence gates below.
+
 ## Invariants
 
 - Stable game identifiers are `p4-vega` and `three-bosses`.
@@ -23,6 +29,9 @@ has not been deployed and must not receive traffic until migrations `0001` and
   backfilled and reconciled. The initial additive migrations do not alter the
   column; a later immutable migration drops it only after the verified cutover
   gates below are satisfied.
+- The p4-Vega backfill is a repeatable operational data command, not an HTTP
+  endpoint or a one-time `schema_migrations` version. It must run again after
+  every legacy-only application revision has drained.
 - Three Bosses remains `UNRANKED` and its submission endpoint remains disabled
   until the remaining Phase 12 release gates are approved.
 - A player identity always comes from verified authentication, never a client
@@ -140,6 +149,10 @@ authenticated loopback proxy target and requires exact database, target, and
 action-specific confirmation before opening a connection for any mutation.
 The dedicated session forces autocommit for durable history rows.
 
+The repeatable p4-Vega backfill is deliberately not recorded as a numbered
+schema migration. Migration history proves structural evolution; it must not
+make a required second backfill run appear already complete.
+
 ### `game_runs`
 
 An immutable authenticated submission ledger containing:
@@ -178,6 +191,54 @@ Machine identifiers use an ASCII binary collation; display text remains
 `utf8mb4`. The exact additive SQL lives in `backend/migrations` and is verified
 against disposable MySQL 8.0.31. Applying it remains separately reviewed and
 approval-gated.
+
+### p4-Vega historical backfill and reconciliation
+
+The historical transfer is an operator-only CLI operation. It is never exposed
+through Express, bundled into the runtime server, or made callable by a browser.
+It reuses the migration connection boundary: dedicated `MIGRATION_DB_*`
+credentials, the authenticated loopback Cloud SQL proxy, exact database and
+target confirmation, a p4-Vega-backfill-specific mutation flag, the database
+advisory lock, bounded waits, and exact migration-history and table-shape
+verification.
+
+Each run copies every non-null `users.p4_score` by immutable `user_id` into the
+`p4-vega`, rules-version-1 personal best. Historical integers are copied even
+when today's client validator would reject them. New rows reuse the verified
+`game_personal_bests` migration's UTC `applied_at` timestamp on every pass,
+with null `completion_time_ms` and null `source_game_run_id`. A conflicting
+target row changes only when the legacy score is strictly greater; an equal
+source preserves the target timestamp. A target score higher than legacy is
+not silently accepted: preflight refuses the whole run before writes, as it
+does for extra generic rows, unexpected p4-Vega metadata or run-ledger rows,
+and unexpected p4-Vega rules versions. The operation never changes `users`,
+decreases or deletes a target score, or creates a historical `game_runs` row.
+
+Reconciliation is a separate read-only gate. It returns only server-side
+aggregate evidence: source and target count, minimum, maximum, and sum, plus
+counts for missing rows, extra rows, directional score mismatches, unexpected
+p4-Vega completion-time or source-run metadata, run-ledger rows, and rules
+versions. It never prints or exports player identities. A cutover-quality
+reconciliation succeeds only when every discrepancy count is zero and the
+aggregate sets match.
+
+That success is point-in-time database evidence, not proof that a legacy-only
+writer cannot commit after the snapshot. The separately recorded Cloud Run
+revision drain, in-flight request wait, and final post-drain pass remain
+mandatory. Likewise, the loopback target confirmation cannot identify the
+Cloud SQL instance behind the proxy; operators must verify and record the
+authenticated proxy's exact project, region, and instance before enabling a
+data action.
+
+The backfill uses a short-lived least-privilege principal with only the source
+reads and target reads/inserts/score-and-timestamp updates required for the
+reviewed operation. Migration history is read-only to this principal, so the
+shared recorded timestamp cannot be edited between passes. It receives no
+permission to update `users` or to delete, alter, drop, trigger, export, or
+grant. No trigger, view, generated column, index, or foreign key is added
+around `users.p4_score`, so the later contract migration can remove the column
+cleanly. The transitional command must itself be removed or disabled, and
+included in the no-reference proof, before that drop is approved.
 
 ## Completed live metadata preflight
 
@@ -235,21 +296,27 @@ backfill, credential rotation, or deployment.
    `game_personal_bests` while preserving the legacy API. The legacy request
    has no run ID, so it never fabricates a `game_runs` row or claims request
    idempotency.
-5. Backfill every non-null legacy value into `game_personal_bests`, even if an
-   old stored value does not satisfy today's client validator.
-6. Wait for old Cloud Run revisions to drain, then rerun the monotonic,
-   idempotent backfill to close the rolling-deployment window.
-7. Reconcile with server-side missing, extra, and mismatched-row joins plus
-   counts, minimum, maximum, and sum. Do not export player identities.
+5. With a short-lived least-privilege principal and the dedicated action
+   confirmation, run the repeatable monotonic p4-Vega backfill. Copy every
+   non-null legacy value, even if an old stored value does not satisfy today's
+   client validator; do not create a historical run row.
+6. Wait for every legacy-only Cloud Run revision to drain, prove it can no
+   longer receive traffic, then rerun the same idempotent backfill to close the
+   rolling-deployment window.
+7. Run the read-only aggregate reconciliation gate with server-side missing,
+   extra, score-mismatch, and metadata-mismatch counts plus source and target
+   count, minimum, maximum, and sum. Require an exact match and do not export
+   player identities.
 8. Add the generic read API and the direct-linkable multi-game frontend. Switch
    the existing p4-Vega `submit_score` and `get_leaderboard` implementations to
    `game_personal_bests` without changing their request or response contracts.
 9. Stop writing `users.p4_score`, drain every dual-write revision, observe the
    cutover, and rerun the complete reconciliation against the now-static legacy
    column.
-10. Prove that no deployable backend revision, job, operational query, or
-    rollback candidate still reads or writes `users.p4_score`. Retain at least
-    one schema-compatible rollback revision and record a fresh named backup plus
+10. Remove or disable the transitional backfill command, then prove that no
+    deployable backend revision, job, operational query, or rollback candidate
+    still reads or writes `users.p4_score`. Retain at least one
+    schema-compatible rollback revision and record a fresh named backup plus
     point-in-time-recovery evidence.
 11. Add and separately review a new immutable migration that drops
     `users.p4_score`; do not rewrite the already-applied additive migrations.
@@ -282,6 +349,10 @@ only serialization mechanism.
   revision while preserving both domain tables. A legacy-only revision makes
   `game_personal_bests` stale and must not receive traffic again until the
   backfill and full reconciliation have rerun.
+- A completed historical backfill is not rolled back by deleting imported
+  personal-best rows: those rows may already include legitimate dual writes.
+  Correct drift by rerunning the monotonic command and reconciliation, or use
+  the recorded recovery procedure when data is damaged.
 - After writes to `users.p4_score` stop, never roll back to a legacy-only
   revision: the column is stale even before it is dropped. Prefer the last
   schema-compatible dual-write revision or a forward fix. Restoring the legacy

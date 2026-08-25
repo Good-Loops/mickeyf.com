@@ -215,11 +215,14 @@ container on a dynamically assigned `127.0.0.1` port and destroys it after the
 tests. It never uses the Cloud SQL proxy on port 3306 or the runtime `DB_*`
 variables; concurrent worktrees receive separate Compose projects and ports.
 
-The migration CLI uses only dedicated `MIGRATION_DB_*` variables. Its default
-`migrations:plan` command is read-only. Both mutating commands additionally
-require `MIGRATION_CONFIRM_DATABASE` to exactly match `MIGRATION_DB_NAME`, plus
-their own action-specific gate: `MIGRATION_ALLOW_APPLY=1` or
-`MIGRATION_ALLOW_ROLLBACK_EMPTY=1`. These checks run before a database socket
+The migration CLI uses only dedicated `MIGRATION_DB_*` variables. Its
+`migrations:plan` command is read-only. Schema mutations require their own
+action-specific gate: `MIGRATION_ALLOW_APPLY=1` or
+`MIGRATION_ALLOW_ROLLBACK_EMPTY=1`. The repeatable p4-Vega data tools likewise
+use separate `MIGRATION_ALLOW_P4_VEGA_BACKFILL=1` and
+`MIGRATION_ALLOW_P4_VEGA_RECONCILE=1` gates; neither schema-action flag
+authorizes them. Every privileged command requires `MIGRATION_CONFIRM_DATABASE`
+to exactly match `MIGRATION_DB_NAME`. These checks run before a database socket
 is opened. `MIGRATION_CONFIRM_TARGET` must also exactly match
 `127.0.0.1:<port>/<database>`; remote unencrypted database hosts are rejected,
 so production use goes through the authenticated local Cloud SQL proxy:
@@ -228,6 +231,8 @@ so production use goes through the authenticated local Cloud SQL proxy:
 npm --prefix backend run migrations:plan
 npm --prefix backend run migrations:apply
 npm --prefix backend run migrations:rollback-empty
+npm --prefix backend run migrations:p4-backfill
+npm --prefix backend run migrations:p4-reconcile
 ```
 
 Every command requires `MIGRATION_DB_HOST=127.0.0.1`, `MIGRATION_DB_PORT`,
@@ -235,8 +240,36 @@ Every command requires `MIGRATION_DB_HOST=127.0.0.1`, `MIGRATION_DB_PORT`,
 fallback to the backend's runtime `DB_*` credentials. Optional bounded settings
 are `MIGRATION_ADVISORY_LOCK_TIMEOUT_SECONDS` (default 5),
 `MIGRATION_LOCK_WAIT_TIMEOUT_SECONDS` (default 10), and
-`MIGRATION_OPERATION_TIMEOUT_MS` (default 30000). Set an action gate only for
-the command being reviewed, then remove it from the shell after the command.
+`MIGRATION_OPERATION_TIMEOUT_MS` (default 30000). The backfill also accepts
+`MIGRATION_P4_VEGA_BACKFILL_CHUNK_SIZE` from 1 through 5000 (default 500).
+Both p4-Vega data commands use the separate bounded
+`MIGRATION_P4_VEGA_OPERATION_TIMEOUT_MS` (default 900000, maximum 21600000), so
+the short schema-operation deadline does not strand a multi-chunk pass. Set an
+action gate only for the command being reviewed, then remove it from the shell
+after the command.
+
+The p4-Vega backfill verifies the exact applied schema and legacy source,
+copies non-null historical scores monotonically in bounded transactions, and
+then emits aggregate-only reconciliation evidence. The separate reconciliation
+command is data-read-only and emits the same identity-free evidence. Either
+command exits with code 2 when comparison drift remains; that is a failed gate,
+not permission to cut over. Exit code 2 after a backfill can follow successfully
+committed chunks, so it means "rerun/reconcile," not "nothing changed." Exit 1
+means configuration, schema, or operational failure; exit 0 means the emitted
+snapshot is consistent. Because chunks commit independently, any nonzero
+backfill result after processing starts can leave earlier chunks safely
+committed; never infer a whole-job rollback. Correct the failure and rerun the
+monotonic command. These tools are repeatable rollout operations, not numbered
+migrations, and running them in production remains separately reviewed and
+approval-gated. Follow the two-run legacy-revision drain sequence in
+[`backend/LEADERBOARD_DESIGN.md`](backend/LEADERBOARD_DESIGN.md).
+
+An exit-0 reconciliation proves only that one database snapshot matched. It
+does not prove that an old application revision cannot commit afterward. Record
+the Cloud Run revision drain and in-flight request wait separately before the
+final pass. The CLI confirmation identifies the loopback socket and database,
+not the Cloud SQL instance behind the proxy; verify and record the authenticated
+proxy's exact project, region, and instance before setting an action gate.
 
 `migrations:rollback-empty` is only a pre-traffic cleanup: it locks and verifies
 the reviewed tables, refuses if either domain table contains a row, and then
