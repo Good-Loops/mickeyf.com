@@ -117,10 +117,10 @@ table are planned:
 ### `schema_migrations`
 
 Stores the immutable migration version, SHA-256 checksum, and applied time. A
-separate migration principal holds DDL permission only for the reviewed
-migration run; the runtime service account and database user do not receive DDL
-permission. The runner uses a database advisory lock so two deploys cannot
-apply migrations concurrently.
+separate, short-lived migration principal receives only the reviewed schema,
+migration-history, backfill, and reconciliation privileges required for the
+approved run; the runtime identity receives no DDL permission. The runner uses
+a database advisory lock so two deploys cannot apply migrations concurrently.
 
 ### `game_runs`
 
@@ -190,8 +190,8 @@ deadline.
 
 The inspected application database account currently has broad DDL and DML
 privileges. Do not reuse it as the long-term migration boundary. Before
-production rollout, create or canary a least-privilege runtime database identity
-and use a separate short-lived migration principal. Credential changes and
+production rollout, provision and validate a least-privilege runtime database
+identity and use a separate short-lived migration principal. Credential changes and
 privilege revocation require their own reviewed approval. The preflight made no
 database, configuration, or repository change and returned the local proxy to
 its original stopped state.

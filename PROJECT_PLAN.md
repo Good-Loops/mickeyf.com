@@ -83,14 +83,18 @@ local site. This is a local integration and evaluation step only: do not merge
 it to `main`, publish the WebGL build, change Firebase Hosting, or expose a
 production game route until Mike separately approves release.
 
-Use the stable local route `/games/three-bosses`. Rebuilding the Unity game
-must not change that route or require a new link. Keep generated WebGL output
-outside the repository at
+Keep `/games/three-bosses` as the stable browser-facing local URL. Updating the
+game replaces the build at the same external location, so it normally does not
+require a new browser-facing link. Internal Unity loader, data, framework, and
+WebAssembly filenames may change between builds, especially if hashed filenames
+are later enabled; the React loader must resolve the current generated build
+configuration instead of hard-coding asset filenames. Keep generated WebGL
+output outside the repository at
 `%LOCALAPPDATA%\mickeyf.com\three-bosses-webgl`, serve it only on loopback at
 `127.0.0.1:4174`, and proxy it through the Vite development server at
-`/__local/three-bosses/`. Gate the card and route behind an explicit local
-environment flag so CI and production builds do not expose them. The
-integration must:
+`/__local/three-bosses/`. Register the card and route only when both
+`import.meta.env.DEV` and `VITE_ENABLE_THREE_BOSSES_LOCAL=1` are true. Keep the
+flag unset in CI and production builds. The integration must:
 
 - add a Three Bosses entry to the local Games page and a dedicated game page
   that follows the existing site's layout, typography, spacing, controls, and
@@ -109,13 +113,18 @@ integration must:
   static-path changes that a future deployment would require, but do not apply
   production hosting changes during local playability testing.
 
-Test the production-style WebGL build through the real local frontend rather
+Before each build, require the Unity Editor to be ready, stopped, and not
+compiling. Afterward, review Git status and reject incidental `ProjectSettings`,
+asset, scene, prefab, or `.meta` changes. Test the production-style WebGL build
+through the real local frontend rather
 than opening Unity's generated `index.html` directly. Run the normal local
 frontend, backend, database proxy, and WebGL asset server together so existing
 authentication checks are healthy; a disconnected-backend `Failed to fetch`
 message is not an acceptable clean-console result. Use the local browser to
 inspect the new Games entry and game page at desktop, narrow/mobile, and
-ultrawide sizes. Verify direct navigation and refresh, loading and error states,
+ultrawide sizes. Narrow/mobile acceptance covers the responsive website shell;
+gameplay acceptance remains desktop while the game requires keyboard controls.
+Verify direct navigation and refresh, loading and error states,
 canvas scaling, focus recovery, keyboard controls, fullscreen enter/exit,
 audio on/off persistence, pause/background behavior, all three boss levels,
 defeat/retry/menu flows, completion, route exit/re-entry, browser Console and
