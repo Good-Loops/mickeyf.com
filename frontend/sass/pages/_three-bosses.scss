@@ -3,11 +3,14 @@
 .three-bosses {
     @include default-component;
 
-    width: min(100%, 96rem);
+    // Match p4-Vega's 60vw canvas at the 1920px desktop reference without
+    // making the Unity player grow indefinitely on wider displays.
+    width: min(calc(100vw - 2rem), clamp(80rem, 60vw, 115.2rem));
     row-gap: 1.5rem;
     margin-inline: auto;
 
     &__title {
+        font-size: $font-size-s;
         margin-bottom: 0;
     }
 
@@ -23,7 +26,7 @@
 
     &__canvas-wrapper {
         position: relative;
-        width: min(100%, 80rem);
+        width: 100%;
         aspect-ratio: 16 / 9;
         overflow: hidden;
         background: #050508;
@@ -99,24 +102,5 @@
         height: min(100vh, calc(100vw * 9 / 16)) !important;
         aspect-ratio: 16 / 9;
         flex: 0 0 auto;
-    }
-}
-
-@media only screen and (max-width: $bp-m) {
-    .three-bosses {
-        &__title {
-            font-size: $font-size-m;
-        }
-
-        &__canvas-wrapper {
-            width: calc(100vw - 2rem);
-        }
-
-    }
-}
-
-@media only screen and (max-width: $bp-s) {
-    .three-bosses__title {
-        font-size: $font-size-s;
     }
 }

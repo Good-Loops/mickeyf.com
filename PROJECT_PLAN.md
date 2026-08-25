@@ -142,11 +142,11 @@ work: add an in-game pause button and a simple pause menu. Pausing must freeze
 gameplay, active-combat timing, and audio consistently, and Resume must restore
 them cleanly.
 
-Future website presentation polish, also deferred until after the current
-local playability work: at a 1920 × 1080 desktop viewport, use the existing
-p4-Vega game page as the reference for canvas-to-heading proportions and
-overall consistency. Reduce the Three Bosses website page heading above the
-canvas; this does not refer to the title inside the Unity main menu.
+Website presentation polish: **completed and browser-verified on 2026-08-25**.
+At a 1920 × 1080 desktop viewport, the Three Bosses frame now matches the
+existing p4-Vega canvas footprint and heading scale. This reduces only the
+website page heading above the canvas; the title inside the Unity main menu is
+unchanged.
 
 ### Multi-game leaderboard redesign
 
