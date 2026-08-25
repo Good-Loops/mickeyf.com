@@ -168,3 +168,12 @@ The design must include:
 
 Do not assume that scores from different games have the same meaning or can be
 ranked together.
+
+## Deferred tooling follow-up
+
+- TypeDoc drift CI guard: **deferred by owner decision on 2026-08-25**.
+  Documentation generation is deterministic as of commit `7386191a`. If this
+  work resumes, add a `docs:check` command that regenerates the tracked output
+  and fails on unexpected output, canonical source-link, local-reference, or
+  line-ending drift. This is preventative tooling and does not block current
+  Three Bosses work.
