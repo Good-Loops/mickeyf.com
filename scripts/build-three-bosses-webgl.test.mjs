@@ -14,6 +14,9 @@ import { afterEach, test } from "node:test";
 
 import {
   GUARDED_PROJECT_PATHS,
+  PIPELINE_GLOBAL_LIGHT_FALSE_POSITIVES,
+  PIPELINE_RUNTIME_DISABLED_WARNING,
+  assessSuccessfulBuildDiagnostics,
   getDefaultOutputPath,
   parseUnityEnvelope,
   readSnapshots,
@@ -88,7 +91,9 @@ const createFixture = async () => {
 };
 
 const createFakeUnity = ({
+  buildErrors = [],
   buildResult = "Succeeded",
+  buildWarnings = [],
   mutateDuringBuild,
   mutateDuringReimport,
   statusBuildId = "build-test",
@@ -138,10 +143,13 @@ const createFakeUnity = ({
       return envelope(JSON.stringify({
         buildId: statusBuildId,
         buildTimeMs: 123,
+        errors: buildErrors.map((message) => ({ message })),
         outputPath: "external-build",
         result: buildResult,
         status: "completed",
-        totalWarnings: 2,
+        totalErrors: buildErrors.length,
+        totalWarnings: buildWarnings.length,
+        warnings: buildWarnings.map((message) => ({ message })),
       }));
     }
     throw new Error(`Unexpected fake Unity command: ${command}`);
@@ -174,6 +182,49 @@ test("parses object and nested-string Unity command results", () => {
   assert.throws(() => parseUnityEnvelope({ success: false }), /failed/u);
 });
 
+test("accepts only the exact Pipeline scanner false positives", () => {
+  const assessment = assessSuccessfulBuildDiagnostics({
+    errors: [...PIPELINE_GLOBAL_LIGHT_FALSE_POSITIVES]
+      .reverse()
+      .map((message) => ({ message })),
+    totalErrors: PIPELINE_GLOBAL_LIGHT_FALSE_POSITIVES.length,
+    totalWarnings: 1,
+    warnings: [{ message: PIPELINE_RUNTIME_DISABLED_WARNING }],
+  });
+
+  assert.deepEqual(assessment, {
+    acceptedGlobalLightErrors: 10,
+    acceptedPipelineWarnings: 1,
+    actionableWarningMessages: [],
+    actionableWarnings: 0,
+  });
+  assert.deepEqual(assessSuccessfulBuildDiagnostics({ totalErrors: 0, totalWarnings: 0 }), {
+    acceptedGlobalLightErrors: 0,
+    acceptedPipelineWarnings: 0,
+    actionableWarningMessages: [],
+    actionableWarnings: 0,
+  });
+  assert.equal(assessSuccessfulBuildDiagnostics({
+    totalErrors: 0,
+    totalWarnings: 0,
+    warnings: [{ message: "Unexpected warning" }],
+  }).actionableWarnings, 1);
+});
+
+test("rejects incomplete or unexpected successful-build error diagnostics", () => {
+  assert.throws(
+    () => assessSuccessfulBuildDiagnostics({ totalErrors: 1 }),
+    /returned 0 diagnostic message/u,
+  );
+  assert.throws(
+    () => assessSuccessfulBuildDiagnostics({
+      errors: [{ message: "More than one global light on layer Default for light blend style index 0" }],
+      totalErrors: 1,
+    }),
+    /unexpected build errors/u,
+  );
+});
+
 test("uses the shared WebGL directory override for build output", () => {
   assert.equal(
     getDefaultOutputPath({
@@ -202,6 +253,8 @@ test("restores the exact pre-build working bytes after a successful build", asyn
   const { guardedBytes, outputPath, projectPath, repoRoot } = await createFixture();
   const { logger, messages } = quietLogger();
   const invokeUnity = createFakeUnity({
+    buildErrors: PIPELINE_GLOBAL_LIGHT_FALSE_POSITIVES,
+    buildWarnings: [PIPELINE_RUNTIME_DISABLED_WARNING],
     mutateDuringBuild: async () => {
       await assert.rejects(
         () => readFile(join(outputPath, BUILD_COMPLETION_MARKER)),
@@ -228,6 +281,8 @@ test("restores the exact pre-build working bytes after a successful build", asyn
   }
   const combinedLogs = messages.join("\n");
   assert.equal(combinedLogs.includes("ps4Passcode"), false);
+  assert.match(combinedLogs, /known scanner-only Global Light diagnostics/u);
+  assert.match(combinedLogs, /intentionally disabled/u);
   assert.match(combinedLogs, /temporarily unavailable/u);
 });
 

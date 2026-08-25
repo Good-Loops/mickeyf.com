@@ -82,6 +82,19 @@ HTML directly. Set `THREE_BOSSES_WEBGL_DIR` to override the default external
 output directory. The stable local website URL is
 `http://localhost:5173/games/three-bosses`.
 
+`com.unity.pipeline` 0.5.0-exp.1 currently scans build scenes additively while
+looking for runtime managers. The three boss scenes each contain one valid
+Global Light 2D and are loaded singly during gameplay, but the scan makes those
+lights coexist temporarily and records ten duplicate-light false positives.
+The wrapper accepts only that exact ten-message pattern (or no such messages
+after a future package fix) and fails on any deviation. Do not remove or alter
+the scene lights to silence the scanner.
+
+The accompanying `No RuntimePipelineManager components found` warning is also
+intentional: Pipeline remains available to the Editor and Unity CLI, while its
+code-evaluation and hot-reload server stays disabled in the production WebGL
+Player. Do not add a runtime manager merely to suppress this warning.
+
 ## Repository boundaries
 
 Commit Unity source under `Assets/`, `Packages/`, and `ProjectSettings/`, plus

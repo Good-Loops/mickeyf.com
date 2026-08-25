@@ -36,6 +36,24 @@ const ACTIVE_BUILD_STATUSES = new Set(["queued", "building"]);
 const TERMINAL_BUILD_STATUS = "completed";
 const DEFAULT_POLL_INTERVAL_MS = 2_000;
 
+export const PIPELINE_RUNTIME_DISABLED_WARNING =
+  "Pipeline: No RuntimePipelineManager components found in build scenes. Pipeline will be disabled in Player builds.";
+
+const PIPELINE_GLOBAL_LIGHT_LAYERS = Object.freeze([
+  "Default",
+  "Player",
+  "Impact",
+  "Boss",
+  "Projectile",
+]);
+
+export const PIPELINE_GLOBAL_LIGHT_FALSE_POSITIVES = Object.freeze(
+  PIPELINE_GLOBAL_LIGHT_LAYERS.flatMap((layer) => [
+    `More than one global light on layer ${layer} for light blend style index 0`,
+    `More than one global light on layer ${layer} for light blend style index 0`,
+  ]),
+);
+
 const normalizeGitPath = (path) => path.split(sep).join("/");
 
 export const getDefaultOutputPath = (environment = process.env) => {
@@ -50,6 +68,53 @@ export const getDefaultOutputPath = (environment = process.env) => {
 };
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
+
+const diagnosticMessages = (entries) => (Array.isArray(entries) ? entries : [])
+  .map((entry) => (typeof entry === "string" ? entry : entry?.message))
+  .filter((message) => typeof message === "string" && message.length > 0);
+
+const equalStringMultisets = (left, right) => {
+  if (left.length !== right.length) return false;
+  const sortedLeft = [...left].sort();
+  const sortedRight = [...right].sort();
+  return sortedLeft.every((value, index) => value === sortedRight[index]);
+};
+
+export const assessSuccessfulBuildDiagnostics = (buildStatus) => {
+  const errors = diagnosticMessages(buildStatus?.errors);
+  const reportedTotalErrors = Number.isInteger(buildStatus?.totalErrors)
+    ? buildStatus.totalErrors
+    : errors.length;
+  if (reportedTotalErrors !== errors.length) {
+    throw new Error(
+      `Unity reported ${reportedTotalErrors} build error(s), but returned ${errors.length} diagnostic message(s).`,
+    );
+  }
+  if (
+    errors.length > 0
+    && !equalStringMultisets(errors, PIPELINE_GLOBAL_LIGHT_FALSE_POSITIVES)
+  ) {
+    throw new Error(`Unity reported unexpected build errors: ${errors.join("; ")}`);
+  }
+
+  const warnings = diagnosticMessages(buildStatus?.warnings);
+  const pipelineWarningIndex = warnings.indexOf(PIPELINE_RUNTIME_DISABLED_WARNING);
+  const acceptedPipelineWarnings = pipelineWarningIndex >= 0 ? 1 : 0;
+  const actionableWarningMessages = warnings.filter((_, index) => index !== pipelineWarningIndex);
+  const reportedTotalWarnings = Number.isInteger(buildStatus?.totalWarnings)
+    ? buildStatus.totalWarnings
+    : warnings.length;
+
+  return {
+    acceptedGlobalLightErrors: errors.length,
+    acceptedPipelineWarnings,
+    actionableWarningMessages,
+    actionableWarnings: Math.max(
+      actionableWarningMessages.length,
+      reportedTotalWarnings - acceptedPipelineWarnings,
+    ),
+  };
+};
 
 export const parseNulDelimitedBuffer = (buffer) => buffer
   .toString("utf8")
@@ -647,6 +712,7 @@ export const runGuardedWebGlBuild = async ({
   let primaryError;
   let previousBuildId;
   let buildStatus;
+  let diagnosticAssessment;
   let cleanupBarrierSatisfied = true;
   const cleanupErrors = [];
 
@@ -701,6 +767,18 @@ export const runGuardedWebGlBuild = async ({
     cleanupBarrierSatisfied = true;
     if (buildStatus.result !== "Succeeded") {
       throw new Error(`Unity WebGL build ${buildId} finished with result '${buildStatus.result}'.`);
+    }
+    diagnosticAssessment = assessSuccessfulBuildDiagnostics(buildStatus);
+    if (diagnosticAssessment.acceptedGlobalLightErrors > 0) {
+      logger.warn(
+        `Accepted ${diagnosticAssessment.acceptedGlobalLightErrors} known scanner-only Global Light diagnostics from com.unity.pipeline.`,
+      );
+    }
+    if (diagnosticAssessment.acceptedPipelineWarnings > 0) {
+      logger.log("Runtime Pipeline support is intentionally disabled in the WebGL Player.");
+    }
+    for (const warning of diagnosticAssessment.actionableWarningMessages) {
+      logger.warn(`Unity build warning: ${warning}`);
     }
   } catch (error) {
     primaryError = error;
@@ -809,6 +887,8 @@ export const runGuardedWebGlBuild = async ({
   return {
     buildId: buildStatus.buildId,
     buildTimeMs: buildStatus.buildTimeMs,
+    actionableWarnings: diagnosticAssessment.actionableWarnings,
+    acceptedGlobalLightErrors: diagnosticAssessment.acceptedGlobalLightErrors,
     outputPath: buildStatus.outputPath ?? outputPath,
     result: buildStatus.result,
     totalWarnings: buildStatus.totalWarnings ?? 0,
@@ -835,7 +915,7 @@ if (isMainModule) {
     const result = await runGuardedWebGlBuild({ getInterruptSignal: () => interruptSignal });
     console.log(
       `Unity WebGL build ${result.buildId} succeeded in ${result.buildTimeMs ?? "unknown"} ms `
-      + `with ${result.totalWarnings} warning(s).`,
+      + `with ${result.actionableWarnings} actionable warning(s).`,
     );
     console.log(`External build directory: ${result.outputPath}`);
   } catch (error) {
