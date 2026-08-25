@@ -38,9 +38,11 @@ each phase boundary.
     audio-persistence, duplicate-event, and interrupted-run smoke tests:
     **controlled full-route validation completed on 2026-08-24**. Automated
     coverage passed 19 EditMode and 18 PlayMode tests, with clean Unity source
-    integrity and no Console warnings or errors. Mike confirmed audible
-    mute/unmute behavior on 2026-08-24. His continuous hands-on combat-feel,
-    weapon, pickup, and full normal-route check remains before release.
+    integrity and no Console warnings or errors. Subsequent menu, timer, and
+    countdown regression coverage passed 19 EditMode and 20 PlayMode tests in
+    commits `7da148d7` and `5062c6b5`. Mike confirmed audible mute/unmute
+    behavior on 2026-08-24. His continuous hands-on combat-feel, weapon,
+    pickup, and full normal-route check remains before release.
 
 Phase 12 release acceptance still requires Step 12.10, the remaining hands-on
 gameplay check, passing Unity compilation and automated tests, clean asset/meta
@@ -54,6 +56,23 @@ The local Three Bosses result flow is stable enough for integration work.
 Continue Phase 13 on the existing feature branch; do not merge or push these
 changes to `main` until Phase 13 is complete and the remaining Phase 12 release
 gates above have been satisfied.
+
+### Step 13.1 — multi-game contract and migration design
+
+**Drafted on 2026-08-24; awaiting owner approval and the live schema
+preflight.** The server-owned contract uses stable
+`p4-vega` and `three-bosses` identifiers. p4-Vega remains score-descending on
+its unchanged legacy endpoint. Three Bosses is completion-time-ascending but
+remains `UNRANKED` with submission disabled. Persistence will use an immutable
+run ledger for idempotency plus one personal-best row per player, game, and
+rules version so incompatible future rules are never compared.
+
+The additive migration, backfill, reconciliation, compatibility, security,
+and rollback contract is recorded in
+[`backend/LEADERBOARD_DESIGN.md`](backend/LEADERBOARD_DESIGN.md). Exact SQL is
+blocked until a sanitized live `users` table metadata preflight confirms the
+foreign-key column types and constraints. No migration or production data
+change is authorized by this design baseline.
 
 ### Multi-game leaderboard redesign
 
