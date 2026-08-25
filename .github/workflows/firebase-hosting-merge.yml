@@ -113,7 +113,7 @@ jobs:
           npm ls --omit=dev
 
           version="$(./node_modules/.bin/firebase --version)"
-          if [[ "$version" != "15.27.0" ]]; then
+          if [[ "$version" != "15.28.1" ]]; then
             echo "Unexpected Firebase CLI version: $version" >&2
             exit 1
           fi
