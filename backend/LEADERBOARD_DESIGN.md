@@ -121,6 +121,12 @@ separate, short-lived migration principal receives only the reviewed schema,
 migration-history, backfill, and reconciliation privileges required for the
 approved run; the runtime identity receives no DDL permission. The runner uses
 a database advisory lock so two deploys cannot apply migrations concurrently.
+Checksums cover the exact committed LF SQL bytes. Each version contains one
+statement because MySQL DDL commits implicitly; the runner verifies the exact
+table shape before recording or recovering a version. The CLI accepts only the
+authenticated loopback proxy target and requires exact database, target, and
+action-specific confirmation before opening a connection for any mutation.
+The dedicated session forces autocommit for durable history rows.
 
 ### `game_runs`
 
@@ -132,6 +138,10 @@ An immutable authenticated submission ledger containing:
 - a server-computed payload fingerprint;
 - whether the submission improved the personal best; and
 - server submission timestamp.
+
+UTC `DATETIME(6)` fields deliberately have no session-dependent default;
+approved write SQL supplies `UTC_TIMESTAMP(6)` (or an explicitly validated UTC
+value for the shared backfill timestamp).
 
 The table has a unique constraint on `(game_id, user_id, run_id)`. Rules version
 and every canonical metric are included in the payload fingerprint. For the
@@ -153,8 +163,8 @@ source run and no fabricated historical ledger entry.
 
 Foreign-key types must exactly match the live `users.user_id` definition.
 Machine identifiers use an ASCII binary collation; display text remains
-`utf8mb4`. Exact SQL is a separate reviewed implementation step based on the
-completed live metadata preflight below; applying it remains separately
+`utf8mb4`. The exact additive SQL lives in `backend/migrations` and is verified
+against disposable MySQL 8.0.31. Applying it remains separately reviewed and
 approval-gated.
 
 ## Completed live metadata preflight
@@ -196,14 +206,14 @@ privilege revocation require their own reviewed approval. The preflight made no
 database, configuration, or repository change and returned the local proxy to
 its original stopped state.
 
-This evidence satisfies the metadata gate for drafting exact SQL and local
-migration tests. It does not authorize DDL, backfill, credential rotation, or a
-production deployment.
+This evidence satisfied the metadata gate for the exact SQL and isolated local
+migration tests completed on 2026-08-25. It does not authorize production DDL,
+backfill, credential rotation, or deployment.
 
 ## Expand, backfill, and cutover
 
-1. Add a versioned, checksum-recorded migration runner using `mysql2`, a
-   dedicated migration configuration, and a short-lived migration principal.
+1. Use the versioned, checksum-recorded `mysql2` migration runner with its
+   dedicated migration configuration and a short-lived migration principal.
 2. During Mike's reviewed migration approval, assess every proposed statement's
    online-DDL and metadata-lock behavior. Then record and verify a fresh named
    pre-migration backup plus point-in-time-recovery evidence.
@@ -237,8 +247,11 @@ only serialization mechanism.
 
 ## Rollback
 
-- Before generic traffic, remove empty new tables in reverse dependency order
-  only after inspection.
+- Before generic traffic, the explicit `rollback-empty` operation may remove
+  the reviewed schema only after taking write locks and proving both domain
+  tables are empty. It atomically drops `game_personal_bests`, `game_runs`, and
+  their initial `schema_migrations` history so a clean reapplication is
+  possible. It refuses partial, unknown, checksum-drifted, or populated state.
 - After generic traffic, roll back application code but preserve the ledger and
   best tables. The previous backend continues to operate from
   `users.p4_score`, but the new personal-best table becomes stale while old code

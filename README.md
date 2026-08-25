@@ -205,8 +205,43 @@ npm run docs
 npm --prefix frontend run test
 npm --prefix frontend run build
 npm --prefix backend run test
+npm --prefix backend run test:unit
+npm --prefix backend run test:migrations
 npm --prefix backend run prod
 ```
+
+The migration integration suite starts its own digest-pinned MySQL 8.0.31
+container on a dynamically assigned `127.0.0.1` port and destroys it after the
+tests. It never uses the Cloud SQL proxy on port 3306 or the runtime `DB_*`
+variables; concurrent worktrees receive separate Compose projects and ports.
+
+The migration CLI uses only dedicated `MIGRATION_DB_*` variables. Its default
+`migrations:plan` command is read-only. Both mutating commands additionally
+require `MIGRATION_CONFIRM_DATABASE` to exactly match `MIGRATION_DB_NAME`, plus
+their own action-specific gate: `MIGRATION_ALLOW_APPLY=1` or
+`MIGRATION_ALLOW_ROLLBACK_EMPTY=1`. These checks run before a database socket
+is opened. `MIGRATION_CONFIRM_TARGET` must also exactly match
+`127.0.0.1:<port>/<database>`; remote unencrypted database hosts are rejected,
+so production use goes through the authenticated local Cloud SQL proxy:
+
+```powershell
+npm --prefix backend run migrations:plan
+npm --prefix backend run migrations:apply
+npm --prefix backend run migrations:rollback-empty
+```
+
+Every command requires `MIGRATION_DB_HOST=127.0.0.1`, `MIGRATION_DB_PORT`,
+`MIGRATION_DB_NAME`, `MIGRATION_DB_USER`, and `MIGRATION_DB_PASS`; there is no
+fallback to the backend's runtime `DB_*` credentials. Optional bounded settings
+are `MIGRATION_ADVISORY_LOCK_TIMEOUT_SECONDS` (default 5),
+`MIGRATION_LOCK_WAIT_TIMEOUT_SECONDS` (default 10), and
+`MIGRATION_OPERATION_TIMEOUT_MS` (default 30000). Set an action gate only for
+the command being reviewed, then remove it from the shell after the command.
+
+`migrations:rollback-empty` is only a pre-traffic cleanup: it locks and verifies
+the reviewed tables, refuses if either domain table contains a row, and then
+drops the empty leaderboard schema atomically. Production application remains
+separately reviewed and approval-gated.
 
 ## Developer tooling
 

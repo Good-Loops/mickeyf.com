@@ -67,6 +67,7 @@ jobs:
         run: |
           npm --prefix backend test
           npm --prefix backend run test:unit
+          npm --prefix backend run test:migrations
           npm --prefix backend run prod
 
       - name: Build documentation

@@ -1,0 +1,31 @@
+name: mickeyf-migration-test
+
+services:
+  mysql:
+    image: mysql:8.0.31@sha256:3d7ae561cf6095f6aca8eb7830e1d14734227b1fb4748092f2be2cfbccf7d614
+    labels:
+      com.mickeyf.purpose: migration-test
+      com.mickeyf.scope: local-test-only
+    environment:
+      MYSQL_ROOT_PASSWORD: migration-test-root-only
+      MYSQL_DATABASE: mickeyf_migration_test
+      MYSQL_USER: migration_test
+      MYSQL_PASSWORD: migration-test-only
+      MYSQL_INITDB_SKIP_TZINFO: "1"
+    command:
+      - "--character-set-server=utf8mb4"
+      - "--collation-server=utf8mb4_unicode_ci"
+      - "--sql-mode=STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION"
+    ports:
+      - "127.0.0.1::3306"
+    tmpfs:
+      - /var/lib/mysql:rw,nosuid,nodev,size=512m
+    healthcheck:
+      test:
+        - CMD-SHELL
+        - mysqladmin ping --host=127.0.0.1 --user=root --password="$$MYSQL_ROOT_PASSWORD" --silent
+      interval: 2s
+      timeout: 5s
+      retries: 30
+      start_period: 10s
+    stop_grace_period: 30s

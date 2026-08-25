@@ -71,9 +71,12 @@ The additive migration, backfill, reconciliation, compatibility, security,
 and rollback contract is recorded in
 [`backend/LEADERBOARD_DESIGN.md`](backend/LEADERBOARD_DESIGN.md). The sanitized
 live preflight confirmed the foreign-key type and current schema constraints,
-so exact migration SQL may now be drafted and tested locally. Applying DDL,
-backfilling data, changing production credentials, or deploying the new API
-still requires a separate reviewed approval.
+and the exact additive table migrations, checksum-recorded runner, fail-closed
+empty rollback, and isolated MySQL 8.0.31 test harness were implemented and
+verified locally on 2026-08-25. The migration adds no backfill and does not
+alter `users.p4_score`. Applying DDL, backfilling data, changing production
+credentials, or deploying the new API still requires a separate reviewed
+approval.
 
 ### Step 13.2 — local Three Bosses website playability prototype (no publication)
 
