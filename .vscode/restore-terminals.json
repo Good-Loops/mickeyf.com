@@ -53,7 +53,7 @@
           "icon": "terminal-bash",
           "color": "terminal.ansiBlue",
           "commands": [
-            "copilot"
+            "copilot --allow-all"
           ],
           "shouldRunCommands": true
         }
