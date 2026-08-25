@@ -1,6 +1,10 @@
 import { THREE_BOSSES_BUILD_BASE_PATH } from '@/config/featureFlags';
+import {
+    bindUnityVisibility,
+    type UnityVisibilityBridgeInstance,
+} from '@/games/three-bosses/unityVisibility';
 
-export type UnityWebGlInstance = Readonly<{
+export type UnityWebGlInstance = UnityVisibilityBridgeInstance & Readonly<{
     Quit: () => Promise<void>;
     SetFullscreen?: (fullscreen: number) => void;
 }>;
@@ -198,11 +202,29 @@ const startNewHandle = async ({
             cacheControl: () => 'no-store',
         }, onProgress);
 
+        let releaseVisibility: () => void;
+
+        try {
+            releaseVisibility = bindUnityVisibility(instance);
+        } catch (error) {
+            await instance.Quit();
+            throw error;
+        }
+
         const quit = async () => {
             if (quitPromise) return quitPromise;
 
             quitPromise = (async () => {
                 try {
+                    try {
+                        releaseVisibility();
+                    } catch {
+                        // Quit is the lifecycle authority. If it succeeds, a
+                        // receiver-cleanup failure cannot poison the singleton.
+                    }
+
+                    // A hidden player must resume its main loop before Quit can
+                    // observe Unity's shutdown request.
                     await instance.Quit();
                 } finally {
                     script.remove();

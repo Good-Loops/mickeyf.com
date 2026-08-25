@@ -7,7 +7,13 @@ using UnityEngine;
 /// </summary>
 public sealed class RunSessionService : MonoBehaviour
 {
+    private const string ServiceObjectName = "Three Bosses Run Session";
+
     private static RunSessionService instance;
+
+    private PausableMonotonicClock sessionClock;
+    private bool isPausedForDocumentHidden;
+    private bool audioWasPausedBeforeDocumentHidden;
 
     public static RunSessionService Instance
     {
@@ -19,6 +25,7 @@ public sealed class RunSessionService : MonoBehaviour
     }
 
     public RunSession Session { get; private set; }
+    public bool IsPausedForDocumentHidden => isPausedForDocumentHidden;
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     private static void ResetStatics()
@@ -41,8 +48,48 @@ public sealed class RunSessionService : MonoBehaviour
         }
 
         instance = this;
-        Session ??= new RunSession(new UnityRealtimeClock());
+        gameObject.name = ServiceObjectName;
+        sessionClock = new PausableMonotonicClock(new UnityRealtimeClock());
+        Session = new RunSession(sessionClock);
         DontDestroyOnLoad(gameObject);
+    }
+
+    private void OnDestroy()
+    {
+        if (instance != this)
+            return;
+
+        ResumeFromDocumentHidden();
+        instance = null;
+    }
+
+    /// <summary>
+    /// WebGL SendMessage endpoint used immediately before the browser host
+    /// suspends Unity's main loop.
+    /// </summary>
+    public void PauseForDocumentHidden()
+    {
+        if (isPausedForDocumentHidden)
+            return;
+
+        sessionClock.Pause();
+        audioWasPausedBeforeDocumentHidden = AudioListener.pause;
+        AudioListener.pause = true;
+        isPausedForDocumentHidden = true;
+    }
+
+    /// <summary>
+    /// WebGL SendMessage endpoint used immediately before the browser host
+    /// resumes Unity's main loop.
+    /// </summary>
+    public void ResumeFromDocumentHidden()
+    {
+        if (!isPausedForDocumentHidden)
+            return;
+
+        sessionClock.Resume();
+        AudioListener.pause = audioWasPausedBeforeDocumentHidden;
+        isPausedForDocumentHidden = false;
     }
 
     private static void EnsureInstance()
@@ -54,7 +101,7 @@ public sealed class RunSessionService : MonoBehaviour
         if (instance != null)
             return;
 
-        var serviceObject = new GameObject("Three Bosses Run Session");
+        var serviceObject = new GameObject(ServiceObjectName);
         instance = serviceObject.AddComponent<RunSessionService>();
     }
 

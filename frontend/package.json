@@ -8,7 +8,7 @@
     },
     "scripts": {
         "dev": "vite",
-        "test": "tsc -p tsconfig.json --noEmit",
+        "test": "tsc -p tsconfig.json --noEmit && node --experimental-strip-types --test ts/games/three-bosses/unityVisibility.test.mjs",
         "build": "vite build",
         "preview": "vite preview",
         "docs:json": "typedoc --options typedoc.json"

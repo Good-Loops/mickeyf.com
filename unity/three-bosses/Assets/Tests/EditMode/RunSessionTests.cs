@@ -40,6 +40,87 @@ namespace ThreeBosses.Run.Tests
         }
 
         [Test]
+        public void PausableClockFreezesNowAndExcludesThePausedGapAfterResume()
+        {
+            var pausableClock = new PausableMonotonicClock(clock);
+            clock.Advance(10d);
+
+            Assert.That(pausableClock.NowSeconds, Is.EqualTo(10d).Within(0.0001d));
+            Assert.That(pausableClock.Pause(), Is.True);
+
+            clock.Advance(12d);
+            Assert.That(pausableClock.NowSeconds, Is.EqualTo(10d).Within(0.0001d));
+            Assert.That(pausableClock.Resume(), Is.True);
+
+            clock.Advance(3d);
+            Assert.That(pausableClock.NowSeconds, Is.EqualTo(13d).Within(0.0001d));
+        }
+
+        [Test]
+        public void PausableClockPauseAndResumeAreIdempotentAcrossMultipleCycles()
+        {
+            var pausableClock = new PausableMonotonicClock(clock);
+            clock.Advance(2d);
+
+            Assert.That(pausableClock.Pause(), Is.True);
+            clock.Advance(5d);
+            Assert.That(pausableClock.Pause(), Is.False);
+            clock.Advance(3d);
+            Assert.That(pausableClock.Resume(), Is.True);
+            Assert.That(pausableClock.Resume(), Is.False);
+
+            clock.Advance(4d);
+            Assert.That(pausableClock.Pause(), Is.True);
+            clock.Advance(6d);
+            Assert.That(pausableClock.Resume(), Is.True);
+            clock.Advance(1d);
+
+            Assert.That(pausableClock.NowSeconds, Is.EqualTo(7d).Within(0.0001d));
+        }
+
+        [Test]
+        public void RunStartedWhileClockIsPausedRemainsAtZeroUntilResume()
+        {
+            var pausableClock = new PausableMonotonicClock(clock);
+            var pausedSession = new RunSession(pausableClock);
+
+            pausedSession.BeginNewRun();
+            Assert.That(pausableClock.Pause(), Is.True);
+            clock.Advance(10d);
+            Assert.That(pausedSession.StartRun(), Is.True);
+            clock.Advance(5d);
+
+            Assert.That(pausedSession.ElapsedSeconds, Is.Zero.Within(0.0001d));
+            Assert.That(pausableClock.Resume(), Is.True);
+            clock.Advance(2d);
+            Assert.That(pausedSession.ElapsedSeconds, Is.EqualTo(2d).Within(0.0001d));
+        }
+
+        [Test]
+        public void NextBossEnteredWhileClockIsPausedDoesNotAccrueHiddenTime()
+        {
+            var pausableClock = new PausableMonotonicClock(clock);
+            var pausedSession = new RunSession(pausableClock);
+
+            pausedSession.BeginNewRun();
+            Assert.That(pausedSession.StartRun(), Is.True);
+            clock.Advance(3d);
+            Assert.That(
+                pausedSession.RecordBossDefeat(BossId.Bee),
+                Is.EqualTo(BossDefeatResult.AdvanceToNextBoss));
+
+            Assert.That(pausableClock.Pause(), Is.True);
+            clock.Advance(10d);
+            Assert.That(pausedSession.EnterNextBoss(BossId.Cyborg), Is.True);
+            clock.Advance(5d);
+            Assert.That(pausedSession.ElapsedSeconds, Is.EqualTo(3d).Within(0.0001d));
+
+            Assert.That(pausableClock.Resume(), Is.True);
+            clock.Advance(2d);
+            Assert.That(pausedSession.ElapsedSeconds, Is.EqualTo(5d).Within(0.0001d));
+        }
+
+        [Test]
         public void TimerExcludesBossDeathAndTransitionTime()
         {
             StartRun();
