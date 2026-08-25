@@ -20,14 +20,33 @@ namespace ThreeBosses.Tests
         };
 
         [UnityTest]
-        public IEnumerator BattleScenesContainOneTopCenterTimerBeforeOverlays()
+        public IEnumerator BattleScenesUseStableFramingAndOneTopCenterTimerBeforeOverlays()
         {
             Type displayType = RequireRuntimeType("RunTimerDisplay");
+            Type pixelPerfectCameraType = RequireType(
+                "UnityEngine.Rendering.Universal.PixelPerfectCamera, Unity.RenderPipelines.Universal.2D.Runtime");
 
             foreach (string sceneName in BattleScenes)
             {
                 SceneManager.LoadScene(sceneName);
                 yield return null;
+
+                Camera camera = Camera.main;
+                Assert.That(camera, Is.Not.Null, sceneName);
+                Assert.That(camera.orthographic, Is.True, sceneName);
+
+                Component pixelPerfectCamera = camera.GetComponent(pixelPerfectCameraType);
+                Assert.That(pixelPerfectCamera, Is.Not.Null, sceneName);
+                Assert.That(((Behaviour)pixelPerfectCamera).enabled, Is.True, sceneName);
+                Assert.That(GetProperty<int>(pixelPerfectCamera, "assetsPPU"), Is.EqualTo(32), sceneName);
+                Assert.That(GetProperty<int>(pixelPerfectCamera, "refResolutionX"), Is.EqualTo(1280), sceneName);
+                Assert.That(GetProperty<int>(pixelPerfectCamera, "refResolutionY"), Is.EqualTo(720), sceneName);
+                Assert.That(
+                    GetProperty<object>(pixelPerfectCamera, "cropFrame").ToString(),
+                    Is.EqualTo("StretchFill"),
+                    sceneName);
+                Assert.That(camera.aspect, Is.EqualTo(16f / 9f).Within(0.001f), sceneName);
+                Assert.That(camera.orthographicSize, Is.EqualTo(11.25f).Within(0.001f), sceneName);
 
                 MonoBehaviour[] displays = UnityEngine.Object.FindObjectsByType<MonoBehaviour>(
                         FindObjectsInactive.Include,
