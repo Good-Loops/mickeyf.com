@@ -61,7 +61,8 @@ and literal-dark redesign is complete and separately approved.
 
 ### Step 13.1 — multi-game contract and migration design
 
-**Approved by Mike and live-schema-preflighted on 2026-08-24.** The
+**Storage migration completed on 2026-08-26; frontend integration remains in
+progress.** Approved by Mike and live-schema-preflighted on 2026-08-24. The
 server-owned contract uses stable
 `p4-vega` and `three-bosses` identifiers. p4-Vega remains score-descending on
 its unchanged legacy endpoint. Three Bosses is completion-time-ascending but
@@ -160,6 +161,18 @@ rollback code depends on the legacy column, a separately reviewed immutable
 migration will drop `users.p4_score`. The initial additive migrations remain
 unchanged, and the drop requires its own production approval and recovery
 evidence.
+
+That storage end state completed on 2026-08-26. Commit `388bf6d5` added
+immutable migration `0003_drop_users_p4_score` plus a separately gated,
+plan-digest-bound `ALGORITHM=INSTANT` path. After final exact reconciliation,
+on-demand backup `1787787054951`, and a live dependency audit, production
+recorded migration checksum
+`bc4c89691d9d2f729977446e1bde8f168c5ee83c95349e80c3a6deec598a2951`
+and removed `users.p4_score`. Generic and legacy-adapter reads still return the
+same five p4-Vega rows, Three Bosses remains empty, both submission paths remain
+closed, and the temporary maintenance identity was deleted. Because deferred
+`main` still contains the legacy writer, its automatic build trigger is disabled
+and must remain disabled until `main` becomes schema-compatible.
 
 The local generic-only grant contract was completed on 2026-08-26. p4-Vega and
 Three Bosses now share one database-scoped advisory lock per authenticated user,
@@ -330,28 +343,21 @@ maintenance identity was deleted, and no Cloud SQL operation, temporary trigger,
 or build remains pending. This establishes the production submission freeze;
 it does not perform the generic read/write cutover or alter `users.p4_score`.
 
-The Phase 13.1 repeatable, privileged p4-Vega historical-backfill CLI and
-separate read-only aggregate reconciliation gate were implemented and verified
-locally on 2026-08-25. The backfill is operational tooling rather than an HTTP
-endpoint or numbered schema migration so it can be repeated after the dual
-writer is deployed and again after every legacy-only revision drains. It
-copies all non-null historical scores monotonically without fabricating run
-history; the
-reconciliation reports only aggregate equality and missing, extra, score, and
-metadata discrepancy counts plus unexpected p4-Vega run/rules counts, never
-player identities. Before writing, the command refuses target-ahead scores,
-extra rows, metadata anomalies, run-ledger rows, and unexpected rules versions
-rather than guessing how to repair them. Every pass reuses the verified
-personal-best migration timestamp, so retries remain stable.
+The repeatable p4-Vega historical backfill and separate aggregate
+reconciliation gate completed the cutover without fabricating run history or
+exposing player identities. After migration `0003` removed the source column,
+the mutating backfill and standalone operator commands were retired. The
+read-only exact reconciliation remains internal to the destructive migration
+plan so the drop can be safely replayed against the fresh pre-drop backup.
 
 The generic p4-Vega `get_leaderboard` path is now the single production reader
 for both HTTP APIs. Its request, legacy response fields, ten-row bound, cache
 behavior, and numeric historical scores remain compatible. The additive schema,
 enabled dual-writer deployment, repeatable backfill, production freeze, and
 every drain and exact reconciliation required for the frozen generic-only
-traffic cutover are complete. Production `users.p4_score` remains present; its
-runtime grants are retired, while the later immutable column removal remains
-incomplete. The multi-game frontend is recorded below.
+traffic cutover are complete. Production `users.p4_score` and its runtime grants
+are removed; migration history and post-drop API checks passed. The multi-game
+frontend is recorded below.
 
 The additive backend catalog and per-game routes were implemented and verified
 on 2026-08-26. The catalog is projected from server-owned definitions;
@@ -367,7 +373,7 @@ isolated-MySQL tests. Rank remains `UNRANKED`. These routes have not been
 enabled for Three Bosses production writes: the routes are present in the
 serving frozen generic-only revision, but
 `THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=false` remains enforced. They do not
-replace the remaining submission-enablement or column-removal gates.
+replace the remaining submission-enablement gate.
 
 The credential-safe browser submission client and Unity host bridge were
 committed at `c4349f7c`. Unity will later send only its canonical run ID and
@@ -402,16 +408,13 @@ and full source-manifest verification recorded reduced/compliant digest
 `9f7cc4bae03325f8969a37d3cfdda8d74b487288f3334801f9853ef77fe6fb043`.
 The runtime identity can read ordinary `users` columns but receives
 `ER_COLUMNACCESS_DENIED_ERROR` for `p4_score`; public leaderboard and
-submission-freeze smoke tests passed. `users.p4_score` remains unchanged. Only
-after this evidence may a separately approved enabled generic revision
-accept scores. The retired frozen dual writer was a valid rollback target only
-until those grants were retired; that boundary has now passed, so rollback must
-use a generic-authoritative compatible revision or a forward fix. Exactly one
-`p4_score` retirement checkpoint remains: final reconciliation and reference
-audit, a fresh named backup with recovery evidence, the immutable column drop,
-and post-drop schema/runtime/API verification. Submission enablement is a
-separate later decision, not another prerequisite for the drop. The initial
-additive migrations remain unchanged.
+submission-freeze smoke tests passed. The subsequent checksum-recorded migration
+removed `users.p4_score` after fresh recovery evidence, and post-drop public
+verification passed. A separately approved enabled generic revision may now
+accept scores when product readiness permits. The retired frozen dual writer
+is no longer schema-compatible; rollback must use a generic-authoritative
+compatible revision or a forward fix. Submission enablement remains a separate
+later decision. The initial additive migrations remain unchanged.
 
 The frozen generic-only candidate source was locally frozen and reviewed on
 2026-08-26 at exact commit
@@ -588,9 +591,10 @@ browser submission transport and lifecycle-safe Unity bridge are complete but
 the Unity caller and button remain disconnected. Transport tests, production
 build, and desktop plus narrow browser checks pass. A disposable loopback API
 verified the populated p4-Vega table without applying approval-gated database
-migrations; the unmigrated live local p4 read correctly remains in its bounded
-server-error state. The complete route/UI mobile matrix, production migration,
-deployment, and Unity submission activation remain separate pending steps.
+migrations. Production storage, generic backend reads, and the frozen writer are
+now migrated and verified. Public frontend release remains deferred with the
+feature branch; the site-wide responsive/mobile pass and Unity submission
+activation remain separate pending work.
 
 The design must include:
 

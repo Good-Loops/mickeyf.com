@@ -236,11 +236,10 @@ variables; concurrent worktrees receive separate Compose projects and ports.
 
 The migration CLI uses only dedicated `MIGRATION_DB_*` variables. Its
 `migrations:plan` command is read-only. Schema mutations require their own
-action-specific gate: `MIGRATION_ALLOW_APPLY=1` or
-`MIGRATION_ALLOW_ROLLBACK_EMPTY=1`. The repeatable p4-Vega data tools likewise
-use separate `MIGRATION_ALLOW_P4_VEGA_BACKFILL=1` and
-`MIGRATION_ALLOW_P4_VEGA_RECONCILE=1` gates; neither schema-action flag
-authorizes them. Every privileged command requires `MIGRATION_CONFIRM_DATABASE`
+action-specific gate. Ordinary `migrations:apply` may apply only additive
+table migrations; it cannot execute migration `0003`. The legacy rollback,
+backfill, and standalone reconciliation commands were retired after the
+production cutover. Every privileged command requires `MIGRATION_CONFIRM_DATABASE`
 to exactly match `MIGRATION_DB_NAME`. These checks run before a database socket
 is opened. `MIGRATION_CONFIRM_TARGET` must also exactly match
 `127.0.0.1:<port>/<database>`; remote unencrypted database hosts are rejected,
@@ -249,10 +248,21 @@ so production use goes through the authenticated local Cloud SQL proxy:
 ```powershell
 npm --prefix backend run migrations:plan
 npm --prefix backend run migrations:apply
-npm --prefix backend run migrations:rollback-empty
-npm --prefix backend run migrations:p4-backfill
-npm --prefix backend run migrations:p4-reconcile
+npm --prefix backend run migrations:p4-drop:plan
+npm --prefix backend run migrations:p4-drop:verify
+npm --prefix backend run migrations:p4-drop:apply
 ```
+
+The three `p4-drop` commands own the irreversible `users.p4_score` migration.
+Their deterministic plan binds the exact migration checksum, database account,
+production server UUID, schema state, and final identity-free reconciliation.
+Apply additionally requires the pinned Cloud SQL target, reviewed plan digest,
+frozen generic-only revision, exact destructive confirmation, and a live check
+that the schema-incompatible `main` build trigger is disabled. Explicit
+`ALGORITHM=INSTANT` prevents a silent table-copy fallback. Production migration
+`0003_drop_users_p4_score` completed on 2026-08-26. Verify reports the applied
+state; another apply is refused before DDL because the irreversible step is
+already complete.
 
 Runtime-account privilege reduction has its own fail-closed workflow:
 
@@ -337,16 +347,14 @@ Every command requires `MIGRATION_DB_HOST=127.0.0.1`, `MIGRATION_DB_PORT`,
 the backend's runtime `DB_*` credentials. Optional bounded settings are
 `MIGRATION_ADVISORY_LOCK_TIMEOUT_SECONDS` (default 5),
 `MIGRATION_LOCK_WAIT_TIMEOUT_SECONDS` (default 10), and
-`MIGRATION_OPERATION_TIMEOUT_MS` (default 30000). The backfill also accepts
-`MIGRATION_P4_VEGA_BACKFILL_CHUNK_SIZE` from 1 through 5000 (default 500).
-Both p4-Vega data commands use the separate bounded
-`MIGRATION_P4_VEGA_OPERATION_TIMEOUT_MS` (default 900000, maximum 21600000), so
-the short schema-operation deadline does not strand a multi-chunk pass. Set an
-action gate only for the command being reviewed, then remove it from the shell
-after the command. After connecting, the CLI also verifies that `DATABASE()` and
+`MIGRATION_OPERATION_TIMEOUT_MS` (default 30000). p4 drop planning and apply
+also accept `MIGRATION_P4_VEGA_OPERATION_TIMEOUT_MS` (default 900000) for their
+bounded exact reconciliation. Set an action gate only for the command being
+reviewed, then remove it from the shell after the command. After connecting,
+the CLI also verifies that `DATABASE()` and
 the complete account returned by `CURRENT_USER()` match those confirmations.
 
-For production, keep the phases separate and follow the detailed cutover order
+The completed production cutover followed the phased order
 in [`backend/LEADERBOARD_DESIGN.md`](backend/LEADERBOARD_DESIGN.md):
 
 1. Verify and record the proxy's exact project, region, and instance first;
@@ -403,39 +411,22 @@ observation, two runtime transaction samples were zero, and final reconciliation
 again matched all five p4-Vega rows with no discrepancy. The temporary
 maintenance user was deleted and negative authentication verified. The two
 legacy `p4_score` column grants have since been retired; `users.p4_score` itself
-remains unchanged. One `p4_score` retirement checkpoint remains: final
-reconciliation/reference audit, fresh backup and recovery evidence, immutable
-column drop, and post-drop verification. Submission enablement is a separate
-later decision. Exact evidence is recorded in
+was dropped by checksum-recorded migration `0003` on 2026-08-26 after backup
+`1787787054951`. Post-drop schema verification and both public leaderboard
+contracts passed with the same five scores, and the temporary maintenance
+identity was deleted. Submission enablement is a separate later decision.
+Exact evidence is recorded in
 [`backend/LEADERBOARD_DESIGN.md`](backend/LEADERBOARD_DESIGN.md).
 
-The p4-Vega backfill verifies the exact applied schema and legacy source,
-copies non-null historical scores monotonically in bounded transactions, and
-then emits aggregate-only reconciliation evidence. The separate reconciliation
-command is data-read-only and emits the same identity-free evidence. Either
-command exits with code 2 when comparison drift remains; that is a failed gate,
-not permission to cut over. Exit code 2 after a backfill can follow successfully
-committed chunks, so it means "rerun/reconcile," not "nothing changed." Exit 1
-means configuration, schema, or operational failure; exit 0 means the emitted
-snapshot is consistent. Because chunks commit independently, any nonzero
-backfill result after processing starts can leave earlier chunks safely
-committed; never infer a whole-job rollback. Correct the failure and rerun the
-monotonic command. These tools are repeatable rollout operations, not numbered
-migrations, and running them in production remains separately reviewed and
-approval-gated. Follow the two-run legacy-revision drain sequence in
-[`backend/LEADERBOARD_DESIGN.md`](backend/LEADERBOARD_DESIGN.md).
+The mutating backfill and its operator command were retired after the legacy
+column removal. The identity-free, read-only reconciliation remains because a
+drop plan replayed against the fresh pre-drop backup must prove exact equality
+before DDL. The completed cutover treated each reconciliation as one database
+snapshot and separately recorded the Cloud Run drain, in-flight request wait,
+authenticated proxy target, and pinned Cloud SQL server UUID.
 
-An exit-0 reconciliation proves only that one database snapshot matched. It
-does not prove that an old application revision cannot commit afterward. Record
-the Cloud Run revision drain and in-flight request wait separately before the
-final pass. The CLI confirmation identifies the loopback socket and database,
-not the Cloud SQL instance behind the proxy; verify and record the authenticated
-proxy's exact project, region, and instance before setting an action gate.
-
-`migrations:rollback-empty` is only a pre-traffic cleanup: it locks and verifies
-the reviewed tables, refuses if either domain table contains a row, and then
-drops the empty leaderboard schema atomically. Production application remains
-separately reviewed and approval-gated.
+The old empty-schema rollback command was also retired once the production
+leaderboard tables contained durable data.
 
 ## Developer tooling
 

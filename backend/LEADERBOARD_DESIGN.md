@@ -3,29 +3,28 @@
 Status: Phase 13.1 contract approved by Mike on 2026-08-24. The sanitized live
 schema preflight completed on the same date. On 2026-08-25, Mike approved the
 end state in which p4-Vega uses the generic leaderboard storage and the legacy
-`users.p4_score` column is retired after a verified cutover. The additive
+`users.p4_score` column was retired after a verified cutover. The additive
 production schema and an initial p4-Vega data seed were applied and verified on
 2026-08-26. The exact frozen generic-only revision now serves 100% of
 production traffic, and the exact legacy column grants are retired. The frozen
 dual writer is therefore no longer a valid rollback target. This document
-records the completed traffic cutover and grant retirement but does not
-authorize submission enablement, column removal, or another production
-mutation.
+records the completed traffic cutover, grant retirement, and checksum-recorded
+column removal. It does not authorize submission enablement or another
+production mutation.
 
 Production now contains `schema_migrations`, `game_runs`, and
 `game_personal_bests` alongside `users`. The initial seed and the later
 post-drain backfill and frozen generic-only cutover reconciliations all match the
 same five p4-Vega personal bests exactly; `game_runs` is empty and
-`users.p4_score` is unchanged but inaccessible to the runtime account. The
+`users.p4_score` has been removed. The
 frozen generic-only revision serves 100% of production traffic, and the drained
 dual writer has zero traffic.
 
 The transitional p4-Vega dual-write repository was implemented and verified
-locally on 2026-08-25 with unit, rollback, and concurrent MySQL 8.0.31 tests. It
-remains available in the exact retired frozen revision recorded below; its
-former enabled revision is also retired. Migrations `0001` and `0002` are
-applied and verified. Submission enablement and the legacy-column stage remain
-gated on separate review.
+locally on 2026-08-25 with unit, rollback, and concurrent MySQL 8.0.31 tests.
+Its exact frozen revision and former enabled revision are retired and no longer
+schema-compatible. Migrations `0001`, `0002`, and `0003` are applied and
+verified. Submission enablement remains gated on separate review.
 
 The transitional read split was corrected and reverified on 2026-08-26 at
 `a127beac14c2662648c8aededa59374f5d7c87dd`. That split now describes the
@@ -44,8 +43,8 @@ test physically drops the legacy column before successfully submitting and
 reading a score. Type-checking, 125 unit and security tests, 42 isolated MySQL
 integration tests, the production bundle, and image-only Cloud Build contract
 tests pass. This source now serves as the exact frozen generic-only production
-revision recorded below. Its traffic activation does not authorize the
-remaining grant, pool-recycle, submission, or column-removal sequence.
+revision recorded below. Its traffic activation, grant retirement, and column
+removal are recorded below; submission enablement remains separate.
 The generic-only runtime fixture also creates `users` without the legacy column
 and proves both game repositories under the restricted application identity.
 
@@ -334,8 +333,8 @@ and preserve the same identity for uncertain retries. The Unity caller and
 receiver remain disconnected and the Submit Score button remains inert. The
 old singular frontend route is intentionally not retained because the owner
 approved a clean URL change before meaningful public adoption. Generic-only
-p4 writes, production migration, Unity submission activation, and legacy-column
-removal remain incomplete.
+p4 storage and legacy-column removal are complete. p4 write enablement and Unity
+submission activation remain incomplete and separately gated.
 
 ## Invariants
 
@@ -345,13 +344,13 @@ removal remain incomplete.
 - Existing `submit_score` and `get_leaderboard` requests and their p4-Vega
   response bodies remain compatible throughout the migration, including after
   their storage implementation moves to `game_personal_bests`.
-- Existing `users.p4_score` values are preserved until every non-null score is
-  backfilled and reconciled. The initial additive migrations do not alter the
-  column; a later immutable migration drops it only after the verified cutover
-  gates below are satisfied.
-- The p4-Vega backfill is a repeatable operational data command, not an HTTP
-  endpoint or a one-time `schema_migrations` version. It must run again after
-  every legacy-only application revision has drained.
+- Existing `users.p4_score` values were preserved until every non-null score was
+  backfilled and reconciled. The initial additive migrations did not alter the
+  column; immutable migration `0003` dropped it only after the verified cutover
+  gates below were satisfied.
+- The retired p4-Vega backfill was repeatable operational tooling rather than an
+  HTTP endpoint or schema migration. Read-only reconciliation remains inside
+  the destructive migration plan for safe replay against the pre-drop backup.
 - Three Bosses remains `UNRANKED` and its submission endpoint remains disabled
   until the remaining Phase 12 release gates are approved.
 - A player identity always comes from verified authentication, never a client
@@ -362,7 +361,7 @@ current presentation and ordering policy:
 
 | Game ID | Primary order | Rank state | Submission state |
 | --- | --- | --- | --- |
-| `p4-vega` | score, descending | not applicable | legacy endpoint only |
+| `p4-vega` | score, descending | not applicable | legacy endpoint, frozen |
 | `three-bosses` | completion time, ascending | unranked | disabled |
 
 Only a strict primary-metric improvement replaces a personal best. An equal
@@ -513,15 +512,14 @@ against disposable MySQL 8.0.31. Its completed production application is
 recorded below; any later schema change remains separately reviewed and
 approval-gated.
 
-### p4-Vega historical backfill and reconciliation
+### Completed p4-Vega historical backfill and retained reconciliation
 
-The historical transfer is an operator-only CLI operation. It is never exposed
-through Express, bundled into the runtime server, or made callable by a browser.
-It reuses the migration connection boundary: dedicated `MIGRATION_DB_*`
-credentials, the authenticated loopback Cloud SQL proxy, exact database and
-target confirmation, a p4-Vega-backfill-specific mutation flag, the database
-advisory lock, bounded waits, and exact migration-history and table-shape
-verification.
+The historical transfer ran only as an operator CLI operation. It was never
+exposed through Express, bundled into the runtime server, or callable by a
+browser. It reused the migration connection boundary: dedicated
+`MIGRATION_DB_*` credentials, the authenticated loopback Cloud SQL proxy, exact
+target confirmation, its own mutation gate, the database advisory lock, bounded
+waits, and exact migration-history and table-shape verification.
 
 Each run copies every non-null `users.p4_score` by immutable `user_id` into the
 `p4-vega`, rules-version-1 personal best. Historical integers are copied even
@@ -535,7 +533,7 @@ does for extra generic rows, unexpected p4-Vega metadata or run-ledger rows,
 and unexpected p4-Vega rules versions. The operation never changes `users`,
 decreases or deletes a target score, or creates a historical `game_runs` row.
 
-Reconciliation is a separate read-only gate. It returns only server-side
+Reconciliation remains a read-only gate. It returns only server-side
 aggregate evidence: source and target count, minimum, maximum, and sum, plus
 counts for missing rows, extra rows, directional score mismatches, unexpected
 p4-Vega completion-time or source-run metadata, run-ledger rows, and rules
@@ -543,22 +541,15 @@ versions. It never prints or exports player identities. A cutover-quality
 reconciliation succeeds only when every discrepancy count is zero and the
 aggregate sets match.
 
-That success is point-in-time database evidence, not proof that a legacy-only
-writer cannot commit after the snapshot. The separately recorded Cloud Run
-revision drain, in-flight request wait, and final post-drain pass remain
-mandatory. Likewise, the loopback target confirmation cannot identify the
-Cloud SQL instance behind the proxy; operators must verify and record the
-authenticated proxy's exact project, region, and instance before enabling a
-data action.
+That success was point-in-time database evidence, not proof that a legacy-only
+writer could not commit after the snapshot. The completed cutover therefore
+recorded the Cloud Run revision drain, in-flight request wait, final post-drain
+pass, authenticated proxy target, and pinned Cloud SQL server UUID separately.
 
-The backfill runs only through the fixed CLI operation and its independently
-approved action gate. Supply one approved maintenance credential through
-`MIGRATION_DB_*`, clear it immediately afterward, and reduce the runtime account
-to reviewed DML before candidate deployment. No trigger, view, generated
-column, index, or foreign key is added around `users.p4_score`, so the later
-contract migration can remove the column cleanly. The transitional command
-must itself be removed or disabled, and included in the no-reference proof,
-before that drop is approved.
+The mutating backfill, standalone reconciliation command, and their action gates
+were retired after migration `0003`. The aggregate reconciliation logic remains
+only as a pre-DDL safety check when planning or replaying the drop against the
+fresh pre-drop backup.
 
 ## Completed live metadata preflight
 
@@ -726,11 +717,36 @@ credential then failed with `ER_ACCESS_DENIED_ERROR`, the final user list
 contained only `cms_mickeyf` and `root`, and no Cloud SQL operation or build was
 unfinished. Cloud Run remained at generation 121 with 100% traffic on
 `mickeyf-org-freeze-d5aee625983b4dafa90d0db9898341e8`; both submission flags
-remained false. `users.p4_score` itself was not modified or removed. Exactly one
-retirement checkpoint remains: final reconciliation/reference audit, a fresh
-named backup with recovery evidence, the immutable column drop, and post-drop
-schema/runtime/API verification. Submission enablement is a separate later
-decision.
+remained false.
+
+## Completed production p4_score removal
+
+On 2026-08-26, commit `388bf6d5` introduced immutable migration
+`0003_drop_users_p4_score` with explicit `ALGORITHM=INSTANT`, exact source-shape
+and dependency checks, a deterministic reviewed plan, an irreversible-effect
+gate, and recovery for completed DDL whose history insert was interrupted.
+Ordinary migration apply cannot execute the drop.
+
+The final live plan on pinned server UUID
+`d1e6865c-ecad-11ee-a6b0-42010a400002` again found five exact source/target
+matches, minimum 190, maximum 410, sum 1350, and zero discrepancy, metadata,
+run-ledger, or rules-version counts. On-demand backup `1787787054951` completed
+successfully in location `us`; binary logging, Cloud Storage transaction logs,
+and seven-day PITR retention remained enabled. Because deferred `main` still
+contains the old writer, trigger `main-push-mickeyf-com` was disabled without
+changing its repository, branch, filename, included files, or service account.
+It must remain disabled until `main` is schema-compatible.
+
+The apply recorded checksum
+`bc4c89691d9d2f729977446e1bde8f168c5ee83c95349e80c3a6deec598a2951`
+and verified all three migrations applied with nothing pending or recoverable.
+The public catalog, generic and legacy-adapter p4 reads, empty Three Bosses
+board, unknown-game response, authentication state, both submission freezes,
+no-store headers, and no-cookie/no-redirect constraints passed after the drop;
+both p4 APIs retained the same five scores. The temporary maintenance account
+was deleted and then failed authentication, the Cloud SQL user list again
+contained only `cms_mickeyf` and `root`, and no build or Cloud SQL operation was
+unfinished. Submission enablement remains a separate product decision.
 
 This evidence satisfied the metadata gate for the exact SQL and isolated local
 migration tests completed on 2026-08-25. That preflight did not by itself
@@ -877,17 +893,22 @@ legacy reader.
     legacy equality as a cutover gate, verify the generic-authoritative rollback
     candidate, and only then deploy an explicitly approved revision with the
     positive opt-in enabled. Once new generic-only scores are accepted, exact
-    equality with the stale legacy column is no longer expected.
+    equality with the stale legacy column is no longer expected. **Legacy
+    backfill commands are retired; submission enablement remains pending.**
 14. Remove the transitional backfill command, then prove that no
     deployable backend revision, job, operational query, or rollback candidate
     still reads or writes `users.p4_score`. Retain at least one
     generic-authoritative, schema-compatible rollback revision and record a
-    fresh named backup plus point-in-time-recovery evidence.
+    fresh named backup plus point-in-time-recovery evidence. **Completed for
+    the active production path on 2026-08-26; the incompatible deferred-main
+    trigger remains disabled until that branch is updated.**
 15. Add and separately review a new immutable migration that drops
     `users.p4_score`; do not rewrite the already-applied additive migrations.
     Apply it only after Mike explicitly approves the production contract step.
+    **Completed on 2026-08-26 as migration `0003`.**
 16. Verify the current p4-Vega submission and leaderboard paths, generic reads,
     migration history, and recovery procedure against the contracted schema.
+    **Completed on 2026-08-26; submissions remain frozen.**
 17. Keep Three Bosses writes disabled. Its backend, browser client, and host
     bridge are prepared, but do not enable them until Unity canonicalizes one
     integer millisecond result for display, score, and transport; the Unity
@@ -908,11 +929,9 @@ only serialization mechanism.
 
 ## Rollback
 
-- Before generic traffic, the explicit `rollback-empty` operation may remove
-  the reviewed schema only after taking write locks and proving both domain
-  tables are empty. It atomically drops `game_personal_bests`, `game_runs`, and
-  their initial `schema_migrations` history so a clean reapplication is
-  possible. It refuses partial, unknown, checksum-drifted, or populated state.
+- Before generic traffic, an explicit `rollback-empty` operation was available
+  only after taking write locks and proving both domain tables empty. It was
+  retired once production contained durable leaderboard data.
 - During dual writes, application code may roll back to the last compatible
   dual-write revision while preserving both domain tables. Once the freeze gate
   enters the rollout, rollback must preserve the required gate state and must
