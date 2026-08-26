@@ -194,9 +194,38 @@ effective-severity findings. The locked production dependency install also
 reported zero `npm audit` findings. The build did not deploy: Cloud Run remained
 at generation 118 with 100% traffic on the frozen dual-writer revision, and no
 revision, traffic, database, grant, trigger, or IAM mutation was requested or
-executed. A one-shot deployment configuration may now be derived from this exact
-build and digest, but the old image's embedded-OpenSSL risk acceptance does not
-cover the new digest and must be addressed before any zero-traffic deployment.
+executed.
+
+The exact source-less one-shot package is now tracked as
+`cloudbuild.generic-only.deploy.json`, SHA-256
+`8afde577fbefe781ed0a0c428f04dad40a5b8f8d147f22f01ccbae86bb9a5bf4`. Its eight
+pinned steps revalidate the exact source build, approval, SLSA v1 provenance,
+continuous OS/NPM/secret analysis, and zero vulnerability occurrences before
+allowing only a `--no-traffic` frozen deployment. The deterministic target is
+revision `mickeyf-org-freeze-d5aee625983b4dafa90d0db9898341e8` with temporary
+tag `f-d5aee625983b4dafa90d0db9898341e8`, exact runtime identity/resources/numeric
+secret references, and both submission flags false. Pre/post attestation rejects
+positive-traffic drift, while the non-mutating smoke suite now requires the
+legacy and generic p4-Vega leaderboard rows to agree. The package has no source,
+available secret, notification, traffic-promotion, database, migration, grant,
+IAM, or trigger-mutation step; all seven contract tests pass. No temporary
+trigger or deploy build has been created. Later approval must cover prompt exact-
+tag and temporary-trigger cleanup because a zero-percent tagged URL is still
+publicly invokable.
+
+The refreshed OpenSSL review found byte-identical Dockerfile, lockfile, pinned
+Node base, first four OCI layers, and Node installation layer
+`sha256:efbef6f9e333972a10ca323e700496a64e7ddcc3a6725e6afbbae52e690f4a4`
+between the previously accepted image and this candidate; both declare Node
+22.23.2. Only test/maintenance package scripts changed, and no affected QUIC,
+DTLS, CMP, CMS, RPK, or one-shot `EVP_Cipher()` path was added. The technical
+reachability evidence therefore transfers at the embedded-component boundary,
+but the prior user acceptance does not transfer across image digests, and the
+clean Artifact Analysis result does not scan Node's embedded OpenSSL 3.5.7.
+OpenSSL 3.5.8 is fixed upstream but not yet present in a released Node 22 build.
+Explicit acceptance for this exact digest and zero-traffic stage remains required.
+The source-build freshness gate expires at `2026-08-26T23:06:14Z`; if missed,
+rebuild the exact source rather than relax it.
 
 The additive backend API was implemented and verified locally on 2026-08-26.
 `GET /api/leaderboards` explicitly projects the server catalog, and

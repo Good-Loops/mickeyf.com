@@ -439,9 +439,48 @@ locked production dependency install also reported zero `npm audit` findings.
 The image-only build created no deployment: a post-build check still found Cloud
 Run generation 118 and exactly 100% traffic on the frozen dual-writer revision.
 No revision, traffic, database, privilege, trigger, or IAM mutation was requested
-or executed. The previous image's embedded-OpenSSL risk acceptance does not
-automatically transfer to this new digest and must be addressed before any
-zero-traffic deployment.
+or executed.
+
+The temporary reviewed one-shot deployment package is now tracked as
+`cloudbuild.generic-only.deploy.json` with SHA-256
+`8afde577fbefe781ed0a0c428f04dad40a5b8f8d147f22f01ccbae86bb9a5bf4`.
+Its source-less eight-step contract pins the exact build, commit, digest,
+approval-required image trigger, signed provenance, and scan result. If later
+authorized through a temporary approval-required trigger running as the bounded
+deployment identity, it can create only frozen revision
+`mickeyf-org-freeze-d5aee625983b4dafa90d0db9898341e8`, expose temporary tag
+`f-d5aee625983b4dafa90d0db9898341e8`, and pass `--no-traffic` with both
+submission flags false. The package contains no source, build artifacts,
+available secrets, Slack notification, traffic promotion, migration, grant,
+database, IAM, or trigger mutation step. Its scan gate was tightened to require
+zero vulnerability occurrences at every severity, and its anonymous/read-only
+smoke suite now requires the legacy and generic p4-Vega reads to return identical
+rows. All seven image/deployment contract tests pass. The candidate tag remains
+publicly invokable despite carrying zero production traffic, so later approval
+must include prompt exact-tag and temporary-trigger cleanup. No trigger or deploy
+build has been created from this package.
+
+The embedded-OpenSSL evidence was separately refreshed. The previously accepted
+and new images use identical Dockerfile blob
+`2b3c60894c2a73e701230482f3b722a72e017725`, production lockfile blob
+`65759ac60e8a6f6bc90f19cab2cd2d18cb8750dc`, and pinned Node base. Their OCI
+manifests share the first four layers byte-for-byte, including Node installation
+layer `sha256:efbef6f9e333972a10ca323e700496a64e7ddcc3a6725e6afbbae52e690f4a4`;
+both image configurations declare Node 22.23.2. The only `package.json` changes
+are test and maintenance scripts, and the application diff adds none of the
+affected QUIC, DTLS, CMP, CMS, RPK, or one-shot `EVP_Cipher()` paths. This makes
+the earlier reachability evidence applicable at the component level, but the
+clean package/OS scan does not inspect Node's embedded OpenSSL 3.5.7 and the
+user's earlier risk acceptance remains bound to the old digest. OpenSSL 3.5.8
+is the upstream security fix, while Node 22.23.2 remains the latest published
+22.x release and the [Node 3.5.8 update](https://github.com/nodejs/node/pull/65542)
+is still open; see the [OpenSSL 3.5 release
+notes](https://www.openssl-library.org/news/openssl-3.5-notes/index.html) and
+[Node release list](https://nodejs.org/en/blog/release). Explicit acceptance for
+this exact digest and zero-traffic stage is therefore still required. The
+package's historical two-hour freshness gate expires at
+`2026-08-26T23:06:14Z`; rebuild the exact commit instead of weakening that gate
+if the deadline is missed.
 
 ### Step 13.2 — local Three Bosses website playability prototype (no publication)
 
