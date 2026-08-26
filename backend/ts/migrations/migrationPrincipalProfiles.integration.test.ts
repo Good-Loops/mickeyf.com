@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { setTimeout as delay } from 'node:timers/promises';
 import { after, before, beforeEach, test } from 'node:test';
 import mysql, {
     type Connection,
@@ -10,15 +11,24 @@ import { loadMigrationManifest } from './migrationManifest';
 import {
     ActiveMigrationPrincipalConnectionsError,
     createTemporaryMigrationPrincipal,
+    type MigrationPrincipalAdminConnection,
     revokeTemporaryMigrationPrincipal,
     UnexpectedMigrationTriggerError,
 } from './migrationPrincipalManager';
 import {
     getMigrationPrincipalProfile,
+    MIGRATION_PRINCIPAL_BOOTSTRAP_ACCOUNT,
     MIGRATION_PRINCIPAL_HOST,
     MIGRATION_PRINCIPAL_PROFILE_NAMES,
+    MIGRATION_PRINCIPAL_WATCHDOG_ARMER_ACCOUNT,
     type MigrationPrincipalProfileName,
 } from './migrationPrincipalProfiles';
+import {
+    armMigrationPrincipalWatchdog,
+    disarmMigrationPrincipalWatchdog,
+    getMigrationPrincipalWatchdogEventName,
+    MIGRATION_PRINCIPAL_BOOTSTRAP_ROLE,
+} from './migrationPrincipalWatchdog';
 import {
     backfillP4VegaScores,
     reconcileP4VegaScores,
@@ -34,6 +44,9 @@ const migrationTestPort = Number(process.env.MIGRATION_TEST_PORT);
 const TEST_DATABASE = 'mickeyf_migration_test';
 const SENTINEL_DATABASE = 'mickeyf_privilege_sentinel';
 const TEST_PASSWORD = 'migration-profile-test-0123456789abcdef';
+const WATCHDOG_DEFINER = 'root@%';
+const BOOTSTRAP_PASSWORD = 'migration-bootstrap-test-0123456789abcdef';
+const ARMER_PASSWORD = 'migration-armer-test-0123456789abcdef';
 const config = loadMigrationConfig();
 const migrations = loadMigrationManifest();
 let adminConnection: Connection;
@@ -70,8 +83,38 @@ async function dropProfileAccounts(): Promise<void> {
     }
 }
 
+async function dropBootstrapFixture(): Promise<void> {
+    await adminConnection.query(
+        'DROP USER IF EXISTS ?@?',
+        [MIGRATION_PRINCIPAL_BOOTSTRAP_ACCOUNT, MIGRATION_PRINCIPAL_HOST]
+    );
+    await adminConnection.query(
+        'DROP ROLE IF EXISTS ?@?',
+        [MIGRATION_PRINCIPAL_BOOTSTRAP_ROLE, MIGRATION_PRINCIPAL_HOST]
+    );
+}
+
+async function dropArmerFixture(): Promise<void> {
+    await adminConnection.query(
+        'DROP USER IF EXISTS ?@?',
+        [MIGRATION_PRINCIPAL_WATCHDOG_ARMER_ACCOUNT, MIGRATION_PRINCIPAL_HOST]
+    );
+}
+
+async function dropWatchdogEvents(): Promise<void> {
+    for (const profileName of MIGRATION_PRINCIPAL_PROFILE_NAMES) {
+        const eventName = getMigrationPrincipalWatchdogEventName(profileName);
+        await adminConnection.query(`DROP EVENT IF EXISTS \`${eventName}\``);
+    }
+}
+
 async function resetFixture(): Promise<void> {
+    await dropWatchdogEvents();
+    await adminConnection.query('DROP VIEW IF EXISTS migration_watchdog_bootstrap_probe');
+    await adminConnection.query('DROP TRIGGER IF EXISTS migration_watchdog_persisted_probe');
     await dropProfileAccounts();
+    await dropBootstrapFixture();
+    await dropArmerFixture();
     await adminConnection.query('SET FOREIGN_KEY_CHECKS = 0');
     try {
         await adminConnection.query(`
@@ -169,11 +212,19 @@ async function withTemporaryProfile(
     profileName: MigrationPrincipalProfileName,
     operation: (connection: Connection) => Promise<void>
 ): Promise<void> {
+    await armMigrationPrincipalWatchdog(
+        adminConnection,
+        config.database,
+        profileName,
+        120,
+        WATCHDOG_DEFINER
+    );
     await createTemporaryMigrationPrincipal(
         adminConnection,
         config.database,
         profileName,
-        TEST_PASSWORD
+        TEST_PASSWORD,
+        WATCHDOG_DEFINER
     );
     await assertLifecycleSettings(profileName);
     const connection = await connectAsProfile(profileName);
@@ -186,6 +237,7 @@ async function withTemporaryProfile(
             config.database,
             profileName
         );
+        await disarmAsBootstrap(profileName);
     }
     await assertReconnectDenied(profileName);
 }
@@ -249,9 +301,532 @@ beforeEach(resetFixture);
 
 after(async () => {
     if (!adminConnection) return;
+    await dropWatchdogEvents();
+    await adminConnection.query('DROP VIEW IF EXISTS migration_watchdog_bootstrap_probe');
+    await adminConnection.query('DROP TRIGGER IF EXISTS migration_watchdog_persisted_probe');
     await dropProfileAccounts();
+    await dropBootstrapFixture();
+    await dropArmerFixture();
     await adminConnection.query(`DROP DATABASE IF EXISTS ${SENTINEL_DATABASE}`);
     await adminConnection.end();
+});
+
+async function createBootstrapFixture(includeSystemUser = true): Promise<void> {
+    await adminConnection.query(
+        'CREATE ROLE IF NOT EXISTS ?@?',
+        [MIGRATION_PRINCIPAL_BOOTSTRAP_ROLE, MIGRATION_PRINCIPAL_HOST]
+    );
+    const globalPrivileges = includeSystemUser
+        ? 'CREATE USER, PROCESS, SYSTEM_USER'
+        : 'CREATE USER, PROCESS';
+    await adminConnection.query(
+        `GRANT ${globalPrivileges} ON *.* TO ?@?`,
+        [MIGRATION_PRINCIPAL_BOOTSTRAP_ROLE, MIGRATION_PRINCIPAL_HOST]
+    );
+    await adminConnection.query(
+        `GRANT ALL PRIVILEGES ON \`${TEST_DATABASE}\`.* TO ?@?`,
+        [MIGRATION_PRINCIPAL_BOOTSTRAP_ROLE, MIGRATION_PRINCIPAL_HOST]
+    );
+    await adminConnection.query(
+        'GRANT SELECT ON ?? TO ?@?',
+        [`${SENTINEL_DATABASE}.sentinel`, MIGRATION_PRINCIPAL_BOOTSTRAP_ROLE,
+            MIGRATION_PRINCIPAL_HOST]
+    );
+    await adminConnection.query(
+        `CREATE USER ?@? IDENTIFIED BY ? WITH MAX_USER_CONNECTIONS 1`,
+        [
+            MIGRATION_PRINCIPAL_BOOTSTRAP_ACCOUNT,
+            MIGRATION_PRINCIPAL_HOST,
+            BOOTSTRAP_PASSWORD,
+        ]
+    );
+    await adminConnection.query(
+        'GRANT ?@? TO ?@?',
+        [
+            MIGRATION_PRINCIPAL_BOOTSTRAP_ROLE,
+            MIGRATION_PRINCIPAL_HOST,
+            MIGRATION_PRINCIPAL_BOOTSTRAP_ACCOUNT,
+            MIGRATION_PRINCIPAL_HOST,
+        ]
+    );
+    await adminConnection.query(
+        'SET DEFAULT ROLE ALL TO ?@?',
+        [MIGRATION_PRINCIPAL_BOOTSTRAP_ACCOUNT, MIGRATION_PRINCIPAL_HOST]
+    );
+    await adminConnection.query(
+        'GRANT SELECT ON ?? TO ?@?',
+        [
+            `${config.database}.users`,
+            MIGRATION_PRINCIPAL_BOOTSTRAP_ACCOUNT,
+            MIGRATION_PRINCIPAL_HOST,
+        ]
+    );
+}
+
+async function createArmerFixture(): Promise<void> {
+    await adminConnection.query(
+        'CREATE USER ?@? IDENTIFIED BY ?',
+        [
+            MIGRATION_PRINCIPAL_WATCHDOG_ARMER_ACCOUNT,
+            MIGRATION_PRINCIPAL_HOST,
+            ARMER_PASSWORD,
+        ]
+    );
+    await adminConnection.query(
+        'GRANT SELECT ON mysql.user TO ?@?',
+        [MIGRATION_PRINCIPAL_WATCHDOG_ARMER_ACCOUNT, MIGRATION_PRINCIPAL_HOST]
+    );
+    await adminConnection.query(
+        `GRANT EVENT ON \`${TEST_DATABASE}\`.* TO ?@?`,
+        [MIGRATION_PRINCIPAL_WATCHDOG_ARMER_ACCOUNT, MIGRATION_PRINCIPAL_HOST]
+    );
+}
+
+async function connectAsArmer(): Promise<Connection> {
+    return mysql.createConnection({
+        host: config.host,
+        port: config.port,
+        user: MIGRATION_PRINCIPAL_WATCHDOG_ARMER_ACCOUNT,
+        password: ARMER_PASSWORD,
+        database: config.database,
+        dateStrings: true,
+        multipleStatements: false,
+    });
+}
+
+async function connectAsBootstrap(): Promise<Connection> {
+    const connection = await mysql.createConnection({
+        host: config.host,
+        port: config.port,
+        user: MIGRATION_PRINCIPAL_BOOTSTRAP_ACCOUNT,
+        password: BOOTSTRAP_PASSWORD,
+        database: config.database,
+        dateStrings: true,
+        multipleStatements: false,
+    });
+    await connection.query('SET ROLE ALL');
+    return connection;
+}
+
+async function assertBootstrapReconnectDenied(): Promise<void> {
+    let unexpectedConnection: Connection | undefined;
+    try {
+        unexpectedConnection = await connectAsBootstrap();
+        assert.fail('locked bootstrap account unexpectedly reconnected');
+    } catch (error) {
+        assert.equal(
+            (error as { code?: unknown }).code,
+            'ER_ACCOUNT_HAS_BEEN_LOCKED'
+        );
+    } finally {
+        if (unexpectedConnection) await unexpectedConnection.end();
+    }
+}
+
+async function disarmAsBootstrap(
+    profileName: MigrationPrincipalProfileName
+): Promise<void> {
+    if ((await accountState(MIGRATION_PRINCIPAL_BOOTSTRAP_ACCOUNT)).length === 0) {
+        await createBootstrapFixture();
+    }
+    const bootstrapConnection = await connectAsBootstrap();
+    try {
+        await disarmMigrationPrincipalWatchdog(
+            bootstrapConnection,
+            config.database,
+            profileName,
+            WATCHDOG_DEFINER
+        );
+    } finally {
+        await bootstrapConnection.end();
+    }
+    assert.deepEqual(
+        await accountState(MIGRATION_PRINCIPAL_BOOTSTRAP_ACCOUNT),
+        []
+    );
+}
+
+async function rescheduleWatchdogNow(
+    profileName: MigrationPrincipalProfileName
+): Promise<void> {
+    const eventName = getMigrationPrincipalWatchdogEventName(profileName);
+    await adminConnection.query(`
+        ALTER EVENT \`${eventName}\`
+        ON SCHEDULE AT CURRENT_TIMESTAMP(6) + INTERVAL 2 SECOND
+        ON COMPLETION PRESERVE
+        ENABLE
+    `);
+}
+
+async function waitForWatchdogAttempt(
+    profileName: MigrationPrincipalProfileName
+): Promise<void> {
+    const eventName = getMigrationPrincipalWatchdogEventName(profileName);
+    for (let attempt = 0; attempt < 80; attempt += 1) {
+        const [rows] = await adminConnection.query<Array<RowDataPacket & {
+            lastExecuted: string | null;
+            status: string;
+        }>>(`
+            SELECT LAST_EXECUTED AS lastExecuted, STATUS AS status
+            FROM information_schema.EVENTS
+            WHERE EVENT_SCHEMA = ? AND EVENT_NAME = ?
+        `, [config.database, eventName]);
+        if (
+            rows.length === 1
+            && rows[0].lastExecuted !== null
+            && rows[0].status === 'DISABLED'
+        ) {
+            return;
+        }
+        await delay(100);
+    }
+    assert.fail(`watchdog ${profileName} did not attempt before the test deadline`);
+}
+
+async function accountState(accountName: string): Promise<readonly {
+    accountLocked: string;
+}[]> {
+    const [rows] = await adminConnection.query<Array<RowDataPacket & {
+        accountLocked: string;
+    }>>(`
+        SELECT account_locked AS accountLocked
+        FROM mysql.user
+        WHERE User = ? AND Host = ?
+    `, [accountName, MIGRATION_PRINCIPAL_HOST]);
+    return rows.map(({ accountLocked }) => ({ accountLocked }));
+}
+
+test('provisioning unlocks only after grants and exact watchdog revalidation', async () => {
+    const profileName = 'p4-reconcile';
+    await applyMigrations(asMigrationConnection(adminConnection), migrations, config);
+    await armMigrationPrincipalWatchdog(
+        adminConnection,
+        config.database,
+        profileName,
+        120,
+        WATCHDOG_DEFINER
+    );
+
+    const statements: string[] = [];
+    let lockedCredentialErrorCode: string | undefined;
+    let accountStateDuringGrant: readonly { accountLocked: string }[] = [];
+    const observedAdminConnection: MigrationPrincipalAdminConnection = {
+        async query(sql: string, values: unknown[] = []): Promise<[unknown, unknown]> {
+            statements.push(sql.trim().replace(/\s+/gu, ' '));
+            const result = await adminConnection.query(sql, values);
+            if (lockedCredentialErrorCode === undefined && sql.startsWith('GRANT ')) {
+                accountStateDuringGrant = await accountState(
+                    getMigrationPrincipalProfile(profileName).accountName
+                );
+                let unexpectedConnection: Connection | undefined;
+                try {
+                    unexpectedConnection = await connectAsProfile(profileName);
+                    lockedCredentialErrorCode = 'CONNECTED';
+                } catch (error) {
+                    lockedCredentialErrorCode = String(
+                        (error as { code?: unknown }).code
+                    );
+                } finally {
+                    if (unexpectedConnection) await unexpectedConnection.end();
+                }
+            }
+            return result as [unknown, unknown];
+        },
+    };
+
+    await createTemporaryMigrationPrincipal(
+        observedAdminConnection,
+        config.database,
+        profileName,
+        TEST_PASSWORD,
+        WATCHDOG_DEFINER
+    );
+
+    const metadataReads = statements
+        .map((sql, index) => sql.includes('FROM information_schema.EVENTS') ? index : -1)
+        .filter((index) => index >= 0);
+    const createIndex = statements.findIndex((sql) => sql.startsWith('CREATE USER'));
+    const grantIndexes = statements
+        .map((sql, index) => sql.startsWith('GRANT ') ? index : -1)
+        .filter((index) => index >= 0);
+    const lastGrantIndex = grantIndexes[grantIndexes.length - 1];
+    const unlockIndex = statements.findIndex((sql) =>
+        sql === 'ALTER USER ?@? ACCOUNT UNLOCK'
+    );
+    assert.deepEqual(accountStateDuringGrant, [{ accountLocked: 'Y' }]);
+    assert.equal(lockedCredentialErrorCode, 'ER_ACCOUNT_HAS_BEEN_LOCKED');
+    assert.equal(metadataReads.length, 2);
+    assert.match(statements[createIndex], /ACCOUNT LOCK$/u);
+    assert.ok(createIndex < lastGrantIndex);
+    assert.ok(lastGrantIndex < metadataReads[1]);
+    assert.ok(metadataReads[1] < unlockIndex);
+    assert.equal(unlockIndex, statements.length - 1);
+    await assertLifecycleSettings(profileName);
+
+    await revokeTemporaryMigrationPrincipal(
+        adminConnection,
+        config.database,
+        profileName
+    );
+    await disarmAsBootstrap(profileName);
+});
+
+test('disarm locks the bootstrap before event removal and self-drops last', async () => {
+    const profileName = 'schema-apply';
+    await armMigrationPrincipalWatchdog(
+        adminConnection,
+        config.database,
+        profileName,
+        120,
+        WATCHDOG_DEFINER
+    );
+    await createBootstrapFixture();
+    const bootstrapConnection = await connectAsBootstrap();
+    const statements: string[] = [];
+    let lockedReconnectWasRejected = false;
+    const observedBootstrapConnection: MigrationPrincipalAdminConnection = {
+        async query(sql: string, values: unknown[] = []): Promise<[unknown, unknown]> {
+            statements.push(sql.trim().replace(/\s+/gu, ' '));
+            const result = await bootstrapConnection.query(sql, values);
+            if (sql.startsWith('ALTER USER') && sql.includes('ACCOUNT LOCK')) {
+                assert.deepEqual(
+                    await accountState(MIGRATION_PRINCIPAL_BOOTSTRAP_ACCOUNT),
+                    [{ accountLocked: 'Y' }]
+                );
+                await assertBootstrapReconnectDenied();
+                lockedReconnectWasRejected = true;
+            }
+            return result as [unknown, unknown];
+        },
+    };
+
+    try {
+        await disarmMigrationPrincipalWatchdog(
+            observedBootstrapConnection,
+            config.database,
+            profileName,
+            WATCHDOG_DEFINER
+        );
+    } finally {
+        await bootstrapConnection.end();
+    }
+
+    const lockIndex = statements.indexOf('ALTER USER ?@? ACCOUNT LOCK');
+    const dropEventIndex = statements.findIndex((sql) => sql.startsWith('DROP EVENT'));
+    const dropUserIndex = statements.indexOf('DROP USER ?@?');
+    assert.equal(lockedReconnectWasRejected, true);
+    assert.ok(lockIndex < dropEventIndex);
+    assert.ok(dropEventIndex < dropUserIndex);
+    assert.equal(dropUserIndex, statements.length - 1);
+    assert.deepEqual(await accountState(MIGRATION_PRINCIPAL_BOOTSTRAP_ACCOUNT), []);
+});
+
+test('cms definer path disarms through a bootstrap without SYSTEM_USER', async () => {
+    const profileName = 'schema-apply';
+    const cmsDefiner = `${MIGRATION_PRINCIPAL_WATCHDOG_ARMER_ACCOUNT}`
+        + `@${MIGRATION_PRINCIPAL_HOST}`;
+    await createArmerFixture();
+    const armerConnection = await connectAsArmer();
+    try {
+        await armMigrationPrincipalWatchdog(
+            armerConnection,
+            config.database,
+            profileName,
+            120,
+            cmsDefiner
+        );
+    } finally {
+        await armerConnection.end();
+    }
+
+    await createBootstrapFixture(false);
+    const [roleGrantRows] = await adminConnection.query<RowDataPacket[]>(
+        "SHOW GRANTS FOR 'cloudsqlsuperuser'@'%'"
+    );
+    assert.doesNotMatch(
+        roleGrantRows.map((row) => Object.values(row).join(' ')).join('\n'),
+        /SYSTEM_USER/u
+    );
+    const bootstrapConnection = await connectAsBootstrap();
+    try {
+        await disarmMigrationPrincipalWatchdog(
+            bootstrapConnection,
+            config.database,
+            profileName,
+            cmsDefiner
+        );
+    } finally {
+        await bootstrapConnection.end();
+    }
+
+    assert.deepEqual(await accountState(MIGRATION_PRINCIPAL_BOOTSTRAP_ACCOUNT), []);
+    const [eventRows] = await adminConnection.query<RowDataPacket[]>(`
+        SELECT EVENT_NAME
+        FROM information_schema.EVENTS
+        WHERE EVENT_SCHEMA = ? AND EVENT_NAME = ?
+    `, [config.database, getMigrationPrincipalWatchdogEventName(profileName)]);
+    assert.deepEqual(eventRows, []);
+});
+
+test('deadline attempt locks, revokes, and drops stranded bootstrap and schema accounts', async () => {
+    await armMigrationPrincipalWatchdog(
+        adminConnection,
+        config.database,
+        'schema-apply',
+        120,
+        WATCHDOG_DEFINER
+    );
+    await createBootstrapFixture();
+    await createTemporaryMigrationPrincipal(
+        adminConnection,
+        config.database,
+        'schema-apply',
+        TEST_PASSWORD,
+        WATCHDOG_DEFINER
+    );
+    const operationConnection = await connectAsProfile('schema-apply');
+
+    try {
+        await rescheduleWatchdogNow('schema-apply');
+        await waitForWatchdogAttempt('schema-apply');
+
+        assert.deepEqual(
+            await accountState(MIGRATION_PRINCIPAL_BOOTSTRAP_ACCOUNT),
+            []
+        );
+        const operationState = await accountState('mickeyf_schema_apply');
+        assert.ok(
+            operationState.length === 0
+                || (
+                    operationState.length === 1
+                    && operationState[0].accountLocked === 'Y'
+                )
+        );
+        await assertReconnectDenied('schema-apply');
+        await assertPrivilegeDenied(() => operationConnection.query(
+            'CREATE TABLE schema_migrations (version VARCHAR(191) PRIMARY KEY)'
+        ));
+    } finally {
+        await operationConnection.end();
+    }
+
+    for (let attempt = 0; attempt < 30; attempt += 1) {
+        if ((await accountState('mickeyf_schema_apply')).length === 0) break;
+        await delay(100);
+    }
+    assert.deepEqual(await accountState('mickeyf_schema_apply'), []);
+    await disarmAsBootstrap('schema-apply');
+});
+
+test('deadline trigger refusal still drops bootstrap and leaves schema account locked and revoked', async () => {
+    await armMigrationPrincipalWatchdog(
+        adminConnection,
+        config.database,
+        'schema-apply',
+        120,
+        WATCHDOG_DEFINER
+    );
+    await createBootstrapFixture();
+    await createTemporaryMigrationPrincipal(
+        adminConnection,
+        config.database,
+        'schema-apply',
+        TEST_PASSWORD,
+        WATCHDOG_DEFINER
+    );
+    await adminConnection.query(`
+        CREATE TABLE schema_migrations (
+            version VARCHAR(191) NOT NULL PRIMARY KEY
+        ) ENGINE = InnoDB
+    `);
+    await adminConnection.query(`
+        CREATE DEFINER = 'mickeyf_schema_apply'@'%'
+        TRIGGER migration_watchdog_persisted_probe
+        BEFORE INSERT ON schema_migrations
+        FOR EACH ROW SET @migration_watchdog_persisted_probe = 1
+    `);
+
+    await rescheduleWatchdogNow('schema-apply');
+    await waitForWatchdogAttempt('schema-apply');
+
+    assert.deepEqual(
+        await accountState(MIGRATION_PRINCIPAL_BOOTSTRAP_ACCOUNT),
+        []
+    );
+    assert.deepEqual(await accountState('mickeyf_schema_apply'), [{
+        accountLocked: 'Y',
+    }]);
+    await assertReconnectDenied('schema-apply');
+    const [grants] = await adminConnection.query<RowDataPacket[]>(
+        "SHOW GRANTS FOR 'mickeyf_schema_apply'@'%'"
+    );
+    assert.equal(grants.length, 1);
+    assert.match(String(Object.values(grants[0])[0]), /^GRANT USAGE ON \*\.\*/u);
+
+    await adminConnection.query('DROP TRIGGER migration_watchdog_persisted_probe');
+    await revokeTemporaryMigrationPrincipal(
+        adminConnection,
+        config.database,
+        'schema-apply'
+    );
+    await disarmAsBootstrap('schema-apply');
+});
+
+test('deadline refuses orphaning bootstrap definers and leaves both accounts locked and revoked', async () => {
+    await armMigrationPrincipalWatchdog(
+        adminConnection,
+        config.database,
+        'schema-apply',
+        120,
+        WATCHDOG_DEFINER
+    );
+    await createBootstrapFixture();
+    await createTemporaryMigrationPrincipal(
+        adminConnection,
+        config.database,
+        'schema-apply',
+        TEST_PASSWORD,
+        WATCHDOG_DEFINER
+    );
+    await adminConnection.query(`
+        CREATE DEFINER = 'mickeyf_migration_bootstrap'@'%'
+        VIEW migration_watchdog_bootstrap_probe AS SELECT 1 AS probe
+    `);
+
+    await rescheduleWatchdogNow('schema-apply');
+    await waitForWatchdogAttempt('schema-apply');
+
+    assert.deepEqual(
+        await accountState(MIGRATION_PRINCIPAL_BOOTSTRAP_ACCOUNT),
+        [{ accountLocked: 'Y' }]
+    );
+    assert.deepEqual(
+        await accountState('mickeyf_schema_apply'),
+        [{ accountLocked: 'Y' }]
+    );
+    await assertReconnectDenied('schema-apply');
+    for (const accountName of [
+        MIGRATION_PRINCIPAL_BOOTSTRAP_ACCOUNT,
+        'mickeyf_schema_apply',
+    ]) {
+        const [grants] = await adminConnection.query<RowDataPacket[]>(
+            `SHOW GRANTS FOR '${accountName}'@'%'`
+        );
+        assert.equal(grants.length, 1);
+        assert.match(String(Object.values(grants[0])[0]), /^GRANT USAGE ON \*\.\*/u);
+    }
+
+    await adminConnection.query('DROP VIEW migration_watchdog_bootstrap_probe');
+    await revokeTemporaryMigrationPrincipal(
+        adminConnection,
+        config.database,
+        'schema-apply'
+    );
+    await adminConnection.query(
+        'DROP USER ?@?',
+        [MIGRATION_PRINCIPAL_BOOTSTRAP_ACCOUNT, MIGRATION_PRINCIPAL_HOST]
+    );
+    await disarmAsBootstrap('schema-apply');
 });
 
 test('schema profile applies the reviewed schema and denies unrelated DDL and DML', async () => {
@@ -427,11 +1002,19 @@ test('rollback profile drops only an empty reviewed schema and preserves users',
 
 test('revocation refuses an active sole session, then succeeds after it closes', async () => {
     await applyMigrations(asMigrationConnection(adminConnection), migrations, config);
+    await armMigrationPrincipalWatchdog(
+        adminConnection,
+        config.database,
+        'p4-reconcile',
+        120,
+        WATCHDOG_DEFINER
+    );
     await createTemporaryMigrationPrincipal(
         adminConnection,
         config.database,
         'p4-reconcile',
-        TEST_PASSWORD
+        TEST_PASSWORD,
+        WATCHDOG_DEFINER
     );
     const operationConnection = await connectAsProfile('p4-reconcile');
     try {
@@ -467,6 +1050,7 @@ test('revocation refuses an active sole session, then succeeds after it closes',
         'p4-reconcile'
     );
     await assertReconnectDenied('p4-reconcile');
+    await disarmAsBootstrap('p4-reconcile');
 });
 
 test('persisted trigger inventory blocks account removal until an operator cleans it', async () => {
@@ -476,11 +1060,19 @@ test('persisted trigger inventory blocks account removal until an operator clean
         migrations,
         config
     );
+    await armMigrationPrincipalWatchdog(
+        adminConnection,
+        config.database,
+        'p4-reconcile',
+        120,
+        WATCHDOG_DEFINER
+    );
     await createTemporaryMigrationPrincipal(
         adminConnection,
         config.database,
         'p4-reconcile',
-        TEST_PASSWORD
+        TEST_PASSWORD,
+        WATCHDOG_DEFINER
     );
     const operationConnection = await connectAsProfile('p4-reconcile');
     await reconcileP4VegaScores(
@@ -518,4 +1110,5 @@ test('persisted trigger inventory blocks account removal until an operator clean
         'p4-reconcile'
     );
     await assertReconnectDenied('p4-reconcile');
+    await disarmAsBootstrap('p4-reconcile');
 });

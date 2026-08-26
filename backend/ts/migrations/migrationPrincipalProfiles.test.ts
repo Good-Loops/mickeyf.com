@@ -10,12 +10,19 @@ import {
 import {
     buildMigrationPrincipalGrantStatements,
     getMigrationPrincipalProfile,
+    MIGRATION_PRINCIPAL_BOOTSTRAP_ACCOUNT,
     MIGRATION_PRINCIPAL_HOST,
     MIGRATION_PRINCIPAL_PROFILE_NAMES,
+    MIGRATION_PRINCIPAL_WATCHDOG_ARMER_ACCOUNT,
 } from './migrationPrincipalProfiles';
+import {
+    buildMigrationPrincipalWatchdogBody,
+    getMigrationPrincipalWatchdogEventName,
+} from './migrationPrincipalWatchdog';
 
 const DATABASE = 'mickeyf_migration_test';
 const TEST_PASSWORD = 'test-only-0123456789abcdef0123456789';
+const WATCHDOG_DEFINER = 'root@%';
 
 type QueryCall = Readonly<{ sql: string; values: readonly unknown[] }>;
 
@@ -24,6 +31,8 @@ class FakeAdminConnection implements MigrationPrincipalAdminConnection {
     activeConnections = 0;
     mandatoryRoles = '';
     unexpectedTriggers = 0;
+    watchdogPresent = true;
+    watchdogSecondsUntilExecution = 119;
     failGrantNumber?: number;
     failCreate = false;
     private grantsSeen = 0;
@@ -42,6 +51,42 @@ class FakeAdminConnection implements MigrationPrincipalAdminConnection {
         if (sql.includes('information_schema.PROCESSLIST')) {
             return [[{ activeConnectionCount: this.activeConnections }], []];
         }
+        if (sql.includes('@@GLOBAL.event_scheduler')) {
+            return [[{
+                eventScheduler: 'ON',
+                currentUser: 'migration_principal_admin@%',
+            }], []];
+        }
+        if (sql.includes('FROM mysql.user')) {
+            return [[{ accountCount: values[0] === 'root' ? 1 : 0 }], []];
+        }
+        if (sql.includes('FROM information_schema.EVENTS')) {
+            if (!this.watchdogPresent) return [[], []];
+            const eventName = String(values[1]);
+            const profileName = MIGRATION_PRINCIPAL_PROFILE_NAMES.find(
+                (name) => getMigrationPrincipalWatchdogEventName(name) === eventName
+            );
+            assert.ok(profileName);
+            return [[{
+                eventSchema: DATABASE,
+                eventName,
+                definer: 'root@%',
+                timeZone: '+00:00',
+                eventBody: 'SQL',
+                eventDefinition: buildMigrationPrincipalWatchdogBody(
+                    DATABASE,
+                    profileName
+                ),
+                sqlMode: 'STRICT_TRANS_TABLES,ERROR_FOR_DIVISION_BY_ZERO,NO_ENGINE_SUBSTITUTION',
+                eventType: 'ONE TIME',
+                executeAt: '2026-08-26 12:00:00',
+                status: 'ENABLED',
+                onCompletion: 'PRESERVE',
+                eventComment: `mickeyf migration watchdog v1 ${profileName}`,
+                lastExecuted: null,
+                secondsUntilExecution: this.watchdogSecondsUntilExecution,
+            }], []];
+        }
         if (sql.includes('@@GLOBAL.mandatory_roles')) {
             return [[{ mandatoryRoles: this.mandatoryRoles }], []];
         }
@@ -54,6 +99,8 @@ class FakeAdminConnection implements MigrationPrincipalAdminConnection {
 
 test('profiles expose fixed account identities and exact allowlisted grants', () => {
     assert.equal(MIGRATION_PRINCIPAL_HOST, '%');
+    assert.equal(MIGRATION_PRINCIPAL_BOOTSTRAP_ACCOUNT, 'mickeyf_migration_bootstrap');
+    assert.equal(MIGRATION_PRINCIPAL_WATCHDOG_ARMER_ACCOUNT, 'cms_mickeyf');
     assert.deepEqual(MIGRATION_PRINCIPAL_PROFILE_NAMES, [
         'schema-apply',
         'p4-backfill',
@@ -119,12 +166,35 @@ test('create parameterizes the account and password and applies every fixed gran
         connection,
         DATABASE,
         'p4-reconcile',
-        TEST_PASSWORD
+        TEST_PASSWORD,
+        WATCHDOG_DEFINER
     );
 
-    const [mandatoryRoleCall, createCall, ...grantCalls] = connection.calls;
+    const mandatoryRoleCall = connection.calls.find(({ sql }) =>
+        sql.includes('@@GLOBAL.mandatory_roles')
+    );
+    const createCall = connection.calls.find(({ sql }) => sql.startsWith('CREATE USER'));
+    const grantCalls = connection.calls.filter(({ sql }) => sql.startsWith('GRANT '));
+    const watchdogMetadataCallIndexes = connection.calls
+        .map(({ sql }, index) => sql.includes('FROM information_schema.EVENTS')
+            ? index
+            : -1)
+        .filter((index) => index >= 0);
+    const createCallIndex = connection.calls.findIndex(({ sql }) =>
+        sql.startsWith('CREATE USER')
+    );
+    const grantCallIndexes = connection.calls
+        .map(({ sql }, index) => sql.startsWith('GRANT ') ? index : -1)
+        .filter((index) => index >= 0);
+    const lastGrantCallIndex = grantCallIndexes[grantCallIndexes.length - 1];
+    const unlockCallIndex = connection.calls.findIndex(({ sql }) =>
+        sql.startsWith('ALTER USER') && sql.includes('ACCOUNT UNLOCK')
+    );
+    assert.ok(mandatoryRoleCall);
+    assert.ok(createCall);
     assert.match(mandatoryRoleCall.sql, /@@GLOBAL\.mandatory_roles/u);
     assert.match(createCall.sql, /^CREATE USER \?@\?/u);
+    assert.match(createCall.sql, /ACCOUNT LOCK$/u);
     assert.doesNotMatch(createCall.sql, new RegExp(TEST_PASSWORD, 'u'));
     assert.deepEqual(createCall.values, [
         'mickeyf_p4_reconcile',
@@ -142,6 +212,11 @@ test('create parameterizes the account and password and applies every fixed gran
         ),
         true
     );
+    assert.deepEqual(watchdogMetadataCallIndexes.length, 2);
+    assert.ok(createCallIndex < lastGrantCallIndex);
+    assert.ok(lastGrantCallIndex < watchdogMetadataCallIndexes[1]);
+    assert.ok(watchdogMetadataCallIndexes[1] < unlockCallIndex);
+    assert.equal(unlockCallIndex, connection.calls.length - 1);
 });
 
 test('partial provisioning locks, revokes, and drops the incomplete account', async () => {
@@ -153,7 +228,8 @@ test('partial provisioning locks, revokes, and drops the incomplete account', as
             connection,
             DATABASE,
             'schema-apply',
-            TEST_PASSWORD
+            TEST_PASSWORD,
+            WATCHDOG_DEFINER
         ),
         (error: unknown) => {
             assert.ok(error instanceof MigrationPrincipalProvisioningError);
@@ -177,7 +253,8 @@ test('CREATE USER failure does not claim that a nonexistent account was removed'
             connection,
             DATABASE,
             'schema-apply',
-            TEST_PASSWORD
+            TEST_PASSWORD,
+            WATCHDOG_DEFINER
         ),
         (error: unknown) => {
             assert.ok(error instanceof MigrationPrincipalProvisioningError);
@@ -186,7 +263,10 @@ test('CREATE USER failure does not claim that a nonexistent account was removed'
             return true;
         }
     );
-    assert.equal(connection.calls.length, 2);
+    assert.equal(
+        connection.calls.some(({ sql }) => sql.startsWith('ALTER USER')),
+        false
+    );
 });
 
 test('provisioning refuses inherited mandatory roles before account creation', async () => {
@@ -198,11 +278,32 @@ test('provisioning refuses inherited mandatory roles before account creation', a
             connection,
             DATABASE,
             'p4-reconcile',
-            TEST_PASSWORD
+            TEST_PASSWORD,
+            WATCHDOG_DEFINER
         ),
         /mandatory_roles to be empty/
     );
     assert.equal(connection.calls.some(({ sql }) => sql.startsWith('CREATE USER')), false);
+});
+
+test('create refuses to provision any account without its exact armed watchdog', async () => {
+    const connection = new FakeAdminConnection();
+    connection.watchdogPresent = false;
+
+    await assert.rejects(
+        () => createTemporaryMigrationPrincipal(
+            connection,
+            DATABASE,
+            'schema-apply',
+            TEST_PASSWORD,
+            WATCHDOG_DEFINER
+        ),
+        /requires an armed watchdog/
+    );
+    assert.equal(
+        connection.calls.some(({ sql }) => sql.startsWith('CREATE USER')),
+        false
+    );
 });
 
 test('revocation locks first and refuses to drop an account with an open session', async () => {

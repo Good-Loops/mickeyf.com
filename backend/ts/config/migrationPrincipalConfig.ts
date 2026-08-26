@@ -1,12 +1,23 @@
 import {
     getMigrationPrincipalProfile,
+    MIGRATION_PRINCIPAL_BOOTSTRAP_ACCOUNT,
     MIGRATION_PRINCIPAL_HOST,
+    MIGRATION_PRINCIPAL_WATCHDOG_ARMER_ACCOUNT,
     type MigrationPrincipalProfileName,
 } from '../migrations/migrationPrincipalProfiles';
+import {
+    assertMigrationPrincipalWatchdogDelay,
+    assertMigrationPrincipalWatchdogDefiner,
+    getMigrationPrincipalWatchdogEventName,
+} from '../migrations/migrationPrincipalWatchdog';
 
 type Environment = Readonly<Record<string, string | undefined>>;
 
-export type MigrationPrincipalAction = 'create' | 'revoke';
+export type MigrationPrincipalAction =
+    | 'create'
+    | 'revoke'
+    | 'watchdog-arm'
+    | 'watchdog-disarm';
 
 export type MigrationPrincipalAdminConfig = Readonly<{
     action: MigrationPrincipalAction;
@@ -17,6 +28,8 @@ export type MigrationPrincipalAdminConfig = Readonly<{
     password: string;
     database: string;
     principalPassword?: string;
+    watchdogDefiner?: string;
+    watchdogDelaySeconds?: number;
 }>;
 
 function requiredValue(
@@ -39,6 +52,12 @@ function parsePort(value: string): number {
     return port;
 }
 
+function parseWatchdogDelay(value: string): number {
+    const delaySeconds = Number(value);
+    assertMigrationPrincipalWatchdogDelay(delaySeconds);
+    return delaySeconds;
+}
+
 export function loadMigrationPrincipalAdminConfig(
     action: MigrationPrincipalAction,
     profileName: MigrationPrincipalProfileName,
@@ -58,6 +77,14 @@ export function loadMigrationPrincipalAdminConfig(
     const profile = getMigrationPrincipalProfile(profileName);
     if (user === profile.accountName) {
         throw new Error('Provisioning administrator must differ from the temporary account');
+    }
+    const expectedAdminUser = action === 'watchdog-arm'
+        ? MIGRATION_PRINCIPAL_WATCHDOG_ARMER_ACCOUNT
+        : MIGRATION_PRINCIPAL_BOOTSTRAP_ACCOUNT;
+    if (user !== expectedAdminUser) {
+        throw new Error(
+            `${action} requires the fixed migration administrator ${expectedAdminUser}`
+        );
     }
 
     const expectedTarget = `${host}:${port}/${database}`;
@@ -83,15 +110,43 @@ export function loadMigrationPrincipalAdminConfig(
         );
     }
 
-    const authorizationVariable = action === 'create'
-        ? 'MIGRATION_PRINCIPAL_ALLOW_CREATE'
-        : 'MIGRATION_PRINCIPAL_ALLOW_REVOKE';
+    const authorizationVariable = {
+        create: 'MIGRATION_PRINCIPAL_ALLOW_CREATE',
+        revoke: 'MIGRATION_PRINCIPAL_ALLOW_REVOKE',
+        'watchdog-arm': 'MIGRATION_PRINCIPAL_ALLOW_WATCHDOG_ARM',
+        'watchdog-disarm': 'MIGRATION_PRINCIPAL_ALLOW_WATCHDOG_DISARM',
+    }[action];
     if (env[authorizationVariable] !== '1') {
         throw new Error(`${authorizationVariable}=1 is required for this account action`);
     }
 
     const principalPassword = action === 'create'
         ? requiredValue(env, 'MIGRATION_PRINCIPAL_PASSWORD', true)
+        : undefined;
+
+    const watchdogAction = action === 'create'
+        || action === 'watchdog-arm'
+        || action === 'watchdog-disarm';
+    const watchdogDefiner = watchdogAction
+        ? requiredValue(env, 'MIGRATION_PRINCIPAL_CONFIRM_WATCHDOG_DEFINER')
+        : undefined;
+    if (watchdogAction) {
+        if (watchdogDefiner === undefined) {
+            throw new Error('Migration-watchdog definer confirmation was not loaded');
+        }
+        assertMigrationPrincipalWatchdogDefiner(watchdogDefiner);
+        const expectedEvent = getMigrationPrincipalWatchdogEventName(profileName);
+        if (env.MIGRATION_PRINCIPAL_CONFIRM_EVENT !== expectedEvent) {
+            throw new Error(
+                'MIGRATION_PRINCIPAL_CONFIRM_EVENT must exactly match the fixed profile event'
+            );
+        }
+    }
+    const watchdogDelaySeconds = action === 'watchdog-arm'
+        ? parseWatchdogDelay(requiredValue(
+            env,
+            'MIGRATION_PRINCIPAL_WATCHDOG_DELAY_SECONDS'
+        ))
         : undefined;
 
     return Object.freeze({
@@ -103,5 +158,7 @@ export function loadMigrationPrincipalAdminConfig(
         password: requiredValue(env, 'MIGRATION_PRINCIPAL_ADMIN_PASS', true),
         database,
         principalPassword,
+        watchdogDefiner,
+        watchdogDelaySeconds,
     });
 }

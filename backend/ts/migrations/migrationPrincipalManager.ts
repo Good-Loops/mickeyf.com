@@ -2,8 +2,13 @@ import {
     buildMigrationPrincipalGrantStatements,
     getMigrationPrincipalProfile,
     MIGRATION_PRINCIPAL_HOST,
+    MIGRATION_PRINCIPAL_REVIEWED_TABLES,
     type MigrationPrincipalProfileName,
 } from './migrationPrincipalProfiles';
+import {
+    assertMigrationPrincipalWatchdogReady,
+    assertMigrationPrincipalWatchdogStillReady,
+} from './migrationPrincipalWatchdog';
 
 export interface MigrationPrincipalAdminConnection {
     query(sql: string, values?: unknown[]): Promise<[unknown, unknown]>;
@@ -20,12 +25,6 @@ type MandatoryRolesRow = Readonly<{
 type TriggerCountRow = Readonly<{
     unexpectedTriggerCount: number | string;
 }>;
-
-const REVIEWED_TRIGGER_TABLES = Object.freeze([
-    'schema_migrations',
-    'game_runs',
-    'game_personal_bests',
-] as const);
 
 export class ActiveMigrationPrincipalConnectionsError extends Error {
     constructor(accountName: string, activeConnectionCount: number) {
@@ -144,7 +143,7 @@ async function assertReviewedTablesHaveNoTriggers(
         FROM information_schema.TRIGGERS
         WHERE TRIGGER_SCHEMA = ?
           AND EVENT_OBJECT_TABLE IN (?, ?, ?)
-    `, [database, ...REVIEWED_TRIGGER_TABLES]);
+    `, [database, ...MIGRATION_PRINCIPAL_REVIEWED_TABLES]);
     if (!Array.isArray(result) || result.length !== 1) {
         throw new Error('Could not verify reviewed-table trigger inventory');
     }
@@ -161,6 +160,16 @@ async function lockPrincipal(
 ): Promise<void> {
     await connection.query(
         'ALTER USER ?@? ACCOUNT LOCK',
+        [accountName, MIGRATION_PRINCIPAL_HOST]
+    );
+}
+
+async function unlockPrincipal(
+    connection: MigrationPrincipalAdminConnection,
+    accountName: string
+): Promise<void> {
+    await connection.query(
+        'ALTER USER ?@? ACCOUNT UNLOCK',
         [accountName, MIGRATION_PRINCIPAL_HOST]
     );
 }
@@ -197,23 +206,31 @@ export async function createTemporaryMigrationPrincipal(
     connection: MigrationPrincipalAdminConnection,
     database: string,
     profileName: MigrationPrincipalProfileName,
-    password: string
+    password: string,
+    watchdogDefiner: string
 ): Promise<void> {
     assertPrincipalPassword(password);
     const profile = getMigrationPrincipalProfile(profileName);
     const grantStatements = buildMigrationPrincipalGrantStatements(database, profileName);
+    await assertMigrationPrincipalWatchdogReady(
+        connection,
+        database,
+        profileName,
+        watchdogDefiner
+    );
     await assertNoMandatoryRoles(connection);
     let accountCreated = false;
 
     try {
-        // One connection plus immediate post-operation revocation is the actual
-        // lifetime boundary. One-day password expiry is only a last-resort fuse.
+        // Keep the account inert until all grants are installed and the exact
+        // watchdog is reverified. A crash at any earlier point leaves a locked
+        // account rather than an unguarded privileged credential.
         await connection.query(
             `CREATE USER ?@?
              IDENTIFIED BY ?
              WITH MAX_USER_CONNECTIONS 1
              PASSWORD EXPIRE INTERVAL 1 DAY
-             ACCOUNT UNLOCK`,
+             ACCOUNT LOCK`,
             [profile.accountName, MIGRATION_PRINCIPAL_HOST, password]
         );
         accountCreated = true;
@@ -221,6 +238,13 @@ export async function createTemporaryMigrationPrincipal(
         for (const statement of grantStatements) {
             await connection.query(statement, [profile.accountName, MIGRATION_PRINCIPAL_HOST]);
         }
+        await assertMigrationPrincipalWatchdogStillReady(
+            connection,
+            database,
+            profileName,
+            watchdogDefiner
+        );
+        await unlockPrincipal(connection, profile.accountName);
     } catch (provisioningCause) {
         if (!accountCreated) {
             throw new MigrationPrincipalProvisioningError(

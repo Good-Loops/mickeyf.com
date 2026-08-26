@@ -54,20 +54,31 @@ async function main(): Promise<void> {
     try {
         const [rows] = await connection.query<Array<RowDataPacket & {
             databaseName: string;
-        }>>('SELECT DATABASE() AS databaseName');
-        if (rows.length !== 1 || rows[0].databaseName !== config.database) {
-            throw new Error('Provisioning connection selected an unexpected database');
+            currentUser: string;
+        }>>('SELECT DATABASE() AS databaseName, CURRENT_USER() AS currentUser');
+        if (
+            rows.length !== 1
+            || rows[0].databaseName !== config.database
+            || rows[0].currentUser !== `${config.user}@%`
+        ) {
+            throw new Error(
+                'Provisioning connection selected an unexpected database or account'
+            );
         }
 
         if (action === 'create') {
-            if (config.principalPassword === undefined) {
-                throw new Error('Temporary principal password was not loaded');
+            if (
+                config.principalPassword === undefined
+                || config.watchdogDefiner === undefined
+            ) {
+                throw new Error('Temporary principal or watchdog configuration was not loaded');
             }
             await createTemporaryMigrationPrincipal(
                 connection,
                 config.database,
                 profileName,
-                config.principalPassword
+                config.principalPassword,
+                config.watchdogDefiner
             );
         } else {
             await revokeTemporaryMigrationPrincipal(

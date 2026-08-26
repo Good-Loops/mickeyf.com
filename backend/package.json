@@ -8,7 +8,7 @@
     },
     "scripts": {
         "test": "tsc -p tsconfig.json --noEmit",
-        "test:unit": "node --test -r ts-node/register ts/config/migrationConfig.test.ts ts/config/migrationPrincipalConfig.test.ts ts/config/runtimeConfig.test.ts ts/leaderboards/gameCatalog.test.ts ts/leaderboards/leaderboardContract.test.ts ts/leaderboards/p4VegaScoreRepository.test.ts ts/leaderboards/threeBossesRunRepository.test.ts ts/leaderboards/threeBossesRunRequest.test.ts ts/middleware/apiResponseSecurity.test.ts ts/middleware/errorHandling.test.ts ts/migrations/migrationManifest.test.ts ts/migrations/migrationPrincipalProfiles.test.ts ts/migrations/migrationRunner.test.ts ts/migrations/p4VegaBackfill.test.ts ts/routers/leaderboardRouter.test.ts ts/routers/threeBossesRouter.security.test.ts ts/security/mainController.security.test.ts ts/security/p4VegaScorePolicy.test.ts ts/security/requestAuthentication.test.ts ts/security/requestRateLimits.test.ts ts/security/scoreSubmissionAuthorization.test.ts ts/security/userRequestValidation.test.ts",
+        "test:unit": "node --test -r ts-node/register ts/config/migrationConfig.test.ts ts/config/migrationPrincipalConfig.test.ts ts/config/runtimeConfig.test.ts ts/leaderboards/gameCatalog.test.ts ts/leaderboards/leaderboardContract.test.ts ts/leaderboards/p4VegaScoreRepository.test.ts ts/leaderboards/threeBossesRunRepository.test.ts ts/leaderboards/threeBossesRunRequest.test.ts ts/middleware/apiResponseSecurity.test.ts ts/middleware/errorHandling.test.ts ts/migrations/migrationManifest.test.ts ts/migrations/migrationPrincipalProfiles.test.ts ts/migrations/migrationPrincipalWatchdog.test.ts ts/migrations/migrationRunner.test.ts ts/migrations/p4VegaBackfill.test.ts ts/routers/leaderboardRouter.test.ts ts/routers/threeBossesRouter.security.test.ts ts/security/mainController.security.test.ts ts/security/p4VegaScorePolicy.test.ts ts/security/requestAuthentication.test.ts ts/security/requestRateLimits.test.ts ts/security/scoreSubmissionAuthorization.test.ts ts/security/userRequestValidation.test.ts",
         "test:migrations": "node scripts/run-migration-tests.mjs",
         "migrations:plan": "ts-node ts/migrations/runMigrations.ts plan",
         "migrations:apply": "ts-node ts/migrations/runMigrations.ts apply",
@@ -17,6 +17,8 @@
         "migrations:p4-reconcile": "ts-node ts/migrations/runMigrations.ts reconcile-p4-vega",
         "migrations:principal:create": "ts-node ts/migrations/runMigrationPrincipal.ts create",
         "migrations:principal:revoke": "ts-node ts/migrations/runMigrationPrincipal.ts revoke",
+        "migrations:principal:watchdog:arm": "ts-node ts/migrations/runMigrationPrincipalWatchdog.ts arm",
+        "migrations:principal:watchdog:disarm": "ts-node ts/migrations/runMigrationPrincipalWatchdog.ts disarm",
         "watch": "webpack --mode development --watch",
         "prod": "webpack --mode production",
         "dev": "nodemon dist/server.min.js",

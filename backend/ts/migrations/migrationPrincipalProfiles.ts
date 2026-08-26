@@ -1,12 +1,21 @@
 import mysql from 'mysql2';
 
 export const MIGRATION_PRINCIPAL_HOST = '%' as const;
+export const MIGRATION_PRINCIPAL_BOOTSTRAP_ACCOUNT =
+    'mickeyf_migration_bootstrap' as const;
+export const MIGRATION_PRINCIPAL_WATCHDOG_ARMER_ACCOUNT = 'cms_mickeyf' as const;
 
 export const MIGRATION_PRINCIPAL_PROFILE_NAMES = Object.freeze([
     'schema-apply',
     'p4-backfill',
     'p4-reconcile',
     'empty-rollback',
+] as const);
+
+export const MIGRATION_PRINCIPAL_REVIEWED_TABLES = Object.freeze([
+    'schema_migrations',
+    'game_runs',
+    'game_personal_bests',
 ] as const);
 
 export type MigrationPrincipalProfileName =
@@ -135,7 +144,7 @@ export function getMigrationPrincipalProfile(
     return profiles[name];
 }
 
-function quoteDatabaseName(database: string): string {
+export function quoteMigrationPrincipalDatabaseName(database: string): string {
     // Restrict the operator-controlled identifier before escaping it. The live
     // database names used by this project fit this intentionally narrow set.
     if (!/^[A-Za-z0-9_$-]{1,64}$/u.test(database)) {
@@ -151,7 +160,7 @@ export function buildMigrationPrincipalGrantStatements(
     database: string,
     profileName: MigrationPrincipalProfileName
 ): readonly string[] {
-    const quotedDatabase = quoteDatabaseName(database);
+    const quotedDatabase = quoteMigrationPrincipalDatabaseName(database);
     return Object.freeze(getMigrationPrincipalProfile(profileName).grants.map((grant) => {
         const object = grant.scope === 'database'
             ? `${quotedDatabase}.*`

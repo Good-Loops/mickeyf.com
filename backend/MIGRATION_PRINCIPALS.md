@@ -1,127 +1,206 @@
 # Temporary migration database principals
 
 This procedure creates one fixed, single-connection MySQL account for one
-approved operation, runs that operation through the authenticated loopback
-Cloud SQL proxy, then locks, revokes, and drops the account. The provisioner
-does not deploy code, start a proxy, mutate Cloud resources, or select a Cloud
-SQL instance. Those are separate approval-gated steps.
+approved operation, then locks, revokes, and drops it. A one-time MySQL Event
+Scheduler watchdog is armed **before either temporary privileged account
+exists**, so cleanup survives the controlling PowerShell process, proxy, host,
+or power failing.
 
-Never create more than one profile at a time. Never reuse one profile for a
-different command. The migration command must exit and close its sole database
-connection before revocation.
+The repository does not select a Cloud SQL instance, start a proxy, create the
+Cloud SQL bootstrap user, or authorize production changes. Those remain
+separate approval-gated steps. Never create more than one profile at a time and
+never reuse a profile for a different command.
 
-## Exact profiles
+## Fixed identities and profiles
 
-All accounts use host `%` because the server-side source identity of a proxy
-connection is not a stable operator input. This broad host match is bounded by
-the authenticated proxy, a generated password, `MAX_USER_CONNECTIONS 1`, a
-one-day password-aging setting, and immediate explicit revocation. Password
-aging is **not an account TTL**: it does not terminate an existing session, and
-an authenticated MySQL user can normally change its own password. Only the
-lock/revoke/drop closeout makes this account temporary. A production run also
-needs an independently scheduled cleanup path for shell, host, or power loss.
+All MySQL accounts use host `%` because the server-side source identity behind
+the authenticated proxy is not a stable operator input. This broad host match
+is bounded by the proxy, generated passwords, fixed account allowlists,
+`MAX_USER_CONNECTIONS 1`, account locking, and immediate revocation. The
+one-day password-aging setting is **not a TTL** and does not terminate an open
+session.
 
-| Profile | Fixed account | Required capabilities |
-| --- | --- | --- |
-| `schema-apply` | `mickeyf_schema_apply@%` | `CREATE`, migration-history `SELECT`/`INSERT`, FK `REFERENCES`, and reviewed-table `TRIGGER` metadata |
-| `p4-backfill` | `mickeyf_p4_backfill@%` | reviewed-table `SELECT`, only `users(user_id,p4_score)` `SELECT`, personal-best `INSERT`, only `score`/`recorded_at` `UPDATE`, and reviewed-table `TRIGGER` metadata |
-| `p4-reconcile` | `mickeyf_p4_reconcile@%` | reviewed-table `SELECT`, only `users(user_id,p4_score)` `SELECT`, and reviewed-table `TRIGGER` metadata |
-| `empty-rollback` | `mickeyf_empty_rollback@%` | database-scoped `LOCK TABLES`, plus `SELECT`, `DROP`, and `TRIGGER` on only the three reviewed migration tables |
+| Purpose | Fixed MySQL account |
+| --- | --- |
+| Watchdog armer | `cms_mickeyf@%` |
+| Principal administrator | `mickeyf_migration_bootstrap@%` |
+| Allowed watchdog definer | exactly `root@%` or `cms_mickeyf@%` |
 
-The executable grant statements are the immutable allowlist in
-`ts/migrations/migrationPrincipalProfiles.ts`. Database identifiers are
-validated and escaped; account names, host, and passwords are mysql2 query
-parameters. No caller-supplied SQL fragment is accepted.
+The armer identity is used only to arm. The bootstrap identity is required for
+operation-account creation, normal revocation, and watchdog disarm. Both CLIs
+verify `DATABASE()` and `CURRENT_USER()` exactly, so MySQL account resolution
+cannot silently substitute another account. The selected watchdog definer is
+independent of the connection identity and must be explicitly confirmed.
+
+| Profile | Fixed operation account | Fixed event | Required capabilities |
+| --- | --- | --- | --- |
+| `schema-apply` | `mickeyf_schema_apply@%` | `mickeyf_watchdog_schema_apply` | `CREATE`, migration-history `SELECT`/`INSERT`, FK `REFERENCES`, and reviewed-table `TRIGGER` metadata |
+| `p4-backfill` | `mickeyf_p4_backfill@%` | `mickeyf_watchdog_p4_backfill` | reviewed-table `SELECT`, only `users(user_id,p4_score)` `SELECT`, personal-best `INSERT`, only `score`/`recorded_at` `UPDATE`, and reviewed-table `TRIGGER` metadata |
+| `p4-reconcile` | `mickeyf_p4_reconcile@%` | `mickeyf_watchdog_p4_reconcile` | reviewed-table `SELECT`, only `users(user_id,p4_score)` `SELECT`, and reviewed-table `TRIGGER` metadata |
+| `empty-rollback` | `mickeyf_empty_rollback@%` | `mickeyf_watchdog_empty_rollback` | database-scoped `LOCK TABLES`, plus `SELECT`, `DROP`, and `TRIGGER` on only the three reviewed migration tables |
+
+The executable allowlists are in
+`ts/migrations/migrationPrincipalProfiles.ts` and
+`ts/migrations/migrationPrincipalWatchdog.ts`. Database identifiers are
+strictly validated and escaped. Account names, host, and passwords are fixed or
+mysql2 parameters; no caller-provided SQL fragment is accepted.
 
 ### Deliberate MySQL privilege boundaries
 
 `p4-reconcile` performs no DML and cannot create, alter, or drop tables, but it
-is **not strictly immutable**. The exact-schema verifier must see every trigger,
-and MySQL hides `information_schema.TRIGGERS` without table-level `TRIGGER`.
-That privilege technically permits trigger DDL. On the pinned test server,
-binary-log policy independently prevented a non-`SUPER` account from creating
-a trigger, while the account could still drop an existing trigger. Do not rely
-on that extra server restriction in production. The single connection and
-immediate lock/revoke/drop are compensating boundaries. Closeout queries the
-reviewed-table trigger inventory after locking and revoking, but before
-`DROP USER`; any surviving trigger blocks account removal until an operator
-investigates and removes it.
-
-MySQL similarly requires table-level `SELECT` on each generic table so the
-verifier can inspect its complete column metadata; column grants make the table
-look incomplete. Sensitive legacy access remains restricted to
-`users.user_id` and `users.p4_score`. Schema apply requires table-level
-`REFERENCES` on `users`, but receives no `SELECT` or DML there.
+is not strictly immutable. The exact-schema verifier needs table-level
+`TRIGGER` to see every trigger in `information_schema`; that privilege can also
+permit trigger DDL. Closeout audits the three reviewed tables after locking and
+revoking. A surviving trigger prevents `DROP USER` until an operator removes
+it. Table-level `SELECT` is similarly needed for complete column metadata.
+Sensitive legacy access remains restricted to `users.user_id` and
+`users.p4_score`.
 
 `DROP` also authorizes `TRUNCATE` on the three rollback tables, and
 `LOCK TABLES` is grantable only at database scope. Treat `empty-rollback` as a
 destructive emergency credential even though it cannot drop or read `users`.
 
-## Provisioner prerequisites
+## Independent watchdog contract
 
-The bootstrap credential is separate from both runtime `DB_*` credentials and
-operation `MIGRATION_DB_*` credentials. Native MySQL cannot restrict
-`CREATE USER`, `ALTER USER`, `DROP USER`, or `PROCESS` to these four account
-names. The credential therefore has unavoidable global account-management and
-session-visibility power. The CLI's fixed profile allowlist constrains this
-program, not the credential itself. Issue and constrain that bootstrap identity
-externally, keep it short-lived, and allow it to:
+Each profile owns one compile-time event name and exact event body. Arming:
 
-- create, alter, and drop accounts (the CLI targets only the fixed accounts);
-- grant/revoke the allowlisted object capabilities with bounded `GRANT OPTION`;
-- inspect other sessions (`PROCESS`) so revocation can prove the operation
-  account has no open connection.
+- refuses unless `@@GLOBAL.event_scheduler` is `ON`;
+- refuses unless both the bootstrap and selected operation account are absent;
+- requires the selected allowlisted definer to exist exactly once;
+- fixes the creation session to `time_zone = '+00:00'` and the reviewed
+  `SQL_MODE`;
+- schedules from server time for 120 through 1,800 seconds, preserves the event
+  after its one attempt, and requires at least 60 seconds to remain before an
+  operation account may be created;
+- reads the event back and requires exact schema, name, definer, body, time
+  zone, SQL mode, schedule, status, completion policy, comment, and deadline.
 
-The script fails if any capability is missing. Do not use the application
-runtime account. Inject both bootstrap and operation passwords into the current
-process without printing them, placing them in command arguments, committing
-them, or sending them to Slack.
+Operation-account provisioning then verifies the event, creates the account
+`ACCOUNT LOCK`, installs the allowlisted grants while it remains unusable,
+revalidates the exact event and deadline, and makes `ACCOUNT UNLOCK` the final
+statement. A crash during provisioning therefore leaves either a harmless
+locked account or a locked privileged account guarded by the watchdog.
 
-Provisioning also refuses to create an account while
-`@@GLOBAL.mandatory_roles` is nonempty, because an inherited mandatory role
-would silently widen the reviewed grant profile.
+At its deadline, the event conditionally locks both fixed temporary accounts.
+It explicitly revokes the bootstrap account's `cloudsqlsuperuser` role because
+`REVOKE ALL PRIVILEGES` does not revoke roles, then revokes direct privileges
+from both accounts. Before dropping the bootstrap it audits every event,
+routine, trigger, and view whose definer is exactly
+`mickeyf_migration_bootstrap@%`. Before dropping the operation account it
+audits triggers on `schema_migrations`, `game_runs`, and
+`game_personal_bests`.
 
-## Exact create, operate, revoke sequence
+If the bootstrap owns any definer object, both accounts remain locked and
+revoked and the event signals an error. If an unexpected reviewed-table
+trigger exists, the bootstrap is dropped but the operation account remains
+locked and revoked. Otherwise both temporary accounts are dropped. The event's
+`LAST_EXECUTED` value means only that execution was attempted: MySQL records it
+for both success and `SIGNAL` failure. Always verify account lock, grants,
+existence, and definer-object outcomes directly.
 
-The following PowerShell template is intentionally explicit. Replace values in
-angle brackets only after the target instance, backup/PITR evidence, proxy
-target, database, and requested operation have received their separate
-approval. Do not paste a password into the command history.
+`ON COMPLETION PRESERVE` intentionally leaves the event disabled after its
+attempt. Normal disarm is itself crash-bounded. Authenticated as the fixed
+bootstrap, it first requires zero bootstrap-definer objects, locks its own
+account, reads back the complete reviewed event, drops the event, proves event
+absence, and executes `DROP USER mickeyf_migration_bootstrap@%` as its final SQL
+statement. If the process dies after event removal, at worst the bootstrap is
+left locked. The CLI then closes its already-open session. An independent
+administrator must verify bootstrap absence after closeout.
 
-```powershell
-# Authenticated proxy must already be listening on this approved non-default port.
-$env:MIGRATION_PRINCIPAL_ADMIN_HOST = '127.0.0.1'
-$env:MIGRATION_PRINCIPAL_ADMIN_PORT = '<approved-proxy-port>'
-$env:MIGRATION_PRINCIPAL_ADMIN_DATABASE = '<approved-database>'
-$env:MIGRATION_PRINCIPAL_ADMIN_USER = '<short-lived-bootstrap-user>'
-$env:MIGRATION_PRINCIPAL_ADMIN_PASS = '<injected-without-echo>'
+## Administrator prerequisites
 
-# Generate one operation password in memory; do not print it.
-$temporaryPasswordBytes = [byte[]]::new(32)
-[Security.Cryptography.RandomNumberGenerator]::Fill($temporaryPasswordBytes)
-$env:MIGRATION_PRINCIPAL_PASSWORD = [Convert]::ToBase64String($temporaryPasswordBytes)
-[Array]::Clear($temporaryPasswordBytes, 0, $temporaryPasswordBytes.Length)
-```
+Native MySQL cannot restrict global account-management privileges to these
+four operation names. Fixed application allowlists constrain these CLIs, not a
+stolen administrator credential. Keep administrator credentials out of
+runtime `DB_*`, operation `MIGRATION_DB_*`, command arguments, source control,
+logs, and Slack.
 
-Choose exactly one row and keep its profile, account, command, and action gate
-together:
+Before production, perform a live privilege probe on the selected instance:
 
-| Profile | Account confirmation | Operation command | Operation gate |
-| --- | --- | --- | --- |
-| `schema-apply` | `mickeyf_schema_apply@%` | `npm --prefix backend run migrations:apply` | `MIGRATION_ALLOW_APPLY=1` |
-| `p4-backfill` | `mickeyf_p4_backfill@%` | `npm --prefix backend run migrations:p4-backfill` | `MIGRATION_ALLOW_P4_VEGA_BACKFILL=1` |
-| `p4-reconcile` | `mickeyf_p4_reconcile@%` | `npm --prefix backend run migrations:p4-reconcile` | `MIGRATION_ALLOW_P4_VEGA_RECONCILE=1` |
-| `empty-rollback` | `mickeyf_empty_rollback@%` | `npm --prefix backend run migrations:rollback-empty` | `MIGRATION_ALLOW_ROLLBACK_EMPTY=1` |
+- `cms_mickeyf@%` must read the required account/event metadata and create the
+  fixed event. Creating an event with a different explicit definer can require
+  both `SET_USER_ID` and `SYSTEM_USER` on MySQL 8.0.31; Cloud SQL may not make
+  that combination available. This is why `root@%` and `cms_mickeyf@%` remain
+  separate, explicitly tested candidates rather than an assumed default.
+- On pinned MySQL 8.0.31, dropping a `root@%`-definer event also requires the
+  bootstrap to hold `SYSTEM_USER`. Do not add that privilege merely to make the
+  root path work. The tested `cms_mickeyf@%`-definer path lets a bootstrap
+  without `SYSTEM_USER` disarm normally and is the narrower candidate if the
+  live Cloud SQL probe agrees.
+- The selected event definer must retain account lock, role/direct-grant
+  revocation, metadata audit, and user-drop capabilities until the deadline.
+- The externally created `mickeyf_migration_bootstrap@%` account must create,
+  alter, grant to, revoke from, and drop the fixed operation accounts; inspect
+  sessions with `PROCESS`; inspect event/trigger/definer metadata; drop the
+  fixed event; and lock and drop itself during normal closeout.
 
-For the chosen row, set the literal values and create the account:
+Provisioning refuses a nonempty `@@GLOBAL.mandatory_roles`, because an inherited
+mandatory role would silently widen an operation profile.
+
+## Exact arm, create, operate, revoke, and disarm sequence
+
+Replace angle-bracket values only after the instance, backup/PITR evidence,
+proxy target, database, operation, watchdog definer, and deadline have their
+own approvals. Do not paste passwords into command history.
+
+Choose one fixed row:
+
+| Profile | Account confirmation | Event confirmation | Operation command | Operation gate |
+| --- | --- | --- | --- | --- |
+| `schema-apply` | `mickeyf_schema_apply@%` | `mickeyf_watchdog_schema_apply` | `migrations:apply` | `MIGRATION_ALLOW_APPLY` |
+| `p4-backfill` | `mickeyf_p4_backfill@%` | `mickeyf_watchdog_p4_backfill` | `migrations:p4-backfill` | `MIGRATION_ALLOW_P4_VEGA_BACKFILL` |
+| `p4-reconcile` | `mickeyf_p4_reconcile@%` | `mickeyf_watchdog_p4_reconcile` | `migrations:p4-reconcile` | `MIGRATION_ALLOW_P4_VEGA_RECONCILE` |
+| `empty-rollback` | `mickeyf_empty_rollback@%` | `mickeyf_watchdog_empty_rollback` | `migrations:rollback-empty` | `MIGRATION_ALLOW_ROLLBACK_EMPTY` |
+
+Set shared target confirmations:
 
 ```powershell
 $profile = '<profile>'
 $account = '<fixed-account-confirmation>'
+$event = '<fixed-event-confirmation>'
+$watchdogDefiner = '<root@% or cms_mickeyf@%>'
+$watchdogDelaySeconds = '<120-through-1800>'
+
+$env:MIGRATION_PRINCIPAL_ADMIN_HOST = '127.0.0.1'
+$env:MIGRATION_PRINCIPAL_ADMIN_PORT = '<approved-proxy-port>'
+$env:MIGRATION_PRINCIPAL_ADMIN_DATABASE = '<approved-database>'
 $env:MIGRATION_PRINCIPAL_CONFIRM_TARGET = "127.0.0.1:$($env:MIGRATION_PRINCIPAL_ADMIN_PORT)/$($env:MIGRATION_PRINCIPAL_ADMIN_DATABASE)"
 $env:MIGRATION_PRINCIPAL_CONFIRM_DATABASE = $env:MIGRATION_PRINCIPAL_ADMIN_DATABASE
 $env:MIGRATION_PRINCIPAL_CONFIRM_PROFILE = $profile
 $env:MIGRATION_PRINCIPAL_CONFIRM_ACCOUNT = $account
+$env:MIGRATION_PRINCIPAL_CONFIRM_EVENT = $event
+$env:MIGRATION_PRINCIPAL_CONFIRM_WATCHDOG_DEFINER = $watchdogDefiner
+```
+
+1. Arm before creating either temporary account, using only the fixed armer:
+
+```powershell
+$env:MIGRATION_PRINCIPAL_ADMIN_USER = 'cms_mickeyf'
+$env:MIGRATION_PRINCIPAL_ADMIN_PASS = '<injected-without-echo>'
+$env:MIGRATION_PRINCIPAL_WATCHDOG_DELAY_SECONDS = $watchdogDelaySeconds
+$env:MIGRATION_PRINCIPAL_ALLOW_WATCHDOG_ARM = '1'
+& npm --prefix backend run migrations:principal:watchdog:arm -- $profile
+$armExitCode = $LASTEXITCODE
+Remove-Item Env:MIGRATION_PRINCIPAL_ALLOW_WATCHDOG_ARM
+Remove-Item Env:MIGRATION_PRINCIPAL_WATCHDOG_DELAY_SECONDS
+Remove-Item Env:MIGRATION_PRINCIPAL_ADMIN_PASS
+if ($armExitCode -ne 0) { throw "Watchdog arm failed with exit $armExitCode" }
+```
+
+2. Through the separately approved Cloud SQL administration path, create only
+   `mickeyf_migration_bootstrap@%` with a generated secret. Do this after arm,
+   never before it. Then inject its secret without echo and create the locked
+   operation account:
+
+```powershell
+$env:MIGRATION_PRINCIPAL_ADMIN_USER = 'mickeyf_migration_bootstrap'
+$env:MIGRATION_PRINCIPAL_ADMIN_PASS = '<injected-without-echo>'
+
+$temporaryPasswordBytes = [byte[]]::new(32)
+[Security.Cryptography.RandomNumberGenerator]::Fill($temporaryPasswordBytes)
+$env:MIGRATION_PRINCIPAL_PASSWORD = [Convert]::ToBase64String($temporaryPasswordBytes)
+[Array]::Clear($temporaryPasswordBytes, 0, $temporaryPasswordBytes.Length)
+
 $env:MIGRATION_PRINCIPAL_ALLOW_CREATE = '1'
 & npm --prefix backend run migrations:principal:create -- $profile
 $createExitCode = $LASTEXITCODE
@@ -130,15 +209,11 @@ Remove-Item Env:MIGRATION_PRINCIPAL_ADMIN_PASS
 if ($createExitCode -ne 0) { throw "Temporary-account creation failed with exit $createExitCode" }
 ```
 
-Removing the bootstrap password here is mandatory: the ordinary migration
-process must never inherit it. Reinject it from the protected source only for
-the revoke command.
+Removing the bootstrap password before the ordinary migration is mandatory.
+Reinject it only for normal closeout.
 
-Configure the ordinary migration CLI with only the temporary account, set its
-existing exact target confirmations and the one operation gate from the table,
-then use this fixed mapping to run exactly one operation. The `finally` block
-revokes on an ordinary command failure or PowerShell interruption before the
-exit code is investigated:
+3. Run exactly the selected operation. Revoke first in `finally`; disarm only
+   after revocation succeeds:
 
 ```powershell
 $env:MIGRATION_DB_HOST = '127.0.0.1'
@@ -151,27 +226,16 @@ $env:MIGRATION_CONFIRM_DATABASE = $env:MIGRATION_DB_NAME
 $env:MIGRATION_CONFIRM_TARGET = "127.0.0.1:$($env:MIGRATION_DB_PORT)/$($env:MIGRATION_DB_NAME)"
 
 switch ($profile) {
-    'schema-apply' {
-        $operationScript = 'migrations:apply'
-        $operationGate = 'MIGRATION_ALLOW_APPLY'
-    }
-    'p4-backfill' {
-        $operationScript = 'migrations:p4-backfill'
-        $operationGate = 'MIGRATION_ALLOW_P4_VEGA_BACKFILL'
-    }
-    'p4-reconcile' {
-        $operationScript = 'migrations:p4-reconcile'
-        $operationGate = 'MIGRATION_ALLOW_P4_VEGA_RECONCILE'
-    }
-    'empty-rollback' {
-        $operationScript = 'migrations:rollback-empty'
-        $operationGate = 'MIGRATION_ALLOW_ROLLBACK_EMPTY'
-    }
+    'schema-apply' { $operationScript = 'migrations:apply'; $operationGate = 'MIGRATION_ALLOW_APPLY' }
+    'p4-backfill' { $operationScript = 'migrations:p4-backfill'; $operationGate = 'MIGRATION_ALLOW_P4_VEGA_BACKFILL' }
+    'p4-reconcile' { $operationScript = 'migrations:p4-reconcile'; $operationGate = 'MIGRATION_ALLOW_P4_VEGA_RECONCILE' }
+    'empty-rollback' { $operationScript = 'migrations:rollback-empty'; $operationGate = 'MIGRATION_ALLOW_ROLLBACK_EMPTY' }
     default { throw "Unmapped migration profile: $profile" }
 }
 
 $operationExitCode = 1
 $revokeExitCode = 1
+$disarmExitCode = 1
 try {
     Set-Item "Env:$operationGate" '1'
     & npm --prefix backend run $operationScript
@@ -180,35 +244,48 @@ try {
     Remove-Item "Env:$operationGate" -ErrorAction SilentlyContinue
     Remove-Item Env:MIGRATION_DB_PASS -ErrorAction SilentlyContinue
 
-    # Reinject from the protected source without echo only for closeout.
     $env:MIGRATION_PRINCIPAL_ADMIN_PASS = '<re-injected-without-echo>'
     $env:MIGRATION_PRINCIPAL_ALLOW_REVOKE = '1'
     & npm --prefix backend run migrations:principal:revoke -- $profile
     $revokeExitCode = $LASTEXITCODE
     Remove-Item Env:MIGRATION_PRINCIPAL_ALLOW_REVOKE -ErrorAction SilentlyContinue
+
+    if ($revokeExitCode -eq 0) {
+        $env:MIGRATION_PRINCIPAL_ALLOW_WATCHDOG_DISARM = '1'
+        & npm --prefix backend run migrations:principal:watchdog:disarm -- $profile
+        $disarmExitCode = $LASTEXITCODE
+        Remove-Item Env:MIGRATION_PRINCIPAL_ALLOW_WATCHDOG_DISARM -ErrorAction SilentlyContinue
+    }
     Remove-Item Env:MIGRATION_PRINCIPAL_ADMIN_PASS -ErrorAction SilentlyContinue
 }
 
-if ($revokeExitCode -ne 0) { throw "Temporary-account revocation failed with exit $revokeExitCode" }
+if ($revokeExitCode -ne 0) { throw "Revocation failed; leave the watchdog armed" }
+if ($disarmExitCode -ne 0) { throw "Watchdog disarm could not be confirmed" }
 if ($operationExitCode -ne 0) { throw "Migration operation failed with exit $operationExitCode" }
 ```
 
-No in-process `finally` can survive host termination or power loss. The
-independent bounded cleanup path required above remains a production
-prerequisite; the one-day password-aging setting is not a substitute.
+4. After the disarm connection closes, verify through the separately approved
+   administration path that `mickeyf_migration_bootstrap@%` is absent. The
+   disarm CLI self-drops it, but intentionally cannot query after its final
+   statement to prove its own absence.
 
-Revocation performs `ALTER USER ... ACCOUNT LOCK`, `REVOKE ALL PRIVILEGES,
-GRANT OPTION`, an active-session count, an exact reviewed-table trigger
-inventory, and finally `DROP USER`. Privilege
-revocation affects an existing session on its next request. If a session is
-still open, the command fails loudly after locking and revoking the account;
-close that session and rerun the same revoke command. The retry is intentional
-and idempotent. If trigger inventory fails, investigate and remove the
-unexpected trigger as the bootstrap operator, then rerun revocation. `FLUSH
-PRIVILEGES` is neither required nor used.
+Revocation locks, revokes, counts active sessions, audits reviewed-table
+triggers, and then drops the operation account. If a session remains, it fails
+loudly after lock/revoke; close the session and retry. `FLUSH PRIVILEGES` is
+neither needed nor used.
 
-Finally remove all remaining operation and provisioner inputs from the current
-shell. Missing variables are ignored so cleanup is safe to repeat:
+### If the deadline fires or closeout fails
+
+Do not infer success from `LAST_EXECUTED`. Verify both fixed temporary accounts,
+their lock/grant state, the four bootstrap definer-object categories, and the
+reviewed-table trigger inventory directly. If the preserved event remains but
+the watchdog dropped the bootstrap, recreate the same fixed bootstrap only
+through the separately approved Cloud SQL path, inspect the outcome, safely
+disarm the exact event, and verify the bootstrap's second removal. Never disarm
+first merely to clear an error: that removes the independent cleanup boundary
+while the interesting mess is still on the floor.
+
+Finally clear every input from the shell:
 
 ```powershell
 @(
@@ -221,7 +298,12 @@ shell. Missing variables are ignored so cleanup is safe to repeat:
     'MIGRATION_PRINCIPAL_CONFIRM_DATABASE',
     'MIGRATION_PRINCIPAL_CONFIRM_PROFILE',
     'MIGRATION_PRINCIPAL_CONFIRM_ACCOUNT',
+    'MIGRATION_PRINCIPAL_CONFIRM_EVENT',
+    'MIGRATION_PRINCIPAL_CONFIRM_WATCHDOG_DEFINER',
+    'MIGRATION_PRINCIPAL_WATCHDOG_DELAY_SECONDS',
     'MIGRATION_PRINCIPAL_ALLOW_CREATE', 'MIGRATION_PRINCIPAL_ALLOW_REVOKE',
+    'MIGRATION_PRINCIPAL_ALLOW_WATCHDOG_ARM',
+    'MIGRATION_PRINCIPAL_ALLOW_WATCHDOG_DISARM',
     'MIGRATION_ALLOW_APPLY', 'MIGRATION_ALLOW_ROLLBACK_EMPTY',
     'MIGRATION_ALLOW_P4_VEGA_BACKFILL',
     'MIGRATION_ALLOW_P4_VEGA_RECONCILE'
@@ -229,15 +311,18 @@ shell. Missing variables are ignored so cleanup is safe to repeat:
 Remove-Variable temporaryPasswordBytes -ErrorAction SilentlyContinue
 ```
 
-A successful operation is not complete until the revoke command reports that
-the account was revoked and dropped.
+A run is not complete until the operation account is absent, the exact event is
+absent, the bootstrap account is externally verified absent, and secrets are
+cleared.
 
 ## Local verification
 
-`npm --prefix backend run test:migrations` provisions every profile in the
-pinned disposable MySQL 8.0.31 container, executes its real operation, proves
-ordinary DML/table-DDL and cross-schema denials, exercises trigger detection and
-cleanup, behaviorally rejects a concurrent second connection, checks the
-configured one-day password-aging interval without treating it as a TTL, and
-proves reconnect denial after revocation. The harness removes the container,
-volume, accounts, and sentinel schema even on failure.
+`npm --prefix backend run test:migrations` uses pinned disposable MySQL 8.0.31.
+It executes every real profile, proves least-privilege denials, verifies
+lock-first provisioning and final unlock ordering, tests crash-bounded
+bootstrap self-lock/disarm/self-drop, and lets the scheduler deadline fire.
+Deadline tests inspect actual account lock/revoke/drop outcomes for normal
+cleanup, operation-trigger refusal, and bootstrap-definer refusal; they do not
+treat event metadata as proof of success. The harness removes its container,
+volume, accounts, events, roles, views, triggers, and sentinel schema even on
+failure.

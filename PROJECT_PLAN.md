@@ -87,6 +87,15 @@ backfill has run, so the feature-branch p4-Vega detail correctly cannot read
 its generic table yet. These are explicit completion gates, not accepted
 follow-up work.
 
+That preflight also found that the deployed `cms_mickeyf` application account
+still inherits Cloud SQL's `cloudsqlsuperuser` role. This is an existing
+least-privilege defect: remove the role and grant only the reviewed runtime
+table privileges before deploying the leaderboard candidate. It must not be
+used as the schema administrator. The production migration safety design may
+use it once only to arm an exact, fixed-definer, one-shot cleanup watchdog
+before either temporary account exists, but that containment exception
+requires explicit approval, immediate secret clearing, and recorded cleanup.
+
 The approved Phase 13 storage end state is for both the existing p4-Vega API
 operations and the generic leaderboard read to use `game_personal_bests` as
 their source of truth. After transactional dual writes, a complete backfill,
