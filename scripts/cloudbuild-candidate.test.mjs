@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 
 const configPath = fileURLToPath(new URL('../cloudbuild.candidate.yaml', import.meta.url));
+const dockerfilePath = fileURLToPath(new URL('../Dockerfile', import.meta.url));
 const expectedConfig = [
     '# Isolated, image-only backend candidate build.',
     '# A separately reviewed manual trigger must supply a full Git COMMIT_SHA.',
@@ -44,10 +45,24 @@ const expectedConfig = [
     '',
 ].join('\n');
 
-async function readCandidateConfig() {
-    const config = await readFile(configPath, 'utf8');
+const expectedAlpineOpenSslPatch = [
+    'RUN apk update \\',
+    '    && apk add --no-cache --upgrade \\',
+    '        libcrypto3=3.5.8-r0 \\',
+    '        libssl3=3.5.8-r0 \\',
+    "    && apk info --exists 'libcrypto3=3.5.8-r0' > /dev/null \\",
+    "    && apk info --exists 'libssl3=3.5.8-r0' > /dev/null \\",
+    '    && rm -rf /var/cache/apk/*',
+].join('\n');
 
-    return config.replace(/\r\n?/gu, '\n');
+async function readNormalizedFile(path) {
+    const contents = await readFile(path, 'utf8');
+
+    return contents.replace(/\r\n?/gu, '\n');
+}
+
+async function readCandidateConfig() {
+    return readNormalizedFile(configPath);
 }
 
 test('candidate configuration remains an exact image-only build contract', async () => {
@@ -72,4 +87,22 @@ test('candidate configuration contains no production rollout capabilities', asyn
     for (const forbiddenCapability of forbiddenCapabilities) {
         assert.doesNotMatch(config, forbiddenCapability);
     }
+});
+
+test('candidate image patches only the reviewed Alpine OpenSSL packages', async () => {
+    const dockerfile = await readNormalizedFile(dockerfilePath);
+    const patchOccurrences = dockerfile.split(expectedAlpineOpenSslPatch).length - 1;
+    const patchIndex = dockerfile.indexOf(expectedAlpineOpenSslPatch);
+    const sharedBaseIndex = dockerfile.indexOf(' AS node-runtime-base');
+    const nextStageIndex = dockerfile.indexOf('FROM node-runtime-base AS npm-base');
+
+    assert.equal(patchOccurrences, 1);
+    assert.ok(sharedBaseIndex >= 0);
+    assert.ok(patchIndex > sharedBaseIndex);
+    assert.ok(nextStageIndex > patchIndex);
+    assert.match(dockerfile, /^FROM node-runtime-base AS runtime$/mu);
+
+    const dockerfileWithoutReviewedPatch = dockerfile.replace(expectedAlpineOpenSslPatch, '');
+
+    assert.doesNotMatch(dockerfileWithoutReviewedPatch, /\bapk\s+(?:add|fix|update|upgrade)\b/iu);
 });

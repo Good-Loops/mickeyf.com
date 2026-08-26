@@ -2,6 +2,18 @@
 # image. Update the tag and digest together during a reviewed runtime upgrade.
 FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS node-runtime-base
 
+# Artifact Registry identifies Alpine's OpenSSL 3.5.7-r0 package record as
+# affected. This patches Alpine's shared libraries; Node's separately embedded
+# OpenSSL remains part of each reviewed Node runtime upgrade. Upgrade only the
+# installed libraries, verify the result, and discard the repository indexes.
+RUN apk update \
+    && apk add --no-cache --upgrade \
+        libcrypto3=3.5.8-r0 \
+        libssl3=3.5.8-r0 \
+    && apk info --exists 'libcrypto3=3.5.8-r0' > /dev/null \
+    && apk info --exists 'libssl3=3.5.8-r0' > /dev/null \
+    && rm -rf /var/cache/apk/*
+
 FROM node-runtime-base AS npm-base
 
 # Match the packageManager contract used to generate the lockfile. This stage
