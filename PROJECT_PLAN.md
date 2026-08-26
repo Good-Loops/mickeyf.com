@@ -83,11 +83,22 @@ separate reviewed approval.
 The additive production schema was applied on 2026-08-26 from commit
 `abd6ff9d`, after successful on-demand backup `1787754667930` and a clean
 two-version plan. `schema_migrations`, `game_runs`, and `game_personal_bests`
-now exist with the reviewed checksums and exact shapes; both domain tables are
-empty. `users.p4_score` remains nullable `INT`, and the identity-free source
-evidence remained seven users, five scores, minimum 190, maximum 410, and sum
-1350. No backfill, API deployment, credential change, trigger, or destructive
-migration was performed, so the p4-Vega generic table is correctly still empty.
+now exist with the reviewed checksums and exact shapes. Immediately after that
+step both domain tables were empty, `users.p4_score` remained nullable `INT`,
+and the identity-free source evidence remained seven users, five scores,
+minimum 190, maximum 410, and sum 1350. No API deployment, credential change,
+trigger, or destructive migration was performed.
+
+The separately approved initial p4-Vega seed ran on 2026-08-26 from commit
+`87ab4954`, after successful on-demand backup `1787755849821`. One transaction
+copied the five legacy scores into `game_personal_bests`; an independent
+read-only reconciliation confirmed source and target count 5, minimum 190,
+maximum 410, sum 1350, five exact matches, and zero discrepancy, metadata,
+run-ledger, or rules-version counts. `game_runs` stayed empty and
+`users.p4_score` stayed unchanged. This is point-in-time seed evidence only:
+the live legacy-only writer can still create drift, so the complete backfill
+and reconciliation must run again after dual-writer deployment and the
+legacy-revision drain before any cutover.
 
 That preflight also found that the deployed `cms_mickeyf` account inherits
 Cloud SQL's `cloudsqlsuperuser` role. This existing least-privilege defect must
@@ -204,9 +215,10 @@ assessment for the exact candidate.
 The Phase 13.1 repeatable, privileged p4-Vega historical-backfill CLI and
 separate read-only aggregate reconciliation gate were implemented and verified
 locally on 2026-08-25. The backfill is operational tooling rather than an HTTP
-endpoint or numbered schema migration so it can run once after dual writes
-deploy and again after every legacy-only revision drains. It copies all
-non-null historical scores monotonically without fabricating run history; the
+endpoint or numbered schema migration so it can be repeated after the dual
+writer is deployed and again after every legacy-only revision drains. It
+copies all non-null historical scores monotonically without fabricating run
+history; the
 reconciliation reports only aggregate equality and missing, extra, score, and
 metadata discrepancy counts plus unexpected p4-Vega run/rules counts, never
 player identities. Before writing, the command refuses target-ahead scores,
@@ -246,10 +258,8 @@ result receiver, one-source millisecond canonicalization, score/rank parity,
 and Submit Score button activation remain deliberately disconnected until the
 Three Bosses gameplay and ranking release gates are approved.
 
-Neither a production backfill nor a production reconciliation has been
-performed. Production execution requires the additive schema, an explicitly
-approved maintenance credential, exact target confirmation, and recovery
-evidence.
+An initial production seed backfill and point-in-time reconciliation completed
+on 2026-08-26, but no production cutover reconciliation has been performed.
 Only a zero-discrepancy post-drain reconciliation permits the later read/write
 cutover to `game_personal_bests`. The final production switch requires a
 freeze-capable dual writer first: drain every no-gate revision, freeze the

@@ -4,14 +4,15 @@ Status: Phase 13.1 contract approved by Mike on 2026-08-24. The sanitized live
 schema preflight completed on the same date. On 2026-08-25, Mike approved the
 end state in which p4-Vega uses the generic leaderboard storage and the legacy
 `users.p4_score` column is retired after a verified cutover. The additive
-production schema was applied and verified on 2026-08-26. This document records
-that completed change but does not authorize a backfill, deployment, privilege
-change, legacy-column removal, or other production mutation.
+production schema and an initial p4-Vega data seed were applied and verified on
+2026-08-26. This document records those completed changes but does not authorize
+a deployment, privilege change, read/write cutover, legacy-column removal, or
+other production mutation.
 
 Production now contains `schema_migrations`, `game_runs`, and
-`game_personal_bests` alongside `users`; the two domain tables are empty and
-`users.p4_score` is unchanged. No backfill or API deployment has run, so the
-generic p4-Vega route still has no live score data to serve.
+`game_personal_bests` alongside `users`. The initial seed copied five p4-Vega
+personal bests; `game_runs` is empty and `users.p4_score` is unchanged. No API
+deployment or reader cutover has run.
 
 The transitional p4-Vega dual-write repository was implemented and verified
 locally on 2026-08-25 with unit, rollback, and concurrent MySQL 8.0.31 tests. It
@@ -83,9 +84,9 @@ image pins.
 
 The repeatable, privileged p4-Vega historical-backfill CLI and read-only
 aggregate reconciliation command were implemented and verified locally on
-2026-08-25. This does not authorize or constitute a production backfill, read
-cutover, or removal of `users.p4_score`; each production step retains the
-approval and evidence gates below.
+2026-08-25. The separately approved initial production seed is recorded below;
+the tooling does not authorize a read cutover or removal of `users.p4_score`,
+and each later production step retains the approval and evidence gates below.
 
 The eventual generic p4-Vega `get_leaderboard` implementation was prepared and
 verified on 2026-08-25 without changing its request or response contract. It is
@@ -298,7 +299,8 @@ source run and no fabricated historical ledger entry.
 Foreign-key types must exactly match the live `users.user_id` definition.
 Machine identifiers use an ASCII binary collation; display text remains
 `utf8mb4`. The exact additive SQL lives in `backend/migrations` and is verified
-against disposable MySQL 8.0.31. Applying it remains separately reviewed and
+against disposable MySQL 8.0.31. Its completed production application is
+recorded below; any later schema change remains separately reviewed and
 approval-gated.
 
 ### p4-Vega historical backfill and reconciliation
@@ -418,12 +420,38 @@ The runner recorded the reviewed migrations and SHA-256 checksums:
   `01EADE4CFC8E1131BE79DF43881A9BC7A538AAF0E1E1D3F470DEB6C21EAAED3A`.
 
 Post-apply planning reported both versions applied with nothing pending or
-recoverable. The three new tables use InnoDB and `utf8mb4_unicode_ci`; both
-domain tables contain zero rows. `users.p4_score` remains nullable `INT`, and
-the aggregate-only source evidence remained seven users, five scored rows,
-minimum 190, maximum 410, and sum 1350. No trigger, backfill, deployment,
-credential change, rollback, or destructive migration was performed. The
-runtime `cloudsqlsuperuser` finding and exact-grant-manifest blocker remain.
+recoverable. The three new tables use InnoDB and `utf8mb4_unicode_ci`;
+immediately after this schema step both domain tables contained zero rows.
+`users.p4_score` remained nullable `INT`, and the aggregate-only source evidence
+remained seven users, five scored rows, minimum 190, maximum 410, and sum 1350.
+No trigger, backfill, deployment, credential change, rollback, or destructive
+migration was performed during this step. The runtime `cloudsqlsuperuser`
+finding and exact-grant-manifest blocker remain.
+
+## Completed initial production p4-Vega seed
+
+On 2026-08-26, the separately approved initial seed ran from commit `87ab4954`
+after on-demand backup `1787755849821` completed successfully. The exact proxy,
+database, resolved account, schema history, checksums, table shapes, and legacy
+source shape were reverified before the data action. The pre-seed reconciliation
+reported five missing rows and no other anomaly.
+
+The monotonic backfill processed one chunk and reused
+`0002_create_game_personal_bests.applied_at` as the single historical
+`recorded_at`. A separately authorized read-only reconciliation then reported
+source and target count 5, minimum 190, maximum 410, sum 1350, five exact
+matches, and zero missing, mismatch, extra, metadata, run-ledger, or unexpected
+rules-version counts. `game_runs` remained empty, `users.p4_score` remained a
+nullable `INT`, and the seven-user source aggregates were unchanged.
+
+This is an initial point-in-time seed, not cutover evidence. The serving
+production revision returned HTTP 401 rather than the freeze gate's 503 for an
+anonymous score-submission probe, proving production remained unfrozen. No
+freeze-capable dual-writer deployment occurred in this task. A complete
+backfill and exact reconciliation remain mandatory after that writer is
+deployed and all legacy-only revisions and in-flight requests have drained. No
+API deployment, traffic change, privilege change, trigger, column drop, or
+reader/writer cutover occurred in this step.
 
 ## Expand, backfill, and cutover
 
