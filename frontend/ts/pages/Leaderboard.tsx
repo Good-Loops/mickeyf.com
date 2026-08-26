@@ -1,87 +1,119 @@
 /**
- * Leaderboard page ("/leaderboard").
- * Fetches and renders the current leaderboard from the backend.
+ * Leaderboard hub ("/leaderboards").
+ * Lists leaderboard destinations without duplicating game-launch cards from
+ * the separate Games page.
  */
 import { useEffect, useState } from 'react';
-import Swal from 'sweetalert2';
-import { API_BASE } from '@/config/apiConfig';
+import { Link } from 'react-router-dom';
+import {
+    getLeaderboardCatalog,
+    type LeaderboardCatalogGame,
+} from '@/services/leaderboardService';
 
-interface LeaderboardEntry {
-  	user_name: string;
-	p4_score: number;
+function isAbortError(error: unknown): boolean {
+    return error instanceof DOMException && error.name === 'AbortError';
+}
+
+function getMetricLabel(game: LeaderboardCatalogGame): string {
+    return game.primaryMetric === 'completionTimeMs'
+        ? game.labels.completionTime ?? 'Completion time'
+        : game.labels.score;
 }
 
 const Leaderboard: React.FC = () => {
-  	const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
-  	const [isLoading, setIsLoading] = useState(true);
+    const [games, setGames] = useState<LeaderboardCatalogGame[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const [requestVersion, setRequestVersion] = useState(0);
 
-	useEffect(() => {
-		const fetchLeaderboard = async () => {
+    useEffect(() => {
+        const abortController = new AbortController();
 
-			try {
-				const res = await fetch(`${API_BASE}/api/users`, {
-					method: 'POST',
-					credentials: 'include',
-					headers: {
-						'Content-Type': 'application/json',
-						'Accept': 'application/json',
-					},
-					body: JSON.stringify({ type: 'get_leaderboard' }),
-				});
+        const loadCatalog = async () => {
+            setIsLoading(true);
+            setErrorMessage(null);
 
-				if (!res.ok) {
-					throw new Error(`HTTP error! status: ${res.status}`);
-				}
+            try {
+                const response = await getLeaderboardCatalog(abortController.signal);
+                setGames(response.games);
+            } catch (error) {
+                if (!isAbortError(error)) {
+                    setErrorMessage(
+                        error instanceof Error
+                            ? error.message
+                            : 'The leaderboards could not be loaded.'
+                    );
+                }
+            } finally {
+                if (!abortController.signal.aborted) {
+                    setIsLoading(false);
+                }
+            }
+        };
 
-				const data = await res.json();
+        void loadCatalog();
+        return () => abortController.abort();
+    }, [requestVersion]);
 
-				if (data.success) {
-					setLeaderboard(data.leaderboard as LeaderboardEntry[]);
-				} else {
-					Swal.fire({
-						title: 'Error fetching leaderboard',
-						text: 'Could not retrieve leaderboard data',
-						icon: 'error',
-					});
-				}
-			} catch (err) {
-				console.error('Error fetching leaderboard:', err);
-				Swal.fire({
-					title: 'Error',
-					text: 'An error occurred while fetching the leaderboard',
-					icon: 'error',
-				});
-			} finally {
-				setIsLoading(false);
-			}
-		};
-		fetchLeaderboard();
-	}, []);
+    return (
+        <section className="leaderboard" aria-labelledby="leaderboards-title">
+            <header className="leaderboard__header">
+                <h1 id="leaderboards-title" className="leaderboard__title">
+                    Leaderboards
+                </h1>
+            </header>
 
-  if (isLoading) {
-		return (
-			<section className="leaderboard">
-				<h1 className="leaderboard__title">Loading...</h1>
-			</section>
-		);
-  	}
+            {isLoading && games.length === 0 && (
+                <div className="leaderboard__state" role="status" aria-live="polite">
+                    Loading leaderboards…
+                </div>
+            )}
 
-  return (
-    <section className="leaderboard">
-		<h1 className="leaderboard__title">Leaderboard</h1>
-			<ul className="leaderboard__list">
-				{leaderboard.map((entry) => (
-					<li key={entry.user_name} className="leaderboard__list-item">
-						<div className="leaderboard__item-container">
-							<span className="leaderboard__user-name">{entry.user_name}</span>
-							<span className="leaderboard__score">{entry.p4_score}</span>
-						</div>
-					</li>
-				))}
-    		</ul>
-    </section>
-  );
+            {errorMessage && (
+                <div className="leaderboard__state leaderboard__state--error" role="alert">
+                    <h2>Leaderboards unavailable</h2>
+                    <p>{errorMessage}</p>
+                    <button
+                        className="leaderboard__action"
+                        type="button"
+                        onClick={() => setRequestVersion((version) => version + 1)}
+                    >
+                        Try again
+                    </button>
+                </div>
+            )}
+
+            {!isLoading && !errorMessage && games.length === 0 && (
+                <div className="leaderboard__state" role="status">
+                    <h2>No leaderboards yet</h2>
+                    <p>Game leaderboards will appear here when they are available.</p>
+                </div>
+            )}
+
+            {games.length > 0 && (
+                <nav className="leaderboard__cards" aria-label="Game leaderboards">
+                    {games.map((game) => (
+                        <Link
+                            className={`leaderboard-card leaderboard-card--${game.gameId}`}
+                            key={game.gameId}
+                            to={`/leaderboards/${game.gameId}`}
+                        >
+                            <h2 className="leaderboard-card__title">{game.displayName}</h2>
+                            <dl className="leaderboard-card__metadata">
+                                <div>
+                                    <dt>Metric</dt>
+                                    <dd>{getMetricLabel(game)}</dd>
+                                </div>
+                            </dl>
+                            <div className="leaderboard-card__footer">
+                                <span aria-hidden="true">View →</span>
+                            </div>
+                        </Link>
+                    ))}
+                </nav>
+            )}
+        </section>
+    );
 };
 
 export default Leaderboard;
-

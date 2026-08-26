@@ -22,6 +22,7 @@ import {
 } from '@/config/featureFlags';
 
 import Leaderboard from "@/pages/Leaderboard";
+import GameLeaderboard from "@/pages/leaderboards/GameLeaderboard";
 import Social from "@/pages/Social";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
@@ -45,7 +46,8 @@ const App: React.FC = () => {
 					<Route path={THREE_BOSSES_LOCAL_ROUTE} element={<ThreeBosses />} />
 				)}
 
-				<Route path="/leaderboard" element={<Leaderboard />} />
+				<Route path="/leaderboards" element={<Leaderboard />} />
+				<Route path="/leaderboards/:gameId" element={<GameLeaderboard />} />
 				<Route path="/social" element={<Social />} />
 				<Route path="/login" element={<Login />} />
 				<Route path="/register" element={<Register />} />

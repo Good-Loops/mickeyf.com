@@ -22,8 +22,8 @@ the versioned `game_personal_bests` source and verified on 2026-08-25 without
 changing its request or response contract. This code has not been deployed or
 activated in production. It remains gated on the additive schema, completed
 backfill, legacy-revision drain, and zero-discrepancy reconciliation. The
-multi-game frontend, generic-only write cutover, and legacy column removal
-remain later steps.
+generic-only write cutover and legacy column removal remain later steps; the
+read-only multi-game frontend slice is recorded below.
 
 The additive backend read API was implemented and verified locally on
 2026-08-26. `GET /api/leaderboards` explicitly projects the server catalog,
@@ -31,8 +31,18 @@ and `GET /api/leaderboards/:gameId` exposes the generic p4-Vega rows with
 one-based positions while returning a typed empty result for the known,
 submission-disabled Three Bosses game. Exact unknown-game, rate-limit, and
 server-error responses use the version-one error envelope. No generic write
-route was added, the existing frontend remains on its legacy API, and none of
-this code has been deployed or activated in production.
+route was added, and none of this code has been deployed or activated in
+production.
+
+The read-only multi-game frontend slice was implemented locally on 2026-08-26.
+The canonical `/leaderboards` page is now a catalog-driven hub of leaderboard
+destinations, not a duplicate game launcher. Direct detail routes use the
+generic GET API, and p4-Vega no longer reads the legacy `/api/users`
+leaderboard operation in the browser. The known Three Bosses route renders its
+typed empty, unranked, submission-disabled state. The old singular frontend
+route is intentionally not retained because the owner approved a clean URL
+change before meaningful public adoption. Generic-only writes, Three Bosses
+submission, production migration, and legacy-column removal remain incomplete.
 
 ## Invariants
 
@@ -136,13 +146,14 @@ scale or treating the leaderboard as competitive infrastructure.
 
 ## Frontend route contract
 
-- `/leaderboard` redirects to `/leaderboard/p4-vega` for backward-compatible
-  navigation.
-- `/leaderboard/:gameId` is the direct-linkable selected game state.
-- The selector is populated from the server catalog rather than a separate
-  client-owned ranking configuration.
-- Each selected game owns its loading, empty, success, and error state. A
-  failure for one game does not erase a previously loaded result for another.
+- `/leaderboards` is the server-catalog-driven hub. Its cards navigate to
+  leaderboard details only; playable game cards remain under `/games`.
+- `/leaderboards/:gameId` is the direct-linkable selected game state.
+- The hub and selected-game metadata are populated from the server catalog
+  rather than a separate client-owned ranking configuration.
+- Each direct game route owns a bounded loading, empty, success, and error
+  state. Navigating between routes performs a fresh read; version one does not
+  promise a cross-game client cache.
 - Unknown game IDs show a bounded not-found state with links to known games;
   they are not silently normalized to a different identifier.
 

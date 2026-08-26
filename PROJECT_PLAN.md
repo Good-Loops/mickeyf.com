@@ -112,8 +112,8 @@ The existing p4-Vega `get_leaderboard` read path was switched locally to
 request, response fields, ten-row bound, cache behavior, and numeric historical
 scores remain compatible; game/rules scoping and tie order now follow the
 approved generic contract. This code has not been deployed or activated in
-production. The multi-game frontend, generic-only write cutover, and
-`users.p4_score` removal remain incomplete.
+production. The generic-only write cutover and `users.p4_score` removal remain
+incomplete; the multi-game frontend is recorded below.
 
 The additive backend catalog and per-game read routes were implemented and
 verified locally on 2026-08-26. The catalog is projected from server-owned
@@ -211,8 +211,20 @@ unchanged.
 
 ### Multi-game leaderboard redesign
 
-Redesign `/leaderboard` as a multi-game experience rather than extending the
+Redesign `/leaderboards` as a multi-game experience rather than extending the
 current p4-Vega-only list in place.
+
+Frontend hub and generic read integration: **implemented locally on
+2026-08-26**. The plural route contains catalog-driven leaderboard cards, each
+linking to its own direct detail route. These are leaderboard destinations,
+not playable game cards; game launching remains under `/games`. The p4-Vega
+detail now uses the generic GET API, while Three Bosses exposes its typed empty,
+unranked, submission-disabled state. Transport tests, production build, and
+desktop plus narrow browser checks pass. A disposable loopback API verified the
+populated p4-Vega table without applying approval-gated database migrations;
+the unmigrated live local p4 read correctly remains in its bounded server-error
+state. Three Bosses submission, the complete route/UI mobile matrix, production
+migration, and deployment remain separate pending steps.
 
 The design must include:
 
@@ -229,6 +241,26 @@ The design must include:
 
 Do not assume that scores from different games have the same meaning or can be
 ranked together.
+
+## Phase 14 — Site information architecture, feedback, responsiveness, and literal-dark redesign (deferred)
+
+After the current leaderboard and migration work, redesign the header's
+information architecture as a separate site-wide task:
+
+- group Animations, Games, and Leaderboards into an accessible
+  **Entertainment** dropdown;
+- group Login and Register into an accessible **Account** dropdown, with the
+  username and Logout represented coherently when authenticated;
+- make the navigation genuinely responsive and verify keyboard, focus, and
+  disclosure behavior;
+- choose a clearer replacement name for **Social** before changing that area,
+  including deliberate handling of the existing route;
+- add a dedicated user-feedback page with server-side validation, abuse/rate
+  limiting, and an explicit privacy and retention policy; and
+- after the navigation and content structure are settled, redesign the full
+  website with a more professional, responsive, literally dark visual theme.
+  "Dark" here means a deliberate dark color palette with readable contrast,
+  not a gloomy or moody creative direction.
 
 ## Deferred tooling follow-up
 

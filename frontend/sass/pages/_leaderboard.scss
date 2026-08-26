@@ -1,42 +1,346 @@
 @use '../abstracts' as *;
+@use 'sass:color';
 
 .leaderboard {
     @include default-component;
-    row-gap: 0;
 
-    padding-block: 2em;
-    padding-inline: 8em;
+    width: min(112rem, calc(100% - 4rem));
+    min-width: 0;
+    row-gap: clamp(2.4rem, 4vw, 4rem);
 
-    border-radius: .8em;
+    margin-block: 4rem;
+    padding: clamp(2.4rem, 4vw, 5rem);
+
+    border: .1rem solid rgba($white, .35);
+    border-radius: $default-border-radius;
 
     background-image: $sidebar-bg-gradient;
-
     box-shadow: $dark-box-shadow;
 
-    &__list {
-        @include title-coloring;
-        list-style-type: decimal;
+    &__header {
+        display: grid;
+        justify-items: center;
+        gap: 1.2rem;
+
+        max-width: 78rem;
+        text-align: center;
+
+        &--detail {
+            width: 100%;
+        }
     }
 
-    &__item-container {
-        display: flex;
-    }
-
-
-    &__list-item {
-        font-size: 3rem;
-        font-weight: 900;
+    &__eyebrow {
+        color: $space-blue;
         font-family: $subheading-font;
-        
-        padding: .5em .8em;
-        margin: .5em 0;
-
-        box-shadow: $dark-box-shadow;
-
-        border-radius: .2em;
+        font-size: 1.5rem;
+        font-weight: 900;
+        letter-spacing: .16em;
+        text-transform: uppercase;
     }
 
-    &__score {
-        margin-left: auto;
+    &__title {
+        @include title-coloring;
+        font-size: clamp(4.4rem, 7vw, 8rem);
+        line-height: 1;
+        overflow-wrap: anywhere;
+    }
+
+    &__cards {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr));
+        gap: 2rem;
+
+        width: 100%;
+    }
+
+    &__state {
+        display: grid;
+        justify-items: center;
+        gap: 1.6rem;
+
+        width: min(100%, 72rem);
+        padding: clamp(2.4rem, 4vw, 4rem);
+
+        color: $space-blue;
+        text-align: center;
+
+        border: .1rem solid rgba($space-blue, .2);
+        border-radius: $default-border-radius;
+        background: rgba($white, .35);
+
+        font-size: 1.8rem;
+        line-height: 1.5;
+
+        p {
+            max-width: 100%;
+            overflow-wrap: anywhere;
+        }
+
+        h1,
+        h2 {
+            font-family: $subheading-font;
+            font-size: clamp(2.4rem, 4vw, 3.4rem);
+        }
+
+        &--error {
+            border-color: rgba($space-blue, .45);
+        }
+
+        &--empty {
+            max-width: 68rem;
+        }
+    }
+
+    &__action {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+
+        min-height: 4.4rem;
+        padding: .8rem 1.8rem;
+
+        color: $white;
+        font-size: 1.7rem;
+        font-weight: 800;
+
+        border: .2rem solid transparent;
+        border-radius: .6rem;
+        background: $space-blue;
+
+        &:hover {
+            background: color.adjust($space-blue, $lightness: 8%);
+        }
+
+        &:focus-visible {
+            outline: .3rem solid $white;
+            outline-offset: .3rem;
+        }
+    }
+
+    &__text-link,
+    &__back-link,
+    &__known-games a {
+        color: $space-blue;
+        font-size: 1.7rem;
+        font-weight: 800;
+        text-decoration: underline;
+        text-underline-offset: .25em;
+
+        &:focus-visible {
+            outline: .3rem solid $space-blue;
+            outline-offset: .3rem;
+        }
+    }
+
+    &__back-link {
+        justify-self: start;
+        margin-bottom: .8rem;
+    }
+
+    &__known-games {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: 1.6rem;
+
+        padding-top: .8rem;
+    }
+
+    &__badges {
+        display: flex;
+        flex-wrap: wrap;
+        justify-content: center;
+        gap: .8rem;
+
+        span {
+            padding: .55rem 1rem;
+
+            color: $space-blue;
+            font-size: 1.4rem;
+            font-weight: 900;
+
+            border: .1rem solid rgba($space-blue, .35);
+            border-radius: 100vw;
+            background: rgba($white, .25);
+        }
+    }
+
+    &__table-wrapper {
+        width: 100%;
+        min-width: 0;
+        overflow-x: auto;
+
+        border-radius: $default-border-radius;
+        background: rgba($space-blue, .9);
+        box-shadow: $dark-box-shadow-s;
+
+        &:focus-visible {
+            outline: .35rem solid $white;
+            outline-offset: .35rem;
+        }
+    }
+
+    &__table {
+        width: 100%;
+        min-width: 52rem;
+        border-collapse: collapse;
+
+        color: $white;
+        font-size: clamp(1.6rem, 2vw, 2rem);
+
+        caption {
+            padding: 1.8rem 2rem;
+
+            color: $white;
+            font-family: $subheading-font;
+            font-size: 2.2rem;
+            font-weight: 900;
+            text-align: left;
+        }
+
+        th,
+        td {
+            padding: 1.5rem 2rem;
+            text-align: left;
+        }
+
+        th {
+            color: $primary-light;
+            font-size: 1.4rem;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+            background: rgba(black, .18);
+        }
+
+        td {
+            border-top: .1rem solid rgba($white, .15);
+            overflow-wrap: anywhere;
+        }
+
+        th:first-child,
+        td:first-child {
+            width: 10rem;
+            text-align: center;
+        }
+
+        th:not(:nth-child(2)),
+        td:not(:nth-child(2)) {
+            white-space: nowrap;
+        }
+
+        tbody tr:nth-child(even) {
+            background: rgba($white, .06);
+        }
+    }
+
+    @media only screen and (max-width: $bp-m) {
+        width: min(100% - 2rem, 112rem);
+        margin-block: 2rem;
+
+        &__table {
+            th,
+            td {
+                padding-inline: 1.4rem;
+            }
+        }
+    }
+}
+
+.leaderboard-card {
+    display: flex;
+    flex-direction: column;
+    gap: 1.4rem;
+
+    min-width: 0;
+    min-height: 22rem;
+    padding: clamp(2.4rem, 3vw, 3.2rem);
+
+    color: $white;
+
+    border: .2rem solid rgba($primary-light, .55);
+    border-radius: $default-border-radius;
+    background: linear-gradient(145deg, rgba($space-blue, .94), rgba($space-blue, .78));
+    box-shadow: $dark-box-shadow-s;
+
+    transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease;
+
+    &--three-bosses {
+        border-color: rgba($secondary-light, .65);
+    }
+
+    &__title {
+        color: $white;
+        font-family: $subheading-font;
+        font-size: clamp(3rem, 4vw, 4.2rem);
+        line-height: 1.05;
+        overflow-wrap: anywhere;
+    }
+
+    &__metadata {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        gap: 1rem;
+
+        margin-top: auto;
+
+        div {
+            min-width: 0;
+            padding: 1.2rem;
+
+            border-radius: .5rem;
+            background: rgba($white, .08);
+        }
+
+        dt {
+            margin-bottom: .4rem;
+
+            color: rgba($white, .65);
+            font-size: 1.2rem;
+            font-weight: 800;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+        }
+
+        dd {
+            font-size: 1.6rem;
+            font-weight: 800;
+            overflow-wrap: anywhere;
+        }
+    }
+
+    &__footer {
+        display: flex;
+        justify-content: flex-end;
+        gap: 1rem;
+
+        padding-top: 1.4rem;
+
+        color: $primary-light;
+        font-size: 1.5rem;
+        font-weight: 900;
+
+        border-top: .1rem solid rgba($white, .18);
+    }
+
+    &:hover {
+        transform: translateY(-.4rem);
+        border-color: $white;
+        box-shadow: 0 1.4rem 3rem rgba($space-blue, .28);
+    }
+
+    &:focus-visible {
+        outline: .35rem solid $white;
+        outline-offset: .35rem;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .leaderboard-card {
+        transition: none;
+
+        &:hover {
+            transform: none;
+        }
     }
 }

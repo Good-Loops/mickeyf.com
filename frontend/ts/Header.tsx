@@ -33,8 +33,8 @@ const Header: React.FC = () => {
                 </NavLink>
             </li>
             <li className="nav__item">
-                <NavLink className="nav__link" to="/leaderboard">
-                Leaderboard
+                <NavLink className="nav__link" to="/leaderboards">
+                Leaderboards
                 </NavLink>
             </li>
             <li className="nav__item">
