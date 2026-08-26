@@ -176,8 +176,10 @@ The transitional p4-Vega write path was implemented and verified locally on
 2026-08-25. That candidate updated `users.p4_score` and
 `game_personal_bests` atomically on one acquired connection; either write
 failure rolled the transaction back, concurrent submissions converged on the
-same maximum, and the legacy HTTP response remained unchanged. It was not
-deployed and remains the pre-cutover phase of the rollout sequence.
+same maximum, and the legacy HTTP response remained unchanged. The exact
+freeze-capable composition is now preserved in the zero-traffic revision
+recorded below; it has not served positive production traffic and remains the
+pre-cutover phase of the rollout sequence.
 
 The active transitional read split was corrected and reverified on 2026-08-26
 at `a127beac14c2662648c8aededa59374f5d7c87dd`. While this dual writer is
@@ -248,8 +250,8 @@ immutable digest
 `sha256:47689830d731f8be46fea7ae1e4ed1991fc9fdeb099a5901c54039c7778ea7bb`.
 Artifact Registry completed its configured analyses with no package
 vulnerability occurrences reported, and signed in-toto/SLSA provenance binds
-the commit, image-only recipe, trigger, builder, and digest. The candidate is
-still undeployed: Cloud Run generation 106 remained on
+the commit, image-only recipe, trigger, builder, and digest. That earlier
+candidate remained undeployed: Cloud Run generation 106 stayed on
 `mickeyf-org-build-c4b3ff0e93bd4f979d93319709e97baa` with 100% traffic after
 verification.
 
@@ -257,10 +259,30 @@ Node 22.23.2 separately embeds OpenSSL 3.5.7 inside the executable, so the
 Alpine package patch does not alter `process.versions.openssl`. A source and
 application reachability review found that this backend does not expose the
 affected QUIC, DTLS, CMP, CMS, RPK, or one-shot `EVP_Cipher()` paths. That is an
-evidence-based inference, not an upstream Node guarantee. Before deployment,
-either refresh the pinned official Node runtime to a release embedding OpenSSL
-3.5.8 or later, or explicitly review and accept that bounded reachability
-assessment for the exact candidate.
+evidence-based inference, not an upstream Node guarantee. On 2026-08-26, Mike
+explicitly accepted that bounded reachability assessment for the exact
+zero-traffic candidate only. That acceptance does not extend to positive
+production traffic; refresh the pinned runtime or repeat the explicit review
+before promotion.
+
+The exact enabled dual-writer candidate was built and deployed at zero traffic
+on 2026-08-26 from commit
+`5abdc5bb1ee0a0fb947e7bb1024cec8e68438f64`. Approval-required image build
+`9a6066b4-4f34-422b-ba33-83d6b0e9a9eb` produced immutable digest
+`sha256:895c37a932be08721d5977c07577fc7503ae84eed75eb429bccb306fcb061aeb`;
+Artifact Analysis completed with continuous scanning active, no vulnerability
+occurrences, and exact signed SLSA v1 provenance. Approval-required deploy build
+`cf494f1b-3842-4150-ba07-59e2176ca752` used reviewed one-shot config SHA-256
+`84859552914f45c5b8b7907ccc66186445802a7ec2a605660ec3b3173ec58bdf`
+and created revision
+`mickeyf-org-build-9a6066b44f34422bba3383d6b0e9a9eb` with the p4 opt-in
+enabled, Three Bosses submissions disabled, and zero traffic. Runtime and
+unchanged-traffic attestation passed, followed by the anonymous 401
+`UNAUTHORIZED`, catalog, leaderboard, disabled-submission, and database-read
+smoke suite. The short-lived direct tag and temporary deploy trigger were then
+deleted. Cloud Run generation 114 still routes 100% to
+`mickeyf-org-grants-restored-20260826-a`; the exact candidate revision is
+retained without a tag or traffic for the separately reviewed promotion step.
 
 The Phase 13.1 repeatable, privileged p4-Vega historical-backfill CLI and
 separate read-only aggregate reconciliation gate were implemented and verified
@@ -287,7 +309,7 @@ production cutover and `users.p4_score` removal remain incomplete; the
 multi-game frontend is recorded below.
 
 The additive backend catalog and per-game routes were implemented and verified
-locally on 2026-08-26. The catalog is projected from server-owned definitions;
+on 2026-08-26. The catalog is projected from server-owned definitions;
 the generic p4-Vega response adds only version metadata and one-based positions
 to existing rows. Three Bosses reads now query real current-rule personal bests
 in deterministic completion-time order even while writes are disabled. Its
@@ -297,8 +319,9 @@ validation, explicit cookie-origin protection, server-derived score, immutable
 idempotent run history, transactional strict personal bests, and per-user and
 per-IP limits are covered by unit, security, rollback, concurrency, and
 isolated-MySQL tests. Rank remains `UNRANKED`. These routes have not been
-deployed or enabled in production and do not replace the p4 production
-backfill, revision-drain, or reconciliation gates.
+enabled for production traffic: they are deployed only in the zero-traffic
+candidate above, Three Bosses writes remain disabled, and the routes do not
+replace the p4 production backfill, revision-drain, or reconciliation gates.
 
 The credential-safe browser submission client and Unity host bridge were
 committed at `c4349f7c`. Unity will later send only its canonical run ID and
@@ -311,17 +334,18 @@ Three Bosses gameplay and ranking release gates are approved.
 An initial production seed backfill and point-in-time reconciliation completed
 on 2026-08-26, but no production cutover reconciliation has been performed.
 Only a zero-discrepancy post-drain reconciliation permits the later read/write
-cutover to `game_personal_bests`. The final production switch requires a
-freeze-capable dual writer first: drain every no-gate revision, freeze the
-dual writer, drain enabled and in-flight requests, and reconcile exactly. A
-frozen generic-only revision may then receive traffic; every dual writer must
-drain and the exact reconciliation must pass again before a separately approved
-enabled generic revision accepts scores. After generic-only traffic starts,
-legitimate improvements make exact equality with the stale legacy column
-impossible; rollback must use a generic-authoritative compatible revision or a
-forward fix, never the old dual writer. After every code/job/tool reference is
-removed, a new immutable migration may drop `users.p4_score` under separate
-production approval. The initial additive migrations remain unchanged.
+cutover to `game_personal_bests`. The exact freeze-capable dual-writer candidate
+now exists at zero traffic. The next rollout step must route all traffic to it,
+prove every no-gate revision and admitted request has drained, rerun the
+backfill and exact reconciliation, then deploy and drain through the frozen
+dual-writer and frozen generic-only stages. Every dual writer must drain and the
+exact reconciliation must pass again before a separately approved enabled
+generic revision accepts scores. After generic-only traffic starts, legitimate
+improvements make exact equality with the stale legacy column impossible;
+rollback must use a generic-authoritative compatible revision or a forward fix,
+never the old dual writer. After every code/job/tool reference is removed, a
+new immutable migration may drop `users.p4_score` under separate production
+approval. The initial additive migrations remain unchanged.
 
 ### Step 13.2 — local Three Bosses website playability prototype (no publication)
 

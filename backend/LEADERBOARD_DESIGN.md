@@ -5,20 +5,23 @@ schema preflight completed on the same date. On 2026-08-25, Mike approved the
 end state in which p4-Vega uses the generic leaderboard storage and the legacy
 `users.p4_score` column is retired after a verified cutover. The additive
 production schema and an initial p4-Vega data seed were applied and verified on
-2026-08-26. This document records those completed changes but does not authorize
-a deployment, privilege change, read/write cutover, legacy-column removal, or
-other production mutation.
+2026-08-26. The exact freeze-capable dual-writer candidate was later deployed as
+a zero-traffic revision on the same date. This document records those completed
+changes but does not authorize traffic promotion, a read/write cutover,
+legacy-column removal, or another production mutation.
 
 Production now contains `schema_migrations`, `game_runs`, and
 `game_personal_bests` alongside `users`. The initial seed copied five p4-Vega
-personal bests; `game_runs` is empty and `users.p4_score` is unchanged. No API
-deployment or reader cutover has run.
+personal bests; `game_runs` is empty and `users.p4_score` is unchanged. The
+candidate API is deployed only in an untagged zero-traffic revision; no reader
+cutover has run.
 
 The transitional p4-Vega dual-write repository was implemented and verified
 locally on 2026-08-25 with unit, rollback, and concurrent MySQL 8.0.31 tests. It
-has not been deployed. Migrations `0001` and `0002` are now applied and
-verified, but traffic remains gated on the separately reviewed data-migration
-and cutover sequence below.
+is now deployed only in the exact zero-traffic revision recorded below.
+Migrations `0001` and `0002` are applied and verified, but positive traffic
+remains gated on the separately reviewed data-migration and cutover sequence
+below.
 
 The transitional read split was corrected and reverified on 2026-08-26 at
 `a127beac14c2662648c8aededa59374f5d7c87dd`. Its legacy `/api/users`
@@ -47,10 +50,10 @@ the frontend build passed. The checks proved frozen requests stop before
 database acquisition and enabled requests retain the dual writer's rollback
 and concurrency guarantees.
 
-The same composition is now retained on `feature/new-leaderboard` at
-`c1c742b927844e89fe9f7ab07ddb9a20501399ee`. It is a reviewable source
-checkpoint, not an approved main-branch build, image, revision, traffic target,
-or production rollback candidate; no live or production state changed.
+The same composition is retained on `feature/new-leaderboard` at exact commit
+`5abdc5bb1ee0a0fb947e7bb1024cec8e68438f64`. It is not an approved main-branch
+source or positive-traffic target. Its exact image and zero-traffic revision are
+recorded below for the separately reviewed rollout sequence.
 
 The revision-scoped p4-Vega submission freeze gate was prepared locally on
 2026-08-26. `P4_VEGA_SCORE_SUBMISSIONS_ENABLED=true` is the only value that
@@ -81,6 +84,31 @@ no-cookie, redirect, response-size, and timeout checks. The 401 proves the gate
 is open and stops before database acquisition; it does not identify the
 persistence implementation, so it is never sufficient without the source and
 image pins.
+
+The approved image-only build
+`9a6066b4-4f34-422b-ba33-83d6b0e9a9eb` resolved exact commit
+`5abdc5bb1ee0a0fb947e7bb1024cec8e68438f64` and produced immutable digest
+`sha256:895c37a932be08721d5977c07577fc7503ae84eed75eb429bccb306fcb061aeb`.
+Artifact Analysis finished successfully with continuous scanning active and no
+vulnerability occurrences. The signed SLSA v1 occurrence binds the exact
+commit, image-only build, trigger, Google-hosted builder, and digest. Mike
+explicitly accepted the documented Node 22.23.2 embedded-OpenSSL 3.5.7 bounded
+reachability assessment for this zero-traffic candidate only.
+
+Approved one-shot deploy build
+`cf494f1b-3842-4150-ba07-59e2176ca752` used config SHA-256
+`84859552914f45c5b8b7907ccc66186445802a7ec2a605660ec3b3173ec58bdf`.
+It revalidated the exact build, signed provenance, scan, severity policy,
+runtime identity, secret references, resources, positive-traffic snapshot, and
+environment before creating revision
+`mickeyf-org-build-9a6066b44f34422bba3383d6b0e9a9eb` at zero traffic with
+`P4_VEGA_SCORE_SUBMISSIONS_ENABLED=true` and
+`THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=false`. The anonymous HTTP and database-
+read smoke suite passed, including the required p4 401 `UNAUTHORIZED` response
+with no-store and no cookie. The temporary tag and deploy trigger were deleted
+immediately afterward. At Cloud Run generation 114, production remains 100% on
+`mickeyf-org-grants-restored-20260826-a`; the exact candidate revision is
+retained without a tag or traffic.
 
 The repeatable, privileged p4-Vega historical-backfill CLI and read-only
 aggregate reconciliation command were implemented and verified locally on
@@ -560,7 +588,8 @@ reader/writer cutover occurred in this step.
    create a temporary manual candidate trigger for the isolated image-only
    config, run it against the exact full source commit, and verify trigger,
    repository, config path, requested and resolved revision, provenance, image
-   tag, digest, and scan evidence.
+   tag, digest, and scan evidence. **Completed on 2026-08-26 for exact commit
+   `5abdc5bb1ee0a0fb947e7bb1024cec8e68438f64`.**
 10. Under a separate review, create a temporary candidate-deploy trust path
     whose validation rejects every build and commit except the exact reviewed
     dual-writer image, sets and attests the literal p4 positive opt-in, keeps
@@ -568,7 +597,9 @@ reader/writer cutover occurred in this step.
     probe. Verify that temporary trigger exactly, deploy the zero-traffic
     candidate, then route all traffic to it and prove every no-gate revision
     and admitted request has drained; only this freeze-capable dual writer may
-    serve as the pre-cutover rollback target.
+    serve as the pre-cutover rollback target. **The temporary trust path,
+    zero-traffic deployment, smoke suite, tag removal, and trigger cleanup
+    completed on 2026-08-26. Positive-traffic routing and drain proof remain.**
 11. Under another review, use the same pinned candidate-deploy path to deploy
     the freeze-capable dual writer without the p4 positive opt-in. Keep Three
     Bosses disabled, route all traffic to the frozen revision, prove every
