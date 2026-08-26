@@ -158,6 +158,34 @@ require a non-mutating anonymous HTTP 401 `UNAUTHORIZED` probe. That probe
 proves the gate is open without persistence, but cannot by itself identify the
 writer implementation.
 
+The first exact-commit candidate image was rejected on 2026-08-26 after its
+registry scan reported ten OpenSSL operating-system package findings. The
+shared Docker base now upgrades only Alpine's `libcrypto3` and `libssl3` from
+`3.5.7-r0` to the reviewed `3.5.8-r0` revision, verifies both postconditions,
+and removes the repository indexes. The existing candidate contract test now
+fails if this exact patch moves outside the shared base or another unreviewed
+`apk` package mutation appears.
+
+Replacement image-only build `e2a8aa19-de27-4e07-a895-b7d8773d7368`
+resolved exact commit `199f834c40240371194064327fb873ff95502f74` and produced
+immutable digest
+`sha256:47689830d731f8be46fea7ae1e4ed1991fc9fdeb099a5901c54039c7778ea7bb`.
+Artifact Registry completed its configured analyses with no package
+vulnerability occurrences reported, and signed in-toto/SLSA provenance binds
+the commit, image-only recipe, trigger, builder, and digest. The candidate is
+still undeployed: Cloud Run generation 106 remained on
+`mickeyf-org-build-c4b3ff0e93bd4f979d93319709e97baa` with 100% traffic after
+verification.
+
+Node 22.23.2 separately embeds OpenSSL 3.5.7 inside the executable, so the
+Alpine package patch does not alter `process.versions.openssl`. A source and
+application reachability review found that this backend does not expose the
+affected QUIC, DTLS, CMP, CMS, RPK, or one-shot `EVP_Cipher()` paths. That is an
+evidence-based inference, not an upstream Node guarantee. Before deployment,
+either refresh the pinned official Node runtime to a release embedding OpenSSL
+3.5.8 or later, or explicitly review and accept that bounded reachability
+assessment for the exact candidate.
+
 The Phase 13.1 repeatable, privileged p4-Vega historical-backfill CLI and
 separate read-only aggregate reconciliation gate were implemented and verified
 locally on 2026-08-25. The backfill is operational tooling rather than an HTTP
