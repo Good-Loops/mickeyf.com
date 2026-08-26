@@ -9,10 +9,11 @@ import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import helmet from 'helmet';
 import { loadRuntimeConfig } from './config/runtimeConfig';
-import { closeDatabasePool, verifyDatabaseConnection } from './db/dbConfig';
+import { closeDatabasePool, pool, verifyDatabaseConnection } from './db/dbConfig';
 import { preventSensitiveResponseCaching } from './middleware/apiResponseSecurity';
 import { notFoundHandler, requestErrorHandler } from './middleware/errorHandling';
 import { createAuthRouter } from './routers/authRouter';
+import { createLeaderboardRouter } from './routers/leaderboardRouter';
 import { createMainRouter } from './routers/mainRouter';
 import { createGeneralApiRateLimiter } from './security/requestRateLimits';
 
@@ -53,6 +54,7 @@ app.use(cookieParser(runtimeConfig.sessionSecret));
 
 const generalApiRateLimiter = createGeneralApiRateLimiter();
 app.use(['/api', '/auth'], generalApiRateLimiter);
+app.use('/api/leaderboards', createLeaderboardRouter(pool));
 app.use('/api', createMainRouter(runtimeConfig.sessionSecret, runtimeConfig.isProduction));
 app.use('/auth', createAuthRouter(runtimeConfig.sessionSecret, runtimeConfig.isProduction));
 

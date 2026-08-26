@@ -7,6 +7,8 @@
  */
 
 export const GAME_IDS = Object.freeze(['p4-vega', 'three-bosses'] as const);
+export const P4_VEGA_RULES_VERSION = 1 as const;
+export const THREE_BOSSES_RULES_VERSION = 1 as const;
 
 export type GameId = (typeof GAME_IDS)[number];
 export type LeaderboardMetric = 'score' | 'completionTimeMs';
@@ -32,7 +34,7 @@ export const GAME_DEFINITIONS: Readonly<Record<GameId, LeaderboardGameDefinition
         'p4-vega': Object.freeze({
             gameId: 'p4-vega',
             displayName: 'p4-Vega',
-            rulesVersion: 1,
+            rulesVersion: P4_VEGA_RULES_VERSION,
             primaryMetric: 'score',
             sortDirection: 'descending',
             scoreLabel: 'Score',
@@ -44,7 +46,7 @@ export const GAME_DEFINITIONS: Readonly<Record<GameId, LeaderboardGameDefinition
         'three-bosses': Object.freeze({
             gameId: 'three-bosses',
             displayName: 'Three Bosses',
-            rulesVersion: 1,
+            rulesVersion: THREE_BOSSES_RULES_VERSION,
             primaryMetric: 'completionTimeMs',
             sortDirection: 'ascending',
             scoreLabel: 'Score',

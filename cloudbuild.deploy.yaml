@@ -1088,6 +1088,98 @@ steps:
         if not no_store(auth_headers) or auth_headers.get_all("Set-Cookie"):
             reject("anonymous authentication response headers are unsafe")
 
+        catalog, catalog_headers = request("/api/leaderboards", 200)
+        expected_catalog = {
+            "success": True,
+            "contractVersion": 1,
+            "games": [
+                {
+                    "gameId": "p4-vega",
+                    "displayName": "p4-Vega",
+                    "rulesVersion": 1,
+                    "primaryMetric": "score",
+                    "sortDirection": "descending",
+                    "labels": {"score": "Score", "completionTime": None, "rank": None},
+                    "rankState": "not-applicable",
+                    "submissionState": "legacy-only",
+                },
+                {
+                    "gameId": "three-bosses",
+                    "displayName": "Three Bosses",
+                    "rulesVersion": 1,
+                    "primaryMetric": "completionTimeMs",
+                    "sortDirection": "ascending",
+                    "labels": {"score": "Score", "completionTime": "Time", "rank": "Rank"},
+                    "rankState": "unranked",
+                    "submissionState": "disabled",
+                },
+            ],
+        }
+        if (catalog != expected_catalog
+                or catalog.get("success") is not True
+                or type(catalog.get("contractVersion")) is not int
+                or any(type(game.get("rulesVersion")) is not int for game in catalog["games"])):
+            reject("leaderboard catalog response contract does not match")
+        if not no_store(catalog_headers) or catalog_headers.get_all("Set-Cookie"):
+            reject("leaderboard catalog response headers are unsafe")
+
+        generic_board, generic_board_headers = request("/api/leaderboards/p4-vega", 200)
+        if (not isinstance(generic_board, dict)
+                or set(generic_board) != {"success", "contractVersion", "gameId", "rulesVersion", "entries"}
+                or generic_board.get("success") is not True
+                or type(generic_board.get("contractVersion")) is not int
+                or generic_board.get("contractVersion") != 1
+                or generic_board.get("gameId") != "p4-vega"
+                or type(generic_board.get("rulesVersion")) is not int
+                or generic_board.get("rulesVersion") != 1
+                or not isinstance(generic_board.get("entries"), list)
+                or len(generic_board["entries"]) > 10):
+            reject("generic p4-Vega leaderboard response contract does not match")
+        for position, row in enumerate(generic_board["entries"], start=1):
+            score = row.get("score") if isinstance(row, dict) else None
+            if (not isinstance(row, dict) or set(row) != {"position", "userName", "score"}
+                    or type(row.get("position")) is not int
+                    or row.get("position") != position
+                    or not isinstance(row.get("userName"), str)
+                    or isinstance(score, bool) or not isinstance(score, (int, float))
+                    or (isinstance(score, float) and not math.isfinite(score))):
+                reject("generic p4-Vega leaderboard entry contract does not match")
+        if not no_store(generic_board_headers) or generic_board_headers.get_all("Set-Cookie"):
+            reject("generic p4-Vega leaderboard response headers are unsafe")
+
+        bosses, bosses_headers = request("/api/leaderboards/three-bosses", 200)
+        if bosses != {
+            "success": True,
+            "contractVersion": 1,
+            "gameId": "three-bosses",
+            "rulesVersion": 1,
+            "entries": [],
+        } or (bosses.get("success") is not True
+                or type(bosses.get("contractVersion")) is not int
+                or type(bosses.get("rulesVersion")) is not int):
+            reject("disabled Three Bosses leaderboard response contract does not match")
+        if not no_store(bosses_headers) or bosses_headers.get_all("Set-Cookie"):
+            reject("Three Bosses leaderboard response headers are unsafe")
+
+        unknown_game, unknown_game_headers = request("/api/leaderboards/P4-Vega", 404)
+        if unknown_game != {
+            "success": False,
+            "contractVersion": 1,
+            "error": "UNKNOWN_GAME",
+        } or (unknown_game.get("success") is not False
+                or type(unknown_game.get("contractVersion")) is not int):
+            reject("unknown leaderboard game response contract does not match")
+        if not no_store(unknown_game_headers) or unknown_game_headers.get_all("Set-Cookie"):
+            reject("unknown leaderboard game response headers are unsafe")
+
+        disabled_post, disabled_post_headers = request(
+            "/api/leaderboards/three-bosses/runs", 404, {}
+        )
+        if disabled_post != {"error": "NOT_FOUND"}:
+            reject("Three Bosses submission route is unexpectedly available")
+        if not no_store(disabled_post_headers) or disabled_post_headers.get_all("Set-Cookie"):
+            reject("unavailable Three Bosses submission response headers are unsafe")
+
         board, board_headers = request("/api/users", 200, {"type": "get_leaderboard"})
         if (not isinstance(board, dict) or set(board) != {"success", "leaderboard"}
                 or board.get("success") is not True or not isinstance(board.get("leaderboard"), list)

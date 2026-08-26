@@ -112,8 +112,18 @@ The existing p4-Vega `get_leaderboard` read path was switched locally to
 request, response fields, ten-row bound, cache behavior, and numeric historical
 scores remain compatible; game/rules scoping and tie order now follow the
 approved generic contract. This code has not been deployed or activated in
-production. The generic HTTP routes, multi-game frontend, generic-only write
-cutover, and `users.p4_score` removal remain incomplete.
+production. The multi-game frontend, generic-only write cutover, and
+`users.p4_score` removal remain incomplete.
+
+The additive backend catalog and per-game read routes were implemented and
+verified locally on 2026-08-26. The catalog is projected from server-owned
+definitions; the generic p4-Vega response adds only version metadata and
+one-based positions to the existing repository rows. Known Three Bosses reads
+return a typed empty `UNRANKED` game result while its catalog submission state
+remains disabled, and no generic submission route exists. Versioned 404, 429,
+and 500 responses do not alter legacy API error bodies. These routes have not
+been deployed or activated in production and do not replace the production
+backfill, revision-drain, or reconciliation gates.
 
 Neither a production backfill nor a production reconciliation has been
 performed. Production execution requires the additive schema, an explicitly

@@ -15,6 +15,7 @@
  * Start here:
  * - {@link RouteContract}
  * - {@link AuthRoutesContract}
+ * - {@link LeaderboardRoutesContract}
  *
  * Notes:
  * - Treat contracts as versioned/stable; changes are breaking.
@@ -24,5 +25,6 @@ export type { AuthLevel } from '../routers/routeContract';
 export type { HttpMethod } from '../routers/routeContract';
 export type { RouteContract } from '../routers/routeContract';
 export type { AuthRoutesContract } from '../routers/authRouter.contract';
+export type { LeaderboardRoutesContract } from '../routers/leaderboardRouter.contract';
 
 export * from './contracts.support';

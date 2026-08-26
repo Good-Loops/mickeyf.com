@@ -1,18 +1,20 @@
 /**
  * Version-one public DTOs and mechanical bounds for the additive leaderboard
- * API. Runtime handlers will be added only after the live schema preflight and
- * migration review are complete.
+ * API.
  */
-import type {
-    LeaderboardMetric,
-    RankState,
-    SortDirection,
-    SubmissionState,
+import {
+    P4_VEGA_RULES_VERSION,
+    THREE_BOSSES_RULES_VERSION,
+    type LeaderboardMetric,
+    type RankState,
+    type SortDirection,
+    type SubmissionState,
 } from './gameCatalog';
+
+export { THREE_BOSSES_RULES_VERSION } from './gameCatalog';
 
 export const LEADERBOARD_CONTRACT_VERSION = 1 as const;
 export const LEADERBOARD_PAGE_SIZE = 10 as const;
-export const THREE_BOSSES_RULES_VERSION = 1 as const;
 export const THREE_BOSSES_MIN_COMPLETION_TIME_MS = 1 as const;
 export const THREE_BOSSES_MAX_COMPLETION_TIME_MS = 86_400_000 as const;
 export const THREE_BOSSES_SCORE_NUMERATOR = 100_000_000 as const;
@@ -60,7 +62,7 @@ export type GameLeaderboardResponse =
           success: true;
           contractVersion: typeof LEADERBOARD_CONTRACT_VERSION;
           gameId: 'p4-vega';
-          rulesVersion: 1;
+          rulesVersion: typeof P4_VEGA_RULES_VERSION;
           entries: P4VegaLeaderboardEntry[];
       }
     | {
@@ -104,10 +106,12 @@ export type LeaderboardApiErrorCode =
     | 'RATE_LIMITED'
     | 'SERVER_ERROR';
 
-export type LeaderboardApiError = {
+export type LeaderboardApiError<
+    ErrorCode extends LeaderboardApiErrorCode = LeaderboardApiErrorCode
+> = {
     success: false;
     contractVersion: typeof LEADERBOARD_CONTRACT_VERSION;
-    error: LeaderboardApiErrorCode;
+    error: ErrorCode;
 };
 
 export function isCanonicalV4RunId(value: unknown): value is string {

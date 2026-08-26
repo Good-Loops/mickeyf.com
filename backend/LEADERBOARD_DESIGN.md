@@ -22,8 +22,17 @@ the versioned `game_personal_bests` source and verified on 2026-08-25 without
 changing its request or response contract. This code has not been deployed or
 activated in production. It remains gated on the additive schema, completed
 backfill, legacy-revision drain, and zero-discrepancy reconciliation. The
-generic HTTP API, multi-game frontend, generic-only write cutover, and legacy
-column removal remain later steps.
+multi-game frontend, generic-only write cutover, and legacy column removal
+remain later steps.
+
+The additive backend read API was implemented and verified locally on
+2026-08-26. `GET /api/leaderboards` explicitly projects the server catalog,
+and `GET /api/leaderboards/:gameId` exposes the generic p4-Vega rows with
+one-based positions while returning a typed empty result for the known,
+submission-disabled Three Bosses game. Exact unknown-game, rate-limit, and
+server-error responses use the version-one error envelope. No generic write
+route was added, the existing frontend remains on its legacy API, and none of
+this code has been deployed or activated in production.
 
 ## Invariants
 
