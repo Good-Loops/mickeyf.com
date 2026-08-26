@@ -19,6 +19,13 @@ HTTP request and response remain unchanged. A disposable MySQL test also drops
 the legacy column before submitting successfully. This candidate has not been
 deployed and does not authorize the production cutover sequence below.
 
+Compatibility between the historical dual-write source and the freeze gate was
+locally reproduced and fully tested in detached worktrees on 2026-08-26. The
+worktrees were removed without retaining a candidate ref, image, or revision,
+and no live or production state changed. See
+[`P4_DUAL_WRITE_FREEZE_COMPATIBILITY.md`](P4_DUAL_WRITE_FREEZE_COMPATIBILITY.md)
+for the exact composition, verification, and cleanup evidence.
+
 The revision-scoped p4-Vega submission freeze gate was prepared locally on
 2026-08-26. `P4_VEGA_SCORE_SUBMISSIONS_ENABLED=true` is the only value that
 permits the legacy `submit_score` operation; missing, blank, or any other value

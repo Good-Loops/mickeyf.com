@@ -94,6 +94,13 @@ failure rolled the transaction back, concurrent submissions converged on the
 same maximum, and the legacy HTTP response remained unchanged. It was not
 deployed and remains the pre-cutover phase of the rollout sequence.
 
+Compatibility between the historical dual-write source and the freeze gate was
+locally reproduced and fully tested in detached worktrees on 2026-08-26. The
+ephemeral worktrees were removed without retaining a candidate ref, image, or
+revision, and no live or production state changed. The exact composition,
+verification, and cleanup evidence is recorded in
+[`backend/P4_DUAL_WRITE_FREEZE_COMPATIBILITY.md`](backend/P4_DUAL_WRITE_FREEZE_COMPATIBILITY.md).
+
 The generic-authoritative p4-Vega writer was prepared and verified locally on
 2026-08-26. It locks the authenticated user and scoped generic personal best,
 compares only `game_personal_bests`, and writes only a strict improvement on
