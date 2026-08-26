@@ -58,6 +58,15 @@ export const RUNTIME_GRANT_INTEGRATION_TEST_COMMAND = Object.freeze({
     "ts/security/runtimeGrantManifest.integration.test.ts",
   ]),
 });
+export const RUNTIME_GRANT_OPERATIONS_INTEGRATION_TEST_COMMAND = Object.freeze({
+  executable: process.execPath,
+  args: Object.freeze([
+    "--test",
+    "-r",
+    "ts-node/register",
+    "ts/security/runtimeGrantOperations.integration.test.ts",
+  ]),
+});
 
 const INTEGRATION_TEST_COMMANDS = Object.freeze([
   MIGRATION_INTEGRATION_TEST_COMMAND,
@@ -65,6 +74,7 @@ const INTEGRATION_TEST_COMMANDS = Object.freeze([
   THREE_BOSSES_RUN_INTEGRATION_TEST_COMMAND,
   P4_VEGA_BACKFILL_INTEGRATION_TEST_COMMAND,
   RUNTIME_GRANT_INTEGRATION_TEST_COMMAND,
+  RUNTIME_GRANT_OPERATIONS_INTEGRATION_TEST_COMMAND,
 ]);
 
 const MYSQL_SERVICE = "mysql";

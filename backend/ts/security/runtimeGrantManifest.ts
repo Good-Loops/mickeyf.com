@@ -27,6 +27,12 @@ export const PRODUCTION_RUNTIME_DATABASE_ACCOUNT: RuntimeDatabaseAccount =
         host: '%',
     });
 
+export const PRODUCTION_RUNTIME_DATABASE_ROLE: RuntimeDatabaseAccount =
+    Object.freeze({
+        user: 'cloudsqlsuperuser',
+        host: '%',
+    });
+
 /**
  * Exact application-runtime DML. Migration history and schema changes belong
  * to a separate maintenance identity and are deliberately absent here.
@@ -141,7 +147,9 @@ function quoteIdentifier(value: string, label: string): string {
     return `\`${value}\``;
 }
 
-function renderAccount(account: RuntimeDatabaseAccount): string {
+export function renderRuntimeDatabaseAccount(
+    account: RuntimeDatabaseAccount
+): string {
     if (
         !SAFE_ACCOUNT_PART.test(account.user)
         || !SAFE_ACCOUNT_PART.test(account.host)
@@ -149,6 +157,15 @@ function renderAccount(account: RuntimeDatabaseAccount): string {
         throw new TypeError('Runtime database account contains unsupported characters');
     }
     return `'${account.user}'@'${account.host}'`;
+}
+
+export function runtimeDatabaseAccountName(
+    account: RuntimeDatabaseAccount
+): string {
+    // Validate through the SQL renderer so confirmations and statements accept
+    // exactly the same deliberately narrow account syntax.
+    renderRuntimeDatabaseAccount(account);
+    return `${account.user}@${account.host}`;
 }
 
 export function runtimeColumnPrivilegeInventory(): readonly RuntimeColumnPrivilege[] {
@@ -172,7 +189,7 @@ export function renderRuntimeGrantStatements(
     account: RuntimeDatabaseAccount
 ): readonly string[] {
     const database = quoteIdentifier(databaseName, 'Database name');
-    const principal = renderAccount(account);
+    const principal = renderRuntimeDatabaseAccount(account);
 
     return Object.freeze(RUNTIME_GRANT_MANIFEST.map(({ table, grants }) => {
         const privileges = grants.map(({ privilege, columns }) => {

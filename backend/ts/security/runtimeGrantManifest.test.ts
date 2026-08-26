@@ -2,12 +2,17 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
     PRODUCTION_RUNTIME_DATABASE_ACCOUNT,
+    PRODUCTION_RUNTIME_DATABASE_ROLE,
     renderRuntimeGrantStatements,
     RUNTIME_GRANT_MANIFEST,
     runtimeColumnPrivilegeInventory,
 } from './runtimeGrantManifest';
 
 test('defines only the three runtime tables and required DML', () => {
+    assert.deepEqual(PRODUCTION_RUNTIME_DATABASE_ROLE, {
+        user: 'cloudsqlsuperuser',
+        host: '%',
+    });
     assert.deepEqual(
         RUNTIME_GRANT_MANIFEST.map(({ table }) => table),
         ['users', 'game_runs', 'game_personal_bests']

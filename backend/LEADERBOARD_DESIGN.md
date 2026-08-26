@@ -411,6 +411,44 @@ Do not revoke that role and improvise replacement grants. After maintenance,
 drop and verify removal of an ephemeral account; if the account is deliberately
 persistent, rotate its credential and govern it as a standing administrator.
 
+The local reduction workflow now exposes `runtime-grants:plan`,
+`runtime-grants:verify`, and `runtime-grants:apply`. It inventories the exact
+account across hosts, lock/password-expiration/partial-revoke state, raw static
+and dynamic global privileges, every schema/table/column/routine scope, both role directions,
+default roles, both proxy directions, mandatory-role configuration, server
+identity, and the manifest's required physical columns. The deterministic plan
+also contains the exact `cloudsqlsuperuser@%` to no-database-roles transition
+and `noted-reef-387021:us-central1:cms-mickeyf` target. The server UUID observed
+through that production proxy is independently pinned, and effective `PROCESS`
+access is proved before any zero-session result is trusted. Any unexpected direct
+privilege, grant/admin option, role, proxy edge, account flag, server version,
+or metadata gap blocks with no operation; the workflow does not act as a
+general privilege cleaner.
+
+An approved apply first proves effective `PROCESS` access and zero open
+`cms_mickeyf` sessions, before any grant write. It grants and proves the complete
+direct manifest, clears only the reviewed default role, and repeats the same
+session proof immediately before asking Cloud SQL to replace the account's
+database-role list with an empty list. Project, instance, connection name, role
+transition, plan digest, server UUID, runtime account, maintenance account, database, loopback
+target, and traffic drain all have separate exact confirmations. The Cloud SQL
+instance is described and matched before MySQL is opened, while the MySQL server
+must match the pinned production UUID. Apply refuses while any Cloud SQL operation
+is unfinished and repeats that check just before explicit synchronous
+`gcloud sql users assign-roles` arguments with no ambient project and no
+`--async`. Final success requires a fresh metadata inspection with only the
+manifest and no assigned/default role.
+
+These account-management statements are not one transaction. An interruption
+before control-plane role removal leaves the deliberately recoverable prepared
+state: exact direct grants are present and the broad role still exists, although
+default activation may already be cleared. A timeout or abort makes the external
+outcome indeterminate; inspect Cloud SQL operations and re-plan before retrying.
+Traffic must remain drained through the operation because an already-open session can
+retain active role state; afterward, recycle every application pool and run
+fresh-connection positive and negative probes. The local implementation and
+disposable MySQL 8.0.31 tests changed no production privilege.
+
 This manifest is transitional. Three Bosses presently serializes submissions
 with `users SELECT ... FOR UPDATE`, which MySQL authorizes through the same
 `UPDATE(p4_score)` grant needed by the dual writer. Before the legacy column

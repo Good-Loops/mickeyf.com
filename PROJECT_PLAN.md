@@ -121,6 +121,24 @@ operation: production still inherits `cloudsqlsuperuser`, and replacing it with
 the exact direct grants remains a separately reviewed candidate-deployment
 action.
 
+The local privilege-reduction workflow was then completed on
+`feature/new-leaderboard`. Its `plan`, `verify`, and `apply` commands bind the
+exact runtime account, approved `cloudsqlsuperuser@%` role, Cloud SQL target,
+independently observed production server UUID, and observed metadata into one
+reviewed SHA-256. The apply path is conservative: it blocks a wrong proxy target,
+proves effective `PROCESS` visibility and drained runtime sessions before any
+write, adds and proves only the manifest, blocks every unexpected direct
+privilege or relationship instead of cleaning it automatically, clears only the
+approved default role, rechecks the drain, and delegates the zero-role
+replacement to the documented Cloud SQL control plane. It also blocks while a Cloud SQL
+operation is unfinished and treats an interrupted external mutation as
+indeterminate. Disposable MySQL 8.0.31 tests cover restricted-account PROCESS
+proof, pre-write active-session refusal, provider failure and rerun,
+unknown-state refusal, final fresh-session role absence, and idempotency. This
+is tooling evidence only; no production grant or role was changed, so the live
+least-privilege blocker remains open until a separately approved plan/apply and
+fresh-runtime verification complete.
+
 The approved Phase 13 storage end state is for both the existing p4-Vega API
 operations and the generic leaderboard read to use `game_personal_bests` as
 their source of truth. After transactional dual writes, a complete backfill,

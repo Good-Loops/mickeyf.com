@@ -4,6 +4,7 @@ import {
     assertDatabaseConfirmation,
     assertMutationAuthorized,
     assertP4VegaDataOperationAuthorized,
+    assertRuntimeGrantCommandConfirmed,
     loadMigrationConfig,
     loadMigrationAccountConfirmation,
 } from './migrationConfig';
@@ -15,6 +16,28 @@ const migrationEnvironment = {
     MIGRATION_DB_PASS: ' migration password ',
     MIGRATION_DB_NAME: 'migration_test',
 };
+
+const runtimeGrantCloudSqlTarget = Object.freeze({
+    project: 'noted-reef-387021',
+    instance: 'cms-mickeyf',
+    connectionName: 'noted-reef-387021:us-central1:cms-mickeyf',
+    serverUuid: 'd1e6865c-ecad-11ee-a6b0-42010a400002',
+});
+
+function confirmRuntimeGrant(
+    command: 'plan' | 'verify' | 'apply',
+    config: ReturnType<typeof loadMigrationConfig>,
+    environment: Readonly<Record<string, string | undefined>>
+) {
+    return assertRuntimeGrantCommandConfirmed(
+        command,
+        config,
+        'cms_mickeyf@%',
+        'cloudsqlsuperuser@%',
+        runtimeGrantCloudSqlTarget,
+        environment
+    );
+}
 
 test('migration configuration uses dedicated credentials and safe timeout defaults', () => {
     const config = loadMigrationConfig(migrationEnvironment);
@@ -266,5 +289,87 @@ test('each mutating action requires its own explicit authorization', () => {
             MIGRATION_ALLOW_APPLY: '1',
         }),
         /MIGRATION_CONFIRM_TARGET/
+    );
+});
+
+test('runtime grant commands require exact target and account confirmations', () => {
+    const config = loadMigrationConfig(migrationEnvironment);
+    const confirmedEnvironment = {
+        MIGRATION_CONFIRM_DATABASE: migrationEnvironment.MIGRATION_DB_NAME,
+        MIGRATION_CONFIRM_TARGET: '127.0.0.1:3306/migration_test',
+        MIGRATION_CONFIRM_RUNTIME_ACCOUNT: 'cms_mickeyf@%',
+    };
+
+    assert.deepEqual(confirmRuntimeGrant('plan', config, confirmedEnvironment), {});
+    assert.deepEqual(confirmRuntimeGrant('verify', config, confirmedEnvironment), {});
+    assert.throws(
+        () => confirmRuntimeGrant('plan', config, {
+            ...confirmedEnvironment,
+            MIGRATION_CONFIRM_RUNTIME_ACCOUNT: 'other@%',
+        }),
+        /MIGRATION_CONFIRM_RUNTIME_ACCOUNT/
+    );
+    assert.throws(
+        () => confirmRuntimeGrant('verify', config, {
+            ...confirmedEnvironment,
+            MIGRATION_CONFIRM_TARGET: '127.0.0.1:3307/migration_test',
+        }),
+        /MIGRATION_CONFIRM_TARGET/
+    );
+});
+
+test('runtime grant apply has a separate gate, plan digest, and server UUID', () => {
+    const config = loadMigrationConfig(migrationEnvironment);
+    const confirmedEnvironment = {
+        MIGRATION_CONFIRM_DATABASE: migrationEnvironment.MIGRATION_DB_NAME,
+        MIGRATION_CONFIRM_TARGET: '127.0.0.1:3306/migration_test',
+        MIGRATION_CONFIRM_RUNTIME_ACCOUNT: 'cms_mickeyf@%',
+        MIGRATION_CONFIRM_RUNTIME_ROLE: 'cloudsqlsuperuser@%',
+        MIGRATION_CONFIRM_CLOUD_SQL_PROJECT: runtimeGrantCloudSqlTarget.project,
+        MIGRATION_CONFIRM_CLOUD_SQL_INSTANCE: runtimeGrantCloudSqlTarget.instance,
+        MIGRATION_CONFIRM_CLOUD_SQL_CONNECTION_NAME:
+            runtimeGrantCloudSqlTarget.connectionName,
+        MIGRATION_CONFIRM_RUNTIME_ROLE_REPLACEMENT:
+            'cloudsqlsuperuser@% -> no database roles',
+        MIGRATION_CONFIRM_RUNTIME_TRAFFIC_DRAINED: '1',
+        MIGRATION_ALLOW_RUNTIME_GRANTS: '1',
+        MIGRATION_CONFIRM_RUNTIME_GRANT_PLAN_SHA256: 'a'.repeat(64),
+        MIGRATION_CONFIRM_SERVER_UUID: runtimeGrantCloudSqlTarget.serverUuid,
+    };
+
+    assert.deepEqual(confirmRuntimeGrant('apply', config, confirmedEnvironment), {
+        approvedPlanSha256: 'a'.repeat(64),
+        confirmedServerUuid: runtimeGrantCloudSqlTarget.serverUuid,
+    });
+
+    for (const [name, value] of [
+        ['MIGRATION_ALLOW_RUNTIME_GRANTS', undefined],
+        ['MIGRATION_CONFIRM_RUNTIME_ROLE', 'unexpected@%'],
+        ['MIGRATION_CONFIRM_CLOUD_SQL_PROJECT', 'another-project'],
+        ['MIGRATION_CONFIRM_CLOUD_SQL_INSTANCE', 'another-instance'],
+        ['MIGRATION_CONFIRM_CLOUD_SQL_CONNECTION_NAME', 'another:region:instance'],
+        ['MIGRATION_CONFIRM_RUNTIME_ROLE_REPLACEMENT', 'remove something'],
+        ['MIGRATION_CONFIRM_RUNTIME_TRAFFIC_DRAINED', undefined],
+        ['MIGRATION_CONFIRM_RUNTIME_GRANT_PLAN_SHA256', 'A'.repeat(64)],
+        ['MIGRATION_CONFIRM_RUNTIME_GRANT_PLAN_SHA256', 'short'],
+        ['MIGRATION_CONFIRM_SERVER_UUID', 'not-a-uuid'],
+        ['MIGRATION_CONFIRM_SERVER_UUID', 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'],
+    ] as const) {
+        assert.throws(
+            () => confirmRuntimeGrant('apply', config, {
+                ...confirmedEnvironment,
+                [name]: value,
+            }),
+            new RegExp(name)
+        );
+    }
+
+    assert.throws(
+        () => confirmRuntimeGrant('apply', config, {
+            ...confirmedEnvironment,
+            MIGRATION_ALLOW_APPLY: '1',
+            MIGRATION_ALLOW_RUNTIME_GRANTS: undefined,
+        }),
+        /MIGRATION_ALLOW_RUNTIME_GRANTS=1/
     );
 });

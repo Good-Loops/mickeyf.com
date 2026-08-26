@@ -152,6 +152,8 @@ export type MutatingMigrationAction = 'apply' | 'rollback-empty';
 
 export type P4VegaDataOperation = 'backfill-p4-vega' | 'reconcile-p4-vega';
 
+export type RuntimeGrantCommand = 'plan' | 'verify' | 'apply';
+
 function assertTargetConfirmed(
     config: Pick<MigrationConfig, 'host' | 'port' | 'database'>,
     env: Environment
@@ -194,4 +196,93 @@ export function assertP4VegaDataOperationAuthorized(
     if (env[authorizationVariable] !== '1') {
         throw new Error(`${authorizationVariable}=1 is required for this migration action`);
     }
+}
+
+export type RuntimeGrantConfirmation = Readonly<{
+    approvedPlanSha256?: string;
+    confirmedServerUuid?: string;
+}>;
+
+export function assertRuntimeGrantCommandConfirmed(
+    command: RuntimeGrantCommand,
+    config: Pick<MigrationConfig, 'host' | 'port' | 'database'>,
+    expectedRuntimeAccount: string,
+    expectedRuntimeRole: string,
+    expectedCloudSqlTarget: Readonly<{
+        project: string;
+        instance: string;
+        connectionName: string;
+        serverUuid: string;
+    }>,
+    env: Environment = process.env
+): RuntimeGrantConfirmation {
+    assertTargetConfirmed(config, env);
+
+    if (env.MIGRATION_CONFIRM_RUNTIME_ACCOUNT !== expectedRuntimeAccount) {
+        throw new Error(
+            'MIGRATION_CONFIRM_RUNTIME_ACCOUNT must exactly match the reviewed runtime account'
+        );
+    }
+
+    if (command !== 'apply') return Object.freeze({});
+
+    if (env.MIGRATION_CONFIRM_RUNTIME_ROLE !== expectedRuntimeRole) {
+        throw new Error(
+            'MIGRATION_CONFIRM_RUNTIME_ROLE must exactly match the reviewed runtime role'
+        );
+    }
+    if (
+        env.MIGRATION_CONFIRM_CLOUD_SQL_PROJECT !== expectedCloudSqlTarget.project
+        || env.MIGRATION_CONFIRM_CLOUD_SQL_INSTANCE !== expectedCloudSqlTarget.instance
+        || env.MIGRATION_CONFIRM_CLOUD_SQL_CONNECTION_NAME
+            !== expectedCloudSqlTarget.connectionName
+    ) {
+        throw new Error(
+            'MIGRATION_CONFIRM_CLOUD_SQL_PROJECT, MIGRATION_CONFIRM_CLOUD_SQL_INSTANCE, and MIGRATION_CONFIRM_CLOUD_SQL_CONNECTION_NAME must exactly match the reviewed target'
+        );
+    }
+    if (
+        env.MIGRATION_CONFIRM_RUNTIME_ROLE_REPLACEMENT
+            !== `${expectedRuntimeRole} -> no database roles`
+    ) {
+        throw new Error(
+            'MIGRATION_CONFIRM_RUNTIME_ROLE_REPLACEMENT must confirm the exact zero-role transition'
+        );
+    }
+    if (env.MIGRATION_CONFIRM_RUNTIME_TRAFFIC_DRAINED !== '1') {
+        throw new Error(
+            'MIGRATION_CONFIRM_RUNTIME_TRAFFIC_DRAINED=1 is required before runtime role removal'
+        );
+    }
+
+    if (env.MIGRATION_ALLOW_RUNTIME_GRANTS !== '1') {
+        throw new Error(
+            'MIGRATION_ALLOW_RUNTIME_GRANTS=1 is required for the runtime grant apply action'
+        );
+    }
+
+    const approvedPlanSha256 = env.MIGRATION_CONFIRM_RUNTIME_GRANT_PLAN_SHA256;
+    if (!approvedPlanSha256 || !/^[a-f0-9]{64}$/u.test(approvedPlanSha256)) {
+        throw new Error(
+            'MIGRATION_CONFIRM_RUNTIME_GRANT_PLAN_SHA256 must be the exact lowercase plan digest'
+        );
+    }
+
+    const confirmedServerUuid = env.MIGRATION_CONFIRM_SERVER_UUID;
+    if (
+        !confirmedServerUuid
+        || !/^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u
+            .test(confirmedServerUuid)
+    ) {
+        throw new Error(
+            'MIGRATION_CONFIRM_SERVER_UUID must be the exact lowercase server UUID from the plan'
+        );
+    }
+    if (confirmedServerUuid !== expectedCloudSqlTarget.serverUuid) {
+        throw new Error(
+            'MIGRATION_CONFIRM_SERVER_UUID must match the independently pinned Cloud SQL server UUID'
+        );
+    }
+
+    return Object.freeze({ approvedPlanSha256, confirmedServerUuid });
 }

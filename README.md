@@ -254,6 +254,56 @@ npm --prefix backend run migrations:p4-backfill
 npm --prefix backend run migrations:p4-reconcile
 ```
 
+Runtime-account privilege reduction has its own fail-closed workflow:
+
+```powershell
+npm --prefix backend run runtime-grants:plan
+npm --prefix backend run runtime-grants:verify
+npm --prefix backend run runtime-grants:apply
+```
+
+`plan` inventories every direct privilege channel, the runtime account's lock,
+password-expiration and partial-revoke state, each role/default role, and each
+proxy relationship without changing grants. It emits the exact
+expected `cloudsqlsuperuser@%` to no-database-roles transition, the fixed Cloud
+SQL target, the independently observed production server UUID, ordered
+operations, blockers, and a deterministic SHA-256. `verify` exits 0 only after
+the account has exactly the manifest and no
+role; drift exits 2. Unexpected direct privileges, roles, grant/admin options,
+proxy relationships, account flags, global role settings, unsupported server
+metadata, or a duplicate account name block with zero planned mutations. The
+tool deliberately does not guess how to clean them up.
+
+All three commands require the normal exact database, loopback target,
+maintenance account, effective `PROCESS` visibility, and
+`MIGRATION_CONFIRM_RUNTIME_ACCOUNT=cms_mickeyf@%` confirmations. `apply`
+additionally requires the exact reviewed role, Cloud SQL
+project/instance/connection name, literal
+`cloudsqlsuperuser@% -> no database roles` transition, traffic-drained
+confirmation, plan SHA-256, server UUID, and
+`MIGRATION_ALLOW_RUNTIME_GRANTS=1`. Before opening MySQL, it independently
+verifies the fixed Cloud SQL instance and refuses while any Cloud SQL operation
+is unfinished. The MySQL connection must then match the pinned production UUID.
+Before its first grant write and again immediately before role removal, it
+proves effective `PROCESS` access and zero runtime sessions. It grants and
+proves the complete direct manifest, clears the approved default role, rechecks
+Cloud SQL operations, and uses Cloud SQL's synchronous zero-role replacement
+before proving the final metadata. It never uses `REVOKE ALL`, removes an
+unknown role, alters the shared role, changes a
+password, or kills a session. Cloud SQL documents the zero-role replacement in
+its [database-role procedure](https://docs.cloud.google.com/sql/docs/mysql/create-manage-users#replace_database_roles_for_an_existing_user).
+
+MySQL privilege and role changes are not one transaction. A failed run can
+therefore leave the safe prepared state: the direct grants installed, the
+broad role still assigned, and its default activation cleared. Drain traffic,
+inspect any Cloud SQL operation still in flight, generate a new plan, and only
+then retry. A timeout or aborted `gcloud` process is explicitly indeterminate;
+the next apply cannot proceed while Cloud SQL reports an unfinished operation.
+Completion also requires a fresh runtime connection and positive and negative
+application probes; metadata verification is not evidence that a
+previously pooled session disappeared. No production privilege change was made
+when this local workflow was added.
+
 Every command requires `MIGRATION_DB_HOST=127.0.0.1`, `MIGRATION_DB_PORT`,
 `MIGRATION_DB_NAME`, `MIGRATION_DB_USER`, `MIGRATION_DB_PASS`, and the exact
 `CURRENT_USER()` value in `MIGRATION_CONFIRM_ACCOUNT`; there is no fallback to
