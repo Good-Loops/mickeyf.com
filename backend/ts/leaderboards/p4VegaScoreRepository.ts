@@ -1,9 +1,10 @@
 /**
- * p4-Vega persistence for the generic personal-best cutover.
+ * p4-Vega persistence while the legacy score column is retired.
  *
- * Reads and writes use generic storage in code, but deployment remains gated
- * on the explicit backfill, revision-drain, and reconciliation sequence. The
- * legacy HTTP controller adapts these operations to its historical contract.
+ * An improving score is written to both stores in one transaction. Reads use
+ * generic storage in code, but deployment remains gated on the explicit
+ * backfill and reconciliation sequence. A worse submission must not
+ * opportunistically create a misleading historical personal-best row.
  */
 import {
     Pool,
@@ -16,11 +17,6 @@ import { LEADERBOARD_PAGE_SIZE } from './leaderboardContract';
 
 type P4VegaScoreDatabase = Pick<Pool, 'getConnection'>;
 type P4VegaLeaderboardDatabase = Pick<Pool, 'query'>;
-
-type LockedP4VegaBestRow = RowDataPacket & {
-    userId: number;
-    score: number | null;
-};
 
 export type P4VegaLeaderboardRow = Readonly<{
     userName: string;
@@ -72,11 +68,8 @@ export async function readP4VegaLeaderboard(
 }
 
 /**
- * Stores a strict p4-Vega personal-best improvement in generic storage.
- *
- * The authenticated user's row is locked before the current generic best is
- * compared. This preserves the established missing-user result and serializes
- * concurrent submissions without relying on MySQL affected-row flags.
+ * Stores a strict p4-Vega personal-best improvement in both transitional
+ * stores. Returns the established legacy `personalBest` result.
  */
 export async function submitP4VegaScore(
     database: P4VegaScoreDatabase,
@@ -97,26 +90,17 @@ export async function submitP4VegaScore(
         await connection.beginTransaction();
         transactionStarted = true;
 
-        const [lockedRows] = await connection.query<LockedP4VegaBestRow[]>(
+        const [legacyResult] = await connection.query<ResultSetHeader>(
             {
-                sql: `SELECT
-                        users.user_id AS userId,
-                        game_personal_bests.score AS score
-                    FROM users
-                    LEFT JOIN game_personal_bests
-                        ON game_personal_bests.game_id = ?
-                       AND game_personal_bests.rules_version = ?
-                       AND game_personal_bests.user_id = users.user_id
-                    WHERE users.user_id = ?
-                    FOR UPDATE`,
+                sql: `UPDATE users
+                    SET p4_score = ?
+                    WHERE user_id = ?
+                    AND (p4_score IS NULL OR p4_score < ?)`,
                 timeout: DATABASE_QUERY_TIMEOUT_MS,
             },
-            [P4_VEGA.gameId, P4_VEGA.rulesVersion, userId]
+            [score, userId, score]
         );
-        const lockedBest = lockedRows[0];
-        const personalBest = lockedBest !== undefined && (
-            lockedBest.score === null || score > lockedBest.score
-        );
+        const personalBest = legacyResult.affectedRows === 1;
 
         if (personalBest) {
             await connection.query<ResultSetHeader>(
