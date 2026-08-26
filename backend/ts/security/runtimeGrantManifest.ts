@@ -48,7 +48,6 @@ export const RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freez
                     'user_name',
                     'email',
                     'user_password',
-                    'p4_score',
                 ]),
             }),
             Object.freeze({
@@ -58,10 +57,6 @@ export const RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freez
                     'email',
                     'user_password',
                 ]),
-            }),
-            Object.freeze({
-                privilege: 'UPDATE' as const,
-                columns: Object.freeze(['p4_score']),
             }),
         ]),
     }),

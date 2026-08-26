@@ -327,16 +327,16 @@ in [`backend/LEADERBOARD_DESIGN.md`](backend/LEADERBOARD_DESIGN.md):
 2. Supply one approved maintenance credential only through `MIGRATION_DB_*`,
    confirm its complete account, plan, apply only the additive schema, clear the
    action gate, and plan again. Do not alter `users.p4_score`.
-3. Before candidate deployment, use the committed runtime grant manifest in
-   `backend/ts/security/runtimeGrantManifest.ts` as the only grant source,
-   verify its exact inventory, and reduce the runtime account in a separately
-   approved operation. Do not replace `cloudsqlsuperuser` with improvised
-   grants.
+3. Use the committed runtime grant manifest in
+   `backend/ts/security/runtimeGrantManifest.ts` as the only intended end-state
+   grant source. Do not replace it with improvised grants.
 4. Deploy the freeze-capable dual writer, drain legacy-only revisions, then run
    the separately gated monotonic backfill and aggregate reconciliation.
 5. For cutover, freeze submissions, drain in-flight dual writers, reconcile,
-   deploy the generic-only writer still frozen, drain again, reconcile again,
-   and only then enable generic submissions.
+   deploy the generic-only writer still frozen, drain again, and reconcile
+   again. Then separately approve the exact retirement of the two old
+   `p4_score` column grants, recycle runtime sessions, verify the generic-only
+   manifest, and only then enable generic submissions.
 6. Clear credentials and close the proxy. Drop and prove absence of an ephemeral
    maintenance account; if it is intentionally persistent, rotate and govern it
    as an administrator. Keep `users.p4_score` until its separately approved
@@ -347,18 +347,18 @@ connection and changes no privilege. It grants only the columns used by the
 application on `users`, `game_runs`, and `game_personal_bests`; it grants
 nothing on `schema_migrations`, no `DELETE` or DDL, no role, and no grant
 option. The isolated MySQL 8.0.31 suite installs those grants on a disposable
-runtime user, exercises the current signup, login, p4-Vega, and Three Bosses
-SQL paths, and proves that migration history, ledger mutation, destructive
-DML, DDL, account creation, and grant operations are denied. The separately
-approved production reduction completed on 2026-08-26: `cms_mickeyf@%` now has
-no database role and only the manifest's non-grantable column privileges, with
-fresh positive and negative runtime probes recorded in the project plan.
+runtime user and a `users` table without `p4_score`, exercises the current
+signup, login, p4-Vega, and Three Bosses SQL paths, and proves that user-row
+`FOR UPDATE`, migration history, ledger mutation, destructive DML, DDL, account
+creation, and grant operations are denied. Both game repositories use the same
+database-scoped per-user advisory lock, so the generic-only manifest grants no
+`UPDATE` on `users` and no access to `p4_score`.
 
-The current manifest is transitional: Three Bosses' user-row serialization
-lock is presently authorized by the dual writer's `UPDATE(p4_score)` grant.
-Before dropping that column, replace the lock mechanism without broadening
-`users` updates and verify the generic-only runtime against a disposable schema
-where `p4_score` is physically absent.
+The separately approved production reduction completed on 2026-08-26 using the
+previous transitional manifest: `cms_mickeyf@%` has no database role but still
+has the two narrow `p4_score` column grants required by the serving frozen dual
+writer. The local generic-only manifest now treats those grants as unexpected
+and fails closed; retiring them requires a separate exact, reviewed operation.
 
 The p4-Vega backfill verifies the exact applied schema and legacy source,
 copies non-null historical scores monotonically in bounded transactions, and

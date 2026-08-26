@@ -13,11 +13,12 @@ import {
 import { isValidP4VegaScore } from '../security/p4VegaScorePolicy';
 import { getGameDefinition } from './gameCatalog';
 import { LEADERBOARD_PAGE_SIZE } from './leaderboardContract';
+import { withUserSubmissionLock } from './userSubmissionLock';
 
 type P4VegaScoreDatabase = Pick<Pool, 'getConnection'>;
 type P4VegaLeaderboardDatabase = Pick<Pool, 'query'>;
 
-type LockedP4VegaBestRow = RowDataPacket & {
+type P4VegaBestRow = RowDataPacket & {
     userId: number;
     score: number | null;
 };
@@ -74,9 +75,9 @@ export async function readP4VegaLeaderboard(
 /**
  * Stores a strict p4-Vega personal-best improvement in generic storage.
  *
- * The authenticated user's row is locked before the current generic best is
- * compared. This preserves the established missing-user result and serializes
- * concurrent submissions without relying on MySQL affected-row flags.
+ * An application-scoped user lock serializes submissions before the current
+ * generic best is compared. This preserves the established missing-user result
+ * without requiring write privilege on the `users` table.
  */
 export async function submitP4VegaScore(
     database: P4VegaScoreDatabase,
@@ -90,84 +91,82 @@ export async function submitP4VegaScore(
         throw new TypeError('p4-Vega score writes require a valid score.');
     }
 
-    const connection = await database.getConnection();
-    let transactionStarted = false;
-    let connectionReusable = true;
-    try {
-        await connection.beginTransaction();
-        transactionStarted = true;
-
-        const [lockedRows] = await connection.query<LockedP4VegaBestRow[]>(
-            {
-                sql: `SELECT
-                        users.user_id AS userId,
-                        game_personal_bests.score AS score
-                    FROM users
-                    LEFT JOIN game_personal_bests
-                        ON game_personal_bests.game_id = ?
-                       AND game_personal_bests.rules_version = ?
-                       AND game_personal_bests.user_id = users.user_id
-                    WHERE users.user_id = ?
-                    FOR UPDATE`,
-                timeout: DATABASE_QUERY_TIMEOUT_MS,
-            },
-            [P4_VEGA.gameId, P4_VEGA.rulesVersion, userId]
-        );
-        const lockedBest = lockedRows[0];
-        const personalBest = lockedBest !== undefined && (
-            lockedBest.score === null || score > lockedBest.score
-        );
-
-        if (personalBest) {
-            await connection.query<ResultSetHeader>(
-                {
-                    sql: `INSERT INTO game_personal_bests (
-                            game_id,
-                            rules_version,
-                            user_id,
-                            score,
-                            completion_time_ms,
-                            recorded_at,
-                            source_game_run_id
-                        ) VALUES (?, ?, ?, ?, NULL, UTC_TIMESTAMP(6), NULL) AS incoming
-                        ON DUPLICATE KEY UPDATE
-                            recorded_at = IF(
-                                incoming.score > game_personal_bests.score,
-                                incoming.recorded_at,
-                                game_personal_bests.recorded_at
-                            ),
-                            score = GREATEST(
-                                game_personal_bests.score,
-                                incoming.score
-                            )`,
-                    timeout: DATABASE_QUERY_TIMEOUT_MS,
-                },
-                [
-                    P4_VEGA.gameId,
-                    P4_VEGA.rulesVersion,
-                    userId,
-                    score,
-                ]
-            );
-        }
-
-        await connection.commit();
-        transactionStarted = false;
-        return personalBest;
-    } catch (error) {
-        if (transactionStarted) {
+    return withUserSubmissionLock(
+        database,
+        userId,
+        async ({ connection, invalidateConnection }) => {
+            let transactionStarted = false;
             try {
-                await connection.rollback();
-            } catch (rollbackError) {
-                connectionReusable = false;
-                connection.destroy();
-                throw new P4VegaScoreRollbackError(error, rollbackError);
+                await connection.beginTransaction();
+                transactionStarted = true;
+
+                const [bestRows] = await connection.query<P4VegaBestRow[]>(
+                    {
+                        sql: `SELECT
+                                users.user_id AS userId,
+                                game_personal_bests.score AS score
+                            FROM users
+                            LEFT JOIN game_personal_bests
+                                ON game_personal_bests.game_id = ?
+                               AND game_personal_bests.rules_version = ?
+                               AND game_personal_bests.user_id = users.user_id
+                            WHERE users.user_id = ?`,
+                        timeout: DATABASE_QUERY_TIMEOUT_MS,
+                    },
+                    [P4_VEGA.gameId, P4_VEGA.rulesVersion, userId]
+                );
+                const currentBest = bestRows[0];
+                const personalBest = currentBest !== undefined && (
+                    currentBest.score === null || score > currentBest.score
+                );
+
+                if (personalBest) {
+                    await connection.query<ResultSetHeader>(
+                        {
+                            sql: `INSERT INTO game_personal_bests (
+                                    game_id,
+                                    rules_version,
+                                    user_id,
+                                    score,
+                                    completion_time_ms,
+                                    recorded_at,
+                                    source_game_run_id
+                                ) VALUES (?, ?, ?, ?, NULL, UTC_TIMESTAMP(6), NULL) AS incoming
+                                ON DUPLICATE KEY UPDATE
+                                    recorded_at = IF(
+                                        incoming.score > game_personal_bests.score,
+                                        incoming.recorded_at,
+                                        game_personal_bests.recorded_at
+                                    ),
+                                    score = GREATEST(
+                                        game_personal_bests.score,
+                                        incoming.score
+                                    )`,
+                            timeout: DATABASE_QUERY_TIMEOUT_MS,
+                        },
+                        [
+                            P4_VEGA.gameId,
+                            P4_VEGA.rulesVersion,
+                            userId,
+                            score,
+                        ]
+                    );
+                }
+
+                await connection.commit();
+                transactionStarted = false;
+                return personalBest;
+            } catch (error) {
+                if (transactionStarted) {
+                    try {
+                        await connection.rollback();
+                    } catch (rollbackError) {
+                        invalidateConnection();
+                        throw new P4VegaScoreRollbackError(error, rollbackError);
+                    }
+                }
+                throw error;
             }
         }
-        throw error;
-    } finally {
-        if (connectionReusable) {
-            connection.release();
-        }
-    }
+    );
 }

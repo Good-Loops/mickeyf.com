@@ -41,7 +41,7 @@ test('renders the exact production grant statements without applying them', () =
             PRODUCTION_RUNTIME_DATABASE_ACCOUNT
         ),
         [
-            "GRANT SELECT (`user_id`, `user_name`, `email`, `user_password`, `p4_score`), INSERT (`user_name`, `email`, `user_password`), UPDATE (`p4_score`) ON `cms`.`users` TO 'cms_mickeyf'@'%';",
+            "GRANT SELECT (`user_id`, `user_name`, `email`, `user_password`), INSERT (`user_name`, `email`, `user_password`) ON `cms`.`users` TO 'cms_mickeyf'@'%';",
             "GRANT SELECT (`game_id`, `rules_version`, `user_id`, `run_id`, `score`, `completion_time_ms`, `payload_fingerprint`, `personal_best`, `submitted_at`), INSERT (`game_id`, `rules_version`, `user_id`, `run_id`, `score`, `completion_time_ms`, `payload_fingerprint`, `personal_best`, `submitted_at`) ON `cms`.`game_runs` TO 'cms_mickeyf'@'%';",
             "GRANT SELECT (`game_id`, `rules_version`, `user_id`, `score`, `completion_time_ms`, `recorded_at`), INSERT (`game_id`, `rules_version`, `user_id`, `score`, `completion_time_ms`, `recorded_at`, `source_game_run_id`), UPDATE (`score`, `completion_time_ms`, `recorded_at`, `source_game_run_id`) ON `cms`.`game_personal_bests` TO 'cms_mickeyf'@'%';",
         ]

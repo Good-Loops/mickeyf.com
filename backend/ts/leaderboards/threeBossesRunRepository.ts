@@ -12,6 +12,7 @@ import {
     LEADERBOARD_CONTRACT_VERSION,
     LEADERBOARD_PAGE_SIZE,
 } from './leaderboardContract';
+import { withUserSubmissionLock } from './userSubmissionLock';
 
 type ThreeBossesReadDatabase = Pick<Pool, 'query'>;
 type ThreeBossesWriteDatabase = Pick<Pool, 'getConnection'>;
@@ -165,202 +166,201 @@ export async function submitThreeBossesRun(
         completionTimeMs
     );
     const score = calculateThreeBossesScore(completionTimeMs);
-    const connection = await database.getConnection();
-    let transactionStarted = false;
-    let connectionReusable = true;
+    return withUserSubmissionLock(
+        database,
+        userId,
+        async ({ connection, invalidateConnection }) => {
+            let transactionStarted = false;
 
-    try {
-        await connection.beginTransaction();
-        transactionStarted = true;
+            try {
+                await connection.beginTransaction();
+                transactionStarted = true;
 
-        // This locked user row is the per-user serialization boundary for
-        // replay checks, rate admission, ledger inserts, and personal bests.
-        const [users] = await connection.query<RowDataPacket[]>(
-            {
-                sql: `SELECT user_id
-                    FROM users
-                    WHERE user_id = ?
-                    LIMIT 1
-                    FOR UPDATE`,
-                timeout: DATABASE_QUERY_TIMEOUT_MS,
-            },
-            [userId]
-        );
-        if (users.length === 0) {
-            await connection.commit();
-            transactionStarted = false;
-            return { kind: 'user-not-found' };
-        }
-
-        const [existingRuns] = await connection.query<ExistingRunRow[]>(
-            {
-                sql: `SELECT
-                        rules_version AS rulesVersion,
-                        score,
-                        completion_time_ms AS completionTimeMs,
-                        payload_fingerprint AS payloadFingerprint,
-                        personal_best AS personalBest
-                    FROM game_runs
-                    WHERE game_id = ?
-                      AND user_id = ?
-                      AND run_id = ?
-                    LIMIT 1`,
-                timeout: DATABASE_QUERY_TIMEOUT_MS,
-            },
-            [THREE_BOSSES.gameId, userId, runId]
-        );
-        if (existingRuns.length > 0) {
-            const result = replayResult(
-                existingRuns[0],
-                fingerprint,
-                runId,
-                completionTimeMs,
-                score
-            );
-            await connection.commit();
-            transactionStarted = false;
-            return result;
-        }
-
-        const [runCounts] = await connection.query<Array<RowDataPacket & {
-            acceptedRunCount: number;
-        }>>(
-            {
-                sql: `SELECT COUNT(*) AS acceptedRunCount
-                    FROM game_runs
-                    WHERE game_id = ?
-                      AND user_id = ?
-                      AND submitted_at > UTC_TIMESTAMP(6) - INTERVAL 15 MINUTE`,
-                timeout: DATABASE_QUERY_TIMEOUT_MS,
-            },
-            [THREE_BOSSES.gameId, userId]
-        );
-        if (Number(runCounts[0]?.acceptedRunCount) >= THREE_BOSSES_USER_RUN_LIMIT) {
-            await connection.commit();
-            transactionStarted = false;
-            return { kind: 'rate-limited' };
-        }
-
-        const [personalBests] = await connection.query<PersonalBestRow[]>(
-            {
-                sql: `SELECT completion_time_ms AS completionTimeMs
-                    FROM game_personal_bests
-                    WHERE game_id = ?
-                      AND rules_version = ?
-                      AND user_id = ?
-                    FOR UPDATE`,
-                timeout: DATABASE_QUERY_TIMEOUT_MS,
-            },
-            [THREE_BOSSES.gameId, THREE_BOSSES.rulesVersion, userId]
-        );
-        const currentBest = personalBests[0];
-        if (
-            currentBest
-            && !isValidThreeBossesCompletionTimeMs(currentBest.completionTimeMs)
-        ) {
-            throw new Error('Stored Three Bosses personal best has an invalid completion time.');
-        }
-        const personalBest = !currentBest
-            || completionTimeMs < currentBest.completionTimeMs;
-
-        const [insertResult] = await connection.query<ResultSetHeader>(
-            {
-                sql: `INSERT INTO game_runs (
-                        game_id,
-                        rules_version,
-                        user_id,
-                        run_id,
-                        score,
-                        completion_time_ms,
-                        payload_fingerprint,
-                        personal_best,
-                        submitted_at
-                    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6))`,
-                timeout: DATABASE_QUERY_TIMEOUT_MS,
-            },
-            [
-                THREE_BOSSES.gameId,
-                THREE_BOSSES.rulesVersion,
-                userId,
-                runId,
-                score,
-                completionTimeMs,
-                fingerprint,
-                personalBest ? 1 : 0,
-            ]
-        );
-
-        if (personalBest) {
-            if (currentBest) {
-                await connection.query<ResultSetHeader>(
+                // The shared application lock serializes replay checks, rate
+                // admission, ledger inserts, and personal bests for this user.
+                const [users] = await connection.query<RowDataPacket[]>(
                     {
-                        sql: `UPDATE game_personal_bests
-                            SET score = ?,
-                                completion_time_ms = ?,
-                                recorded_at = UTC_TIMESTAMP(6),
-                                source_game_run_id = ?
+                        sql: `SELECT user_id
+                            FROM users
+                            WHERE user_id = ?
+                            LIMIT 1`,
+                        timeout: DATABASE_QUERY_TIMEOUT_MS,
+                    },
+                    [userId]
+                );
+                if (users.length === 0) {
+                    await connection.commit();
+                    transactionStarted = false;
+                    return { kind: 'user-not-found' };
+                }
+
+                const [existingRuns] = await connection.query<ExistingRunRow[]>(
+                    {
+                        sql: `SELECT
+                                rules_version AS rulesVersion,
+                                score,
+                                completion_time_ms AS completionTimeMs,
+                                payload_fingerprint AS payloadFingerprint,
+                                personal_best AS personalBest
+                            FROM game_runs
+                            WHERE game_id = ?
+                              AND user_id = ?
+                              AND run_id = ?
+                            LIMIT 1`,
+                        timeout: DATABASE_QUERY_TIMEOUT_MS,
+                    },
+                    [THREE_BOSSES.gameId, userId, runId]
+                );
+                if (existingRuns.length > 0) {
+                    const result = replayResult(
+                        existingRuns[0],
+                        fingerprint,
+                        runId,
+                        completionTimeMs,
+                        score
+                    );
+                    await connection.commit();
+                    transactionStarted = false;
+                    return result;
+                }
+
+                const [runCounts] = await connection.query<Array<RowDataPacket & {
+                    acceptedRunCount: number;
+                }>>(
+                    {
+                        sql: `SELECT COUNT(*) AS acceptedRunCount
+                            FROM game_runs
+                            WHERE game_id = ?
+                              AND user_id = ?
+                              AND submitted_at > UTC_TIMESTAMP(6) - INTERVAL 15 MINUTE`,
+                        timeout: DATABASE_QUERY_TIMEOUT_MS,
+                    },
+                    [THREE_BOSSES.gameId, userId]
+                );
+                if (Number(runCounts[0]?.acceptedRunCount) >= THREE_BOSSES_USER_RUN_LIMIT) {
+                    await connection.commit();
+                    transactionStarted = false;
+                    return { kind: 'rate-limited' };
+                }
+
+                const [personalBests] = await connection.query<PersonalBestRow[]>(
+                    {
+                        sql: `SELECT completion_time_ms AS completionTimeMs
+                            FROM game_personal_bests
                             WHERE game_id = ?
                               AND rules_version = ?
                               AND user_id = ?`,
                         timeout: DATABASE_QUERY_TIMEOUT_MS,
                     },
-                    [
-                        score,
-                        completionTimeMs,
-                        insertResult.insertId,
-                        THREE_BOSSES.gameId,
-                        THREE_BOSSES.rulesVersion,
-                        userId,
-                    ]
+                    [THREE_BOSSES.gameId, THREE_BOSSES.rulesVersion, userId]
                 );
-            } else {
-                await connection.query<ResultSetHeader>(
+                const currentBest = personalBests[0];
+                if (
+                    currentBest
+                    && !isValidThreeBossesCompletionTimeMs(currentBest.completionTimeMs)
+                ) {
+                    throw new Error('Stored Three Bosses personal best has an invalid completion time.');
+                }
+                const personalBest = !currentBest
+                    || completionTimeMs < currentBest.completionTimeMs;
+
+                const [insertResult] = await connection.query<ResultSetHeader>(
                     {
-                        sql: `INSERT INTO game_personal_bests (
+                        sql: `INSERT INTO game_runs (
                                 game_id,
                                 rules_version,
                                 user_id,
+                                run_id,
                                 score,
                                 completion_time_ms,
-                                recorded_at,
-                                source_game_run_id
-                            ) VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP(6), ?)`,
+                                payload_fingerprint,
+                                personal_best,
+                                submitted_at
+                            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, UTC_TIMESTAMP(6))`,
                         timeout: DATABASE_QUERY_TIMEOUT_MS,
                     },
                     [
                         THREE_BOSSES.gameId,
                         THREE_BOSSES.rulesVersion,
                         userId,
+                        runId,
                         score,
                         completionTimeMs,
-                        insertResult.insertId,
+                        fingerprint,
+                        personalBest ? 1 : 0,
                     ]
                 );
-            }
-        }
 
-        await connection.commit();
-        transactionStarted = false;
-        return {
-            kind: 'accepted',
-            replayed: false,
-            personalBest,
-            runId,
-            score,
-            completionTimeMs,
-        };
-    } catch (error) {
-        if (transactionStarted) {
-            try {
-                await connection.rollback();
-            } catch (rollbackError) {
-                connectionReusable = false;
-                connection.destroy();
-                throw new ThreeBossesRunRollbackError(error, rollbackError);
+                if (personalBest) {
+                    if (currentBest) {
+                        await connection.query<ResultSetHeader>(
+                            {
+                                sql: `UPDATE game_personal_bests
+                                    SET score = ?,
+                                        completion_time_ms = ?,
+                                        recorded_at = UTC_TIMESTAMP(6),
+                                        source_game_run_id = ?
+                                    WHERE game_id = ?
+                                      AND rules_version = ?
+                                      AND user_id = ?`,
+                                timeout: DATABASE_QUERY_TIMEOUT_MS,
+                            },
+                            [
+                                score,
+                                completionTimeMs,
+                                insertResult.insertId,
+                                THREE_BOSSES.gameId,
+                                THREE_BOSSES.rulesVersion,
+                                userId,
+                            ]
+                        );
+                    } else {
+                        await connection.query<ResultSetHeader>(
+                            {
+                                sql: `INSERT INTO game_personal_bests (
+                                        game_id,
+                                        rules_version,
+                                        user_id,
+                                        score,
+                                        completion_time_ms,
+                                        recorded_at,
+                                        source_game_run_id
+                                    ) VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP(6), ?)`,
+                                timeout: DATABASE_QUERY_TIMEOUT_MS,
+                            },
+                            [
+                                THREE_BOSSES.gameId,
+                                THREE_BOSSES.rulesVersion,
+                                userId,
+                                score,
+                                completionTimeMs,
+                                insertResult.insertId,
+                            ]
+                        );
+                    }
+                }
+
+                await connection.commit();
+                transactionStarted = false;
+                return {
+                    kind: 'accepted',
+                    replayed: false,
+                    personalBest,
+                    runId,
+                    score,
+                    completionTimeMs,
+                };
+            } catch (error) {
+                if (transactionStarted) {
+                    try {
+                        await connection.rollback();
+                    } catch (rollbackError) {
+                        invalidateConnection();
+                        throw new ThreeBossesRunRollbackError(error, rollbackError);
+                    }
+                }
+                throw error;
             }
         }
-        throw error;
-    } finally {
-        if (connectionReusable) connection.release();
-    }
+    );
 }

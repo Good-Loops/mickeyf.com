@@ -31,18 +31,18 @@ legacy-only and enabled dual-writer drains, post-drain backfills, and
 zero-discrepancy reconciliations have completed.
 
 The generic-authoritative p4-Vega writer was prepared and verified locally on
-2026-08-26. It locks the authenticated user and scoped generic best on one
-connection, compares the generic score, and writes only a strict improvement
-to `game_personal_bests`; it never reads or writes `users.p4_score`. The legacy
+2026-08-26. It holds the shared per-user submission lock, compares the generic
+score, and writes only a strict improvement to `game_personal_bests`; it never
+reads or writes `users.p4_score`. The legacy
 HTTP request and response remain unchanged. The active feature branch now uses
 that repository and one generic reader for both HTTP APIs. A disposable MySQL
 test physically drops the legacy column before successfully submitting and
-reading a score. Type-checking, 116 unit and security tests, 41 isolated MySQL
+reading a score. Type-checking, 125 unit and security tests, 42 isolated MySQL
 integration tests, the production bundle, and image-only Cloud Build contract
 tests pass. This source has not been deployed and does not authorize the
 production cutover sequence below; production remains on the frozen dual writer.
-The dropped-column case uses the migration-test account and proves schema
-independence only; the restricted-runtime proof remains a separate gate.
+The generic-only runtime fixture also creates `users` without the legacy column
+and proves both game repositories under the restricted application identity.
 
 On 2026-08-26, detached worktrees verified historical dual-write base
 `0dbe3fb8` plus the seven storage-independent freeze-gate changes from
@@ -457,21 +457,24 @@ Credential changes and privilege revocation require
 their own reviewed approval. The preflight made no database, configuration, or
 repository change and returned the local proxy to its original stopped state.
 
-The exact column-level runtime manifest now lives in
-`ts/security/runtimeGrantManifest.ts`. It grants the transitional application
-only `SELECT`, `INSERT`, and the narrowly required `UPDATE` columns on `users`,
-`game_runs`, and `game_personal_bests`. It grants no access to
-`schema_migrations`, no `DELETE`, DDL, role, administrative privilege, or grant
-option. A redundant `game_runs SELECT ... FOR UPDATE` was removed because the
-preceding locked user row already serializes every submission for that user;
-the immutable ledger therefore needs only `SELECT` and `INSERT`.
+The exact generic-only column-level runtime manifest now lives in
+`ts/security/runtimeGrantManifest.ts`. It grants `users` only the auth columns
+required for `SELECT` and signup `INSERT`, with no `p4_score` access and no
+`UPDATE` privilege. `game_runs` and `game_personal_bests` retain only their
+required narrow `SELECT`, `INSERT`, and personal-best `UPDATE` columns. It
+grants no access to `schema_migrations`, no `DELETE`, DDL, role, administrative
+privilege, or grant option. A redundant `game_runs SELECT ... FOR UPDATE` was
+removed because the shared application lock already serializes every
+submission for that user; the immutable ledger therefore needs only `SELECT`
+and `INSERT`.
 
 The pinned MySQL 8.0.31 integration suite installs the manifest on a separate
-disposable runtime identity, exercises every current auth and leaderboard SQL
-path, compares the exact column inventory, and proves that migration history,
-ledger mutation, destructive DML, DDL, account creation, and grant operations
-are denied. This test evidence did not itself change live grants; the later
-approved production reduction used this manifest as its only grant source.
+disposable runtime identity and a physical `users` table without `p4_score`. It
+exercises every current auth and leaderboard SQL path, compares the exact column
+inventory, and proves that user-row `FOR UPDATE`, migration history, ledger
+mutation, destructive DML, DDL, account creation, and grant operations are
+denied. This test evidence did not itself change live grants; the earlier
+approved production reduction used the previous transitional manifest.
 Do not improvise replacement grants. After maintenance,
 drop and verify removal of an ephemeral account; if the account is deliberately
 persistent, rotate its credential and govern it as a standing administrator.
@@ -527,16 +530,16 @@ reads remained healthy, and no temporary database user, maintenance revision,
 or pending Cloud SQL operation remained. The reviewed transitional runtime
 least-privilege blocker is closed.
 
-This manifest is transitional. Both the locally prepared generic p4 writer and
-Three Bosses presently serialize submissions with `users SELECT ... FOR
-UPDATE`, which MySQL authorizes through the transitional `UPDATE(p4_score)`
-grant. Before the generic-only candidate is built, replace both dependencies
-without granting arbitrary `users` updates and pass a restricted generic-only
-fixture with `p4_score` physically absent. Removing the column from the manifest
-is not enough to retire the live grants: the current planner correctly blocks
-unexpected privileges rather than revoking them, so an exact separately
-reviewed revoke operation or equivalent verified maintenance procedure is also
-required.
+The local generic p4 writer and Three Bosses now serialize with one shared,
+database-scoped per-user advisory lock acquired before the transaction. It is
+released after commit or rollback; any indeterminate lock or rollback state
+destroys the session so a pooled connection cannot retain an uncertain lock.
+This removes both `users SELECT ... FOR UPDATE` dependencies without adding a
+table, migration, or artificial user-column grant. Removing `p4_score` from the
+source manifest does not itself retire the older live grants: the current
+planner correctly blocks unexpected privileges rather than revoking them, so
+an exact separately reviewed revoke operation or equivalent verified
+maintenance procedure is still required.
 
 This evidence satisfied the metadata gate for the exact SQL and isolated local
 migration tests completed on 2026-08-25. That preflight did not by itself
@@ -666,7 +669,11 @@ completed enabled dual-writer checkpoint, not the generic read/write cutover;
     cleanup also completed on 2026-08-26.**
 12. Deploy the generic-only writer while it remains frozen, route all traffic to
     it, drain every dual-write revision, and require the same exact
-    reconciliation again against the still-static legacy column.
+    reconciliation again against the still-static legacy column. With no old
+    writer or pooled session remaining, run the separately approved exact
+    column-grant retirement, recycle the generic-only runtime pool, and verify
+    the fresh restricted identity exactly matches the source manifest before
+    enabling submissions.
 13. Revoke operational authorization for further legacy backfills, retire exact
     legacy equality as a cutover gate, verify the generic-authoritative rollback
     candidate, and only then deploy an explicitly approved revision with the
@@ -691,9 +698,9 @@ completed enabled dual-writer checkpoint, not the generic read/write cutover;
 Transactions must use one acquired MySQL connection; transaction statements
 must not be issued through unrelated pooled queries.
 
-For a future generic run submission, the server authenticates and feature-gates
-before database work, then starts one transaction and locks the authenticated
-`users` row with `FOR UPDATE`. It resolves any existing scoped run, compares the
+For a generic run submission, the server authenticates and feature-gates before
+database work, acquires the shared per-user submission lock, and then starts one
+transaction. It resolves any existing scoped run, compares the
 stored canonical fields and fingerprint, inserts a new ledger row if absent,
 and updates the versioned personal best only on strict improvement. The run
 stores the original `personalBest` outcome before commit so exact retries return

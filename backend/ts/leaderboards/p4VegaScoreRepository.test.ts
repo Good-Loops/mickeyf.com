@@ -36,8 +36,9 @@ function createFakeDatabase(options: FakeDatabaseOptions = {}) {
             queryOptions: { sql: string; timeout?: number },
             values?: unknown[]
         ) {
+            const sql = queryOptions.sql.replace(/\s+/g, ' ').trim();
             queries.push({
-                sql: queryOptions.sql.replace(/\s+/g, ' ').trim(),
+                sql,
                 timeout: queryOptions.timeout,
                 values,
             });
@@ -45,7 +46,10 @@ function createFakeDatabase(options: FakeDatabaseOptions = {}) {
             if (options.queryErrorAt === queries.length) {
                 throw options.queryError ?? new Error('query failed');
             }
-            if (queries.length === 1) {
+            if (sql.includes('GET_LOCK') || sql.includes('RELEASE_LOCK')) {
+                return [[{ lockResult: 1 }], []];
+            }
+            if (sql.startsWith('SELECT users.user_id AS userId')) {
                 return [options.userExists === false
                     ? []
                     : [{ userId: 42, score: options.storedScore ?? null }], []];
@@ -151,18 +155,28 @@ test('writes an improving score only to generic storage on one committed connect
 
     assert.equal(personalBest, true);
     assert.equal(fake.acquisitions(), 1);
-    assert.deepEqual(fake.events, ['begin', 'query:1', 'query:2', 'commit', 'release']);
-    assert.equal(fake.queries.length, 2);
-    assert.equal(fake.queries[0].timeout, 10_000);
-    assert.equal(
-        fake.queries[0].sql,
-        'SELECT users.user_id AS userId, game_personal_bests.score AS score FROM users LEFT JOIN game_personal_bests ON game_personal_bests.game_id = ? AND game_personal_bests.rules_version = ? AND game_personal_bests.user_id = users.user_id WHERE users.user_id = ? FOR UPDATE'
-    );
-    assert.deepEqual(fake.queries[0].values, ['p4-vega', 1, 42]);
+    assert.deepEqual(fake.events, [
+        'query:1',
+        'begin',
+        'query:2',
+        'query:3',
+        'commit',
+        'query:4',
+        'release',
+    ]);
+    assert.equal(fake.queries.length, 4);
+    assert.match(fake.queries[0].sql, /GET_LOCK/);
     assert.equal(fake.queries[1].timeout, 10_000);
-    assert.match(fake.queries[1].sql, /^INSERT INTO game_personal_bests/);
-    assert.match(fake.queries[1].sql, /ON DUPLICATE KEY UPDATE/);
-    assert.deepEqual(fake.queries[1].values, ['p4-vega', 1, 42, 990]);
+    assert.equal(
+        fake.queries[1].sql,
+        'SELECT users.user_id AS userId, game_personal_bests.score AS score FROM users LEFT JOIN game_personal_bests ON game_personal_bests.game_id = ? AND game_personal_bests.rules_version = ? AND game_personal_bests.user_id = users.user_id WHERE users.user_id = ?'
+    );
+    assert.deepEqual(fake.queries[1].values, ['p4-vega', 1, 42]);
+    assert.equal(fake.queries[2].timeout, 10_000);
+    assert.match(fake.queries[2].sql, /^INSERT INTO game_personal_bests/);
+    assert.match(fake.queries[2].sql, /ON DUPLICATE KEY UPDATE/);
+    assert.deepEqual(fake.queries[2].values, ['p4-vega', 1, 42, 990]);
+    assert.match(fake.queries[3].sql, /RELEASE_LOCK/);
     assert.equal(fake.queries.some(({ sql }) => /\bp4_score\b/iu.test(sql)), false);
 });
 
@@ -172,8 +186,16 @@ test('inserts the first generic personal best without consulting affected-row se
     const personalBest = await submitP4VegaScore(fake.database, 42, 900);
 
     assert.equal(personalBest, true);
-    assert.deepEqual(fake.events, ['begin', 'query:1', 'query:2', 'commit', 'release']);
-    assert.equal(fake.queries.length, 2);
+    assert.deepEqual(fake.events, [
+        'query:1',
+        'begin',
+        'query:2',
+        'query:3',
+        'commit',
+        'query:4',
+        'release',
+    ]);
+    assert.equal(fake.queries.length, 4);
 });
 
 test('commits equal and lower scores without writing generic history', async () => {
@@ -183,8 +205,15 @@ test('commits equal and lower scores without writing generic history', async () 
         const personalBest = await submitP4VegaScore(fake.database, 42, score);
 
         assert.equal(personalBest, false);
-        assert.deepEqual(fake.events, ['begin', 'query:1', 'commit', 'release']);
-        assert.equal(fake.queries.length, 1);
+        assert.deepEqual(fake.events, [
+            'query:1',
+            'begin',
+            'query:2',
+            'commit',
+            'query:3',
+            'release',
+        ]);
+        assert.equal(fake.queries.length, 3);
     }
 });
 
@@ -194,15 +223,22 @@ test('preserves the missing-user false result without attempting a generic inser
     const personalBest = await submitP4VegaScore(fake.database, 42, 900);
 
     assert.equal(personalBest, false);
-    assert.deepEqual(fake.events, ['begin', 'query:1', 'commit', 'release']);
-    assert.equal(fake.queries.length, 1);
+    assert.deepEqual(fake.events, [
+        'query:1',
+        'begin',
+        'query:2',
+        'commit',
+        'query:3',
+        'release',
+    ]);
+    assert.equal(fake.queries.length, 3);
 });
 
 test('rolls back when the generic write fails', async () => {
     const queryError = new Error('generic write failed');
     const fake = createFakeDatabase({
         storedScore: 900,
-        queryErrorAt: 2,
+        queryErrorAt: 3,
         queryError,
     });
 
@@ -212,14 +248,14 @@ test('rolls back when the generic write fails', async () => {
     );
     assert.deepEqual(
         fake.events,
-        ['begin', 'query:1', 'query:2', 'rollback', 'release']
+        ['query:1', 'begin', 'query:2', 'query:3', 'rollback', 'query:4', 'release']
     );
 });
 
-test('rolls back and skips the generic write when the locking read fails', async () => {
-    const queryError = new Error('locking read failed');
+test('rolls back and skips the generic write when the current-best read fails', async () => {
+    const queryError = new Error('current-best read failed');
     const fake = createFakeDatabase({
-        queryErrorAt: 1,
+        queryErrorAt: 2,
         queryError,
     });
 
@@ -227,8 +263,15 @@ test('rolls back and skips the generic write when the locking read fails', async
         () => submitP4VegaScore(fake.database, 42, 990),
         queryError
     );
-    assert.deepEqual(fake.events, ['begin', 'query:1', 'rollback', 'release']);
-    assert.equal(fake.queries.length, 1);
+    assert.deepEqual(fake.events, [
+        'query:1',
+        'begin',
+        'query:2',
+        'rollback',
+        'query:3',
+        'release',
+    ]);
+    assert.equal(fake.queries.length, 3);
 });
 
 test('rolls back a failed commit and always releases a reusable connection', async () => {
@@ -241,7 +284,16 @@ test('rolls back a failed commit and always releases a reusable connection', asy
     );
     assert.deepEqual(
         fake.events,
-        ['begin', 'query:1', 'query:2', 'commit', 'rollback', 'release']
+        [
+            'query:1',
+            'begin',
+            'query:2',
+            'query:3',
+            'commit',
+            'rollback',
+            'query:4',
+            'release',
+        ]
     );
 });
 
@@ -250,7 +302,7 @@ test('destroys a connection when rollback fails instead of returning it to the p
     const rollbackError = new Error('rollback failed');
     const fake = createFakeDatabase({
         storedScore: 900,
-        queryErrorAt: 2,
+        queryErrorAt: 3,
         queryError,
         rollbackError,
     });
@@ -266,7 +318,7 @@ test('destroys a connection when rollback fails instead of returning it to the p
     );
     assert.deepEqual(
         fake.events,
-        ['begin', 'query:1', 'query:2', 'rollback', 'destroy']
+        ['query:1', 'begin', 'query:2', 'query:3', 'rollback', 'destroy']
     );
 });
 
@@ -288,5 +340,5 @@ test('releases the connection when beginning the transaction fails', async () =>
         () => submitP4VegaScore(fake.database, 42, 990),
         beginError
     );
-    assert.deepEqual(fake.events, ['begin', 'release']);
+    assert.deepEqual(fake.events, ['query:1', 'begin', 'query:2', 'release']);
 });

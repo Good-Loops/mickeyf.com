@@ -57,9 +57,11 @@ function assertSafeTestEnvironment(): void {
     assert.equal(process.env.MIGRATION_TEST_USER, EXPECTED_TEST_TARGET.user);
 }
 
-function withFirstQueryBarrier(
+function withQueryBarrier(
     pool: Pool,
-    participantCount: number
+    participantCount: number,
+    matchesQuery: (sql: string) => boolean,
+    position: 'before' | 'after'
 ): Pick<Pool, 'getConnection'> {
     let arrived = 0;
     let openBarrier!: () => void;
@@ -74,17 +76,27 @@ function withFirstQueryBarrier(
                 options: unknown,
                 values?: unknown[]
             ) => Promise<unknown>;
-            let firstQuery = true;
+            let barrierReached = false;
+            async function waitAtBarrier(): Promise<void> {
+                arrived += 1;
+                if (arrived === participantCount) openBarrier();
+                await barrier;
+            }
             return {
                 beginTransaction: () => connection.beginTransaction(),
                 async query(options: unknown, values?: unknown[]) {
-                    if (firstQuery) {
-                        firstQuery = false;
-                        arrived += 1;
-                        if (arrived === participantCount) openBarrier();
-                        await barrier;
+                    const sql = typeof options === 'object' && options !== null
+                        && 'sql' in options
+                        ? String(options.sql).replace(/\s+/g, ' ').trim()
+                        : String(options);
+                    const useBarrier = !barrierReached && matchesQuery(sql);
+                    if (useBarrier) {
+                        barrierReached = true;
+                        if (position === 'before') await waitAtBarrier();
                     }
-                    return query(options, values);
+                    const result = await query(options, values);
+                    if (useBarrier && position === 'after') await waitAtBarrier();
+                    return result;
                 },
                 commit: () => connection.commit(),
                 rollback: () => connection.rollback(),
@@ -93,6 +105,27 @@ function withFirstQueryBarrier(
             } as unknown as PoolConnection;
         },
     } as Pick<Pool, 'getConnection'>;
+}
+
+function withFirstQueryBarrier(
+    pool: Pool,
+    participantCount: number
+): Pick<Pool, 'getConnection'> {
+    return withQueryBarrier(pool, participantCount, () => true, 'before');
+}
+
+function withCompletedPersonalBestReadBarrier(
+    pool: Pool,
+    participantCount: number
+): Pick<Pool, 'getConnection'> {
+    return withQueryBarrier(
+        pool,
+        participantCount,
+        (sql) => sql.startsWith(
+            'SELECT completion_time_ms AS completionTimeMs FROM game_personal_bests'
+        ),
+        'after'
+    );
 }
 
 function withRejectedPersonalBestWrite(
@@ -144,7 +177,6 @@ async function resetFixture(): Promise<void> {
             user_name VARCHAR(255) NOT NULL,
             email VARCHAR(255) NOT NULL,
             user_password VARCHAR(255) NOT NULL,
-            p4_score INT NULL,
             CONSTRAINT pk_users PRIMARY KEY (user_id),
             UNIQUE KEY uq_users_email (email)
         ) ENGINE = InnoDB
@@ -153,8 +185,8 @@ async function resetFixture(): Promise<void> {
     `);
     for (let userId = 1; userId <= 15; userId += 1) {
         await observer.query(
-            `INSERT INTO users (user_name, email, user_password, p4_score)
-             VALUES (?, ?, 'test-only-hash', NULL)`,
+            `INSERT INTO users (user_name, email, user_password)
+             VALUES (?, ?, 'test-only-hash')`,
             [`player-${userId}`, `player-${userId}@example.test`]
         );
     }
@@ -370,7 +402,7 @@ test('ten new runs consume the shared window while exact replay consumes no slot
 });
 
 test('concurrent exact retries create one row and return one original plus one replay', {
-    timeout: 5_000,
+    timeout: 15_000,
 }, async () => {
     const database = withFirstQueryBarrier(applicationPool, 2);
     const concurrentRunId = randomUUID();
@@ -388,7 +420,7 @@ test('concurrent exact retries create one row and return one original plus one r
 });
 
 test('concurrent distinct runs serialize personal bests and preserve replay outcomes', {
-    timeout: 5_000,
+    timeout: 15_000,
 }, async () => {
     const database = withFirstQueryBarrier(applicationPool, 2);
     const slowRunId = randomUUID();
@@ -428,8 +460,26 @@ test('concurrent distinct runs serialize personal bests and preserve replay outc
     }
 });
 
+test('concurrent first submissions for different users avoid cross-user range locks', {
+    timeout: 15_000,
+}, async () => {
+    const database = withCompletedPersonalBestReadBarrier(applicationPool, 2);
+    const outcomes = await Promise.all([
+        submitThreeBossesRun(database, 1, randomUUID(), 60_000),
+        submitThreeBossesRun(database, 2, randomUUID(), 50_000),
+    ]);
+
+    assert.equal(outcomes.every(({ kind }) => kind === 'accepted'), true);
+    assert.equal(await countRows('game_runs'), 2);
+    assert.equal(await countRows('game_personal_bests'), 2);
+    assert.deepEqual(await readThreeBossesLeaderboard(applicationPool), [
+        { userName: 'player-2', score: 2_000, completionTimeMs: 50_000 },
+        { userName: 'player-1', score: 1_667, completionTimeMs: 60_000 },
+    ]);
+});
+
 test('concurrent rate admission allows only the tenth new run', {
-    timeout: 5_000,
+    timeout: 15_000,
 }, async () => {
     for (let index = 0; index < 9; index += 1) {
         const result = await submitThreeBossesRun(

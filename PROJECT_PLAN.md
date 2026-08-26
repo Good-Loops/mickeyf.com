@@ -161,18 +161,20 @@ migration will drop `users.p4_score`. The initial additive migrations remain
 unchanged, and the drop requires its own production approval and recovery
 evidence.
 
-The current grant manifest is intentionally transitional because the serving
-dual writer still updates `users.p4_score`. Both the locally prepared generic
-p4 writer and Three Bosses currently use `users SELECT ... FOR UPDATE` as their
-per-user serialization boundary, and MySQL authorizes that exclusive lock
-through the transitional `UPDATE(p4_score)` grant. Before the generic-only
-candidate is built, replace both dependencies without granting arbitrary
-`users` updates, remove `p4_score` from the manifest's `SELECT` and `UPDATE`
-columns, and pass a restricted-runtime fixture in which the column is physically
-absent. The current grant planner blocks unexpected existing column grants
-rather than revoking them, so retiring the two live `p4_score` grants also
-requires a separately reviewed exact revoke operation or equivalent verified
-maintenance procedure.
+The local generic-only grant contract was completed on 2026-08-26. p4-Vega and
+Three Bosses now share one database-scoped advisory lock per authenticated user,
+acquired before their transaction and released after commit or rollback. An
+indeterminate acquisition, release, or rollback invalidates the pooled session,
+so neither repository needs `users SELECT ... FOR UPDATE`. The source manifest
+now omits `p4_score` entirely and grants no `UPDATE` on `users`. A restricted
+MySQL 8.0.31 fixture creates `users` without the legacy column, exercises auth
+and both leaderboard repositories, and proves a direct user-row locking read is
+denied. Repository concurrency and rollback tests still pass. This was local
+code-and-test work only: production remains on the frozen dual writer with its
+older transitional `p4_score` grants. The current grant planner deliberately
+blocks those now-unexpected grants rather than revoking them, so their live
+retirement still requires a separately reviewed exact revoke operation or
+equivalent verified maintenance procedure.
 
 The transitional p4-Vega write path was implemented and verified locally on
 2026-08-25. That candidate updated `users.p4_score` and
@@ -203,21 +205,22 @@ live-trigger edit, deployment, traffic change, production database mutation,
 or production freeze resulted.
 
 The generic-authoritative p4-Vega writer was prepared and verified locally on
-2026-08-26. It locks the authenticated user and scoped generic personal best,
-compares only `game_personal_bests`, and writes only a strict improvement on
-the same transaction connection. It preserves the legacy HTTP contract and
+2026-08-26. It holds the shared per-user submission lock, compares only
+`game_personal_bests`, and writes only a strict improvement on the same
+transaction connection. It preserves the legacy HTTP contract and
 missing-user result, leaves a sentinel legacy score unchanged, survives
 concurrent submissions, and was tested after physically dropping
 `users.p4_score` in the disposable MySQL fixture. On 2026-08-26 that reviewed
 implementation was integrated into the active feature branch: both the legacy
 `/api/users` operation and the additive API now use one generic reader locally,
-while the legacy response still exposes `p4_score`. Type-checking, 116 unit and
-security tests, 41 isolated MySQL integration tests, the production bundle, and
+while the legacy response still exposes `p4_score`. Type-checking, 125 unit and
+security tests, 42 isolated MySQL integration tests, the production bundle, and
 the image-only Cloud Build contract tests pass. This source is not deployed;
 production remains on the frozen dual writer, and the production column and
 transitional grants are unchanged. The column-drop integration case proves code
-and schema independence under the migration-test account; restricted-runtime
-compatibility remains the next gate.
+and schema independence under the migration-test account; the separate
+restricted-runtime fixture now proves the same generic-only paths under the
+least-privilege application identity.
 
 The revision-scoped p4-Vega submission freeze gate was prepared locally on
 2026-08-26. Only the exact runtime opt-in
@@ -378,11 +381,11 @@ Three Bosses gameplay and ranking release gates are approved.
 The frozen dual writer now serves 100% of production traffic, the enabled
 revision and its infrastructure are retired, active runtime transactions were
 zero, and the exact frozen reconciliation completed with five matching rows and
-no discrepancy. Before building that candidate, replace both the generic p4
-and Three Bosses `users SELECT ... FOR UPDATE` privilege dependencies so the
-runtime manifest can omit `p4_score` and pass with the column physically absent,
-then prepare the exact retirement path for the old live column grants. The next
-rollout step must then separately approve deploying the
+no discrepancy. The local generic p4 and Three Bosses lock dependency has been
+removed, the source runtime manifest omits `p4_score`, and the no-column
+restricted fixture passes. The next local prerequisite is the exact retirement
+path for the old live column grants. The next rollout step must then separately
+approve deploying the
 generic-only writer while it remains frozen, route all traffic to that
 exact revision, retire every dual-writer revision, require the serving HTTP 503
 contract, and rerun exact reconciliation against the still-static legacy

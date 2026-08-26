@@ -114,7 +114,6 @@ async function createSchema(): Promise<void> {
             user_name VARCHAR(255) NOT NULL,
             email VARCHAR(255) NOT NULL,
             user_password VARCHAR(255) NOT NULL,
-            p4_score INT NULL,
             CONSTRAINT pk_users PRIMARY KEY (user_id),
             UNIQUE KEY uq_users_email (email)
         ) ENGINE = InnoDB
@@ -134,8 +133,8 @@ async function resetData(): Promise<void> {
         await administrator.query('SET FOREIGN_KEY_CHECKS = 1');
     }
     await administrator.query(`
-        INSERT INTO users (user_name, email, user_password, p4_score)
-        VALUES ('player-1', 'player-1@example.test', 'test-only-hash', NULL)
+        INSERT INTO users (user_name, email, user_password)
+        VALUES ('player-1', 'player-1@example.test', 'test-only-hash')
     `);
 }
 
@@ -333,6 +332,8 @@ test('denies migration history, ledger mutation, destructive DML, and DDL', asyn
         runtimePool.query('SELECT source_game_run_id FROM game_personal_bests LIMIT 1'));
     await assertPrivilegeDenied(() =>
         runtimePool.query('UPDATE users SET email = email WHERE user_id = 1'));
+    await assertPrivilegeDenied(() =>
+        runtimePool.query('SELECT user_id FROM users WHERE user_id = 1 FOR UPDATE'));
     await assertPrivilegeDenied(() =>
         runtimePool.query('UPDATE game_runs SET score = score WHERE 1 = 0'));
     await assertPrivilegeDenied(() =>

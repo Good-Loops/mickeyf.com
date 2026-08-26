@@ -173,6 +173,44 @@ test('unexpected direct privileges and privilege relationships block every mutat
     });
 });
 
+test('stale p4_score grants fail closed without rendering a revoke', () => {
+    const current = exactSnapshot();
+    const snapshot: RuntimeGrantSnapshot = {
+        ...current,
+        availableColumns: [
+            ...current.availableColumns,
+            { tableName: 'users', columnName: 'p4_score' },
+        ],
+        columnPrivileges: [
+            ...current.columnPrivileges,
+            {
+                schemaName: DATABASE,
+                tableName: 'users',
+                columnName: 'p4_score',
+                privilegeType: 'SELECT',
+                isGrantable: 'NO',
+            },
+            {
+                schemaName: DATABASE,
+                tableName: 'users',
+                columnName: 'p4_score',
+                privilegeType: 'UPDATE',
+                isGrantable: 'NO',
+            },
+        ],
+    };
+
+    const plan = createRuntimeGrantPlan(snapshot, SETTINGS, RUNTIME_ACCOUNT);
+
+    assert.equal(plan.state, 'blocked');
+    assert.match(plan.blockers.join(' '), /unexpected or grantable column privileges/u);
+    assert.deepEqual(plan.operations, {
+        ensureRequiredPrivileges: [],
+        clearDefaultRoles: [],
+        removeApprovedRole: null,
+    });
+});
+
 test('unexpected role admin option, account flags, and global role settings block', () => {
     const snapshot: RuntimeGrantSnapshot = {
         ...exactSnapshot(),

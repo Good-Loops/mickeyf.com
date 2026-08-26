@@ -212,7 +212,11 @@ test('score submission still accepts the Bearer token fallback and authenticated
             queryOptions.push(options);
             queryValues.push(values);
             transactionEvents.push('query');
-            if (queryValues.length === 1) {
+            const sql = (options as { sql: string }).sql;
+            if (sql.includes('GET_LOCK') || sql.includes('RELEASE_LOCK')) {
+                return [[{ lockResult: 1 }], []];
+            }
+            if (sql.includes('SELECT') && sql.includes('users.user_id AS userId')) {
                 return [[{ userId: 42, score: 900 }], []];
             }
             return [{ affectedRows: 2 }, []];
@@ -248,21 +252,37 @@ test('score submission still accepts the Bearer token fallback and authenticated
 
     assert.equal(state.status, 200);
     assert.deepEqual(state.body, { success: true, personalBest: true });
-    assert.deepEqual(transactionEvents, ['begin', 'query', 'query', 'commit', 'release']);
+    assert.deepEqual(transactionEvents, [
+        'query',
+        'begin',
+        'query',
+        'query',
+        'commit',
+        'query',
+        'release',
+    ]);
     assert.deepEqual(queryValues, [
+        [42, 5],
         ['p4-vega', 1, 42],
         ['p4-vega', 1, 42, 990],
+        [42],
     ]);
-    assert.equal((queryOptions[0] as { timeout?: number }).timeout, 10_000);
-    assert.equal((queryOptions[1] as { timeout?: number }).timeout, 10_000);
+    assert.equal(
+        queryOptions.every((options) =>
+            (options as { timeout?: number }).timeout === 10_000),
+        true
+    );
 });
 
 test('non-improving score preserves the exact legacy success response', async () => {
     let queryCount = 0;
     const connection = {
         async beginTransaction() {},
-        async query() {
+        async query(options: { sql: string }) {
             queryCount += 1;
+            if (options.sql.includes('GET_LOCK') || options.sql.includes('RELEASE_LOCK')) {
+                return [[{ lockResult: 1 }], []];
+            }
             return [[{ userId: 42, score: 900 }], []];
         },
         async commit() {},
@@ -289,7 +309,7 @@ test('non-improving score preserves the exact legacy success response', async ()
 
     assert.equal(state.status, 200);
     assert.deepEqual(state.body, { success: true, personalBest: false });
-    assert.equal(queryCount, 1);
+    assert.equal(queryCount, 3);
 });
 
 test('legacy leaderboard operation adapts the bounded generic read', async () => {

@@ -56,6 +56,9 @@ function createReplayDatabase() {
                 async query(options: { sql: string }) {
                     const sql = options.sql.replace(/\s+/g, ' ').trim();
                     events.push(sql);
+                    if (sql.includes('GET_LOCK') || sql.includes('RELEASE_LOCK')) {
+                        return [[{ lockResult: 1 }], []];
+                    }
                     if (sql.includes('FROM users')) {
                         return [[{ user_id: 42 }], []];
                     }

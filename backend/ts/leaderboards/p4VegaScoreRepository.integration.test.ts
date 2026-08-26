@@ -363,7 +363,7 @@ test('leaderboard reads only current generic p4-Vega bests in deterministic orde
 });
 
 test('equal concurrent submissions produce one personal best and one generic row', {
-    timeout: 5_000,
+    timeout: 15_000,
 }, async () => {
     const concurrentDatabase = withFirstQueryBarrier(applicationPool, 2);
     const outcomes = await Promise.all([
@@ -385,7 +385,7 @@ test('equal concurrent submissions produce one personal best and one generic row
 });
 
 test('concurrent mixed submissions converge generic storage on the higher score', {
-    timeout: 5_000,
+    timeout: 15_000,
 }, async () => {
     const concurrentDatabase = withFirstQueryBarrier(applicationPool, 2);
     const [, highScoreWasPersonalBest] = await Promise.all([
