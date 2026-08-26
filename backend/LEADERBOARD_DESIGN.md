@@ -177,12 +177,26 @@ flags false and the enabled sibling retired. No Cloud Build or Cloud SQL
 operation was active. Cloud SQL remained runnable on MySQL 8.0.31 with backups,
 binary logging, and seven-day transaction-log retention. The persistent
 approval-required feature trigger still exposes only the image build; no
-temporary deployment trigger exists. This checkpoint created no build, digest,
-scan, revision, traffic change, database change, grant change, trigger, or IAM
-change. The next separately approved step must build this exact SHA, verify
-fresh provenance and scan evidence, and only then derive a one-shot deployment
-configuration pinned to that build and digest. Prior risk acceptance for the
-old image does not cover the new digest.
+temporary deployment trigger exists.
+
+With explicit approval, image-only build
+`d5aee625-983b-4daf-a90d-0db9898341e8` completed successfully for the exact
+requested and resolved revision
+`e91d3b1177932614c22fbed059a42a05fcb10793`. Its full-length commit tag
+independently resolves to immutable digest
+`sha256:3bba5ca29a474c6b75d92f48f93a9efc6cfa3fe32d3a4ddb7b82f2a610baaa48`.
+Artifact Registry reports SLSA build level 3; signed in-toto SLSA v1 provenance
+binds the digest to the build ID, approval-required image-only trigger,
+Google-hosted builder, and source commit. Artifact Analysis finished successfully
+with continuous analysis active and OS, NPM, and secret analysis complete. It
+reported zero vulnerability occurrences, including zero HIGH or CRITICAL
+effective-severity findings. The locked production dependency install also
+reported zero `npm audit` findings. The build did not deploy: Cloud Run remained
+at generation 118 with 100% traffic on the frozen dual-writer revision, and no
+revision, traffic, database, grant, trigger, or IAM mutation was requested or
+executed. A one-shot deployment configuration may now be derived from this exact
+build and digest, but the old image's embedded-OpenSSL risk acceptance does not
+cover the new digest and must be addressed before any zero-traffic deployment.
 
 The additive backend API was implemented and verified locally on 2026-08-26.
 `GET /api/leaderboards` explicitly projects the server catalog, and

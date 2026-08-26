@@ -423,12 +423,25 @@ log retention enabled. No Cloud Build or Cloud SQL operation was active. The
 approval-required `feature-new-leaderboard-candidate` trigger remained bound to
 the image-only configuration and has no deploy or traffic capability; the only
 deployment trigger was the existing source-less canonical Stage B trigger.
-No candidate build was requested, no new image digest or scan evidence exists,
-and no revision, traffic, database, privilege, trigger, or IAM mutation was
-made. Before deployment, a separately approved exact-SHA image build must
-produce fresh provenance and Artifact Analysis evidence; the previous image's
-embedded-OpenSSL risk acceptance does not automatically transfer to that new
-digest.
+
+With explicit approval, image-only build
+`d5aee625-983b-4daf-a90d-0db9898341e8` then completed successfully. Its requested
+and resolved Git revision, full-length image tag, and signed provenance all bind
+to exact commit `e91d3b1177932614c22fbed059a42a05fcb10793`; the tag independently
+resolves to immutable digest
+`sha256:3bba5ca29a474c6b75d92f48f93a9efc6cfa3fe32d3a4ddb7b82f2a610baaa48`.
+Artifact Registry reports SLSA build level 3, and the signed in-toto SLSA v1
+statement binds that digest to the build ID, trigger, Google-hosted builder, and
+source commit. Artifact Analysis finished successfully with continuous analysis
+active and OS, NPM, and secret analysis complete; it reported zero vulnerability
+occurrences and therefore zero HIGH or CRITICAL effective-severity findings. The
+locked production dependency install also reported zero `npm audit` findings.
+The image-only build created no deployment: a post-build check still found Cloud
+Run generation 118 and exactly 100% traffic on the frozen dual-writer revision.
+No revision, traffic, database, privilege, trigger, or IAM mutation was requested
+or executed. The previous image's embedded-OpenSSL risk acceptance does not
+automatically transfer to this new digest and must be addressed before any
+zero-traffic deployment.
 
 ### Step 13.2 — local Three Bosses website playability prototype (no publication)
 
