@@ -94,12 +94,14 @@ failure rolled the transaction back, concurrent submissions converged on the
 same maximum, and the legacy HTTP response remained unchanged. It was not
 deployed and remains the pre-cutover phase of the rollout sequence.
 
-Compatibility between the historical dual-write source and the freeze gate was
-locally reproduced and fully tested in detached worktrees on 2026-08-26. The
-ephemeral worktrees were removed without retaining a candidate ref, image, or
-revision, and no live or production state changed. The exact composition,
-verification, and cleanup evidence is recorded in
-[`backend/P4_DUAL_WRITE_FREEZE_COMPATIBILITY.md`](backend/P4_DUAL_WRITE_FREEZE_COMPATIBILITY.md).
+On 2026-08-26, detached worktrees verified historical dual-write base
+`0dbe3fb8` plus the seven storage-independent freeze-gate changes from
+`e8e1faeb`, excluding generic-authoritative writer `2e3d4fde`. The complete
+backend, isolated MySQL, frontend, and production-build checks passed; the
+tested composition is now retained on `feature/new-leaderboard` at
+`c1c742b927844e89fe9f7ab07ddb9a20501399ee`. No image, Cloud Run revision,
+live-trigger edit, deployment, traffic change, production database mutation,
+or production freeze resulted.
 
 The generic-authoritative p4-Vega writer was prepared and verified locally on
 2026-08-26. It locks the authenticated user and scoped generic personal best,
@@ -110,7 +112,8 @@ concurrent submissions, and was tested after physically dropping
 `users.p4_score` in the disposable MySQL fixture. This candidate is not
 deployed: the additive schema, dual-write rollout, backfill, legacy-only
 revision drain, exact reconciliation, and production submission-freeze gates
-still come first.
+still come first. Its implementation remains recorded at `2e3d4fde`; the
+active branch source is the required transitional dual writer.
 
 The revision-scoped p4-Vega submission freeze gate was prepared locally on
 2026-08-26. Only the exact runtime opt-in
@@ -119,15 +122,17 @@ other value returns HTTP 503 `SUBMISSIONS_FROZEN` before authentication or
 database work while leaving account and leaderboard operations available. The
 gate is deliberately independent of the storage repository so the same change
 can protect both a transitional dual-write revision and the generic-only
-revision. The tracked canonical Stage B source now prepares zero-traffic
-candidates with `P4_VEGA_SCORE_SUBMISSIONS_ENABLED=false`, attests the exact
-seven-variable environment, and probes the candidate's exact HTTP 503 freeze
-contract. This repository change has not been synchronized to or verified
-against the live source-less inline trigger; no Stage B build ran, no revision
-was deployed, no traffic changed, and no production freeze was established.
-Synchronizing and verifying the live trigger remains a hard prerequisite to a
-frozen candidate deployment. The enabled dual-writer phase will require its own
-separately reviewed exact-`true` Stage B configuration and probe contract.
+revision. The tracked canonical Stage B source remains deliberately frozen
+with `P4_VEGA_SCORE_SUBMISSIONS_ENABLED=false`; it attests the exact
+seven-variable environment and probes the exact HTTP 503 freeze contract. It
+has not been synchronized to or verified against the live source-less inline
+trigger; no Stage B build ran, no revision was deployed, no traffic changed,
+and no production freeze was established. The enabled dual-writer state is
+intentionally deferred until its exact main-branch Stage A source commit is
+known: the separately reviewed configuration must pin that commit, set the
+literal flag to `true`, and require an anonymous HTTP 401 `UNAUTHORIZED` probe.
+That probe proves the gate is open without persistence, but cannot by itself
+identify the writer implementation.
 
 The Phase 13.1 repeatable, privileged p4-Vega historical-backfill CLI and
 separate read-only aggregate reconciliation gate were implemented and verified

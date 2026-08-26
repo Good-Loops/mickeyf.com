@@ -17,14 +17,23 @@ connection, compares the generic score, and writes only a strict improvement
 to `game_personal_bests`; it never reads or writes `users.p4_score`. The legacy
 HTTP request and response remain unchanged. A disposable MySQL test also drops
 the legacy column before submitting successfully. This candidate has not been
-deployed and does not authorize the production cutover sequence below.
+deployed and does not authorize the production cutover sequence below. Its
+implementation remains recorded at `2e3d4fde`; it is not the active branch
+source while the required transitional dual-write phase is staged.
 
-Compatibility between the historical dual-write source and the freeze gate was
-locally reproduced and fully tested in detached worktrees on 2026-08-26. The
-worktrees were removed without retaining a candidate ref, image, or revision,
-and no live or production state changed. See
-[`P4_DUAL_WRITE_FREEZE_COMPATIBILITY.md`](P4_DUAL_WRITE_FREEZE_COMPATIBILITY.md)
-for the exact composition, verification, and cleanup evidence.
+On 2026-08-26, detached worktrees verified historical dual-write base
+`0dbe3fb8` plus the seven storage-independent freeze-gate changes from
+`e8e1faeb`, excluding generic-authoritative writer `2e3d4fde`. Backend
+type-check, 84 unit tests, 10 migration tests, 6 dual-write integration tests,
+7 backfill/reconciliation tests, the production bundle, 14 frontend tests, and
+the frontend build passed. The checks proved frozen requests stop before
+database acquisition and enabled requests retain the dual writer's rollback
+and concurrency guarantees.
+
+The same composition is now retained on `feature/new-leaderboard` at
+`c1c742b927844e89fe9f7ab07ddb9a20501399ee`. It is a reviewable source
+checkpoint, not an approved main-branch build, image, revision, traffic target,
+or production rollback candidate; no live or production state changed.
 
 The revision-scoped p4-Vega submission freeze gate was prepared locally on
 2026-08-26. `P4_VEGA_SCORE_SUBMISSIONS_ENABLED=true` is the only value that
@@ -33,13 +42,21 @@ returns HTTP 503 `SUBMISSIONS_FROZEN` before authentication or database work.
 Login, signup, and leaderboard reads remain available, and each revision logs
 only the normalized `enabled` or `frozen` state at startup. The gate is
 storage-independent so it can be applied to both the transitional dual writer
-and the generic writer. The tracked canonical Stage B source now prepares
-zero-traffic candidates with `P4_VEGA_SCORE_SUBMISSIONS_ENABLED=false`, attests
-the exact seven-variable environment, and verifies the exact HTTP 503 freeze
-response without authentication or persistence. This repository change has not
-been synchronized to or verified against the live source-less inline trigger;
-no Stage B build ran, no revision was deployed, no traffic changed, and no
-production freeze was established.
+and the generic writer. The tracked canonical Stage B source remains
+deliberately frozen with `P4_VEGA_SCORE_SUBMISSIONS_ENABLED=false`, attests the
+exact seven-variable environment, and verifies the exact HTTP 503 freeze
+response without authentication or persistence. It has not been synchronized
+to or verified against the live source-less inline trigger; no Stage B build
+ran, no revision was deployed, no traffic changed, and no production freeze
+was established.
+
+The enabled dual-writer Stage B state is intentionally deferred until its exact
+main-branch Stage A source commit is known. Its separately reviewed source must
+pin that commit, set the literal flag to `true`, and require an anonymous HTTP
+401 `UNAUTHORIZED` probe with the existing JSON, no-store, no-cookie, redirect,
+response-size, and timeout checks. The 401 proves the gate is open and stops
+before database acquisition; it does not identify the persistence
+implementation, so it is never sufficient without the source-commit pin.
 
 The repeatable, privileged p4-Vega historical-backfill CLI and read-only
 aggregate reconciliation command were implemented and verified locally on
@@ -371,20 +388,22 @@ backfill, credential rotation, or deployment.
    use `game_personal_bests` without changing their request or response
    contracts, but do not route production traffic to the generic-only writer
    yet.
-9. Under a separate review, synchronize the reviewed canonical Stage B contents
-   into the live source-less inline trigger and verify the live trigger exactly.
-   Until that prerequisite is proven, do not deploy a freeze-gate revision or
-   add the environment variable manually.
-10. Apply the same freeze-gate change to a dual-write revision. Separately review
-    and synchronize an enabled Stage B state that sets and attests the exact
-    positive opt-in and uses a non-mutating anonymous probe. First deploy that
-    enabled zero-traffic candidate, then route all traffic to it and prove every
-    no-gate revision and admitted request has drained; only this freeze-capable
-    dual writer may serve as the pre-cutover rollback target.
-11. Deploy the freeze-capable dual writer without the positive opt-in, route all
-    traffic to it, and prove every enabled revision and in-flight score request
-    has drained. Require HTTP 503 `SUBMISSIONS_FROZEN` from the serving revision,
-    then rerun the complete reconciliation. Low traffic or a quiet interval is
+9. Retain and review the dual-writer-plus-gate source on `main`, then record its
+   exact authoritative Stage A commit. Do not synchronize an enabled Stage B
+   state while only a feature-branch commit is known, and do not add the runtime
+   flag manually.
+10. Under a separate review, synchronize an enabled Stage B source whose Stage A
+    validation rejects every commit except that exact reviewed dual-writer
+    commit, sets and attests the literal positive opt-in, and requires the
+    non-mutating anonymous HTTP 401 probe. Verify the live source-less trigger
+    exactly, deploy the zero-traffic candidate, then route all traffic to it and
+    prove every no-gate revision and admitted request has drained; only this
+    freeze-capable dual writer may serve as the pre-cutover rollback target.
+11. Under another review, synchronize the exact frozen Stage B state and deploy
+    the freeze-capable dual writer without the positive opt-in. Route all traffic
+    to it, prove every enabled revision and in-flight score request has drained,
+    and require HTTP 503 `SUBMISSIONS_FROZEN` from the serving revision before
+    rerunning the complete reconciliation. Low traffic or a quiet interval is
     not evidence of a write freeze.
 12. Deploy the generic-only writer while it remains frozen, route all traffic to
     it, drain every dual-write revision, and require the same exact

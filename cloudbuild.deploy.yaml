@@ -1,5 +1,11 @@
 # Stage B canonical source-less inline configuration.
 #
+# This tracked phase is intentionally frozen. Do not change its submission flag
+# to true until a reviewed dual-writer-plus-gate source is on main and the
+# authoritative Stage A validation below is pinned to that exact commit. An
+# anonymous HTTP 401 proves that the gate is open; it does not prove which
+# persistence implementation is running.
+#
 # Store these contents inline on the Pub/Sub trigger; do not attach repository
 # source. Configure exactly these two payload bindings:
 #   _SOURCE_BUILD_ID = $(body.message.attributes.buildId)
