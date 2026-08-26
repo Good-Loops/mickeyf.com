@@ -5,12 +5,15 @@ import {
     buildCloudSqlOperationsListArgs,
     buildCloudSqlRoleRemovalArgs,
     buildGcloudCommand,
+    buildMainTriggerDescribeArgs,
     CLOUD_SQL_ROLE_REMOVAL_PROVIDER,
     CloudSqlRoleRemovalIndeterminateError,
     createProductionCloudSqlRoleRemover,
+    INCOMPATIBLE_MAIN_BUILD_TRIGGER,
     PRODUCTION_CLOUD_SQL_TARGET,
     verifyProductionCloudSqlTarget,
     verifyNoCloudSqlOperationsInFlight,
+    verifyIncompatibleMainTriggerDisabled,
     type ExternalCommand,
     type ExternalCommandRunner,
 } from './cloudSqlRuntimeRoleRemover';
@@ -114,6 +117,48 @@ test('Cloud SQL apply preflight blocks unfinished operations', async () => {
         ),
         /unsupported Cloud SQL operation metadata/
     );
+});
+
+test('destructive schema preflight requires the exact main trigger to be disabled', async () => {
+    const exactTrigger = {
+        id: INCOMPATIBLE_MAIN_BUILD_TRIGGER.id,
+        name: INCOMPATIBLE_MAIN_BUILD_TRIGGER.name,
+        disabled: true,
+        filename: INCOMPATIBLE_MAIN_BUILD_TRIGGER.filename,
+        includedFiles: INCOMPATIBLE_MAIN_BUILD_TRIGGER.includedFiles,
+        serviceAccount: INCOMPATIBLE_MAIN_BUILD_TRIGGER.serviceAccount,
+        github: {
+            owner: INCOMPATIBLE_MAIN_BUILD_TRIGGER.repositoryOwner,
+            name: INCOMPATIBLE_MAIN_BUILD_TRIGGER.repositoryName,
+            push: { branch: INCOMPATIBLE_MAIN_BUILD_TRIGGER.branchPattern },
+        },
+    };
+    const calls: ExternalCommand[] = [];
+    await verifyIncompatibleMainTriggerDisabled(
+        1_000,
+        undefined,
+        async (command) => {
+            calls.push(command);
+            return JSON.stringify(exactTrigger);
+        }
+    );
+    assert.deepEqual(logicalGcloudArgs(calls[0]), buildMainTriggerDescribeArgs());
+
+    for (const changedTrigger of [
+        { ...exactTrigger, disabled: false },
+        { ...exactTrigger, id: 'another-trigger' },
+        { ...exactTrigger, includedFiles: ['backend/**'] },
+        { ...exactTrigger, github: { ...exactTrigger.github, push: { branch: '^dev$' } } },
+    ]) {
+        await assert.rejects(
+            () => verifyIncompatibleMainTriggerDisabled(
+                1_000,
+                undefined,
+                async () => JSON.stringify(changedTrigger)
+            ),
+            /not exactly disabled/
+        );
+    }
 });
 
 test('role remover validates the hashed context before invoking gcloud', async () => {

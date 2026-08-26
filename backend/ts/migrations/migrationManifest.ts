@@ -4,22 +4,43 @@ import path from 'node:path';
 
 export type LeaderboardTableName = 'game_runs' | 'game_personal_bests';
 
-export type MigrationDefinition = Readonly<{
+export type MigrationEffectKind = 'create-table' | 'drop-column';
+
+type MigrationMetadata = Readonly<{
     version: string;
     fileName: string;
-    tableName: LeaderboardTableName;
     sql: string;
     checksum: Buffer;
 }>;
 
+export type MigrationDefinition = MigrationMetadata & Readonly<
+    | {
+        effect: 'create-table';
+        tableName: LeaderboardTableName;
+    }
+    | {
+        effect: 'drop-column';
+        tableName: 'users';
+        columnName: 'p4_score';
+    }
+>;
+
 const MIGRATION_SPECS = Object.freeze([
     Object.freeze({
         fileName: '0001_create_game_runs.sql',
+        effect: 'create-table' as const,
         tableName: 'game_runs' as const,
     }),
     Object.freeze({
         fileName: '0002_create_game_personal_bests.sql',
+        effect: 'create-table' as const,
         tableName: 'game_personal_bests' as const,
+    }),
+    Object.freeze({
+        fileName: '0003_drop_users_p4_score.sql',
+        effect: 'drop-column' as const,
+        tableName: 'users' as const,
+        columnName: 'p4_score' as const,
     }),
 ]);
 
@@ -63,12 +84,25 @@ function readMigration(
     const sql = rawSql.toString('utf8');
     assertSingleStatement(sql, spec.fileName);
 
-    return Object.freeze({
+    const migrationMetadata = {
         version: spec.fileName.slice(0, -'.sql'.length),
         fileName: spec.fileName,
-        tableName: spec.tableName,
         sql,
         checksum: createHash('sha256').update(rawSql).digest(),
+    };
+    if (spec.effect === 'drop-column') {
+        return Object.freeze({
+            ...migrationMetadata,
+            effect: spec.effect,
+            tableName: spec.tableName,
+            columnName: spec.columnName,
+        });
+    }
+
+    return Object.freeze({
+        ...migrationMetadata,
+        effect: spec.effect,
+        tableName: spec.tableName,
     });
 }
 

@@ -1,12 +1,18 @@
 import { createHash } from 'node:crypto';
 import type { MigrationConfig } from '../config/migrationConfig';
 import {
+    legacyP4ScoreColumnExists,
     type MigrationConnection,
     tableExists,
     verifyHistoryTable,
+    verifyLegacyP4ScoreColumnAbsent,
+    verifyLegacyP4ScoreColumnPresent,
     verifyLeaderboardTable,
 } from './leaderboardSchema';
-import type { MigrationDefinition } from './migrationManifest';
+import type {
+    MigrationDefinition,
+    MigrationEffectKind,
+} from './migrationManifest';
 
 export type MigrationRunnerSettings = Pick<
     MigrationConfig,
@@ -34,6 +40,10 @@ export type MigrationPlan = Readonly<{
     applied: readonly string[];
     pending: readonly string[];
     recoverable: readonly string[];
+}>;
+
+export type ApplyMigrationOptions = Readonly<{
+    allowedEffectKinds?: readonly MigrationEffectKind[];
 }>;
 
 const CREATE_HISTORY_TABLE_SQL = `
@@ -169,21 +179,25 @@ async function inspectMigrationState(
     const recoverable: string[] = [];
 
     for (const migration of migrations) {
-        const hasTable = await tableExists(connection, migration.tableName);
         if (appliedByVersion.has(migration.version)) {
-            if (!hasTable) {
-                throw new Error(
-                    `Applied migration ${migration.version} is missing table ${migration.tableName}`
-                );
-            }
-            await verifyLeaderboardTable(connection, migration.tableName);
+            await verifyMigrationPostcondition(connection, migration);
             applied.push(migration.version);
             continue;
         }
 
         pending.push(migration.version);
-        if (hasTable) {
-            await verifyLeaderboardTable(connection, migration.tableName);
+        if (migration.effect === 'create-table') {
+            if (await tableExists(connection, migration.tableName)) {
+                await verifyLeaderboardTable(connection, migration.tableName);
+                recoverable.push(migration.version);
+            }
+            continue;
+        }
+
+        if (await legacyP4ScoreColumnExists(connection)) {
+            await verifyLegacyP4ScoreColumnPresent(connection);
+        } else {
+            await verifyLegacyP4ScoreColumnAbsent(connection);
             recoverable.push(migration.version);
         }
     }
@@ -193,6 +207,39 @@ async function inspectMigrationState(
         pending: Object.freeze(pending),
         recoverable: Object.freeze(recoverable),
     });
+}
+
+async function verifyMigrationPrecondition(
+    connection: MigrationConnection,
+    migration: MigrationDefinition
+): Promise<void> {
+    if (migration.effect === 'create-table') {
+        if (await tableExists(connection, migration.tableName)) {
+            throw new Error(
+                `Migration ${migration.version} requires table ${migration.tableName} to be absent`
+            );
+        }
+        return;
+    }
+
+    await verifyLegacyP4ScoreColumnPresent(connection);
+}
+
+async function verifyMigrationPostcondition(
+    connection: MigrationConnection,
+    migration: MigrationDefinition
+): Promise<void> {
+    if (migration.effect === 'create-table') {
+        if (!(await tableExists(connection, migration.tableName))) {
+            throw new Error(
+                `Applied migration ${migration.version} is missing table ${migration.tableName}`
+            );
+        }
+        await verifyLeaderboardTable(connection, migration.tableName);
+        return;
+    }
+
+    await verifyLegacyP4ScoreColumnAbsent(connection);
 }
 
 export async function planMigrations(
@@ -210,20 +257,29 @@ export async function planMigrations(
 export async function applyMigrations(
     connection: MigrationConnection,
     migrations: readonly MigrationDefinition[],
-    settings: MigrationRunnerSettings
+    settings: MigrationRunnerSettings,
+    options: ApplyMigrationOptions = {}
 ): Promise<MigrationPlan> {
     return withMigrationLock(connection, settings, async () => {
-        await createHistoryTable(connection);
-        const initialPlan = await inspectMigrationState(connection, migrations, true);
+        const hasHistory = await tableExists(connection, 'schema_migrations');
+        if (hasHistory) await verifyHistoryTable(connection);
+        const initialPlan = await inspectMigrationState(connection, migrations, hasHistory);
+        const allowedEffectKinds = new Set<MigrationEffectKind>(
+            options.allowedEffectKinds ?? ['create-table']
+        );
+
+        if (!hasHistory) await createHistoryTable(connection);
         const applied = [...initialPlan.applied];
 
         for (const migration of migrations) {
             if (applied.includes(migration.version)) continue;
+            if (!allowedEffectKinds.has(migration.effect)) continue;
 
             if (!initialPlan.recoverable.includes(migration.version)) {
+                await verifyMigrationPrecondition(connection, migration);
                 await connection.query(migration.sql);
-                await verifyLeaderboardTable(connection, migration.tableName);
             }
+            await verifyMigrationPostcondition(connection, migration);
 
             await connection.query(
                 `INSERT INTO schema_migrations (version, checksum, applied_at)
@@ -233,11 +289,7 @@ export async function applyMigrations(
             applied.push(migration.version);
         }
 
-        return Object.freeze({
-            applied: Object.freeze(applied),
-            pending: Object.freeze([]),
-            recoverable: Object.freeze([]),
-        });
+        return inspectMigrationState(connection, migrations, true);
     });
 }
 
@@ -291,6 +343,16 @@ export async function rollbackEmptyLeaderboardSchema(
         const plan = await inspectMigrationState(connection, migrations, true);
         if (plan.pending.length > 0 || plan.recoverable.length > 0) {
             throw new Error('Cannot roll back a partially applied migration set');
+        }
+        const irreversibleMigration = migrations.find(
+            (migration) =>
+                migration.effect === 'drop-column'
+                && plan.applied.includes(migration.version)
+        );
+        if (irreversibleMigration) {
+            throw new Error(
+                `Cannot roll back irreversible migration ${irreversibleMigration.version}`
+            );
         }
 
         let tablesLocked = false;

@@ -97,7 +97,20 @@ type CheckRow = {
     enforced: 'YES' | 'NO';
 };
 
+type LegacyP4ScoreColumnRow = {
+    name: string;
+    type: string;
+    nullable: 'YES' | 'NO';
+    characterSet: string | null;
+    collation: string | null;
+    defaultValue: string | null;
+    extra: string;
+    comment: string;
+    generationExpression: string;
+};
+
 const DATETIME_PRECISION = 6;
+const P4_SCORE_IDENTIFIER_PATTERN = '(^|[^a-z0-9_])p4_score([^a-z0-9_]|$)';
 
 const HISTORY_TABLE: ExpectedTable = Object.freeze({
     columns: Object.freeze([
@@ -356,6 +369,181 @@ export async function tableExists(
     `, [tableName]);
 
     return Number(rows[0]?.tableCount) === 1;
+}
+
+async function verifyLegacyUsersTable(connection: MigrationConnection): Promise<void> {
+    const rows = await queryRows<{ engine: string }>(connection, `
+        SELECT ENGINE AS engine
+        FROM information_schema.TABLES
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'users'
+    `);
+    assertExact('legacy users table', rows, [{ engine: 'InnoDB' }]);
+}
+
+async function readLegacyP4ScoreColumn(
+    connection: MigrationConnection
+): Promise<LegacyP4ScoreColumnRow[]> {
+    return queryRows<LegacyP4ScoreColumnRow>(connection, `
+        SELECT
+            COLUMN_NAME AS name,
+            COLUMN_TYPE AS type,
+            IS_NULLABLE AS nullable,
+            CHARACTER_SET_NAME AS characterSet,
+            COLLATION_NAME AS collation,
+            COLUMN_DEFAULT AS defaultValue,
+            EXTRA AS extra,
+            COLUMN_COMMENT AS comment,
+            GENERATION_EXPRESSION AS generationExpression
+        FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'users'
+          AND COLUMN_NAME = 'p4_score'
+    `);
+}
+
+export async function legacyP4ScoreColumnExists(
+    connection: MigrationConnection
+): Promise<boolean> {
+    return (await readLegacyP4ScoreColumn(connection)).length === 1;
+}
+
+async function verifyNoLegacyP4ScoreDependencies(
+    connection: MigrationConnection
+): Promise<void> {
+    const indexes = await queryRows<{ name: string }>(connection, `
+        SELECT INDEX_NAME AS name
+        FROM information_schema.STATISTICS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'users'
+          AND (
+              COLUMN_NAME = 'p4_score'
+              OR LOWER(EXPRESSION) REGEXP ?
+          )
+        ORDER BY INDEX_NAME, SEQ_IN_INDEX
+    `, [P4_SCORE_IDENTIFIER_PATTERN]);
+    assertExact('legacy p4_score index dependencies', indexes, []);
+
+    const foreignKeys = await queryRows<{ schemaName: string; tableName: string; name: string }>(
+        connection,
+        `
+            SELECT
+                CONSTRAINT_SCHEMA AS schemaName,
+                TABLE_NAME AS tableName,
+                CONSTRAINT_NAME AS name
+            FROM information_schema.KEY_COLUMN_USAGE
+            WHERE (
+                    TABLE_SCHEMA = DATABASE()
+                AND TABLE_NAME = 'users'
+                AND COLUMN_NAME = 'p4_score'
+            ) OR (
+                    REFERENCED_TABLE_SCHEMA = DATABASE()
+                AND REFERENCED_TABLE_NAME = 'users'
+                AND REFERENCED_COLUMN_NAME = 'p4_score'
+            )
+            ORDER BY CONSTRAINT_SCHEMA, TABLE_NAME, CONSTRAINT_NAME
+        `
+    );
+    assertExact('legacy p4_score foreign-key dependencies', foreignKeys, []);
+
+    const checks = await queryRows<{ name: string }>(connection, `
+        SELECT tableConstraints.CONSTRAINT_NAME AS name
+        FROM information_schema.TABLE_CONSTRAINTS AS tableConstraints
+        INNER JOIN information_schema.CHECK_CONSTRAINTS AS checkConstraints
+            ON checkConstraints.CONSTRAINT_SCHEMA = tableConstraints.CONSTRAINT_SCHEMA
+           AND checkConstraints.CONSTRAINT_NAME = tableConstraints.CONSTRAINT_NAME
+        WHERE tableConstraints.TABLE_SCHEMA = DATABASE()
+          AND tableConstraints.TABLE_NAME = 'users'
+          AND tableConstraints.CONSTRAINT_TYPE = 'CHECK'
+          AND LOWER(checkConstraints.CHECK_CLAUSE) REGEXP ?
+        ORDER BY tableConstraints.CONSTRAINT_NAME
+    `, [P4_SCORE_IDENTIFIER_PATTERN]);
+    assertExact('legacy p4_score check dependencies', checks, []);
+
+    const generatedColumns = await queryRows<{ name: string }>(connection, `
+        SELECT COLUMN_NAME AS name
+        FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = 'users'
+          AND GENERATION_EXPRESSION <> ''
+          AND LOWER(GENERATION_EXPRESSION) REGEXP ?
+        ORDER BY ORDINAL_POSITION
+    `, [P4_SCORE_IDENTIFIER_PATTERN]);
+    assertExact('legacy p4_score generated-column dependencies', generatedColumns, []);
+
+    const views = await queryRows<{ name: string }>(connection, `
+        SELECT TABLE_NAME AS name
+        FROM information_schema.VIEWS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND (
+              VIEW_DEFINITION IS NULL
+              OR LOWER(VIEW_DEFINITION) REGEXP ?
+          )
+        ORDER BY TABLE_NAME
+    `, [P4_SCORE_IDENTIFIER_PATTERN]);
+    assertExact('legacy p4_score view dependencies or unreadable views', views, []);
+
+    const triggers = await queryRows<{ name: string }>(connection, `
+        SELECT TRIGGER_NAME AS name
+        FROM information_schema.TRIGGERS
+        WHERE TRIGGER_SCHEMA = DATABASE()
+          AND (
+              ACTION_STATEMENT IS NULL
+              OR LOWER(ACTION_STATEMENT) REGEXP ?
+          )
+        ORDER BY TRIGGER_NAME
+    `, [P4_SCORE_IDENTIFIER_PATTERN]);
+    assertExact('legacy p4_score trigger dependencies or unreadable triggers', triggers, []);
+
+    const routines = await queryRows<{ type: string; name: string }>(connection, `
+        SELECT ROUTINE_TYPE AS type, ROUTINE_NAME AS name
+        FROM information_schema.ROUTINES
+        WHERE ROUTINE_SCHEMA = DATABASE()
+          AND (
+              ROUTINE_DEFINITION IS NULL
+              OR LOWER(ROUTINE_DEFINITION) REGEXP ?
+          )
+        ORDER BY ROUTINE_TYPE, ROUTINE_NAME
+    `, [P4_SCORE_IDENTIFIER_PATTERN]);
+    assertExact('legacy p4_score routine dependencies or unreadable routines', routines, []);
+
+    const events = await queryRows<{ name: string }>(connection, `
+        SELECT EVENT_NAME AS name
+        FROM information_schema.EVENTS
+        WHERE EVENT_SCHEMA = DATABASE()
+          AND (
+              EVENT_DEFINITION IS NULL
+              OR LOWER(EVENT_DEFINITION) REGEXP ?
+          )
+        ORDER BY EVENT_NAME
+    `, [P4_SCORE_IDENTIFIER_PATTERN]);
+    assertExact('legacy p4_score event dependencies or unreadable events', events, []);
+}
+
+export async function verifyLegacyP4ScoreColumnPresent(
+    connection: MigrationConnection
+): Promise<void> {
+    await verifyLegacyUsersTable(connection);
+    assertExact('legacy users.p4_score column', await readLegacyP4ScoreColumn(connection), [{
+        name: 'p4_score',
+        type: 'int',
+        nullable: 'YES',
+        characterSet: null,
+        collation: null,
+        defaultValue: null,
+        extra: '',
+        comment: '',
+        generationExpression: '',
+    }]);
+    await verifyNoLegacyP4ScoreDependencies(connection);
+}
+
+export async function verifyLegacyP4ScoreColumnAbsent(
+    connection: MigrationConnection
+): Promise<void> {
+    await verifyLegacyUsersTable(connection);
+    assertExact('legacy users.p4_score postcondition', await readLegacyP4ScoreColumn(connection), []);
+    await verifyNoLegacyP4ScoreDependencies(connection);
 }
 
 export async function verifyHistoryTable(connection: MigrationConnection): Promise<void> {

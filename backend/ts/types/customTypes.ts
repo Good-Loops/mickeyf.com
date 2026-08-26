@@ -13,12 +13,10 @@
  *
  * Contract notes:
  * - Field names use snake_case to align with persisted/API representations used in this codebase.
- * - `p4_score` may be `null` when a user has not recorded a score.
  */
 export interface User {
     user_id: number;
     user_name: string;
     email: string;
     user_password: string;
-    p4_score: number | null;
 }

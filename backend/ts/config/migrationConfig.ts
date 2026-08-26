@@ -156,6 +156,8 @@ export type RuntimeGrantCommand = 'plan' | 'verify' | 'apply';
 
 export type P4GrantRetirementCommand = 'plan' | 'verify' | 'apply';
 
+export type P4ScoreDropCommand = 'plan' | 'verify' | 'apply';
+
 function assertTargetConfirmed(
     config: Pick<MigrationConfig, 'host' | 'port' | 'database'>,
     env: Environment
@@ -349,6 +351,47 @@ export function assertP4GrantRetirementCommandConfirmed(
 
     return loadPlanAndServerConfirmation(
         'MIGRATION_CONFIRM_P4_GRANT_RETIREMENT_PLAN_SHA256',
+        expectedCloudSqlTarget,
+        env
+    );
+}
+
+export function assertP4ScoreDropCommandConfirmed(
+    command: P4ScoreDropCommand,
+    config: Pick<MigrationConfig, 'host' | 'port' | 'database'>,
+    expectedCloudSqlTarget: CloudSqlTarget,
+    env: Environment = process.env
+): RuntimeGrantConfirmation {
+    assertTargetConfirmed(config, env);
+    if (command !== 'apply') return Object.freeze({});
+
+    assertCloudSqlTargetConfirmed(expectedCloudSqlTarget, env);
+    if (env.MIGRATION_CONFIRM_GENERIC_ONLY_FROZEN !== '1') {
+        throw new Error(
+            'MIGRATION_CONFIRM_GENERIC_ONLY_FROZEN=1 is required before dropping p4_score'
+        );
+    }
+    if (
+        env.MIGRATION_CONFIRM_MAIN_TRIGGER_DISABLED
+            !== 'main-push-mickeyf-com -> disabled'
+    ) {
+        throw new Error(
+            'MIGRATION_CONFIRM_MAIN_TRIGGER_DISABLED must confirm the incompatible main trigger is disabled'
+        );
+    }
+    if (env.MIGRATION_CONFIRM_P4_SCORE_DROP !== 'users.p4_score -> dropped') {
+        throw new Error(
+            'MIGRATION_CONFIRM_P4_SCORE_DROP must confirm the exact irreversible column removal'
+        );
+    }
+    if (env.MIGRATION_ALLOW_P4_SCORE_DROP !== '1') {
+        throw new Error(
+            'MIGRATION_ALLOW_P4_SCORE_DROP=1 is required for the p4_score drop apply action'
+        );
+    }
+
+    return loadPlanAndServerConfirmation(
+        'MIGRATION_CONFIRM_P4_SCORE_DROP_PLAN_SHA256',
         expectedCloudSqlTarget,
         env
     );

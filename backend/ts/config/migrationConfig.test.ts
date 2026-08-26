@@ -4,6 +4,7 @@ import {
     assertDatabaseConfirmation,
     assertMutationAuthorized,
     assertP4GrantRetirementCommandConfirmed,
+    assertP4ScoreDropCommandConfirmed,
     assertP4VegaDataOperationAuthorized,
     assertRuntimeGrantCommandConfirmed,
     loadMigrationConfig,
@@ -49,6 +50,19 @@ function confirmP4GrantRetirement(
         command,
         config,
         'cms_mickeyf@%',
+        runtimeGrantCloudSqlTarget,
+        environment
+    );
+}
+
+function confirmP4ScoreDrop(
+    command: 'plan' | 'verify' | 'apply',
+    config: ReturnType<typeof loadMigrationConfig>,
+    environment: Readonly<Record<string, string | undefined>>
+) {
+    return assertP4ScoreDropCommandConfirmed(
+        command,
+        config,
         runtimeGrantCloudSqlTarget,
         environment
     );
@@ -481,4 +495,52 @@ test('p4 grant-retirement apply has isolated fail-closed confirmations', () => {
         }),
         /MIGRATION_ALLOW_RUNTIME_GRANTS=1/
     );
+});
+
+test('p4_score drop apply requires its exact destructive confirmations', () => {
+    const config = loadMigrationConfig(migrationEnvironment);
+    const baseEnvironment = {
+        MIGRATION_CONFIRM_DATABASE: migrationEnvironment.MIGRATION_DB_NAME,
+        MIGRATION_CONFIRM_TARGET: '127.0.0.1:3306/migration_test',
+    };
+    const confirmedEnvironment = {
+        ...baseEnvironment,
+        MIGRATION_CONFIRM_CLOUD_SQL_PROJECT: runtimeGrantCloudSqlTarget.project,
+        MIGRATION_CONFIRM_CLOUD_SQL_INSTANCE: runtimeGrantCloudSqlTarget.instance,
+        MIGRATION_CONFIRM_CLOUD_SQL_CONNECTION_NAME:
+            runtimeGrantCloudSqlTarget.connectionName,
+        MIGRATION_CONFIRM_GENERIC_ONLY_FROZEN: '1',
+        MIGRATION_CONFIRM_MAIN_TRIGGER_DISABLED: 'main-push-mickeyf-com -> disabled',
+        MIGRATION_CONFIRM_P4_SCORE_DROP: 'users.p4_score -> dropped',
+        MIGRATION_ALLOW_P4_SCORE_DROP: '1',
+        MIGRATION_CONFIRM_P4_SCORE_DROP_PLAN_SHA256: 'c'.repeat(64),
+        MIGRATION_CONFIRM_SERVER_UUID: runtimeGrantCloudSqlTarget.serverUuid,
+    };
+
+    assert.deepEqual(confirmP4ScoreDrop('plan', config, baseEnvironment), {});
+    assert.deepEqual(confirmP4ScoreDrop('verify', config, baseEnvironment), {});
+    assert.deepEqual(confirmP4ScoreDrop('apply', config, confirmedEnvironment), {
+        approvedPlanSha256: 'c'.repeat(64),
+        confirmedServerUuid: runtimeGrantCloudSqlTarget.serverUuid,
+    });
+
+    for (const [name, value] of [
+        ['MIGRATION_CONFIRM_CLOUD_SQL_PROJECT', 'another-project'],
+        ['MIGRATION_CONFIRM_CLOUD_SQL_INSTANCE', 'another-instance'],
+        ['MIGRATION_CONFIRM_CLOUD_SQL_CONNECTION_NAME', 'another:region:instance'],
+        ['MIGRATION_CONFIRM_GENERIC_ONLY_FROZEN', undefined],
+        ['MIGRATION_CONFIRM_MAIN_TRIGGER_DISABLED', 'still enabled'],
+        ['MIGRATION_CONFIRM_P4_SCORE_DROP', 'drop something'],
+        ['MIGRATION_ALLOW_P4_SCORE_DROP', undefined],
+        ['MIGRATION_CONFIRM_P4_SCORE_DROP_PLAN_SHA256', 'C'.repeat(64)],
+        ['MIGRATION_CONFIRM_SERVER_UUID', 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'],
+    ] as const) {
+        assert.throws(
+            () => confirmP4ScoreDrop('apply', config, {
+                ...confirmedEnvironment,
+                [name]: value,
+            }),
+            new RegExp(name)
+        );
+    }
 });

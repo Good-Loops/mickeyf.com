@@ -24,7 +24,9 @@ const EXPECTED_TEST_TARGET = Object.freeze({
 });
 
 const config = loadMigrationConfig();
-const migrations = loadMigrationManifest();
+const migrations = loadMigrationManifest().filter(
+    ({ effect }) => effect === 'create-table'
+);
 const migrationTestRootUser = process.env.MIGRATION_TEST_ROOT_USER;
 const migrationTestRootPassword = process.env.MIGRATION_TEST_ROOT_PASSWORD;
 let connection: Connection;

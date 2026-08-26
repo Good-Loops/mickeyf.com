@@ -19,7 +19,15 @@ test('migration manifest preserves lexical order and hashes exact LF bytes', () 
 
     assert.deepEqual(
         migrations.map(({ version }) => version),
-        ['0001_create_game_runs', '0002_create_game_personal_bests']
+        [
+            '0001_create_game_runs',
+            '0002_create_game_personal_bests',
+            '0003_drop_users_p4_score',
+        ]
+    );
+    assert.deepEqual(
+        migrations.map(({ effect }) => effect),
+        ['create-table', 'create-table', 'drop-column']
     );
     for (const migration of migrations) {
         const rawSql = readFileSync(path.join(migrationDirectory, migration.fileName));
@@ -29,12 +37,16 @@ test('migration manifest preserves lexical order and hashes exact LF bytes', () 
             createHash('sha256').update(rawSql).digest()
         );
     }
+    assert.equal(
+        migrations[2].sql,
+        'ALTER TABLE users DROP COLUMN p4_score, ALGORITHM=INSTANT;\n'
+    );
 });
 
 test('migration manifest refuses unreviewed SQL files', () => {
     const directory = copyMigrationDirectory();
     try {
-        writeFileSync(path.join(directory, '0003_unreviewed.sql'), 'SELECT 1;\n');
+        writeFileSync(path.join(directory, '0004_unreviewed.sql'), 'SELECT 1;\n');
         assert.throws(
             () => loadMigrationManifest(directory),
             /must contain exactly/

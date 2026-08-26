@@ -25,6 +25,19 @@ export const PRODUCTION_CLOUD_SQL_TARGET = Object.freeze({
     serverUuid: 'd1e6865c-ecad-11ee-a6b0-42010a400002',
 });
 
+export const INCOMPATIBLE_MAIN_BUILD_TRIGGER = Object.freeze({
+    id: 'ef5a2981-95be-4f4d-af91-f997fde73356',
+    name: 'main-push-mickeyf-com',
+    region: 'global',
+    repositoryOwner: 'Good-Loops',
+    repositoryName: 'mickeyf.com',
+    branchPattern: '^main$',
+    filename: 'cloudbuild.yaml',
+    includedFiles: Object.freeze(['backend/**', 'Dockerfile', 'cloudbuild.yaml', '.dockerignore']),
+    serviceAccount:
+        'projects/-/serviceAccounts/cloud-build@noted-reef-387021.iam.gserviceaccount.com',
+});
+
 export type ExternalCommand = Readonly<{
     executable: string;
     args: readonly string[];
@@ -80,6 +93,19 @@ export function buildCloudSqlOperationsListArgs(): readonly string[] {
         `--instance=${PRODUCTION_CLOUD_SQL_TARGET.instance}`,
         '--filter=status!=DONE',
         '--limit=100',
+        '--format=json',
+        '--quiet',
+    ]);
+}
+
+export function buildMainTriggerDescribeArgs(): readonly string[] {
+    return Object.freeze([
+        'builds',
+        'triggers',
+        'describe',
+        INCOMPATIBLE_MAIN_BUILD_TRIGGER.id,
+        `--project=${PRODUCTION_CLOUD_SQL_TARGET.project}`,
+        `--region=${INCOMPATIBLE_MAIN_BUILD_TRIGGER.region}`,
         '--format=json',
         '--quiet',
     ]);
@@ -211,7 +237,54 @@ export async function verifyNoCloudSqlOperationsInFlight(
         (operation as { status?: unknown })?.status !== 'DONE').length;
     if (unfinishedCount > 0) {
         throw new Error(
-            `Cloud SQL has ${unfinishedCount} unfinished operation(s); runtime grant apply is blocked`
+            `Cloud SQL has ${unfinishedCount} unfinished operation(s); privileged apply is blocked`
+        );
+    }
+}
+
+export async function verifyIncompatibleMainTriggerDisabled(
+    timeoutMs: number,
+    signal?: AbortSignal,
+    runner: ExternalCommandRunner = runExternalCommand
+): Promise<void> {
+    const output = await runner(
+        buildGcloudCommand(buildMainTriggerDescribeArgs()),
+        { timeoutMs, signal }
+    );
+    let trigger: unknown;
+    try {
+        trigger = JSON.parse(output);
+    } catch {
+        throw new Error('gcloud returned invalid Cloud Build trigger metadata');
+    }
+
+    const observed = trigger as {
+        id?: unknown;
+        name?: unknown;
+        disabled?: unknown;
+        filename?: unknown;
+        includedFiles?: unknown;
+        serviceAccount?: unknown;
+        github?: {
+            owner?: unknown;
+            name?: unknown;
+            push?: { branch?: unknown };
+        };
+    };
+    if (
+        observed.id !== INCOMPATIBLE_MAIN_BUILD_TRIGGER.id
+        || observed.name !== INCOMPATIBLE_MAIN_BUILD_TRIGGER.name
+        || observed.disabled !== true
+        || observed.filename !== INCOMPATIBLE_MAIN_BUILD_TRIGGER.filename
+        || JSON.stringify(observed.includedFiles)
+            !== JSON.stringify(INCOMPATIBLE_MAIN_BUILD_TRIGGER.includedFiles)
+        || observed.serviceAccount !== INCOMPATIBLE_MAIN_BUILD_TRIGGER.serviceAccount
+        || observed.github?.owner !== INCOMPATIBLE_MAIN_BUILD_TRIGGER.repositoryOwner
+        || observed.github?.name !== INCOMPATIBLE_MAIN_BUILD_TRIGGER.repositoryName
+        || observed.github?.push?.branch !== INCOMPATIBLE_MAIN_BUILD_TRIGGER.branchPattern
+    ) {
+        throw new Error(
+            'The pinned incompatible main Cloud Build trigger is not exactly disabled'
         );
     }
 }

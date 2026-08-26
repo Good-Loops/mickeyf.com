@@ -26,6 +26,11 @@ const EXPECTED_TEST_TARGET = Object.freeze({
 
 const config = loadMigrationConfig();
 const migrations = loadMigrationManifest();
+const additiveMigrations = migrations.filter(({ effect }) => effect === 'create-table');
+const p4ScoreDropMigration = migrations.find(({ effect }) => effect === 'drop-column');
+if (!p4ScoreDropMigration || p4ScoreDropMigration.effect !== 'drop-column') {
+    throw new Error('The reviewed p4_score drop migration is missing from the manifest');
+}
 let connection: Connection;
 
 type CliResult = Readonly<{
@@ -62,7 +67,7 @@ function assertSafeTestEnvironment(): void {
 }
 
 function runMigrationCli(
-    command: 'plan' | 'apply' | 'rollback-empty',
+    command: 'plan' | 'apply',
     overrides: Readonly<Record<string, string | undefined>> = {}
 ): Promise<CliResult> {
     const environment = { ...process.env };
@@ -102,6 +107,7 @@ function runMigrationCli(
 }
 
 async function resetFixture(): Promise<void> {
+    await connection.query('DROP VIEW IF EXISTS p4_score_dependency');
     await connection.query('SET FOREIGN_KEY_CHECKS = 0');
     try {
         await connection.query(`
@@ -146,6 +152,17 @@ async function tableCount(tableName: string): Promise<number> {
     return Number(rows[0].tableCount);
 }
 
+async function columnCount(tableName: string, columnName: string): Promise<number> {
+    const [rows] = await connection.query<Array<RowDataPacket & { columnCount: number }>>(`
+        SELECT COUNT(*) AS columnCount
+        FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = ?
+          AND COLUMN_NAME = ?
+    `, [tableName, columnName]);
+    return Number(rows[0].columnCount);
+}
+
 before(async () => {
     assertSafeTestEnvironment();
     connection = await mysql.createConnection({
@@ -186,12 +203,12 @@ test('clean apply is additive, checksum-recorded, and idempotent', async () => {
         'SELECT * FROM users ORDER BY user_id'
     );
 
-    const initialPlan = await planMigrations(migrationConnection, migrations, config);
-    assert.deepEqual(initialPlan.pending, migrations.map(({ version }) => version));
+    const initialPlan = await planMigrations(migrationConnection, additiveMigrations, config);
+    assert.deepEqual(initialPlan.pending, additiveMigrations.map(({ version }) => version));
     assert.equal(await tableCount('schema_migrations'), 0);
 
-    const appliedPlan = await applyMigrations(migrationConnection, migrations, config);
-    assert.deepEqual(appliedPlan.applied, migrations.map(({ version }) => version));
+    const appliedPlan = await applyMigrations(migrationConnection, additiveMigrations, config);
+    assert.deepEqual(appliedPlan.applied, additiveMigrations.map(({ version }) => version));
     assert.deepEqual(appliedPlan.pending, []);
 
     const [historyBefore] = await connection.query<RowDataPacket[]>(`
@@ -201,14 +218,14 @@ test('clean apply is additive, checksum-recorded, and idempotent', async () => {
     `);
     assert.deepEqual(
         historyBefore.map(({ version, checksum }) => ({ version, checksum })),
-        migrations.map(({ version, checksum }) => ({
+        additiveMigrations.map(({ version, checksum }) => ({
             version,
             checksum: checksum.toString('hex').toUpperCase(),
         }))
     );
 
-    const secondPlan = await applyMigrations(migrationConnection, migrations, config);
-    assert.deepEqual(secondPlan.applied, migrations.map(({ version }) => version));
+    const secondPlan = await applyMigrations(migrationConnection, additiveMigrations, config);
+    assert.deepEqual(secondPlan.applied, additiveMigrations.map(({ version }) => version));
     const [historyAfter] = await connection.query<RowDataPacket[]>(`
         SELECT version, HEX(checksum) AS checksum, applied_at AS appliedAt
         FROM schema_migrations
@@ -231,8 +248,8 @@ test('clean apply is additive, checksum-recorded, and idempotent', async () => {
 
 test('checksum drift and an existing wrong-shaped table fail closed', async () => {
     const migrationConnection = asMigrationConnection(connection);
-    await applyMigrations(migrationConnection, migrations, config);
-    const changedMigrations: readonly MigrationDefinition[] = migrations.map((migration, index) =>
+    await applyMigrations(migrationConnection, additiveMigrations, config);
+    const changedMigrations: readonly MigrationDefinition[] = additiveMigrations.map((migration, index) =>
         index === 0
             ? Object.freeze({ ...migration, checksum: Buffer.alloc(32, 0xff) })
             : migration
@@ -253,24 +270,23 @@ test('checksum drift and an existing wrong-shaped table fail closed', async () =
           COLLATE = utf8mb4_unicode_ci
     `);
     await assert.rejects(
-        () => applyMigrations(migrationConnection, migrations, config),
+        () => applyMigrations(migrationConnection, additiveMigrations, config),
         /does not match the reviewed migration schema/
     );
-    const [history] = await connection.query<RowDataPacket[]>('SELECT * FROM schema_migrations');
-    assert.equal(history.length, 0);
+    assert.equal(await tableCount('schema_migrations'), 0);
     assert.equal(await tableCount('game_personal_bests'), 0);
 });
 
 test('recovery rejects a same-named but weakened check constraint', async () => {
-    const weakenedSql = migrations[0].sql.replace(
+    const weakenedSql = additiveMigrations[0].sql.replace(
         'CHECK (rules_version > 0)',
         'CHECK (rules_version >= 0)'
     );
-    assert.notEqual(weakenedSql, migrations[0].sql);
+    assert.notEqual(weakenedSql, additiveMigrations[0].sql);
     await connection.query(weakenedSql);
 
     await assert.rejects(
-        () => planMigrations(asMigrationConnection(connection), migrations, config),
+        () => planMigrations(asMigrationConnection(connection), additiveMigrations, config),
         /game_runs checks does not match the reviewed migration schema/
     );
     assert.equal(await tableCount('schema_migrations'), 0);
@@ -278,7 +294,7 @@ test('recovery rejects a same-named but weakened check constraint', async () => 
 
 test('history rows are durable even when the server session began with autocommit off', async () => {
     await connection.query('SET SESSION autocommit = 0');
-    await applyMigrations(asMigrationConnection(connection), migrations, config);
+    await applyMigrations(asMigrationConnection(connection), additiveMigrations, config);
 
     const [autocommitRows] = await connection.query<Array<RowDataPacket & {
         autocommitEnabled: number;
@@ -298,7 +314,7 @@ test('history rows are durable even when the server session began with autocommi
         );
         assert.deepEqual(
             historyRows.map(({ version }) => version),
-            migrations.map(({ version }) => version)
+            additiveMigrations.map(({ version }) => version)
         );
     } finally {
         await observer.end();
@@ -307,14 +323,14 @@ test('history rows are durable even when the server session began with autocommi
 
 test('unrecorded atomic DDL is verified and safely resumed', async () => {
     const migrationConnection = asMigrationConnection(connection);
-    await connection.query(migrations[0].sql);
+    await connection.query(additiveMigrations[0].sql);
 
-    const plan = await planMigrations(migrationConnection, migrations, config);
-    assert.deepEqual(plan.recoverable, [migrations[0].version]);
-    assert.deepEqual(plan.pending, migrations.map(({ version }) => version));
+    const plan = await planMigrations(migrationConnection, additiveMigrations, config);
+    assert.deepEqual(plan.recoverable, [additiveMigrations[0].version]);
+    assert.deepEqual(plan.pending, additiveMigrations.map(({ version }) => version));
 
-    const applied = await applyMigrations(migrationConnection, migrations, config);
-    assert.deepEqual(applied.applied, migrations.map(({ version }) => version));
+    const applied = await applyMigrations(migrationConnection, additiveMigrations, config);
+    assert.deepEqual(applied.applied, additiveMigrations.map(({ version }) => version));
     assert.equal(await tableCount('game_personal_bests'), 1);
 });
 
@@ -335,7 +351,7 @@ test('advisory lock contention fails without applying partial schema', async () 
         assert.equal(Number(lockRows[0].acquired), 1);
 
         await assert.rejects(
-            () => applyMigrations(asMigrationConnection(connection), migrations, {
+            () => applyMigrations(asMigrationConnection(connection), additiveMigrations, {
                 ...config,
                 advisoryLockTimeoutSeconds: 0,
             }),
@@ -349,7 +365,7 @@ test('advisory lock contention fails without applying partial schema', async () 
     }
 });
 
-test('shipped CLI enforces action-specific gates before applying or rolling back', async () => {
+test('shipped generic CLI applies only additive migrations and leaves 0003 pending', async () => {
     const deniedAccount = await runMigrationCli('plan', {
         MIGRATION_CONFIRM_ACCOUNT: 'different-account@%',
     });
@@ -368,44 +384,200 @@ test('shipped CLI enforces action-specific gates before applying or rolling back
 
     const applied = await runMigrationCli('apply');
     assert.equal(applied.exitCode, 0, applied.stderr);
-    assert.match(applied.stdout, /Pending migrations: none/);
+    assert.match(
+        applied.stdout,
+        new RegExp(`Pending migrations: ${p4ScoreDropMigration.version}`)
+    );
     assert.equal(await tableCount('game_runs'), 1);
 
     const planned = await runMigrationCli('plan', {
         MIGRATION_CONFIRM_DATABASE: undefined,
         MIGRATION_CONFIRM_TARGET: undefined,
         MIGRATION_ALLOW_APPLY: undefined,
-        MIGRATION_ALLOW_ROLLBACK_EMPTY: undefined,
     });
     assert.equal(planned.exitCode, 0, planned.stderr);
-    assert.match(planned.stdout, /Pending migrations: none/);
-
-    const deniedRollback = await runMigrationCli('rollback-empty', {
-        MIGRATION_DB_PORT: '9',
-        MIGRATION_CONFIRM_TARGET: `127.0.0.1:9/${config.database}`,
-        MIGRATION_ALLOW_ROLLBACK_EMPTY: undefined,
-    });
-    assert.equal(deniedRollback.exitCode, 1);
-    assert.match(deniedRollback.stderr, /MIGRATION_ALLOW_ROLLBACK_EMPTY=1/);
+    assert.match(
+        planned.stdout,
+        new RegExp(`Pending migrations: ${p4ScoreDropMigration.version}`)
+    );
     assert.equal(await tableCount('game_runs'), 1);
+    assert.equal(await tableCount('schema_migrations'), 1);
+});
 
-    const rolledBack = await runMigrationCli('rollback-empty');
-    assert.equal(rolledBack.exitCode, 0, rolledBack.stderr);
-    assert.match(rolledBack.stdout, /schema rolled back/);
-    assert.equal(await tableCount('schema_migrations'), 0);
+test('explicit authorization applies 0003 once without changing users or generic data', async () => {
+    const migrationConnection = asMigrationConnection(connection);
+    await applyMigrations(migrationConnection, additiveMigrations, config);
+    await connection.query(`
+        INSERT INTO game_personal_bests (
+            game_id,
+            rules_version,
+            user_id,
+            score,
+            completion_time_ms,
+            source_game_run_id,
+            recorded_at
+        ) VALUES ('p4-vega', 1, 2, 990, NULL, NULL, UTC_TIMESTAMP(6))
+    `);
+    const [usersBefore] = await connection.query<RowDataPacket[]>(`
+        SELECT user_id, user_name, email, user_password
+        FROM users
+        ORDER BY user_id
+    `);
+    const [bestsBefore] = await connection.query<RowDataPacket[]>(`
+        SELECT * FROM game_personal_bests ORDER BY game_id, rules_version, user_id
+    `);
+
+    const appliedPlan = await applyMigrations(
+        migrationConnection,
+        migrations,
+        config,
+        { allowedEffectKinds: ['drop-column'] }
+    );
+    assert.deepEqual(appliedPlan.applied, migrations.map(({ version }) => version));
+    assert.deepEqual(appliedPlan.pending, []);
+    assert.equal(await columnCount('users', 'p4_score'), 0);
+
+    const [historyBefore] = await connection.query<RowDataPacket[]>(`
+        SELECT version, HEX(checksum) AS checksum, applied_at AS appliedAt
+        FROM schema_migrations
+        ORDER BY version
+    `);
+    assert.deepEqual(
+        historyBefore.map(({ version, checksum }) => ({ version, checksum })),
+        migrations.map(({ version, checksum }) => ({
+            version,
+            checksum: checksum.toString('hex').toUpperCase(),
+        }))
+    );
+    const [usersAfter] = await connection.query<RowDataPacket[]>(`
+        SELECT user_id, user_name, email, user_password
+        FROM users
+        ORDER BY user_id
+    `);
+    const [bestsAfter] = await connection.query<RowDataPacket[]>(`
+        SELECT * FROM game_personal_bests ORDER BY game_id, rules_version, user_id
+    `);
+    assert.deepEqual(usersAfter, usersBefore);
+    assert.deepEqual(bestsAfter, bestsBefore);
+
+    const rerunPlan = await applyMigrations(
+        migrationConnection,
+        migrations,
+        config,
+        { allowedEffectKinds: ['drop-column'] }
+    );
+    assert.deepEqual(rerunPlan.applied, migrations.map(({ version }) => version));
+    const [historyAfter] = await connection.query<RowDataPacket[]>(`
+        SELECT version, HEX(checksum) AS checksum, applied_at AS appliedAt
+        FROM schema_migrations
+        ORDER BY version
+    `);
+    assert.deepEqual(historyAfter, historyBefore);
+});
+
+test('0003 recovery records an already-absent p4_score without rerunning DDL', async () => {
+    const migrationConnection = asMigrationConnection(connection);
+    await applyMigrations(migrationConnection, additiveMigrations, config);
+    await connection.query(p4ScoreDropMigration.sql);
+    const [usersCreateBefore] = await connection.query<RowDataPacket[]>('SHOW CREATE TABLE users');
+
+    const recoveryPlan = await planMigrations(migrationConnection, migrations, config);
+    assert.deepEqual(recoveryPlan.recoverable, [p4ScoreDropMigration.version]);
+    assert.deepEqual(recoveryPlan.pending, [p4ScoreDropMigration.version]);
+
+    const appliedPlan = await applyMigrations(
+        migrationConnection,
+        migrations,
+        config,
+        { allowedEffectKinds: ['drop-column'] }
+    );
+    assert.deepEqual(appliedPlan.applied, migrations.map(({ version }) => version));
+    assert.deepEqual(appliedPlan.pending, []);
+    const [usersCreateAfter] = await connection.query<RowDataPacket[]>('SHOW CREATE TABLE users');
+    assert.deepEqual(usersCreateAfter, usersCreateBefore);
+
+    const [history] = await connection.query<Array<RowDataPacket & {
+        version: string;
+        checksum: string;
+    }>>(`
+        SELECT version, HEX(checksum) AS checksum
+        FROM schema_migrations
+        WHERE version = ?
+    `, [p4ScoreDropMigration.version]);
+    assert.deepEqual(history, [{
+        version: p4ScoreDropMigration.version,
+        checksum: p4ScoreDropMigration.checksum.toString('hex').toUpperCase(),
+    }]);
+});
+
+test('0003 refuses a p4_score dependency or wrong source column shape', async () => {
+    const migrationConnection = asMigrationConnection(connection);
+    await applyMigrations(migrationConnection, additiveMigrations, config);
+    await connection.query(`
+        CREATE VIEW p4_score_dependency AS
+        SELECT user_id, p4_score FROM users
+    `);
+
+    await assert.rejects(
+        () => planMigrations(migrationConnection, migrations, config),
+        /p4_score view dependencies/
+    );
+    assert.equal(await columnCount('users', 'p4_score'), 1);
+
+    await resetFixture();
+    await applyMigrations(migrationConnection, additiveMigrations, config);
+    await connection.query('ALTER TABLE users MODIFY COLUMN p4_score BIGINT NULL');
+    await assert.rejects(
+        () => applyMigrations(
+            migrationConnection,
+            migrations,
+            config,
+            { allowedEffectKinds: ['drop-column'] }
+        ),
+        /legacy users\.p4_score column does not match the reviewed migration schema/
+    );
+    assert.equal(await columnCount('users', 'p4_score'), 1);
+    const [history] = await connection.query<RowDataPacket[]>(
+        'SELECT version FROM schema_migrations ORDER BY version'
+    );
+    assert.deepEqual(
+        history.map(({ version }) => version),
+        additiveMigrations.map(({ version }) => version)
+    );
+});
+
+test('full-manifest rollback refuses an applied irreversible 0003', async () => {
+    const migrationConnection = asMigrationConnection(connection);
+    await applyMigrations(migrationConnection, additiveMigrations, config);
+    await applyMigrations(
+        migrationConnection,
+        migrations,
+        config,
+        { allowedEffectKinds: ['drop-column'] }
+    );
+
+    await assert.rejects(
+        () => rollbackEmptyLeaderboardSchema(migrationConnection, migrations, config),
+        new RegExp(`irreversible migration ${p4ScoreDropMigration.version}`)
+    );
+    assert.equal(await tableCount('schema_migrations'), 1);
+    assert.equal(await tableCount('game_runs'), 1);
+    assert.equal(await tableCount('game_personal_bests'), 1);
+    assert.equal(await tableCount('users'), 1);
+    assert.equal(await columnCount('users', 'p4_score'), 0);
 });
 
 test('empty rollback is complete, while any ledger data makes it refuse', async () => {
     const migrationConnection = asMigrationConnection(connection);
-    await applyMigrations(migrationConnection, migrations, config);
-    await rollbackEmptyLeaderboardSchema(migrationConnection, migrations, config);
+    await applyMigrations(migrationConnection, additiveMigrations, config);
+    await rollbackEmptyLeaderboardSchema(migrationConnection, additiveMigrations, config);
 
     assert.equal(await tableCount('schema_migrations'), 0);
     assert.equal(await tableCount('game_runs'), 0);
     assert.equal(await tableCount('game_personal_bests'), 0);
     assert.equal(await tableCount('users'), 1);
 
-    await applyMigrations(migrationConnection, migrations, config);
+    await applyMigrations(migrationConnection, additiveMigrations, config);
     const [result] = await connection.query<ResultSetHeader>(`
         INSERT INTO game_runs (
             game_id,
@@ -432,7 +604,7 @@ test('empty rollback is complete, while any ledger data makes it refuse', async 
     assert.equal(result.affectedRows, 1);
 
     await assert.rejects(
-        () => rollbackEmptyLeaderboardSchema(migrationConnection, migrations, config),
+        () => rollbackEmptyLeaderboardSchema(migrationConnection, additiveMigrations, config),
         /refused because leaderboard tables contain data/
     );
     assert.equal(await tableCount('schema_migrations'), 1);
@@ -443,7 +615,7 @@ test('empty rollback is complete, while any ledger data makes it refuse', async 
 
 test('rollback refuses personal-best, partial, unknown, and checksum-drifted states', async () => {
     const migrationConnection = asMigrationConnection(connection);
-    await applyMigrations(migrationConnection, migrations, config);
+    await applyMigrations(migrationConnection, additiveMigrations, config);
     await connection.query(`
         INSERT INTO game_personal_bests (
             game_id,
@@ -456,38 +628,38 @@ test('rollback refuses personal-best, partial, unknown, and checksum-drifted sta
         ) VALUES ('p4-vega', 1, 1, 990, NULL, NULL, UTC_TIMESTAMP(6))
     `);
     await assert.rejects(
-        () => rollbackEmptyLeaderboardSchema(migrationConnection, migrations, config),
+        () => rollbackEmptyLeaderboardSchema(migrationConnection, additiveMigrations, config),
         /refused because leaderboard tables contain data/
     );
     assert.equal(await tableCount('game_personal_bests'), 1);
 
     await resetFixture();
-    await connection.query(migrations[0].sql);
+    await connection.query(additiveMigrations[0].sql);
     await assert.rejects(
-        () => rollbackEmptyLeaderboardSchema(migrationConnection, migrations, config),
+        () => rollbackEmptyLeaderboardSchema(migrationConnection, additiveMigrations, config),
         /schema_migrations does not exist/
     );
     assert.equal(await tableCount('game_runs'), 1);
 
     await resetFixture();
-    await applyMigrations(migrationConnection, migrations, config);
+    await applyMigrations(migrationConnection, additiveMigrations, config);
     await connection.query(
         `INSERT INTO schema_migrations (version, checksum, applied_at)
          VALUES (?, ?, UTC_TIMESTAMP(6))`,
         ['9999_unknown', Buffer.alloc(32)]
     );
     await assert.rejects(
-        () => rollbackEmptyLeaderboardSchema(migrationConnection, migrations, config),
+        () => rollbackEmptyLeaderboardSchema(migrationConnection, additiveMigrations, config),
         /unknown migration version/
     );
     await connection.query('DELETE FROM schema_migrations WHERE version = ?', ['9999_unknown']);
 
     await connection.query(
         'UPDATE schema_migrations SET checksum = ? WHERE version = ?',
-        [Buffer.alloc(32, 0xff), migrations[0].version]
+        [Buffer.alloc(32, 0xff), additiveMigrations[0].version]
     );
     await assert.rejects(
-        () => rollbackEmptyLeaderboardSchema(migrationConnection, migrations, config),
+        () => rollbackEmptyLeaderboardSchema(migrationConnection, additiveMigrations, config),
         /Checksum mismatch/
     );
     assert.equal(await tableCount('game_runs'), 1);
@@ -495,7 +667,7 @@ test('rollback refuses personal-best, partial, unknown, and checksum-drifted sta
 });
 
 test('source-run foreign key proves game, rules version, and user ownership', async () => {
-    await applyMigrations(asMigrationConnection(connection), migrations, config);
+    await applyMigrations(asMigrationConnection(connection), additiveMigrations, config);
     const [runResult] = await connection.query<ResultSetHeader>(`
         INSERT INTO game_runs (
             game_id,
