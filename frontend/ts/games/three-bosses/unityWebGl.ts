@@ -3,6 +3,10 @@ import {
     bindUnityVisibility,
     type UnityVisibilityBridgeInstance,
 } from '@/games/three-bosses/unityVisibility';
+import {
+    bindThreeBossesSubmissionBridge,
+    type ThreeBossesRunSubmitter,
+} from '@/games/three-bosses/unitySubmissionBridge';
 
 export type UnityWebGlInstance = UnityVisibilityBridgeInstance & Readonly<{
     Quit: () => Promise<void>;
@@ -51,6 +55,7 @@ type StartUnityWebGlOptions = Readonly<{
     canvas: HTMLCanvasElement;
     signal: AbortSignal;
     onProgress: (progress: number) => void;
+    submitRun: ThreeBossesRunSubmitter;
 }>;
 
 const manifestUrl = `${THREE_BOSSES_BUILD_BASE_PATH}build-manifest.json`;
@@ -184,6 +189,7 @@ const startNewHandle = async ({
     canvas,
     signal,
     onProgress,
+    submitRun,
 }: StartUnityWebGlOptions): Promise<UnityWebGlHandle> => {
     const manifest = await readManifest(signal);
     const loaderUrl = resolveLocalAssetUrl(manifest.loaderUrl);
@@ -202,26 +208,46 @@ const startNewHandle = async ({
             cacheControl: () => 'no-store',
         }, onProgress);
 
-        let releaseVisibility: () => void;
+        let releaseVisibility: (() => void) | null = null;
+        let releaseSubmissionBridge: (() => void) | null = null;
 
         try {
             releaseVisibility = bindUnityVisibility(instance);
+            releaseSubmissionBridge = bindThreeBossesSubmissionBridge(instance, submitRun);
         } catch (error) {
+            try {
+                releaseSubmissionBridge?.();
+            } catch {
+                // Continue tearing down the partially initialized player.
+            }
+            try {
+                releaseVisibility?.();
+            } catch {
+                // Quit remains authoritative for partial initialization.
+            }
             await instance.Quit();
             throw error;
         }
+
+        const releaseBrowserBindings = () => {
+            try {
+                releaseSubmissionBridge?.();
+            } catch {
+                // Quit remains authoritative if a browser-global cleanup fails.
+            }
+            try {
+                releaseVisibility?.();
+            } catch {
+                // A hidden player is resumed again by the shutdown path below.
+            }
+        };
 
         const quit = async () => {
             if (quitPromise) return quitPromise;
 
             quitPromise = (async () => {
                 try {
-                    try {
-                        releaseVisibility();
-                    } catch {
-                        // Quit is the lifecycle authority. If it succeeds, a
-                        // receiver-cleanup failure cannot poison the singleton.
-                    }
+                    releaseBrowserBindings();
 
                     // A hidden player must resume its main loop before Quit can
                     // observe Unity's shutdown request.

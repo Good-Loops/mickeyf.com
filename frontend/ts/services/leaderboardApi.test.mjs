@@ -32,6 +32,28 @@ const catalog = {
     ],
 };
 
+const runSubmission = {
+    contractVersion: 1,
+    rulesVersion: 1,
+    runId: '550e8400-e29b-41d4-a716-446655440000',
+    completionTimeMs: 60_000,
+};
+
+const runSubmissionResponse = {
+    success: true,
+    contractVersion: 1,
+    gameId: 'three-bosses',
+    rulesVersion: 1,
+    runId: runSubmission.runId,
+    replayed: false,
+    personalBest: true,
+    result: {
+        score: 1_667,
+        completionTimeMs: runSubmission.completionTimeMs,
+        rank: 'UNRANKED',
+    },
+};
+
 test('catalog read uses the generic GET endpoint and validates its contract', async () => {
     let observedUrl;
     let observedInit;
@@ -69,6 +91,130 @@ test('game read encodes its route parameter and preserves server order', async (
     assert.deepEqual(await api.getGame('p4-vega'), response);
     assert.equal(observedUrl, '/api/leaderboards/p4-vega');
     assert.deepEqual(response.entries.map((entry) => entry.position), [1, 2]);
+});
+
+test('Three Bosses submission sends the exact cookie-bearing JSON contract', async () => {
+    let observedUrl;
+    let observedInit;
+    const controller = new AbortController();
+    const api = createLeaderboardApi('https://api.example.test/', async (url, init) => {
+        observedUrl = url;
+        observedInit = init;
+        return Response.json(runSubmissionResponse, { status: 201 });
+    });
+
+    assert.deepEqual(
+        await api.submitThreeBossesRun(runSubmission, controller.signal),
+        runSubmissionResponse,
+    );
+    assert.equal(observedUrl, 'https://api.example.test/api/leaderboards/three-bosses/runs');
+    assert.equal(observedInit.method, 'POST');
+    assert.equal(observedInit.credentials, 'include');
+    assert.deepEqual(observedInit.headers, {
+        Accept: 'application/json',
+        'Content-Type': 'application/json',
+    });
+    assert.equal(observedInit.body, JSON.stringify(runSubmission));
+    assert.equal(observedInit.signal, controller.signal);
+    assert.equal(observedInit.headers.Authorization, undefined);
+});
+
+test('Three Bosses exact replays require HTTP 200 and retain the typed result', async () => {
+    const replay = {
+        ...runSubmissionResponse,
+        replayed: true,
+        personalBest: false,
+    };
+    const api = createLeaderboardApi('', async () => Response.json(replay));
+
+    assert.deepEqual(await api.submitThreeBossesRun(runSubmission), replay);
+});
+
+test('Three Bosses submission preserves every versioned API error and status', async () => {
+    const cases = [
+        ['UNKNOWN_GAME', 404],
+        ['SUBMISSION_DISABLED', 403],
+        ['UNSUPPORTED_CONTRACT_VERSION', 400],
+        ['UNSUPPORTED_RULES_VERSION', 400],
+        ['INVALID_RUN', 400],
+        ['UNAUTHORIZED', 401],
+        ['IDEMPOTENCY_CONFLICT', 409],
+        ['RATE_LIMITED', 429],
+        ['SERVER_ERROR', 500],
+    ];
+
+    for (const [code, status] of cases) {
+        const api = createLeaderboardApi('', async () => Response.json(
+            { success: false, contractVersion: 1, error: code },
+            { status },
+        ));
+
+        await assert.rejects(
+            api.submitThreeBossesRun(runSubmission),
+            (error) => error instanceof LeaderboardRequestError
+                && error.code === code
+                && error.status === status,
+            `${code} did not retain its public status`,
+        );
+    }
+});
+
+test('Three Bosses submission rejects invalid local input before fetch', async () => {
+    let fetchCount = 0;
+    const api = createLeaderboardApi('', async () => {
+        fetchCount += 1;
+        throw new Error('fetch must not run');
+    });
+
+    for (const invalidRequest of [
+        { ...runSubmission, contractVersion: 2 },
+        { ...runSubmission, rulesVersion: 2 },
+        { ...runSubmission, runId: runSubmission.runId.toUpperCase() },
+        { ...runSubmission, completionTimeMs: 0 },
+        { ...runSubmission, score: 1_667 },
+    ]) {
+        await assert.rejects(
+            api.submitThreeBossesRun(invalidRequest),
+            (error) => error instanceof LeaderboardRequestError
+                && error.status === 400,
+        );
+    }
+    assert.equal(fetchCount, 0);
+});
+
+test('Three Bosses submission fails closed on malformed success and error responses', async () => {
+    const malformedSuccesses = [
+        { ...runSubmissionResponse, runId: '6ba7b810-9dad-41d1-80b4-00c04fd430c8' },
+        { ...runSubmissionResponse, result: { ...runSubmissionResponse.result, completionTimeMs: 60_001 } },
+        { ...runSubmissionResponse, unexpected: true },
+    ];
+
+    for (const malformed of malformedSuccesses) {
+        const api = createLeaderboardApi('', async () => Response.json(malformed, { status: 201 }));
+        await assert.rejects(
+            api.submitThreeBossesRun(runSubmission),
+            (error) => error instanceof LeaderboardRequestError
+                && error.code === 'INVALID_RESPONSE',
+        );
+    }
+
+    const wrongSuccessStatus = createLeaderboardApi('', async () =>
+        Response.json(runSubmissionResponse, { status: 200 }));
+    await assert.rejects(
+        wrongSuccessStatus.submitThreeBossesRun(runSubmission),
+        (error) => error instanceof LeaderboardRequestError
+            && error.code === 'INVALID_RESPONSE',
+    );
+
+    const wrongErrorStatus = createLeaderboardApi('', async () => Response.json(
+        { success: false, contractVersion: 1, error: 'UNAUTHORIZED' },
+        { status: 403 },
+    ));
+    await assert.rejects(
+        wrongErrorStatus.submitThreeBossesRun(runSubmission),
+        (error) => error instanceof LeaderboardRequestError
+            && error.code === 'INVALID_RESPONSE',
+    );
 });
 
 test('unknown game errors retain their public code and encoded request path', async () => {
@@ -176,4 +322,13 @@ test('network failures are normalized while aborts remain aborts', async () => {
         throw abort;
     });
     await assert.rejects(abortedApi.getCatalog(), (error) => error === abort);
+
+    const abortedBodyApi = createLeaderboardApi('', async () => ({
+        ok: true,
+        status: 200,
+        json: async () => {
+            throw abort;
+        },
+    }));
+    await assert.rejects(abortedBodyApi.getCatalog(), (error) => error === abort);
 });

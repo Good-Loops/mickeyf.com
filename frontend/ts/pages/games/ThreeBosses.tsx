@@ -6,6 +6,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import FullscreenButton from '@/components/FullscreenButton';
 import { startThreeBossesWebGl, type UnityWebGlHandle } from '@/games/three-bosses/unityWebGl';
+import { submitThreeBossesRun } from '@/services/leaderboardService';
 
 type LoadState =
     | Readonly<{ kind: 'loading'; progress: number }>
@@ -47,6 +48,7 @@ const ThreeBosses: React.FC = () => {
                     onProgress: (progress) => {
                         if (!cancelled) setLoadState({ kind: 'loading', progress });
                     },
+                    submitRun: submitThreeBossesRun,
                 });
 
                 if (cancelled) {

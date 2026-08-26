@@ -6,13 +6,17 @@ const leaderboardApi = createLeaderboardApi(API_BASE);
 
 export const getLeaderboardCatalog = leaderboardApi.getCatalog;
 export const getGameLeaderboard = leaderboardApi.getGame;
+export const submitThreeBossesRun = leaderboardApi.submitThreeBossesRun;
 
 export {
     LeaderboardRequestError,
     type GameLeaderboardResponse,
     type LeaderboardCatalogGame,
     type LeaderboardCatalogResponse,
+    type LeaderboardClientErrorCode,
     type LeaderboardGameId,
     type LeaderboardRankState,
     type LeaderboardSubmissionState,
+    type ThreeBossesRunSubmissionRequest,
+    type ThreeBossesRunSubmissionResponse,
 } from '@/services/leaderboardApi';
