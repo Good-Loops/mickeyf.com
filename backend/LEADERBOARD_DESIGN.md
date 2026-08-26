@@ -3,18 +3,21 @@
 Status: Phase 13.1 contract approved by Mike on 2026-08-24. The sanitized live
 schema preflight completed on the same date. On 2026-08-25, Mike approved the
 end state in which p4-Vega uses the generic leaderboard storage and the legacy
-`users.p4_score` column is retired after a verified cutover. This document does
-not authorize a production schema or data change.
+`users.p4_score` column is retired after a verified cutover. The additive
+production schema was applied and verified on 2026-08-26. This document records
+that completed change but does not authorize a backfill, deployment, privilege
+change, legacy-column removal, or other production mutation.
 
-A fresh read-only check on 2026-08-26 confirmed that production still has only
-the `users` application table and still includes `users.p4_score`; neither
-additive migration has been applied. That is the current incomplete rollout
-state and explains why the generic p4-Vega route cannot yet serve live data.
+Production now contains `schema_migrations`, `game_runs`, and
+`game_personal_bests` alongside `users`; the two domain tables are empty and
+`users.p4_score` is unchanged. No backfill or API deployment has run, so the
+generic p4-Vega route still has no live score data to serve.
 
 The transitional p4-Vega dual-write repository was implemented and verified
 locally on 2026-08-25 with unit, rollback, and concurrent MySQL 8.0.31 tests. It
-has not been deployed and must not receive traffic until migrations `0001` and
-`0002` have been applied and verified on the target database.
+has not been deployed. Migrations `0001` and `0002` are now applied and
+verified, but traffic remains gated on the separately reviewed data-migration
+and cutover sequence below.
 
 The transitional read split was corrected and reverified on 2026-08-26 at
 `a127beac14c2662648c8aededa59374f5d7c87dd`. Its legacy `/api/users`
@@ -355,14 +358,14 @@ The approved read-only preflight on 2026-08-24 confirmed:
 - database defaults are `utf8mb4` and `utf8mb4_unicode_ci`, transaction
   isolation is `REPEATABLE-READ`, strict SQL modes are active, and foreign-key
   and unique checks are enabled;
-- `users` is the only current application table and uses InnoDB;
+- `users` was the only application table at the time and used InnoDB;
 - `users.user_id` is `INT NOT NULL AUTO_INCREMENT PRIMARY KEY`, while
   `user_name`, `email`, and `user_password` are non-null `VARCHAR(255)` values
   and `p4_score` is a nullable `INT`;
 - `email` is unique, but `user_name` is not schema-enforced unique, so every
   new relationship must use immutable `user_id` rather than display names;
 - no foreign keys, `CHECK` constraints, triggers, migration-history table, or
-  leaderboard tables currently exist; and
+  leaderboard tables existed at the time; and
 - aggregate-only checks found that every stored non-null p4-Vega score satisfies
   the current integer, range, and divisibility contract. Player identities and
   row-level data were not selected or recorded.
@@ -381,9 +384,10 @@ privileges through Cloud SQL's `cloudsqlsuperuser` role. Before candidate
 deployment, revoke that role and grant only the reviewed runtime DML. Production
 migration commands require an explicitly approved maintenance credential; a
 separate maintenance identity is preferred, and any one-time reuse of the
-current credential is an explicit exception followed by immediate clearing and
-privilege reduction. Credential changes and privilege revocation require their
-own reviewed approval. The preflight made no database, configuration, or
+current credential is an explicit exception followed by immediate local
+clearing. Runtime privilege reduction remains a separately reviewed
+pre-deployment blocker. Credential changes and privilege revocation require
+their own reviewed approval. The preflight made no database, configuration, or
 repository change and returned the local proxy to its original stopped state.
 
 The exact per-table runtime grant manifest and its verification test remain to
@@ -393,8 +397,33 @@ drop and verify removal of an ephemeral account; if the account is deliberately
 persistent, rotate its credential and govern it as a standing administrator.
 
 This evidence satisfied the metadata gate for the exact SQL and isolated local
-migration tests completed on 2026-08-25. It does not authorize production DDL,
-backfill, credential rotation, or deployment.
+migration tests completed on 2026-08-25. That preflight did not by itself
+authorize production DDL, backfill, credential rotation, or deployment.
+
+## Completed production additive schema
+
+On 2026-08-26, the exact schema from commit `abd6ff9d` was applied through the
+authenticated loopback proxy to
+`noted-reef-387021:us-central1:cms-mickeyf`, database `cms`. On-demand backup
+`1787754667930` completed successfully first, with binary logging and seven-day
+transaction-log retention verified. Immediately before DDL there were no
+active transactions, metadata-lock waiters, in-use tables, or Cloud SQL
+operations.
+
+The runner recorded the reviewed migrations and SHA-256 checksums:
+
+- `0001_create_game_runs`:
+  `9A797EDD514DFC946783CF66CF80EE8DFA774210A0D100946C3A9A822596CA00`;
+- `0002_create_game_personal_bests`:
+  `01EADE4CFC8E1131BE79DF43881A9BC7A538AAF0E1E1D3F470DEB6C21EAAED3A`.
+
+Post-apply planning reported both versions applied with nothing pending or
+recoverable. The three new tables use InnoDB and `utf8mb4_unicode_ci`; both
+domain tables contain zero rows. `users.p4_score` remains nullable `INT`, and
+the aggregate-only source evidence remained seven users, five scored rows,
+minimum 190, maximum 410, and sum 1350. No trigger, backfill, deployment,
+credential change, rollback, or destructive migration was performed. The
+runtime `cloudsqlsuperuser` finding and exact-grant-manifest blocker remain.
 
 ## Expand, backfill, and cutover
 

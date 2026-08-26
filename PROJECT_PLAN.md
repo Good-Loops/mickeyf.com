@@ -76,16 +76,18 @@ live preflight confirmed the foreign-key type and current schema constraints,
 and the exact additive table migrations, checksum-recorded runner, fail-closed
 empty rollback, and isolated MySQL 8.0.31 test harness were implemented and
 verified locally on 2026-08-25. The migration adds no backfill and does not
-alter `users.p4_score`. Applying DDL, backfilling data, changing production
-credentials, or deploying the new API still requires a separate reviewed
-approval.
+alter `users.p4_score`. At that checkpoint, applying DDL, backfilling data,
+changing production credentials, and deploying the new API each still required
+separate reviewed approval.
 
-A fresh read-only production check on 2026-08-26 confirmed the incomplete live
-state directly: `users` is still the only application table and
-`users.p4_score` is still present. No additive migration or production
-backfill has run, so the feature-branch p4-Vega detail correctly cannot read
-its generic table yet. These are explicit completion gates, not accepted
-follow-up work.
+The additive production schema was applied on 2026-08-26 from commit
+`abd6ff9d`, after successful on-demand backup `1787754667930` and a clean
+two-version plan. `schema_migrations`, `game_runs`, and `game_personal_bests`
+now exist with the reviewed checksums and exact shapes; both domain tables are
+empty. `users.p4_score` remains nullable `INT`, and the identity-free source
+evidence remained seven users, five scores, minimum 190, maximum 410, and sum
+1350. No backfill, API deployment, credential change, trigger, or destructive
+migration was performed, so the p4-Vega generic table is correctly still empty.
 
 That preflight also found that the deployed `cms_mickeyf` account inherits
 Cloud SQL's `cloudsqlsuperuser` role. This existing least-privilege defect must
@@ -93,8 +95,8 @@ be fixed before candidate deployment: revoke the role and grant only reviewed
 runtime DML. Production migration commands use one explicitly approved
 maintenance credential through `MIGRATION_DB_*`; a separate maintenance
 identity is preferred, while one-time reuse of the current credential is an
-explicit exception followed by immediate credential clearing and runtime
-privilege reduction.
+explicit exception followed by immediate local credential clearing. Runtime
+privilege reduction remains a separately reviewed pre-deployment blocker.
 
 The exact per-table runtime grant manifest and its verification test are not yet
 implemented. They are a candidate-deployment blocker; do not revoke the current
