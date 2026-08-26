@@ -493,6 +493,22 @@ privilege, grant/admin option, role, proxy edge, account flag, server version,
 or metadata gap blocks with no operation; the workflow does not act as a
 general privilege cleaner.
 
+The separate `runtime-grants:p4-retirement:plan`, `:verify`, and `:apply`
+commands handle only the final two legacy column grants. A plan is actionable
+only when the account has no role and its direct privileges are exactly the
+generic-only manifest plus non-grantable `SELECT (p4_score)` and
+`UPDATE (p4_score)` on `users`; the already-retired exact manifest is an
+idempotent no-op. Any partial pair or unrelated drift blocks with no operation.
+Apply binds the deterministic plan digest and pinned server UUID, requires the
+exact Cloud SQL and frozen generic-only confirmations, proves zero runtime
+sessions under effective `PROCESS`, and invokes one exact combined `REVOKE`
+without `IF EXISTS`. It then performs a fresh complete metadata inspection.
+Invocation or post-write verification uncertainty is reported as
+indeterminate, never silently retried. The disposable MySQL 8.0.31 test proves
+active-session refusal, exact retirement, loss of `p4_score` access, final
+manifest compliance, and repeat-apply idempotency. This tooling was not run
+against production when committed.
+
 An approved apply first proves effective `PROCESS` access and zero open
 `cms_mickeyf` sessions, before any grant write. It grants and proves the complete
 direct manifest, clears only the reviewed default role, and repeats the same
@@ -538,8 +554,8 @@ This removes both `users SELECT ... FOR UPDATE` dependencies without adding a
 table, migration, or artificial user-column grant. Removing `p4_score` from the
 source manifest does not itself retire the older live grants: the current
 planner correctly blocks unexpected privileges rather than revoking them, so
-an exact separately reviewed revoke operation or equivalent verified
-maintenance procedure is still required.
+the separately reviewed retirement workflow must still be approved and run
+only after the frozen generic-only deployment and drain evidence.
 
 This evidence satisfied the metadata gate for the exact SQL and isolated local
 migration tests completed on 2026-08-25. That preflight did not by itself

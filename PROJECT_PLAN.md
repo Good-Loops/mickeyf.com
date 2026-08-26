@@ -383,19 +383,23 @@ revision and its infrastructure are retired, active runtime transactions were
 zero, and the exact frozen reconciliation completed with five matching rows and
 no discrepancy. The local generic p4 and Three Bosses lock dependency has been
 removed, the source runtime manifest omits `p4_score`, and the no-column
-restricted fixture passes. The next local prerequisite is the exact retirement
-path for the old live column grants. The next rollout step must then separately
-approve deploying the
+restricted fixture passes. The exact fail-closed plan/verify/apply path for the
+old live column grants was implemented and verified locally on 2026-08-26; it
+accepts only both old grants present or both absent, drains runtime sessions,
+invokes one exact atomic revoke, and treats an uncertain result as
+indeterminate. It has not been run on production. The next rollout step must
+separately approve deploying the
 generic-only writer while it remains frozen, route all traffic to that
 exact revision, retire every dual-writer revision, require the serving HTTP 503
 contract, and rerun exact reconciliation against the still-static legacy
-column. Only then may a separately approved enabled generic revision accept
-scores. After generic-only traffic starts, legitimate improvements make exact
-equality with the stale legacy column impossible; rollback must use a
-generic-authoritative compatible revision or a forward fix, never a dual
-writer. After every code, job, tool, grant, and rollback reference is removed,
-a new immutable migration may drop `users.p4_score` under separate production
-approval. The initial additive migrations remain unchanged.
+column. Only after that evidence may the exact old grants be retired and a
+separately approved enabled generic revision accept scores. After generic-only
+traffic starts, legitimate improvements make exact equality with the stale
+legacy column impossible; rollback must use a generic-authoritative compatible
+revision or a forward fix, never a dual writer. After every code, job, tool,
+grant, and rollback reference is removed, a new immutable migration may drop
+`users.p4_score` under separate production approval. The initial additive
+migrations remain unchanged.
 
 ### Step 13.2 — local Three Bosses website playability prototype (no publication)
 

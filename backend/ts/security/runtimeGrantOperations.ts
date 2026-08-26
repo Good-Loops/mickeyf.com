@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import {
+    renderP4VegaGrantRetirementStatement,
     renderRuntimeDatabaseAccount,
     renderRuntimeGrantStatements,
     runtimeColumnPrivilegeInventory,
@@ -158,6 +159,33 @@ export type RuntimeGrantPlan = RuntimeGrantPlanPayload & Readonly<{
     sha256: string;
 }>;
 
+export type P4GrantRetirementState = 'blocked' | 'ready' | 'retired';
+
+type P4GrantRetirementPlanPayload = Readonly<{
+    formatVersion: 1;
+    database: string;
+    runtimeAccount: string;
+    state: P4GrantRetirementState;
+    server: Readonly<{
+        uuid: string;
+        version: string;
+        versionComment: string;
+        currentUser: string;
+        activateAllRolesOnLogin: boolean;
+        partialRevokes: boolean;
+    }>;
+    expectedColumnPrivileges: readonly ColumnPrivilege[];
+    legacyP4ColumnPrivileges: readonly ColumnPrivilege[];
+    observed: RuntimeGrantSnapshot;
+    blockers: readonly string[];
+    compliant: boolean;
+    operation: string | null;
+}>;
+
+export type P4GrantRetirementPlan = P4GrantRetirementPlanPayload & Readonly<{
+    sha256: string;
+}>;
+
 export type RuntimeRoleRemovalContext = Readonly<{
     provider: string;
     target: string;
@@ -175,6 +203,16 @@ export class RuntimeGrantDriftError extends Error {
     constructor(plan: RuntimeGrantPlan) {
         super('Runtime database privileges do not exactly match the reviewed manifest');
         this.name = 'RuntimeGrantDriftError';
+        this.plan = plan;
+    }
+}
+
+export class P4GrantRetirementDriftError extends Error {
+    readonly plan: P4GrantRetirementPlan;
+
+    constructor(plan: P4GrantRetirementPlan) {
+        super('Legacy p4_score runtime grants have not been exactly retired');
+        this.name = 'P4GrantRetirementDriftError';
         this.plan = plan;
     }
 }
@@ -272,6 +310,16 @@ function expectedColumnPrivileges(database: string): ColumnPrivilege[] {
         tableName: privilege.tableName,
         columnName: privilege.columnName,
         privilegeType: privilege.privilegeType,
+        isGrantable: 'NO' as const,
+    })));
+}
+
+function legacyP4ColumnPrivileges(database: string): ColumnPrivilege[] {
+    return sorted((['SELECT', 'UPDATE'] as const).map((privilegeType) => ({
+        schemaName: database,
+        tableName: 'users',
+        columnName: 'p4_score',
+        privilegeType,
         isGrantable: 'NO' as const,
     })));
 }
@@ -668,9 +716,12 @@ function roleMatches(
 
 function unexpectedColumnPrivileges(
     snapshot: RuntimeGrantSnapshot,
-    expected: readonly ColumnPrivilege[]
+    expected: readonly ColumnPrivilege[],
+    additionallyAllowed: readonly ColumnPrivilege[] = []
 ): ColumnPrivilege[] {
-    const expectedKeys = new Set(expected.map(columnPrivilegeKey));
+    const expectedKeys = new Set(
+        [...expected, ...additionallyAllowed].map(columnPrivilegeKey)
+    );
     return snapshot.columnPrivileges.filter((privilege) =>
         privilege.isGrantable === 'YES'
         || !expectedKeys.has(columnPrivilegeKey(privilege)));
@@ -712,7 +763,8 @@ function blockersFor(
     snapshot: RuntimeGrantSnapshot,
     settings: RuntimeGrantSettings,
     account: RuntimeDatabaseAccount,
-    expected: readonly ColumnPrivilege[]
+    expected: readonly ColumnPrivilege[],
+    additionallyAllowedColumnPrivileges: readonly ColumnPrivilege[] = []
 ): string[] {
     const blockers: string[] = [];
     if (snapshot.databaseName !== settings.database) {
@@ -781,7 +833,13 @@ function blockersFor(
     if (snapshot.routinePrivileges.length > 0) {
         blockers.push('runtime account has unexpected routine privileges');
     }
-    if (unexpectedColumnPrivileges(snapshot, expected).length > 0) {
+    if (
+        unexpectedColumnPrivileges(
+            snapshot,
+            expected,
+            additionallyAllowedColumnPrivileges
+        ).length > 0
+    ) {
         blockers.push('runtime account has unexpected or grantable column privileges');
     }
     if (
@@ -926,6 +984,104 @@ export function createRuntimeGrantPlan(
     return { ...payload, sha256 };
 }
 
+function p4GrantRetirementBlockersFor(
+    snapshot: RuntimeGrantSnapshot,
+    settings: RuntimeGrantSettings,
+    account: RuntimeDatabaseAccount,
+    expected: readonly ColumnPrivilege[],
+    legacy: readonly ColumnPrivilege[]
+): string[] {
+    const blockers = blockersFor(
+        snapshot,
+        settings,
+        account,
+        expected,
+        legacy
+    );
+    if (snapshot.assignedRoles.length > 0 || snapshot.defaultRoles.length > 0) {
+        blockers.push(
+            'runtime account must have no assigned or default roles before p4_score grant retirement'
+        );
+    }
+    if (!hasRequiredPrivilegeSubset(snapshot, expected)) {
+        blockers.push('required generic-only runtime column grants are missing');
+    }
+
+    const legacyKeys = new Set(legacy.map(columnPrivilegeKey));
+    const observedLegacy = snapshot.columnPrivileges.filter((privilege) =>
+        legacyKeys.has(columnPrivilegeKey(privilege)));
+    if (
+        observedLegacy.length !== 0
+        && !sameRecords(observedLegacy, legacy)
+    ) {
+        blockers.push(
+            'legacy p4_score grants must be exactly non-grantable SELECT and UPDATE together'
+        );
+    }
+
+    const exactRetired = hasExactDirectPrivileges(snapshot, expected);
+    const exactReady = hasExactDirectPrivileges(
+        snapshot,
+        [...expected, ...legacy]
+    );
+    if (!exactRetired && !exactReady) {
+        blockers.push(
+            'runtime column grants are neither the exact generic-only manifest nor that manifest plus both legacy p4_score grants'
+        );
+    }
+    return unique(blockers);
+}
+
+export function createP4GrantRetirementPlan(
+    snapshot: RuntimeGrantSnapshot,
+    settings: RuntimeGrantSettings,
+    account: RuntimeDatabaseAccount
+): P4GrantRetirementPlan {
+    const expected = expectedColumnPrivileges(settings.database);
+    const legacy = legacyP4ColumnPrivileges(settings.database);
+    const blockers = p4GrantRetirementBlockersFor(
+        snapshot,
+        settings,
+        account,
+        expected,
+        legacy
+    );
+    const state: P4GrantRetirementState = blockers.length > 0
+        ? 'blocked'
+        : hasExactDirectPrivileges(snapshot, expected)
+            ? 'retired'
+            : 'ready';
+    const payload: P4GrantRetirementPlanPayload = {
+        formatVersion: 1,
+        database: settings.database,
+        runtimeAccount: runtimeDatabaseAccountName(account),
+        state,
+        server: {
+            uuid: snapshot.serverUuid,
+            version: snapshot.serverVersion,
+            versionComment: snapshot.versionComment,
+            currentUser: snapshot.currentUser,
+            activateAllRolesOnLogin: snapshot.activateAllRolesOnLogin,
+            partialRevokes: snapshot.partialRevokes,
+        },
+        expectedColumnPrivileges: expected,
+        legacyP4ColumnPrivileges: legacy,
+        observed: snapshot,
+        blockers,
+        compliant: state === 'retired',
+        operation: state === 'ready'
+            ? renderP4VegaGrantRetirementStatement(
+                settings.database,
+                account
+            ).replace(/;$/u, '')
+            : null,
+    };
+    const sha256 = createHash('sha256')
+        .update(JSON.stringify(payload), 'utf8')
+        .digest('hex');
+    return { ...payload, sha256 };
+}
+
 function assertRoleStateStable(
     initial: RuntimeGrantSnapshot,
     current: RuntimeGrantSnapshot
@@ -973,7 +1129,7 @@ export async function assertRuntimeSessionsDrained(
     }
     if (Number(row.sessionCount) !== 0) {
         throw new Error(
-            'Runtime database sessions are still open; drain application traffic before role removal'
+            'Runtime database sessions are still open; drain application traffic before changing runtime privileges'
         );
     }
 }
@@ -1056,6 +1212,117 @@ export async function planRuntimeGrants(
             settings,
             account
         ));
+}
+
+export async function planP4GrantRetirement(
+    connection: RuntimeGrantConnection,
+    settings: RuntimeGrantSettings,
+    account: RuntimeDatabaseAccount
+): Promise<P4GrantRetirementPlan> {
+    return withRuntimeGrantLock(connection, settings, account, async () =>
+        createP4GrantRetirementPlan(
+            await inspectRuntimeGrantState(
+                connection,
+                settings.database,
+                account
+            ),
+            settings,
+            account
+        ));
+}
+
+export async function verifyP4GrantRetirement(
+    connection: RuntimeGrantConnection,
+    settings: RuntimeGrantSettings,
+    account: RuntimeDatabaseAccount
+): Promise<P4GrantRetirementPlan> {
+    const plan = await planP4GrantRetirement(connection, settings, account);
+    if (!plan.compliant) throw new P4GrantRetirementDriftError(plan);
+    return plan;
+}
+
+export async function applyP4GrantRetirement(
+    connection: RuntimeGrantConnection,
+    settings: RuntimeGrantSettings,
+    account: RuntimeDatabaseAccount,
+    approvedPlanSha256: string,
+    confirmedServerUuid: string
+): Promise<P4GrantRetirementPlan> {
+    return withRuntimeGrantLock(connection, settings, account, async () => {
+        const initialPlan = createP4GrantRetirementPlan(
+            await inspectRuntimeGrantState(
+                connection,
+                settings.database,
+                account
+            ),
+            settings,
+            account
+        );
+        if (initialPlan.server.uuid !== confirmedServerUuid) {
+            throw new Error(
+                'Connected server UUID does not match the approved p4_score grant-retirement target'
+            );
+        }
+        if (initialPlan.sha256 !== approvedPlanSha256) {
+            throw new Error(
+                'Runtime grant state changed after the approved p4_score retirement plan was generated'
+            );
+        }
+        if (initialPlan.blockers.length > 0) {
+            throw new Error(
+                `p4_score grant retirement is blocked: ${
+                    initialPlan.blockers.join('; ')
+                }`
+            );
+        }
+
+        await assertRuntimeSessionsDrained(connection, account);
+        if (initialPlan.compliant) return initialPlan;
+        if (initialPlan.state !== 'ready' || !initialPlan.operation) {
+            throw new Error('p4_score grant retirement did not reach the reviewed ready state');
+        }
+
+        try {
+            await connection.query(initialPlan.operation);
+        } catch (error) {
+            const detail = error instanceof Error
+                ? error.message
+                : 'unknown REVOKE failure';
+            throw new RuntimeGrantIndeterminateError(
+                'The exact p4_score REVOKE was invoked but did not return a '
+                + `confirmed result: ${detail}. Run a fresh retirement plan and `
+                + 'verification before retrying.'
+            );
+        }
+
+        let finalPlan: P4GrantRetirementPlan;
+        try {
+            finalPlan = createP4GrantRetirementPlan(
+                await inspectRuntimeGrantState(
+                    connection,
+                    settings.database,
+                    account
+                ),
+                settings,
+                account
+            );
+        } catch (error) {
+            const detail = error instanceof Error
+                ? error.message
+                : 'unknown final verification failure';
+            throw new RuntimeGrantIndeterminateError(
+                'The exact p4_score REVOKE returned, but final verification '
+                + `failed: ${detail}. Run a fresh retirement plan and verification.`
+            );
+        }
+        if (!finalPlan.compliant) {
+            throw new RuntimeGrantIndeterminateError(
+                'The exact p4_score REVOKE returned, but final privilege metadata '
+                + 'is not retired. Run a fresh retirement plan and verification.'
+            );
+        }
+        return finalPlan;
+    });
 }
 
 export async function verifyRuntimeGrants(

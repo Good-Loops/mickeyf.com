@@ -260,6 +260,9 @@ Runtime-account privilege reduction has its own fail-closed workflow:
 npm --prefix backend run runtime-grants:plan
 npm --prefix backend run runtime-grants:verify
 npm --prefix backend run runtime-grants:apply
+npm --prefix backend run runtime-grants:p4-retirement:plan
+npm --prefix backend run runtime-grants:p4-retirement:verify
+npm --prefix backend run runtime-grants:p4-retirement:apply
 ```
 
 `plan` inventories every direct privilege channel, the runtime account's lock,
@@ -292,6 +295,24 @@ before proving the final metadata. It never uses `REVOKE ALL`, removes an
 unknown role, alters the shared role, changes a
 password, or kills a session. Cloud SQL documents the zero-role replacement in
 its [database-role procedure](https://docs.cloud.google.com/sql/docs/mysql/create-manage-users#replace_database_roles_for_an_existing_user).
+
+The three `p4-retirement` commands are a separate one-time path, not a general
+privilege cleaner. Their plan accepts only the exact generic-only manifest plus
+both non-grantable `users.p4_score` `SELECT` and `UPDATE` grants (`ready`), or
+the exact manifest with both grants absent (`retired`). A partial pair, a grant
+option, any other privilege, a role, or a missing final grant blocks with no
+SQL. `verify` exits 0 only for `retired`; drift exits 2. `apply` additionally
+requires the fixed Cloud SQL target, the frozen generic-only serving
+confirmation `MIGRATION_CONFIRM_GENERIC_ONLY_FROZEN=1`, the literal
+`MIGRATION_CONFIRM_P4_GRANT_RETIREMENT="users.p4_score SELECT,UPDATE -> no runtime access"`,
+`MIGRATION_CONFIRM_RUNTIME_TRAFFIC_DRAINED=1`, the retirement plan SHA-256 in
+`MIGRATION_CONFIRM_P4_GRANT_RETIREMENT_PLAN_SHA256`, the pinned server UUID, and
+`MIGRATION_ALLOW_P4_GRANT_RETIREMENT=1`. It locks the same account workflow,
+proves zero runtime sessions, runs one exact `REVOKE SELECT (p4_score), UPDATE
+(p4_score)` statement without `IF EXISTS`, and requires a fresh exact metadata
+verification. A connection loss after invocation is indeterminate and requires
+a new plan and verification before any retry. Adding this local tool did not
+execute it or change production.
 
 MySQL privilege and role changes are not one transaction. A failed run can
 therefore leave the safe prepared state: the direct grants installed, the
@@ -334,9 +355,10 @@ in [`backend/LEADERBOARD_DESIGN.md`](backend/LEADERBOARD_DESIGN.md):
    the separately gated monotonic backfill and aggregate reconciliation.
 5. For cutover, freeze submissions, drain in-flight dual writers, reconcile,
    deploy the generic-only writer still frozen, drain again, and reconcile
-   again. Then separately approve the exact retirement of the two old
-   `p4_score` column grants, recycle runtime sessions, verify the generic-only
-   manifest, and only then enable generic submissions.
+   again. Then separately approve and run
+   `runtime-grants:p4-retirement:apply`, recycle runtime sessions, run
+   `runtime-grants:p4-retirement:verify`, verify the generic-only manifest, and
+   only then enable generic submissions.
 6. Clear credentials and close the proxy. Drop and prove absence of an ephemeral
    maintenance account; if it is intentionally persistent, rotate and govern it
    as an administrator. Keep `users.p4_score` until its separately approved
@@ -357,8 +379,9 @@ database-scoped per-user advisory lock, so the generic-only manifest grants no
 The separately approved production reduction completed on 2026-08-26 using the
 previous transitional manifest: `cms_mickeyf@%` has no database role but still
 has the two narrow `p4_score` column grants required by the serving frozen dual
-writer. The local generic-only manifest now treats those grants as unexpected
-and fails closed; retiring them requires a separate exact, reviewed operation.
+writer. The local generic-only manifest still treats those grants as unexpected
+and fails closed. The separate exact retirement workflow is implemented and
+locally verified, but has not been run against production.
 
 The p4-Vega backfill verifies the exact applied schema and legacy source,
 copies non-null historical scores monotonically in bounded transactions, and

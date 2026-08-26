@@ -6,12 +6,15 @@ import type { MigrationConnection } from '../migrations/leaderboardSchema';
 import { loadMigrationManifest } from '../migrations/migrationManifest';
 import { applyMigrations } from '../migrations/migrationRunner';
 import {
+    applyP4GrantRetirement,
     applyRuntimeGrants,
     assertRuntimeSessionsDrained,
+    planP4GrantRetirement,
     planRuntimeGrants,
     type RuntimeGrantConnection,
     type RuntimeGrantSettings,
     type RuntimeRoleRemover,
+    verifyP4GrantRetirement,
     verifyRuntimeGrants,
 } from './runtimeGrantOperations';
 import type { RuntimeDatabaseAccount } from './runtimeGrantManifest';
@@ -338,6 +341,106 @@ test('active runtime sessions block role removal, then a drained rerun converges
         verified.server.uuid
     );
     assert.equal(secondApply.sha256, verified.sha256);
+});
+
+test('exact p4_score grants retire atomically after runtime sessions drain', async () => {
+    await installBroadFixture();
+    const rootRuntimeConnection = asRuntimeGrantConnection(root);
+    const broadPlan = await planRuntimeGrants(
+        rootRuntimeConnection,
+        settings,
+        RUNTIME_ACCOUNT
+    );
+    await applyRuntimeGrants(
+        rootRuntimeConnection,
+        settings,
+        RUNTIME_ACCOUNT,
+        broadPlan.sha256,
+        broadPlan.server.uuid,
+        createSqlRoleRemover()
+    );
+    await root.query(
+        'GRANT SELECT (`p4_score`), UPDATE (`p4_score`) '
+        + 'ON `mickeyf_migration_test`.`users` TO ' + RUNTIME_PRINCIPAL
+    );
+
+    const activeRuntimeConnection = await createRuntimeConnection();
+    try {
+        await activeRuntimeConnection.query('SELECT p4_score FROM users LIMIT 1');
+        const readyPlan = await planP4GrantRetirement(
+            rootRuntimeConnection,
+            settings,
+            RUNTIME_ACCOUNT
+        );
+        assert.equal(readyPlan.state, 'ready');
+        assert.deepEqual(readyPlan.blockers, []);
+        assert.equal(
+            readyPlan.operation,
+            'REVOKE SELECT (`p4_score`), UPDATE (`p4_score`) '
+            + "ON `mickeyf_migration_test`.`users` FROM 'runtime_operation_test'@'%'"
+        );
+        await assert.rejects(
+            () => applyP4GrantRetirement(
+                rootRuntimeConnection,
+                settings,
+                RUNTIME_ACCOUNT,
+                readyPlan.sha256,
+                readyPlan.server.uuid
+            ),
+            /sessions are still open/
+        );
+    } finally {
+        await activeRuntimeConnection.end();
+    }
+
+    const refreshedPlan = await planP4GrantRetirement(
+        rootRuntimeConnection,
+        settings,
+        RUNTIME_ACCOUNT
+    );
+    const retiredPlan = await applyP4GrantRetirement(
+        rootRuntimeConnection,
+        settings,
+        RUNTIME_ACCOUNT,
+        refreshedPlan.sha256,
+        refreshedPlan.server.uuid
+    );
+    assert.equal(retiredPlan.state, 'retired');
+    assert.equal(retiredPlan.compliant, true);
+
+    const freshRuntimeConnection = await createRuntimeConnection();
+    try {
+        await freshRuntimeConnection.query('SELECT user_id FROM users LIMIT 1');
+        await assert.rejects(
+            () => freshRuntimeConnection.query('SELECT p4_score FROM users LIMIT 1'),
+            (error: unknown) => (error as { code?: string }).code
+                === 'ER_COLUMNACCESS_DENIED_ERROR'
+        );
+    } finally {
+        await freshRuntimeConnection.end();
+    }
+
+    const verified = await verifyP4GrantRetirement(
+        rootRuntimeConnection,
+        settings,
+        RUNTIME_ACCOUNT
+    );
+    const secondApply = await applyP4GrantRetirement(
+        rootRuntimeConnection,
+        settings,
+        RUNTIME_ACCOUNT,
+        verified.sha256,
+        verified.server.uuid
+    );
+    assert.equal(secondApply.sha256, verified.sha256);
+    assert.equal(
+        (await verifyRuntimeGrants(
+            rootRuntimeConnection,
+            settings,
+            RUNTIME_ACCOUNT
+        )).compliant,
+        true
+    );
 });
 
 test('role-remover failure leaves a prepared state that a new approved plan repairs', async () => {

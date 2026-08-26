@@ -200,3 +200,20 @@ export function renderRuntimeGrantStatements(
         )} TO ${principal};`;
     }));
 }
+
+/**
+ * Renders the single, atomic privilege statement used after the frozen
+ * generic-only runtime has been deployed and every old runtime session has
+ * drained. It deliberately names only the two transitional p4_score grants.
+ */
+export function renderP4VegaGrantRetirementStatement(
+    databaseName: string,
+    account: RuntimeDatabaseAccount
+): string {
+    const database = quoteIdentifier(databaseName, 'Database name');
+    const principal = renderRuntimeDatabaseAccount(account);
+
+    return `REVOKE SELECT (\`p4_score\`), UPDATE (\`p4_score\`) ON ${
+        database
+    }.\`users\` FROM ${principal};`;
+}
