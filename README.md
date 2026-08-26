@@ -349,9 +349,10 @@ nothing on `schema_migrations`, no `DELETE` or DDL, no role, and no grant
 option. The isolated MySQL 8.0.31 suite installs those grants on a disposable
 runtime user, exercises the current signup, login, p4-Vega, and Three Bosses
 SQL paths, and proves that migration history, ledger mutation, destructive
-DML, DDL, account creation, and grant operations are denied. Production still
-inherits `cloudsqlsuperuser` until the separate privilege-reduction operation
-is reviewed and approved.
+DML, DDL, account creation, and grant operations are denied. The separately
+approved production reduction completed on 2026-08-26: `cms_mickeyf@%` now has
+no database role and only the manifest's non-grantable column privileges, with
+fresh positive and negative runtime probes recorded in the project plan.
 
 The current manifest is transitional: Three Bosses' user-row serialization
 lock is presently authorized by the dual writer's `UPDATE(p4_score)` grant.

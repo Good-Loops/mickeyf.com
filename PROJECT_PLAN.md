@@ -100,14 +100,16 @@ the live legacy-only writer can still create drift, so the complete backfill
 and reconciliation must run again after dual-writer deployment and the
 legacy-revision drain before any cutover.
 
-That preflight also found that the deployed `cms_mickeyf` account inherits
-Cloud SQL's `cloudsqlsuperuser` role. This existing least-privilege defect must
-be fixed before candidate deployment: revoke the role and grant only reviewed
-runtime DML. Production migration commands use one explicitly approved
-maintenance credential through `MIGRATION_DB_*`; a separate maintenance
-identity is preferred, while one-time reuse of the current credential is an
-explicit exception followed by immediate local credential clearing. Runtime
-privilege reduction remains a separately reviewed pre-deployment blocker.
+That preflight also found that the deployed `cms_mickeyf` account inherited
+Cloud SQL's `cloudsqlsuperuser` role. This least-privilege defect was fixed on
+2026-08-26 before candidate deployment by removing the role and retaining only
+the reviewed direct runtime DML described below. Production migration commands
+use one explicitly approved maintenance credential through `MIGRATION_DB_*`; a
+separate maintenance identity is preferred, while one-time reuse of the current
+credential is an explicit exception followed by immediate local credential
+clearing. Runtime
+privilege reduction remains a separately reviewed operation for any future
+account or manifest change.
 
 The exact column-level runtime grant manifest and isolated verification test
 were implemented locally on 2026-08-26. The manifest grants only the columns
@@ -117,9 +119,8 @@ read was removed so the immutable `game_runs` ledger needs no `UPDATE` grant.
 The pinned MySQL 8.0.31 suite proves every current runtime path succeeds while
 migration history, destructive DML, ledger updates, DDL, account creation, and
 grant operations fail. This closes the code-and-test prerequisite, not the live
-operation: production still inherits `cloudsqlsuperuser`, and replacing it with
-the exact direct grants remains a separately reviewed candidate-deployment
-action.
+operation. The separately approved live reduction described below has now
+replaced `cloudsqlsuperuser` with the exact direct grants.
 
 The local privilege-reduction workflow was then completed on
 `feature/new-leaderboard`. Its `plan`, `verify`, and `apply` commands bind the
@@ -135,9 +136,21 @@ operation is unfinished and treats an interrupted external mutation as
 indeterminate. Disposable MySQL 8.0.31 tests cover restricted-account PROCESS
 proof, pre-write active-session refusal, provider failure and rerun,
 unknown-state refusal, final fresh-session role absence, and idempotency. This
-is tooling evidence only; no production grant or role was changed, so the live
-least-privilege blocker remains open until a separately approved plan/apply and
-fresh-runtime verification complete.
+was tooling evidence only; the later live operation was authorized and recorded
+separately.
+
+The approved production reduction completed on 2026-08-26. After traffic was
+drained, the reviewed apply removed every database role from `cms_mickeyf@%`
+and retained only the manifest's non-grantable column privileges. A fresh
+runtime revision, `mickeyf-org-grants-restored-20260826-a`, then received 100%
+traffic on immutable image digest
+`sha256:babde939969cc17db89c2138a55f692cef65cc1ab2d2e20de1b06179a456d5c1`.
+Standalone verification recorded digest
+`0565e5d5532e115d3b4142efcad4c63ed665effc7f838147c8d42a11f177fe7a`,
+fresh positive and negative SQL probes passed, public and local leaderboard
+reads remained healthy, no temporary database user or revision remained, and
+Cloud SQL reported no pending operation. This closes the runtime
+least-privilege blocker for the reviewed transitional manifest.
 
 The approved Phase 13 storage end state is for both the existing p4-Vega API
 operations and the generic leaderboard read to use `game_personal_bests` as

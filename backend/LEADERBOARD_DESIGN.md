@@ -381,14 +381,14 @@ unbounded, so the migration connection must set a short session
 `lock_wait_timeout` and the runner must enforce its own fail-fast operation
 deadline.
 
-The inspected application database account currently has broad DDL and DML
-privileges through Cloud SQL's `cloudsqlsuperuser` role. Before candidate
-deployment, revoke that role and grant only the reviewed runtime DML. Production
+The inspected application database account had broad DDL and DML privileges
+through Cloud SQL's `cloudsqlsuperuser` role. Before candidate deployment, that
+role was removed and only the reviewed runtime DML was retained. Production
 migration commands require an explicitly approved maintenance credential; a
 separate maintenance identity is preferred, and any one-time reuse of the
 current credential is an explicit exception followed by immediate local
-clearing. Runtime privilege reduction remains a separately reviewed
-pre-deployment blocker. Credential changes and privilege revocation require
+clearing. Future runtime privilege changes remain separately reviewed.
+Credential changes and privilege revocation require
 their own reviewed approval. The preflight made no database, configuration, or
 repository change and returned the local proxy to its original stopped state.
 
@@ -405,9 +405,9 @@ The pinned MySQL 8.0.31 integration suite installs the manifest on a separate
 disposable runtime identity, exercises every current auth and leaderboard SQL
 path, compares the exact column inventory, and proves that migration history,
 ledger mutation, destructive DML, DDL, account creation, and grant operations
-are denied. This test evidence does not change live grants: production still
-inherits `cloudsqlsuperuser` until a separately approved reduction operation.
-Do not revoke that role and improvise replacement grants. After maintenance,
+are denied. This test evidence did not itself change live grants; the later
+approved production reduction used this manifest as its only grant source.
+Do not improvise replacement grants. After maintenance,
 drop and verify removal of an ephemeral account; if the account is deliberately
 persistent, rotate its credential and govern it as a standing administrator.
 
@@ -448,6 +448,19 @@ Traffic must remain drained through the operation because an already-open sessio
 retain active role state; afterward, recycle every application pool and run
 fresh-connection positive and negative probes. The local implementation and
 disposable MySQL 8.0.31 tests changed no production privilege.
+
+The separately approved production reduction completed on 2026-08-26. With
+traffic drained, the apply removed every database role from `cms_mickeyf@%`
+and retained only the manifest's non-grantable column privileges. Fresh
+revision `mickeyf-org-grants-restored-20260826-a` then received 100% traffic on
+immutable image digest
+`sha256:babde939969cc17db89c2138a55f692cef65cc1ab2d2e20de1b06179a456d5c1`.
+Standalone verification recorded digest
+`0565e5d5532e115d3b4142efcad4c63ed665effc7f838147c8d42a11f177fe7a`;
+fresh positive and negative SQL probes passed, public and local leaderboard
+reads remained healthy, and no temporary database user, maintenance revision,
+or pending Cloud SQL operation remained. The reviewed transitional runtime
+least-privilege blocker is closed.
 
 This manifest is transitional. Three Bosses presently serializes submissions
 with `users SELECT ... FOR UPDATE`, which MySQL authorizes through the same

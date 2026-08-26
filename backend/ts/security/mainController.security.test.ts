@@ -173,6 +173,33 @@ test('the submission freeze rejects anonymous and authenticated scores before da
     assert.equal(acquisitionCount, 0);
 });
 
+test('enabled score submission rejects an anonymous request before database work', async () => {
+    let queryCount = 0;
+    let acquisitionCount = 0;
+    const database = {
+        async query() {
+            queryCount += 1;
+            throw new Error('anonymous score submission must not query the database');
+        },
+        async getConnection() {
+            acquisitionCount += 1;
+            throw new Error('anonymous score submission must not acquire a connection');
+        },
+    } as unknown as Pick<Pool, 'getConnection' | 'query'>;
+    const controller = createTestController(database, true);
+    const { response, state } = responseRecorder();
+
+    await controller(request({
+        type: 'submit_score',
+        p4_score: 990,
+    }), response);
+
+    assert.equal(state.status, 401);
+    assert.deepEqual(state.body, { error: 'UNAUTHORIZED' });
+    assert.equal(queryCount, 0);
+    assert.equal(acquisitionCount, 0);
+});
+
 test('score submission still accepts the Bearer token fallback and authenticated identity', async () => {
     const transactionEvents: string[] = [];
     const queryValues: Array<unknown[] | undefined> = [];
