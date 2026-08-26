@@ -177,9 +177,9 @@ The transitional p4-Vega write path was implemented and verified locally on
 `game_personal_bests` atomically on one acquired connection; either write
 failure rolled the transaction back, concurrent submissions converged on the
 same maximum, and the legacy HTTP response remained unchanged. The exact
-freeze-capable composition now serves production in the enabled dual-writer
-revision recorded below. The same immutable image is also retained in a
-separate frozen zero-traffic revision for the next reviewed rollout step.
+freeze-capable composition first served production with writes enabled. The
+same immutable image now serves in the frozen dual-writer revision recorded
+below, and the enabled revision is retired.
 
 The active transitional read split was corrected and reverified on 2026-08-26
 at `a127beac14c2662648c8aededa59374f5d7c87dd`. While this dual writer is
@@ -208,8 +208,8 @@ missing-user result, leaves a sentinel legacy score unchanged, survives
 concurrent submissions, and was tested after physically dropping
 `users.p4_score` in the disposable MySQL fixture. This candidate is not
 deployed. The additive schema, enabled dual-write rollout, legacy-only revision
-drain, and post-drain backfill and reconciliation are complete; the frozen
-dual-writer promotion and frozen generic-only cutover still come first. Its
+drain, post-drain backfill and reconciliation, and frozen dual-writer promotion
+are complete; the frozen generic-only cutover still comes first. Its
 implementation remains recorded at `2e3d4fde`; the active branch source is the
 required transitional dual writer.
 
@@ -263,9 +263,11 @@ application reachability review found that this backend does not expose the
 affected QUIC, DTLS, CMP, CMS, RPK, or one-shot `EVP_Cipher()` paths. That is an
 evidence-based inference, not an upstream Node guarantee. On 2026-08-26, Mike
 explicitly accepted that bounded reachability assessment for the exact
-zero-traffic candidate only. That acceptance does not extend to positive
-production traffic; refresh the pinned runtime or repeat the explicit review
-before promotion.
+zero-traffic candidate only. The later explicit approvals to promote the exact
+digest first as the enabled and then as the frozen dual writer extended that
+bounded acceptance only to those two rollout stages. It does not cover a future
+generic-only image; refresh the pinned runtime or repeat the explicit review
+before that deployment.
 
 The exact enabled dual-writer candidate was built and deployed at zero traffic
 on 2026-08-26 from commit
@@ -303,6 +305,22 @@ temporary tag and deploy trigger were removed. At generation 117, production
 still routes 100% to the enabled dual-writer revision with no tags; the frozen
 revision is retained retired at zero traffic. No production freeze occurred.
 
+Under the next separate approval, an etag-bound traffic-only update advanced
+Cloud Run from generation 117 to 118 and routed both the service specification
+and observed status exactly 100% to the frozen revision, with no tag or
+`LATEST` target. Cloud Run then reported the enabled revision `Active=False`
+and `ResourcesAvailable` retired while the frozen revision became active. A
+unique logged production probe reached that exact revision and returned HTTP
+503 `SUBMISSIONS_FROZEN` with `no-store`, no cookie, and no redirect; both p4
+leaderboard reads still returned the same five rows, and Three Bosses remained
+HTTP 403 `SUBMISSION_DISABLED`. Two consecutive aggregate `INNODB_TRX` samples
+found zero active `cms_mickeyf` transactions before the read-only reconciliation
+reported source and target count 5, minimum 190, maximum 410, sum 1350, five
+exact matches, and every discrepancy count zero. The temporary PROCESS-capable
+maintenance identity was deleted, and no Cloud SQL operation, temporary trigger,
+or build remains pending. This establishes the production submission freeze;
+it does not perform the generic read/write cutover or alter `users.p4_score`.
+
 The Phase 13.1 repeatable, privileged p4-Vega historical-backfill CLI and
 separate read-only aggregate reconciliation gate were implemented and verified
 locally on 2026-08-25. The backfill is operational tooling rather than an HTTP
@@ -322,11 +340,11 @@ verified on 2026-08-25, but it is not the active transitional source. The
 additive schema, enabled dual-writer deployment, legacy-only revision drain,
 repeatable backfill, and zero-discrepancy reconciliation are complete. The
 legacy operation still reads `users.p4_score` until the remaining frozen
-dual-writer and frozen generic-only cutover gates pass. Its request, response
-fields, ten-row bound, cache behavior, and numeric historical scores must
-remain compatible. The generic-only writer is locally prepared, but its
-production cutover and `users.p4_score` removal remain incomplete; the
-multi-game frontend is recorded below.
+generic-only cutover gates pass. Its request, response fields, ten-row bound,
+cache behavior, and numeric historical scores must remain compatible. The
+generic-only writer is locally prepared, but its production cutover and
+`users.p4_score` removal remain incomplete; the multi-game frontend is recorded
+below.
 
 The additive backend catalog and per-game routes were implemented and verified
 on 2026-08-26. The catalog is projected from server-owned definitions;
@@ -340,9 +358,9 @@ idempotent run history, transactional strict personal bests, and per-user and
 per-IP limits are covered by unit, security, rollback, concurrency, and
 isolated-MySQL tests. Rank remains `UNRANKED`. These routes have not been
 enabled for Three Bosses production writes: the routes are present in the
-serving enabled dual-writer revision and in the frozen zero-traffic candidate,
-but `THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=false` remains enforced. They do not
-replace the remaining p4 freeze, cutover, or reconciliation gates.
+serving frozen dual-writer revision, but
+`THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=false` remains enforced. They do not
+replace the remaining p4 cutover or reconciliation gates.
 
 The credential-safe browser submission client and Unity host bridge were
 committed at `c4349f7c`. Unity will later send only its canonical run ID and
@@ -352,22 +370,20 @@ result receiver, one-source millisecond canonicalization, score/rank parity,
 and Submit Score button activation remain deliberately disconnected until the
 Three Bosses gameplay and ranking release gates are approved.
 
-The enabled dual writer now serves 100% of production traffic, every legacy-only
-revision has drained, and the repeatable post-drain backfill and exact
-reconciliation completed with five matching rows and no discrepancy. The exact
-frozen dual-writer revision is independently verified and retained at zero
-traffic. The next rollout step must separately approve routing all traffic to
-that frozen revision, prove the enabled dual writer and admitted requests have
-drained, require the serving HTTP 503 freeze contract, and rerun exact
-reconciliation. The rollout can then proceed through the frozen generic-only
-stage. Every dual writer must drain and exact reconciliation must pass again
-before a separately approved enabled generic revision accepts scores. After
-generic-only traffic starts, legitimate improvements make exact equality with
-the stale legacy column impossible; rollback must use a generic-authoritative
-compatible revision or a forward fix, never the old dual writer. After every
-code, job, tool, grant, and rollback reference is removed, a new immutable
-migration may drop `users.p4_score` under separate production approval. The
-initial additive migrations remain unchanged.
+The frozen dual writer now serves 100% of production traffic, the enabled
+revision and its infrastructure are retired, active runtime transactions were
+zero, and the exact frozen reconciliation completed with five matching rows and
+no discrepancy. The next rollout step must separately approve deploying the
+prepared generic-only writer while it remains frozen, route all traffic to that
+exact revision, retire every dual-writer revision, require the serving HTTP 503
+contract, and rerun exact reconciliation against the still-static legacy
+column. Only then may a separately approved enabled generic revision accept
+scores. After generic-only traffic starts, legitimate improvements make exact
+equality with the stale legacy column impossible; rollback must use a
+generic-authoritative compatible revision or a forward fix, never a dual
+writer. After every code, job, tool, grant, and rollback reference is removed,
+a new immutable migration may drop `users.p4_score` under separate production
+approval. The initial additive migrations remain unchanged.
 
 ### Step 13.2 — local Three Bosses website playability prototype (no publication)
 
