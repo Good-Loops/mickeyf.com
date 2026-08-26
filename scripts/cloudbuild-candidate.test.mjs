@@ -95,6 +95,20 @@ function decodeMaterializedScript(step) {
     return script;
 }
 
+function decodeCloudBuildLiteralDollars(value) {
+    const dollarRuns = value.match(/\$+/gu) ?? [];
+
+    for (const run of dollarRuns) {
+        assert.equal(
+            run.length % 2,
+            0,
+            'runtime dollar signs must be escaped as pairs for Cloud Build validation'
+        );
+    }
+
+    return value.replaceAll('$$', '$');
+}
+
 test('candidate configuration remains an exact image-only build contract', async () => {
     assert.equal(await readCandidateConfig(), expectedConfig);
 });
@@ -141,7 +155,7 @@ test('generic-only deployment configuration is the exact reviewed source-less co
     const serialized = await readNormalizedFile(genericDeployConfigPath);
     assert.equal(
         sha256(serialized),
-        '8afde577fbefe781ed0a0c428f04dad40a5b8f8d147f22f01ccbae86bb9a5bf4'
+        'a5cd6534c766ecfb9dd9f8440a5c8a7ef709828ee7281ed122ea4952a7c4936d'
     );
 
     const config = JSON.parse(serialized);
@@ -158,6 +172,20 @@ test('generic-only deployment configuration is the exact reviewed source-less co
         assert.equal(step.volumes, undefined);
         assert.equal(step.waitFor, undefined);
     }
+});
+
+test('generic-only deployment escapes runtime dollars for Cloud Build approval', async () => {
+    const config = JSON.parse(await readNormalizedFile(genericDeployConfigPath));
+    const bashArguments = config.steps
+        .filter(({ entrypoint }) => entrypoint === 'bash')
+        .flatMap(({ args }) => args ?? []);
+    const serializedArguments = bashArguments.join('\n');
+
+    assert.equal(serializedArguments.match(/\$/gu)?.length, 162);
+    assert.equal(
+        bashArguments.map(decodeCloudBuildLiteralDollars).join('\n').match(/\$/gu)?.length,
+        81
+    );
 });
 
 test('generic-only deployment pins the exact approved source and signed provenance', async () => {
@@ -205,7 +233,13 @@ test('generic-only deployment is frozen, zero-traffic, scan-zero, and mutation-b
     const executableText = [
         sourceValidation,
         anonymousSmoke,
-        ...config.steps.flatMap(({ args }) => args ?? []),
+        ...config.steps.flatMap(({ args }) =>
+            (args ?? []).map((argument) =>
+                typeof argument === 'string'
+                    ? decodeCloudBuildLiteralDollars(argument)
+                    : argument
+            )
+        ),
     ].join('\n');
 
     assert.equal(executableText.split('gcloud run deploy').length - 1, 1);

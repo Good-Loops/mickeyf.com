@@ -5,16 +5,18 @@ schema preflight completed on the same date. On 2026-08-25, Mike approved the
 end state in which p4-Vega uses the generic leaderboard storage and the legacy
 `users.p4_score` column is retired after a verified cutover. The additive
 production schema and an initial p4-Vega data seed were applied and verified on
-2026-08-26. The exact frozen dual writer now serves 100% of production traffic,
-and its former enabled revision is retired. This document records those
-completed changes but does not authorize the generic read/write cutover,
+2026-08-26. The exact frozen dual writer still serves 100% of production
+traffic, its former enabled revision is retired, and the frozen generic-only
+candidate is ready at zero traffic. This document records those completed
+changes but does not authorize the generic read/write traffic cutover,
 legacy-column removal, or another production mutation.
 
 Production now contains `schema_migrations`, `game_runs`, and
 `game_personal_bests` alongside `users`. The initial seed and the later
 post-drain backfill both reconcile the same five p4-Vega personal bests exactly;
 `game_runs` is empty and `users.p4_score` is unchanged. The frozen dual writer
-serves 100% of production traffic, and no reader cutover has run.
+serves 100% of production traffic, the generic-only candidate has zero traffic,
+and no reader cutover has run.
 
 The transitional p4-Vega dual-write repository was implemented and verified
 locally on 2026-08-25 with unit, rollback, and concurrent MySQL 8.0.31 tests. It
@@ -39,8 +41,10 @@ that repository and one generic reader for both HTTP APIs. A disposable MySQL
 test physically drops the legacy column before successfully submitting and
 reading a score. Type-checking, 125 unit and security tests, 42 isolated MySQL
 integration tests, the production bundle, and image-only Cloud Build contract
-tests pass. This source has not been deployed and does not authorize the
-production cutover sequence below; production remains on the frozen dual writer.
+tests pass. This source is deployed only as the ready, frozen, zero-traffic
+candidate recorded below. It has not been activated and does not authorize the
+remaining production cutover sequence; production remains on the frozen dual
+writer.
 The generic-only runtime fixture also creates `users` without the legacy column
 and proves both game repositories under the restricted application identity.
 
@@ -153,12 +157,13 @@ and each later production step retains the approval and evidence gates below.
 
 The generic p4-Vega `get_leaderboard` implementation is now the active local
 reader for both APIs without changing the legacy request or response contract.
-It has not been deployed or activated in production. The additive schema,
-enabled dual-writer rollout, legacy-only revision drain, frozen dual-writer
-promotion, and post-drain reconciliations are complete; production activation
-remains gated on the frozen generic-only stage. The legacy column removal is a
-later separately approved step; the multi-game frontend slice is recorded
-below.
+It is deployed only in a frozen zero-traffic revision and has not been activated
+in production. The additive schema, enabled dual-writer rollout, legacy-only
+revision drain, frozen dual-writer promotion, post-drain reconciliations, and
+generic-only zero-traffic verification are complete; production activation
+remains gated on traffic promotion and the later cutover checks. The legacy
+column removal is a later separately approved step; the multi-game frontend
+slice is recorded below.
 
 The exact frozen generic-only candidate source was reviewed on 2026-08-26 at
 commit `e91d3b1177932614c22fbed059a42a05fcb10793`, tree
@@ -196,22 +201,34 @@ at generation 118 with 100% traffic on the frozen dual-writer revision, and no
 revision, traffic, database, grant, trigger, or IAM mutation was requested or
 executed.
 
-The exact source-less one-shot package is now tracked as
-`cloudbuild.generic-only.deploy.json`, SHA-256
-`8afde577fbefe781ed0a0c428f04dad40a5b8f8d147f22f01ccbae86bb9a5bf4`. Its eight
-pinned steps revalidate the exact source build, approval, SLSA v1 provenance,
-continuous OS/NPM/secret analysis, and zero vulnerability occurrences before
-allowing only a `--no-traffic` frozen deployment. The deterministic target is
-revision `mickeyf-org-freeze-d5aee625983b4dafa90d0db9898341e8` with temporary
-tag `f-d5aee625983b4dafa90d0db9898341e8`, exact runtime identity/resources/numeric
-secret references, and both submission flags false. Pre/post attestation rejects
-positive-traffic drift, while the non-mutating smoke suite now requires the
-legacy and generic p4-Vega leaderboard rows to agree. The package has no source,
-available secret, notification, traffic-promotion, database, migration, grant,
-IAM, or trigger-mutation step; all seven contract tests pass. No temporary
-trigger or deploy build has been created. Later approval must cover prompt exact-
-tag and temporary-trigger cleanup because a zero-percent tagged URL is still
-publicly invokable.
+The exact source-less one-shot package is tracked as
+`cloudbuild.generic-only.deploy.json`. Its initial reviewed form had SHA-256
+`8afde577fbefe781ed0a0c428f04dad40a5b8f8d147f22f01ccbae86bb9a5bf4`, but Cloud
+Build deferred template validation until approval and then rejected ordinary
+Bash `$VARIABLE` references. Pending build
+`4b6b5c99-e950-4436-a009-4744b77aea8f` never started and was cancelled; its
+temporary trigger was deleted. The package now uses Cloud Build's required `$$`
+literal-dollar escape. Decoding that escape produces the exact original runtime
+commands, and a regression test enforces paired dollars. The corrected package
+SHA-256 is
+`a5cd6534c766ecfb9dd9f8440a5c8a7ef709828ee7281ed122ea4952a7c4936d`, and all
+eight contract tests pass.
+
+With explicit approval, corrected source-less build
+`02eb1328-8b12-4b3b-bb0c-c9ef79f4a3a9` ran all eight pinned validation,
+deployment, attestation, and smoke steps successfully. It revalidated the exact
+source build, approval, SLSA v1 provenance, continuous OS/NPM/secret analysis,
+and zero vulnerability occurrences before creating only revision
+`mickeyf-org-freeze-d5aee625983b4dafa90d0db9898341e8` at zero traffic from the
+exact digest. The revision uses the reviewed runtime identity, resources,
+numeric secret references, and both submission flags false. The anonymous smoke
+suite proved the catalog, generic p4-Vega board, empty Three Bosses board,
+unknown-game response, frozen p4 submission, disabled Three Bosses submission,
+and identical legacy/generic p4 rows. Production remained 100% on
+`mickeyf-org-freeze-9a6066b44f34422bba3383d6b0e9a9eb`. The public temporary
+tag and one-use trigger were deleted immediately; final generation 120 has no
+tag or ongoing build. No traffic promotion, database, migration, grant, IAM, or
+submission-state change occurred.
 
 The refreshed OpenSSL review found byte-identical Dockerfile, lockfile, pinned
 Node base, first four OCI layers, and Node installation layer
@@ -220,12 +237,12 @@ between the previously accepted image and this candidate; both declare Node
 22.23.2. Only test/maintenance package scripts changed, and no affected QUIC,
 DTLS, CMP, CMS, RPK, or one-shot `EVP_Cipher()` path was added. The technical
 reachability evidence therefore transfers at the embedded-component boundary,
-but the prior user acceptance does not transfer across image digests, and the
-clean Artifact Analysis result does not scan Node's embedded OpenSSL 3.5.7.
-OpenSSL 3.5.8 is fixed upstream but not yet present in a released Node 22 build.
-Explicit acceptance for this exact digest and zero-traffic stage remains required.
-The source-build freshness gate expires at `2026-08-26T23:06:14Z`; if missed,
-rebuild the exact source rather than relax it.
+but the clean Artifact Analysis result does not scan Node's embedded OpenSSL
+3.5.7. OpenSSL 3.5.8 is fixed upstream but not yet present in a released Node 22
+build. Mike explicitly accepted the bounded embedded-component risk for this
+exact digest and zero-traffic stage. The build passed the two-hour source
+freshness gate before its `2026-08-26T23:06:14Z` deadline; the gate was not
+relaxed.
 
 The additive backend API was implemented and verified locally on 2026-08-26.
 `GET /api/leaderboards` explicitly projects the server catalog, and
@@ -756,7 +773,11 @@ completed enabled dual-writer checkpoint, not the generic read/write cutover;
     writer or pooled session remaining, run the separately approved exact
     column-grant retirement, recycle the generic-only runtime pool, and verify
     the fresh restricted identity exactly matches the source manifest before
-    enabling submissions.
+    enabling submissions. **The frozen generic-only zero-traffic deployment,
+    smoke suite, tag removal, and trigger cleanup completed on 2026-08-26 in
+    build `02eb1328-8b12-4b3b-bb0c-c9ef79f4a3a9`. Production traffic remains
+    100% on the frozen dual writer; promotion, drain, reconciliation, and grant
+    retirement remain pending.**
 13. Revoke operational authorization for further legacy backfills, retire exact
     legacy equality as a cutover gate, verify the generic-authoritative rollback
     candidate, and only then deploy an explicitly approved revision with the

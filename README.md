@@ -383,6 +383,13 @@ writer. The local generic-only manifest still treats those grants as unexpected
 and fails closed. The separate exact retirement workflow is implemented and
 locally verified, but has not been run against production.
 
+The frozen generic-only revision
+`mickeyf-org-freeze-d5aee625983b4dafa90d0db9898341e8` was deployed and fully
+smoke-tested at zero traffic on 2026-08-26. Its temporary public tag and one-use
+trigger were removed. Production still routes 100% to the frozen dual writer;
+generic-only traffic promotion, legacy-column grant retirement, and
+`users.p4_score` removal have not run.
+
 The p4-Vega backfill verifies the exact applied schema and legacy source,
 copies non-null historical scores monotonically in bounded transactions, and
 then emits aggregate-only reconciliation evidence. The separate reconciliation
