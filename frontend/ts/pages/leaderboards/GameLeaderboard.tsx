@@ -1,6 +1,7 @@
 /** Direct-linkable leaderboard detail page for one server-catalog game. */
 import { useEffect, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
+import { RouteHeading } from '@/components/RouteHeading';
 import {
     getGameLeaderboard,
     getLeaderboardCatalog,
@@ -9,7 +10,7 @@ import {
     type LeaderboardCatalogGame,
 } from '@/services/leaderboardService';
 
-type DetailState =
+export type DetailState =
     | { status: 'loading' }
     | { status: 'not-found'; games: LeaderboardCatalogGame[] }
     | {
@@ -27,6 +28,64 @@ const numberFormatter = new Intl.NumberFormat('en-US');
 
 function isAbortError(error: unknown): boolean {
     return error instanceof DOMException && error.name === 'AbortError';
+}
+
+type LeaderboardDetailReaders = {
+    readCatalog: typeof getLeaderboardCatalog;
+    readGame: typeof getGameLeaderboard;
+};
+
+type SettledDetailState = Exclude<DetailState, { status: 'loading' }>;
+
+/** Resolves one detail route into a renderable state without React side effects. */
+export async function loadGameLeaderboardState(
+    gameId: string | undefined,
+    signal?: AbortSignal,
+    readers: LeaderboardDetailReaders = {
+        readCatalog: getLeaderboardCatalog,
+        readGame: getGameLeaderboard,
+    }
+): Promise<SettledDetailState> {
+    let selectedGame: LeaderboardCatalogGame | null = null;
+    let knownGames: LeaderboardCatalogGame[] = [];
+
+    try {
+        const catalog = await readers.readCatalog(signal);
+        knownGames = catalog.games;
+        selectedGame = catalog.games.find((game) => game.gameId === gameId) ?? null;
+
+        if (!gameId || !selectedGame) {
+            return { status: 'not-found', games: knownGames };
+        }
+
+        const leaderboard = await readers.readGame(selectedGame.gameId, signal);
+
+        if (leaderboard.rulesVersion !== selectedGame.rulesVersion) {
+            throw new LeaderboardRequestError(
+                'The leaderboard service returned an unexpected response.',
+                200,
+                'INVALID_RESPONSE'
+            );
+        }
+
+        return { status: 'success', game: selectedGame, leaderboard };
+    } catch (error) {
+        if (isAbortError(error)) {
+            throw error;
+        }
+
+        if (error instanceof LeaderboardRequestError && error.code === 'UNKNOWN_GAME') {
+            return { status: 'not-found', games: knownGames };
+        }
+
+        return {
+            status: 'error',
+            game: selectedGame,
+            message: error instanceof Error
+                ? error.message
+                : 'The leaderboard could not be loaded.',
+        };
+    }
 }
 
 function formatRankState(game: LeaderboardCatalogGame): string {
@@ -166,72 +225,29 @@ function LeaderboardTable({
     );
 }
 
-const GameLeaderboard: React.FC = () => {
-    const { gameId } = useParams<{ gameId: string }>();
-    const [state, setState] = useState<DetailState>({ status: 'loading' });
-    const [requestVersion, setRequestVersion] = useState(0);
+type GameLeaderboardViewProps = {
+    gameId: string | undefined;
+    state: DetailState;
+    onRetry: () => void;
+};
 
-    useEffect(() => {
-        const abortController = new AbortController();
-
-        const loadLeaderboard = async () => {
-            setState({ status: 'loading' });
-            let selectedGame: LeaderboardCatalogGame | null = null;
-            let knownGames: LeaderboardCatalogGame[] = [];
-
-            try {
-                const catalog = await getLeaderboardCatalog(abortController.signal);
-                knownGames = catalog.games;
-                selectedGame = catalog.games.find((game) => game.gameId === gameId) ?? null;
-
-                if (!gameId || !selectedGame) {
-                    setState({ status: 'not-found', games: knownGames });
-                    return;
-                }
-
-                const leaderboard = await getGameLeaderboard(
-                    selectedGame.gameId,
-                    abortController.signal
-                );
-
-                if (leaderboard.rulesVersion !== selectedGame.rulesVersion) {
-                    throw new LeaderboardRequestError(
-                        'The leaderboard service returned an unexpected response.',
-                        200,
-                        'INVALID_RESPONSE'
-                    );
-                }
-
-                setState({ status: 'success', game: selectedGame, leaderboard });
-            } catch (error) {
-                if (isAbortError(error)) {
-                    return;
-                }
-
-                if (error instanceof LeaderboardRequestError && error.code === 'UNKNOWN_GAME') {
-                    setState({ status: 'not-found', games: knownGames });
-                    return;
-                }
-
-                setState({
-                    status: 'error',
-                    game: selectedGame,
-                    message: error instanceof Error
-                        ? error.message
-                        : 'The leaderboard could not be loaded.',
-                });
-            }
-        };
-
-        void loadLeaderboard();
-        return () => abortController.abort();
-    }, [gameId, requestVersion]);
+export function GameLeaderboardView({
+    gameId,
+    state,
+    onRetry,
+}: GameLeaderboardViewProps) {
+    const headingFocusKey = `${gameId ?? 'unknown'}:${state.status}`;
 
     if (state.status === 'loading') {
         return (
             <section className="leaderboard" aria-labelledby="leaderboard-loading-title">
                 <div className="leaderboard__state" role="status" aria-live="polite">
-                    <h1 id="leaderboard-loading-title">Loading leaderboard…</h1>
+                    <RouteHeading
+                        id="leaderboard-loading-title"
+                        focusKey={headingFocusKey}
+                    >
+                        Loading leaderboard…
+                    </RouteHeading>
                 </div>
             </section>
         );
@@ -241,7 +257,12 @@ const GameLeaderboard: React.FC = () => {
         return (
             <section className="leaderboard" aria-labelledby="leaderboard-not-found-title">
                 <div className="leaderboard__state leaderboard__state--error" role="alert">
-                    <h1 id="leaderboard-not-found-title">Leaderboard not found</h1>
+                    <RouteHeading
+                        id="leaderboard-not-found-title"
+                        focusKey={headingFocusKey}
+                    >
+                        Leaderboard not found
+                    </RouteHeading>
                     <p>No leaderboard matches “{gameId}”.</p>
                     <Link className="leaderboard__action" to="/leaderboards">
                         View all leaderboards
@@ -264,16 +285,19 @@ const GameLeaderboard: React.FC = () => {
         return (
             <section className="leaderboard" aria-labelledby="leaderboard-error-title">
                 <div className="leaderboard__state leaderboard__state--error" role="alert">
-                    <h1 id="leaderboard-error-title">
+                    <RouteHeading
+                        id="leaderboard-error-title"
+                        focusKey={headingFocusKey}
+                    >
                         {state.game
                             ? `${state.game.displayName} leaderboard unavailable`
                             : 'Leaderboard unavailable'}
-                    </h1>
+                    </RouteHeading>
                     <p>{state.message}</p>
                     <button
                         className="leaderboard__action"
                         type="button"
-                        onClick={() => setRequestVersion((version) => version + 1)}
+                        onClick={onRetry}
                     >
                         Try again
                     </button>
@@ -292,9 +316,13 @@ const GameLeaderboard: React.FC = () => {
                     ← All leaderboards
                 </Link>
                 <p className="leaderboard__eyebrow">Game leaderboard</p>
-                <h1 id="game-leaderboard-title" className="leaderboard__title">
+                <RouteHeading
+                    id="game-leaderboard-title"
+                    className="leaderboard__title"
+                    focusKey={headingFocusKey}
+                >
                     {state.game.displayName}
-                </h1>
+                </RouteHeading>
                 <div className="leaderboard__badges" aria-label="Leaderboard status">
                     <span>{formatRankState(state.game)}</span>
                     <span>{formatSubmissionState(state.game)}</span>
@@ -303,6 +331,50 @@ const GameLeaderboard: React.FC = () => {
 
             <LeaderboardTable game={state.game} leaderboard={state.leaderboard} />
         </section>
+    );
+}
+
+const GameLeaderboard: React.FC = () => {
+    const { gameId } = useParams<{ gameId: string }>();
+    const [state, setState] = useState<DetailState>({ status: 'loading' });
+    const [requestVersion, setRequestVersion] = useState(0);
+
+    useEffect(() => {
+        const abortController = new AbortController();
+
+        const loadLeaderboard = async () => {
+            setState({ status: 'loading' });
+
+            try {
+                const nextState = await loadGameLeaderboardState(
+                    gameId,
+                    abortController.signal
+                );
+
+                if (!abortController.signal.aborted) {
+                    setState(nextState);
+                }
+            } catch (error) {
+                if (!isAbortError(error) && !abortController.signal.aborted) {
+                    setState({
+                        status: 'error',
+                        game: null,
+                        message: 'The leaderboard could not be loaded.',
+                    });
+                }
+            }
+        };
+
+        void loadLeaderboard();
+        return () => abortController.abort();
+    }, [gameId, requestVersion]);
+
+    return (
+        <GameLeaderboardView
+            gameId={gameId}
+            state={state}
+            onRetry={() => setRequestVersion((version) => version + 1)}
+        />
     );
 };
 

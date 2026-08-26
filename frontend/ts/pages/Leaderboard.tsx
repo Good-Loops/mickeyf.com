@@ -5,10 +5,23 @@
  */
 import { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
+import { RouteHeading } from '@/components/RouteHeading';
 import {
     getLeaderboardCatalog,
     type LeaderboardCatalogGame,
+    type LeaderboardCatalogResponse,
 } from '@/services/leaderboardService';
+
+type LeaderboardCatalogReader = (
+    signal?: AbortSignal
+) => Promise<LeaderboardCatalogResponse>;
+
+export async function loadLeaderboardCatalogGames(
+    signal?: AbortSignal,
+    readCatalog: LeaderboardCatalogReader = getLeaderboardCatalog
+): Promise<LeaderboardCatalogGame[]> {
+    return (await readCatalog(signal)).games;
+}
 
 function isAbortError(error: unknown): boolean {
     return error instanceof DOMException && error.name === 'AbortError';
@@ -20,47 +33,25 @@ function getMetricLabel(game: LeaderboardCatalogGame): string {
         : game.labels.score;
 }
 
-const Leaderboard: React.FC = () => {
-    const [games, setGames] = useState<LeaderboardCatalogGame[]>([]);
-    const [isLoading, setIsLoading] = useState(true);
-    const [errorMessage, setErrorMessage] = useState<string | null>(null);
-    const [requestVersion, setRequestVersion] = useState(0);
+type LeaderboardViewProps = {
+    games: LeaderboardCatalogGame[];
+    isLoading: boolean;
+    errorMessage: string | null;
+    onRetry: () => void;
+};
 
-    useEffect(() => {
-        const abortController = new AbortController();
-
-        const loadCatalog = async () => {
-            setIsLoading(true);
-            setErrorMessage(null);
-
-            try {
-                const response = await getLeaderboardCatalog(abortController.signal);
-                setGames(response.games);
-            } catch (error) {
-                if (!isAbortError(error)) {
-                    setErrorMessage(
-                        error instanceof Error
-                            ? error.message
-                            : 'The leaderboards could not be loaded.'
-                    );
-                }
-            } finally {
-                if (!abortController.signal.aborted) {
-                    setIsLoading(false);
-                }
-            }
-        };
-
-        void loadCatalog();
-        return () => abortController.abort();
-    }, [requestVersion]);
-
+export function LeaderboardView({
+    games,
+    isLoading,
+    errorMessage,
+    onRetry,
+}: LeaderboardViewProps) {
     return (
         <section className="leaderboard" aria-labelledby="leaderboards-title">
             <header className="leaderboard__header">
-                <h1 id="leaderboards-title" className="leaderboard__title">
+                <RouteHeading id="leaderboards-title" className="leaderboard__title">
                     Leaderboards
-                </h1>
+                </RouteHeading>
             </header>
 
             {isLoading && games.length === 0 && (
@@ -76,7 +67,7 @@ const Leaderboard: React.FC = () => {
                     <button
                         className="leaderboard__action"
                         type="button"
-                        onClick={() => setRequestVersion((version) => version + 1)}
+                        onClick={onRetry}
                     >
                         Try again
                     </button>
@@ -113,6 +104,50 @@ const Leaderboard: React.FC = () => {
                 </nav>
             )}
         </section>
+    );
+}
+
+const Leaderboard: React.FC = () => {
+    const [games, setGames] = useState<LeaderboardCatalogGame[]>([]);
+    const [isLoading, setIsLoading] = useState(true);
+    const [errorMessage, setErrorMessage] = useState<string | null>(null);
+    const [requestVersion, setRequestVersion] = useState(0);
+
+    useEffect(() => {
+        const abortController = new AbortController();
+
+        const loadCatalog = async () => {
+            setIsLoading(true);
+            setErrorMessage(null);
+
+            try {
+                setGames(await loadLeaderboardCatalogGames(abortController.signal));
+            } catch (error) {
+                if (!isAbortError(error)) {
+                    setErrorMessage(
+                        error instanceof Error
+                            ? error.message
+                            : 'The leaderboards could not be loaded.'
+                    );
+                }
+            } finally {
+                if (!abortController.signal.aborted) {
+                    setIsLoading(false);
+                }
+            }
+        };
+
+        void loadCatalog();
+        return () => abortController.abort();
+    }, [requestVersion]);
+
+    return (
+        <LeaderboardView
+            games={games}
+            isLoading={isLoading}
+            errorMessage={errorMessage}
+            onRetry={() => setRequestVersion((version) => version + 1)}
+        />
     );
 };
 
