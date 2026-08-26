@@ -173,6 +173,8 @@ export async function submitThreeBossesRun(
         await connection.beginTransaction();
         transactionStarted = true;
 
+        // This locked user row is the per-user serialization boundary for
+        // replay checks, rate admission, ledger inserts, and personal bests.
         const [users] = await connection.query<RowDataPacket[]>(
             {
                 sql: `SELECT user_id
@@ -202,8 +204,7 @@ export async function submitThreeBossesRun(
                     WHERE game_id = ?
                       AND user_id = ?
                       AND run_id = ?
-                    LIMIT 1
-                    FOR UPDATE`,
+                    LIMIT 1`,
                 timeout: DATABASE_QUERY_TIMEOUT_MS,
             },
             [THREE_BOSSES.gameId, userId, runId]

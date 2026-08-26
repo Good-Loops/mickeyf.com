@@ -49,12 +49,22 @@ export const THREE_BOSSES_RUN_INTEGRATION_TEST_COMMAND = Object.freeze({
     "ts/leaderboards/threeBossesRunRepository.integration.test.ts",
   ]),
 });
+export const RUNTIME_GRANT_INTEGRATION_TEST_COMMAND = Object.freeze({
+  executable: process.execPath,
+  args: Object.freeze([
+    "--test",
+    "-r",
+    "ts-node/register",
+    "ts/security/runtimeGrantManifest.integration.test.ts",
+  ]),
+});
 
 const INTEGRATION_TEST_COMMANDS = Object.freeze([
   MIGRATION_INTEGRATION_TEST_COMMAND,
   P4_VEGA_DUAL_WRITE_INTEGRATION_TEST_COMMAND,
   THREE_BOSSES_RUN_INTEGRATION_TEST_COMMAND,
   P4_VEGA_BACKFILL_INTEGRATION_TEST_COMMAND,
+  RUNTIME_GRANT_INTEGRATION_TEST_COMMAND,
 ]);
 
 const MYSQL_SERVICE = "mysql";

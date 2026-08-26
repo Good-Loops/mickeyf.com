@@ -392,11 +392,31 @@ pre-deployment blocker. Credential changes and privilege revocation require
 their own reviewed approval. The preflight made no database, configuration, or
 repository change and returned the local proxy to its original stopped state.
 
-The exact per-table runtime grant manifest and its verification test remain to
-be implemented before candidate deployment. Do not revoke the current role and
-improvise replacement grants during a production operation. After maintenance,
+The exact column-level runtime manifest now lives in
+`ts/security/runtimeGrantManifest.ts`. It grants the transitional application
+only `SELECT`, `INSERT`, and the narrowly required `UPDATE` columns on `users`,
+`game_runs`, and `game_personal_bests`. It grants no access to
+`schema_migrations`, no `DELETE`, DDL, role, administrative privilege, or grant
+option. A redundant `game_runs SELECT ... FOR UPDATE` was removed because the
+preceding locked user row already serializes every submission for that user;
+the immutable ledger therefore needs only `SELECT` and `INSERT`.
+
+The pinned MySQL 8.0.31 integration suite installs the manifest on a separate
+disposable runtime identity, exercises every current auth and leaderboard SQL
+path, compares the exact column inventory, and proves that migration history,
+ledger mutation, destructive DML, DDL, account creation, and grant operations
+are denied. This test evidence does not change live grants: production still
+inherits `cloudsqlsuperuser` until a separately approved reduction operation.
+Do not revoke that role and improvise replacement grants. After maintenance,
 drop and verify removal of an ephemeral account; if the account is deliberately
 persistent, rotate its credential and govern it as a standing administrator.
+
+This manifest is transitional. Three Bosses presently serializes submissions
+with `users SELECT ... FOR UPDATE`, which MySQL authorizes through the same
+`UPDATE(p4_score)` grant needed by the dual writer. Before the legacy column
+and grant are removed, replace that serialization boundary without granting
+arbitrary `users` updates and pass a restricted generic-only fixture with
+`p4_score` physically absent.
 
 This evidence satisfied the metadata gate for the exact SQL and isolated local
 migration tests completed on 2026-08-25. That preflight did not by itself
@@ -426,7 +446,8 @@ immediately after this schema step both domain tables contained zero rows.
 remained seven users, five scored rows, minimum 190, maximum 410, and sum 1350.
 No trigger, backfill, deployment, credential change, rollback, or destructive
 migration was performed during this step. The runtime `cloudsqlsuperuser`
-finding and exact-grant-manifest blocker remain.
+finding remains; the exact manifest and isolated verification were completed
+later on the feature branch without changing production privileges.
 
 ## Completed initial production p4-Vega seed
 

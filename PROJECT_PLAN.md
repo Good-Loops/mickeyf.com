@@ -109,9 +109,17 @@ identity is preferred, while one-time reuse of the current credential is an
 explicit exception followed by immediate local credential clearing. Runtime
 privilege reduction remains a separately reviewed pre-deployment blocker.
 
-The exact per-table runtime grant manifest and its verification test are not yet
-implemented. They are a candidate-deployment blocker; do not revoke the current
-role and improvise replacement grants during a production operation.
+The exact column-level runtime grant manifest and isolated verification test
+were implemented locally on 2026-08-26. The manifest grants only the columns
+used by current auth and leaderboard SQL on `users`, `game_runs`, and
+`game_personal_bests`, and nothing on `schema_migrations`. A redundant locking
+read was removed so the immutable `game_runs` ledger needs no `UPDATE` grant.
+The pinned MySQL 8.0.31 suite proves every current runtime path succeeds while
+migration history, destructive DML, ledger updates, DDL, account creation, and
+grant operations fail. This closes the code-and-test prerequisite, not the live
+operation: production still inherits `cloudsqlsuperuser`, and replacing it with
+the exact direct grants remains a separately reviewed candidate-deployment
+action.
 
 The approved Phase 13 storage end state is for both the existing p4-Vega API
 operations and the generic leaderboard read to use `game_personal_bests` as
@@ -121,6 +129,17 @@ rollback code depends on the legacy column, a separately reviewed immutable
 migration will drop `users.p4_score`. The initial additive migrations remain
 unchanged, and the drop requires its own production approval and recovery
 evidence.
+
+The current grant manifest is intentionally transitional because the active
+dual writer still updates `users.p4_score`. Before the generic-only cutover and
+column drop, update and reverify the manifest so that `p4_score` disappears
+from both its `SELECT` and `UPDATE` columns; do not carry a stale column grant
+into the final schema. Three Bosses currently uses `users SELECT ... FOR
+UPDATE` as its per-user serialization boundary, and MySQL authorizes that lock
+through the transitional `UPDATE(p4_score)` grant. Before removing the grant,
+replace that serialization mechanism without granting arbitrary `users`
+updates, then pass an isolated generic-only fixture in which `p4_score` is
+physically absent.
 
 The transitional p4-Vega write path was implemented and verified locally on
 2026-08-25. That candidate updated `users.p4_score` and
