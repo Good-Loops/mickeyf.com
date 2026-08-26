@@ -350,6 +350,13 @@ test('advisory lock contention fails without applying partial schema', async () 
 });
 
 test('shipped CLI enforces action-specific gates before applying or rolling back', async () => {
+    const deniedAccount = await runMigrationCli('plan', {
+        MIGRATION_CONFIRM_ACCOUNT: 'different-account@%',
+    });
+    assert.equal(deniedAccount.exitCode, 1);
+    assert.match(deniedAccount.stderr, /does not match migration confirmations/);
+    assert.equal(await tableCount('schema_migrations'), 0);
+
     const deniedApply = await runMigrationCli('apply', {
         MIGRATION_DB_PORT: '9',
         MIGRATION_CONFIRM_TARGET: `127.0.0.1:9/${config.database}`,

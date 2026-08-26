@@ -116,6 +116,25 @@ export function loadMigrationConfig(env: Environment = process.env): MigrationCo
     });
 }
 
+export function loadMigrationAccountConfirmation(
+    env: Environment = process.env
+): string {
+    const confirmedAccount = requiredValue(env, 'MIGRATION_CONFIRM_ACCOUNT', true);
+    const accountSeparator = confirmedAccount.lastIndexOf('@');
+    if (
+        confirmedAccount !== confirmedAccount.trim()
+        || confirmedAccount.length > 288
+        || accountSeparator <= 0
+        || accountSeparator === confirmedAccount.length - 1
+        || /[\u0000-\u001f\u007f]/u.test(confirmedAccount)
+    ) {
+        throw new Error(
+            'MIGRATION_CONFIRM_ACCOUNT must be the exact CURRENT_USER() account'
+        );
+    }
+    return confirmedAccount;
+}
+
 export function assertDatabaseConfirmation(
     config: Pick<MigrationConfig, 'database'>,
     confirmedDatabase: string | undefined

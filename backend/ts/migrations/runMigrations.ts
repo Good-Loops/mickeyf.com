@@ -2,6 +2,7 @@ import mysql, { type Connection, type RowDataPacket } from 'mysql2/promise';
 import {
     assertP4VegaDataOperationAuthorized,
     assertMutationAuthorized,
+    loadMigrationAccountConfirmation,
     loadMigrationConfig,
     type MigrationConfig,
 } from '../config/migrationConfig';
@@ -61,15 +62,23 @@ function asP4VegaBackfillConnection(connection: Connection): P4VegaBackfillConne
     return connection as unknown as P4VegaBackfillConnection;
 }
 
-async function assertConnectedDatabase(
+async function assertConnectedTarget(
     connection: Connection,
-    expectedDatabase: string
+    expectedDatabase: string,
+    expectedAccount: string
 ): Promise<void> {
-    const [rows] = await connection.query<Array<RowDataPacket & { databaseName: string }>>(
-        'SELECT DATABASE() AS databaseName'
-    );
-    if (rows.length !== 1 || rows[0].databaseName !== expectedDatabase) {
-        throw new Error('Connected database does not match MIGRATION_DB_NAME');
+    const [rows] = await connection.query<Array<RowDataPacket & {
+        databaseName: string | null;
+        currentUser: string;
+    }>>('SELECT DATABASE() AS databaseName, CURRENT_USER() AS currentUser');
+    const [identity] = rows;
+
+    if (
+        rows.length !== 1
+        || identity.databaseName !== expectedDatabase
+        || identity.currentUser !== expectedAccount
+    ) {
+        throw new Error('Connected database or account does not match migration confirmations');
     }
 }
 
@@ -161,6 +170,7 @@ function safeErrorMessage(error: unknown, password: string): string {
 async function main(): Promise<void> {
     const command = parseCommand(process.argv.slice(2));
     const config = loadMigrationConfig();
+    const confirmedAccount = loadMigrationAccountConfirmation();
     if (command === 'apply' || command === 'rollback-empty') {
         // Refuse before opening a socket, not merely before the first DDL.
         assertMutationAuthorized(command, config);
@@ -182,7 +192,7 @@ async function main(): Promise<void> {
     });
 
     try {
-        await assertConnectedDatabase(connection, config.database);
+        await assertConnectedTarget(connection, config.database, confirmedAccount);
         await withOperationDeadline(
             connection,
             command === 'backfill-p4-vega' || command === 'reconcile-p4-vega'

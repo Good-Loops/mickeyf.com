@@ -87,14 +87,18 @@ backfill has run, so the feature-branch p4-Vega detail correctly cannot read
 its generic table yet. These are explicit completion gates, not accepted
 follow-up work.
 
-That preflight also found that the deployed `cms_mickeyf` application account
-still inherits Cloud SQL's `cloudsqlsuperuser` role. This is an existing
-least-privilege defect: remove the role and grant only the reviewed runtime
-table privileges before deploying the leaderboard candidate. It must not be
-used as the schema administrator. The production migration safety design may
-use it once only to arm an exact, fixed-definer, one-shot cleanup watchdog
-before either temporary account exists, but that containment exception
-requires explicit approval, immediate secret clearing, and recorded cleanup.
+That preflight also found that the deployed `cms_mickeyf` account inherits
+Cloud SQL's `cloudsqlsuperuser` role. This existing least-privilege defect must
+be fixed before candidate deployment: revoke the role and grant only reviewed
+runtime DML. Production migration commands use one explicitly approved
+maintenance credential through `MIGRATION_DB_*`; a separate maintenance
+identity is preferred, while one-time reuse of the current credential is an
+explicit exception followed by immediate credential clearing and runtime
+privilege reduction.
+
+The exact per-table runtime grant manifest and its verification test are not yet
+implemented. They are a candidate-deployment blocker; do not revoke the current
+role and improvise replacement grants during a production operation.
 
 The approved Phase 13 storage end state is for both the existing p4-Vega API
 operations and the generic leaderboard read to use `game_personal_bests` as
@@ -242,8 +246,8 @@ Three Bosses gameplay and ranking release gates are approved.
 
 Neither a production backfill nor a production reconciliation has been
 performed. Production execution requires the additive schema, an explicitly
-approved short-lived least-privilege principal, exact target confirmation, and
-recovery evidence.
+approved maintenance credential, exact target confirmation, and recovery
+evidence.
 Only a zero-discrepancy post-drain reconciliation permits the later read/write
 cutover to `game_personal_bests`. The final production switch requires a
 freeze-capable dual writer first: drain every no-gate revision, freeze the

@@ -254,17 +254,11 @@ npm --prefix backend run migrations:p4-backfill
 npm --prefix backend run migrations:p4-reconcile
 ```
 
-Production-capable commands must use the single-operation temporary accounts
-and immediate lock/revoke/drop sequence in
-[`backend/MIGRATION_PRINCIPALS.md`](backend/MIGRATION_PRINCIPALS.md). That
-procedure records the exact grants, confirmation variables, lifecycle controls,
-denial evidence, and unavoidable MySQL privilege caveats; it does not authorize
-or perform a production action.
-
 Every command requires `MIGRATION_DB_HOST=127.0.0.1`, `MIGRATION_DB_PORT`,
-`MIGRATION_DB_NAME`, `MIGRATION_DB_USER`, and `MIGRATION_DB_PASS`; there is no
-fallback to the backend's runtime `DB_*` credentials. Optional bounded settings
-are `MIGRATION_ADVISORY_LOCK_TIMEOUT_SECONDS` (default 5),
+`MIGRATION_DB_NAME`, `MIGRATION_DB_USER`, `MIGRATION_DB_PASS`, and the exact
+`CURRENT_USER()` value in `MIGRATION_CONFIRM_ACCOUNT`; there is no fallback to
+the backend's runtime `DB_*` credentials. Optional bounded settings are
+`MIGRATION_ADVISORY_LOCK_TIMEOUT_SECONDS` (default 5),
 `MIGRATION_LOCK_WAIT_TIMEOUT_SECONDS` (default 10), and
 `MIGRATION_OPERATION_TIMEOUT_MS` (default 30000). The backfill also accepts
 `MIGRATION_P4_VEGA_BACKFILL_CHUNK_SIZE` from 1 through 5000 (default 500).
@@ -272,15 +266,34 @@ Both p4-Vega data commands use the separate bounded
 `MIGRATION_P4_VEGA_OPERATION_TIMEOUT_MS` (default 900000, maximum 21600000), so
 the short schema-operation deadline does not strand a multi-chunk pass. Set an
 action gate only for the command being reviewed, then remove it from the shell
-after the command.
+after the command. After connecting, the CLI also verifies that `DATABASE()` and
+the complete account returned by `CURRENT_USER()` match those confirmations.
+
+For production, keep the phases separate and follow the detailed cutover order
+in [`backend/LEADERBOARD_DESIGN.md`](backend/LEADERBOARD_DESIGN.md):
+
+1. Verify and record the proxy's exact project, region, and instance first;
+   then record a fresh named backup and point-in-time-recovery evidence.
+2. Supply one approved maintenance credential only through `MIGRATION_DB_*`,
+   confirm its complete account, plan, apply only the additive schema, clear the
+   action gate, and plan again. Do not alter `users.p4_score`.
+3. Before candidate deployment, commit and test an exact per-table runtime grant
+   manifest. Until that exists, runtime privilege reduction remains a blocker;
+   do not replace `cloudsqlsuperuser` with improvised grants.
+4. Deploy the freeze-capable dual writer, drain legacy-only revisions, then run
+   the separately gated monotonic backfill and aggregate reconciliation.
+5. For cutover, freeze submissions, drain in-flight dual writers, reconcile,
+   deploy the generic-only writer still frozen, drain again, reconcile again,
+   and only then enable generic submissions.
+6. Clear credentials and close the proxy. Drop and prove absence of an ephemeral
+   maintenance account; if it is intentionally persistent, rotate and govern it
+   as an administrator. Keep `users.p4_score` until its separately approved
+   post-cutover drop migration.
 
 The p4-Vega backfill verifies the exact applied schema and legacy source,
 copies non-null historical scores monotonically in bounded transactions, and
 then emits aggregate-only reconciliation evidence. The separate reconciliation
-command issues only data reads and emits the same identity-free evidence. Its
-temporary principal is not strictly immutable because MySQL requires
-`TRIGGER` privilege for the exact-schema verifier to prove trigger absence; the
-temporary-principal procedure documents that bounded exception. Either
+command is data-read-only and emits the same identity-free evidence. Either
 command exits with code 2 when comparison drift remains; that is a failed gate,
 not permission to cut over. Exit code 2 after a backfill can follow successfully
 committed chunks, so it means "rerun/reconcile," not "nothing changed." Exit 1

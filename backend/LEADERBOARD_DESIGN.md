@@ -245,10 +245,9 @@ table are planned:
 ### `schema_migrations`
 
 Stores the immutable migration version, SHA-256 checksum, and applied time. A
-separate, short-lived migration principal receives only the reviewed schema,
-migration-history, backfill, and reconciliation privileges required for the
-approved run; the runtime identity receives no DDL permission. The runner uses
-a database advisory lock so two deploys cannot apply migrations concurrently.
+separately approved maintenance credential is supplied only for the reviewed
+operation; the runtime identity receives no DDL permission. The runner uses a
+database advisory lock so two deploys cannot apply migrations concurrently.
 Checksums cover the exact committed LF SQL bytes. Each version contains one
 statement because MySQL DDL commits implicitly; the runner verifies the exact
 table shape before recording or recovering a version. The CLI accepts only the
@@ -337,15 +336,14 @@ Cloud SQL instance behind the proxy; operators must verify and record the
 authenticated proxy's exact project, region, and instance before enabling a
 data action.
 
-The backfill uses a short-lived least-privilege principal with only the source
-reads and target reads/inserts/score-and-timestamp updates required for the
-reviewed operation. Migration history is read-only to this principal, so the
-shared recorded timestamp cannot be edited between passes. It receives no
-permission to update `users` or to delete, alter, drop, trigger, export, or
-grant. No trigger, view, generated column, index, or foreign key is added
-around `users.p4_score`, so the later contract migration can remove the column
-cleanly. The transitional command must itself be removed or disabled, and
-included in the no-reference proof, before that drop is approved.
+The backfill runs only through the fixed CLI operation and its independently
+approved action gate. Supply one approved maintenance credential through
+`MIGRATION_DB_*`, clear it immediately afterward, and reduce the runtime account
+to reviewed DML before candidate deployment. No trigger, view, generated
+column, index, or foreign key is added around `users.p4_score`, so the later
+contract migration can remove the column cleanly. The transitional command
+must itself be removed or disabled, and included in the no-reference proof,
+before that drop is approved.
 
 ## Completed live metadata preflight
 
@@ -379,12 +377,20 @@ unbounded, so the migration connection must set a short session
 deadline.
 
 The inspected application database account currently has broad DDL and DML
-privileges. Do not reuse it as the long-term migration boundary. Before
-production rollout, provision and validate a least-privilege runtime database
-identity and use a separate short-lived migration principal. Credential changes and
-privilege revocation require their own reviewed approval. The preflight made no
-database, configuration, or repository change and returned the local proxy to
-its original stopped state.
+privileges through Cloud SQL's `cloudsqlsuperuser` role. Before candidate
+deployment, revoke that role and grant only the reviewed runtime DML. Production
+migration commands require an explicitly approved maintenance credential; a
+separate maintenance identity is preferred, and any one-time reuse of the
+current credential is an explicit exception followed by immediate clearing and
+privilege reduction. Credential changes and privilege revocation require their
+own reviewed approval. The preflight made no database, configuration, or
+repository change and returned the local proxy to its original stopped state.
+
+The exact per-table runtime grant manifest and its verification test remain to
+be implemented before candidate deployment. Do not revoke the current role and
+improvise replacement grants during a production operation. After maintenance,
+drop and verify removal of an ephemeral account; if the account is deliberately
+persistent, rotate its credential and govern it as a standing administrator.
 
 This evidence satisfied the metadata gate for the exact SQL and isolated local
 migration tests completed on 2026-08-25. It does not authorize production DDL,
@@ -393,7 +399,7 @@ backfill, credential rotation, or deployment.
 ## Expand, backfill, and cutover
 
 1. Use the versioned, checksum-recorded `mysql2` migration runner with its
-   dedicated migration configuration and a short-lived migration principal.
+   dedicated migration configuration and an approved maintenance credential.
 2. During Mike's reviewed migration approval, assess every proposed statement's
    online-DDL and metadata-lock behavior. Then record and verify a fresh named
    pre-migration backup plus point-in-time-recovery evidence.
@@ -404,8 +410,8 @@ backfill, credential rotation, or deployment.
    has no run ID, so it never fabricates a `game_runs` row or claims request
    idempotency. During this phase, keep the legacy leaderboard read on
    `users.p4_score`; do not expose an incomplete generic table as its source.
-5. With a short-lived least-privilege principal and the dedicated action
-   confirmation, run the repeatable monotonic p4-Vega backfill. Copy every
+5. With the approved maintenance credential and dedicated action confirmation,
+   run the repeatable monotonic p4-Vega backfill. Copy every
    non-null legacy value, even if an old stored value does not satisfy today's
    client validator; do not create a historical run row.
 6. Wait for every legacy-only Cloud Run revision to drain, prove it can no

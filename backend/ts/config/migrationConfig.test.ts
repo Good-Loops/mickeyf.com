@@ -5,6 +5,7 @@ import {
     assertMutationAuthorized,
     assertP4VegaDataOperationAuthorized,
     loadMigrationConfig,
+    loadMigrationAccountConfirmation,
 } from './migrationConfig';
 
 const migrationEnvironment = {
@@ -44,6 +45,30 @@ test('migration configuration never falls back to runtime database credentials',
         }),
         /MIGRATION_DB_HOST/
     );
+});
+
+test('migration account confirmation requires the exact resolved MySQL account', () => {
+    assert.equal(
+        loadMigrationAccountConfirmation({ MIGRATION_CONFIRM_ACCOUNT: 'migration-user@%' }),
+        'migration-user@%'
+    );
+
+    for (const value of [
+        undefined,
+        '',
+        ' migration-user@%',
+        'migration-user@% ',
+        'migration-user',
+        '@%',
+        'migration-user@',
+        'migration-user@%\n',
+        `${'u'.repeat(33)}@${'h'.repeat(255)}`,
+    ]) {
+        assert.throws(
+            () => loadMigrationAccountConfirmation({ MIGRATION_CONFIRM_ACCOUNT: value }),
+            /MIGRATION_CONFIRM_ACCOUNT/
+        );
+    }
 });
 
 test('migration configuration permits only the loopback Cloud SQL proxy target', () => {
