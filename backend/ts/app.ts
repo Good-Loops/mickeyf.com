@@ -49,12 +49,19 @@ app.use(cors({
     maxAge: 600,
 }));
 app.use(['/api', '/auth'], preventSensitiveResponseCaching);
-app.use(express.json({ limit: '32kb', strict: true }));
 app.use(cookieParser(runtimeConfig.sessionSecret));
 
 const generalApiRateLimiter = createGeneralApiRateLimiter();
 app.use(['/api', '/auth'], generalApiRateLimiter);
-app.use('/api/leaderboards', createLeaderboardRouter(pool));
+app.use('/api/leaderboards', createLeaderboardRouter(pool, {
+    sessionSecret: runtimeConfig.sessionSecret,
+    allowedMutationOrigins: runtimeConfig.corsOrigins,
+    threeBossesRunSubmissionsEnabled:
+        runtimeConfig.threeBossesRunSubmissionsEnabled,
+}));
+// Keep this parser after the leaderboard router. That router owns its POST
+// parser so a disabled Three Bosses endpoint rejects before reading a body.
+app.use(express.json({ limit: '32kb', strict: true }));
 app.use('/api', createMainRouter({
     sessionSecret: runtimeConfig.sessionSecret,
     isProduction: runtimeConfig.isProduction,
@@ -74,6 +81,10 @@ async function startServer(): Promise<void> {
                 p4VegaScoreSubmissions: runtimeConfig.p4VegaScoreSubmissionsEnabled
                     ? 'enabled'
                     : 'frozen',
+                threeBossesRunSubmissions:
+                    runtimeConfig.threeBossesRunSubmissionsEnabled
+                        ? 'enabled'
+                        : 'disabled',
             });
         });
     } catch (error: unknown) {

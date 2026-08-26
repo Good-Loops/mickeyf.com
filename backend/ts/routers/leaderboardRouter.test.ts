@@ -8,6 +8,13 @@ import { notFoundHandler } from '../middleware/errorHandling';
 import { leaderboardRoutesContract } from './leaderboardRouter.contract';
 import { createLeaderboardRouter } from './leaderboardRouter';
 
+const sessionSecret = 'leaderboard-router-unit-test-secret';
+const routerOptions = Object.freeze({
+    sessionSecret,
+    allowedMutationOrigins: ['https://mickeyf.com'],
+    threeBossesRunSubmissionsEnabled: false,
+});
+
 type QueryCall = Readonly<{
     sql: string;
     timeout: number | undefined;
@@ -27,21 +34,36 @@ function createFakeDatabase(queryError?: Error) {
                 values,
             });
             if (queryError) throw queryError;
+            if (values?.[0] === 'three-bosses') return [[
+                {
+                    userName: 'fast-player',
+                    score: 2_000,
+                    completionTimeMs: 50_000,
+                },
+                {
+                    userName: 'steady-player',
+                    score: 1_000,
+                    completionTimeMs: 100_000,
+                },
+            ], []];
             return [[
                 { userName: 'historical-player', score: 1_200, internalId: 91 },
                 { userName: 'current-player', score: 990, internalId: 42 },
             ], []];
         },
-    } as unknown as Pick<Pool, 'query'>;
+        async getConnection() {
+            throw new Error('read and disabled-route tests must not acquire a connection');
+        },
+    } as unknown as Pick<Pool, 'getConnection' | 'query'>;
     return { database, queries };
 }
 
 async function withLeaderboardServer(
-    database: Pick<Pool, 'query'>,
+    database: Pick<Pool, 'getConnection' | 'query'>,
     run: (origin: string) => Promise<void>
 ) {
     const app = express();
-    app.use('/api/leaderboards', createLeaderboardRouter(database));
+    app.use('/api/leaderboards', createLeaderboardRouter(database, routerOptions));
     app.use(notFoundHandler);
 
     const server = app.listen(0, '127.0.0.1');
@@ -64,7 +86,7 @@ async function requestJson(origin: string, path: string, method = 'GET') {
     };
 }
 
-test('publishes the two additive public read route contracts', () => {
+test('publishes the additive read and authenticated run route contracts', () => {
     assert.deepEqual(
         leaderboardRoutesContract.routes.map(({ id, method, path, auth }) => ({
             id,
@@ -78,6 +100,12 @@ test('publishes the two additive public read route contracts', () => {
                 method: 'GET',
                 path: '/',
                 auth: 'public',
+            },
+            {
+                id: 'leaderboards.three-bosses.submit-run',
+                method: 'POST',
+                path: '/three-bosses/runs',
+                auth: 'user',
             },
             {
                 id: 'leaderboards.game',
@@ -141,11 +169,27 @@ test('serves the exact catalog and game DTOs without enabling Three Bosses write
                     contractVersion: 1,
                     gameId: 'three-bosses',
                     rulesVersion: 1,
-                    entries: [],
+                    entries: [
+                        {
+                            position: 1,
+                            userName: 'fast-player',
+                            score: 2_000,
+                            completionTimeMs: 50_000,
+                            rank: 'UNRANKED',
+                        },
+                        {
+                            position: 2,
+                            userName: 'steady-player',
+                            score: 1_000,
+                            completionTimeMs: 100_000,
+                            rank: 'UNRANKED',
+                        },
+                    ],
                 },
             }
         );
-        assert.equal(fake.queries.length, 0);
+        assert.equal(fake.queries.length, 1);
+        assert.deepEqual(fake.queries[0].values, ['three-bosses', 1]);
 
         assert.deepEqual(
             await requestJson(
@@ -166,8 +210,8 @@ test('serves the exact catalog and game DTOs without enabling Three Bosses write
                 },
             }
         );
-        assert.equal(fake.queries.length, 1);
-        assert.deepEqual(fake.queries[0].values, ['p4-vega', 1]);
+        assert.equal(fake.queries.length, 2);
+        assert.deepEqual(fake.queries[1].values, ['p4-vega', 1]);
 
         for (const gameId of [
             'P4-Vega',
@@ -200,7 +244,7 @@ test('serves the exact catalog and game DTOs without enabling Three Bosses write
                 },
             }
         );
-        assert.equal(fake.queries.length, 1);
+        assert.equal(fake.queries.length, 2);
 
         assert.deepEqual(
             await requestJson(
@@ -208,9 +252,16 @@ test('serves the exact catalog and game DTOs without enabling Three Bosses write
                 '/api/leaderboards/three-bosses/runs',
                 'POST'
             ),
-            { status: 404, body: { error: 'NOT_FOUND' } }
+            {
+                status: 403,
+                body: {
+                    success: false,
+                    contractVersion: 1,
+                    error: 'SUBMISSION_DISABLED',
+                },
+            }
         );
-        assert.equal(fake.queries.length, 1);
+        assert.equal(fake.queries.length, 2);
     });
 });
 

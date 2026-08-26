@@ -80,6 +80,13 @@ alter `users.p4_score`. Applying DDL, backfilling data, changing production
 credentials, or deploying the new API still requires a separate reviewed
 approval.
 
+A fresh read-only production check on 2026-08-26 confirmed the incomplete live
+state directly: `users` is still the only application table and
+`users.p4_score` is still present. No additive migration or production
+backfill has run, so the feature-branch p4-Vega detail correctly cannot read
+its generic table yet. These are explicit completion gates, not accepted
+follow-up work.
+
 The approved Phase 13 storage end state is for both the existing p4-Vega API
 operations and the generic leaderboard read to use `game_personal_bests` as
 their source of truth. After transactional dual writes, a complete backfill,
@@ -136,15 +143,20 @@ gate is deliberately independent of the storage repository so the same change
 can protect both a transitional dual-write revision and the generic-only
 revision. The tracked canonical Stage B source remains deliberately frozen
 with `P4_VEGA_SCORE_SUBMISSIONS_ENABLED=false`; it attests the exact
-seven-variable environment and probes the exact HTTP 503 freeze contract. It
-has not been synchronized to or verified against the live source-less inline
-trigger; no Stage B build ran, no revision was deployed, no traffic changed,
-and no production freeze was established. The enabled dual-writer state is
-intentionally deferred until its exact main-branch Stage A source commit is
-known: the separately reviewed configuration must pin that commit, set the
-literal flag to `true`, and require an anonymous HTTP 401 `UNAUTHORIZED` probe.
-That probe proves the gate is open without persistence, but cannot by itself
-identify the writer implementation.
+eight-variable environment, including disabled Three Bosses writes, and probes
+the exact HTTP 503 freeze contract. It has not been synchronized to or verified
+against the live source-less inline trigger; no Stage B build ran, no revision
+was deployed, no traffic changed, and no production freeze was established.
+Because `main` is deferred through Phase 14, the production main-only Stage A
+and Stage B trust chain will remain unchanged. An isolated image-only candidate
+configuration was committed at `e68959e9`; it has no Pub/Sub, deploy, secret,
+Cloud Run, Cloud SQL, or traffic capability. Any later feature-branch build or
+deployment still requires a separately approved temporary trigger that pins
+the full source commit and verified provenance. An enabled dual-writer
+deployment must also pin that exact candidate, set the p4 flag to `true`, and
+require a non-mutating anonymous HTTP 401 `UNAUTHORIZED` probe. That probe
+proves the gate is open without persistence, but cannot by itself identify the
+writer implementation.
 
 The Phase 13.1 repeatable, privileged p4-Vega historical-backfill CLI and
 separate read-only aggregate reconciliation gate were implemented and verified
@@ -169,15 +181,27 @@ must remain compatible. The generic-only writer is locally prepared, but its
 production cutover and `users.p4_score` removal remain incomplete; the
 multi-game frontend is recorded below.
 
-The additive backend catalog and per-game read routes were implemented and
-verified locally on 2026-08-26. The catalog is projected from server-owned
-definitions; the generic p4-Vega response adds only version metadata and
-one-based positions to the existing repository rows. Known Three Bosses reads
-return a typed empty `UNRANKED` game result while its catalog submission state
-remains disabled, and no generic submission route exists. Versioned 404, 429,
-and 500 responses do not alter legacy API error bodies. These routes have not
-been deployed or activated in production and do not replace the production
+The additive backend catalog and per-game routes were implemented and verified
+locally on 2026-08-26. The catalog is projected from server-owned definitions;
+the generic p4-Vega response adds only version metadata and one-based positions
+to existing rows. Three Bosses reads now query real current-rule personal bests
+in deterministic completion-time order even while writes are disabled. Its
+authenticated run endpoint is complete behind the exact fail-closed
+`THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=true` opt-in: strict JSON/version/UUID/time
+validation, explicit cookie-origin protection, server-derived score, immutable
+idempotent run history, transactional strict personal bests, and per-user and
+per-IP limits are covered by unit, security, rollback, concurrency, and
+isolated-MySQL tests. Rank remains `UNRANKED`. These routes have not been
+deployed or enabled in production and do not replace the p4 production
 backfill, revision-drain, or reconciliation gates.
+
+The credential-safe browser submission client and Unity host bridge were
+committed at `c4349f7c`. Unity will later send only its canonical run ID and
+integer completion time; browser-managed cookies never enter the game binary,
+and uncertain results retry with the same identity. The Unity `.jslib` caller,
+result receiver, one-source millisecond canonicalization, score/rank parity,
+and Submit Score button activation remain deliberately disconnected until the
+Three Bosses gameplay and ranking release gates are approved.
 
 Neither a production backfill nor a production reconciliation has been
 performed. Production execution requires the additive schema, an explicitly
@@ -274,17 +298,19 @@ unchanged.
 Redesign `/leaderboards` as a multi-game experience rather than extending the
 current p4-Vega-only list in place.
 
-Frontend hub and generic read integration: **implemented locally on
-2026-08-26**. The plural route contains catalog-driven leaderboard cards, each
-linking to its own direct detail route. These are leaderboard destinations,
-not playable game cards; game launching remains under `/games`. The p4-Vega
-detail now uses the generic GET API, while Three Bosses exposes its typed empty,
-unranked, submission-disabled state. Transport tests, production build, and
-desktop plus narrow browser checks pass. A disposable loopback API verified the
-populated p4-Vega table without applying approval-gated database migrations;
-the unmigrated live local p4 read correctly remains in its bounded server-error
-state. Three Bosses submission, the complete route/UI mobile matrix, production
-migration, and deployment remain separate pending steps.
+Frontend hub, generic reads, and the disabled submission transport:
+**implemented locally on 2026-08-26**. The plural route contains catalog-driven
+leaderboard cards, each linking to its own direct detail route. These are
+leaderboard destinations, not playable game cards; game launching remains
+under `/games`. The p4-Vega detail now uses the generic GET API, while Three
+Bosses reads typed real rows and remains unranked and submission-disabled. The
+browser submission transport and lifecycle-safe Unity bridge are complete but
+the Unity caller and button remain disconnected. Transport tests, production
+build, and desktop plus narrow browser checks pass. A disposable loopback API
+verified the populated p4-Vega table without applying approval-gated database
+migrations; the unmigrated live local p4 read correctly remains in its bounded
+server-error state. The complete route/UI mobile matrix, production migration,
+deployment, and Unity submission activation remain separate pending steps.
 
 The design must include:
 

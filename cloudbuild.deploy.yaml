@@ -1,10 +1,11 @@
 # Stage B canonical source-less inline configuration.
 #
-# This tracked phase is intentionally frozen. Do not change its submission flag
-# to true until a reviewed dual-writer-plus-gate source is on main and the
-# authoritative Stage A validation below is pinned to that exact commit. An
-# anonymous HTTP 401 proves that the gate is open; it does not prove which
-# persistence implementation is running.
+# This tracked main-only phase is intentionally frozen. Do not repoint it at a
+# feature branch or change its p4 submission flag to true. Any pre-main rollout
+# uses a separate, temporary, exact-commit candidate trust path. When this
+# canonical path is eventually enabled, its Stage A validation must pin the
+# reviewed main commit. An anonymous HTTP 401 proves that the gate is open; it
+# does not prove which persistence implementation is running.
 #
 # Store these contents inline on the Pub/Sub trigger; do not attach repository
 # source. Configure exactly these two payload bindings:
@@ -659,7 +660,7 @@ steps:
             --concurrency=80 --timeout=300s --max-instances=10 --cpu-boost --ingress=all \
             --startup-probe='timeoutSeconds=240,periodSeconds=240,failureThreshold=1,tcpSocket.port=8080' \
             --liveness-probe='' --set-cloudsql-instances="$$CLOUD_SQL" \
-            --set-env-vars="NODE_ENV=production,CLOUD_SQL_CONNECTION_NAME=$$CLOUD_SQL,DB_USER=cms_mickeyf,DB_NAME=cms,P4_VEGA_SCORE_SUBMISSIONS_ENABLED=false" \
+            --set-env-vars="NODE_ENV=production,CLOUD_SQL_CONNECTION_NAME=$$CLOUD_SQL,DB_USER=cms_mickeyf,DB_NAME=cms,P4_VEGA_SCORE_SUBMISSIONS_ENABLED=false,THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=false" \
             --set-secrets='DB_PASS=DB_PASS:1,SESSION_SECRET=SESSION_SECRET:2' \
             --update-labels="source-build-id=$$SOURCE_BUILD_ID,source-commit=$$COMMIT_SHA" \
             --no-traffic --tag="$$CANDIDATE_TAG" --quiet; then
@@ -848,8 +849,8 @@ steps:
             reject("service ingress does not match")
 
         env_items = container.get("env") or []
-        if len(env_items) != 7 or len({item.get("name") for item in env_items}) != 7:
-            reject("environment is not the exact seven-variable configuration")
+        if len(env_items) != 8 or len({item.get("name") for item in env_items}) != 8:
+            reject("environment is not the exact eight-variable configuration")
         env = {item.get("name"): item for item in env_items}
         plain = {
             "NODE_ENV": "production",
@@ -857,6 +858,7 @@ steps:
             "DB_USER": "cms_mickeyf",
             "DB_NAME": "cms",
             "P4_VEGA_SCORE_SUBMISSIONS_ENABLED": "false",
+            "THREE_BOSSES_RUN_SUBMISSIONS_ENABLED": "false",
         }
         for name, value in plain.items():
             if env.get(name) != {"name": name, "value": value}:
@@ -1180,10 +1182,14 @@ steps:
             reject("unknown leaderboard game response headers are unsafe")
 
         disabled_post, disabled_post_headers = request(
-            "/api/leaderboards/three-bosses/runs", 404, {}
+            "/api/leaderboards/three-bosses/runs", 403, {}
         )
-        if disabled_post != {"error": "NOT_FOUND"}:
-            reject("Three Bosses submission route is unexpectedly available")
+        if disabled_post != {
+            "success": False,
+            "contractVersion": 1,
+            "error": "SUBMISSION_DISABLED",
+        }:
+            reject("Three Bosses disabled-submission contract does not match")
         if not no_store(disabled_post_headers) or disabled_post_headers.get_all("Set-Cookie"):
             reject("unavailable Three Bosses submission response headers are unsafe")
 

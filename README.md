@@ -92,6 +92,15 @@ is intentional:
 P4_VEGA_SCORE_SUBMISSIONS_ENABLED=true
 ```
 
+Three Bosses uses a separate fail-closed gate. Its leaderboard remains readable
+while run submission is disabled. Set the exact lowercase value `true` only for
+intentional local endpoint/bridge testing; the Unity submit control remains a
+separate release gate:
+
+```text
+THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=true
+```
+
 On native Windows, Compose finds the ADC file under `%APPDATA%` automatically.
 Set `GOOGLE_APPLICATION_CREDENTIALS_HOST` in `.env` only to override that
 location; use forward slashes in an override path. Create or refresh

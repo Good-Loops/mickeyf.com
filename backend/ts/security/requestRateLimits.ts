@@ -11,6 +11,7 @@ const LEADERBOARD_RATE_LIMIT_MESSAGE = Object.freeze({
     error: 'RATE_LIMITED' as const,
 });
 const LEADERBOARD_API_PATH = /^\/api\/leaderboards(?:\/|$)/i;
+export const THREE_BOSSES_SUBMISSION_IP_LIMIT = 30 as const;
 
 export function generalApiRateLimitMessage(
     req: Pick<Request, 'originalUrl'>
@@ -56,6 +57,18 @@ export function createGeneralApiRateLimiter() {
         handler: (req, res, _next, options) => {
             res.status(options.statusCode).json(generalApiRateLimitMessage(req));
         },
+        passOnStoreError: false,
+    });
+}
+
+/** Per-instance abuse ceiling for the opt-in Three Bosses mutation route. */
+export function createThreeBossesSubmissionIpRateLimiter() {
+    return rateLimit({
+        windowMs: 15 * 60 * 1000,
+        limit: THREE_BOSSES_SUBMISSION_IP_LIMIT,
+        standardHeaders: 'draft-8',
+        legacyHeaders: false,
+        message: LEADERBOARD_RATE_LIMIT_MESSAGE,
         passOnStoreError: false,
     });
 }

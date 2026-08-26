@@ -9,6 +9,7 @@ export type RuntimeConfig = {
     sessionSecret: string;
     corsOrigins: readonly string[];
     p4VegaScoreSubmissionsEnabled: boolean;
+    threeBossesRunSubmissionsEnabled: boolean;
 };
 
 export type DatabaseConfig = {
@@ -85,6 +86,9 @@ export function loadRuntimeConfig(env: Environment = process.env): RuntimeConfig
                 : Object.freeze([]),
         p4VegaScoreSubmissionsEnabled: isExplicitlyEnabled(
             env.P4_VEGA_SCORE_SUBMISSIONS_ENABLED
+        ),
+        threeBossesRunSubmissionsEnabled: isExplicitlyEnabled(
+            env.THREE_BOSSES_RUN_SUBMISSIONS_ENABLED
         ),
     });
 }

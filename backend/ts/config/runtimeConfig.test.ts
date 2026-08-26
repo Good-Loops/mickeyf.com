@@ -18,11 +18,28 @@ test('production runtime configuration exposes only exact HTTPS frontend origins
     assert.equal(config.isProduction, true);
     assert.equal(config.port, 8080);
     assert.equal(config.p4VegaScoreSubmissionsEnabled, false);
+    assert.equal(config.threeBossesRunSubmissionsEnabled, false);
     assert.deepEqual(config.corsOrigins, [
         'https://mickeyf.com',
         'https://www.mickeyf.com',
     ]);
     assert.equal(config.corsOrigins.some((origin) => origin.includes('localhost')), false);
+});
+
+test('Three Bosses run submissions require the exact positive runtime opt-in', () => {
+    const enabled = loadRuntimeConfig({
+        ...productionEnvironment,
+        THREE_BOSSES_RUN_SUBMISSIONS_ENABLED: 'true',
+    });
+    assert.equal(enabled.threeBossesRunSubmissionsEnabled, true);
+
+    for (const value of ['', 'false', 'TRUE', '1', ' true ', 'yes']) {
+        const disabled = loadRuntimeConfig({
+            ...productionEnvironment,
+            THREE_BOSSES_RUN_SUBMISSIONS_ENABLED: value,
+        });
+        assert.equal(disabled.threeBossesRunSubmissionsEnabled, false);
+    }
 });
 
 test('p4-Vega score submissions require the exact positive runtime opt-in', () => {

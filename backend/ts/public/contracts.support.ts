@@ -21,6 +21,7 @@ export type {
     GetGameLeaderboardResponse,
     GetLeaderboardCatalogRequest,
     GetLeaderboardCatalogResponse,
+    SubmitThreeBossesRunResponse,
 } from '../routers/leaderboardRouter.contract';
 export type {
     GameLeaderboardResponse,
@@ -30,6 +31,8 @@ export type {
     LeaderboardCatalogResponse,
     P4VegaLeaderboardEntry,
     ThreeBossesLeaderboardEntry,
+    ThreeBossesRunSubmissionRequest,
+    ThreeBossesRunSubmissionResponse,
 } from '../leaderboards/leaderboardContract';
 export {
     LEADERBOARD_CONTRACT_VERSION,

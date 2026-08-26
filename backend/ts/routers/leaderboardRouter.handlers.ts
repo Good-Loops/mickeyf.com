@@ -6,15 +6,38 @@ type RequestUriError = URIError & {
     statusCode?: number;
 };
 
+type RequestBodyError = Error & {
+    status?: number;
+    statusCode?: number;
+    type?: string;
+};
+
 /** Converts unexpected failures inside the generic router to its versioned DTO. */
 export const leaderboardRequestErrorHandler: ErrorRequestHandler = (
     error,
-    _req,
+    req,
     res,
     next
 ) => {
     if (res.headersSent) {
         next(error);
+        return;
+    }
+
+    const requestBodyError = error as RequestBodyError;
+    if (
+        req.method === 'POST'
+        && req.path === '/three-bosses/runs'
+        && (
+            requestBodyError.type === 'entity.parse.failed'
+            || requestBodyError.type === 'entity.too.large'
+        )
+    ) {
+        res.status(400).json({
+            success: false,
+            contractVersion: LEADERBOARD_CONTRACT_VERSION,
+            error: 'INVALID_RUN',
+        });
         return;
     }
 

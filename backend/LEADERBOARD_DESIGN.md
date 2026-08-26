@@ -6,6 +6,11 @@ end state in which p4-Vega uses the generic leaderboard storage and the legacy
 `users.p4_score` column is retired after a verified cutover. This document does
 not authorize a production schema or data change.
 
+A fresh read-only check on 2026-08-26 confirmed that production still has only
+the `users` application table and still includes `users.p4_score`; neither
+additive migration has been applied. That is the current incomplete rollout
+state and explains why the generic p4-Vega route cannot yet serve live data.
+
 The transitional p4-Vega dual-write repository was implemented and verified
 locally on 2026-08-25 with unit, rollback, and concurrent MySQL 8.0.31 tests. It
 has not been deployed and must not receive traffic until migrations `0001` and
@@ -52,19 +57,26 @@ only the normalized `enabled` or `frozen` state at startup. The gate is
 storage-independent so it can be applied to both the transitional dual writer
 and the generic writer. The tracked canonical Stage B source remains
 deliberately frozen with `P4_VEGA_SCORE_SUBMISSIONS_ENABLED=false`, attests the
-exact seven-variable environment, and verifies the exact HTTP 503 freeze
-response without authentication or persistence. It has not been synchronized
-to or verified against the live source-less inline trigger; no Stage B build
-ran, no revision was deployed, no traffic changed, and no production freeze
-was established.
+exact eight-variable environment including
+`THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=false`, and verifies the exact p4 HTTP
+503 and Three Bosses HTTP 403 freeze contracts without authentication or
+persistence. It has not been synchronized to or verified against the live
+source-less inline trigger; no Stage B build ran, no revision was deployed, no
+traffic changed, and no production freeze was established.
 
-The enabled dual-writer Stage B state is intentionally deferred until its exact
-main-branch Stage A source commit is known. Its separately reviewed source must
-pin that commit, set the literal flag to `true`, and require an anonymous HTTP
-401 `UNAUTHORIZED` probe with the existing JSON, no-store, no-cookie, redirect,
-response-size, and timeout checks. The 401 proves the gate is open and stops
-before database acquisition; it does not identify the persistence
-implementation, so it is never sufficient without the source-commit pin.
+`main` remains deferred until after Phase 14, so the live main-only Stage A and
+Stage B trust chain must not be weakened or repointed. The isolated
+`cloudbuild.candidate.yaml` image-only contract was committed at `e68959e9`;
+it contains no production Pub/Sub, deployment, secret, Cloud Run, Cloud SQL,
+or traffic capability. A separately approved temporary trigger must bind it to
+the exact full feature-branch commit with verified Git provenance. Any later
+deploy path must independently pin that build identity, commit, image digest,
+and dedicated identities. An enabled dual writer must also require the
+anonymous HTTP 401 `UNAUTHORIZED` p4 probe with the existing JSON, no-store,
+no-cookie, redirect, response-size, and timeout checks. The 401 proves the gate
+is open and stops before database acquisition; it does not identify the
+persistence implementation, so it is never sufficient without the source and
+image pins.
 
 The repeatable, privileged p4-Vega historical-backfill CLI and read-only
 aggregate reconciliation command were implemented and verified locally on
@@ -79,26 +91,37 @@ production. Switching the legacy operation remains gated on the additive
 schema, completed backfill, legacy-revision drain, and zero-discrepancy
 reconciliation. The generic-only writer is locally prepared, but its
 production cutover and the legacy column removal remain later gated steps; the
-read-only multi-game frontend slice is recorded below.
+multi-game frontend slice is recorded below.
 
-The additive backend read API was implemented and verified locally on
-2026-08-26. `GET /api/leaderboards` explicitly projects the server catalog,
-and `GET /api/leaderboards/:gameId` exposes the generic p4-Vega rows with
-one-based positions while returning a typed empty result for the known,
-submission-disabled Three Bosses game. Exact unknown-game, rate-limit, and
-server-error responses use the version-one error envelope. No generic write
-route was added, and none of this code has been deployed or activated in
-production.
+The additive backend API was implemented and verified locally on 2026-08-26.
+`GET /api/leaderboards` explicitly projects the server catalog, and
+`GET /api/leaderboards/:gameId` exposes generic p4-Vega rows with one-based
+positions. Three Bosses reads real current-rule personal bests in completion-
+time order even while writes are disabled. Its complete authenticated run
+route remains fail-closed unless the exact
+`THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=true` runtime opt-in is present. It
+validates exact JSON/version/UUID/time input, derives score server-side,
+requires an allowed browser Origin for cookie mutations, serializes immutable
+runs and personal bests on one transaction connection, preserves exact replay
+outcomes, rejects conflicting reuse, and enforces both database-backed per-user
+and per-instance IP limits. Unit, security, rollback, concurrency, and eight
+isolated MySQL integration tests passed. None of this code has been deployed or
+activated in production.
 
-The read-only multi-game frontend slice was implemented locally on 2026-08-26.
+The multi-game frontend slice was implemented locally on 2026-08-26.
 The canonical `/leaderboards` page is now a catalog-driven hub of leaderboard
 destinations, not a duplicate game launcher. Direct detail routes use the
 generic GET API, and p4-Vega no longer reads the legacy `/api/users`
-leaderboard operation in the browser. The known Three Bosses route renders its
-typed empty, unranked, submission-disabled state. The old singular frontend
-route is intentionally not retained because the owner approved a clean URL
-change before meaningful public adoption. Generic-only writes, Three Bosses
-submission, production migration, and legacy-column removal remain incomplete.
+leaderboard operation in the browser. The Three Bosses route renders typed
+real rows while its catalog remains unranked and submission-disabled. A strict
+cookie-bearing POST client and lifecycle-safe Unity host bridge were committed
+at `c4349f7c`; they pass only canonical run metrics, never browser credentials,
+and preserve the same identity for uncertain retries. The Unity caller and
+receiver remain disconnected and the Submit Score button remains inert. The
+old singular frontend route is intentionally not retained because the owner
+approved a clean URL change before meaningful public adoption. Generic-only
+p4 writes, production migration, Unity submission activation, and legacy-column
+removal remain incomplete.
 
 ## Invariants
 
@@ -156,7 +179,7 @@ Exact version-one DTOs and mechanical bounds are defined in
 user IDs, run IDs, fingerprints, or timestamps. SQL ordering is selected from
 the code-owned game catalog; route input is never interpolated into `ORDER BY`.
 
-Planned Three Bosses submissions, once enabled, use `contractVersion: 1`,
+Three Bosses submissions, once enabled, use `contractVersion: 1`,
 `rulesVersion: 1`, a canonical lowercase RFC 4122 version-four UUID, and an
 integer `completionTimeMs` from 1 through 86,400,000 inclusive. The bound is a
 versioned transport and storage safety contract, not a rank threshold.
@@ -192,13 +215,13 @@ The disabled-state and validation checks happen before a database connection is
 acquired. Tests must prove disabled Three Bosses submissions perform zero
 ledger or personal-best writes.
 
-Before enabling writes, add a dedicated fail-closed limit of ten accepted new
-runs per authenticated user per 15 minutes, enforced from the shared database
-inside the user-locked transaction. Exact idempotent replays return the stored
-result without consuming another accepted-run slot. Retain the general API
-limit and add a dedicated per-instance IP ceiling of 30 submission requests per
-15 minutes; reevaluate a distributed IP limiter before increasing Cloud Run
-scale or treating the leaderboard as competitive infrastructure.
+The implemented endpoint enforces a fail-closed limit of ten accepted new runs
+per authenticated user per 15 minutes from the shared database inside the
+user-locked transaction. Exact idempotent replays return the stored result
+without consuming another accepted-run slot. The general API limit remains,
+and a dedicated per-instance IP ceiling permits 30 submission requests per 15
+minutes. Reevaluate a distributed IP limiter before increasing Cloud Run scale
+or treating the leaderboard as competitive infrastructure.
 
 ## Frontend route contract
 
@@ -397,23 +420,27 @@ backfill, credential rotation, or deployment.
    `game_personal_bests` without changing its request or response contract.
    Prepare the direct-linkable multi-game frontend and generic-only writer, but
    do not route production traffic to the generic-only writer yet.
-9. Retain and review the dual-writer-plus-gate source on `main`, then record its
-   exact authoritative Stage A commit. Do not synchronize an enabled Stage B
-   state while only a feature-branch commit is known, and do not add the runtime
-   flag manually.
-10. Under a separate review, synchronize an enabled Stage B source whose Stage A
-    validation rejects every commit except that exact reviewed dual-writer
-    commit, sets and attests the literal positive opt-in, and requires the
-    non-mutating anonymous HTTP 401 probe. Verify the live source-less trigger
-    exactly, deploy the zero-traffic candidate, then route all traffic to it and
-    prove every no-gate revision and admitted request has drained; only this
-    freeze-capable dual writer may serve as the pre-cutover rollback target.
-11. Under another review, synchronize the exact frozen Stage B state and deploy
-    the freeze-capable dual writer without the positive opt-in. Route all traffic
-    to it, prove every enabled revision and in-flight score request has drained,
-    and require HTTP 503 `SUBMISSIONS_FROZEN` from the serving revision before
-    rerunning the complete reconciliation. Low traffic or a quiet interval is
-    not evidence of a write freeze.
+9. Retain and review the dual-writer-plus-gate source on the feature branch.
+   Leave the production main-only triggers unchanged. Under separate approval,
+   create a temporary manual candidate trigger for the isolated image-only
+   config, run it against the exact full source commit, and verify trigger,
+   repository, config path, requested and resolved revision, provenance, image
+   tag, digest, and scan evidence.
+10. Under a separate review, create a temporary candidate-deploy trust path
+    whose validation rejects every build and commit except the exact reviewed
+    dual-writer image, sets and attests the literal p4 positive opt-in, keeps
+    Three Bosses disabled, and requires the non-mutating anonymous HTTP 401
+    probe. Verify that temporary trigger exactly, deploy the zero-traffic
+    candidate, then route all traffic to it and prove every no-gate revision
+    and admitted request has drained; only this freeze-capable dual writer may
+    serve as the pre-cutover rollback target.
+11. Under another review, use the same pinned candidate-deploy path to deploy
+    the freeze-capable dual writer without the p4 positive opt-in. Keep Three
+    Bosses disabled, route all traffic to the frozen revision, prove every
+    enabled revision and in-flight score request has drained, and require HTTP
+    503 `SUBMISSIONS_FROZEN` from the serving revision before rerunning the
+    complete reconciliation. Low traffic or a quiet interval is not evidence
+    of a write freeze.
 12. Deploy the generic-only writer while it remains frozen, route all traffic to
     it, drain every dual-write revision, and require the same exact
     reconciliation again against the still-static legacy column.
@@ -432,8 +459,11 @@ backfill, credential rotation, or deployment.
     Apply it only after Mike explicitly approves the production contract step.
 16. Verify the current p4-Vega submission and leaderboard paths, generic reads,
     migration history, and recovery procedure against the contracted schema.
-17. Keep Three Bosses writes disabled until its release and validation policy is
-    approved.
+17. Keep Three Bosses writes disabled. Its backend, browser client, and host
+    bridge are prepared, but do not enable them until Unity canonicalizes one
+    integer millisecond result for display, score, and transport; the Unity
+    caller/receiver and button are connected and tested; and its release,
+    ranking, and validation policy is approved.
 
 Transactions must use one acquired MySQL connection; transaction statements
 must not be issued through unrelated pooled queries.
