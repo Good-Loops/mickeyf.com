@@ -254,6 +254,13 @@ npm --prefix backend run migrations:p4-backfill
 npm --prefix backend run migrations:p4-reconcile
 ```
 
+Production-capable commands must use the single-operation temporary accounts
+and immediate lock/revoke/drop sequence in
+[`backend/MIGRATION_PRINCIPALS.md`](backend/MIGRATION_PRINCIPALS.md). That
+procedure records the exact grants, confirmation variables, lifecycle controls,
+denial evidence, and unavoidable MySQL privilege caveats; it does not authorize
+or perform a production action.
+
 Every command requires `MIGRATION_DB_HOST=127.0.0.1`, `MIGRATION_DB_PORT`,
 `MIGRATION_DB_NAME`, `MIGRATION_DB_USER`, and `MIGRATION_DB_PASS`; there is no
 fallback to the backend's runtime `DB_*` credentials. Optional bounded settings
@@ -270,7 +277,10 @@ after the command.
 The p4-Vega backfill verifies the exact applied schema and legacy source,
 copies non-null historical scores monotonically in bounded transactions, and
 then emits aggregate-only reconciliation evidence. The separate reconciliation
-command is data-read-only and emits the same identity-free evidence. Either
+command issues only data reads and emits the same identity-free evidence. Its
+temporary principal is not strictly immutable because MySQL requires
+`TRIGGER` privilege for the exact-schema verifier to prove trigger absence; the
+temporary-principal procedure documents that bounded exception. Either
 command exits with code 2 when comparison drift remains; that is a failed gate,
 not permission to cut over. Exit code 2 after a backfill can follow successfully
 committed chunks, so it means "rerun/reconcile," not "nothing changed." Exit 1
