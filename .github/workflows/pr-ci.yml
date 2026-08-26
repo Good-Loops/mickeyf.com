@@ -63,6 +63,9 @@ jobs:
           npm run test:three-bosses-webgl-build
           npm run test:three-bosses-webgl-server
 
+      - name: Validate isolated backend candidate build
+        run: npm run test:cloudbuild-candidate
+
       - name: Test and build backend
         run: |
           npm --prefix backend test
