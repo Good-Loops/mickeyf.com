@@ -510,7 +510,7 @@ test('stale apply digest refuses before its first privilege mutation', async () 
     assert.equal(connection.calls.some((sql) => sql.includes('RELEASE_LOCK')), true);
 });
 
-test('p4 retirement drains sessions, applies once, verifies, and stays idempotent', async () => {
+test('p4 retirement applies with existing sessions, verifies, and stays idempotent', async () => {
     const connection = new P4RetirementConnection();
     const readyPlan = await planP4GrantRetirement(
         connection,
@@ -524,29 +524,11 @@ test('p4 retirement drains sessions, applies once, verifies, and stays idempoten
     );
 
     connection.activeSessions = 1;
-    await assert.rejects(
-        () => applyP4GrantRetirement(
-            connection,
-            SETTINGS,
-            RUNTIME_ACCOUNT,
-            readyPlan.sha256,
-            SERVER_UUID
-        ),
-        /sessions are still open/
-    );
-    assert.equal(connection.legacyGrantsPresent, true);
-
-    connection.activeSessions = 0;
-    const refreshedPlan = await planP4GrantRetirement(
-        connection,
-        SETTINGS,
-        RUNTIME_ACCOUNT
-    );
     const retired = await applyP4GrantRetirement(
         connection,
         SETTINGS,
         RUNTIME_ACCOUNT,
-        refreshedPlan.sha256,
+        readyPlan.sha256,
         SERVER_UUID
     );
     assert.equal(retired.state, 'retired');

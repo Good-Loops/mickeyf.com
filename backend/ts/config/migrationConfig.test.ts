@@ -427,7 +427,6 @@ test('p4 grant-retirement apply has isolated fail-closed confirmations', () => {
         MIGRATION_CONFIRM_GENERIC_ONLY_FROZEN: '1',
         MIGRATION_CONFIRM_P4_GRANT_RETIREMENT:
             'users.p4_score SELECT,UPDATE -> no runtime access',
-        MIGRATION_CONFIRM_RUNTIME_TRAFFIC_DRAINED: '1',
         MIGRATION_ALLOW_P4_GRANT_RETIREMENT: '1',
         MIGRATION_CONFIRM_P4_GRANT_RETIREMENT_PLAN_SHA256: 'b'.repeat(64),
         MIGRATION_CONFIRM_SERVER_UUID: runtimeGrantCloudSqlTarget.serverUuid,
@@ -447,7 +446,6 @@ test('p4 grant-retirement apply has isolated fail-closed confirmations', () => {
         ['MIGRATION_CONFIRM_CLOUD_SQL_CONNECTION_NAME', 'another:region:instance'],
         ['MIGRATION_CONFIRM_GENERIC_ONLY_FROZEN', undefined],
         ['MIGRATION_CONFIRM_P4_GRANT_RETIREMENT', 'remove p4_score'],
-        ['MIGRATION_CONFIRM_RUNTIME_TRAFFIC_DRAINED', undefined],
         ['MIGRATION_ALLOW_P4_GRANT_RETIREMENT', undefined],
         ['MIGRATION_CONFIRM_P4_GRANT_RETIREMENT_PLAN_SHA256', 'B'.repeat(64)],
         ['MIGRATION_CONFIRM_P4_GRANT_RETIREMENT_PLAN_SHA256', 'short'],
@@ -477,6 +475,7 @@ test('p4 grant-retirement apply has isolated fail-closed confirmations', () => {
             MIGRATION_CONFIRM_RUNTIME_ROLE: 'cloudsqlsuperuser@%',
             MIGRATION_CONFIRM_RUNTIME_ROLE_REPLACEMENT:
                 'cloudsqlsuperuser@% -> no database roles',
+            MIGRATION_CONFIRM_RUNTIME_TRAFFIC_DRAINED: '1',
             MIGRATION_ALLOW_RUNTIME_GRANTS: undefined,
             MIGRATION_CONFIRM_RUNTIME_GRANT_PLAN_SHA256: 'a'.repeat(64),
         }),

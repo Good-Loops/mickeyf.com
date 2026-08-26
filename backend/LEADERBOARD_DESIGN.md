@@ -23,7 +23,7 @@ The transitional p4-Vega dual-write repository was implemented and verified
 locally on 2026-08-25 with unit, rollback, and concurrent MySQL 8.0.31 tests. It
 remains available in the exact retired frozen revision recorded below; its
 former enabled revision is also retired. Migrations `0001` and `0002` are
-applied and verified, and the remaining grant-retirement, runtime-pool recycle,
+applied and verified, and the remaining grant-retirement,
 submission-enablement, and legacy-column stages stay gated on separate review.
 
 The transitional read split was corrected and reverified on 2026-08-26 at
@@ -161,10 +161,10 @@ reader for both APIs without changing the legacy request or response contract.
 It now serves in the frozen generic-only production revision. The additive
 schema, enabled dual-writer rollout, frozen dual-writer promotion, and
 generic-only deployment are complete, along with every drain and exact
-reconciliation required for the frozen generic-only traffic cutover. Legacy-column grant
-retirement, the runtime-pool recycle, submission enablement, and column removal
-remain later separately approved steps; the multi-game frontend slice is
-recorded below.
+reconciliation required for the frozen generic-only traffic cutover.
+Legacy-column grant retirement, submission enablement, and column removal remain
+later separately approved steps; the multi-game frontend slice is recorded
+below.
 
 The exact frozen generic-only candidate source was reviewed on 2026-08-26 at
 commit `e91d3b1177932614c22fbed059a42a05fcb10793`, tree
@@ -288,8 +288,8 @@ ongoing build, temporary tag, or one-use deployment trigger.
 The retained frozen dual writer is a valid rollback target only while both
 legacy `p4_score` column grants remain. Any rollback before their retirement
 still requires a fresh service etag and an exact traffic-only PATCH. Grant
-retirement, runtime-pool recycle, submission enablement, and column removal are
-separate production steps; this cutover performed none of them and left
+retirement, submission enablement, and column removal are separate production
+steps; this cutover performed none of them and left
 `users.p4_score` unchanged.
 
 The refreshed OpenSSL review found byte-identical Dockerfile, lockfile, pinned
@@ -646,14 +646,18 @@ generic-only manifest plus non-grantable `SELECT (p4_score)` and
 `UPDATE (p4_score)` on `users`; the already-retired exact manifest is an
 idempotent no-op. Any partial pair or unrelated drift blocks with no operation.
 Apply binds the deterministic plan digest and pinned server UUID, requires the
-exact Cloud SQL and frozen generic-only confirmations, proves zero runtime
-sessions under effective `PROCESS`, and invokes one exact combined `REVOKE`
-without `IF EXISTS`. It then performs a fresh complete metadata inspection.
-Invocation or post-write verification uncertainty is reported as
-indeterminate, never silently retried. The disposable MySQL 8.0.31 test proves
-active-session refusal, exact retirement, loss of `p4_score` access, final
-manifest compliance, and repeat-apply idempotency. This tooling was not run
-against production when committed.
+exact Cloud SQL and frozen generic-only confirmations, and invokes one exact
+combined `REVOKE` without `IF EXISTS`. It then performs a fresh complete metadata
+inspection. MySQL applies direct table- and column-privilege changes on an
+existing client's next request, so this exact revoke requires neither a traffic
+drain nor a runtime-pool recycle. The disposable MySQL 8.0.31 test keeps a
+runtime session open across the revoke and proves loss of `p4_score` access on
+its next request, continued ordinary `users` access, final manifest compliance,
+and repeat-apply idempotency. See MySQL's
+[privilege-change semantics](https://dev.mysql.com/doc/mysql-security-excerpt/8.0/en/privilege-changes.html).
+Invocation or post-write verification uncertainty is reported as indeterminate,
+never silently retried. This tooling was not run against production when
+committed.
 
 An approved apply first proves effective `PROCESS` access and zero open
 `cms_mickeyf` sessions, before any grant write. It grants and proves the complete
@@ -833,16 +837,15 @@ legacy reader.
 12. Deploy the generic-only writer while it remains frozen, route all traffic to
     it, drain every dual-write revision, and require the same exact
     reconciliation again against the still-static legacy column. With no old
-    writer or pooled session remaining, run the separately approved exact
-    column-grant retirement, recycle the generic-only runtime pool, and verify
-    the fresh restricted identity exactly matches the source manifest before
-    enabling submissions. **The frozen generic-only zero-traffic deployment,
+    writer remaining, run the separately approved exact column-grant retirement
+    and verify the restricted identity exactly matches the source manifest
+    before enabling submissions. **The frozen generic-only zero-traffic deployment,
     smoke suite, tag removal, and trigger cleanup completed on 2026-08-26 in
     build `02eb1328-8b12-4b3b-bb0c-c9ef79f4a3a9`. Generation 121 promotion, the
     315-second frozen dual-writer drain, repeated zero old-revision request-log
     checks, two zero-transaction samples, exact final reconciliation, and
-    temporary-identity cleanup also completed on 2026-08-26. Grant retirement,
-    runtime-pool recycle, and submission enablement remain pending.**
+    temporary-identity cleanup also completed on 2026-08-26. Grant retirement
+    and submission enablement remain pending.**
 13. Revoke operational authorization for further legacy backfills, retire exact
     legacy equality as a cutover gate, verify the generic-authoritative rollback
     candidate, and only then deploy an explicitly approved revision with the

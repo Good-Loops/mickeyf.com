@@ -341,11 +341,6 @@ export function assertP4GrantRetirementCommandConfirmed(
             'MIGRATION_CONFIRM_P4_GRANT_RETIREMENT must confirm the exact two-grant retirement'
         );
     }
-    if (env.MIGRATION_CONFIRM_RUNTIME_TRAFFIC_DRAINED !== '1') {
-        throw new Error(
-            'MIGRATION_CONFIRM_RUNTIME_TRAFFIC_DRAINED=1 is required before p4_score grant retirement'
-        );
-    }
     if (env.MIGRATION_ALLOW_P4_GRANT_RETIREMENT !== '1') {
         throw new Error(
             'MIGRATION_ALLOW_P4_GRANT_RETIREMENT=1 is required for the p4_score grant retirement apply action'

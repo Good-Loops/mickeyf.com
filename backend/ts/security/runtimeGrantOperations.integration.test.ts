@@ -343,7 +343,7 @@ test('active runtime sessions block role removal, then a drained rerun converges
     assert.equal(secondApply.sha256, verified.sha256);
 });
 
-test('exact p4_score grants retire atomically after runtime sessions drain', async () => {
+test('existing runtime sessions observe exact p4_score retirement on their next request', async () => {
     await installBroadFixture();
     const rootRuntimeConnection = asRuntimeGrantConnection(root);
     const broadPlan = await planRuntimeGrants(
@@ -379,45 +379,24 @@ test('exact p4_score grants retire atomically after runtime sessions drain', asy
             'REVOKE SELECT (`p4_score`), UPDATE (`p4_score`) '
             + "ON `mickeyf_migration_test`.`users` FROM 'runtime_operation_test'@'%'"
         );
-        await assert.rejects(
-            () => applyP4GrantRetirement(
-                rootRuntimeConnection,
-                settings,
-                RUNTIME_ACCOUNT,
-                readyPlan.sha256,
-                readyPlan.server.uuid
-            ),
-            /sessions are still open/
+        const retiredPlan = await applyP4GrantRetirement(
+            rootRuntimeConnection,
+            settings,
+            RUNTIME_ACCOUNT,
+            readyPlan.sha256,
+            readyPlan.server.uuid
         );
-    } finally {
-        await activeRuntimeConnection.end();
-    }
+        assert.equal(retiredPlan.state, 'retired');
+        assert.equal(retiredPlan.compliant, true);
 
-    const refreshedPlan = await planP4GrantRetirement(
-        rootRuntimeConnection,
-        settings,
-        RUNTIME_ACCOUNT
-    );
-    const retiredPlan = await applyP4GrantRetirement(
-        rootRuntimeConnection,
-        settings,
-        RUNTIME_ACCOUNT,
-        refreshedPlan.sha256,
-        refreshedPlan.server.uuid
-    );
-    assert.equal(retiredPlan.state, 'retired');
-    assert.equal(retiredPlan.compliant, true);
-
-    const freshRuntimeConnection = await createRuntimeConnection();
-    try {
-        await freshRuntimeConnection.query('SELECT user_id FROM users LIMIT 1');
+        await activeRuntimeConnection.query('SELECT user_id FROM users LIMIT 1');
         await assert.rejects(
-            () => freshRuntimeConnection.query('SELECT p4_score FROM users LIMIT 1'),
+            () => activeRuntimeConnection.query('SELECT p4_score FROM users LIMIT 1'),
             (error: unknown) => (error as { code?: string }).code
                 === 'ER_COLUMNACCESS_DENIED_ERROR'
         );
     } finally {
-        await freshRuntimeConnection.end();
+        await activeRuntimeConnection.end();
     }
 
     const verified = await verifyP4GrantRetirement(

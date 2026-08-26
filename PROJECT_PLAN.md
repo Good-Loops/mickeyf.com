@@ -369,8 +369,8 @@ isolated-MySQL tests. Rank remains `UNRANKED`. These routes have not been
 enabled for Three Bosses production writes: the routes are present in the
 serving frozen generic-only revision, but
 `THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=false` remains enforced. They do not
-replace the remaining p4 grant-retirement, runtime-pool recycle, submission-
-enablement, or column-removal gates.
+replace the remaining p4 grant-retirement, submission-enablement, or
+column-removal gates.
 
 The credential-safe browser submission client and Unity host bridge were
 committed at `c4349f7c`. Unity will later send only its canonical run ID and
@@ -392,12 +392,15 @@ manifest omits `p4_score`, and the no-column restricted fixture passes.
 
 The exact fail-closed plan/verify/apply path for the old live column grants was
 implemented and verified locally on 2026-08-26; it accepts only both old grants
-present or both absent, drains runtime sessions, invokes one exact atomic
-revoke, and treats an uncertain result as indeterminate. It has not been run on
-production: the runtime account still has `p4_score` `SELECT` and `UPDATE`, and
-`users.p4_score` remains unchanged. The next rollout step must separately
-approve exact legacy-column grant retirement, recycle the generic-only runtime
-pool, and verify the fresh restricted identity against the source manifest.
+present or both absent, invokes one exact atomic revoke, and treats an uncertain
+result as indeterminate. MySQL applies direct table- and column-privilege changes
+on an existing client's next request; the disposable integration test proves
+that behavior across an open runtime connection, so this operation needs no
+traffic drain or runtime-pool recycle. It has not been run on production: the
+runtime account still has `p4_score` `SELECT` and `UPDATE`, and `users.p4_score`
+remains unchanged. The next rollout step must separately approve exact
+legacy-column grant retirement and verify the runtime identity against the
+source manifest.
 Only after that evidence may a separately approved enabled generic revision
 accept scores. The retired frozen dual writer remains a valid rollback target
 only until those grants are retired; after that boundary, rollback must use a

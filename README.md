@@ -305,14 +305,20 @@ SQL. `verify` exits 0 only for `retired`; drift exits 2. `apply` additionally
 requires the fixed Cloud SQL target, the frozen generic-only serving
 confirmation `MIGRATION_CONFIRM_GENERIC_ONLY_FROZEN=1`, the literal
 `MIGRATION_CONFIRM_P4_GRANT_RETIREMENT="users.p4_score SELECT,UPDATE -> no runtime access"`,
-`MIGRATION_CONFIRM_RUNTIME_TRAFFIC_DRAINED=1`, the retirement plan SHA-256 in
+the retirement plan SHA-256 in
 `MIGRATION_CONFIRM_P4_GRANT_RETIREMENT_PLAN_SHA256`, the pinned server UUID, and
 `MIGRATION_ALLOW_P4_GRANT_RETIREMENT=1`. It locks the same account workflow,
-proves zero runtime sessions, runs one exact `REVOKE SELECT (p4_score), UPDATE
-(p4_score)` statement without `IF EXISTS`, and requires a fresh exact metadata
-verification. A connection loss after invocation is indeterminate and requires
-a new plan and verification before any retry. Adding this local tool did not
-execute it or change production.
+runs one exact `REVOKE SELECT (p4_score), UPDATE (p4_score)` statement without
+`IF EXISTS`, and requires a fresh exact metadata verification. MySQL applies
+table- and column-privilege changes on an existing client's next request, so
+this direct revoke does not require a traffic drain or application-pool recycle;
+the disposable integration test keeps a runtime connection open across the
+revoke and proves that its next `p4_score` request is denied while ordinary
+`users` access remains available. See MySQL's
+[privilege-change semantics](https://dev.mysql.com/doc/mysql-security-excerpt/8.0/en/privilege-changes.html).
+A connection loss after invocation is indeterminate and requires a new plan and
+verification before any retry. Adding this local tool did not execute it or
+change production.
 
 MySQL privilege and role changes are not one transaction. A failed run can
 therefore leave the safe prepared state: the direct grants installed, the
@@ -397,8 +403,8 @@ observation, two runtime transaction samples were zero, and final reconciliation
 again matched all five p4-Vega rows with no discrepancy. The temporary
 maintenance user was deleted and negative authentication verified. The two
 legacy `p4_score` column grants and `users.p4_score` itself remain unchanged;
-grant retirement, runtime-pool recycle, submission enablement, and column
-removal have not run. Exact evidence is recorded in
+grant retirement, submission enablement, and column removal have not run. Exact
+evidence is recorded in
 [`backend/LEADERBOARD_DESIGN.md`](backend/LEADERBOARD_DESIGN.md).
 
 The p4-Vega backfill verifies the exact applied schema and legacy source,

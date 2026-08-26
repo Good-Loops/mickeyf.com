@@ -1276,7 +1276,6 @@ export async function applyP4GrantRetirement(
             );
         }
 
-        await assertRuntimeSessionsDrained(connection, account);
         if (initialPlan.compliant) return initialPlan;
         if (initialPlan.state !== 'ready' || !initialPlan.operation) {
             throw new Error('p4_score grant retirement did not reach the reviewed ready state');

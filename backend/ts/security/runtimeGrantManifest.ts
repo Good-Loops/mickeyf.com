@@ -203,8 +203,9 @@ export function renderRuntimeGrantStatements(
 
 /**
  * Renders the single, atomic privilege statement used after the frozen
- * generic-only runtime has been deployed and every old runtime session has
- * drained. It deliberately names only the two transitional p4_score grants.
+ * generic-only runtime has been deployed. It deliberately names only the two
+ * transitional p4_score grants; MySQL applies this column-level change to an
+ * existing client on its next request.
  */
 export function renderP4VegaGrantRetirementStatement(
     databaseName: string,
