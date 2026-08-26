@@ -160,6 +160,30 @@ remains gated on the frozen generic-only stage. The legacy column removal is a
 later separately approved step; the multi-game frontend slice is recorded
 below.
 
+The exact frozen generic-only candidate source was reviewed on 2026-08-26 at
+commit `e91d3b1177932614c22fbed059a42a05fcb10793`, tree
+`1537b61c94edf194edcde47aeda48ba651e0ea96`. The remote feature branch matched
+that commit. The image-only configuration and Dockerfile SHA-256 values are
+`dccd0bcf976c77abb3e9fa6d39c1ae855ff127fbf4ec67efd3480e20a4afcda4` and
+`0754bb3eee99f647f536b682e056dfa6b40ac030700d9c01d754c7bc606f6ac9`,
+respectively. The production bundle contains no legacy `users.p4_score` SQL;
+type-checking, 133 unit/security tests, 43 disposable MySQL 8.0.31 integration
+tests, the bundle, and all three candidate-contract tests passed.
+
+A read-only live preflight still found generation 118 serving only frozen
+dual-writer revision
+`mickeyf-org-freeze-9a6066b44f34422bba3383d6b0e9a9eb`, with both submission
+flags false and the enabled sibling retired. No Cloud Build or Cloud SQL
+operation was active. Cloud SQL remained runnable on MySQL 8.0.31 with backups,
+binary logging, and seven-day transaction-log retention. The persistent
+approval-required feature trigger still exposes only the image build; no
+temporary deployment trigger exists. This checkpoint created no build, digest,
+scan, revision, traffic change, database change, grant change, trigger, or IAM
+change. The next separately approved step must build this exact SHA, verify
+fresh provenance and scan evidence, and only then derive a one-shot deployment
+configuration pinned to that build and digest. Prior risk acceptance for the
+old image does not cover the new digest.
+
 The additive backend API was implemented and verified locally on 2026-08-26.
 `GET /api/leaderboards` explicitly projects the server catalog, and
 `GET /api/leaderboards/:gameId` exposes generic p4-Vega rows with one-based

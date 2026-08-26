@@ -401,6 +401,35 @@ grant, and rollback reference is removed, a new immutable migration may drop
 `users.p4_score` under separate production approval. The initial additive
 migrations remain unchanged.
 
+The frozen generic-only candidate source was locally frozen and reviewed on
+2026-08-26 at exact commit
+`e91d3b1177932614c22fbed059a42a05fcb10793` (tree
+`1537b61c94edf194edcde47aeda48ba651e0ea96`). The remote feature branch matched
+that commit. Its image-only Cloud Build configuration SHA-256 is
+`dccd0bcf976c77abb3e9fa6d39c1ae855ff127fbf4ec67efd3480e20a4afcda4`;
+the Dockerfile SHA-256 is
+`0754bb3eee99f647f536b682e056dfa6b40ac030700d9c01d754c7bc606f6ac9`.
+The production bundle contains generic personal-best storage references and no
+legacy `users.p4_score` SQL. Type-checking, 133 unit/security tests, 43 isolated
+MySQL 8.0.31 tests, the production bundle, and all three image-only candidate
+contract tests passed.
+
+The same day's read-only production preflight found Cloud Run generation 118
+still routing exactly 100% to frozen dual-writer revision
+`mickeyf-org-freeze-9a6066b44f34422bba3383d6b0e9a9eb`; its enabled sibling
+remained retired and both submission flags remained false. Cloud SQL was
+runnable on MySQL 8.0.31 with backups, binary logging, and seven-day transaction
+log retention enabled. No Cloud Build or Cloud SQL operation was active. The
+approval-required `feature-new-leaderboard-candidate` trigger remained bound to
+the image-only configuration and has no deploy or traffic capability; the only
+deployment trigger was the existing source-less canonical Stage B trigger.
+No candidate build was requested, no new image digest or scan evidence exists,
+and no revision, traffic, database, privilege, trigger, or IAM mutation was
+made. Before deployment, a separately approved exact-SHA image build must
+produce fresh provenance and Artifact Analysis evidence; the previous image's
+embedded-OpenSSL risk acceptance does not automatically transfer to that new
+digest.
+
 ### Step 13.2 — local Three Bosses website playability prototype (no publication)
 
 Status: In progress. The development-only Games card, route, external asset
