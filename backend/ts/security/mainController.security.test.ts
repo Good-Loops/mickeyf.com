@@ -262,7 +262,7 @@ test('non-improving score preserves the exact legacy success response', async ()
     assert.equal(queryCount, 1);
 });
 
-test('leaderboard smoke operation remains a bounded read-only query', async () => {
+test('legacy leaderboard operation remains a bounded users-column read', async () => {
     let queryCount = 0;
     let queryOptions: unknown;
     let queryValues: unknown[] | undefined;
@@ -271,7 +271,7 @@ test('leaderboard smoke operation remains a bounded read-only query', async () =
             queryCount += 1;
             queryOptions = options;
             queryValues = values;
-            return [[{ userName: 'player', score: 990, internalId: 42 }], []];
+            return [[{ userName: 'legacy-player', score: 900, internalId: 42 }], []];
         },
     } as unknown as Pick<Pool, 'getConnection' | 'query'>;
     const controller = createTestController(database, false);
@@ -280,15 +280,15 @@ test('leaderboard smoke operation remains a bounded read-only query', async () =
     await controller(request({ type: 'get_leaderboard' }), response);
 
     assert.equal(queryCount, 1);
-    assert.deepEqual(queryValues, ['p4-vega', 1]);
+    assert.equal(queryValues, undefined);
     const options = queryOptions as { sql?: string; timeout?: number };
     assert.equal(options.timeout, 10_000);
     assert.equal(
         options.sql?.replace(/\s+/g, ' ').trim(),
-        'SELECT users.user_name AS userName, game_personal_bests.score AS score FROM game_personal_bests INNER JOIN users ON users.user_id = game_personal_bests.user_id WHERE game_personal_bests.game_id = ? AND game_personal_bests.rules_version = ? ORDER BY game_personal_bests.score DESC, game_personal_bests.recorded_at ASC, game_personal_bests.user_id ASC LIMIT 10'
+        'SELECT user_name AS userName, p4_score AS score FROM users WHERE p4_score IS NOT NULL ORDER BY p4_score DESC LIMIT 10'
     );
     assert.deepEqual(state.body, {
         success: true,
-        leaderboard: [{ user_name: 'player', p4_score: 990 }],
+        leaderboard: [{ user_name: 'legacy-player', p4_score: 900 }],
     });
 });

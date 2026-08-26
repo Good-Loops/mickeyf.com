@@ -3,7 +3,8 @@ import test from 'node:test';
 import { Pool, PoolConnection } from 'mysql2/promise';
 import {
     P4VegaScoreRollbackError,
-    readP4VegaLeaderboard,
+    readGenericP4VegaLeaderboard,
+    readLegacyP4VegaLeaderboard,
     submitP4VegaScore,
 } from './p4VegaScoreRepository';
 
@@ -105,7 +106,7 @@ test('reads the bounded current p4-Vega leaderboard from generic storage', async
         { userName: 'player', score: 990, internalId: 42 },
     ]);
 
-    const rows = await readP4VegaLeaderboard(fake.database);
+    const rows = await readGenericP4VegaLeaderboard(fake.database);
 
     assert.deepEqual(rows, [
         { userName: 'legacy-outlier', score: 1_200 },
@@ -123,7 +124,7 @@ test('reads the bounded current p4-Vega leaderboard from generic storage', async
 test('returns an empty generic leaderboard unchanged', async () => {
     const fake = createFakeLeaderboardDatabase();
 
-    assert.deepEqual(await readP4VegaLeaderboard(fake.database), []);
+    assert.deepEqual(await readGenericP4VegaLeaderboard(fake.database), []);
     assert.equal(fake.queries.length, 1);
 });
 
@@ -132,9 +133,42 @@ test('propagates generic leaderboard query failures', async () => {
     const fake = createFakeLeaderboardDatabase([], queryError);
 
     await assert.rejects(
-        () => readP4VegaLeaderboard(fake.database),
+        () => readGenericP4VegaLeaderboard(fake.database),
         queryError
     );
+});
+
+test('legacy and generic readers can expose different pre-backfill standings', async () => {
+    const queries: QueryCall[] = [];
+    const database = {
+        async query(
+            queryOptions: { sql: string; timeout?: number },
+            values?: unknown[]
+        ) {
+            const sql = queryOptions.sql.replace(/\s+/g, ' ').trim();
+            queries.push({ sql, timeout: queryOptions.timeout, values });
+            if (sql.includes('FROM game_personal_bests')) {
+                return [[{ userName: 'generic-player', score: 700 }], []];
+            }
+            return [[{ userName: 'legacy-player', score: 900 }], []];
+        },
+    } as unknown as Pick<Pool, 'query'>;
+
+    assert.deepEqual(await readLegacyP4VegaLeaderboard(database), [
+        { userName: 'legacy-player', score: 900 },
+    ]);
+    assert.deepEqual(await readGenericP4VegaLeaderboard(database), [
+        { userName: 'generic-player', score: 700 },
+    ]);
+
+    assert.equal(queries.length, 2);
+    assert.equal(queries[0].timeout, 10_000);
+    assert.equal(
+        queries[0].sql,
+        'SELECT user_name AS userName, p4_score AS score FROM users WHERE p4_score IS NOT NULL ORDER BY p4_score DESC LIMIT 10'
+    );
+    assert.equal(queries[0].values, undefined);
+    assert.deepEqual(queries[1].values, ['p4-vega', 1]);
 });
 
 test('writes an improving score to both stores on one committed connection', async () => {

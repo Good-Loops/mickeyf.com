@@ -20,7 +20,7 @@ import {
     P4_VEGA_RULES_VERSION,
     THREE_BOSSES_RULES_VERSION,
 } from '../leaderboards/gameCatalog';
-import { readP4VegaLeaderboard } from '../leaderboards/p4VegaScoreRepository';
+import { readGenericP4VegaLeaderboard } from '../leaderboards/p4VegaScoreRepository';
 
 type LeaderboardDatabase = Pick<Pool, 'query'>;
 type GameLeaderboardResponseBody = GameLeaderboardResponse
@@ -82,7 +82,7 @@ export function createLeaderboardController(database: LeaderboardDatabase) {
             });
         }
 
-        const rows = await readP4VegaLeaderboard(database);
+        const rows = await readGenericP4VegaLeaderboard(database);
         return res.json({
             success: true,
             contractVersion: LEADERBOARD_CONTRACT_VERSION,

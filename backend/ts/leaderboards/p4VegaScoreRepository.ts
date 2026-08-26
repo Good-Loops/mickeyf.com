@@ -1,10 +1,11 @@
 /**
  * p4-Vega persistence while the legacy score column is retired.
  *
- * An improving score is written to both stores in one transaction. Reads use
- * generic storage in code, but deployment remains gated on the explicit
- * backfill and reconciliation sequence. A worse submission must not
- * opportunistically create a misleading historical personal-best row.
+ * An improving score is written to both stores in one transaction. The legacy
+ * operation continues reading `users.p4_score`, while the additive API reads
+ * generic storage. Deployment remains gated on the explicit backfill and
+ * reconciliation sequence. A worse submission must not opportunistically
+ * create a misleading historical personal-best row.
  */
 import {
     Pool,
@@ -37,11 +38,33 @@ export class P4VegaScoreRollbackError extends Error {
 }
 
 /**
- * Reads the current p4-Vega leaderboard from the versioned personal-best
- * store. The legacy controller owns adaptation to its historical snake-case
- * response shape.
+ * Reads the transitional p4-Vega leaderboard from the legacy user column.
+ *
+ * This reader deliberately remains separate from generic storage until the
+ * backfill, old-revision drain, and reconciliation gates have completed.
  */
-export async function readP4VegaLeaderboard(
+export async function readLegacyP4VegaLeaderboard(
+    database: P4VegaLeaderboardDatabase
+): Promise<P4VegaLeaderboardRow[]> {
+    const [rows] = await database.query<Array<RowDataPacket & P4VegaLeaderboardRow>>({
+        sql: `SELECT
+                user_name AS userName,
+                p4_score AS score
+            FROM users
+            WHERE p4_score IS NOT NULL
+            ORDER BY p4_score DESC
+            LIMIT ${LEADERBOARD_PAGE_SIZE}`,
+        timeout: DATABASE_QUERY_TIMEOUT_MS,
+    });
+
+    return rows.map(({ userName, score }) => ({ userName, score }));
+}
+
+/**
+ * Reads the additive p4-Vega API from the versioned personal-best store.
+ * This may intentionally differ from the legacy reader before backfill.
+ */
+export async function readGenericP4VegaLeaderboard(
     database: P4VegaLeaderboardDatabase
 ): Promise<P4VegaLeaderboardRow[]> {
     const [rows] = await database.query<Array<RowDataPacket & P4VegaLeaderboardRow>>(

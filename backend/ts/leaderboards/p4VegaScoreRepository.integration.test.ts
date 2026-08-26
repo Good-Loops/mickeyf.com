@@ -11,7 +11,8 @@ import type { MigrationConnection } from '../migrations/leaderboardSchema';
 import { loadMigrationManifest } from '../migrations/migrationManifest';
 import { applyMigrations } from '../migrations/migrationRunner';
 import {
-    readP4VegaLeaderboard,
+    readGenericP4VegaLeaderboard,
+    readLegacyP4VegaLeaderboard,
     submitP4VegaScore,
 } from './p4VegaScoreRepository';
 
@@ -251,7 +252,7 @@ test('a pre-backfill no-op does not fabricate generic history', async () => {
     });
 });
 
-test('leaderboard reads only current generic p4-Vega bests in deterministic order', async () => {
+test('legacy and generic leaderboard reads can intentionally differ before backfill', async () => {
     for (let userId = 2; userId <= 13; userId += 1) {
         await observer.query(
             `INSERT INTO users (user_name, email, user_password, p4_score)
@@ -312,7 +313,7 @@ test('leaderboard reads only current generic p4-Vega bests in deterministic orde
             ('three-bosses', 1, 13, 2147483646, 1, '1999-01-01 00:00:00.000000', NULL)`
     );
 
-    const expected = [
+    const expectedGeneric = [
         { userName: 'player', score: 1_200 },
         { userName: 'player-2', score: 990 },
         { userName: 'player-4', score: 900 },
@@ -325,8 +326,28 @@ test('leaderboard reads only current generic p4-Vega bests in deterministic orde
         { userName: 'player-10', score: 400 },
     ];
 
-    assert.deepEqual(await readP4VegaLeaderboard(applicationPool), expected);
-    assert.deepEqual(await readP4VegaLeaderboard(applicationPool), expected);
+    const expectedLegacy = [
+        { userName: 'player-13', score: 2_147_483_647 },
+        { userName: 'player-12', score: 120 },
+        { userName: 'player-11', score: 110 },
+        { userName: 'player-10', score: 100 },
+        { userName: 'player-9', score: 90 },
+        { userName: 'player-8', score: 80 },
+        { userName: 'player-7', score: 70 },
+        { userName: 'player-6', score: 60 },
+        { userName: 'player-5', score: 50 },
+        { userName: 'player-4', score: 40 },
+    ];
+
+    assert.deepEqual(
+        await readGenericP4VegaLeaderboard(applicationPool),
+        expectedGeneric
+    );
+    assert.deepEqual(
+        await readLegacyP4VegaLeaderboard(applicationPool),
+        expectedLegacy
+    );
+    assert.notDeepEqual(expectedGeneric, expectedLegacy);
 });
 
 test('equal concurrent submissions produce one personal best and one generic row', {
