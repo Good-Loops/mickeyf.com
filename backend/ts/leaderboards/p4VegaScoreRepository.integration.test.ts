@@ -55,7 +55,7 @@ function assertSafeTestEnvironment(): void {
             user: config.user,
         },
         EXPECTED_TEST_TARGET,
-        'dual-write integration tests may run only against the isolated Docker target'
+        'p4-Vega repository integration tests may run only against the isolated Docker target'
     );
     assert.equal(process.env.MIGRATION_TEST_HOST, EXPECTED_TEST_TARGET.host);
     assert.equal(Number(process.env.MIGRATION_TEST_PORT), EXPECTED_TEST_TARGET.port);
@@ -101,6 +101,27 @@ function withFirstQueryBarrier(
     } as Pick<Pool, 'getConnection'>;
 }
 
+function withCommitFailure(
+    pool: Pool,
+    commitError: Error
+): Pick<Pool, 'getConnection'> {
+    return {
+        async getConnection() {
+            const connection = await pool.getConnection();
+            return {
+                beginTransaction: () => connection.beginTransaction(),
+                query: connection.query.bind(connection),
+                async commit() {
+                    throw commitError;
+                },
+                rollback: () => connection.rollback(),
+                release: () => connection.release(),
+                destroy: () => connection.destroy(),
+            } as unknown as PoolConnection;
+        },
+    } as Pick<Pool, 'getConnection'>;
+}
+
 async function resetFixture(): Promise<void> {
     await observer.query('SET FOREIGN_KEY_CHECKS = 0');
     try {
@@ -130,7 +151,7 @@ async function resetFixture(): Promise<void> {
     `);
     await observer.query(
         `INSERT INTO users (user_name, email, user_password, p4_score)
-         VALUES ('player', 'player@example.test', 'test-only-hash', NULL)`
+         VALUES ('player', 'player@example.test', 'test-only-hash', 700)`
     );
 
     await applyMigrations(asMigrationConnection(observer), migrations, config);
@@ -200,11 +221,11 @@ after(async () => {
     if (observer) await observer.end();
 });
 
-test('strict improvements update both stores while no-ops preserve generic history', async () => {
+test('strict improvements update generic storage while the legacy score stays static', async () => {
     assert.equal(await submitP4VegaScore(applicationPool, 1, 900), true);
     const initial = await storedScore();
     assert.deepEqual(initial, {
-        legacyScore: 900,
+        legacyScore: 700,
         genericScore: 900,
         recordedAt: initial.recordedAt,
         completionTimeMs: null,
@@ -226,7 +247,7 @@ test('strict improvements update both stores while no-ops preserve generic histo
 
     assert.equal(await submitP4VegaScore(applicationPool, 1, 990), true);
     const improved = await storedScore();
-    assert.equal(improved.legacyScore, 990);
+    assert.equal(improved.legacyScore, 700);
     assert.equal(improved.genericScore, 990);
     assert.notEqual(improved.recordedAt, fixedRecordedAt);
     assert.equal(improved.completionTimeMs, null);
@@ -238,17 +259,30 @@ test('strict improvements update both stores while no-ops preserve generic histo
     assert.equal(Number(runs[0].count), 0);
 });
 
-test('a pre-backfill no-op does not fabricate generic history', async () => {
+test('generic storage is the sole score source after the gated cutover', async () => {
     await observer.query('UPDATE users SET p4_score = 900 WHERE user_id = 1');
 
-    assert.equal(await submitP4VegaScore(applicationPool, 1, 800), false);
-    assert.deepEqual(await storedScore(), {
+    assert.equal(await submitP4VegaScore(applicationPool, 1, 800), true);
+    const stored = await storedScore();
+    assert.deepEqual(stored, {
         legacyScore: 900,
-        genericScore: null,
-        recordedAt: null,
+        genericScore: 800,
+        recordedAt: stored.recordedAt,
         completionTimeMs: null,
         sourceGameRunId: null,
     });
+    assert.equal(typeof stored.recordedAt, 'string');
+});
+
+test('a missing authenticated user preserves the legacy false result', async () => {
+    assert.equal(await submitP4VegaScore(applicationPool, 999, 900), false);
+
+    const [rows] = await observer.query<Array<RowDataPacket & { count: number }>>(`
+        SELECT COUNT(*) AS count
+        FROM game_personal_bests
+        WHERE user_id = 999
+    `);
+    assert.equal(Number(rows[0].count), 0);
 });
 
 test('leaderboard reads only current generic p4-Vega bests in deterministic order', async () => {
@@ -340,7 +374,7 @@ test('equal concurrent submissions produce one personal best and one generic row
 
     assert.equal(outcomes.filter(Boolean).length, 1);
     const stored = await storedScore();
-    assert.equal(stored.legacyScore, 900);
+    assert.equal(stored.legacyScore, 700);
     assert.equal(stored.genericScore, 900);
 
     const [bestCounts] = await observer.query<Array<RowDataPacket & { count: number }>>(`
@@ -351,7 +385,7 @@ test('equal concurrent submissions produce one personal best and one generic row
     assert.equal(Number(bestCounts[0].count), 1);
 });
 
-test('concurrent mixed submissions converge both stores on the higher score', {
+test('concurrent mixed submissions converge generic storage on the higher score', {
     timeout: 5_000,
 }, async () => {
     const concurrentDatabase = withFirstQueryBarrier(applicationPool, 2);
@@ -362,22 +396,35 @@ test('concurrent mixed submissions converge both stores on the higher score', {
 
     assert.equal(highScoreWasPersonalBest, true);
     const stored = await storedScore();
-    assert.equal(stored.legacyScore, 990);
+    assert.equal(stored.legacyScore, 700);
     assert.equal(stored.genericScore, 990);
 });
 
-test('a generic-write failure rolls the legacy update back', async () => {
-    await observer.query('DROP TABLE game_personal_bests');
+test('a failed commit rolls an executed generic write back', async () => {
+    const commitError = new Error('commit failed before reaching MySQL');
+    const failingDatabase = withCommitFailure(applicationPool, commitError);
 
     await assert.rejects(
-        () => submitP4VegaScore(applicationPool, 1, 990),
-        (error: unknown) => {
-            assert.equal((error as { code?: string }).code, 'ER_NO_SUCH_TABLE');
-            return true;
-        }
+        () => submitP4VegaScore(failingDatabase, 1, 990),
+        commitError
     );
-    const [users] = await observer.query<Array<RowDataPacket & { p4Score: number | null }>>(
-        'SELECT p4_score AS p4Score FROM users WHERE user_id = 1'
-    );
-    assert.deepEqual(users, [{ p4Score: null }]);
+    assert.deepEqual(await storedScore(), {
+        legacyScore: 700,
+        genericScore: null,
+        recordedAt: null,
+        completionTimeMs: null,
+        sourceGameRunId: null,
+    });
+});
+
+test('generic writes remain valid after the legacy score column is dropped', async () => {
+    await observer.query('ALTER TABLE users DROP COLUMN p4_score');
+
+    assert.equal(await submitP4VegaScore(applicationPool, 1, 990), true);
+    const [rows] = await observer.query<Array<RowDataPacket & { score: number }>>(`
+        SELECT score
+        FROM game_personal_bests
+        WHERE game_id = 'p4-vega' AND rules_version = 1 AND user_id = 1
+    `);
+    assert.deepEqual(rows, [{ score: 990 }]);
 });

@@ -139,7 +139,10 @@ test('score submission still accepts the Bearer token fallback and authenticated
             queryOptions.push(options);
             queryValues.push(values);
             transactionEvents.push('query');
-            return [{ affectedRows: 1 }, []];
+            if (queryValues.length === 1) {
+                return [[{ userId: 42, score: 900 }], []];
+            }
+            return [{ affectedRows: 2 }, []];
         },
         async commit() {
             transactionEvents.push('commit');
@@ -174,7 +177,7 @@ test('score submission still accepts the Bearer token fallback and authenticated
     assert.deepEqual(state.body, { success: true, personalBest: true });
     assert.deepEqual(transactionEvents, ['begin', 'query', 'query', 'commit', 'release']);
     assert.deepEqual(queryValues, [
-        [990, 42, 990],
+        ['p4-vega', 1, 42],
         ['p4-vega', 1, 42, 990],
     ]);
     assert.equal((queryOptions[0] as { timeout?: number }).timeout, 10_000);
@@ -187,7 +190,7 @@ test('non-improving score preserves the exact legacy success response', async ()
         async beginTransaction() {},
         async query() {
             queryCount += 1;
-            return [{ affectedRows: 0 }, []];
+            return [[{ userId: 42, score: 900 }], []];
         },
         async commit() {},
         async rollback() {},

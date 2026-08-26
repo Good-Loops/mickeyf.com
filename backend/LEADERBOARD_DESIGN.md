@@ -11,6 +11,14 @@ locally on 2026-08-25 with unit, rollback, and concurrent MySQL 8.0.31 tests. It
 has not been deployed and must not receive traffic until migrations `0001` and
 `0002` have been applied and verified on the target database.
 
+The generic-authoritative p4-Vega writer was prepared and verified locally on
+2026-08-26. It locks the authenticated user and scoped generic best on one
+connection, compares the generic score, and writes only a strict improvement
+to `game_personal_bests`; it never reads or writes `users.p4_score`. The legacy
+HTTP request and response remain unchanged. A disposable MySQL test also drops
+the legacy column before submitting successfully. This candidate has not been
+deployed and does not authorize the production cutover sequence below.
+
 The repeatable, privileged p4-Vega historical-backfill CLI and read-only
 aggregate reconciliation command were implemented and verified locally on
 2026-08-25. This does not authorize or constitute a production backfill, read
@@ -22,8 +30,9 @@ the versioned `game_personal_bests` source and verified on 2026-08-25 without
 changing its request or response contract. This code has not been deployed or
 activated in production. It remains gated on the additive schema, completed
 backfill, legacy-revision drain, and zero-discrepancy reconciliation. The
-generic-only write cutover and legacy column removal remain later steps; the
-read-only multi-game frontend slice is recorded below.
+generic-only writer is locally prepared, but its production cutover and the
+legacy column removal remain later gated steps; the read-only multi-game
+frontend slice is recorded below.
 
 The additive backend read API was implemented and verified locally on
 2026-08-26. `GET /api/leaderboards` explicitly projects the server catalog,
@@ -335,23 +344,32 @@ backfill, credential rotation, or deployment.
    extra, score-mismatch, and metadata-mismatch counts plus source and target
    count, minimum, maximum, and sum. Require an exact match and do not export
    player identities.
-8. Add the generic read API and the direct-linkable multi-game frontend. Switch
+8. Add the generic read API and the direct-linkable multi-game frontend. Prepare
    the existing p4-Vega `submit_score` and `get_leaderboard` implementations to
-   `game_personal_bests` without changing their request or response contracts.
-9. Stop writing `users.p4_score`, drain every dual-write revision, observe the
-   cutover, and rerun the complete reconciliation against the now-static legacy
-   column.
-10. Remove or disable the transitional backfill command, then prove that no
+   use `game_personal_bests` without changing their request or response
+   contracts, but do not route production traffic to the generic-only writer
+   yet.
+9. Enforce a server-side p4-Vega submission freeze, drain in-flight score
+   requests, and rerun the complete reconciliation. Keep submissions frozen
+   while deploying the generic-only writer and draining every dual-write
+   revision, then require the same exact reconciliation again against the
+   still-static legacy column. Low traffic is not evidence of a write freeze.
+10. Revoke operational authorization for further legacy backfills, retire exact
+    legacy equality as a cutover gate, verify the generic-authoritative rollback
+    candidate, and only then re-enable submissions. Once new generic-only scores
+    are accepted, exact equality with the stale legacy column is no longer
+    expected.
+11. Remove the transitional backfill command, then prove that no
     deployable backend revision, job, operational query, or rollback candidate
     still reads or writes `users.p4_score`. Retain at least one
-    schema-compatible rollback revision and record a fresh named backup plus
-    point-in-time-recovery evidence.
-11. Add and separately review a new immutable migration that drops
+    generic-authoritative, schema-compatible rollback revision and record a
+    fresh named backup plus point-in-time-recovery evidence.
+12. Add and separately review a new immutable migration that drops
     `users.p4_score`; do not rewrite the already-applied additive migrations.
     Apply it only after Mike explicitly approves the production contract step.
-12. Verify the current p4-Vega submission and leaderboard paths, generic reads,
+13. Verify the current p4-Vega submission and leaderboard paths, generic reads,
     migration history, and recovery procedure against the contracted schema.
-13. Keep Three Bosses writes disabled until its release and validation policy is
+14. Keep Three Bosses writes disabled until its release and validation policy is
     approved.
 
 Transactions must use one acquired MySQL connection; transaction statements
@@ -381,17 +399,19 @@ only serialization mechanism.
   personal-best rows: those rows may already include legitimate dual writes.
   Correct drift by rerunning the monotonic command and reconciliation, or use
   the recorded recovery procedure when data is damaged.
-- After writes to `users.p4_score` stop, never roll back to a legacy-only
-  revision: the column is stale even before it is dropped. Prefer the last
-  schema-compatible dual-write revision or a forward fix. Restoring the legacy
-  source of truth would first require an explicitly reviewed reverse
-  reconciliation from `game_personal_bests`.
+- After generic-only traffic starts, never roll back to a legacy-only or
+  dual-write revision: the stale column could produce incorrect `personalBest`
+  responses even before it is dropped. Use a retained generic-authoritative,
+  schema-compatible revision or a forward fix. Restoring the legacy source of
+  truth would first require an explicitly reviewed reverse reconciliation from
+  `game_personal_bests`.
 - After the column is dropped, old backend revisions are schema-incompatible
   and must never receive traffic. Roll back with a compatible application
   revision or forward fix; recover data into a separate instance from the
   verified personal-best data, backup, or point-in-time state rather than
   assuming the legacy column still exists.
-- Disable new routes before reconciliation rather than deleting submitted data.
+- Freeze score submissions before the final exact reconciliations rather than
+  deleting submitted data.
 - If data recovery is required, restore the recorded backup or point-in-time
   state into a separate recovery instance first; do not overwrite production
   as the initial response.

@@ -22,7 +22,7 @@ export const MIGRATION_INTEGRATION_TEST_COMMAND = Object.freeze({
     "ts/migrations/leaderboardMigration.integration.test.ts",
   ]),
 });
-export const P4_VEGA_DUAL_WRITE_INTEGRATION_TEST_COMMAND = Object.freeze({
+export const P4_VEGA_SCORE_REPOSITORY_INTEGRATION_TEST_COMMAND = Object.freeze({
   executable: process.execPath,
   args: Object.freeze([
     "--test",
@@ -43,7 +43,7 @@ export const P4_VEGA_BACKFILL_INTEGRATION_TEST_COMMAND = Object.freeze({
 
 const INTEGRATION_TEST_COMMANDS = Object.freeze([
   MIGRATION_INTEGRATION_TEST_COMMAND,
-  P4_VEGA_DUAL_WRITE_INTEGRATION_TEST_COMMAND,
+  P4_VEGA_SCORE_REPOSITORY_INTEGRATION_TEST_COMMAND,
   P4_VEGA_BACKFILL_INTEGRATION_TEST_COMMAND,
 ]);
 

@@ -88,11 +88,22 @@ unchanged, and the drop requires its own production approval and recovery
 evidence.
 
 The transitional p4-Vega write path was implemented and verified locally on
-2026-08-25. Strict improvements now update `users.p4_score` and
+2026-08-25. That candidate updated `users.p4_score` and
 `game_personal_bests` atomically on one acquired connection; either write
-failure rolls the transaction back, concurrent submissions converge on the
-same maximum, and the legacy HTTP response remains unchanged. This code has
-not been deployed and must remain behind the additive schema migration gate.
+failure rolled the transaction back, concurrent submissions converged on the
+same maximum, and the legacy HTTP response remained unchanged. It was not
+deployed and remains the pre-cutover phase of the rollout sequence.
+
+The generic-authoritative p4-Vega writer was prepared and verified locally on
+2026-08-26. It locks the authenticated user and scoped generic personal best,
+compares only `game_personal_bests`, and writes only a strict improvement on
+the same transaction connection. It preserves the legacy HTTP contract and
+missing-user result, leaves a sentinel legacy score unchanged, survives
+concurrent submissions, and was tested after physically dropping
+`users.p4_score` in the disposable MySQL fixture. This candidate is not
+deployed: the additive schema, dual-write rollout, backfill, legacy-only
+revision drain, exact reconciliation, and production submission-freeze gates
+still come first.
 
 The Phase 13.1 repeatable, privileged p4-Vega historical-backfill CLI and
 separate read-only aggregate reconciliation gate were implemented and verified
@@ -112,8 +123,9 @@ The existing p4-Vega `get_leaderboard` read path was switched locally to
 request, response fields, ten-row bound, cache behavior, and numeric historical
 scores remain compatible; game/rules scoping and tie order now follow the
 approved generic contract. This code has not been deployed or activated in
-production. The generic-only write cutover and `users.p4_score` removal remain
-incomplete; the multi-game frontend is recorded below.
+production. The generic-only writer is locally prepared, but its production
+cutover and `users.p4_score` removal remain incomplete; the multi-game frontend
+is recorded below.
 
 The additive backend catalog and per-game read routes were implemented and
 verified locally on 2026-08-26. The catalog is projected from server-owned
@@ -130,11 +142,16 @@ performed. Production execution requires the additive schema, an explicitly
 approved short-lived least-privilege principal, exact target confirmation, and
 recovery evidence.
 Only a zero-discrepancy post-drain reconciliation permits the later read/write
-cutover to `game_personal_bests`. After that cutover is observed, all
-dual-writing revisions drain, the now-static legacy column reconciles again,
-and every code/job/tool reference is removed, a new immutable migration may
-drop `users.p4_score` under separate production approval. The initial additive
-migrations remain unchanged.
+cutover to `game_personal_bests`. The final production switch requires a
+server-side score-submission freeze spanning in-flight request drain, the last
+exact reconciliation, generic-only deployment, dual-writer drain, and a second
+exact reconciliation against the still-static legacy column. Only then may
+submissions resume. After generic-only traffic starts, legitimate improvements
+make exact equality with the stale legacy column impossible; rollback must use
+a generic-authoritative compatible revision or a forward fix, never the old
+dual writer. After every code/job/tool reference is removed, a new immutable
+migration may drop `users.p4_score` under separate production approval. The
+initial additive migrations remain unchanged.
 
 ### Step 13.2 — local Three Bosses website playability prototype (no publication)
 
