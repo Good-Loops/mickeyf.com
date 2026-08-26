@@ -11,6 +11,14 @@ locally on 2026-08-25 with unit, rollback, and concurrent MySQL 8.0.31 tests. It
 has not been deployed and must not receive traffic until migrations `0001` and
 `0002` have been applied and verified on the target database.
 
+The transitional read split was corrected and reverified on 2026-08-26 at
+`a127beac14c2662648c8aededa59374f5d7c87dd`. Its legacy `/api/users`
+`get_leaderboard` operation still reads `users.p4_score`, while the additive
+`/api/leaderboards/p4-vega` route reads `game_personal_bests`. Tests explicitly
+prove that those sources may differ before backfill. The existing production
+leaderboard must retain the legacy reader until the old-writer drain, final
+backfill, and zero-discrepancy reconciliation have all completed.
+
 The generic-authoritative p4-Vega writer was prepared and verified locally on
 2026-08-26. It locks the authenticated user and scoped generic best on one
 connection, compares the generic score, and writes only a strict improvement
@@ -64,14 +72,14 @@ aggregate reconciliation command were implemented and verified locally on
 cutover, or removal of `users.p4_score`; each production step retains the
 approval and evidence gates below.
 
-The existing p4-Vega `get_leaderboard` implementation was switched locally to
-the versioned `game_personal_bests` source and verified on 2026-08-25 without
-changing its request or response contract. This code has not been deployed or
-activated in production. It remains gated on the additive schema, completed
-backfill, legacy-revision drain, and zero-discrepancy reconciliation. The
-generic-only writer is locally prepared, but its production cutover and the
-legacy column removal remain later gated steps; the read-only multi-game
-frontend slice is recorded below.
+The eventual generic p4-Vega `get_leaderboard` implementation was prepared and
+verified on 2026-08-25 without changing its request or response contract. It is
+not the active transitional reader and has not been deployed or activated in
+production. Switching the legacy operation remains gated on the additive
+schema, completed backfill, legacy-revision drain, and zero-discrepancy
+reconciliation. The generic-only writer is locally prepared, but its
+production cutover and the legacy column removal remain later gated steps; the
+read-only multi-game frontend slice is recorded below.
 
 The additive backend read API was implemented and verified locally on
 2026-08-26. `GET /api/leaderboards` explicitly projects the server catalog,
@@ -371,7 +379,8 @@ backfill, credential rotation, or deployment.
 4. Deploy transactional p4-Vega dual writes to `users.p4_score` and
    `game_personal_bests` while preserving the legacy API. The legacy request
    has no run ID, so it never fabricates a `game_runs` row or claims request
-   idempotency.
+   idempotency. During this phase, keep the legacy leaderboard read on
+   `users.p4_score`; do not expose an incomplete generic table as its source.
 5. With a short-lived least-privilege principal and the dedicated action
    confirmation, run the repeatable monotonic p4-Vega backfill. Copy every
    non-null legacy value, even if an old stored value does not satisfy today's
@@ -383,11 +392,11 @@ backfill, credential rotation, or deployment.
    extra, score-mismatch, and metadata-mismatch counts plus source and target
    count, minimum, maximum, and sum. Require an exact match and do not export
    player identities.
-8. Add the generic read API and the direct-linkable multi-game frontend. Prepare
-   the existing p4-Vega `submit_score` and `get_leaderboard` implementations to
-   use `game_personal_bests` without changing their request or response
-   contracts, but do not route production traffic to the generic-only writer
-   yet.
+8. Verify the additive generic read API against the reconciled table, then
+   switch the existing p4-Vega `get_leaderboard` implementation to
+   `game_personal_bests` without changing its request or response contract.
+   Prepare the direct-linkable multi-game frontend and generic-only writer, but
+   do not route production traffic to the generic-only writer yet.
 9. Retain and review the dual-writer-plus-gate source on `main`, then record its
    exact authoritative Stage A commit. Do not synchronize an enabled Stage B
    state while only a feature-branch commit is known, and do not add the runtime

@@ -53,9 +53,11 @@ provided ranks remain `UNRANKED` and submission remains disabled.
 ## Phase 13 — Website and leaderboard integration
 
 The local Three Bosses result flow is stable enough for integration work.
-Continue Phase 13 on the existing feature branch; do not merge or push these
-changes to `main` until Phase 13 is complete and the remaining Phase 12 release
-gates above have been satisfied.
+Continue Phase 13 on `feature/new-leaderboard`. Completing this broad branch
+does not authorize a merge or push to `main`: create the next broad feature
+branch from its final commit and retire the old branch instead. Keep `main`
+deferred until the Phase 14 site-wide responsive, information-architecture,
+and literal-dark redesign is complete and separately approved.
 
 ### Step 13.1 — multi-game contract and migration design
 
@@ -93,6 +95,16 @@ The transitional p4-Vega write path was implemented and verified locally on
 failure rolled the transaction back, concurrent submissions converged on the
 same maximum, and the legacy HTTP response remained unchanged. It was not
 deployed and remains the pre-cutover phase of the rollout sequence.
+
+The active transitional read split was corrected and reverified on 2026-08-26
+at `a127beac14c2662648c8aededa59374f5d7c87dd`. While this dual writer is
+serving, the legacy `/api/users` `get_leaderboard` operation deliberately keeps
+reading `users.p4_score`; the additive `/api/leaderboards/p4-vega` route reads
+`game_personal_bests`. Unit, controller, security, isolated MySQL, migration,
+backfill, and production-bundle checks passed, including a pre-backfill fixture
+where the two sources intentionally differ. This prevents the first rollout
+from silently switching the existing leaderboard to an empty or incomplete
+generic table.
 
 On 2026-08-26, detached worktrees verified historical dual-write base
 `0dbe3fb8` plus the seven storage-independent freeze-gate changes from
@@ -147,14 +159,15 @@ extra rows, metadata anomalies, run-ledger rows, and unexpected rules versions
 rather than guessing how to repair them. Every pass reuses the verified
 personal-best migration timestamp, so retries remain stable.
 
-The existing p4-Vega `get_leaderboard` read path was switched locally to
-`game_personal_bests` and verified on 2026-08-25. Its anonymous legacy route,
-request, response fields, ten-row bound, cache behavior, and numeric historical
-scores remain compatible; game/rules scoping and tie order now follow the
-approved generic contract. This code has not been deployed or activated in
-production. The generic-only writer is locally prepared, but its production
-cutover and `users.p4_score` removal remain incomplete; the multi-game frontend
-is recorded below.
+The eventual generic p4-Vega `get_leaderboard` read path was prepared and
+verified on 2026-08-25, but it is not the active transitional source. Only
+after the additive schema, dual-writer deployment, legacy-only revision drain,
+repeatable backfill, and zero-discrepancy reconciliation may the legacy
+operation switch from `users.p4_score` to `game_personal_bests`. Its request,
+response fields, ten-row bound, cache behavior, and numeric historical scores
+must remain compatible. The generic-only writer is locally prepared, but its
+production cutover and `users.p4_score` removal remain incomplete; the
+multi-game frontend is recorded below.
 
 The additive backend catalog and per-game read routes were implemented and
 verified locally on 2026-08-26. The catalog is projected from server-owned
