@@ -31,13 +31,13 @@ export const P4_VEGA_REPOSITORY_INTEGRATION_TEST_COMMAND = Object.freeze({
     "ts/leaderboards/p4VegaScoreRepository.integration.test.ts",
   ]),
 });
-export const P4_VEGA_BACKFILL_INTEGRATION_TEST_COMMAND = Object.freeze({
+export const P4_VEGA_RECONCILIATION_INTEGRATION_TEST_COMMAND = Object.freeze({
   executable: process.execPath,
   args: Object.freeze([
     "--test",
     "-r",
     "ts-node/register",
-    "ts/migrations/p4VegaBackfill.integration.test.ts",
+    "ts/migrations/p4VegaReconciliation.integration.test.ts",
   ]),
 });
 export const THREE_BOSSES_RUN_INTEGRATION_TEST_COMMAND = Object.freeze({
@@ -72,7 +72,7 @@ const INTEGRATION_TEST_COMMANDS = Object.freeze([
   MIGRATION_INTEGRATION_TEST_COMMAND,
   P4_VEGA_REPOSITORY_INTEGRATION_TEST_COMMAND,
   THREE_BOSSES_RUN_INTEGRATION_TEST_COMMAND,
-  P4_VEGA_BACKFILL_INTEGRATION_TEST_COMMAND,
+  P4_VEGA_RECONCILIATION_INTEGRATION_TEST_COMMAND,
   RUNTIME_GRANT_INTEGRATION_TEST_COMMAND,
   RUNTIME_GRANT_OPERATIONS_INTEGRATION_TEST_COMMAND,
 ]);
@@ -193,9 +193,6 @@ const getMigrationTestEnvironment = (mysqlPort) => {
     MIGRATION_CONFIRM_TARGET: `${MYSQL_HOST}:${mysqlPort}/${MYSQL_DATABASE}`,
     MIGRATION_CONFIRM_ACCOUNT: `${MYSQL_USER}@%`,
     MIGRATION_ALLOW_APPLY: "1",
-    MIGRATION_ALLOW_ROLLBACK_EMPTY: "1",
-    MIGRATION_ALLOW_P4_VEGA_BACKFILL: "1",
-    MIGRATION_ALLOW_P4_VEGA_RECONCILE: "1",
   };
 };
 

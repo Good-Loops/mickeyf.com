@@ -1,4 +1,3 @@
-import type { MigrationConfig } from '../config/migrationConfig';
 import type { MigrationConnection } from './leaderboardSchema';
 import type { MigrationDefinition } from './migrationManifest';
 import {
@@ -8,23 +7,16 @@ import {
 
 const P4_VEGA_GAME_ID = 'p4-vega';
 const P4_VEGA_RULES_VERSION = 1;
-const MINIMUM_USER_ID_EXCLUSIVE = -2_147_483_649;
-const MAX_CHUNK_ATTEMPTS = 3;
 const SIGNED_INT_MINIMUM = -2_147_483_648;
 const SIGNED_INT_MAXIMUM = 2_147_483_647;
-const UTC_DATETIME = /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{6}$/u;
 
-export interface P4VegaBackfillConnection extends MigrationConnection {
-    beginTransaction(): Promise<void>;
+export interface P4VegaReconciliationConnection extends MigrationConnection {
     commit(): Promise<void>;
     rollback(): Promise<void>;
     destroy(): void;
 }
 
-export type P4VegaOperationSettings = MigrationRunnerSettings & Pick<
-    MigrationConfig,
-    'p4VegaBackfillChunkSize'
->;
+type P4VegaReconciliationSettings = MigrationRunnerSettings;
 
 export type P4VegaAggregateSummary = Readonly<{
     rowCount: string;
@@ -76,12 +68,6 @@ export type P4VegaReconciliationRows = Readonly<{
     }>;
 }>;
 
-export type P4VegaBackfillResult = Readonly<{
-    sharedRecordedAt: string;
-    chunksProcessed: number;
-    reconciliation: P4VegaReconciliationReport;
-}>;
-
 type LegacySourceTableRow = {
     engine: unknown;
 };
@@ -99,26 +85,18 @@ type LegacySourcePrimaryKeyRow = {
     sequence: unknown;
 };
 
-type AppliedAtRow = {
-    appliedAt: unknown;
-};
-
-type UserBoundaryRow = {
-    userId: unknown;
-};
-
 type AggregateRow = P4VegaReconciliationRows['aggregates'];
 type SourceDifferenceRow = P4VegaReconciliationRows['sourceDifferences'];
 type TargetAnomalyRow = P4VegaReconciliationRows['targetAnomalies'];
 type UnexpectedRow = P4VegaReconciliationRows['unexpected'];
 
-export class P4VegaDataRollbackError extends Error {
+class P4VegaReconciliationRollbackError extends Error {
     constructor(
         readonly operationError: unknown,
         readonly rollbackError: unknown
     ) {
-        super('The p4-Vega data operation and its rollback both failed');
-        this.name = 'P4VegaDataRollbackError';
+        super('The p4-Vega reconciliation and its rollback both failed');
+        this.name = 'P4VegaReconciliationRollbackError';
     }
 }
 
@@ -392,34 +370,6 @@ export function buildP4VegaReconciliationReport(
     });
 }
 
-export function assertP4VegaBackfillPreflightSafe(
-    report: P4VegaReconciliationReport
-): void {
-    const unsafeConditions = [
-        ['generic-higher rows', report.genericHigherCount],
-        ['extra generic rows', report.extraCount],
-        ['unexpected personal-best metadata', report.metadataAnomalyCount],
-        ['unexpected p4-Vega game runs', report.unexpectedGameRunCount],
-        ['unexpected p4-Vega rules versions', report.unexpectedRulesVersionCount],
-    ].filter(([, count]) => count !== '0');
-
-    if (unsafeConditions.length > 0) {
-        throw new Error(
-            `p4-Vega backfill preflight refused: ${unsafeConditions
-                .map(([label]) => label)
-                .join(', ')}`
-        );
-    }
-
-    if (
-        report.missingCount === '0'
-        && report.genericLowerCount === '0'
-        && !report.consistent
-    ) {
-        throw new Error('p4-Vega backfill preflight found unexplained aggregate drift');
-    }
-}
-
 async function verifyLegacyP4SourceSchema(
     connection: MigrationConnection
 ): Promise<void> {
@@ -470,166 +420,20 @@ async function verifyLegacyP4SourceSchema(
     }
 }
 
-async function readSharedRecordedAt(
-    connection: MigrationConnection,
-    migrations: readonly MigrationDefinition[]
-): Promise<string> {
-    const personalBestMigration = migrations.find(
-        ({ tableName }) => tableName === 'game_personal_bests'
-    );
-    if (!personalBestMigration) {
-        throw new Error('Migration manifest omits game_personal_bests');
-    }
-
-    const row = await querySingleRow<AppliedAtRow>(connection, `
-        SELECT DATE_FORMAT(applied_at, '%Y-%m-%d %H:%i:%s.%f') AS appliedAt
-        FROM schema_migrations
-        WHERE version = ?
-    `, [personalBestMigration.version]);
-    if (typeof row.appliedAt !== 'string' || !UTC_DATETIME.test(row.appliedAt)) {
-        throw new Error('Personal-best migration history has an invalid UTC timestamp');
-    }
-    return row.appliedAt;
-}
-
-async function configureBackfillSession(
-    connection: MigrationConnection,
-    lockWaitTimeoutSeconds: number
-): Promise<void> {
-    await connection.query("SET SESSION time_zone = '+00:00'");
-    await connection.query('SET SESSION TRANSACTION ISOLATION LEVEL READ COMMITTED');
-    await connection.query(
-        'SET SESSION innodb_lock_wait_timeout = ?',
-        [lockWaitTimeoutSeconds]
-    );
-}
-
-async function readUserBoundary(
-    connection: MigrationConnection,
-    lowerExclusive: number,
-    highWaterMark: number,
-    chunkSize: number
-): Promise<number | null> {
-    const row = await querySingleRow<UserBoundaryRow>(connection, `
-        SELECT MAX(chunk.user_id) AS userId
-        FROM (
-            SELECT user_id
-            FROM users
-            WHERE user_id > ?
-              AND user_id <= ?
-            ORDER BY user_id
-            LIMIT ?
-        ) AS chunk
-    `, [lowerExclusive, highWaterMark, chunkSize]);
-    return scoreValue(row.userId, 'p4-Vega user chunk boundary');
-}
-
-function isRetryableLockFailure(error: unknown): boolean {
-    if (!error || typeof error !== 'object') return false;
-    const candidate = error as { code?: unknown; errno?: unknown };
-    return candidate.code === 'ER_LOCK_DEADLOCK'
-        || candidate.code === 'ER_LOCK_WAIT_TIMEOUT'
-        || candidate.errno === 1_213
-        || candidate.errno === 1_205;
-}
-
-async function waitBeforeLockRetry(attempt: number): Promise<void> {
-    const exponentialDelayMs = 25 * (2 ** (attempt - 1));
-    const jitterMs = Math.floor(Math.random() * 25);
-    await new Promise<void>((resolve) => {
-        setTimeout(resolve, exponentialDelayMs + jitterMs);
-    });
-}
-
 async function rollbackAfterFailure(
-    connection: P4VegaBackfillConnection,
+    connection: P4VegaReconciliationConnection,
     operationError: unknown
 ): Promise<void> {
     try {
         await connection.rollback();
     } catch (rollbackError) {
         connection.destroy();
-        throw new P4VegaDataRollbackError(operationError, rollbackError);
-    }
-}
-
-async function backfillChunk(
-    connection: P4VegaBackfillConnection,
-    lowerExclusive: number,
-    upperInclusive: number,
-    sharedRecordedAt: string
-): Promise<void> {
-    for (let attempt = 1; attempt <= MAX_CHUNK_ATTEMPTS; attempt += 1) {
-        let transactionStarted = false;
-        try {
-            await connection.beginTransaction();
-            transactionStarted = true;
-            await connection.query(`
-                INSERT INTO game_personal_bests (
-                    game_id,
-                    rules_version,
-                    user_id,
-                    score,
-                    completion_time_ms,
-                    recorded_at,
-                    source_game_run_id
-                )
-                SELECT
-                    incoming_game_id,
-                    incoming_rules_version,
-                    incoming_user_id,
-                    incoming_score,
-                    incoming_completion_time_ms,
-                    incoming_recorded_at,
-                    incoming_source_game_run_id
-                FROM (
-                    SELECT
-                        ? AS incoming_game_id,
-                        ? AS incoming_rules_version,
-                        users.user_id AS incoming_user_id,
-                        users.p4_score AS incoming_score,
-                        NULL AS incoming_completion_time_ms,
-                        CAST(? AS DATETIME(6)) AS incoming_recorded_at,
-                        NULL AS incoming_source_game_run_id
-                    FROM users
-                    WHERE users.user_id > ?
-                      AND users.user_id <= ?
-                      AND users.p4_score IS NOT NULL
-                ) AS incoming
-                ORDER BY incoming_user_id
-                ON DUPLICATE KEY UPDATE
-                    -- MySQL evaluates assignments left-to-right. Compare against
-                    -- the old score before the following assignment changes it.
-                    recorded_at = IF(
-                        incoming_score > game_personal_bests.score,
-                        incoming_recorded_at,
-                        game_personal_bests.recorded_at
-                    ),
-                    score = GREATEST(
-                        game_personal_bests.score,
-                        incoming_score
-                    )
-            `, [
-                P4_VEGA_GAME_ID,
-                P4_VEGA_RULES_VERSION,
-                sharedRecordedAt,
-                lowerExclusive,
-                upperInclusive,
-            ]);
-            await connection.commit();
-            return;
-        } catch (error) {
-            if (transactionStarted) await rollbackAfterFailure(connection, error);
-            if (!isRetryableLockFailure(error) || attempt === MAX_CHUNK_ATTEMPTS) {
-                throw error;
-            }
-            await waitBeforeLockRetry(attempt);
-        }
+        throw new P4VegaReconciliationRollbackError(operationError, rollbackError);
     }
 }
 
 async function reconcileWithinVerifiedSchema(
-    connection: P4VegaBackfillConnection
+    connection: P4VegaReconciliationConnection
 ): Promise<P4VegaReconciliationReport> {
     await connection.query('SET SESSION TRANSACTION ISOLATION LEVEL REPEATABLE READ');
     let transactionStarted = false;
@@ -741,59 +545,12 @@ async function reconcileWithinVerifiedSchema(
 }
 
 export async function reconcileP4VegaScores(
-    connection: P4VegaBackfillConnection,
+    connection: P4VegaReconciliationConnection,
     migrations: readonly MigrationDefinition[],
-    settings: P4VegaOperationSettings
+    settings: P4VegaReconciliationSettings
 ): Promise<P4VegaReconciliationReport> {
     return withVerifiedLeaderboardSchema(connection, migrations, settings, async () => {
         await verifyLegacyP4SourceSchema(connection);
         return reconcileWithinVerifiedSchema(connection);
-    });
-}
-
-export async function backfillP4VegaScores(
-    connection: P4VegaBackfillConnection,
-    migrations: readonly MigrationDefinition[],
-    settings: P4VegaOperationSettings
-): Promise<P4VegaBackfillResult> {
-    return withVerifiedLeaderboardSchema(connection, migrations, settings, async () => {
-        await verifyLegacyP4SourceSchema(connection);
-        const sharedRecordedAt = await readSharedRecordedAt(connection, migrations);
-        const initialReport = await reconcileWithinVerifiedSchema(connection);
-        assertP4VegaBackfillPreflightSafe(initialReport);
-        await configureBackfillSession(connection, settings.lockWaitTimeoutSeconds);
-
-        const highWaterRow = await querySingleRow<UserBoundaryRow>(connection, `
-            SELECT MAX(user_id) AS userId
-            FROM users
-        `);
-        const highWaterMark = scoreValue(
-            highWaterRow.userId,
-            'p4-Vega user high-water mark'
-        );
-        let chunksProcessed = 0;
-        let lowerExclusive = MINIMUM_USER_ID_EXCLUSIVE;
-
-        while (highWaterMark !== null && lowerExclusive < highWaterMark) {
-            const upperInclusive = await readUserBoundary(
-                connection,
-                lowerExclusive,
-                highWaterMark,
-                settings.p4VegaBackfillChunkSize
-            );
-            if (upperInclusive === null) break;
-
-            await backfillChunk(
-                connection,
-                lowerExclusive,
-                upperInclusive,
-                sharedRecordedAt
-            );
-            lowerExclusive = upperInclusive;
-            chunksProcessed += 1;
-        }
-
-        const reconciliation = await reconcileWithinVerifiedSchema(connection);
-        return Object.freeze({ sharedRecordedAt, chunksProcessed, reconciliation });
     });
 }

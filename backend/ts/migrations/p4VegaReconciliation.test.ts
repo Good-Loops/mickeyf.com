@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-    assertP4VegaBackfillPreflightSafe,
     buildP4VegaReconciliationReport,
     type P4VegaReconciliationRows,
-} from './p4VegaBackfill';
+} from './p4VegaReconciliation';
 
 function cleanRows(): P4VegaReconciliationRows {
     return {
@@ -76,7 +75,7 @@ function withUnexpected(
     };
 }
 
-test('normalizes an exactly reconciled report and permits the backfill preflight', () => {
+test('normalizes an exactly reconciled report', () => {
     const report = buildP4VegaReconciliationReport(cleanRows());
 
     assert.deepEqual(report, {
@@ -103,7 +102,6 @@ test('normalizes an exactly reconciled report and permits the backfill preflight
         unexpectedRulesVersionCount: '0',
         consistent: true,
     });
-    assert.doesNotThrow(() => assertP4VegaBackfillPreflightSafe(report));
 });
 
 test('preserves decimal sums beyond the JavaScript safe-integer boundary', () => {
@@ -132,10 +130,9 @@ test('preserves decimal sums beyond the JavaScript safe-integer boundary', () =>
     assert.equal(report.generic.scoreSum, scoreSum);
     assert.equal(report.matchedCount, String(rowCount));
     assert.equal(report.consistent, true);
-    assert.doesNotThrow(() => assertP4VegaBackfillPreflightSafe(report));
 });
 
-test('allows source-ahead missing and lower rows that a monotonic backfill can fix', () => {
+test('reports source-ahead missing and lower rows as inconsistent', () => {
     const rows: P4VegaReconciliationRows = {
         aggregates: {
             legacyCount: 2,
@@ -171,10 +168,9 @@ test('allows source-ahead missing and lower rows that a monotonic backfill can f
     assert.equal(report.mismatchCount, '1');
     assert.equal(report.genericLowerCount, '1');
     assert.equal(report.genericHigherCount, '0');
-    assert.doesNotThrow(() => assertP4VegaBackfillPreflightSafe(report));
 });
 
-test('rejects target-ahead scores that a monotonic source backfill cannot repair', () => {
+test('reports target-ahead scores as inconsistent', () => {
     const rows = withSourceDifferences(
         withAggregates(cleanRows(), {
             legacyCount: 1,
@@ -197,10 +193,9 @@ test('rejects target-ahead scores that a monotonic source backfill cannot repair
 
     assert.equal(report.consistent, false);
     assert.equal(report.genericHigherCount, '1');
-    assert.throws(() => assertP4VegaBackfillPreflightSafe(report), Error);
 });
 
-test('rejects extra, metadata-anomalous, unexpected-rule, and run-ledger states', () => {
+test('reports extra, metadata-anomalous, unexpected-rule, and run-ledger states', () => {
     const extraRows: P4VegaReconciliationRows = {
         aggregates: {
             legacyCount: 0,
@@ -244,11 +239,6 @@ test('rejects extra, metadata-anomalous, unexpected-rule, and run-ledger states'
     ] as const) {
         const report = buildP4VegaReconciliationReport(rows);
         assert.equal(report.consistent, false, name);
-        assert.throws(
-            () => assertP4VegaBackfillPreflightSafe(report),
-            Error,
-            name
-        );
     }
 });
 

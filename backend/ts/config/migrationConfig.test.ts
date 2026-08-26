@@ -5,7 +5,6 @@ import {
     assertMutationAuthorized,
     assertP4GrantRetirementCommandConfirmed,
     assertP4ScoreDropCommandConfirmed,
-    assertP4VegaDataOperationAuthorized,
     assertRuntimeGrantCommandConfirmed,
     loadMigrationConfig,
     loadMigrationAccountConfirmation,
@@ -80,7 +79,6 @@ test('migration configuration uses dedicated credentials and safe timeout defaul
         advisoryLockTimeoutSeconds: 5,
         lockWaitTimeoutSeconds: 10,
         operationTimeoutMs: 30_000,
-        p4VegaBackfillChunkSize: 500,
         p4VegaOperationTimeoutMs: 900_000,
     });
     assert.equal(Object.isFrozen(config), true);
@@ -174,14 +172,12 @@ test('migration configuration accepts bounded timeout overrides', () => {
         MIGRATION_ADVISORY_LOCK_TIMEOUT_SECONDS: '0',
         MIGRATION_LOCK_WAIT_TIMEOUT_SECONDS: '60',
         MIGRATION_OPERATION_TIMEOUT_MS: '120000',
-        MIGRATION_P4_VEGA_BACKFILL_CHUNK_SIZE: '5000',
         MIGRATION_P4_VEGA_OPERATION_TIMEOUT_MS: '21600000',
     });
 
     assert.equal(config.advisoryLockTimeoutSeconds, 0);
     assert.equal(config.lockWaitTimeoutSeconds, 60);
     assert.equal(config.operationTimeoutMs, 120_000);
-    assert.equal(config.p4VegaBackfillChunkSize, 5_000);
     assert.equal(config.p4VegaOperationTimeoutMs, 21_600_000);
 });
 
@@ -194,8 +190,6 @@ test('migration configuration rejects timeout overrides outside safe bounds', ()
         ['MIGRATION_OPERATION_TIMEOUT_MS', '999'],
         ['MIGRATION_OPERATION_TIMEOUT_MS', '120001'],
         ['MIGRATION_OPERATION_TIMEOUT_MS', '30000.5'],
-        ['MIGRATION_P4_VEGA_BACKFILL_CHUNK_SIZE', '0'],
-        ['MIGRATION_P4_VEGA_BACKFILL_CHUNK_SIZE', '5001'],
         ['MIGRATION_P4_VEGA_OPERATION_TIMEOUT_MS', '29999'],
         ['MIGRATION_P4_VEGA_OPERATION_TIMEOUT_MS', '21600001'],
     ] as const;
@@ -206,47 +200,6 @@ test('migration configuration rejects timeout overrides outside safe bounds', ()
             new RegExp(name)
         );
     }
-});
-
-test('p4-Vega data operations require separate explicit authorizations', () => {
-    const config = loadMigrationConfig(migrationEnvironment);
-    const confirmedEnvironment = {
-        MIGRATION_CONFIRM_DATABASE: migrationEnvironment.MIGRATION_DB_NAME,
-        MIGRATION_CONFIRM_TARGET: '127.0.0.1:3306/migration_test',
-    };
-
-    assert.doesNotThrow(() => assertP4VegaDataOperationAuthorized(
-        'backfill-p4-vega',
-        config,
-        { ...confirmedEnvironment, MIGRATION_ALLOW_P4_VEGA_BACKFILL: '1' }
-    ));
-    assert.throws(
-        () => assertP4VegaDataOperationAuthorized('backfill-p4-vega', config, {
-            ...confirmedEnvironment,
-            MIGRATION_ALLOW_APPLY: '1',
-            MIGRATION_ALLOW_P4_VEGA_RECONCILE: '1',
-        }),
-        /MIGRATION_ALLOW_P4_VEGA_BACKFILL=1/
-    );
-
-    assert.doesNotThrow(() => assertP4VegaDataOperationAuthorized(
-        'reconcile-p4-vega',
-        config,
-        { ...confirmedEnvironment, MIGRATION_ALLOW_P4_VEGA_RECONCILE: '1' }
-    ));
-    assert.throws(
-        () => assertP4VegaDataOperationAuthorized('reconcile-p4-vega', config, {
-            ...confirmedEnvironment,
-            MIGRATION_ALLOW_P4_VEGA_BACKFILL: '1',
-        }),
-        /MIGRATION_ALLOW_P4_VEGA_RECONCILE=1/
-    );
-    assert.throws(
-        () => assertP4VegaDataOperationAuthorized('reconcile-p4-vega', config, {
-            MIGRATION_ALLOW_P4_VEGA_RECONCILE: '1',
-        }),
-        /MIGRATION_CONFIRM_DATABASE/
-    );
 });
 
 test('database confirmation must exactly match the configured migration database', () => {
@@ -275,44 +228,32 @@ test('database confirmation must exactly match the configured migration database
     );
 });
 
-test('each mutating action requires its own explicit authorization', () => {
+test('additive migration apply requires explicit authorization', () => {
     const config = loadMigrationConfig(migrationEnvironment);
     const confirmedEnvironment = {
         MIGRATION_CONFIRM_DATABASE: migrationEnvironment.MIGRATION_DB_NAME,
         MIGRATION_CONFIRM_TARGET: '127.0.0.1:3306/migration_test',
     };
 
-    assert.doesNotThrow(() => assertMutationAuthorized('apply', config, {
+    assert.doesNotThrow(() => assertMutationAuthorized(config, {
         ...confirmedEnvironment,
         MIGRATION_ALLOW_APPLY: '1',
     }));
     assert.throws(
-        () => assertMutationAuthorized('apply', config, {
+        () => assertMutationAuthorized(config, {
             ...confirmedEnvironment,
-            MIGRATION_ALLOW_ROLLBACK_EMPTY: '1',
+            MIGRATION_ALLOW_P4_SCORE_DROP: '1',
         }),
         /MIGRATION_ALLOW_APPLY=1/
     );
-
-    assert.doesNotThrow(() => assertMutationAuthorized('rollback-empty', config, {
-        ...confirmedEnvironment,
-        MIGRATION_ALLOW_ROLLBACK_EMPTY: '1',
-    }));
     assert.throws(
-        () => assertMutationAuthorized('rollback-empty', config, {
-            ...confirmedEnvironment,
-            MIGRATION_ALLOW_APPLY: '1',
-        }),
-        /MIGRATION_ALLOW_ROLLBACK_EMPTY=1/
-    );
-    assert.throws(
-        () => assertMutationAuthorized('apply', config, {
+        () => assertMutationAuthorized(config, {
             MIGRATION_ALLOW_APPLY: '1',
         }),
         /MIGRATION_CONFIRM_DATABASE/
     );
     assert.throws(
-        () => assertMutationAuthorized('apply', config, {
+        () => assertMutationAuthorized(config, {
             MIGRATION_CONFIRM_DATABASE: migrationEnvironment.MIGRATION_DB_NAME,
             MIGRATION_CONFIRM_TARGET: '127.0.0.1:3307/migration_test',
             MIGRATION_ALLOW_APPLY: '1',

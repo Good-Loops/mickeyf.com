@@ -9,7 +9,6 @@ export type MigrationConfig = Readonly<{
     advisoryLockTimeoutSeconds: number;
     lockWaitTimeoutSeconds: number;
     operationTimeoutMs: number;
-    p4VegaBackfillChunkSize: number;
     p4VegaOperationTimeoutMs: number;
 }>;
 
@@ -20,8 +19,6 @@ const MAX_LOCK_WAIT_TIMEOUT_SECONDS = 60;
 const DEFAULT_OPERATION_TIMEOUT_MS = 30_000;
 const MIN_OPERATION_TIMEOUT_MS = 1_000;
 const MAX_OPERATION_TIMEOUT_MS = 120_000;
-const DEFAULT_P4_VEGA_BACKFILL_CHUNK_SIZE = 500;
-const MAX_P4_VEGA_BACKFILL_CHUNK_SIZE = 5_000;
 const DEFAULT_P4_VEGA_OPERATION_TIMEOUT_MS = 900_000;
 const MIN_P4_VEGA_OPERATION_TIMEOUT_MS = 30_000;
 const MAX_P4_VEGA_OPERATION_TIMEOUT_MS = 21_600_000;
@@ -99,13 +96,6 @@ export function loadMigrationConfig(env: Environment = process.env): MigrationCo
             MAX_OPERATION_TIMEOUT_MS,
             DEFAULT_OPERATION_TIMEOUT_MS
         ),
-        p4VegaBackfillChunkSize: parseBoundedInteger(
-            env.MIGRATION_P4_VEGA_BACKFILL_CHUNK_SIZE,
-            'MIGRATION_P4_VEGA_BACKFILL_CHUNK_SIZE',
-            1,
-            MAX_P4_VEGA_BACKFILL_CHUNK_SIZE,
-            DEFAULT_P4_VEGA_BACKFILL_CHUNK_SIZE
-        ),
         p4VegaOperationTimeoutMs: parseBoundedInteger(
             env.MIGRATION_P4_VEGA_OPERATION_TIMEOUT_MS,
             'MIGRATION_P4_VEGA_OPERATION_TIMEOUT_MS',
@@ -148,10 +138,6 @@ export function assertDatabaseConfirmation(
     }
 }
 
-export type MutatingMigrationAction = 'apply' | 'rollback-empty';
-
-export type P4VegaDataOperation = 'backfill-p4-vega' | 'reconcile-p4-vega';
-
 export type RuntimeGrantCommand = 'plan' | 'verify' | 'apply';
 
 export type P4GrantRetirementCommand = 'plan' | 'verify' | 'apply';
@@ -173,32 +159,13 @@ function assertTargetConfirmed(
 }
 
 export function assertMutationAuthorized(
-    action: MutatingMigrationAction,
     config: Pick<MigrationConfig, 'host' | 'port' | 'database'>,
     env: Environment = process.env
 ): void {
     assertTargetConfirmed(config, env);
 
-    const authorizationVariable = action === 'apply'
-        ? 'MIGRATION_ALLOW_APPLY'
-        : 'MIGRATION_ALLOW_ROLLBACK_EMPTY';
-    if (env[authorizationVariable] !== '1') {
-        throw new Error(`${authorizationVariable}=1 is required for this migration action`);
-    }
-}
-
-export function assertP4VegaDataOperationAuthorized(
-    operation: P4VegaDataOperation,
-    config: Pick<MigrationConfig, 'host' | 'port' | 'database'>,
-    env: Environment = process.env
-): void {
-    assertTargetConfirmed(config, env);
-
-    const authorizationVariable = operation === 'backfill-p4-vega'
-        ? 'MIGRATION_ALLOW_P4_VEGA_BACKFILL'
-        : 'MIGRATION_ALLOW_P4_VEGA_RECONCILE';
-    if (env[authorizationVariable] !== '1') {
-        throw new Error(`${authorizationVariable}=1 is required for this migration action`);
+    if (env.MIGRATION_ALLOW_APPLY !== '1') {
+        throw new Error('MIGRATION_ALLOW_APPLY=1 is required for this migration action');
     }
 }
 
