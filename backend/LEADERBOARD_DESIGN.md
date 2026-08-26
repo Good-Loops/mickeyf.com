@@ -5,32 +5,33 @@ schema preflight completed on the same date. On 2026-08-25, Mike approved the
 end state in which p4-Vega uses the generic leaderboard storage and the legacy
 `users.p4_score` column is retired after a verified cutover. The additive
 production schema and an initial p4-Vega data seed were applied and verified on
-2026-08-26. The exact frozen dual writer still serves 100% of production
-traffic, its former enabled revision is retired, and the frozen generic-only
-candidate is ready at zero traffic. This document records those completed
-changes but does not authorize the generic read/write traffic cutover,
-legacy-column removal, or another production mutation.
+2026-08-26. The exact frozen generic-only revision now serves 100% of
+production traffic, and the frozen dual writer is retired but retained as the
+rollback target while its legacy column grants remain. This document records
+that completed traffic cutover but does not authorize legacy-column grant
+retirement, submission enablement, column removal, or another production
+mutation.
 
 Production now contains `schema_migrations`, `game_runs`, and
 `game_personal_bests` alongside `users`. The initial seed and the later
-post-drain backfill both reconcile the same five p4-Vega personal bests exactly;
-`game_runs` is empty and `users.p4_score` is unchanged. The frozen dual writer
-serves 100% of production traffic, the generic-only candidate has zero traffic,
-and no reader cutover has run.
+post-drain backfill and frozen generic-only cutover reconciliations all match the
+same five p4-Vega personal bests exactly; `game_runs` is empty and
+`users.p4_score` is unchanged. The frozen generic-only revision serves 100% of
+production traffic, and the drained dual writer has zero traffic.
 
 The transitional p4-Vega dual-write repository was implemented and verified
 locally on 2026-08-25 with unit, rollback, and concurrent MySQL 8.0.31 tests. It
-now serves in the exact frozen production revision recorded below; its former
-enabled revision is retired. Migrations `0001` and `0002` are applied and
-verified, and the remaining generic-only cutover stages stay gated on separate
-review.
+remains available in the exact retired frozen revision recorded below; its
+former enabled revision is also retired. Migrations `0001` and `0002` are
+applied and verified, and the remaining grant-retirement, runtime-pool recycle,
+submission-enablement, and legacy-column stages stay gated on separate review.
 
 The transitional read split was corrected and reverified on 2026-08-26 at
-`a127beac14c2662648c8aededa59374f5d7c87dd`. That split still describes the
-serving frozen dual-writer revision: its legacy `/api/users` operation reads
-`users.p4_score`, while the additive route reads `game_personal_bests`. The
-legacy-only and enabled dual-writer drains, post-drain backfills, and
-zero-discrepancy reconciliations have completed.
+`a127beac14c2662648c8aededa59374f5d7c87dd`. That split now describes the
+retired rollback-compatible frozen dual writer: its legacy `/api/users`
+operation reads `users.p4_score`, while the additive route reads
+`game_personal_bests`. The legacy-only, enabled dual-writer, and frozen
+dual-writer drains and their zero-discrepancy reconciliations have completed.
 
 The generic-authoritative p4-Vega writer was prepared and verified locally on
 2026-08-26. It holds the shared per-user submission lock, compares the generic
@@ -41,10 +42,9 @@ that repository and one generic reader for both HTTP APIs. A disposable MySQL
 test physically drops the legacy column before successfully submitting and
 reading a score. Type-checking, 125 unit and security tests, 42 isolated MySQL
 integration tests, the production bundle, and image-only Cloud Build contract
-tests pass. This source is deployed only as the ready, frozen, zero-traffic
-candidate recorded below. It has not been activated and does not authorize the
-remaining production cutover sequence; production remains on the frozen dual
-writer.
+tests pass. This source now serves as the exact frozen generic-only production
+revision recorded below. Its traffic activation does not authorize the
+remaining grant, pool-recycle, submission, or column-removal sequence.
 The generic-only runtime fixture also creates `users` without the legacy column
 and proves both game repositories under the restricted application identity.
 
@@ -121,7 +121,8 @@ immediately afterward. Under separate approval, Cloud Run generation 115 routed
 100% to this revision. The legacy-only revision was retired and drained, the
 repeatable backfill and aggregate reconciliation again reported five exact rows
 with every discrepancy count at zero, and the temporary maintenance database
-identity was deleted. The legacy reader and `users.p4_score` remain active.
+identity was deleted. At that checkpoint, the legacy reader and
+`users.p4_score` remained active.
 
 Approved one-shot frozen-candidate build
 `c5daa935-39a9-43fb-a7b3-b50cedfbfe25` used config SHA-256
@@ -155,15 +156,15 @@ aggregate reconciliation command were implemented and verified locally on
 the tooling does not authorize a read cutover or removal of `users.p4_score`,
 and each later production step retains the approval and evidence gates below.
 
-The generic p4-Vega `get_leaderboard` implementation is now the active local
+The generic p4-Vega `get_leaderboard` implementation is now the active production
 reader for both APIs without changing the legacy request or response contract.
-It is deployed only in a frozen zero-traffic revision and has not been activated
-in production. The additive schema, enabled dual-writer rollout, legacy-only
-revision drain, frozen dual-writer promotion, post-drain reconciliations, and
-generic-only zero-traffic verification are complete; production activation
-remains gated on traffic promotion and the later cutover checks. The legacy
-column removal is a later separately approved step; the multi-game frontend
-slice is recorded below.
+It now serves in the frozen generic-only production revision. The additive
+schema, enabled dual-writer rollout, frozen dual-writer promotion, and
+generic-only deployment are complete, along with every drain and exact
+reconciliation required for the frozen generic-only traffic cutover. Legacy-column grant
+retirement, the runtime-pool recycle, submission enablement, and column removal
+remain later separately approved steps; the multi-game frontend slice is
+recorded below.
 
 The exact frozen generic-only candidate source was reviewed on 2026-08-26 at
 commit `e91d3b1177932614c22fbed059a42a05fcb10793`, tree
@@ -229,6 +230,67 @@ and identical legacy/generic p4 rows. Production remained 100% on
 tag and one-use trigger were deleted immediately; final generation 120 has no
 tag or ongoing build. No traffic promotion, database, migration, grant, IAM, or
 submission-state change occurred.
+
+## Completed frozen generic-only traffic cutover
+
+On 2026-08-26, under explicit approval, temporary built-in Cloud SQL user
+`recon_cutover_215913_8908@%` was created only for reconciliation and drain
+inspection through the authenticated loopback proxy. Cloud SQL create-user
+operation `92089d9d-e448-4d4d-8350-7c6c00000032` completed successfully, the
+connection resolved to database `cms` and that exact account, and its automatic
+`cloudsqlsuperuser@%` role was verified. The password remained process-local and
+was never written to the repository or output. Before any traffic change, the
+read-only reconciliation reported identical legacy and generic aggregates:
+five rows, minimum 190, maximum 410, sum 1350, five matches, and zero missing,
+score, direction, extra-row, metadata, run-ledger, or rules-version
+discrepancies.
+
+A fresh Cloud Run v2 service read verified settled generation and observed
+generation 120, the exact candidate digest and frozen environment, explicit
+revision-only 100% traffic on the frozen dual writer, and no tag or `LATEST`
+target. Etag-bound, traffic-only PATCH operation
+`8b0c18a8-805f-494d-97e5-d8523bc10c03` then advanced the service exactly once
+to generation 121. The first settled observation at
+`2026-08-26T22:04:01.9446033Z` showed specified and observed traffic exactly
+100% on
+`mickeyf-org-freeze-d5aee625983b4dafa90d0db9898341e8`, still pinned to digest
+`sha256:3bba5ca29a474c6b75d92f48f93a9efc6cfa3fe32d3a4ddb7b82f2a610baaa48`.
+The service template and both false submission flags were unchanged. The
+frozen dual writer remained Ready but became `Active=False`, reason `Retired`.
+
+The nine-request production smoke contract then passed: catalog, generic
+p4-Vega, empty Three Bosses, unknown game, unauthenticated state, and legacy
+p4-Vega reads were exact; legacy and generic p4-Vega rows were identical; p4
+submission returned HTTP 503 `SUBMISSIONS_FROZEN`; Three Bosses submission
+returned HTTP 403 `SUBMISSION_DISABLED`; and no checked response set a cookie
+or redirected. The drain continued through
+`2026-08-26T22:09:16.9446033Z`, 315 seconds after the first settled traffic
+observation and beyond the old revision's 300-second request timeout. Two
+revision-specific request-log reads at `2026-08-26T22:10:26.7402493Z` and
+`2026-08-26T22:12:37.7407309Z` both found zero old-revision request starts from
+the traffic observation onward. Two `INNODB_TRX` samples five seconds apart
+both found zero active `cms_mickeyf` transactions.
+
+The final read-only reconciliation completed at
+`2026-08-26T22:12:52.8700579Z` and exactly repeated the baseline: both stores
+had five rows, minimum 190, maximum 410, sum 1350, five matches, and every
+discrepancy count zero. The runtime account still had its legacy
+`p4_score` `SELECT` and `UPDATE` column privileges; no grant retirement ran.
+Cloud SQL backup `1787774400000` completed during the drain before final
+reconciliation. Delete-user operation
+`34b81b8e-1f0d-4db1-ad39-a3b900000032` then completed successfully, a fresh
+user list contained only `cms_mickeyf` and `root`, and a loopback authentication
+attempt with the deleted credential failed with `ER_ACCESS_DENIED_ERROR`.
+Operator credential environment variables were removed and the PowerShell
+session was closed. Final checks found no unfinished Cloud SQL operation,
+ongoing build, temporary tag, or one-use deployment trigger.
+
+The retained frozen dual writer is a valid rollback target only while both
+legacy `p4_score` column grants remain. Any rollback before their retirement
+still requires a fresh service etag and an exact traffic-only PATCH. Grant
+retirement, runtime-pool recycle, submission enablement, and column removal are
+separate production steps; this cutover performed none of them and left
+`users.p4_score` unchanged.
 
 The refreshed OpenSSL review found byte-identical Dockerfile, lockfile, pinned
 Node base, first four OCI layers, and Node installation layer
@@ -705,7 +767,8 @@ five rows, minimum 190, maximum 410, sum 1350, five exact matches, and zero
 missing, extra, score, metadata, run-ledger, or rules-version discrepancies.
 The temporary maintenance database identity was then deleted. This is the
 completed enabled dual-writer checkpoint, not the generic read/write cutover;
-`users.p4_score` remains present and authoritative for the legacy reader.
+at that checkpoint, `users.p4_score` remained present and authoritative for the
+legacy reader.
 
 ## Expand, backfill, and cutover
 
@@ -775,9 +838,11 @@ completed enabled dual-writer checkpoint, not the generic read/write cutover;
     the fresh restricted identity exactly matches the source manifest before
     enabling submissions. **The frozen generic-only zero-traffic deployment,
     smoke suite, tag removal, and trigger cleanup completed on 2026-08-26 in
-    build `02eb1328-8b12-4b3b-bb0c-c9ef79f4a3a9`. Production traffic remains
-    100% on the frozen dual writer; promotion, drain, reconciliation, and grant
-    retirement remain pending.**
+    build `02eb1328-8b12-4b3b-bb0c-c9ef79f4a3a9`. Generation 121 promotion, the
+    315-second frozen dual-writer drain, repeated zero old-revision request-log
+    checks, two zero-transaction samples, exact final reconciliation, and
+    temporary-identity cleanup also completed on 2026-08-26. Grant retirement,
+    runtime-pool recycle, and submission enablement remain pending.**
 13. Revoke operational authorization for further legacy backfills, retire exact
     legacy equality as a cutover gate, verify the generic-authoritative rollback
     candidate, and only then deploy an explicitly approved revision with the

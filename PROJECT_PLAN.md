@@ -169,12 +169,12 @@ so neither repository needs `users SELECT ... FOR UPDATE`. The source manifest
 now omits `p4_score` entirely and grants no `UPDATE` on `users`. A restricted
 MySQL 8.0.31 fixture creates `users` without the legacy column, exercises auth
 and both leaderboard repositories, and proves a direct user-row locking read is
-denied. Repository concurrency and rollback tests still pass. This was local
-code-and-test work only: production remains on the frozen dual writer with its
-older transitional `p4_score` grants. The current grant planner deliberately
-blocks those now-unexpected grants rather than revoking them, so their live
-retirement still requires a separately reviewed exact revoke operation or
-equivalent verified maintenance procedure.
+denied. Repository concurrency and rollback tests still pass. At that local
+checkpoint, production remained on the frozen dual writer with its older
+transitional `p4_score` grants. The later generic-only traffic cutover is
+recorded below; those grants still remain and their retirement requires the
+separately reviewed exact revoke operation or equivalent verified maintenance
+procedure.
 
 The transitional p4-Vega write path was implemented and verified locally on
 2026-08-25. That candidate updated `users.p4_score` and
@@ -182,13 +182,13 @@ The transitional p4-Vega write path was implemented and verified locally on
 failure rolled the transaction back, concurrent submissions converged on the
 same maximum, and the legacy HTTP response remained unchanged. The exact
 freeze-capable composition first served production with writes enabled. The
-same immutable image now serves in the frozen dual-writer revision recorded
-below, and the enabled revision is retired.
+same immutable image later served in the frozen dual-writer revision recorded
+below. That revision and the enabled revision are now both retired.
 
-The active transitional read split was corrected and reverified on 2026-08-26
-at `a127beac14c2662648c8aededa59374f5d7c87dd`. While this dual writer is
-serving, the legacy `/api/users` `get_leaderboard` operation deliberately keeps
-reading `users.p4_score`; the additive `/api/leaderboards/p4-vega` route reads
+The transitional read split was corrected and reverified on 2026-08-26 at
+`a127beac14c2662648c8aededa59374f5d7c87dd`. While that dual writer served, the
+legacy `/api/users` `get_leaderboard` operation deliberately kept reading
+`users.p4_score`; the additive `/api/leaderboards/p4-vega` route read
 `game_personal_bests`. Unit, controller, security, isolated MySQL, migration,
 backfill, and production-bundle checks passed, including a pre-backfill fixture
 where the two sources intentionally differ. This prevents the first rollout
@@ -215,11 +215,12 @@ implementation was integrated into the active feature branch: both the legacy
 `/api/users` operation and the additive API now use one generic reader locally,
 while the legacy response still exposes `p4_score`. Type-checking, 125 unit and
 security tests, 42 isolated MySQL integration tests, the production bundle, and
-the image-only Cloud Build contract tests pass. This source is not deployed;
-production remains on the frozen dual writer, and the production column and
-transitional grants are unchanged. The column-drop integration case proves code
-and schema independence under the migration-test account; the separate
-restricted-runtime fixture now proves the same generic-only paths under the
+the image-only Cloud Build contract tests pass. At that checkpoint this source
+was not deployed and production remained on the frozen dual writer. The later
+deployment and cutover are recorded below; the production column and
+transitional grants are still unchanged. The column-drop integration case
+proves code and schema independence under the migration-test account; the
+separate restricted-runtime fixture now proves the same generic-only paths under the
 least-privilege application identity.
 
 The revision-scoped p4-Vega submission freeze gate was prepared locally on
@@ -274,9 +275,9 @@ evidence-based inference, not an upstream Node guarantee. On 2026-08-26, Mike
 explicitly accepted that bounded reachability assessment for the exact
 zero-traffic candidate only. The later explicit approvals to promote the exact
 digest first as the enabled and then as the frozen dual writer extended that
-bounded acceptance only to those two rollout stages. It does not cover a future
-generic-only image; refresh the pinned runtime or repeat the explicit review
-before that deployment.
+bounded acceptance only to those two rollout stages. It did not cover the later
+generic-only image, so that exact digest received the refreshed component review
+and explicit acceptance recorded below.
 
 The exact enabled dual-writer candidate was built and deployed at zero traffic
 on 2026-08-26 from commit
@@ -297,8 +298,8 @@ deleted. Under separate approval, Cloud Run generation 115 routed 100% to this
 revision. The legacy-only revision was retired and drained, the repeatable
 backfill and aggregate reconciliation again reported five exact p4-Vega rows
 with every discrepancy count at zero, and the temporary maintenance database
-identity was deleted. This establishes the enabled dual-writer phase only; the
-legacy read and `users.p4_score` remain in service.
+identity was deleted. This established the enabled dual-writer phase only; at
+that checkpoint, the legacy read and `users.p4_score` remained in service.
 
 The exact frozen dual-writer configuration was then deployed at zero traffic
 under separate approval on 2026-08-26. Approval-required build
@@ -311,8 +312,9 @@ attestation, and smoke steps passed: p4 submission returned HTTP 503
 `SUBMISSIONS_FROZEN`, both p4 leaderboard reads returned the same five rows,
 and Three Bosses submission returned HTTP 403 `SUBMISSION_DISABLED`. The
 temporary tag and deploy trigger were removed. At generation 117, production
-still routes 100% to the enabled dual-writer revision with no tags; the frozen
-revision is retained retired at zero traffic. No production freeze occurred.
+still routed 100% to the enabled dual-writer revision with no tags; the frozen
+revision was retained retired at zero traffic. No production freeze had yet
+occurred.
 
 Under the next separate approval, an etag-bound traffic-only update advanced
 Cloud Run from generation 117 to 118 and routed both the service specification
@@ -344,14 +346,13 @@ extra rows, metadata anomalies, run-ledger rows, and unexpected rules versions
 rather than guessing how to repair them. Every pass reuses the verified
 personal-best migration timestamp, so retries remain stable.
 
-The generic p4-Vega `get_leaderboard` path is now the single local reader for
-both HTTP APIs. Its request, legacy response fields, ten-row bound, cache
+The generic p4-Vega `get_leaderboard` path is now the single production reader
+for both HTTP APIs. Its request, legacy response fields, ten-row bound, cache
 behavior, and numeric historical scores remain compatible. The additive schema,
-enabled dual-writer deployment, legacy-only revision drain, repeatable backfill,
-zero-discrepancy reconciliation, and production freeze are complete. This code
-has not been deployed: the serving frozen dual-writer revision still uses the
-transitional legacy reader, and production `users.p4_score` remains present.
-The generic-only production cutover and column removal remain incomplete; the
+enabled dual-writer deployment, repeatable backfill, production freeze, and
+every drain and exact reconciliation required for the frozen generic-only
+traffic cutover are complete. Production `users.p4_score` remains present; its
+grant retirement and later immutable column removal remain incomplete. The
 multi-game frontend is recorded below.
 
 The additive backend catalog and per-game routes were implemented and verified
@@ -366,9 +367,10 @@ idempotent run history, transactional strict personal bests, and per-user and
 per-IP limits are covered by unit, security, rollback, concurrency, and
 isolated-MySQL tests. Rank remains `UNRANKED`. These routes have not been
 enabled for Three Bosses production writes: the routes are present in the
-serving frozen dual-writer revision, but
+serving frozen generic-only revision, but
 `THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=false` remains enforced. They do not
-replace the remaining p4 cutover or reconciliation gates.
+replace the remaining p4 grant-retirement, runtime-pool recycle, submission-
+enablement, or column-removal gates.
 
 The credential-safe browser submission client and Unity host bridge were
 committed at `c4349f7c`. Unity will later send only its canonical run ID and
@@ -378,28 +380,32 @@ result receiver, one-source millisecond canonicalization, score/rank parity,
 and Submit Score button activation remain deliberately disconnected until the
 Three Bosses gameplay and ranking release gates are approved.
 
-The frozen dual writer now serves 100% of production traffic, the enabled
-revision and its infrastructure are retired, active runtime transactions were
-zero, and the exact frozen reconciliation completed with five matching rows and
-no discrepancy. The local generic p4 and Three Bosses lock dependency has been
-removed, the source runtime manifest omits `p4_score`, and the no-column
-restricted fixture passes. The exact fail-closed plan/verify/apply path for the
-old live column grants was implemented and verified locally on 2026-08-26; it
-accepts only both old grants present or both absent, drains runtime sessions,
-invokes one exact atomic revoke, and treats an uncertain result as
-indeterminate. It has not been run on production. The next rollout step must
-separately approve deploying the
-generic-only writer while it remains frozen, route all traffic to that
-exact revision, retire every dual-writer revision, require the serving HTTP 503
-contract, and rerun exact reconciliation against the still-static legacy
-column. Only after that evidence may the exact old grants be retired and a
-separately approved enabled generic revision accept scores. After generic-only
-traffic starts, legitimate improvements make exact equality with the stale
-legacy column impossible; rollback must use a generic-authoritative compatible
-revision or a forward fix, never a dual writer. After every code, job, tool,
-grant, and rollback reference is removed, a new immutable migration may drop
-`users.p4_score` under separate production approval. The initial additive
-migrations remain unchanged.
+The exact frozen generic-only revision now serves 100% of production traffic at
+Cloud Run generation 121. The frozen dual writer is Ready but
+`Active=False`, reason `Retired`. Its 315-second drain, two delayed
+revision-specific zero-request log checks, two zero-transaction samples, the
+complete frozen public contract, and baseline/final reconciliation with five
+matching rows and no discrepancy all completed on 2026-08-26. The temporary
+maintenance account was deleted and negative authentication verified. The local
+generic p4 and Three Bosses lock dependency has been removed, the source runtime
+manifest omits `p4_score`, and the no-column restricted fixture passes.
+
+The exact fail-closed plan/verify/apply path for the old live column grants was
+implemented and verified locally on 2026-08-26; it accepts only both old grants
+present or both absent, drains runtime sessions, invokes one exact atomic
+revoke, and treats an uncertain result as indeterminate. It has not been run on
+production: the runtime account still has `p4_score` `SELECT` and `UPDATE`, and
+`users.p4_score` remains unchanged. The next rollout step must separately
+approve exact legacy-column grant retirement, recycle the generic-only runtime
+pool, and verify the fresh restricted identity against the source manifest.
+Only after that evidence may a separately approved enabled generic revision
+accept scores. The retired frozen dual writer remains a valid rollback target
+only until those grants are retired; after that boundary, rollback must use a
+generic-authoritative compatible revision or a forward fix. Once generic-only
+submissions start, legitimate improvements make exact equality with the stale
+legacy column impossible. After every code, job, tool, grant, and rollback
+reference is removed, a new immutable migration may drop `users.p4_score` under
+separate production approval. The initial additive migrations remain unchanged.
 
 The frozen generic-only candidate source was locally frozen and reviewed on
 2026-08-26 at exact commit
@@ -441,24 +447,30 @@ Run generation 118 and exactly 100% traffic on the frozen dual-writer revision.
 No revision, traffic, database, privilege, trigger, or IAM mutation was requested
 or executed.
 
-The temporary reviewed one-shot deployment package is now tracked as
-`cloudbuild.generic-only.deploy.json` with SHA-256
-`8afde577fbefe781ed0a0c428f04dad40a5b8f8d147f22f01ccbae86bb9a5bf4`.
-Its source-less eight-step contract pins the exact build, commit, digest,
-approval-required image trigger, signed provenance, and scan result. If later
-authorized through a temporary approval-required trigger running as the bounded
-deployment identity, it can create only frozen revision
-`mickeyf-org-freeze-d5aee625983b4dafa90d0db9898341e8`, expose temporary tag
-`f-d5aee625983b4dafa90d0db9898341e8`, and pass `--no-traffic` with both
-submission flags false. The package contains no source, build artifacts,
-available secrets, Slack notification, traffic promotion, migration, grant,
-database, IAM, or trigger mutation step. Its scan gate was tightened to require
-zero vulnerability occurrences at every severity, and its anonymous/read-only
-smoke suite now requires the legacy and generic p4-Vega reads to return identical
-rows. All seven image/deployment contract tests pass. The candidate tag remains
-publicly invokable despite carrying zero production traffic, so later approval
-must include prompt exact-tag and temporary-trigger cleanup. No trigger or deploy
-build has been created from this package.
+The source-less one-shot deployment package is tracked as
+`cloudbuild.generic-only.deploy.json`. Its initial SHA-256
+`8afde577fbefe781ed0a0c428f04dad40a5b8f8d147f22f01ccbae86bb9a5bf4` was never
+executed: Cloud Build rejected its unescaped Bash dollar references during
+approval-time validation, the pending build was cancelled before starting, and
+the temporary trigger was deleted. The corrected package uses Cloud Build's
+required `$$` escape, has SHA-256
+`a5cd6534c766ecfb9dd9f8440a5c8a7ef709828ee7281ed122ea4952a7c4936d`, and passes
+all eight image/deployment contract tests. Its bounded contract contains no
+source, build artifacts, available secrets, Slack notification, traffic
+promotion, migration, grant, database, IAM, or trigger mutation step.
+
+Under explicit approval, source-less build
+`02eb1328-8b12-4b3b-bb0c-c9ef79f4a3a9` deployed only frozen revision
+`mickeyf-org-freeze-d5aee625983b4dafa90d0db9898341e8` at zero traffic and
+passed provenance, scan, runtime-setting, catalog, leaderboard, and freeze
+checks. Its public tag and one-use trigger were then deleted. A later separately
+approved etag-bound traffic-only PATCH, operation
+`8b0c18a8-805f-494d-97e5-d8523bc10c03`, produced the first settled candidate-
+only traffic observation at `2026-08-26T22:04:01.9446033Z`. The drain evidence,
+exact reconciliation, and temporary-account cleanup summarized above completed
+without a rollback or any change to the runtime account's grants, schema/data,
+IAM, or submission state. The temporary account lifecycle was the only database-
+account privilege change in this cutover.
 
 The embedded-OpenSSL evidence was separately refreshed. The previously accepted
 and new images use identical Dockerfile blob
@@ -470,17 +482,17 @@ both image configurations declare Node 22.23.2. The only `package.json` changes
 are test and maintenance scripts, and the application diff adds none of the
 affected QUIC, DTLS, CMP, CMS, RPK, or one-shot `EVP_Cipher()` paths. This makes
 the earlier reachability evidence applicable at the component level, but the
-clean package/OS scan does not inspect Node's embedded OpenSSL 3.5.7 and the
-user's earlier risk acceptance remains bound to the old digest. OpenSSL 3.5.8
-is the upstream security fix, while Node 22.23.2 remains the latest published
-22.x release and the [Node 3.5.8 update](https://github.com/nodejs/node/pull/65542)
+clean package/OS scan does not inspect Node's embedded OpenSSL 3.5.7. Mike
+explicitly accepted the bounded component-level assessment for this exact
+digest, and the separately approved cutover remained pinned to that digest;
+the acceptance does not transfer to another image. OpenSSL 3.5.8 is the
+upstream security fix, while Node 22.23.2 remains the latest published 22.x
+release and the [Node 3.5.8 update](https://github.com/nodejs/node/pull/65542)
 is still open; see the [OpenSSL 3.5 release
 notes](https://www.openssl-library.org/news/openssl-3.5-notes/index.html) and
-[Node release list](https://nodejs.org/en/blog/release). Explicit acceptance for
-this exact digest and zero-traffic stage is therefore still required. The
-package's historical two-hour freshness gate expires at
-`2026-08-26T23:06:14Z`; rebuild the exact commit instead of weakening that gate
-if the deadline is missed.
+[Node release list](https://nodejs.org/en/blog/release). The completed build
+passed its historical two-hour source-freshness gate before
+`2026-08-26T23:06:14Z`; the gate was not weakened.
 
 ### Step 13.2 — local Three Bosses website playability prototype (no publication)
 

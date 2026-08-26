@@ -378,17 +378,28 @@ database-scoped per-user advisory lock, so the generic-only manifest grants no
 
 The separately approved production reduction completed on 2026-08-26 using the
 previous transitional manifest: `cms_mickeyf@%` has no database role but still
-has the two narrow `p4_score` column grants required by the serving frozen dual
-writer. The local generic-only manifest still treats those grants as unexpected
-and fails closed. The separate exact retirement workflow is implemented and
-locally verified, but has not been run against production.
+has the two narrow `p4_score` column grants retained only to keep the retired
+frozen dual writer rollback-compatible. The local generic-only manifest still
+treats those grants as unexpected and fails closed. The separate exact
+retirement workflow is implemented and locally verified, but has not been run
+against production.
 
 The frozen generic-only revision
 `mickeyf-org-freeze-d5aee625983b4dafa90d0db9898341e8` was deployed and fully
 smoke-tested at zero traffic on 2026-08-26. Its temporary public tag and one-use
-trigger were removed. Production still routes 100% to the frozen dual writer;
-generic-only traffic promotion, legacy-column grant retirement, and
-`users.p4_score` removal have not run.
+trigger were removed. Under separate approval, etag-bound traffic-only PATCH
+operation `8b0c18a8-805f-494d-97e5-d8523bc10c03` advanced Cloud Run exactly once
+to generation 121 and routed 100% to that exact frozen generic-only revision.
+The frozen dual writer is now `Active=False`, reason `Retired`. The public
+read/freeze contract passed, the drain exceeded its 300-second request timeout,
+two delayed old-revision log reads found zero requests after the traffic
+observation, two runtime transaction samples were zero, and final reconciliation
+again matched all five p4-Vega rows with no discrepancy. The temporary
+maintenance user was deleted and negative authentication verified. The two
+legacy `p4_score` column grants and `users.p4_score` itself remain unchanged;
+grant retirement, runtime-pool recycle, submission enablement, and column
+removal have not run. Exact evidence is recorded in
+[`backend/LEADERBOARD_DESIGN.md`](backend/LEADERBOARD_DESIGN.md).
 
 The p4-Vega backfill verifies the exact applied schema and legacy source,
 copies non-null historical scores monotonically in bounded transactions, and
