@@ -39,6 +39,18 @@ function request(body: unknown, authorization?: string): Request {
     } as Request;
 }
 
+function createTestController(
+    database: Pick<Pool, 'getConnection' | 'query'>,
+    p4VegaScoreSubmissionsEnabled = true
+) {
+    return createMainController({
+        database,
+        sessionSecret,
+        isProduction: false,
+        p4VegaScoreSubmissionsEnabled,
+    });
+}
+
 test('invalid signup input is rejected before any database or bcrypt work', async () => {
     let queryCount = 0;
     const database = {
@@ -47,7 +59,7 @@ test('invalid signup input is rejected before any database or bcrypt work', asyn
             throw new Error('database must not be called');
         },
     } as unknown as Pick<Pool, 'getConnection' | 'query'>;
-    const controller = createMainController({ database, sessionSecret, isProduction: false });
+    const controller = createTestController(database, false);
     const { response, state } = responseRecorder();
 
     await controller(request({ type: 'signup', user_name: 'player' }), response);
@@ -64,7 +76,7 @@ test('invalid login input returns the generic authentication failure before pers
             throw new Error('database must not be called');
         },
     } as unknown as Pick<Pool, 'getConnection' | 'query'>;
-    const controller = createMainController({ database, sessionSecret, isProduction: false });
+    const controller = createTestController(database);
     const { response, state } = responseRecorder();
 
     await controller(request({ type: 'login', user_name: 'player', user_password: 1234 }), response);
@@ -80,7 +92,7 @@ test('database failures reject for the async wrapper and central error handler',
             throw databaseFailure;
         },
     } as unknown as Pick<Pool, 'getConnection' | 'query'>;
-    const controller = createMainController({ database, sessionSecret, isProduction: false });
+    const controller = createTestController(database);
     const { response } = responseRecorder();
 
     await assert.rejects(
@@ -103,7 +115,7 @@ test('successful login preserves the JWT response and signed session cookie cont
             user_password: passwordHash,
         }], []],
     } as unknown as Pick<Pool, 'getConnection' | 'query'>;
-    const controller = createMainController({ database, sessionSecret, isProduction: false });
+    const controller = createTestController(database, false);
     const { response, state } = responseRecorder();
 
     await controller(request({
@@ -125,6 +137,40 @@ test('successful login preserves the JWT response and signed session cookie cont
     }
     assert.equal(decoded.user_id, 42);
     assert.equal(decoded.user_name, 'player');
+});
+
+test('the submission freeze rejects anonymous and authenticated scores before database work', async () => {
+    let queryCount = 0;
+    let acquisitionCount = 0;
+    const database = {
+        async query() {
+            queryCount += 1;
+            throw new Error('frozen score submission must not query the database');
+        },
+        async getConnection() {
+            acquisitionCount += 1;
+            throw new Error('frozen score submission must not acquire a connection');
+        },
+    } as unknown as Pick<Pool, 'getConnection' | 'query'>;
+    const controller = createTestController(database, false);
+    const token = jwt.sign({ user_id: 42, user_name: 'player' }, sessionSecret, {
+        algorithm: 'HS256',
+        expiresIn: '5m',
+    });
+
+    for (const authorization of [undefined, `Bearer ${token}`]) {
+        const { response, state } = responseRecorder();
+        await controller(request({
+            type: 'submit_score',
+            p4_score: 990,
+        }, authorization), response);
+
+        assert.equal(state.status, 503);
+        assert.deepEqual(state.body, { error: 'SUBMISSIONS_FROZEN' });
+    }
+
+    assert.equal(queryCount, 0);
+    assert.equal(acquisitionCount, 0);
 });
 
 test('score submission still accepts the Bearer token fallback and authenticated identity', async () => {
@@ -160,7 +206,7 @@ test('score submission still accepts the Bearer token fallback and authenticated
         },
         getConnection: async () => connection,
     } as unknown as Pick<Pool, 'getConnection' | 'query'>;
-    const controller = createMainController({ database, sessionSecret, isProduction: false });
+    const controller = createTestController(database);
     const { response, state } = responseRecorder();
     const token = jwt.sign({ user_id: 42, user_name: 'player' }, sessionSecret, {
         algorithm: 'HS256',
@@ -202,7 +248,7 @@ test('non-improving score preserves the exact legacy success response', async ()
         },
         getConnection: async () => connection,
     } as unknown as Pick<Pool, 'getConnection' | 'query'>;
-    const controller = createMainController({ database, sessionSecret, isProduction: false });
+    const controller = createTestController(database);
     const { response, state } = responseRecorder();
     const token = jwt.sign({ user_id: 42, user_name: 'player' }, sessionSecret, {
         algorithm: 'HS256',
@@ -231,7 +277,7 @@ test('leaderboard smoke operation remains a bounded read-only query', async () =
             return [[{ userName: 'player', score: 990, internalId: 42 }], []];
         },
     } as unknown as Pick<Pool, 'getConnection' | 'query'>;
-    const controller = createMainController({ database, sessionSecret, isProduction: false });
+    const controller = createTestController(database, false);
     const { response, state } = responseRecorder();
 
     await controller(request({ type: 'get_leaderboard' }), response);

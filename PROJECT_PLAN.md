@@ -105,6 +105,20 @@ deployed: the additive schema, dual-write rollout, backfill, legacy-only
 revision drain, exact reconciliation, and production submission-freeze gates
 still come first.
 
+The revision-scoped p4-Vega submission freeze gate was prepared locally on
+2026-08-26. Only the exact runtime opt-in
+`P4_VEGA_SCORE_SUBMISSIONS_ENABLED=true` permits score writes; every missing or
+other value returns HTTP 503 `SUBMISSIONS_FROZEN` before authentication or
+database work while leaving account and leaderboard operations available. The
+gate is deliberately independent of the storage repository so the same change
+can protect both a transitional dual-write revision and the generic-only
+revision. It has not been deployed, the live Cloud Build trigger has not been
+changed, and no production freeze has been established. The current canonical
+Stage B workflow omits this flag and attests an exact six-variable environment,
+so it can create only frozen revisions and would reject a manually added
+seventh variable. Updating and verifying that deployment attestation is a hard
+prerequisite to any gate-enabled rollout.
+
 The Phase 13.1 repeatable, privileged p4-Vega historical-backfill CLI and
 separate read-only aggregate reconciliation gate were implemented and verified
 locally on 2026-08-25. The backfill is operational tooling rather than an HTTP
@@ -143,15 +157,16 @@ approved short-lived least-privilege principal, exact target confirmation, and
 recovery evidence.
 Only a zero-discrepancy post-drain reconciliation permits the later read/write
 cutover to `game_personal_bests`. The final production switch requires a
-server-side score-submission freeze spanning in-flight request drain, the last
-exact reconciliation, generic-only deployment, dual-writer drain, and a second
-exact reconciliation against the still-static legacy column. Only then may
-submissions resume. After generic-only traffic starts, legitimate improvements
-make exact equality with the stale legacy column impossible; rollback must use
-a generic-authoritative compatible revision or a forward fix, never the old
-dual writer. After every code/job/tool reference is removed, a new immutable
-migration may drop `users.p4_score` under separate production approval. The
-initial additive migrations remain unchanged.
+freeze-capable dual writer first: drain every no-gate revision, freeze the
+dual writer, drain enabled and in-flight requests, and reconcile exactly. A
+frozen generic-only revision may then receive traffic; every dual writer must
+drain and the exact reconciliation must pass again before a separately approved
+enabled generic revision accepts scores. After generic-only traffic starts,
+legitimate improvements make exact equality with the stale legacy column
+impossible; rollback must use a generic-authoritative compatible revision or a
+forward fix, never the old dual writer. After every code/job/tool reference is
+removed, a new immutable migration may drop `users.p4_score` under separate
+production approval. The initial additive migrations remain unchanged.
 
 ### Step 13.2 — local Three Bosses website playability prototype (no publication)
 

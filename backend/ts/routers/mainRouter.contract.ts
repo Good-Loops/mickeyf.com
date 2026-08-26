@@ -97,6 +97,7 @@ export type ApiErrorCode =
     | 'UNAUTHORIZED'
     | 'INVALID_SCORE'
     | 'IDENTITY_MISMATCH'
+    | 'SUBMISSIONS_FROZEN'
     | 'RATE_LIMITED'
     | 'PAYLOAD_TOO_LARGE'
     | 'INVALID_REQUEST'
@@ -130,7 +131,14 @@ export type LoginResponse =
     | { success: true; token: string; user_name: string }
     | ApiError;
 
-/** @category Backend — DTOs */
+/**
+ * Score submission response.
+ *
+ * While the operational freeze is active, the endpoint returns HTTP 503 with
+ * `{ error: 'SUBMISSIONS_FROZEN' }`.
+ *
+ * @category Backend — DTOs
+ */
 export type SubmitScoreResponse =
     | { success: true; personalBest: boolean }
     | ApiError;

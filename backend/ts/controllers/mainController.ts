@@ -24,6 +24,7 @@ type ControllerDependencies = {
     database: Pick<Pool, 'getConnection' | 'query'>;
     sessionSecret: string;
     isProduction: boolean;
+    p4VegaScoreSubmissionsEnabled: boolean;
 };
 
 type LoginUserRow = RowDataPacket & Pick<User, 'user_id' | 'user_name' | 'user_password'>;
@@ -39,6 +40,7 @@ export function createMainController({
     database,
     sessionSecret,
     isProduction,
+    p4VegaScoreSubmissionsEnabled,
 }: ControllerDependencies) {
     async function addUser(req: Request, res: Response) {
         const validation = validateSignupRequest(req.body);
@@ -113,6 +115,12 @@ export function createMainController({
     }
 
     async function submitScore(req: Request, res: Response) {
+        if (!p4VegaScoreSubmissionsEnabled) {
+            // This gate runs before authentication so operations can probe a
+            // frozen revision without allowing it to acquire a DB connection.
+            return res.status(503).json({ error: 'SUBMISSIONS_FROZEN' });
+        }
+
         const authorization = authorizeScoreSubmission(req, sessionSecret);
         if (!authorization.authorized) {
             return res.status(authorization.status).json({ error: authorization.error });

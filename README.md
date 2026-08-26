@@ -82,6 +82,16 @@ The tracked `compose.yaml` expects the Cloud SQL connection name in the root
 CLOUD_SQL_CONNECTION_NAME=project:region:instance
 ```
 
+p4-Vega score writes use a fail-closed runtime gate. Missing, blank, or any
+value other than the exact lowercase string `true` keeps submissions frozen
+with HTTP 503 `SUBMISSIONS_FROZEN`; login, signup, and leaderboard reads remain
+available. Set this only in the untracked local `.env` when score-write testing
+is intentional:
+
+```text
+P4_VEGA_SCORE_SUBMISSIONS_ENABLED=true
+```
+
 On native Windows, Compose finds the ADC file under `%APPDATA%` automatically.
 Set `GOOGLE_APPLICATION_CREDENTIALS_HOST` in `.env` only to override that
 location; use forward slashes in an override path. Create or refresh

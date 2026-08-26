@@ -17,11 +17,28 @@ test('production runtime configuration exposes only exact HTTPS frontend origins
 
     assert.equal(config.isProduction, true);
     assert.equal(config.port, 8080);
+    assert.equal(config.p4VegaScoreSubmissionsEnabled, false);
     assert.deepEqual(config.corsOrigins, [
         'https://mickeyf.com',
         'https://www.mickeyf.com',
     ]);
     assert.equal(config.corsOrigins.some((origin) => origin.includes('localhost')), false);
+});
+
+test('p4-Vega score submissions require the exact positive runtime opt-in', () => {
+    const enabled = loadRuntimeConfig({
+        ...productionEnvironment,
+        P4_VEGA_SCORE_SUBMISSIONS_ENABLED: 'true',
+    });
+    assert.equal(enabled.p4VegaScoreSubmissionsEnabled, true);
+
+    for (const value of ['', 'false', 'TRUE', '1', ' true ', 'yes']) {
+        const frozen = loadRuntimeConfig({
+            ...productionEnvironment,
+            P4_VEGA_SCORE_SUBMISSIONS_ENABLED: value,
+        });
+        assert.equal(frozen.p4VegaScoreSubmissionsEnabled, false);
+    }
 });
 
 test('runtime configuration rejects missing, weak, and malformed values', () => {

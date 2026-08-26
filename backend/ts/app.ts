@@ -55,7 +55,11 @@ app.use(cookieParser(runtimeConfig.sessionSecret));
 const generalApiRateLimiter = createGeneralApiRateLimiter();
 app.use(['/api', '/auth'], generalApiRateLimiter);
 app.use('/api/leaderboards', createLeaderboardRouter(pool));
-app.use('/api', createMainRouter(runtimeConfig.sessionSecret, runtimeConfig.isProduction));
+app.use('/api', createMainRouter({
+    sessionSecret: runtimeConfig.sessionSecret,
+    isProduction: runtimeConfig.isProduction,
+    p4VegaScoreSubmissionsEnabled: runtimeConfig.p4VegaScoreSubmissionsEnabled,
+}));
 app.use('/auth', createAuthRouter(runtimeConfig.sessionSecret, runtimeConfig.isProduction));
 
 app.use(notFoundHandler);
@@ -65,7 +69,12 @@ async function startServer(): Promise<void> {
     try {
         await verifyDatabaseConnection();
         app.listen(runtimeConfig.port, () => {
-            console.log(`Listening on ${runtimeConfig.port}`);
+            console.log('Backend listening', {
+                port: runtimeConfig.port,
+                p4VegaScoreSubmissions: runtimeConfig.p4VegaScoreSubmissionsEnabled
+                    ? 'enabled'
+                    : 'frozen',
+            });
         });
     } catch (error: unknown) {
         console.error('Backend startup failed', {

@@ -8,6 +8,7 @@ export type RuntimeConfig = {
     port: number;
     sessionSecret: string;
     corsOrigins: readonly string[];
+    p4VegaScoreSubmissionsEnabled: boolean;
 };
 
 export type DatabaseConfig = {
@@ -51,6 +52,10 @@ function parsePort(value: string | undefined, name: string, fallback?: number): 
     return port;
 }
 
+function isExplicitlyEnabled(value: string | undefined): boolean {
+    return value === 'true';
+}
+
 export function parseRuntimeEnvironment(env: Environment): RuntimeEnvironment {
     const value = requiredValue(env, 'NODE_ENV');
     if (value !== 'development' && value !== 'test' && value !== 'production') {
@@ -78,6 +83,9 @@ export function loadRuntimeConfig(env: Environment = process.env): RuntimeConfig
             : nodeEnv === 'development'
                 ? DEVELOPMENT_ORIGINS
                 : Object.freeze([]),
+        p4VegaScoreSubmissionsEnabled: isExplicitlyEnabled(
+            env.P4_VEGA_SCORE_SUBMISSIONS_ENABLED
+        ),
     });
 }
 

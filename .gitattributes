@@ -6,6 +6,7 @@
 .gitignore text eol=lf
 .dockerignore text eol=lf
 .gcloudignore text eol=lf
+.env.example text eol=lf
 Dockerfile text eol=lf
 *.cs text eol=lf
 *.json text eol=lf

@@ -19,6 +19,20 @@ HTTP request and response remain unchanged. A disposable MySQL test also drops
 the legacy column before submitting successfully. This candidate has not been
 deployed and does not authorize the production cutover sequence below.
 
+The revision-scoped p4-Vega submission freeze gate was prepared locally on
+2026-08-26. `P4_VEGA_SCORE_SUBMISSIONS_ENABLED=true` is the only value that
+permits the legacy `submit_score` operation; missing, blank, or any other value
+returns HTTP 503 `SUBMISSIONS_FROZEN` before authentication or database work.
+Login, signup, and leaderboard reads remain available, and each revision logs
+only the normalized `enabled` or `frozen` state at startup. The gate is
+storage-independent so it can be applied to both the transitional dual writer
+and the generic writer. It has not been deployed or activated in production.
+The current canonical Stage B workflow omits the flag and attests an exact
+six-variable environment; it therefore creates only frozen revisions and would
+reject a manually added seventh variable. The deployment configuration and its
+live inline trigger must be updated and verified under separate review before
+any freeze-gate revision is deployed.
+
 The repeatable, privileged p4-Vega historical-backfill CLI and read-only
 aggregate reconciliation command were implemented and verified locally on
 2026-08-25. This does not authorize or constitute a production backfill, read
@@ -349,27 +363,39 @@ backfill, credential rotation, or deployment.
    use `game_personal_bests` without changing their request or response
    contracts, but do not route production traffic to the generic-only writer
    yet.
-9. Enforce a server-side p4-Vega submission freeze, drain in-flight score
-   requests, and rerun the complete reconciliation. Keep submissions frozen
-   while deploying the generic-only writer and draining every dual-write
-   revision, then require the same exact reconciliation again against the
-   still-static legacy column. Low traffic is not evidence of a write freeze.
-10. Revoke operational authorization for further legacy backfills, retire exact
+9. Under a separate review, update the canonical Stage B deployment workflow to
+   set and attest the seventh environment variable, add an exact candidate gate
+   probe, and then synchronize the live source-less inline trigger. Until that
+   prerequisite is verified, do not deploy a freeze-gate revision or add the
+   variable manually.
+10. Apply the same freeze-gate change to a dual-write revision and first deploy
+   it with the exact positive opt-in enabled. Route all traffic to that revision
+   and prove every no-gate revision and admitted request has drained; only this
+   freeze-capable dual writer may serve as the pre-cutover rollback target.
+11. Deploy the freeze-capable dual writer without the positive opt-in, route all
+    traffic to it, and prove every enabled revision and in-flight score request
+    has drained. Require HTTP 503 `SUBMISSIONS_FROZEN` from the serving revision,
+    then rerun the complete reconciliation. Low traffic or a quiet interval is
+    not evidence of a write freeze.
+12. Deploy the generic-only writer while it remains frozen, route all traffic to
+    it, drain every dual-write revision, and require the same exact
+    reconciliation again against the still-static legacy column.
+13. Revoke operational authorization for further legacy backfills, retire exact
     legacy equality as a cutover gate, verify the generic-authoritative rollback
-    candidate, and only then re-enable submissions. Once new generic-only scores
-    are accepted, exact equality with the stale legacy column is no longer
-    expected.
-11. Remove the transitional backfill command, then prove that no
+    candidate, and only then deploy an explicitly approved revision with the
+    positive opt-in enabled. Once new generic-only scores are accepted, exact
+    equality with the stale legacy column is no longer expected.
+14. Remove the transitional backfill command, then prove that no
     deployable backend revision, job, operational query, or rollback candidate
     still reads or writes `users.p4_score`. Retain at least one
     generic-authoritative, schema-compatible rollback revision and record a
     fresh named backup plus point-in-time-recovery evidence.
-12. Add and separately review a new immutable migration that drops
+15. Add and separately review a new immutable migration that drops
     `users.p4_score`; do not rewrite the already-applied additive migrations.
     Apply it only after Mike explicitly approves the production contract step.
-13. Verify the current p4-Vega submission and leaderboard paths, generic reads,
+16. Verify the current p4-Vega submission and leaderboard paths, generic reads,
     migration history, and recovery procedure against the contracted schema.
-14. Keep Three Bosses writes disabled until its release and validation policy is
+17. Keep Three Bosses writes disabled until its release and validation policy is
     approved.
 
 Transactions must use one acquired MySQL connection; transaction statements
@@ -391,8 +417,10 @@ only serialization mechanism.
   tables are empty. It atomically drops `game_personal_bests`, `game_runs`, and
   their initial `schema_migrations` history so a clean reapplication is
   possible. It refuses partial, unknown, checksum-drifted, or populated state.
-- During dual writes, application code may roll back to the last dual-write
-  revision while preserving both domain tables. A legacy-only revision makes
+- During dual writes, application code may roll back to the last compatible
+  dual-write revision while preserving both domain tables. Once the freeze gate
+  enters the rollout, rollback must preserve the required gate state and must
+  not restore a no-gate writer. A legacy-only revision makes
   `game_personal_bests` stale and must not receive traffic again until the
   backfill and full reconciliation have rerun.
 - A completed historical backfill is not rolled back by deleting imported
