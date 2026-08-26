@@ -1,11 +1,9 @@
 /**
- * p4-Vega persistence while the legacy score column is retired.
+ * p4-Vega persistence for the generic personal-best cutover.
  *
- * An improving score is written to both stores in one transaction. The legacy
- * operation continues reading `users.p4_score`, while the additive API reads
- * generic storage. Deployment remains gated on the explicit backfill and
- * reconciliation sequence. A worse submission must not opportunistically
- * create a misleading historical personal-best row.
+ * Reads and writes use generic storage in code, but deployment remains gated
+ * on the explicit backfill, revision-drain, and reconciliation sequence. The
+ * legacy HTTP controller adapts these operations to its historical contract.
  */
 import {
     Pool,
@@ -18,6 +16,11 @@ import { LEADERBOARD_PAGE_SIZE } from './leaderboardContract';
 
 type P4VegaScoreDatabase = Pick<Pool, 'getConnection'>;
 type P4VegaLeaderboardDatabase = Pick<Pool, 'query'>;
+
+type LockedP4VegaBestRow = RowDataPacket & {
+    userId: number;
+    score: number | null;
+};
 
 export type P4VegaLeaderboardRow = Readonly<{
     userName: string;
@@ -38,33 +41,11 @@ export class P4VegaScoreRollbackError extends Error {
 }
 
 /**
- * Reads the transitional p4-Vega leaderboard from the legacy user column.
- *
- * This reader deliberately remains separate from generic storage until the
- * backfill, old-revision drain, and reconciliation gates have completed.
+ * Reads the current p4-Vega leaderboard from the versioned personal-best
+ * store. The legacy controller owns adaptation to its historical snake-case
+ * response shape.
  */
-export async function readLegacyP4VegaLeaderboard(
-    database: P4VegaLeaderboardDatabase
-): Promise<P4VegaLeaderboardRow[]> {
-    const [rows] = await database.query<Array<RowDataPacket & P4VegaLeaderboardRow>>({
-        sql: `SELECT
-                user_name AS userName,
-                p4_score AS score
-            FROM users
-            WHERE p4_score IS NOT NULL
-            ORDER BY p4_score DESC
-            LIMIT ${LEADERBOARD_PAGE_SIZE}`,
-        timeout: DATABASE_QUERY_TIMEOUT_MS,
-    });
-
-    return rows.map(({ userName, score }) => ({ userName, score }));
-}
-
-/**
- * Reads the additive p4-Vega API from the versioned personal-best store.
- * This may intentionally differ from the legacy reader before backfill.
- */
-export async function readGenericP4VegaLeaderboard(
+export async function readP4VegaLeaderboard(
     database: P4VegaLeaderboardDatabase
 ): Promise<P4VegaLeaderboardRow[]> {
     const [rows] = await database.query<Array<RowDataPacket & P4VegaLeaderboardRow>>(
@@ -91,8 +72,11 @@ export async function readGenericP4VegaLeaderboard(
 }
 
 /**
- * Stores a strict p4-Vega personal-best improvement in both transitional
- * stores. Returns the established legacy `personalBest` result.
+ * Stores a strict p4-Vega personal-best improvement in generic storage.
+ *
+ * The authenticated user's row is locked before the current generic best is
+ * compared. This preserves the established missing-user result and serializes
+ * concurrent submissions without relying on MySQL affected-row flags.
  */
 export async function submitP4VegaScore(
     database: P4VegaScoreDatabase,
@@ -113,17 +97,26 @@ export async function submitP4VegaScore(
         await connection.beginTransaction();
         transactionStarted = true;
 
-        const [legacyResult] = await connection.query<ResultSetHeader>(
+        const [lockedRows] = await connection.query<LockedP4VegaBestRow[]>(
             {
-                sql: `UPDATE users
-                    SET p4_score = ?
-                    WHERE user_id = ?
-                    AND (p4_score IS NULL OR p4_score < ?)`,
+                sql: `SELECT
+                        users.user_id AS userId,
+                        game_personal_bests.score AS score
+                    FROM users
+                    LEFT JOIN game_personal_bests
+                        ON game_personal_bests.game_id = ?
+                       AND game_personal_bests.rules_version = ?
+                       AND game_personal_bests.user_id = users.user_id
+                    WHERE users.user_id = ?
+                    FOR UPDATE`,
                 timeout: DATABASE_QUERY_TIMEOUT_MS,
             },
-            [score, userId, score]
+            [P4_VEGA.gameId, P4_VEGA.rulesVersion, userId]
         );
-        const personalBest = legacyResult.affectedRows === 1;
+        const lockedBest = lockedRows[0];
+        const personalBest = lockedBest !== undefined && (
+            lockedBest.score === null || score > lockedBest.score
+        );
 
         if (personalBest) {
             await connection.query<ResultSetHeader>(

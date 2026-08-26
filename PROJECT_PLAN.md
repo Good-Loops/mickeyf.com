@@ -161,16 +161,18 @@ migration will drop `users.p4_score`. The initial additive migrations remain
 unchanged, and the drop requires its own production approval and recovery
 evidence.
 
-The current grant manifest is intentionally transitional because the active
-dual writer still updates `users.p4_score`. Before the generic-only cutover and
-column drop, update and reverify the manifest so that `p4_score` disappears
-from both its `SELECT` and `UPDATE` columns; do not carry a stale column grant
-into the final schema. Three Bosses currently uses `users SELECT ... FOR
-UPDATE` as its per-user serialization boundary, and MySQL authorizes that lock
-through the transitional `UPDATE(p4_score)` grant. Before removing the grant,
-replace that serialization mechanism without granting arbitrary `users`
-updates, then pass an isolated generic-only fixture in which `p4_score` is
-physically absent.
+The current grant manifest is intentionally transitional because the serving
+dual writer still updates `users.p4_score`. Both the locally prepared generic
+p4 writer and Three Bosses currently use `users SELECT ... FOR UPDATE` as their
+per-user serialization boundary, and MySQL authorizes that exclusive lock
+through the transitional `UPDATE(p4_score)` grant. Before the generic-only
+candidate is built, replace both dependencies without granting arbitrary
+`users` updates, remove `p4_score` from the manifest's `SELECT` and `UPDATE`
+columns, and pass a restricted-runtime fixture in which the column is physically
+absent. The current grant planner blocks unexpected existing column grants
+rather than revoking them, so retiring the two live `p4_score` grants also
+requires a separately reviewed exact revoke operation or equivalent verified
+maintenance procedure.
 
 The transitional p4-Vega write path was implemented and verified locally on
 2026-08-25. That candidate updated `users.p4_score` and
@@ -206,12 +208,16 @@ compares only `game_personal_bests`, and writes only a strict improvement on
 the same transaction connection. It preserves the legacy HTTP contract and
 missing-user result, leaves a sentinel legacy score unchanged, survives
 concurrent submissions, and was tested after physically dropping
-`users.p4_score` in the disposable MySQL fixture. This candidate is not
-deployed. The additive schema, enabled dual-write rollout, legacy-only revision
-drain, post-drain backfill and reconciliation, and frozen dual-writer promotion
-are complete; the frozen generic-only cutover still comes first. Its
-implementation remains recorded at `2e3d4fde`; the active branch source is the
-required transitional dual writer.
+`users.p4_score` in the disposable MySQL fixture. On 2026-08-26 that reviewed
+implementation was integrated into the active feature branch: both the legacy
+`/api/users` operation and the additive API now use one generic reader locally,
+while the legacy response still exposes `p4_score`. Type-checking, 116 unit and
+security tests, 41 isolated MySQL integration tests, the production bundle, and
+the image-only Cloud Build contract tests pass. This source is not deployed;
+production remains on the frozen dual writer, and the production column and
+transitional grants are unchanged. The column-drop integration case proves code
+and schema independence under the migration-test account; restricted-runtime
+compatibility remains the next gate.
 
 The revision-scoped p4-Vega submission freeze gate was prepared locally on
 2026-08-26. Only the exact runtime opt-in
@@ -335,16 +341,15 @@ extra rows, metadata anomalies, run-ledger rows, and unexpected rules versions
 rather than guessing how to repair them. Every pass reuses the verified
 personal-best migration timestamp, so retries remain stable.
 
-The eventual generic p4-Vega `get_leaderboard` read path was prepared and
-verified on 2026-08-25, but it is not the active transitional source. The
-additive schema, enabled dual-writer deployment, legacy-only revision drain,
-repeatable backfill, and zero-discrepancy reconciliation are complete. The
-legacy operation still reads `users.p4_score` until the remaining frozen
-generic-only cutover gates pass. Its request, response fields, ten-row bound,
-cache behavior, and numeric historical scores must remain compatible. The
-generic-only writer is locally prepared, but its production cutover and
-`users.p4_score` removal remain incomplete; the multi-game frontend is recorded
-below.
+The generic p4-Vega `get_leaderboard` path is now the single local reader for
+both HTTP APIs. Its request, legacy response fields, ten-row bound, cache
+behavior, and numeric historical scores remain compatible. The additive schema,
+enabled dual-writer deployment, legacy-only revision drain, repeatable backfill,
+zero-discrepancy reconciliation, and production freeze are complete. This code
+has not been deployed: the serving frozen dual-writer revision still uses the
+transitional legacy reader, and production `users.p4_score` remains present.
+The generic-only production cutover and column removal remain incomplete; the
+multi-game frontend is recorded below.
 
 The additive backend catalog and per-game routes were implemented and verified
 on 2026-08-26. The catalog is projected from server-owned definitions;
@@ -373,8 +378,12 @@ Three Bosses gameplay and ranking release gates are approved.
 The frozen dual writer now serves 100% of production traffic, the enabled
 revision and its infrastructure are retired, active runtime transactions were
 zero, and the exact frozen reconciliation completed with five matching rows and
-no discrepancy. The next rollout step must separately approve deploying the
-prepared generic-only writer while it remains frozen, route all traffic to that
+no discrepancy. Before building that candidate, replace both the generic p4
+and Three Bosses `users SELECT ... FOR UPDATE` privilege dependencies so the
+runtime manifest can omit `p4_score` and pass with the column physically absent,
+then prepare the exact retirement path for the old live column grants. The next
+rollout step must then separately approve deploying the
+generic-only writer while it remains frozen, route all traffic to that
 exact revision, retire every dual-writer revision, require the serving HTTP 503
 contract, and rerun exact reconciliation against the still-static legacy
 column. Only then may a separately approved enabled generic revision accept

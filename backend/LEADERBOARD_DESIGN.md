@@ -24,23 +24,25 @@ verified, and the remaining generic-only cutover stages stay gated on separate
 review.
 
 The transitional read split was corrected and reverified on 2026-08-26 at
-`a127beac14c2662648c8aededa59374f5d7c87dd`. Its legacy `/api/users`
-`get_leaderboard` operation still reads `users.p4_score`, while the additive
-`/api/leaderboards/p4-vega` route reads `game_personal_bests`. Tests explicitly
-prove that those sources may differ before backfill. The existing production
-leaderboard retains the legacy reader through the remaining frozen generic-only
-cutover stage. The legacy-only and enabled dual-writer drains, post-drain
-backfills, and zero-discrepancy reconciliations have completed.
+`a127beac14c2662648c8aededa59374f5d7c87dd`. That split still describes the
+serving frozen dual-writer revision: its legacy `/api/users` operation reads
+`users.p4_score`, while the additive route reads `game_personal_bests`. The
+legacy-only and enabled dual-writer drains, post-drain backfills, and
+zero-discrepancy reconciliations have completed.
 
 The generic-authoritative p4-Vega writer was prepared and verified locally on
 2026-08-26. It locks the authenticated user and scoped generic best on one
 connection, compares the generic score, and writes only a strict improvement
 to `game_personal_bests`; it never reads or writes `users.p4_score`. The legacy
-HTTP request and response remain unchanged. A disposable MySQL test also drops
-the legacy column before submitting successfully. This candidate has not been
-deployed and does not authorize the production cutover sequence below. Its
-implementation remains recorded at `2e3d4fde`; it is not the active branch
-source while the required transitional dual-write phase is staged.
+HTTP request and response remain unchanged. The active feature branch now uses
+that repository and one generic reader for both HTTP APIs. A disposable MySQL
+test physically drops the legacy column before successfully submitting and
+reading a score. Type-checking, 116 unit and security tests, 41 isolated MySQL
+integration tests, the production bundle, and image-only Cloud Build contract
+tests pass. This source has not been deployed and does not authorize the
+production cutover sequence below; production remains on the frozen dual writer.
+The dropped-column case uses the migration-test account and proves schema
+independence only; the restricted-runtime proof remains a separate gate.
 
 On 2026-08-26, detached worktrees verified historical dual-write base
 `0dbe3fb8` plus the seven storage-independent freeze-gate changes from
@@ -149,15 +151,14 @@ aggregate reconciliation command were implemented and verified locally on
 the tooling does not authorize a read cutover or removal of `users.p4_score`,
 and each later production step retains the approval and evidence gates below.
 
-The eventual generic p4-Vega `get_leaderboard` implementation was prepared and
-verified on 2026-08-25 without changing its request or response contract. It is
-not the active transitional reader and has not been deployed or activated in
-production. The additive schema, enabled dual-writer rollout, legacy-only
-revision drain, frozen dual-writer promotion, and post-drain reconciliations are
-complete; switching the legacy operation remains gated on the frozen
-generic-only stage. The generic-only writer is locally prepared, but its
-production cutover and the legacy column removal remain later gated steps; the
-multi-game frontend slice is recorded below.
+The generic p4-Vega `get_leaderboard` implementation is now the active local
+reader for both APIs without changing the legacy request or response contract.
+It has not been deployed or activated in production. The additive schema,
+enabled dual-writer rollout, legacy-only revision drain, frozen dual-writer
+promotion, and post-drain reconciliations are complete; production activation
+remains gated on the frozen generic-only stage. The legacy column removal is a
+later separately approved step; the multi-game frontend slice is recorded
+below.
 
 The additive backend API was implemented and verified locally on 2026-08-26.
 `GET /api/leaderboards` explicitly projects the server catalog, and
@@ -526,12 +527,16 @@ reads remained healthy, and no temporary database user, maintenance revision,
 or pending Cloud SQL operation remained. The reviewed transitional runtime
 least-privilege blocker is closed.
 
-This manifest is transitional. Three Bosses presently serializes submissions
-with `users SELECT ... FOR UPDATE`, which MySQL authorizes through the same
-`UPDATE(p4_score)` grant needed by the dual writer. Before the legacy column
-and grant are removed, replace that serialization boundary without granting
-arbitrary `users` updates and pass a restricted generic-only fixture with
-`p4_score` physically absent.
+This manifest is transitional. Both the locally prepared generic p4 writer and
+Three Bosses presently serialize submissions with `users SELECT ... FOR
+UPDATE`, which MySQL authorizes through the transitional `UPDATE(p4_score)`
+grant. Before the generic-only candidate is built, replace both dependencies
+without granting arbitrary `users` updates and pass a restricted generic-only
+fixture with `p4_score` physically absent. Removing the column from the manifest
+is not enough to retire the live grants: the current planner correctly blocks
+unexpected privileges rather than revoking them, so an exact separately
+reviewed revoke operation or equivalent verified maintenance procedure is also
+required.
 
 This evidence satisfied the metadata gate for the exact SQL and isolated local
 migration tests completed on 2026-08-25. That preflight did not by itself

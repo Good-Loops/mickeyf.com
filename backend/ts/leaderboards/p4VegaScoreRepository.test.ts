@@ -3,8 +3,7 @@ import test from 'node:test';
 import { Pool, PoolConnection } from 'mysql2/promise';
 import {
     P4VegaScoreRollbackError,
-    readGenericP4VegaLeaderboard,
-    readLegacyP4VegaLeaderboard,
+    readP4VegaLeaderboard,
     submitP4VegaScore,
 } from './p4VegaScoreRepository';
 
@@ -15,12 +14,14 @@ type QueryCall = Readonly<{
 }>;
 
 type FakeDatabaseOptions = Readonly<{
-    affectedRows?: number;
     beginError?: Error;
     commitError?: Error;
     queryErrorAt?: number;
     queryError?: Error;
     rollbackError?: Error;
+    storedScore?: number | null;
+    userExists?: boolean;
+    writeAffectedRows?: number;
 }>;
 
 function createFakeDatabase(options: FakeDatabaseOptions = {}) {
@@ -44,7 +45,12 @@ function createFakeDatabase(options: FakeDatabaseOptions = {}) {
             if (options.queryErrorAt === queries.length) {
                 throw options.queryError ?? new Error('query failed');
             }
-            return [{ affectedRows: options.affectedRows ?? 1 }, []];
+            if (queries.length === 1) {
+                return [options.userExists === false
+                    ? []
+                    : [{ userId: 42, score: options.storedScore ?? null }], []];
+            }
+            return [{ affectedRows: options.writeAffectedRows ?? 1 }, []];
         },
         async commit() {
             events.push('commit');
@@ -106,7 +112,7 @@ test('reads the bounded current p4-Vega leaderboard from generic storage', async
         { userName: 'player', score: 990, internalId: 42 },
     ]);
 
-    const rows = await readGenericP4VegaLeaderboard(fake.database);
+    const rows = await readP4VegaLeaderboard(fake.database);
 
     assert.deepEqual(rows, [
         { userName: 'legacy-outlier', score: 1_200 },
@@ -124,7 +130,7 @@ test('reads the bounded current p4-Vega leaderboard from generic storage', async
 test('returns an empty generic leaderboard unchanged', async () => {
     const fake = createFakeLeaderboardDatabase();
 
-    assert.deepEqual(await readGenericP4VegaLeaderboard(fake.database), []);
+    assert.deepEqual(await readP4VegaLeaderboard(fake.database), []);
     assert.equal(fake.queries.length, 1);
 });
 
@@ -133,46 +139,13 @@ test('propagates generic leaderboard query failures', async () => {
     const fake = createFakeLeaderboardDatabase([], queryError);
 
     await assert.rejects(
-        () => readGenericP4VegaLeaderboard(fake.database),
+        () => readP4VegaLeaderboard(fake.database),
         queryError
     );
 });
 
-test('legacy and generic readers can expose different pre-backfill standings', async () => {
-    const queries: QueryCall[] = [];
-    const database = {
-        async query(
-            queryOptions: { sql: string; timeout?: number },
-            values?: unknown[]
-        ) {
-            const sql = queryOptions.sql.replace(/\s+/g, ' ').trim();
-            queries.push({ sql, timeout: queryOptions.timeout, values });
-            if (sql.includes('FROM game_personal_bests')) {
-                return [[{ userName: 'generic-player', score: 700 }], []];
-            }
-            return [[{ userName: 'legacy-player', score: 900 }], []];
-        },
-    } as unknown as Pick<Pool, 'query'>;
-
-    assert.deepEqual(await readLegacyP4VegaLeaderboard(database), [
-        { userName: 'legacy-player', score: 900 },
-    ]);
-    assert.deepEqual(await readGenericP4VegaLeaderboard(database), [
-        { userName: 'generic-player', score: 700 },
-    ]);
-
-    assert.equal(queries.length, 2);
-    assert.equal(queries[0].timeout, 10_000);
-    assert.equal(
-        queries[0].sql,
-        'SELECT user_name AS userName, p4_score AS score FROM users WHERE p4_score IS NOT NULL ORDER BY p4_score DESC LIMIT 10'
-    );
-    assert.equal(queries[0].values, undefined);
-    assert.deepEqual(queries[1].values, ['p4-vega', 1]);
-});
-
-test('writes an improving score to both stores on one committed connection', async () => {
-    const fake = createFakeDatabase({ affectedRows: 1 });
+test('writes an improving score only to generic storage on one committed connection', async () => {
+    const fake = createFakeDatabase({ storedScore: 900, writeAffectedRows: 2 });
 
     const personalBest = await submitP4VegaScore(fake.database, 42, 990);
 
@@ -183,17 +156,40 @@ test('writes an improving score to both stores on one committed connection', asy
     assert.equal(fake.queries[0].timeout, 10_000);
     assert.equal(
         fake.queries[0].sql,
-        'UPDATE users SET p4_score = ? WHERE user_id = ? AND (p4_score IS NULL OR p4_score < ?)'
+        'SELECT users.user_id AS userId, game_personal_bests.score AS score FROM users LEFT JOIN game_personal_bests ON game_personal_bests.game_id = ? AND game_personal_bests.rules_version = ? AND game_personal_bests.user_id = users.user_id WHERE users.user_id = ? FOR UPDATE'
     );
-    assert.deepEqual(fake.queries[0].values, [990, 42, 990]);
+    assert.deepEqual(fake.queries[0].values, ['p4-vega', 1, 42]);
     assert.equal(fake.queries[1].timeout, 10_000);
     assert.match(fake.queries[1].sql, /^INSERT INTO game_personal_bests/);
     assert.match(fake.queries[1].sql, /ON DUPLICATE KEY UPDATE/);
     assert.deepEqual(fake.queries[1].values, ['p4-vega', 1, 42, 990]);
+    assert.equal(fake.queries.some(({ sql }) => /\bp4_score\b/iu.test(sql)), false);
 });
 
-test('commits a non-improving or missing-user result without seeding generic history', async () => {
-    const fake = createFakeDatabase({ affectedRows: 0 });
+test('inserts the first generic personal best without consulting affected-row semantics', async () => {
+    const fake = createFakeDatabase({ storedScore: null, writeAffectedRows: 0 });
+
+    const personalBest = await submitP4VegaScore(fake.database, 42, 900);
+
+    assert.equal(personalBest, true);
+    assert.deepEqual(fake.events, ['begin', 'query:1', 'query:2', 'commit', 'release']);
+    assert.equal(fake.queries.length, 2);
+});
+
+test('commits equal and lower scores without writing generic history', async () => {
+    for (const score of [900, 800]) {
+        const fake = createFakeDatabase({ storedScore: 900 });
+
+        const personalBest = await submitP4VegaScore(fake.database, 42, score);
+
+        assert.equal(personalBest, false);
+        assert.deepEqual(fake.events, ['begin', 'query:1', 'commit', 'release']);
+        assert.equal(fake.queries.length, 1);
+    }
+});
+
+test('preserves the missing-user false result without attempting a generic insert', async () => {
+    const fake = createFakeDatabase({ userExists: false });
 
     const personalBest = await submitP4VegaScore(fake.database, 42, 900);
 
@@ -202,10 +198,10 @@ test('commits a non-improving or missing-user result without seeding generic his
     assert.equal(fake.queries.length, 1);
 });
 
-test('rolls the legacy update back when the generic write fails', async () => {
+test('rolls back when the generic write fails', async () => {
     const queryError = new Error('generic write failed');
     const fake = createFakeDatabase({
-        affectedRows: 1,
+        storedScore: 900,
         queryErrorAt: 2,
         queryError,
     });
@@ -220,8 +216,8 @@ test('rolls the legacy update back when the generic write fails', async () => {
     );
 });
 
-test('rolls back and skips the generic write when the legacy update fails', async () => {
-    const queryError = new Error('legacy write failed');
+test('rolls back and skips the generic write when the locking read fails', async () => {
+    const queryError = new Error('locking read failed');
     const fake = createFakeDatabase({
         queryErrorAt: 1,
         queryError,
@@ -237,7 +233,7 @@ test('rolls back and skips the generic write when the legacy update fails', asyn
 
 test('rolls back a failed commit and always releases a reusable connection', async () => {
     const commitError = new Error('commit failed');
-    const fake = createFakeDatabase({ affectedRows: 1, commitError });
+    const fake = createFakeDatabase({ storedScore: 900, commitError });
 
     await assert.rejects(
         () => submitP4VegaScore(fake.database, 42, 990),
@@ -253,7 +249,7 @@ test('destroys a connection when rollback fails instead of returning it to the p
     const queryError = new Error('generic write failed');
     const rollbackError = new Error('rollback failed');
     const fake = createFakeDatabase({
-        affectedRows: 1,
+        storedScore: 900,
         queryErrorAt: 2,
         queryError,
         rollbackError,

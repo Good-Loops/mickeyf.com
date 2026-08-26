@@ -8,7 +8,7 @@ import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { Pool, RowDataPacket } from 'mysql2/promise';
 import {
-    readLegacyP4VegaLeaderboard,
+    readP4VegaLeaderboard,
     submitP4VegaScore,
 } from '../leaderboards/p4VegaScoreRepository';
 import { User } from '../types/customTypes';
@@ -136,7 +136,7 @@ export function createMainController({
     }
 
     async function getLeaderboard(_req: Request, res: Response) {
-        const rows = await readLegacyP4VegaLeaderboard(database);
+        const rows = await readP4VegaLeaderboard(database);
         return res.json({
             success: true,
             leaderboard: rows.map(({ userName, score }) => ({

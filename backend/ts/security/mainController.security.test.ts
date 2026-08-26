@@ -212,7 +212,10 @@ test('score submission still accepts the Bearer token fallback and authenticated
             queryOptions.push(options);
             queryValues.push(values);
             transactionEvents.push('query');
-            return [{ affectedRows: 1 }, []];
+            if (queryValues.length === 1) {
+                return [[{ userId: 42, score: 900 }], []];
+            }
+            return [{ affectedRows: 2 }, []];
         },
         async commit() {
             transactionEvents.push('commit');
@@ -247,7 +250,7 @@ test('score submission still accepts the Bearer token fallback and authenticated
     assert.deepEqual(state.body, { success: true, personalBest: true });
     assert.deepEqual(transactionEvents, ['begin', 'query', 'query', 'commit', 'release']);
     assert.deepEqual(queryValues, [
-        [990, 42, 990],
+        ['p4-vega', 1, 42],
         ['p4-vega', 1, 42, 990],
     ]);
     assert.equal((queryOptions[0] as { timeout?: number }).timeout, 10_000);
@@ -260,7 +263,7 @@ test('non-improving score preserves the exact legacy success response', async ()
         async beginTransaction() {},
         async query() {
             queryCount += 1;
-            return [{ affectedRows: 0 }, []];
+            return [[{ userId: 42, score: 900 }], []];
         },
         async commit() {},
         async rollback() {},
@@ -289,7 +292,7 @@ test('non-improving score preserves the exact legacy success response', async ()
     assert.equal(queryCount, 1);
 });
 
-test('legacy leaderboard operation remains a bounded users-column read', async () => {
+test('legacy leaderboard operation adapts the bounded generic read', async () => {
     let queryCount = 0;
     let queryOptions: unknown;
     let queryValues: unknown[] | undefined;
@@ -298,7 +301,7 @@ test('legacy leaderboard operation remains a bounded users-column read', async (
             queryCount += 1;
             queryOptions = options;
             queryValues = values;
-            return [[{ userName: 'legacy-player', score: 900, internalId: 42 }], []];
+            return [[{ userName: 'player', score: 990, internalId: 42 }], []];
         },
     } as unknown as Pick<Pool, 'getConnection' | 'query'>;
     const controller = createTestController(database, false);
@@ -307,15 +310,15 @@ test('legacy leaderboard operation remains a bounded users-column read', async (
     await controller(request({ type: 'get_leaderboard' }), response);
 
     assert.equal(queryCount, 1);
-    assert.equal(queryValues, undefined);
+    assert.deepEqual(queryValues, ['p4-vega', 1]);
     const options = queryOptions as { sql?: string; timeout?: number };
     assert.equal(options.timeout, 10_000);
     assert.equal(
         options.sql?.replace(/\s+/g, ' ').trim(),
-        'SELECT user_name AS userName, p4_score AS score FROM users WHERE p4_score IS NOT NULL ORDER BY p4_score DESC LIMIT 10'
+        'SELECT users.user_name AS userName, game_personal_bests.score AS score FROM game_personal_bests INNER JOIN users ON users.user_id = game_personal_bests.user_id WHERE game_personal_bests.game_id = ? AND game_personal_bests.rules_version = ? ORDER BY game_personal_bests.score DESC, game_personal_bests.recorded_at ASC, game_personal_bests.user_id ASC LIMIT 10'
     );
     assert.deepEqual(state.body, {
         success: true,
-        leaderboard: [{ user_name: 'legacy-player', p4_score: 900 }],
+        leaderboard: [{ user_name: 'player', p4_score: 990 }],
     });
 });

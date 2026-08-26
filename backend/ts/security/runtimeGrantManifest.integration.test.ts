@@ -8,8 +8,7 @@ import mysql, {
 } from 'mysql2/promise';
 import { loadMigrationConfig } from '../config/migrationConfig';
 import {
-    readGenericP4VegaLeaderboard,
-    readLegacyP4VegaLeaderboard,
+    readP4VegaLeaderboard,
     submitP4VegaScore,
 } from '../leaderboards/p4VegaScoreRepository';
 import {
@@ -299,11 +298,7 @@ test('supports every current auth and leaderboard SQL path', async () => {
     assert.equal(await submitP4VegaScore(runtimePool, 1, 900), true);
     assert.equal(await submitP4VegaScore(runtimePool, 1, 990), true);
     assert.equal(await submitP4VegaScore(runtimePool, 1, 950), false);
-    assert.deepEqual(await readLegacyP4VegaLeaderboard(runtimePool), [{
-        userName: 'player-1',
-        score: 990,
-    }]);
-    assert.deepEqual(await readGenericP4VegaLeaderboard(runtimePool), [{
+    assert.deepEqual(await readP4VegaLeaderboard(runtimePool), [{
         userName: 'player-1',
         score: 990,
     }]);
