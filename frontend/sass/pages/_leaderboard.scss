@@ -49,7 +49,7 @@
     &__cards {
         display: grid;
         grid-template-columns: repeat(auto-fit, minmax(min(100%, 30rem), 1fr));
-        gap: 2rem;
+        gap: clamp(2rem, 3vw, 2.8rem);
 
         width: 100%;
     }
@@ -248,25 +248,82 @@
 }
 
 .leaderboard-card {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+
     display: flex;
     flex-direction: column;
     gap: 1.4rem;
 
     min-width: 0;
-    min-height: 22rem;
+    min-height: 20rem;
     padding: clamp(2.4rem, 3vw, 3.2rem);
 
     color: $white;
 
     border: .2rem solid rgba($primary-light, .55);
     border-radius: $default-border-radius;
-    background: linear-gradient(145deg, rgba($space-blue, .94), rgba($space-blue, .78));
+    background:
+        radial-gradient(circle at 92% 8%, rgba($primary, .22), transparent 34%),
+        linear-gradient(145deg, rgba($space-blue, .96), rgba($space-blue, .8));
     box-shadow: $dark-box-shadow-s;
 
     transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease;
 
+    > * {
+        position: relative;
+        z-index: 1;
+    }
+
+    &::before {
+        content: '';
+
+        position: absolute;
+        inset: 0 0 auto;
+        z-index: 2;
+        height: .45rem;
+
+        background: linear-gradient(90deg, $primary, $tertiary);
+    }
+
+    &::after {
+        content: '';
+
+        position: absolute;
+        top: -8rem;
+        right: -5rem;
+        z-index: 0;
+
+        width: 17rem;
+        aspect-ratio: 1;
+
+        border: .1rem solid rgba($primary-light, .22);
+        border-radius: 50%;
+        box-shadow:
+            0 0 0 2.4rem rgba($primary, .05),
+            0 0 0 5rem rgba($primary, .035);
+
+        pointer-events: none;
+    }
+
     &--three-bosses {
         border-color: rgba($secondary-light, .65);
+
+        background:
+            radial-gradient(circle at 92% 8%, rgba($secondary, .2), transparent 34%),
+            linear-gradient(145deg, rgba($space-blue, .96), rgba($space-blue, .8));
+
+        &::before {
+            background: linear-gradient(90deg, $secondary, $tertiary);
+        }
+
+        &::after {
+            border-color: rgba($secondary-light, .22);
+            box-shadow:
+                0 0 0 2.4rem rgba($secondary, .05),
+                0 0 0 5rem rgba($secondary, .035);
+        }
     }
 
     &__title {
@@ -274,6 +331,7 @@
         font-family: $subheading-font;
         font-size: clamp(3rem, 4vw, 4.2rem);
         line-height: 1.05;
+        text-shadow: 0 .3rem 1.2rem rgba(black, .28);
         overflow-wrap: anywhere;
     }
 
@@ -283,18 +341,23 @@
         gap: 1rem;
 
         margin-top: auto;
+        align-self: flex-start;
 
         div {
-            min-width: 0;
-            padding: 1.2rem;
+            display: flex;
+            align-items: baseline;
+            gap: .9rem;
 
-            border-radius: .5rem;
-            background: rgba($white, .08);
+            width: fit-content;
+            min-width: 0;
+            padding: .8rem 1.1rem;
+
+            border: .1rem solid rgba($white, .14);
+            border-radius: 100vw;
+            background: rgba($white, .075);
         }
 
         dt {
-            margin-bottom: .4rem;
-
             color: rgba($white, .65);
             font-size: 1.2rem;
             font-weight: 800;
@@ -314,13 +377,13 @@
         justify-content: flex-end;
         gap: 1rem;
 
-        padding-top: 1.4rem;
+        padding-top: 1.2rem;
 
         color: $primary-light;
         font-size: 1.5rem;
         font-weight: 900;
 
-        border-top: .1rem solid rgba($white, .18);
+        border-top: .1rem solid rgba($white, .14);
     }
 
     &:hover {
