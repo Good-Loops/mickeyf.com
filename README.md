@@ -345,6 +345,11 @@ for controls, verification steps, and licensing links.
 - Cloud SQL stores application data.
 - Production secrets are referenced through Secret Manager.
 
+[`cloudbuild.deploy.yaml`](cloudbuild.deploy.yaml) is the repository's canonical
+copy of Stage B's source-less inline configuration; the live trigger does not
+read this file. Editing or merging it alone changes no trigger, Cloud Run
+revision, traffic allocation, or score-submission state.
+
 Firebase Hosting path redirects cannot canonicalize hostnames. The
 `www.mickeyf.com` → `mickeyf.com` redirect is maintained in Firebase's external
 custom-domain configuration and must be reverified there after domain or Hosting

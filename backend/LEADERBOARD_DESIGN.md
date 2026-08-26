@@ -26,12 +26,13 @@ returns HTTP 503 `SUBMISSIONS_FROZEN` before authentication or database work.
 Login, signup, and leaderboard reads remain available, and each revision logs
 only the normalized `enabled` or `frozen` state at startup. The gate is
 storage-independent so it can be applied to both the transitional dual writer
-and the generic writer. It has not been deployed or activated in production.
-The current canonical Stage B workflow omits the flag and attests an exact
-six-variable environment; it therefore creates only frozen revisions and would
-reject a manually added seventh variable. The deployment configuration and its
-live inline trigger must be updated and verified under separate review before
-any freeze-gate revision is deployed.
+and the generic writer. The tracked canonical Stage B source now prepares
+zero-traffic candidates with `P4_VEGA_SCORE_SUBMISSIONS_ENABLED=false`, attests
+the exact seven-variable environment, and verifies the exact HTTP 503 freeze
+response without authentication or persistence. This repository change has not
+been synchronized to or verified against the live source-less inline trigger;
+no Stage B build ran, no revision was deployed, no traffic changed, and no
+production freeze was established.
 
 The repeatable, privileged p4-Vega historical-backfill CLI and read-only
 aggregate reconciliation command were implemented and verified locally on
@@ -363,15 +364,16 @@ backfill, credential rotation, or deployment.
    use `game_personal_bests` without changing their request or response
    contracts, but do not route production traffic to the generic-only writer
    yet.
-9. Under a separate review, update the canonical Stage B deployment workflow to
-   set and attest the seventh environment variable, add an exact candidate gate
-   probe, and then synchronize the live source-less inline trigger. Until that
-   prerequisite is verified, do not deploy a freeze-gate revision or add the
-   variable manually.
-10. Apply the same freeze-gate change to a dual-write revision and first deploy
-   it with the exact positive opt-in enabled. Route all traffic to that revision
-   and prove every no-gate revision and admitted request has drained; only this
-   freeze-capable dual writer may serve as the pre-cutover rollback target.
+9. Under a separate review, synchronize the reviewed canonical Stage B contents
+   into the live source-less inline trigger and verify the live trigger exactly.
+   Until that prerequisite is proven, do not deploy a freeze-gate revision or
+   add the environment variable manually.
+10. Apply the same freeze-gate change to a dual-write revision. Separately review
+    and synchronize an enabled Stage B state that sets and attests the exact
+    positive opt-in and uses a non-mutating anonymous probe. First deploy that
+    enabled zero-traffic candidate, then route all traffic to it and prove every
+    no-gate revision and admitted request has drained; only this freeze-capable
+    dual writer may serve as the pre-cutover rollback target.
 11. Deploy the freeze-capable dual writer without the positive opt-in, route all
     traffic to it, and prove every enabled revision and in-flight score request
     has drained. Require HTTP 503 `SUBMISSIONS_FROZEN` from the serving revision,

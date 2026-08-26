@@ -653,7 +653,7 @@ steps:
             --concurrency=80 --timeout=300s --max-instances=10 --cpu-boost --ingress=all \
             --startup-probe='timeoutSeconds=240,periodSeconds=240,failureThreshold=1,tcpSocket.port=8080' \
             --liveness-probe='' --set-cloudsql-instances="$$CLOUD_SQL" \
-            --set-env-vars="NODE_ENV=production,CLOUD_SQL_CONNECTION_NAME=$$CLOUD_SQL,DB_USER=cms_mickeyf,DB_NAME=cms" \
+            --set-env-vars="NODE_ENV=production,CLOUD_SQL_CONNECTION_NAME=$$CLOUD_SQL,DB_USER=cms_mickeyf,DB_NAME=cms,P4_VEGA_SCORE_SUBMISSIONS_ENABLED=false" \
             --set-secrets='DB_PASS=DB_PASS:1,SESSION_SECRET=SESSION_SECRET:2' \
             --update-labels="source-build-id=$$SOURCE_BUILD_ID,source-commit=$$COMMIT_SHA" \
             --no-traffic --tag="$$CANDIDATE_TAG" --quiet; then
@@ -842,14 +842,15 @@ steps:
             reject("service ingress does not match")
 
         env_items = container.get("env") or []
-        if len(env_items) != 6 or len({item.get("name") for item in env_items}) != 6:
-            reject("environment is not the exact six-variable configuration")
+        if len(env_items) != 7 or len({item.get("name") for item in env_items}) != 7:
+            reject("environment is not the exact seven-variable configuration")
         env = {item.get("name"): item for item in env_items}
         plain = {
             "NODE_ENV": "production",
             "CLOUD_SQL_CONNECTION_NAME": "noted-reef-387021:us-central1:cms-mickeyf",
             "DB_USER": "cms_mickeyf",
             "DB_NAME": "cms",
+            "P4_VEGA_SCORE_SUBMISSIONS_ENABLED": "false",
         }
         for name, value in plain.items():
             if env.get(name) != {"name": name, "value": value}:
@@ -1179,6 +1180,15 @@ steps:
             reject("Three Bosses submission route is unexpectedly available")
         if not no_store(disabled_post_headers) or disabled_post_headers.get_all("Set-Cookie"):
             reject("unavailable Three Bosses submission response headers are unsafe")
+
+        frozen_submission, frozen_submission_headers = request(
+            "/api/users", 503, {"type": "submit_score", "p4_score": 10}
+        )
+        if frozen_submission != {"error": "SUBMISSIONS_FROZEN"}:
+            reject("frozen p4-Vega submission response contract does not match")
+        if (not no_store(frozen_submission_headers)
+                or frozen_submission_headers.get_all("Set-Cookie")):
+            reject("frozen p4-Vega submission response headers are unsafe")
 
         board, board_headers = request("/api/users", 200, {"type": "get_leaderboard"})
         if (not isinstance(board, dict) or set(board) != {"success", "leaderboard"}

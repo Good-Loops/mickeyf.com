@@ -112,12 +112,15 @@ other value returns HTTP 503 `SUBMISSIONS_FROZEN` before authentication or
 database work while leaving account and leaderboard operations available. The
 gate is deliberately independent of the storage repository so the same change
 can protect both a transitional dual-write revision and the generic-only
-revision. It has not been deployed, the live Cloud Build trigger has not been
-changed, and no production freeze has been established. The current canonical
-Stage B workflow omits this flag and attests an exact six-variable environment,
-so it can create only frozen revisions and would reject a manually added
-seventh variable. Updating and verifying that deployment attestation is a hard
-prerequisite to any gate-enabled rollout.
+revision. The tracked canonical Stage B source now prepares zero-traffic
+candidates with `P4_VEGA_SCORE_SUBMISSIONS_ENABLED=false`, attests the exact
+seven-variable environment, and probes the candidate's exact HTTP 503 freeze
+contract. This repository change has not been synchronized to or verified
+against the live source-less inline trigger; no Stage B build ran, no revision
+was deployed, no traffic changed, and no production freeze was established.
+Synchronizing and verifying the live trigger remains a hard prerequisite to a
+frozen candidate deployment. The enabled dual-writer phase will require its own
+separately reviewed exact-`true` Stage B configuration and probe contract.
 
 The Phase 13.1 repeatable, privileged p4-Vega historical-backfill CLI and
 separate read-only aggregate reconciliation gate were implemented and verified
