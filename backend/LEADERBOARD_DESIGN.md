@@ -5,31 +5,34 @@ schema preflight completed on the same date. On 2026-08-25, Mike approved the
 end state in which p4-Vega uses the generic leaderboard storage and the legacy
 `users.p4_score` column is retired after a verified cutover. The additive
 production schema and an initial p4-Vega data seed were applied and verified on
-2026-08-26. The exact freeze-capable dual-writer candidate was later deployed as
-a zero-traffic revision on the same date. This document records those completed
-changes but does not authorize traffic promotion, a read/write cutover,
-legacy-column removal, or another production mutation.
+2026-08-26. The exact freeze-capable dual writer now serves production with
+submissions enabled, and the equivalent frozen configuration is independently
+verified in a separate zero-traffic revision. This document records those
+completed changes but does not authorize promotion of the frozen revision, a
+read/write cutover, legacy-column removal, or another production mutation.
 
 Production now contains `schema_migrations`, `game_runs`, and
-`game_personal_bests` alongside `users`. The initial seed copied five p4-Vega
-personal bests; `game_runs` is empty and `users.p4_score` is unchanged. The
-candidate API is deployed only in an untagged zero-traffic revision; no reader
-cutover has run.
+`game_personal_bests` alongside `users`. The initial seed and the later
+post-drain backfill both reconcile the same five p4-Vega personal bests exactly;
+`game_runs` is empty and `users.p4_score` is unchanged. The enabled dual writer
+serves 100% of production traffic, the frozen revision has zero traffic, and no
+reader cutover has run.
 
 The transitional p4-Vega dual-write repository was implemented and verified
 locally on 2026-08-25 with unit, rollback, and concurrent MySQL 8.0.31 tests. It
-is now deployed only in the exact zero-traffic revision recorded below.
-Migrations `0001` and `0002` are applied and verified, but positive traffic
-remains gated on the separately reviewed data-migration and cutover sequence
-below.
+now serves in the exact enabled production revision recorded below and is also
+retained in the frozen zero-traffic revision. Migrations `0001` and `0002` are
+applied and verified; the remaining freeze and generic-only cutover stages stay
+gated on separate review.
 
 The transitional read split was corrected and reverified on 2026-08-26 at
 `a127beac14c2662648c8aededa59374f5d7c87dd`. Its legacy `/api/users`
 `get_leaderboard` operation still reads `users.p4_score`, while the additive
 `/api/leaderboards/p4-vega` route reads `game_personal_bests`. Tests explicitly
 prove that those sources may differ before backfill. The existing production
-leaderboard must retain the legacy reader until the old-writer drain, final
-backfill, and zero-discrepancy reconciliation have all completed.
+leaderboard retains the legacy reader through the remaining frozen cutover
+stages. The legacy-only drain, post-drain backfill, and zero-discrepancy
+reconciliation have completed.
 
 The generic-authoritative p4-Vega writer was prepared and verified locally on
 2026-08-26. It locks the authenticated user and scoped generic best on one
@@ -52,8 +55,8 @@ and concurrency guarantees.
 
 The same composition is retained on `feature/new-leaderboard` at exact commit
 `5abdc5bb1ee0a0fb947e7bb1024cec8e68438f64`. It is not an approved main-branch
-source or positive-traffic target. Its exact image and zero-traffic revision are
-recorded below for the separately reviewed rollout sequence.
+source, but its exact image was separately approved for the enabled production
+dual-writer phase. The enabled and frozen revisions are recorded below.
 
 The revision-scoped p4-Vega submission freeze gate was prepared locally on
 2026-08-26. `P4_VEGA_SCORE_SUBMISSIONS_ENABLED=true` is the only value that
@@ -67,9 +70,10 @@ deliberately frozen with `P4_VEGA_SCORE_SUBMISSIONS_ENABLED=false`, attests the
 exact eight-variable environment including
 `THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=false`, and verifies the exact p4 HTTP
 503 and Three Bosses HTTP 403 freeze contracts without authentication or
-persistence. It has not been synchronized to or verified against the live
-source-less inline trigger; no Stage B build ran, no revision was deployed, no
-traffic changed, and no production freeze was established.
+persistence. The canonical main-only Stage B trigger has not run or changed.
+The separately approved feature-branch trust path recorded below deployed and
+verified the equivalent frozen configuration at zero traffic; it did not
+establish a production freeze.
 
 `main` remains deferred until after Phase 14, so the live main-only Stage A and
 Stage B trust chain must not be weakened or repointed. The isolated
@@ -106,9 +110,24 @@ environment before creating revision
 `THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=false`. The anonymous HTTP and database-
 read smoke suite passed, including the required p4 401 `UNAUTHORIZED` response
 with no-store and no cookie. The temporary tag and deploy trigger were deleted
-immediately afterward. At Cloud Run generation 114, production remains 100% on
-`mickeyf-org-grants-restored-20260826-a`; the exact candidate revision is
-retained without a tag or traffic.
+immediately afterward. Under separate approval, Cloud Run generation 115 routed
+100% to this revision. The legacy-only revision was retired and drained, the
+repeatable backfill and aggregate reconciliation again reported five exact rows
+with every discrepancy count at zero, and the temporary maintenance database
+identity was deleted. The legacy reader and `users.p4_score` remain active.
+
+Approved one-shot frozen-candidate build
+`c5daa935-39a9-43fb-a7b3-b50cedfbfe25` used config SHA-256
+`e9c320e653a4b76cd265bc1470cd92e72fa0253880b07b3115d0a8c8a4f73ebf`
+and the same source commit, provenance, and image digest. It created revision
+`mickeyf-org-freeze-9a6066b44f34422bba3383d6b0e9a9eb` at zero traffic with
+both submission flags false. All eight validation, deployment, attestation, and
+smoke steps passed: p4 submission returned HTTP 503 `SUBMISSIONS_FROZEN`, both
+p4 reads returned the same five rows, and Three Bosses submission returned HTTP
+403 `SUBMISSION_DISABLED`. The temporary tag and deploy trigger were deleted.
+At Cloud Run generation 117, production still routes 100% to
+`mickeyf-org-build-9a6066b44f34422bba3383d6b0e9a9eb` with no tags, while the
+frozen revision is retained retired at zero traffic.
 
 The repeatable, privileged p4-Vega historical-backfill CLI and read-only
 aggregate reconciliation command were implemented and verified locally on
@@ -119,9 +138,10 @@ and each later production step retains the approval and evidence gates below.
 The eventual generic p4-Vega `get_leaderboard` implementation was prepared and
 verified on 2026-08-25 without changing its request or response contract. It is
 not the active transitional reader and has not been deployed or activated in
-production. Switching the legacy operation remains gated on the additive
-schema, completed backfill, legacy-revision drain, and zero-discrepancy
-reconciliation. The generic-only writer is locally prepared, but its
+production. The additive schema, enabled dual-writer rollout, legacy-only
+revision drain, and post-drain reconciliation are complete; switching the
+legacy operation remains gated on the frozen dual-writer and frozen
+generic-only stages. The generic-only writer is locally prepared, but its
 production cutover and the legacy column removal remain later gated steps; the
 multi-game frontend slice is recorded below.
 
@@ -137,8 +157,10 @@ requires an allowed browser Origin for cookie mutations, serializes immutable
 runs and personal bests on one transaction connection, preserves exact replay
 outcomes, rejects conflicting reuse, and enforces both database-backed per-user
 and per-instance IP limits. Unit, security, rollback, concurrency, and eight
-isolated MySQL integration tests passed. None of this code has been deployed or
-activated in production.
+isolated MySQL integration tests passed. These routes are deployed in the
+serving revision, but Three Bosses submissions remain inactive because
+`THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=false`; the Unity submission bridge also
+remains disconnected.
 
 The multi-game frontend slice was implemented locally on 2026-08-26.
 The canonical `/leaderboards` page is now a catalog-driven hub of leaderboard
@@ -553,6 +575,16 @@ deployed and all legacy-only revisions and in-flight requests have drained. No
 API deployment, traffic change, privilege change, trigger, column drop, or
 reader/writer cutover occurred in this step.
 
+Under later separate approval, the exact dual-writer revision
+`mickeyf-org-build-9a6066b44f34422bba3383d6b0e9a9eb` received 100% traffic.
+Every legacy-only revision was retired and drained before the repeatable
+backfill and independent reconciliation ran again. Source and target each had
+five rows, minimum 190, maximum 410, sum 1350, five exact matches, and zero
+missing, extra, score, metadata, run-ledger, or rules-version discrepancies.
+The temporary maintenance database identity was then deleted. This is the
+completed enabled dual-writer checkpoint, not the generic read/write cutover;
+`users.p4_score` remains present and authoritative for the legacy reader.
+
 ## Expand, backfill, and cutover
 
 1. Use the versioned, checksum-recorded `mysql2` migration runner with its
@@ -598,15 +630,19 @@ reader/writer cutover occurred in this step.
     candidate, then route all traffic to it and prove every no-gate revision
     and admitted request has drained; only this freeze-capable dual writer may
     serve as the pre-cutover rollback target. **The temporary trust path,
-    zero-traffic deployment, smoke suite, tag removal, and trigger cleanup
-    completed on 2026-08-26. Positive-traffic routing and drain proof remain.**
+    zero-traffic deployment, smoke suite, tag removal, positive-traffic
+    routing, legacy-only drain, repeat backfill and reconciliation, and trigger
+    cleanup completed on 2026-08-26.**
 11. Under another review, use the same pinned candidate-deploy path to deploy
     the freeze-capable dual writer without the p4 positive opt-in. Keep Three
     Bosses disabled, route all traffic to the frozen revision, prove every
     enabled revision and in-flight score request has drained, and require HTTP
     503 `SUBMISSIONS_FROZEN` from the serving revision before rerunning the
     complete reconciliation. Low traffic or a quiet interval is not evidence
-    of a write freeze.
+    of a write freeze. **The exact frozen revision, zero-traffic smoke suite,
+    tag removal, and trigger cleanup completed on 2026-08-26 in build
+    `c5daa935-39a9-43fb-a7b3-b50cedfbfe25`. Positive-traffic routing, enabled-
+    revision drain, serving freeze proof, and repeat reconciliation remain.**
 12. Deploy the generic-only writer while it remains frozen, route all traffic to
     it, drain every dual-write revision, and require the same exact
     reconciliation again against the still-static legacy column.
