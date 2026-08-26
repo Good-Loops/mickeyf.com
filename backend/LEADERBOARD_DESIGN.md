@@ -6,25 +6,26 @@ end state in which p4-Vega uses the generic leaderboard storage and the legacy
 `users.p4_score` column is retired after a verified cutover. The additive
 production schema and an initial p4-Vega data seed were applied and verified on
 2026-08-26. The exact frozen generic-only revision now serves 100% of
-production traffic, and the frozen dual writer is retired but retained as the
-rollback target while its legacy column grants remain. This document records
-that completed traffic cutover but does not authorize legacy-column grant
-retirement, submission enablement, column removal, or another production
+production traffic, and the exact legacy column grants are retired. The frozen
+dual writer is therefore no longer a valid rollback target. This document
+records the completed traffic cutover and grant retirement but does not
+authorize submission enablement, column removal, or another production
 mutation.
 
 Production now contains `schema_migrations`, `game_runs`, and
 `game_personal_bests` alongside `users`. The initial seed and the later
 post-drain backfill and frozen generic-only cutover reconciliations all match the
 same five p4-Vega personal bests exactly; `game_runs` is empty and
-`users.p4_score` is unchanged. The frozen generic-only revision serves 100% of
-production traffic, and the drained dual writer has zero traffic.
+`users.p4_score` is unchanged but inaccessible to the runtime account. The
+frozen generic-only revision serves 100% of production traffic, and the drained
+dual writer has zero traffic.
 
 The transitional p4-Vega dual-write repository was implemented and verified
 locally on 2026-08-25 with unit, rollback, and concurrent MySQL 8.0.31 tests. It
 remains available in the exact retired frozen revision recorded below; its
 former enabled revision is also retired. Migrations `0001` and `0002` are
-applied and verified, and the remaining grant-retirement,
-submission-enablement, and legacy-column stages stay gated on separate review.
+applied and verified. Submission enablement and the legacy-column stage remain
+gated on separate review.
 
 The transitional read split was corrected and reverified on 2026-08-26 at
 `a127beac14c2662648c8aededa59374f5d7c87dd`. That split now describes the
@@ -162,9 +163,9 @@ It now serves in the frozen generic-only production revision. The additive
 schema, enabled dual-writer rollout, frozen dual-writer promotion, and
 generic-only deployment are complete, along with every drain and exact
 reconciliation required for the frozen generic-only traffic cutover.
-Legacy-column grant retirement, submission enablement, and column removal remain
-later separately approved steps; the multi-game frontend slice is recorded
-below.
+Legacy-column grant retirement is also complete; submission enablement and
+column removal remain later separately approved steps. The multi-game frontend
+slice is recorded below.
 
 The exact frozen generic-only candidate source was reviewed on 2026-08-26 at
 commit `e91d3b1177932614c22fbed059a42a05fcb10793`, tree
@@ -285,12 +286,10 @@ Operator credential environment variables were removed and the PowerShell
 session was closed. Final checks found no unfinished Cloud SQL operation,
 ongoing build, temporary tag, or one-use deployment trigger.
 
-The retained frozen dual writer is a valid rollback target only while both
-legacy `p4_score` column grants remain. Any rollback before their retirement
-still requires a fresh service etag and an exact traffic-only PATCH. Grant
-retirement, submission enablement, and column removal are separate production
-steps; this cutover performed none of them and left
-`users.p4_score` unchanged.
+The retained frozen dual writer was a valid rollback target only while both
+legacy `p4_score` column grants remained. The later grant retirement crossed
+that boundary, so it must not receive traffic again. This traffic cutover itself
+performed none of the later mutations and left `users.p4_score` unchanged.
 
 The refreshed OpenSSL review found byte-identical Dockerfile, lockfile, pinned
 Node base, first four OCI layers, and Node installation layer
@@ -702,10 +701,36 @@ released after commit or rollback; any indeterminate lock or rollback state
 destroys the session so a pooled connection cannot retain an uncertain lock.
 This removes both `users SELECT ... FOR UPDATE` dependencies without adding a
 table, migration, or artificial user-column grant. Removing `p4_score` from the
-source manifest does not itself retire the older live grants: the current
-planner correctly blocks unexpected privileges rather than revoking them, so
-the separately reviewed retirement workflow must still be approved and run
-only after the frozen generic-only deployment and drain evidence.
+source manifest did not itself retire the older live grants: the general planner
+correctly blocked those unexpected privileges rather than guessing how to clean
+them up.
+
+The separately approved exact grant retirement completed on 2026-08-26 from
+ready-plan digest
+`34096d0896b45d4cc827ad71d0a5eee676aed51ab7a8555673f5d26be01065ba`.
+Fresh p4 verification reported `retired`, compliant, zero blockers, and digest
+`862cdb077448351ba3c9c4bba3ec2c72d558411244be40a178740b9f7f3df498`;
+full runtime verification reported `reduced`, compliant, zero blockers, and
+digest `9f7cc4bae03325f8969a37d3cfdda8d74b487288f3334801f9853ef77fe6fb043`
+on pinned server UUID `d1e6865c-ecad-11ee-a6b0-42010a400002`. A fresh runtime
+connection could read `users.user_id`, received
+`ER_COLUMNACCESS_DENIED_ERROR` for `users.p4_score`, and remained denied access
+to `schema_migrations`. The public catalog, generic and legacy p4 leaderboards,
+empty Three Bosses leaderboard, authentication state, unknown-game path, both
+submission freezes, no-store headers, and no-cookie/no-redirect constraints all
+passed; the five p4 rows still had minimum 190, maximum 410, and sum 1350.
+
+Temporary-user operations `2fffed86-890b-49d4-9869-e1f900000032` and
+`3df1c523-bcbe-4d07-b0b2-d1e300000032` completed successfully. The deleted
+credential then failed with `ER_ACCESS_DENIED_ERROR`, the final user list
+contained only `cms_mickeyf` and `root`, and no Cloud SQL operation or build was
+unfinished. Cloud Run remained at generation 121 with 100% traffic on
+`mickeyf-org-freeze-d5aee625983b4dafa90d0db9898341e8`; both submission flags
+remained false. `users.p4_score` itself was not modified or removed. Exactly one
+retirement checkpoint remains: final reconciliation/reference audit, a fresh
+named backup with recovery evidence, the immutable column drop, and post-drop
+schema/runtime/API verification. Submission enablement is a separate later
+decision.
 
 This evidence satisfied the metadata gate for the exact SQL and isolated local
 migration tests completed on 2026-08-25. That preflight did not by itself
@@ -844,8 +869,10 @@ legacy reader.
     build `02eb1328-8b12-4b3b-bb0c-c9ef79f4a3a9`. Generation 121 promotion, the
     315-second frozen dual-writer drain, repeated zero old-revision request-log
     checks, two zero-transaction samples, exact final reconciliation, and
-    temporary-identity cleanup also completed on 2026-08-26. Grant retirement
-    and submission enablement remain pending.**
+    temporary-identity cleanup also completed on 2026-08-26. Exact grant
+    retirement, runtime SQL probes, public smoke tests, and second temporary-
+    identity cleanup completed later the same day. Submission enablement remains
+    pending.**
 13. Revoke operational authorization for further legacy backfills, retire exact
     legacy equality as a cutover gate, verify the generic-authoritative rollback
     candidate, and only then deploy an explicitly approved revision with the

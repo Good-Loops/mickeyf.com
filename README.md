@@ -383,12 +383,12 @@ database-scoped per-user advisory lock, so the generic-only manifest grants no
 `UPDATE` on `users` and no access to `p4_score`.
 
 The separately approved production reduction completed on 2026-08-26 using the
-previous transitional manifest: `cms_mickeyf@%` has no database role but still
-has the two narrow `p4_score` column grants retained only to keep the retired
-frozen dual writer rollback-compatible. The local generic-only manifest still
-treats those grants as unexpected and fails closed. The separate exact
-retirement workflow is implemented and locally verified, but has not been run
-against production.
+previous transitional manifest. The subsequent exact grant retirement also
+completed on 2026-08-26: `cms_mickeyf@%` now has no database role and exactly the
+generic-only source manifest, with no `p4_score` access. Fresh runtime probes
+proved ordinary `users` access still works while `p4_score` and migration
+history are denied. The retired frozen dual writer is therefore no longer a
+valid rollback target.
 
 The frozen generic-only revision
 `mickeyf-org-freeze-d5aee625983b4dafa90d0db9898341e8` was deployed and fully
@@ -402,9 +402,11 @@ two delayed old-revision log reads found zero requests after the traffic
 observation, two runtime transaction samples were zero, and final reconciliation
 again matched all five p4-Vega rows with no discrepancy. The temporary
 maintenance user was deleted and negative authentication verified. The two
-legacy `p4_score` column grants and `users.p4_score` itself remain unchanged;
-grant retirement, submission enablement, and column removal have not run. Exact
-evidence is recorded in
+legacy `p4_score` column grants have since been retired; `users.p4_score` itself
+remains unchanged. One `p4_score` retirement checkpoint remains: final
+reconciliation/reference audit, fresh backup and recovery evidence, immutable
+column drop, and post-drop verification. Submission enablement is a separate
+later decision. Exact evidence is recorded in
 [`backend/LEADERBOARD_DESIGN.md`](backend/LEADERBOARD_DESIGN.md).
 
 The p4-Vega backfill verifies the exact applied schema and legacy source,

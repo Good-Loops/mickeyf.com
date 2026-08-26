@@ -172,9 +172,7 @@ and both leaderboard repositories, and proves a direct user-row locking read is
 denied. Repository concurrency and rollback tests still pass. At that local
 checkpoint, production remained on the frozen dual writer with its older
 transitional `p4_score` grants. The later generic-only traffic cutover is
-recorded below; those grants still remain and their retirement requires the
-separately reviewed exact revoke operation or equivalent verified maintenance
-procedure.
+recorded below, followed by the separately reviewed exact grant retirement.
 
 The transitional p4-Vega write path was implemented and verified locally on
 2026-08-25. That candidate updated `users.p4_score` and
@@ -352,8 +350,8 @@ behavior, and numeric historical scores remain compatible. The additive schema,
 enabled dual-writer deployment, repeatable backfill, production freeze, and
 every drain and exact reconciliation required for the frozen generic-only
 traffic cutover are complete. Production `users.p4_score` remains present; its
-grant retirement and later immutable column removal remain incomplete. The
-multi-game frontend is recorded below.
+runtime grants are retired, while the later immutable column removal remains
+incomplete. The multi-game frontend is recorded below.
 
 The additive backend catalog and per-game routes were implemented and verified
 on 2026-08-26. The catalog is projected from server-owned definitions;
@@ -369,8 +367,7 @@ isolated-MySQL tests. Rank remains `UNRANKED`. These routes have not been
 enabled for Three Bosses production writes: the routes are present in the
 serving frozen generic-only revision, but
 `THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=false` remains enforced. They do not
-replace the remaining p4 grant-retirement, submission-enablement, or
-column-removal gates.
+replace the remaining submission-enablement or column-removal gates.
 
 The credential-safe browser submission client and Unity host bridge were
 committed at `c4349f7c`. Unity will later send only its canonical run ID and
@@ -396,19 +393,25 @@ present or both absent, invokes one exact atomic revoke, and treats an uncertain
 result as indeterminate. MySQL applies direct table- and column-privilege changes
 on an existing client's next request; the disposable integration test proves
 that behavior across an open runtime connection, so this operation needs no
-traffic drain or runtime-pool recycle. It has not been run on production: the
-runtime account still has `p4_score` `SELECT` and `UPDATE`, and `users.p4_score`
-remains unchanged. The next rollout step must separately approve exact
-legacy-column grant retirement and verify the runtime identity against the
-source manifest.
-Only after that evidence may a separately approved enabled generic revision
-accept scores. The retired frozen dual writer remains a valid rollback target
-only until those grants are retired; after that boundary, rollback must use a
-generic-authoritative compatible revision or a forward fix. Once generic-only
-submissions start, legitimate improvements make exact equality with the stale
-legacy column impossible. After every code, job, tool, grant, and rollback
-reference is removed, a new immutable migration may drop `users.p4_score` under
-separate production approval. The initial additive migrations remain unchanged.
+traffic drain or runtime-pool recycle. The production apply completed on
+2026-08-26 from exact ready-plan digest
+`34096d0896b45d4cc827ad71d0a5eee676aed51ab7a8555673f5d26be01065ba`.
+Fresh p4-retirement verification recorded retired/compliant digest
+`862cdb077448351ba3c9c4bba3ec2c72d558411244be40a178740b9f7f3df498`,
+and full source-manifest verification recorded reduced/compliant digest
+`9f7cc4bae03325f8969a37d3cfdda8d74b487288f3334801f9853ef77fe6fb043`.
+The runtime identity can read ordinary `users` columns but receives
+`ER_COLUMNACCESS_DENIED_ERROR` for `p4_score`; public leaderboard and
+submission-freeze smoke tests passed. `users.p4_score` remains unchanged. Only
+after this evidence may a separately approved enabled generic revision
+accept scores. The retired frozen dual writer was a valid rollback target only
+until those grants were retired; that boundary has now passed, so rollback must
+use a generic-authoritative compatible revision or a forward fix. Exactly one
+`p4_score` retirement checkpoint remains: final reconciliation and reference
+audit, a fresh named backup with recovery evidence, the immutable column drop,
+and post-drop schema/runtime/API verification. Submission enablement is a
+separate later decision, not another prerequisite for the drop. The initial
+additive migrations remain unchanged.
 
 The frozen generic-only candidate source was locally frozen and reviewed on
 2026-08-26 at exact commit
