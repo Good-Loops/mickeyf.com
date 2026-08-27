@@ -28,6 +28,8 @@ html {
 }
 
 body {
+    color: $white;
+    background-color: $space-background;
     background-image: $page-bg-gradient;
 }
 
@@ -59,11 +61,11 @@ a {
 }
 
 ::-webkit-scrollbar-thumb {
-    background: $page-bg-gradient;
+    background: linear-gradient(to bottom, rgba($primary, .72), rgba($tertiary, .62));
     border-radius: 100vw;
 }
 
 ::-webkit-scrollbar-track {
-    background: $page-bg-gradient;
+    background: $space-background;
 }
 

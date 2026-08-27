@@ -10,6 +10,16 @@ $secondary-light: hsl(120, 73%, 90%);
 $tertiary: hsl(174, 72%, 55%);
 
 $space-blue: hsl(255, 100%, 10%);
+$space-background: hsl(225, 55%, 4%);
+$space-background-soft: hsl(221, 52%, 8%);
+$space-background-green: hsl(196, 48%, 5%);
+
+$space-star-blue: rgba($primary-light, .9);
+$space-star-green: rgba($secondary-light, .82);
+$space-star-white: rgba(white, .72);
+$space-nebula-blue: rgba($primary-dark, .13);
+$space-nebula-green: rgba($secondary, .1);
+$space-nebula-cyan: rgba($tertiary, .07);
 
 $white: hsl(240, 67%, 95%);
 $white-darker: hsl(240, 67%, 90%);
@@ -17,6 +27,14 @@ $white-darker: hsl(240, 67%, 90%);
 $gray: hsl(0, 0%, 30%);
 $gray-light: hsl(0, 0%, 80%);
 
-$page-bg-gradient: linear-gradient(to bottom right, $primary-dark 30%, $secondary 90%);
+$page-bg-gradient:
+    radial-gradient(circle at 16% 12%, rgba($primary-dark, .08), transparent 36%),
+    radial-gradient(circle at 84% 78%, rgba($secondary, .055), transparent 38%),
+    linear-gradient(
+        145deg,
+        $space-background 0%,
+        $space-background-soft 54%,
+        $space-background-green 100%
+    );
 $component-bg-gradient: linear-gradient(to top left, rgba($primary, .5) 35%, rgba($secondary, .5) 70%);
 $sidebar-bg-gradient: linear-gradient(to top left, rgba($primary, .8) 35%, rgba($secondary, .8) 70%);

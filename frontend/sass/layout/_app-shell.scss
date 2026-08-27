@@ -1,0 +1,66 @@
+@use '../abstracts' as *;
+
+.app-shell {
+    position: relative;
+    isolation: isolate;
+
+    min-height: 100svh;
+
+    &::before,
+    &::after {
+        content: '';
+
+        position: fixed;
+        inset: -12vmax;
+        z-index: -1;
+
+        pointer-events: none;
+    }
+
+    // Three sparse, differently sized fields avoid an obvious repeating grid.
+    &::before {
+        background-image:
+            radial-gradient(circle, $space-star-blue 0 .08rem, transparent .13rem),
+            radial-gradient(circle, $space-star-green 0 .07rem, transparent .12rem),
+            radial-gradient(circle, $space-star-white 0 .055rem, transparent .1rem);
+        background-position:
+            2rem 3rem,
+            9rem 13rem,
+            21rem 7rem;
+        background-size:
+            17rem 17rem,
+            29rem 29rem,
+            43rem 43rem;
+        opacity: .56;
+
+        animation:
+            space-stars-drift 120s linear infinite,
+            space-stars-breathe 10s ease-in-out infinite alternate;
+    }
+
+    // Radial gradients provide soft nebulas without a costly animated blur.
+    &::after {
+        background:
+            radial-gradient(ellipse at 18% 32%, $space-nebula-blue 0%, transparent 48%),
+            radial-gradient(ellipse at 78% 68%, $space-nebula-green 0%, transparent 46%),
+            radial-gradient(ellipse at 62% 18%, $space-nebula-cyan 0%, transparent 40%);
+        opacity: .72;
+
+        animation: space-nebula-drift 80s ease-in-out infinite alternate;
+    }
+}
+
+// Canvas routes already run PIXI or Unity. Keep the lightweight star drift, but
+// release the larger nebula layer from continuous compositing behind the game.
+body:has(canvas) .app-shell::after {
+    animation: none;
+    transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .app-shell::before,
+    .app-shell::after {
+        animation: none;
+        transform: none;
+    }
+}

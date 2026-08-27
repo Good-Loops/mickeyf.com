@@ -1,5 +1,35 @@
 @use '../abstracts' as *;
 
+@keyframes space-stars-drift {
+    from {
+        transform: translate3d(0, 0, 0);
+    }
+
+    to {
+        transform: translate3d(-4rem, 3rem, 0);
+    }
+}
+
+@keyframes space-stars-breathe {
+    from {
+        opacity: .42;
+    }
+
+    to {
+        opacity: .68;
+    }
+}
+
+@keyframes space-nebula-drift {
+    from {
+        transform: translate3d(-2.5vmax, 1.5vmax, 0) scale(1.02);
+    }
+
+    to {
+        transform: translate3d(2.5vmax, -1.5vmax, 0) scale(1.06);
+    }
+}
+
 @keyframes float {
     0% {
         transform: translateY(0px);

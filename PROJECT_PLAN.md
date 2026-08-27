@@ -638,10 +638,31 @@ The design must include:
 Do not assume that scores from different games have the same meaning or can be
 ranked together.
 
-## Phase 14 — Site information architecture, feedback, responsiveness, and literal-dark redesign (deferred)
+## Phase 14 — Site information architecture, feedback, responsiveness, and literal-dark redesign
 
-After the current leaderboard and migration work, redesign the header's
-information architecture as a separate site-wide task:
+**Active on `feature/site-redesign`.** Preserve the existing Sass architecture,
+sparse compositions, generous whitespace, Space Mono/Space Grotesk typography,
+and quiet outlined interactions. Use deep navy/black as the new foundation and
+retain the existing light blue, green, and cyan palette as restrained stars,
+nebulas, borders, and interaction highlights.
+
+Work in this order:
+
+1. Establish the shared animated space background with a static reduced-motion
+   fallback and no additional canvas or GPU renderer. **Implemented and
+   verified on 2026-08-26.**
+2. Redesign Home while preserving its minimal welcome-and-quotes identity.
+3. Continue page by page, including the information-architecture and feedback
+   work below, without globally restyling unfinished pages.
+4. Make the shared shell and ordinary page content responsive last.
+5. Apply a CSS-first responsive display pass to the animation and game canvases
+   while preserving their fixed 16:9 internal worlds. If that expands into
+   dynamic renderer resizing, touch controls, or a large Dancing Fractals panel
+   redesign, defer that subproject and finish Three Bosses scoring plus its
+   production asset/route/bridge publication work before the approved push to
+   `main`. Visual canvas fit and true mobile playability are separate scopes.
+
+The header's information architecture must:
 
 - group Animations, Games, and Leaderboards into an accessible
   **Entertainment** dropdown;
