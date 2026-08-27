@@ -17,6 +17,7 @@ Dockerfile text eol=lf
 *.ts text eol=lf
 *.tsx text eol=lf
 *.scss text eol=lf
+*.svg text eol=lf
 *.md text eol=lf
 /resources/project-structure.txt text eol=lf
 

@@ -1,79 +1,103 @@
 @use '../abstracts' as *;
 
-@keyframes space-stars-far-drift {
+@keyframes space-stars-near-scroll {
     from {
-        opacity: .36;
-        transform: translate3d(-1.2vw, -.8vh, 0) scale(1.02);
+        transform: translate3d(0, 0, 0);
     }
 
     to {
-        opacity: .56;
-        transform: translate3d(1.8vw, 1.4vh, 0) scale(1.045);
+        // Equal to the repeated tile size, so the final frame is the first.
+        transform: translate3d(73rem, 73rem, 0);
     }
 }
 
-@keyframes space-stars-near-drift {
-    from {
-        opacity: .48;
-        transform: translate3d(1.1vw, 1.5vh, 0) scale(1.015);
+@keyframes space-nebula-loop {
+    0%,
+    100% {
+        opacity: .72;
+        transform: translate3d(-2vw, 1vh, 0) scale(1.03);
     }
 
-    to {
-        opacity: .78;
-        transform: translate3d(-1.7vw, -1.1vh, 0) scale(1.04);
-    }
-}
-
-@keyframes space-nebula-drift {
-    from {
-        opacity: .7;
-        transform: translate3d(-2.8vw, 1.8vh, 0) scale(1.025);
-    }
-
-    to {
+    33% {
         opacity: .94;
-        transform: translate3d(3vw, -2.2vh, 0) scale(1.075);
+        transform: translate3d(2.4vw, -1.5vh, 0) scale(1.075);
+    }
+
+    66% {
+        opacity: .82;
+        transform: translate3d(.8vw, 2vh, 0) scale(1.045);
     }
 }
 
-@keyframes space-galaxy-drift {
+@keyframes space-galaxy-float {
+    0%,
+    100% {
+        opacity: .28;
+        transform: translate3d(0, 0, 0) scale(.96);
+    }
+
+    50% {
+        opacity: .52;
+        transform: translate3d(1vw, -.8vh, 0) scale(1.06);
+    }
+}
+
+@keyframes space-celestial-spin {
     from {
-        opacity: .34;
-        transform: translate3d(-1.2vw, 1vh, 0) rotate(-18deg) scale(.94);
+        transform: rotate(0deg);
     }
 
     to {
-        opacity: .58;
-        transform: translate3d(1.8vw, -1.4vh, 0) rotate(-5deg) scale(1.06);
+        transform: rotate(360deg);
     }
 }
 
 @keyframes space-galaxy-core {
-    from {
-        opacity: .5;
-        transform: translate(-50%, -50%) scale(.82);
-    }
-
-    to {
-        opacity: .95;
-        transform: translate(-50%, -50%) scale(1.18);
-    }
-}
-
-@keyframes space-quasar-drift {
-    0% {
-        opacity: .48;
-        transform: translate3d(-1vw, .6vh, 0) rotate(12deg) scale(.9);
+    0%,
+    100% {
+        opacity: .42;
+        transform: translate(-50%, -50%) scale(.78);
     }
 
     50% {
         opacity: .92;
-        transform: translate3d(.5vw, -.8vh, 0) rotate(15deg) scale(1.12);
+        transform: translate(-50%, -50%) scale(1.24);
+    }
+}
+
+@keyframes space-quasar-loop {
+    0%,
+    100% {
+        opacity: .38;
+        transform: translate3d(0, 0, 0) rotate(0deg) scale(.94);
     }
 
-    100% {
+    25% {
         opacity: .58;
-        transform: translate3d(1.4vw, .3vh, 0) rotate(11deg) scale(.96);
+        transform: translate3d(.7vw, -.5vh, 0) rotate(1.2deg) scale(1.02);
+    }
+
+    50% {
+        opacity: .76;
+        transform: translate3d(0, -1vh, 0) rotate(0deg) scale(1.08);
+    }
+
+    75% {
+        opacity: .56;
+        transform: translate3d(-.7vw, -.4vh, 0) rotate(-1.2deg) scale(1.01);
+    }
+}
+
+@keyframes space-quasar-core {
+    0%,
+    100% {
+        opacity: .55;
+        transform: translate(-50%, -50%) scale(.72);
+    }
+
+    50% {
+        opacity: 1;
+        transform: translate(-50%, -50%) scale(1.35);
     }
 }
 
