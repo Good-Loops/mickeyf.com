@@ -650,8 +650,9 @@ Work in this order:
 
 1. Establish the shared animated space background with a static reduced-motion
    fallback and no additional canvas or GPU renderer. Its refined version uses
-   seeded star atlases, generated galaxy/quasar textures, mathematically closed
-   animation loops, restrained nebulas, and shared dark surface colors.
+   seeded star atlases, distinct transparent illustrated galaxy and pixel-quasar
+   sprites, mathematically closed animation loops, restrained nebulas, and
+   shared dark surface colors.
    **Implemented and verified on 2026-08-26.**
 2. Redesign Home while preserving its minimal welcome-and-quotes identity.
 3. Continue page by page, including the information-architecture and feedback

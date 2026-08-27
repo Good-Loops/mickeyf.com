@@ -32,59 +32,54 @@
 @keyframes space-galaxy-float {
     0%,
     100% {
-        opacity: .28;
-        transform: translate3d(0, 0, 0) scale(.96);
+        opacity: .38;
+        transform: translate3d(0, 0, 0) scale(.985);
     }
 
-    50% {
-        opacity: .52;
-        transform: translate3d(1vw, -.8vh, 0) scale(1.06);
-    }
-}
-
-@keyframes space-celestial-spin {
-    from {
-        transform: rotate(0deg);
+    38% {
+        opacity: .54;
+        transform: translate3d(.55vw, -.45vh, 0) scale(1.015);
     }
 
-    to {
-        transform: rotate(360deg);
+    72% {
+        opacity: .46;
+        transform: translate3d(-.4vw, .3vh, 0) scale(.995);
     }
 }
 
 @keyframes space-galaxy-core {
     0%,
     100% {
-        opacity: .42;
-        transform: translate(-50%, -50%) scale(.78);
+        opacity: .24;
+        transform: translate(-50%, -50%) scale(.88);
     }
 
     50% {
-        opacity: .92;
-        transform: translate(-50%, -50%) scale(1.24);
+        opacity: .58;
+        transform: translate(-50%, -50%) scale(1.16);
     }
 }
 
 @keyframes space-quasar-loop {
     0%,
     100% {
-        opacity: .38;
-        transform: translate3d(0, 0, 0) rotate(0deg) scale(.94);
+        opacity: .46;
+        transform: translate3d(0, 0, 0) scale(.98);
     }
 
     25% {
-        opacity: .58;
-        transform: translate3d(.7vw, -.5vh, 0) rotate(1.2deg) scale(1.02);
+        opacity: .57;
+        transform: translate3d(.32vw, -.28vh, 0) scale(1.015);
     }
 
     50% {
-        opacity: .76;
-        transform: translate3d(0, -1vh, 0) rotate(0deg) scale(1.08);
+        opacity: .68;
+        transform: translate3d(0, -.55vh, 0) scale(1.035);
     }
 
     75% {
-        opacity: .56;
-        transform: translate3d(-.7vw, -.4vh, 0) rotate(-1.2deg) scale(1.01);
+        opacity: .55;
+        transform: translate3d(-.32vw, -.22vh, 0) scale(1.01);
     }
 }
 

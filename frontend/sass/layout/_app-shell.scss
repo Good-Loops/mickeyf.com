@@ -69,12 +69,12 @@
     &__galaxy {
         position: absolute;
 
-        width: clamp(24rem, 32vw, 54rem);
-        aspect-ratio: 1.5;
+        width: clamp(14rem, 20vw, 27rem);
+        aspect-ratio: 720 / 528;
 
-        opacity: .4;
+        opacity: .46;
 
-        animation: space-galaxy-float 19s ease-in-out infinite;
+        animation: space-galaxy-float 24s ease-in-out infinite;
 
         &::before,
         &::after {
@@ -86,54 +86,49 @@
         }
 
         &::before {
-            inset: -12%;
+            inset: 0;
 
-            background: url('../../ts/assets/backgrounds/galaxy-blue.jpg') center / contain no-repeat;
-            mix-blend-mode: screen;
-            -webkit-mask-image: radial-gradient(ellipse at center, black 0 43%, rgba(0, 0, 0, .82) 57%, transparent 76%);
-            mask-image: radial-gradient(ellipse at center, black 0 43%, rgba(0, 0, 0, .82) 57%, transparent 76%);
-
-            animation: space-celestial-spin 88s linear infinite;
+            background: url('../../ts/assets/backgrounds/galaxy-spiral-illustrated.webp') center / contain no-repeat;
         }
 
         &::after {
             top: 50%;
             left: 50%;
 
-            width: 2.2rem;
+            width: 1.1rem;
             aspect-ratio: 1;
 
             border-radius: 50%;
-            background: radial-gradient(circle, rgba($white, .92), rgba($primary, .5) 28%, transparent 72%);
-            box-shadow: 0 0 3.6rem rgba($primary, .48);
+            background: radial-gradient(circle, rgba($white, .78), rgba($primary, .3) 32%, transparent 72%);
+            box-shadow: 0 0 2.4rem rgba($primary, .32);
+            opacity: .34;
             transform: translate(-50%, -50%);
 
-            animation: space-galaxy-core 5.6s ease-in-out infinite;
+            animation: space-galaxy-core 6.8s ease-in-out infinite;
         }
 
         &--blue {
-            top: 2%;
-            right: -2%;
+            top: 6%;
+            right: 4%;
         }
 
         &--green {
-            bottom: -2%;
-            left: 2%;
+            bottom: 8%;
+            left: 4%;
 
-            width: clamp(20rem, 27vw, 46rem);
+            width: clamp(16rem, 24vw, 33rem);
+            aspect-ratio: 840 / 398;
 
-            animation-delay: -8s;
-            animation-duration: 23s;
+            animation-delay: -11s;
+            animation-duration: 29s;
 
             &::before {
-                filter: hue-rotate(-42deg) saturate(.82);
-                animation-direction: reverse;
-                animation-duration: 112s;
+                background-image: url('../../ts/assets/backgrounds/galaxy-edge-illustrated.webp');
             }
 
             &::after {
-                background: radial-gradient(circle, rgba($white, .88), rgba($secondary, .45) 28%, transparent 72%);
-                box-shadow: 0 0 3.4rem rgba($secondary, .38);
+                background: radial-gradient(circle, rgba($white, .72), rgba($secondary, .26) 32%, transparent 72%);
+                box-shadow: 0 0 2.2rem rgba($secondary, .3);
                 animation-delay: -2.4s;
             }
         }
@@ -141,19 +136,16 @@
 
     &__quasar {
         position: absolute;
-        top: 30%;
-        left: 63%;
+        top: 34%;
+        left: 69%;
 
-        width: clamp(15rem, 19vw, 30rem);
-        aspect-ratio: 1;
+        width: clamp(8rem, 11vw, 15rem);
+        aspect-ratio: 332 / 420;
 
-        background: url('../../ts/assets/backgrounds/quasar-cyan.jpg') center / contain no-repeat;
-        mix-blend-mode: screen;
-        -webkit-mask-image: radial-gradient(circle at center, black 0 54%, rgba(0, 0, 0, .85) 66%, transparent 82%);
-        mask-image: radial-gradient(circle at center, black 0 54%, rgba(0, 0, 0, .85) 66%, transparent 82%);
-        opacity: .58;
+        background: url('../../ts/assets/backgrounds/quasar-pixel.webp') center / contain no-repeat;
+        opacity: .56;
 
-        animation: space-quasar-loop 14s ease-in-out infinite;
+        animation: space-quasar-loop 18s ease-in-out infinite;
 
         &::after {
             content: '';
@@ -162,17 +154,18 @@
             top: 50%;
             left: 50%;
 
-            width: 2rem;
+            width: 1.1rem;
             aspect-ratio: 1;
 
             border-radius: 50%;
             background: radial-gradient(circle, $white, rgba($tertiary, .72) 25%, transparent 72%);
             box-shadow:
-                0 0 1.8rem rgba($white, .72),
-                0 0 4.8rem rgba($tertiary, .5);
+                0 0 1.2rem rgba($white, .56),
+                0 0 3.2rem rgba($tertiary, .36);
+            opacity: .58;
             transform: translate(-50%, -50%);
 
-            animation: space-quasar-core 3.8s ease-in-out infinite;
+            animation: space-quasar-core 4.6s ease-in-out infinite;
         }
     }
 }
