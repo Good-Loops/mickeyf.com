@@ -6,8 +6,9 @@ end state in which p4-Vega uses the generic leaderboard storage and the legacy
 `users.p4_score` column was retired after a verified cutover. The additive
 production schema and an initial p4-Vega data seed were applied and verified on
 2026-08-26. The exact frozen generic-only revision now serves 100% of
-production traffic, and the exact legacy column grants are retired. The frozen
-dual writer is therefore no longer a valid rollback target. This document
+production traffic, and a verified p4-enabled candidate waits at zero traffic.
+The exact legacy column grants are retired. The frozen dual writer is therefore
+no longer a valid rollback target. This document
 records the completed traffic cutover, grant retirement, and checksum-recorded
 column removal. It does not authorize submission enablement or another
 production mutation.
@@ -18,7 +19,7 @@ post-drain backfill and frozen generic-only cutover reconciliations all match th
 same five p4-Vega personal bests exactly; `game_runs` is empty and
 `users.p4_score` has been removed. The
 frozen generic-only revision serves 100% of production traffic, and the drained
-dual writer has zero traffic.
+dual writer has zero traffic. The p4-enabled candidate also has zero traffic.
 
 The transitional p4-Vega dual-write repository was implemented and verified
 locally on 2026-08-25 with unit, rollback, and concurrent MySQL 8.0.31 tests.
@@ -162,8 +163,8 @@ It now serves in the frozen generic-only production revision. The additive
 schema, enabled dual-writer rollout, frozen dual-writer promotion, and
 generic-only deployment are complete, along with every drain and exact
 reconciliation required for the frozen generic-only traffic cutover.
-Legacy-column grant retirement is also complete; submission enablement and
-column removal remain later separately approved steps. The multi-game frontend
+Legacy-column grant retirement and column removal are also complete. Submission
+enablement remains a later separately approved step. The multi-game frontend
 slice is recorded below.
 
 The exact frozen generic-only candidate source was reviewed on 2026-08-26 at
@@ -202,18 +203,17 @@ at generation 118 with 100% traffic on the frozen dual-writer revision, and no
 revision, traffic, database, grant, trigger, or IAM mutation was requested or
 executed.
 
-The exact source-less one-shot package is tracked as
-`cloudbuild.generic-only.deploy.json`. Its initial reviewed form had SHA-256
+The exact source-less one-shot package's initial reviewed form had SHA-256
 `8afde577fbefe781ed0a0c428f04dad40a5b8f8d147f22f01ccbae86bb9a5bf4`, but Cloud
 Build deferred template validation until approval and then rejected ordinary
 Bash `$VARIABLE` references. Pending build
 `4b6b5c99-e950-4436-a009-4744b77aea8f` never started and was cancelled; its
-temporary trigger was deleted. The package now uses Cloud Build's required `$$`
+temporary trigger was deleted. The corrected package used Cloud Build's required `$$`
 literal-dollar escape. Decoding that escape produces the exact original runtime
-commands, and a regression test enforces paired dollars. The corrected package
+commands, and a regression test enforced paired dollars. The corrected package
 SHA-256 is
-`a5cd6534c766ecfb9dd9f8440a5c8a7ef709828ee7281ed122ea4952a7c4936d`, and all
-eight contract tests pass.
+`a5cd6534c766ecfb9dd9f8440a5c8a7ef709828ee7281ed122ea4952a7c4936d`; all eight
+contract tests passed.
 
 With explicit approval, corrected source-less build
 `02eb1328-8b12-4b3b-bb0c-c9ef79f4a3a9` ran all eight pinned validation,
@@ -230,6 +230,9 @@ and identical legacy/generic p4 rows. Production remained 100% on
 tag and one-use trigger were deleted immediately; final generation 120 has no
 tag or ongoing build. No traffic promotion, database, migration, grant, IAM, or
 submission-state change occurred.
+
+The one-shot package was deleted from current source after it completed; its
+immutable Cloud Build record and Git history retain the deployment evidence.
 
 ## Completed frozen generic-only traffic cutover
 
@@ -629,25 +632,11 @@ privilege, grant/admin option, role, proxy edge, account flag, server version,
 or metadata gap blocks with no operation; the workflow does not act as a
 general privilege cleaner.
 
-The separate `runtime-grants:p4-retirement:plan`, `:verify`, and `:apply`
-commands handle only the final two legacy column grants. A plan is actionable
-only when the account has no role and its direct privileges are exactly the
-generic-only manifest plus non-grantable `SELECT (p4_score)` and
-`UPDATE (p4_score)` on `users`; the already-retired exact manifest is an
-idempotent no-op. Any partial pair or unrelated drift blocks with no operation.
-Apply binds the deterministic plan digest and pinned server UUID, requires the
-exact Cloud SQL and frozen generic-only confirmations, and invokes one exact
-combined `REVOKE` without `IF EXISTS`. It then performs a fresh complete metadata
-inspection. MySQL applies direct table- and column-privilege changes on an
-existing client's next request, so this exact revoke requires neither a traffic
-drain nor a runtime-pool recycle. The disposable MySQL 8.0.31 test keeps a
-runtime session open across the revoke and proves loss of `p4_score` access on
-its next request, continued ordinary `users` access, final manifest compliance,
-and repeat-apply idempotency. See MySQL's
-[privilege-change semantics](https://dev.mysql.com/doc/mysql-security-excerpt/8.0/en/privilege-changes.html).
-Invocation or post-write verification uncertainty is reported as indeterminate,
-never silently retried. This tooling was not run against production when
-committed.
+The final two legacy column grants were retired through a separate, exact,
+plan-bound one-time path. After the successful production operation and column
+drop, that p4-specific implementation and its tests were removed. The generic
+runtime-grant workflow remains and verifies the current least-privilege
+manifest without any `p4_score` access.
 
 An approved apply first proves effective `PROCESS` access and zero open
 `cms_mickeyf` sessions, before any grant write. It grants and proves the complete
@@ -747,6 +736,13 @@ both p4 APIs retained the same five scores. The temporary maintenance account
 was deleted and then failed authentication, the Cloud SQL user list again
 contained only `cms_mickeyf` and `root`, and no build or Cloud SQL operation was
 unfinished. Submission enablement remains a separate product decision.
+
+An enabled p4-Vega candidate, `mickeyf-org-p4-enabled-d5aee625`, was then
+created at zero traffic from the exact verified digest. Read smoke tests passed,
+anonymous p4 submission reached authentication with HTTP 401, and Three Bosses
+submission remained disabled with HTTP 403. Its temporary tag was removed;
+generation 123 still routes 100% to the frozen generic-only revision. No
+production write or database mutation occurred.
 
 This evidence satisfied the metadata gate for the exact SQL and isolated local
 migration tests completed on 2026-08-25. That preflight did not by itself
@@ -931,7 +927,8 @@ only serialization mechanism.
 
 - Before generic traffic, an explicit `rollback-empty` operation was available
   only after taking write locks and proving both domain tables empty. It was
-  retired once production contained durable leaderboard data.
+  retired, and its implementation removed, once production contained durable
+  leaderboard data.
 - During dual writes, application code may roll back to the last compatible
   dual-write revision while preserving both domain tables. Once the freeze gate
   enters the rollout, rollback must preserve the required gate state and must

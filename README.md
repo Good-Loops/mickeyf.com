@@ -270,9 +270,6 @@ Runtime-account privilege reduction has its own fail-closed workflow:
 npm --prefix backend run runtime-grants:plan
 npm --prefix backend run runtime-grants:verify
 npm --prefix backend run runtime-grants:apply
-npm --prefix backend run runtime-grants:p4-retirement:plan
-npm --prefix backend run runtime-grants:p4-retirement:verify
-npm --prefix backend run runtime-grants:p4-retirement:apply
 ```
 
 `plan` inventories every direct privilege channel, the runtime account's lock,
@@ -305,30 +302,6 @@ before proving the final metadata. It never uses `REVOKE ALL`, removes an
 unknown role, alters the shared role, changes a
 password, or kills a session. Cloud SQL documents the zero-role replacement in
 its [database-role procedure](https://docs.cloud.google.com/sql/docs/mysql/create-manage-users#replace_database_roles_for_an_existing_user).
-
-The three `p4-retirement` commands are a separate one-time path, not a general
-privilege cleaner. Their plan accepts only the exact generic-only manifest plus
-both non-grantable `users.p4_score` `SELECT` and `UPDATE` grants (`ready`), or
-the exact manifest with both grants absent (`retired`). A partial pair, a grant
-option, any other privilege, a role, or a missing final grant blocks with no
-SQL. `verify` exits 0 only for `retired`; drift exits 2. `apply` additionally
-requires the fixed Cloud SQL target, the frozen generic-only serving
-confirmation `MIGRATION_CONFIRM_GENERIC_ONLY_FROZEN=1`, the literal
-`MIGRATION_CONFIRM_P4_GRANT_RETIREMENT="users.p4_score SELECT,UPDATE -> no runtime access"`,
-the retirement plan SHA-256 in
-`MIGRATION_CONFIRM_P4_GRANT_RETIREMENT_PLAN_SHA256`, the pinned server UUID, and
-`MIGRATION_ALLOW_P4_GRANT_RETIREMENT=1`. It locks the same account workflow,
-runs one exact `REVOKE SELECT (p4_score), UPDATE (p4_score)` statement without
-`IF EXISTS`, and requires a fresh exact metadata verification. MySQL applies
-table- and column-privilege changes on an existing client's next request, so
-this direct revoke does not require a traffic drain or application-pool recycle;
-the disposable integration test keeps a runtime connection open across the
-revoke and proves that its next `p4_score` request is denied while ordinary
-`users` access remains available. See MySQL's
-[privilege-change semantics](https://dev.mysql.com/doc/mysql-security-excerpt/8.0/en/privilege-changes.html).
-A connection loss after invocation is indeterminate and requires a new plan and
-verification before any retry. Adding this local tool did not execute it or
-change production.
 
 MySQL privilege and role changes are not one transaction. A failed run can
 therefore leave the safe prepared state: the direct grants installed, the
@@ -369,10 +342,9 @@ in [`backend/LEADERBOARD_DESIGN.md`](backend/LEADERBOARD_DESIGN.md):
    the separately gated monotonic backfill and aggregate reconciliation.
 5. For cutover, freeze submissions, drain in-flight dual writers, reconcile,
    deploy the generic-only writer still frozen, drain again, and reconcile
-   again. Then separately approve and run
-   `runtime-grants:p4-retirement:apply`, recycle runtime sessions, run
-   `runtime-grants:p4-retirement:verify`, verify the generic-only manifest, and
-   only then enable generic submissions.
+   again. Then retire the two legacy column grants, verify the generic-only
+   manifest, and only then enable generic submissions. This one-time grant step
+   completed on 2026-08-26 and its dedicated operator commands were removed.
 6. Clear credentials and close the proxy. Drop and prove absence of an ephemeral
    maintenance account; if it is intentionally persistent, rotate and govern it
    as an administrator. Keep `users.p4_score` until its separately approved
@@ -418,6 +390,12 @@ identity was deleted. Submission enablement is a separate later decision.
 Exact evidence is recorded in
 [`backend/LEADERBOARD_DESIGN.md`](backend/LEADERBOARD_DESIGN.md).
 
+An enabled p4-Vega candidate, `mickeyf-org-p4-enabled-d5aee625`, was then
+created at zero traffic from the same verified image digest. Its anonymous
+submission probe reached authentication with HTTP 401, while Three Bosses
+remained disabled with HTTP 403. The temporary tag was removed and production
+continues to route 100% to the frozen generic-only revision.
+
 The mutating backfill and its operator command were retired after the legacy
 column removal. The identity-free, read-only reconciliation remains because a
 drop plan replayed against the fresh pre-drop backup must prove exact equality
@@ -425,8 +403,8 @@ before DDL. The completed cutover treated each reconciliation as one database
 snapshot and separately recorded the Cloud Run drain, in-flight request wait,
 authenticated proxy target, and pinned Cloud SQL server UUID.
 
-The old empty-schema rollback command was also retired once the production
-leaderboard tables contained durable data.
+The old empty-schema rollback and the one-time p4 grant-retirement
+implementations were removed once their production-only jobs were complete.
 
 ## Developer tooling
 

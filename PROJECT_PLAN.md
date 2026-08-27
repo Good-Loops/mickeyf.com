@@ -61,8 +61,9 @@ and literal-dark redesign is complete and separately approved.
 
 ### Step 13.1 — multi-game contract and migration design
 
-**Storage migration completed on 2026-08-26; frontend integration remains in
-progress.** Approved by Mike and live-schema-preflighted on 2026-08-24. The
+**Storage migration and feature-branch frontend integration completed on
+2026-08-26; p4-Vega submission activation remains.** Approved by Mike and
+live-schema-preflighted on 2026-08-24. The
 server-owned contract uses stable
 `p4-vega` and `three-bosses` identifiers. p4-Vega remains score-descending on
 its unchanged legacy endpoint. Three Bosses is completion-time-ascending but
@@ -173,6 +174,24 @@ same five p4-Vega rows, Three Bosses remains empty, both submission paths remain
 closed, and the temporary maintenance identity was deleted. Because deferred
 `main` still contains the legacy writer, its automatic build trigger is disabled
 and must remain disabled until `main` becomes schema-compatible.
+
+A zero-traffic p4-enabled candidate, `mickeyf-org-p4-enabled-d5aee625`, now uses
+the same verified digest as the frozen production revision, with p4-Vega enabled
+and Three Bosses disabled. Its catalog and leaderboard reads passed; anonymous
+p4 submission reached the authentication boundary with HTTP 401, and Three
+Bosses submission remained HTTP 403. The temporary tag was removed. Cloud Run
+generation 123 still routes 100% to the frozen revision, so no live write or
+database mutation occurred.
+
+Post-cutover cleanup removed the completed one-shot deployment package, the
+one-time p4 grant-retirement implementation and tests, and the obsolete
+empty-schema rollback. The immutable migrations, migration-0003 replay and
+recovery path, generic runtime-grant workflow, and read-only reconciliation
+remain. The frontend and Unity audit found no obsolete whole file; the dormant
+Three Bosses submission bridge remains intentionally ready for its future Unity
+connection. Pushing this branch to `main` would trigger the unrelated live
+Firebase release, so it does not shorten this isolated backend activation and
+remains deferred.
 
 The local generic-only grant contract was completed on 2026-08-26. p4-Vega and
 Three Bosses now share one database-scoped advisory lock per authenticated user,
@@ -383,8 +402,9 @@ result receiver, one-source millisecond canonicalization, score/rank parity,
 and Submit Score button activation remain deliberately disconnected until the
 Three Bosses gameplay and ranking release gates are approved.
 
-The exact frozen generic-only revision now serves 100% of production traffic at
-Cloud Run generation 121. The frozen dual writer is Ready but
+The exact frozen generic-only revision first received 100% of production
+traffic at Cloud Run generation 121 and still serves 100% at generation 123.
+The frozen dual writer is Ready but
 `Active=False`, reason `Retired`. Its 315-second drain, two delayed
 revision-specific zero-request log checks, two zero-transaction samples, the
 complete frozen public contract, and baseline/final reconciliation with five
@@ -397,8 +417,8 @@ The exact fail-closed plan/verify/apply path for the old live column grants was
 implemented and verified locally on 2026-08-26; it accepts only both old grants
 present or both absent, invokes one exact atomic revoke, and treats an uncertain
 result as indeterminate. MySQL applies direct table- and column-privilege changes
-on an existing client's next request; the disposable integration test proves
-that behavior across an open runtime connection, so this operation needs no
+on an existing client's next request; the disposable integration test proved
+that behavior across an open runtime connection, so this operation needed no
 traffic drain or runtime-pool recycle. The production apply completed on
 2026-08-26 from exact ready-plan digest
 `34096d0896b45d4cc827ad71d0a5eee676aed51ab7a8555673f5d26be01065ba`.
@@ -456,15 +476,14 @@ Run generation 118 and exactly 100% traffic on the frozen dual-writer revision.
 No revision, traffic, database, privilege, trigger, or IAM mutation was requested
 or executed.
 
-The source-less one-shot deployment package is tracked as
-`cloudbuild.generic-only.deploy.json`. Its initial SHA-256
-`8afde577fbefe781ed0a0c428f04dad40a5b8f8d147f22f01ccbae86bb9a5bf4` was never
-executed: Cloud Build rejected its unescaped Bash dollar references during
-approval-time validation, the pending build was cancelled before starting, and
-the temporary trigger was deleted. The corrected package uses Cloud Build's
-required `$$` escape, has SHA-256
-`a5cd6534c766ecfb9dd9f8440a5c8a7ef709828ee7281ed122ea4952a7c4936d`, and passes
-all eight image/deployment contract tests. Its bounded contract contains no
+The source-less one-shot deployment package's initial SHA-256 was
+`8afde577fbefe781ed0a0c428f04dad40a5b8f8d147f22f01ccbae86bb9a5bf4`. It was
+never executed: Cloud Build rejected its unescaped Bash dollar references
+during approval-time validation, the pending build was cancelled before
+starting, and the temporary trigger was deleted. The corrected package used
+Cloud Build's required `$$` escape, had SHA-256
+`a5cd6534c766ecfb9dd9f8440a5c8a7ef709828ee7281ed122ea4952a7c4936d`, and passed
+all eight image/deployment contract tests. Its bounded contract contained no
 source, build artifacts, available secrets, Slack notification, traffic
 promotion, migration, grant, database, IAM, or trigger mutation step.
 
@@ -479,7 +498,9 @@ only traffic observation at `2026-08-26T22:04:01.9446033Z`. The drain evidence,
 exact reconciliation, and temporary-account cleanup summarized above completed
 without a rollback or any change to the runtime account's grants, schema/data,
 IAM, or submission state. The temporary account lifecycle was the only database-
-account privilege change in this cutover.
+account privilege change in this cutover. The one-shot package was deleted from
+current source after successful execution; its immutable Cloud Build record and
+Git history retain the audit evidence.
 
 The embedded-OpenSSL evidence was separately refreshed. The previously accepted
 and new images use identical Dockerfile blob
