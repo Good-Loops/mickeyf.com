@@ -32,10 +32,6 @@ type ReleaseRow = {
     released: number | null;
 };
 
-type ExistsRow = {
-    hasRows: number;
-};
-
 export type MigrationPlan = Readonly<{
     applied: readonly string[];
     pending: readonly string[];
@@ -328,85 +324,4 @@ async function assertCompleteReviewedMigrationSet(
             'Leaderboard data operation requires the complete reviewed migration set'
         );
     }
-}
-
-export async function rollbackEmptyLeaderboardSchema(
-    connection: MigrationConnection,
-    migrations: readonly MigrationDefinition[],
-    settings: MigrationRunnerSettings
-): Promise<void> {
-    await withMigrationLock(connection, settings, async () => {
-        if (!(await tableExists(connection, 'schema_migrations'))) {
-            throw new Error('Cannot roll back because schema_migrations does not exist');
-        }
-        await verifyHistoryTable(connection);
-        const plan = await inspectMigrationState(connection, migrations, true);
-        if (plan.pending.length > 0 || plan.recoverable.length > 0) {
-            throw new Error('Cannot roll back a partially applied migration set');
-        }
-        const irreversibleMigration = migrations.find(
-            (migration) =>
-                migration.effect === 'drop-column'
-                && plan.applied.includes(migration.version)
-        );
-        if (irreversibleMigration) {
-            throw new Error(
-                `Cannot roll back irreversible migration ${irreversibleMigration.version}`
-            );
-        }
-
-        let tablesLocked = false;
-        let rollbackFailed = false;
-        try {
-            await connection.query(`
-                LOCK TABLES
-                    game_personal_bests WRITE,
-                    game_runs WRITE,
-                    schema_migrations WRITE
-            `);
-            tablesLocked = true;
-
-            // Recheck under the write locks so an out-of-band schema change
-            // cannot slip between the initial inspection and destructive DDL.
-            const lockedPlan = await inspectMigrationState(connection, migrations, true);
-            if (lockedPlan.pending.length > 0 || lockedPlan.recoverable.length > 0) {
-                throw new Error('Cannot roll back a partially applied migration set');
-            }
-
-            const bestRows = await queryRows<ExistsRow>(connection, `
-                SELECT EXISTS(
-                    SELECT 1 FROM game_personal_bests LIMIT 1
-                ) AS hasRows
-            `);
-            const runRows = await queryRows<ExistsRow>(connection, `
-                SELECT EXISTS(
-                    SELECT 1 FROM game_runs LIMIT 1
-                ) AS hasRows
-            `);
-            if (Number(bestRows[0]?.hasRows) !== 0 || Number(runRows[0]?.hasRows) !== 0) {
-                throw new Error(
-                    'Destructive rollback refused because leaderboard tables contain data'
-                );
-            }
-
-            // One MySQL 8 atomic DDL statement closes the count-to-drop race.
-            await connection.query(`
-                DROP TABLE
-                    game_personal_bests,
-                    game_runs,
-                    schema_migrations
-            `);
-        } catch (error) {
-            rollbackFailed = true;
-            throw error;
-        } finally {
-            if (tablesLocked) {
-                try {
-                    await connection.query('UNLOCK TABLES');
-                } catch (unlockError) {
-                    if (!rollbackFailed) throw unlockError;
-                }
-            }
-        }
-    });
 }

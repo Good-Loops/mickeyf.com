@@ -1,11 +1,9 @@
 import mysql, { type Connection, type RowDataPacket } from 'mysql2/promise';
 import {
-    assertP4GrantRetirementCommandConfirmed,
     assertRuntimeGrantCommandConfirmed,
     loadMigrationAccountConfirmation,
     loadMigrationConfig,
     type MigrationConfig,
-    type P4GrantRetirementCommand,
     type RuntimeGrantCommand,
 } from '../config/migrationConfig';
 import {
@@ -16,17 +14,12 @@ import {
     verifyProductionCloudSqlTarget,
 } from './cloudSqlRuntimeRoleRemover';
 import {
-    applyP4GrantRetirement,
     applyRuntimeGrants,
-    P4GrantRetirementDriftError,
-    planP4GrantRetirement,
     planRuntimeGrants,
     RuntimeGrantDriftError,
     RuntimeGrantIndeterminateError,
     type RuntimeGrantConnection,
-    type P4GrantRetirementPlan,
     type RuntimeGrantPlan,
-    verifyP4GrantRetirement,
     verifyRuntimeGrants,
 } from './runtimeGrantOperations';
 import {
@@ -36,18 +29,14 @@ import {
     type RuntimeDatabaseAccount,
 } from './runtimeGrantManifest';
 
-type P4GrantRetirementCliCommand =
-    | 'plan-p4-retirement'
-    | 'verify-p4-retirement'
-    | 'apply-p4-retirement';
-type RuntimeGrantCliCommand = RuntimeGrantCommand | P4GrantRetirementCliCommand;
+type RuntimeGrantCliCommand = RuntimeGrantCommand;
 
 let activeCommand: RuntimeGrantCliCommand | undefined;
 
 function parseCommand(args: readonly string[]): RuntimeGrantCliCommand {
     if (args.length !== 1) {
         throw new Error(
-            'Usage: runRuntimeGrants.ts <plan|verify|apply|plan-p4-retirement|verify-p4-retirement|apply-p4-retirement>'
+            'Usage: runRuntimeGrants.ts <plan|verify|apply>'
         );
     }
     const [command] = args;
@@ -55,29 +44,14 @@ function parseCommand(args: readonly string[]): RuntimeGrantCliCommand {
         command !== 'plan'
         && command !== 'verify'
         && command !== 'apply'
-        && command !== 'plan-p4-retirement'
-        && command !== 'verify-p4-retirement'
-        && command !== 'apply-p4-retirement'
     ) {
         throw new Error('Unknown runtime grant command');
     }
     return command;
 }
 
-function isP4GrantRetirementCommand(
-    command: RuntimeGrantCliCommand
-): command is P4GrantRetirementCliCommand {
-    return command.endsWith('-p4-retirement');
-}
-
-function p4GrantRetirementAction(
-    command: P4GrantRetirementCliCommand
-): P4GrantRetirementCommand {
-    return command.replace(/-p4-retirement$/u, '') as P4GrantRetirementCommand;
-}
-
 function isApplyCommand(command: RuntimeGrantCliCommand): boolean {
-    return command === 'apply' || command === 'apply-p4-retirement';
+    return command === 'apply';
 }
 
 function asRuntimeGrantConnection(connection: Connection): RuntimeGrantConnection {
@@ -157,7 +131,7 @@ async function executeCommand(
     }>,
     maintenanceAccount: RuntimeDatabaseAccount,
     signal: AbortSignal
-): Promise<RuntimeGrantPlan | P4GrantRetirementPlan> {
+): Promise<RuntimeGrantPlan> {
     const settings = {
         database: config.database,
         expectedServerUuid: PRODUCTION_CLOUD_SQL_TARGET.serverUuid,
@@ -169,34 +143,6 @@ async function executeCommand(
         lockWaitTimeoutSeconds: config.lockWaitTimeoutSeconds,
     };
     const runtimeConnection = asRuntimeGrantConnection(connection);
-
-    if (isP4GrantRetirementCommand(command)) {
-        const action = p4GrantRetirementAction(command);
-        if (action === 'plan') {
-            return planP4GrantRetirement(
-                runtimeConnection,
-                settings,
-                PRODUCTION_RUNTIME_DATABASE_ACCOUNT
-            );
-        }
-        if (action === 'verify') {
-            return verifyP4GrantRetirement(
-                runtimeConnection,
-                settings,
-                PRODUCTION_RUNTIME_DATABASE_ACCOUNT
-            );
-        }
-        if (!confirmation.approvedPlanSha256 || !confirmation.confirmedServerUuid) {
-            throw new Error('p4_score grant-retirement apply confirmations were not loaded');
-        }
-        return applyP4GrantRetirement(
-            runtimeConnection,
-            settings,
-            PRODUCTION_RUNTIME_DATABASE_ACCOUNT,
-            confirmation.approvedPlanSha256,
-            confirmation.confirmedServerUuid
-        );
-    }
 
     if (command === 'plan') {
         return planRuntimeGrants(
@@ -245,20 +191,13 @@ async function main(): Promise<void> {
     const maintenanceAccount = parseConfirmedDatabaseAccount(
         confirmedMaintenanceAccount
     );
-    const confirmation = isP4GrantRetirementCommand(command)
-        ? assertP4GrantRetirementCommandConfirmed(
-            p4GrantRetirementAction(command),
-            config,
-            runtimeDatabaseAccountName(PRODUCTION_RUNTIME_DATABASE_ACCOUNT),
-            PRODUCTION_CLOUD_SQL_TARGET
-        )
-        : assertRuntimeGrantCommandConfirmed(
-            command,
-            config,
-            runtimeDatabaseAccountName(PRODUCTION_RUNTIME_DATABASE_ACCOUNT),
-            runtimeDatabaseAccountName(PRODUCTION_RUNTIME_DATABASE_ROLE),
-            PRODUCTION_CLOUD_SQL_TARGET
-        );
+    const confirmation = assertRuntimeGrantCommandConfirmed(
+        command,
+        config,
+        runtimeDatabaseAccountName(PRODUCTION_RUNTIME_DATABASE_ACCOUNT),
+        runtimeDatabaseAccountName(PRODUCTION_RUNTIME_DATABASE_ROLE),
+        PRODUCTION_CLOUD_SQL_TARGET
+    );
     if (isApplyCommand(command)) {
         await verifyProductionCloudSqlTarget(config.operationTimeoutMs);
         await verifyNoCloudSqlOperationsInFlight(config.operationTimeoutMs);
@@ -308,10 +247,7 @@ async function main(): Promise<void> {
 }
 
 main().catch((error: unknown) => {
-    if (
-        error instanceof RuntimeGrantDriftError
-        || error instanceof P4GrantRetirementDriftError
-    ) {
+    if (error instanceof RuntimeGrantDriftError) {
         console.log(JSON.stringify({
             command: activeCommand ?? 'unknown',
             plan: error.plan,
@@ -324,8 +260,5 @@ main().catch((error: unknown) => {
         // Configuration errors are already secret-safe.
     }
     console.error(safeErrorMessage(error, password));
-    process.exitCode = error instanceof RuntimeGrantDriftError
-        || error instanceof P4GrantRetirementDriftError
-        ? 2
-        : 1;
+    process.exitCode = error instanceof RuntimeGrantDriftError ? 2 : 1;
 });

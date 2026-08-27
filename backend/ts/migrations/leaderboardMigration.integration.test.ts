@@ -13,7 +13,6 @@ import {
     applyMigrations,
     migrationLockName,
     planMigrations,
-    rollbackEmptyLeaderboardSchema,
 } from './migrationRunner';
 
 const migrationTestPort = Number(process.env.MIGRATION_TEST_PORT);
@@ -544,126 +543,6 @@ test('0003 refuses a p4_score dependency or wrong source column shape', async ()
         history.map(({ version }) => version),
         additiveMigrations.map(({ version }) => version)
     );
-});
-
-test('full-manifest rollback refuses an applied irreversible 0003', async () => {
-    const migrationConnection = asMigrationConnection(connection);
-    await applyMigrations(migrationConnection, additiveMigrations, config);
-    await applyMigrations(
-        migrationConnection,
-        migrations,
-        config,
-        { allowedEffectKinds: ['drop-column'] }
-    );
-
-    await assert.rejects(
-        () => rollbackEmptyLeaderboardSchema(migrationConnection, migrations, config),
-        new RegExp(`irreversible migration ${p4ScoreDropMigration.version}`)
-    );
-    assert.equal(await tableCount('schema_migrations'), 1);
-    assert.equal(await tableCount('game_runs'), 1);
-    assert.equal(await tableCount('game_personal_bests'), 1);
-    assert.equal(await tableCount('users'), 1);
-    assert.equal(await columnCount('users', 'p4_score'), 0);
-});
-
-test('empty rollback is complete, while any ledger data makes it refuse', async () => {
-    const migrationConnection = asMigrationConnection(connection);
-    await applyMigrations(migrationConnection, additiveMigrations, config);
-    await rollbackEmptyLeaderboardSchema(migrationConnection, additiveMigrations, config);
-
-    assert.equal(await tableCount('schema_migrations'), 0);
-    assert.equal(await tableCount('game_runs'), 0);
-    assert.equal(await tableCount('game_personal_bests'), 0);
-    assert.equal(await tableCount('users'), 1);
-
-    await applyMigrations(migrationConnection, additiveMigrations, config);
-    const [result] = await connection.query<ResultSetHeader>(`
-        INSERT INTO game_runs (
-            game_id,
-            rules_version,
-            user_id,
-            run_id,
-            score,
-            completion_time_ms,
-            payload_fingerprint,
-            personal_best,
-            submitted_at
-        ) VALUES (
-            'three-bosses',
-            1,
-            1,
-            '00000000-0000-4000-8000-000000000001',
-            1000,
-            100000,
-            UNHEX(SHA2('test-only-payload', 256)),
-            1,
-            UTC_TIMESTAMP(6)
-        )
-    `);
-    assert.equal(result.affectedRows, 1);
-
-    await assert.rejects(
-        () => rollbackEmptyLeaderboardSchema(migrationConnection, additiveMigrations, config),
-        /refused because leaderboard tables contain data/
-    );
-    assert.equal(await tableCount('schema_migrations'), 1);
-    assert.equal(await tableCount('game_runs'), 1);
-    const [runs] = await connection.query<RowDataPacket[]>('SELECT * FROM game_runs');
-    assert.equal(runs.length, 1);
-});
-
-test('rollback refuses personal-best, partial, unknown, and checksum-drifted states', async () => {
-    const migrationConnection = asMigrationConnection(connection);
-    await applyMigrations(migrationConnection, additiveMigrations, config);
-    await connection.query(`
-        INSERT INTO game_personal_bests (
-            game_id,
-            rules_version,
-            user_id,
-            score,
-            completion_time_ms,
-            source_game_run_id,
-            recorded_at
-        ) VALUES ('p4-vega', 1, 1, 990, NULL, NULL, UTC_TIMESTAMP(6))
-    `);
-    await assert.rejects(
-        () => rollbackEmptyLeaderboardSchema(migrationConnection, additiveMigrations, config),
-        /refused because leaderboard tables contain data/
-    );
-    assert.equal(await tableCount('game_personal_bests'), 1);
-
-    await resetFixture();
-    await connection.query(additiveMigrations[0].sql);
-    await assert.rejects(
-        () => rollbackEmptyLeaderboardSchema(migrationConnection, additiveMigrations, config),
-        /schema_migrations does not exist/
-    );
-    assert.equal(await tableCount('game_runs'), 1);
-
-    await resetFixture();
-    await applyMigrations(migrationConnection, additiveMigrations, config);
-    await connection.query(
-        `INSERT INTO schema_migrations (version, checksum, applied_at)
-         VALUES (?, ?, UTC_TIMESTAMP(6))`,
-        ['9999_unknown', Buffer.alloc(32)]
-    );
-    await assert.rejects(
-        () => rollbackEmptyLeaderboardSchema(migrationConnection, additiveMigrations, config),
-        /unknown migration version/
-    );
-    await connection.query('DELETE FROM schema_migrations WHERE version = ?', ['9999_unknown']);
-
-    await connection.query(
-        'UPDATE schema_migrations SET checksum = ? WHERE version = ?',
-        [Buffer.alloc(32, 0xff), additiveMigrations[0].version]
-    );
-    await assert.rejects(
-        () => rollbackEmptyLeaderboardSchema(migrationConnection, additiveMigrations, config),
-        /Checksum mismatch/
-    );
-    assert.equal(await tableCount('game_runs'), 1);
-    assert.equal(await tableCount('game_personal_bests'), 1);
 });
 
 test('source-run foreign key proves game, rules version, and user ownership', async () => {

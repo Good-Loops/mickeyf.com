@@ -3,7 +3,6 @@ import test from 'node:test';
 import {
     PRODUCTION_RUNTIME_DATABASE_ACCOUNT,
     PRODUCTION_RUNTIME_DATABASE_ROLE,
-    renderP4VegaGrantRetirementStatement,
     renderRuntimeGrantStatements,
     RUNTIME_GRANT_MANIFEST,
     runtimeColumnPrivilegeInventory,
@@ -49,16 +48,6 @@ test('renders the exact production grant statements without applying them', () =
     );
 });
 
-test('renders only the two legacy p4-Vega column-grant revocations', () => {
-    assert.equal(
-        renderP4VegaGrantRetirementStatement(
-            'cms',
-            PRODUCTION_RUNTIME_DATABASE_ACCOUNT
-        ),
-        "REVOKE SELECT (`p4_score`), UPDATE (`p4_score`) ON `cms`.`users` FROM 'cms_mickeyf'@'%';"
-    );
-});
-
 test('rejects unsafe database and account values before rendering SQL', () => {
     assert.throws(
         () => renderRuntimeGrantStatements(
@@ -69,20 +58,6 @@ test('rejects unsafe database and account values before rendering SQL', () => {
     );
     assert.throws(
         () => renderRuntimeGrantStatements('cms', {
-            user: "runtime'@'%' IDENTIFIED BY 'bad",
-            host: '%',
-        }),
-        /unsupported characters/
-    );
-    assert.throws(
-        () => renderP4VegaGrantRetirementStatement(
-            'cms`; DROP DATABASE cms; --',
-            PRODUCTION_RUNTIME_DATABASE_ACCOUNT
-        ),
-        /simple MySQL identifier/
-    );
-    assert.throws(
-        () => renderP4VegaGrantRetirementStatement('cms', {
             user: "runtime'@'%' IDENTIFIED BY 'bad",
             host: '%',
         }),

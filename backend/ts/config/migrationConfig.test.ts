@@ -3,7 +3,6 @@ import test from 'node:test';
 import {
     assertDatabaseConfirmation,
     assertMutationAuthorized,
-    assertP4GrantRetirementCommandConfirmed,
     assertP4ScoreDropCommandConfirmed,
     assertRuntimeGrantCommandConfirmed,
     loadMigrationConfig,
@@ -35,20 +34,6 @@ function confirmRuntimeGrant(
         config,
         'cms_mickeyf@%',
         'cloudsqlsuperuser@%',
-        runtimeGrantCloudSqlTarget,
-        environment
-    );
-}
-
-function confirmP4GrantRetirement(
-    command: 'plan' | 'verify' | 'apply',
-    config: ReturnType<typeof loadMigrationConfig>,
-    environment: Readonly<Record<string, string | undefined>>
-) {
-    return assertP4GrantRetirementCommandConfirmed(
-        command,
-        config,
-        'cms_mickeyf@%',
         runtimeGrantCloudSqlTarget,
         environment
     );
@@ -339,100 +324,6 @@ test('runtime grant apply has a separate gate, plan digest, and server UUID', ()
             ...confirmedEnvironment,
             MIGRATION_ALLOW_APPLY: '1',
             MIGRATION_ALLOW_RUNTIME_GRANTS: undefined,
-        }),
-        /MIGRATION_ALLOW_RUNTIME_GRANTS=1/
-    );
-});
-
-test('p4 grant-retirement plan and verify require only the exact target and account', () => {
-    const config = loadMigrationConfig(migrationEnvironment);
-    const confirmedEnvironment = {
-        MIGRATION_CONFIRM_DATABASE: migrationEnvironment.MIGRATION_DB_NAME,
-        MIGRATION_CONFIRM_TARGET: '127.0.0.1:3306/migration_test',
-        MIGRATION_CONFIRM_RUNTIME_ACCOUNT: 'cms_mickeyf@%',
-    };
-
-    assert.deepEqual(
-        confirmP4GrantRetirement('plan', config, confirmedEnvironment),
-        {}
-    );
-    assert.deepEqual(
-        confirmP4GrantRetirement('verify', config, confirmedEnvironment),
-        {}
-    );
-    assert.throws(
-        () => confirmP4GrantRetirement('plan', config, {
-            ...confirmedEnvironment,
-            MIGRATION_CONFIRM_RUNTIME_ACCOUNT: 'other@%',
-        }),
-        /MIGRATION_CONFIRM_RUNTIME_ACCOUNT/
-    );
-});
-
-test('p4 grant-retirement apply has isolated fail-closed confirmations', () => {
-    const config = loadMigrationConfig(migrationEnvironment);
-    const confirmedEnvironment = {
-        MIGRATION_CONFIRM_DATABASE: migrationEnvironment.MIGRATION_DB_NAME,
-        MIGRATION_CONFIRM_TARGET: '127.0.0.1:3306/migration_test',
-        MIGRATION_CONFIRM_RUNTIME_ACCOUNT: 'cms_mickeyf@%',
-        MIGRATION_CONFIRM_CLOUD_SQL_PROJECT: runtimeGrantCloudSqlTarget.project,
-        MIGRATION_CONFIRM_CLOUD_SQL_INSTANCE: runtimeGrantCloudSqlTarget.instance,
-        MIGRATION_CONFIRM_CLOUD_SQL_CONNECTION_NAME:
-            runtimeGrantCloudSqlTarget.connectionName,
-        MIGRATION_CONFIRM_GENERIC_ONLY_FROZEN: '1',
-        MIGRATION_CONFIRM_P4_GRANT_RETIREMENT:
-            'users.p4_score SELECT,UPDATE -> no runtime access',
-        MIGRATION_ALLOW_P4_GRANT_RETIREMENT: '1',
-        MIGRATION_CONFIRM_P4_GRANT_RETIREMENT_PLAN_SHA256: 'b'.repeat(64),
-        MIGRATION_CONFIRM_SERVER_UUID: runtimeGrantCloudSqlTarget.serverUuid,
-    };
-
-    assert.deepEqual(
-        confirmP4GrantRetirement('apply', config, confirmedEnvironment),
-        {
-            approvedPlanSha256: 'b'.repeat(64),
-            confirmedServerUuid: runtimeGrantCloudSqlTarget.serverUuid,
-        }
-    );
-
-    for (const [name, value] of [
-        ['MIGRATION_CONFIRM_CLOUD_SQL_PROJECT', 'another-project'],
-        ['MIGRATION_CONFIRM_CLOUD_SQL_INSTANCE', 'another-instance'],
-        ['MIGRATION_CONFIRM_CLOUD_SQL_CONNECTION_NAME', 'another:region:instance'],
-        ['MIGRATION_CONFIRM_GENERIC_ONLY_FROZEN', undefined],
-        ['MIGRATION_CONFIRM_P4_GRANT_RETIREMENT', 'remove p4_score'],
-        ['MIGRATION_ALLOW_P4_GRANT_RETIREMENT', undefined],
-        ['MIGRATION_CONFIRM_P4_GRANT_RETIREMENT_PLAN_SHA256', 'B'.repeat(64)],
-        ['MIGRATION_CONFIRM_P4_GRANT_RETIREMENT_PLAN_SHA256', 'short'],
-        ['MIGRATION_CONFIRM_SERVER_UUID', 'not-a-uuid'],
-        ['MIGRATION_CONFIRM_SERVER_UUID', 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee'],
-    ] as const) {
-        assert.throws(
-            () => confirmP4GrantRetirement('apply', config, {
-                ...confirmedEnvironment,
-                [name]: value,
-            }),
-            new RegExp(name)
-        );
-    }
-
-    assert.throws(
-        () => confirmP4GrantRetirement('apply', config, {
-            ...confirmedEnvironment,
-            MIGRATION_ALLOW_RUNTIME_GRANTS: '1',
-            MIGRATION_ALLOW_P4_GRANT_RETIREMENT: undefined,
-        }),
-        /MIGRATION_ALLOW_P4_GRANT_RETIREMENT=1/
-    );
-    assert.throws(
-        () => confirmRuntimeGrant('apply', config, {
-            ...confirmedEnvironment,
-            MIGRATION_CONFIRM_RUNTIME_ROLE: 'cloudsqlsuperuser@%',
-            MIGRATION_CONFIRM_RUNTIME_ROLE_REPLACEMENT:
-                'cloudsqlsuperuser@% -> no database roles',
-            MIGRATION_CONFIRM_RUNTIME_TRAFFIC_DRAINED: '1',
-            MIGRATION_ALLOW_RUNTIME_GRANTS: undefined,
-            MIGRATION_CONFIRM_RUNTIME_GRANT_PLAN_SHA256: 'a'.repeat(64),
         }),
         /MIGRATION_ALLOW_RUNTIME_GRANTS=1/
     );

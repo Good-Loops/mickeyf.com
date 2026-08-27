@@ -1,19 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
-    applyP4GrantRetirement,
     applyRuntimeGrants,
-    createP4GrantRetirementPlan,
     createRuntimeGrantPlan,
-    planP4GrantRetirement,
     planRuntimeGrants,
-    P4GrantRetirementDriftError,
     RuntimeGrantIndeterminateError,
     runtimeGrantLockName,
     type RuntimeGrantConnection,
     type RuntimeGrantSettings,
     type RuntimeGrantSnapshot,
-    verifyP4GrantRetirement,
 } from './runtimeGrantOperations';
 import {
     runtimeColumnPrivilegeInventory,
@@ -80,30 +75,6 @@ function exactSnapshot(): RuntimeGrantSnapshot {
         proxyPrivileges: [],
         inboundProxyPrivileges: [],
         outgoingRoleEdges: [],
-    };
-}
-
-function snapshotWithLegacyP4Grants(
-    privileges: readonly ('SELECT' | 'UPDATE')[] = ['SELECT', 'UPDATE'],
-    isGrantable: 'YES' | 'NO' = 'NO'
-): RuntimeGrantSnapshot {
-    const current = exactSnapshot();
-    return {
-        ...current,
-        availableColumns: [
-            ...current.availableColumns,
-            { tableName: 'users', columnName: 'p4_score' },
-        ],
-        columnPrivileges: [
-            ...current.columnPrivileges,
-            ...privileges.map((privilegeType) => ({
-                schemaName: DATABASE,
-                tableName: 'users',
-                columnName: 'p4_score',
-                privilegeType,
-                isGrantable,
-            })),
-        ],
     };
 }
 
@@ -202,27 +173,16 @@ test('unexpected direct privileges and privilege relationships block every mutat
     });
 });
 
-test('stale p4_score grants fail closed without rendering a revoke', () => {
+test('unexpected column grants fail closed without rendering a revoke', () => {
     const current = exactSnapshot();
     const snapshot: RuntimeGrantSnapshot = {
         ...current,
-        availableColumns: [
-            ...current.availableColumns,
-            { tableName: 'users', columnName: 'p4_score' },
-        ],
         columnPrivileges: [
             ...current.columnPrivileges,
             {
                 schemaName: DATABASE,
                 tableName: 'users',
-                columnName: 'p4_score',
-                privilegeType: 'SELECT',
-                isGrantable: 'NO',
-            },
-            {
-                schemaName: DATABASE,
-                tableName: 'users',
-                columnName: 'p4_score',
+                columnName: 'email',
                 privilegeType: 'UPDATE',
                 isGrantable: 'NO',
             },
@@ -238,100 +198,6 @@ test('stale p4_score grants fail closed without rendering a revoke', () => {
         clearDefaultRoles: [],
         removeApprovedRole: null,
     });
-});
-
-test('p4 retirement plans only the exact two-grant atomic revoke', () => {
-    const snapshot = snapshotWithLegacyP4Grants();
-    const first = createP4GrantRetirementPlan(
-        snapshot,
-        SETTINGS,
-        RUNTIME_ACCOUNT
-    );
-    const second = createP4GrantRetirementPlan(
-        snapshot,
-        SETTINGS,
-        RUNTIME_ACCOUNT
-    );
-
-    assert.equal(first.state, 'ready');
-    assert.equal(first.compliant, false);
-    assert.deepEqual(first.blockers, []);
-    assert.equal(
-        first.operation,
-        "REVOKE SELECT (`p4_score`), UPDATE (`p4_score`) ON `migration_test`.`users` FROM 'runtime_test'@'%'"
-    );
-    assert.equal(first.sha256, second.sha256);
-    assert.match(first.sha256, /^[a-f0-9]{64}$/u);
-
-    const normalPlan = createRuntimeGrantPlan(snapshot, SETTINGS, RUNTIME_ACCOUNT);
-    assert.equal(normalPlan.state, 'blocked');
-    assert.deepEqual(normalPlan.operations, {
-        ensureRequiredPrivileges: [],
-        clearDefaultRoles: [],
-        removeApprovedRole: null,
-    });
-});
-
-test('p4 retirement is a stable no-op after both grants are absent', () => {
-    const plan = createP4GrantRetirementPlan(
-        exactSnapshot(),
-        SETTINGS,
-        RUNTIME_ACCOUNT
-    );
-
-    assert.equal(plan.state, 'retired');
-    assert.equal(plan.compliant, true);
-    assert.deepEqual(plan.blockers, []);
-    assert.equal(plan.operation, null);
-});
-
-test('partial, grantable, role-bearing, and underprivileged retirement states block', () => {
-    const partial = createP4GrantRetirementPlan(
-        snapshotWithLegacyP4Grants(['SELECT']),
-        SETTINGS,
-        RUNTIME_ACCOUNT
-    );
-    assert.equal(partial.state, 'blocked');
-    assert.match(partial.blockers.join(' '), /exactly non-grantable SELECT and UPDATE/u);
-    assert.equal(partial.operation, null);
-
-    const grantable = createP4GrantRetirementPlan(
-        snapshotWithLegacyP4Grants(['SELECT', 'UPDATE'], 'YES'),
-        SETTINGS,
-        RUNTIME_ACCOUNT
-    );
-    assert.equal(grantable.state, 'blocked');
-    assert.match(grantable.blockers.join(' '), /grantable column privileges/u);
-
-    const withRole: RuntimeGrantSnapshot = {
-        ...snapshotWithLegacyP4Grants(),
-        assignedRoles: [{
-            user: APPROVED_ROLE.user,
-            host: APPROVED_ROLE.host,
-            withAdminOption: false,
-        }],
-    };
-    const rolePlan = createP4GrantRetirementPlan(
-        withRole,
-        SETTINGS,
-        RUNTIME_ACCOUNT
-    );
-    assert.equal(rolePlan.state, 'blocked');
-    assert.match(rolePlan.blockers.join(' '), /no assigned or default roles/u);
-
-    const missingRequired = snapshotWithLegacyP4Grants();
-    const underprivileged: RuntimeGrantSnapshot = {
-        ...missingRequired,
-        columnPrivileges: missingRequired.columnPrivileges.slice(1),
-    };
-    const underprivilegedPlan = createP4GrantRetirementPlan(
-        underprivileged,
-        SETTINGS,
-        RUNTIME_ACCOUNT
-    );
-    assert.equal(underprivilegedPlan.state, 'blocked');
-    assert.match(underprivilegedPlan.blockers.join(' '), /generic-only.*missing/u);
-    assert.equal(underprivilegedPlan.operation, null);
 });
 
 test('unexpected role admin option, account flags, and global role settings block', () => {
@@ -430,42 +296,6 @@ class SnapshotConnection implements RuntimeGrantConnection {
     }
 }
 
-class P4RetirementConnection extends SnapshotConnection {
-    legacyGrantsPresent = true;
-    activeSessions = 0;
-    failRevoke = false;
-
-    override async query(sql: string): Promise<[unknown, unknown]> {
-        if (/^REVOKE SELECT \(`p4_score`\), UPDATE \(`p4_score`\)/u.test(sql)) {
-            this.calls.push(sql);
-            if (this.failRevoke) throw new Error('synthetic revoke connection loss');
-            this.legacyGrantsPresent = false;
-            return [[], []];
-        }
-        if (sql.includes('runtime-grants:active-sessions')) {
-            this.calls.push(sql);
-            return [[{
-                sessionCount: this.activeSessions,
-                processPrivilegeProof: 1,
-            }], []];
-        }
-        if (sql.includes('runtime-grants:columns')) {
-            this.calls.push(sql);
-            return [[
-                ...exactSnapshot().availableColumns,
-                { tableName: 'users', columnName: 'p4_score' },
-            ], []];
-        }
-        if (sql.includes('runtime-grants:column')) {
-            this.calls.push(sql);
-            return [this.legacyGrantsPresent
-                ? snapshotWithLegacyP4Grants().columnPrivileges
-                : exactSnapshot().columnPrivileges, []];
-        }
-        return super.query(sql);
-    }
-}
-
 class PostProviderVerificationFailureConnection extends SnapshotConnection {
     roleRemovalInvoked = false;
 
@@ -508,116 +338,6 @@ test('stale apply digest refuses before its first privilege mutation', async () 
         false
     );
     assert.equal(connection.calls.some((sql) => sql.includes('RELEASE_LOCK')), true);
-});
-
-test('p4 retirement applies with existing sessions, verifies, and stays idempotent', async () => {
-    const connection = new P4RetirementConnection();
-    const readyPlan = await planP4GrantRetirement(
-        connection,
-        SETTINGS,
-        RUNTIME_ACCOUNT
-    );
-    assert.equal(readyPlan.state, 'ready');
-    await assert.rejects(
-        () => verifyP4GrantRetirement(connection, SETTINGS, RUNTIME_ACCOUNT),
-        P4GrantRetirementDriftError
-    );
-
-    connection.activeSessions = 1;
-    const retired = await applyP4GrantRetirement(
-        connection,
-        SETTINGS,
-        RUNTIME_ACCOUNT,
-        readyPlan.sha256,
-        SERVER_UUID
-    );
-    assert.equal(retired.state, 'retired');
-    assert.equal(retired.compliant, true);
-    assert.equal(connection.legacyGrantsPresent, false);
-    assert.equal(
-        connection.calls.filter((sql) => /^REVOKE SELECT/u.test(sql)).length,
-        1
-    );
-
-    const verified = await verifyP4GrantRetirement(
-        connection,
-        SETTINGS,
-        RUNTIME_ACCOUNT
-    );
-    const secondApply = await applyP4GrantRetirement(
-        connection,
-        SETTINGS,
-        RUNTIME_ACCOUNT,
-        verified.sha256,
-        SERVER_UUID
-    );
-    assert.equal(secondApply.sha256, verified.sha256);
-    assert.equal(
-        connection.calls.filter((sql) => /^REVOKE SELECT/u.test(sql)).length,
-        1
-    );
-});
-
-test('p4 retirement refuses stale approval and treats an invoked revoke failure as indeterminate', async () => {
-    const wrongTargetConnection = new P4RetirementConnection();
-    const targetPlan = await planP4GrantRetirement(
-        wrongTargetConnection,
-        SETTINGS,
-        RUNTIME_ACCOUNT
-    );
-    await assert.rejects(
-        () => applyP4GrantRetirement(
-            wrongTargetConnection,
-            SETTINGS,
-            RUNTIME_ACCOUNT,
-            targetPlan.sha256,
-            'bbbbbbbb-cccc-4ddd-8eee-ffffffffffff'
-        ),
-        /server UUID/u
-    );
-    assert.equal(
-        wrongTargetConnection.calls.some((sql) => /^REVOKE SELECT/u.test(sql)),
-        false
-    );
-
-    const staleConnection = new P4RetirementConnection();
-    await assert.rejects(
-        () => applyP4GrantRetirement(
-            staleConnection,
-            SETTINGS,
-            RUNTIME_ACCOUNT,
-            '0'.repeat(64),
-            SERVER_UUID
-        ),
-        /state changed/
-    );
-    assert.equal(
-        staleConnection.calls.some((sql) => /^REVOKE SELECT/u.test(sql)),
-        false
-    );
-
-    const failingConnection = new P4RetirementConnection();
-    const readyPlan = await planP4GrantRetirement(
-        failingConnection,
-        SETTINGS,
-        RUNTIME_ACCOUNT
-    );
-    failingConnection.failRevoke = true;
-    await assert.rejects(
-        () => applyP4GrantRetirement(
-            failingConnection,
-            SETTINGS,
-            RUNTIME_ACCOUNT,
-            readyPlan.sha256,
-            SERVER_UUID
-        ),
-        RuntimeGrantIndeterminateError
-    );
-    assert.equal(failingConnection.legacyGrantsPresent, true);
-    assert.equal(
-        failingConnection.calls.filter((sql) => /^REVOKE SELECT/u.test(sql)).length,
-        1
-    );
 });
 
 test('post-provider verification failures remain explicitly indeterminate', async () => {

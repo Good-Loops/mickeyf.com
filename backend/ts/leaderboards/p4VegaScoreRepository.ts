@@ -1,9 +1,8 @@
 /**
- * p4-Vega persistence for the generic personal-best cutover.
+ * p4-Vega persistence in the generic personal-best store.
  *
- * Reads and writes use generic storage in code, but deployment remains gated
- * on the explicit backfill, revision-drain, and reconciliation sequence. The
- * legacy HTTP controller adapts these operations to its historical contract.
+ * The legacy HTTP controller adapts these operations to its historical
+ * request and response contract.
  */
 import {
     Pool,

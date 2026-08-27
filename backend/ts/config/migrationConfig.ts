@@ -140,8 +140,6 @@ export function assertDatabaseConfirmation(
 
 export type RuntimeGrantCommand = 'plan' | 'verify' | 'apply';
 
-export type P4GrantRetirementCommand = 'plan' | 'verify' | 'apply';
-
 export type P4ScoreDropCommand = 'plan' | 'verify' | 'apply';
 
 function assertTargetConfirmed(
@@ -274,50 +272,6 @@ export function assertRuntimeGrantCommandConfirmed(
 
     return loadPlanAndServerConfirmation(
         'MIGRATION_CONFIRM_RUNTIME_GRANT_PLAN_SHA256',
-        expectedCloudSqlTarget,
-        env
-    );
-}
-
-export function assertP4GrantRetirementCommandConfirmed(
-    command: P4GrantRetirementCommand,
-    config: Pick<MigrationConfig, 'host' | 'port' | 'database'>,
-    expectedRuntimeAccount: string,
-    expectedCloudSqlTarget: CloudSqlTarget,
-    env: Environment = process.env
-): RuntimeGrantConfirmation {
-    assertTargetConfirmed(config, env);
-
-    if (env.MIGRATION_CONFIRM_RUNTIME_ACCOUNT !== expectedRuntimeAccount) {
-        throw new Error(
-            'MIGRATION_CONFIRM_RUNTIME_ACCOUNT must exactly match the reviewed runtime account'
-        );
-    }
-
-    if (command !== 'apply') return Object.freeze({});
-
-    assertCloudSqlTargetConfirmed(expectedCloudSqlTarget, env);
-    if (env.MIGRATION_CONFIRM_GENERIC_ONLY_FROZEN !== '1') {
-        throw new Error(
-            'MIGRATION_CONFIRM_GENERIC_ONLY_FROZEN=1 is required after the frozen generic-only revision is serving'
-        );
-    }
-    if (
-        env.MIGRATION_CONFIRM_P4_GRANT_RETIREMENT
-            !== 'users.p4_score SELECT,UPDATE -> no runtime access'
-    ) {
-        throw new Error(
-            'MIGRATION_CONFIRM_P4_GRANT_RETIREMENT must confirm the exact two-grant retirement'
-        );
-    }
-    if (env.MIGRATION_ALLOW_P4_GRANT_RETIREMENT !== '1') {
-        throw new Error(
-            'MIGRATION_ALLOW_P4_GRANT_RETIREMENT=1 is required for the p4_score grant retirement apply action'
-        );
-    }
-
-    return loadPlanAndServerConfirmation(
-        'MIGRATION_CONFIRM_P4_GRANT_RETIREMENT_PLAN_SHA256',
         expectedCloudSqlTarget,
         env
     );
