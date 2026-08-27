@@ -31,7 +31,7 @@
     }
 
     &__eyebrow {
-        color: $space-blue;
+        color: $primary-light;
         font-family: $subheading-font;
         font-size: 1.5rem;
         font-weight: 900;
@@ -136,6 +136,12 @@
     &__back-link {
         justify-self: start;
         margin-bottom: .8rem;
+
+        color: $primary-light;
+
+        &:focus-visible {
+            outline-color: $primary-light;
+        }
     }
 
     &__known-games {

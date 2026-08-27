@@ -1,32 +1,79 @@
 @use '../abstracts' as *;
 
-@keyframes space-stars-drift {
+@keyframes space-stars-far-drift {
     from {
-        transform: translate3d(0, 0, 0);
+        opacity: .36;
+        transform: translate3d(-1.2vw, -.8vh, 0) scale(1.02);
     }
 
     to {
-        transform: translate3d(-4rem, 3rem, 0);
+        opacity: .56;
+        transform: translate3d(1.8vw, 1.4vh, 0) scale(1.045);
     }
 }
 
-@keyframes space-stars-breathe {
+@keyframes space-stars-near-drift {
     from {
-        opacity: .42;
+        opacity: .48;
+        transform: translate3d(1.1vw, 1.5vh, 0) scale(1.015);
     }
 
     to {
-        opacity: .68;
+        opacity: .78;
+        transform: translate3d(-1.7vw, -1.1vh, 0) scale(1.04);
     }
 }
 
 @keyframes space-nebula-drift {
     from {
-        transform: translate3d(-2.5vmax, 1.5vmax, 0) scale(1.02);
+        opacity: .7;
+        transform: translate3d(-2.8vw, 1.8vh, 0) scale(1.025);
     }
 
     to {
-        transform: translate3d(2.5vmax, -1.5vmax, 0) scale(1.06);
+        opacity: .94;
+        transform: translate3d(3vw, -2.2vh, 0) scale(1.075);
+    }
+}
+
+@keyframes space-galaxy-drift {
+    from {
+        opacity: .34;
+        transform: translate3d(-1.2vw, 1vh, 0) rotate(-18deg) scale(.94);
+    }
+
+    to {
+        opacity: .58;
+        transform: translate3d(1.8vw, -1.4vh, 0) rotate(-5deg) scale(1.06);
+    }
+}
+
+@keyframes space-galaxy-core {
+    from {
+        opacity: .5;
+        transform: translate(-50%, -50%) scale(.82);
+    }
+
+    to {
+        opacity: .95;
+        transform: translate(-50%, -50%) scale(1.18);
+    }
+}
+
+@keyframes space-quasar-drift {
+    0% {
+        opacity: .48;
+        transform: translate3d(-1vw, .6vh, 0) rotate(12deg) scale(.9);
+    }
+
+    50% {
+        opacity: .92;
+        transform: translate3d(.5vw, -.8vh, 0) rotate(15deg) scale(1.12);
+    }
+
+    100% {
+        opacity: .58;
+        transform: translate3d(1.4vw, .3vh, 0) rotate(11deg) scale(.96);
     }
 }
 

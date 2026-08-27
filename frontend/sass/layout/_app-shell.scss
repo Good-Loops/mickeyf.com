@@ -5,62 +5,252 @@
     isolation: isolate;
 
     min-height: 100svh;
+}
 
-    &::before,
-    &::after {
-        content: '';
+.space-background {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
 
-        position: fixed;
-        inset: -12vmax;
-        z-index: -1;
+    overflow: hidden;
+    pointer-events: none;
 
-        pointer-events: none;
+    &__stars,
+    &__nebula {
+        position: absolute;
+        inset: -8vmax;
     }
 
-    // Three sparse, differently sized fields avoid an obvious repeating grid.
-    &::before {
-        background-image:
-            radial-gradient(circle, $space-star-blue 0 .08rem, transparent .13rem),
-            radial-gradient(circle, $space-star-green 0 .07rem, transparent .12rem),
-            radial-gradient(circle, $space-star-white 0 .055rem, transparent .1rem);
-        background-position:
-            2rem 3rem,
-            9rem 13rem,
-            21rem 7rem;
-        background-size:
-            17rem 17rem,
-            29rem 29rem,
-            43rem 43rem;
-        opacity: .56;
+    // Every star has a deliberate, non-repeating viewport position. The two
+    // layers drift independently so the sky reads as depth, not wallpaper.
+    &__stars {
+        background-repeat: no-repeat;
+        background-size: 100% 100%;
 
-        animation:
-            space-stars-drift 120s linear infinite,
-            space-stars-breathe 10s ease-in-out infinite alternate;
+        &--far {
+            background-image:
+                radial-gradient(circle at 3% 11%, $space-star-blue 0 .045rem, transparent .095rem),
+                radial-gradient(circle at 7% 47%, $space-star-white 0 .035rem, transparent .085rem),
+                radial-gradient(circle at 11% 82%, $space-star-green 0 .05rem, transparent .105rem),
+                radial-gradient(circle at 15% 29%, $space-star-white 0 .04rem, transparent .09rem),
+                radial-gradient(circle at 19% 64%, $space-star-blue 0 .055rem, transparent .11rem),
+                radial-gradient(circle at 23% 6%, $space-star-green 0 .035rem, transparent .085rem),
+                radial-gradient(circle at 26% 91%, $space-star-white 0 .045rem, transparent .1rem),
+                radial-gradient(circle at 30% 39%, $space-star-blue 0 .04rem, transparent .095rem),
+                radial-gradient(circle at 34% 71%, $space-star-green 0 .05rem, transparent .105rem),
+                radial-gradient(circle at 38% 18%, $space-star-white 0 .035rem, transparent .08rem),
+                radial-gradient(circle at 41% 55%, $space-star-blue 0 .055rem, transparent .115rem),
+                radial-gradient(circle at 44% 96%, $space-star-white 0 .04rem, transparent .09rem),
+                radial-gradient(circle at 48% 32%, $space-star-green 0 .045rem, transparent .1rem),
+                radial-gradient(circle at 52% 76%, $space-star-blue 0 .035rem, transparent .08rem),
+                radial-gradient(circle at 56% 9%, $space-star-white 0 .05rem, transparent .105rem),
+                radial-gradient(circle at 59% 47%, $space-star-green 0 .04rem, transparent .09rem),
+                radial-gradient(circle at 62% 88%, $space-star-white 0 .055rem, transparent .11rem),
+                radial-gradient(circle at 66% 25%, $space-star-blue 0 .035rem, transparent .085rem),
+                radial-gradient(circle at 69% 63%, $space-star-green 0 .05rem, transparent .105rem),
+                radial-gradient(circle at 73% 4%, $space-star-white 0 .04rem, transparent .095rem),
+                radial-gradient(circle at 76% 42%, $space-star-blue 0 .055rem, transparent .115rem),
+                radial-gradient(circle at 79% 79%, $space-star-white 0 .035rem, transparent .085rem),
+                radial-gradient(circle at 83% 17%, $space-star-green 0 .045rem, transparent .1rem),
+                radial-gradient(circle at 86% 57%, $space-star-blue 0 .04rem, transparent .09rem),
+                radial-gradient(circle at 89% 94%, $space-star-white 0 .05rem, transparent .105rem),
+                radial-gradient(circle at 92% 35%, $space-star-green 0 .035rem, transparent .085rem),
+                radial-gradient(circle at 95% 69%, $space-star-white 0 .055rem, transparent .115rem),
+                radial-gradient(circle at 98% 8%, $space-star-blue 0 .04rem, transparent .095rem),
+                radial-gradient(circle at 5% 96%, $space-star-white 0 .04rem, transparent .09rem),
+                radial-gradient(circle at 17% 15%, $space-star-blue 0 .035rem, transparent .085rem),
+                radial-gradient(circle at 37% 85%, $space-star-white 0 .05rem, transparent .105rem),
+                radial-gradient(circle at 71% 97%, $space-star-green 0 .04rem, transparent .09rem),
+                radial-gradient(circle at 97% 49%, $space-star-white 0 .045rem, transparent .1rem),
+                radial-gradient(circle at 9% 7%, $space-star-green 0 .045rem, transparent .095rem),
+                radial-gradient(circle at 8% 73%, $space-star-blue 0 .035rem, transparent .085rem),
+                radial-gradient(circle at 14% 54%, $space-star-white 0 .05rem, transparent .105rem),
+                radial-gradient(circle at 24% 27%, $space-star-green 0 .035rem, transparent .08rem),
+                radial-gradient(circle at 28% 66%, $space-star-white 0 .045rem, transparent .1rem),
+                radial-gradient(circle at 33% 3%, $space-star-blue 0 .05rem, transparent .105rem),
+                radial-gradient(circle at 39% 47%, $space-star-green 0 .04rem, transparent .09rem),
+                radial-gradient(circle at 43% 22%, $space-star-white 0 .035rem, transparent .085rem),
+                radial-gradient(circle at 49% 91%, $space-star-blue 0 .055rem, transparent .11rem),
+                radial-gradient(circle at 57% 60%, $space-star-white 0 .04rem, transparent .09rem),
+                radial-gradient(circle at 61% 33%, $space-star-green 0 .045rem, transparent .1rem),
+                radial-gradient(circle at 68% 86%, $space-star-blue 0 .035rem, transparent .08rem),
+                radial-gradient(circle at 74% 30%, $space-star-white 0 .05rem, transparent .105rem),
+                radial-gradient(circle at 81% 7%, $space-star-green 0 .04rem, transparent .09rem),
+                radial-gradient(circle at 85% 43%, $space-star-white 0 .045rem, transparent .095rem),
+                radial-gradient(circle at 90% 14%, $space-star-blue 0 .035rem, transparent .085rem),
+                radial-gradient(circle at 93% 82%, $space-star-green 0 .05rem, transparent .105rem);
+            opacity: .46;
+
+            animation: space-stars-far-drift 54s ease-in-out infinite alternate;
+        }
+
+        &--near {
+            background-image:
+                radial-gradient(circle at 6% 24%, rgba($primary-light, .95) 0 .09rem, rgba($primary, .2) .14rem, transparent .3rem),
+                radial-gradient(circle at 13% 68%, rgba($white, .9) 0 .075rem, rgba($white, .14) .13rem, transparent .28rem),
+                radial-gradient(circle at 21% 43%, rgba($secondary-light, .92) 0 .085rem, rgba($secondary, .18) .15rem, transparent .32rem),
+                radial-gradient(circle at 29% 87%, rgba($primary-light, .9) 0 .07rem, rgba($primary, .16) .12rem, transparent .27rem),
+                radial-gradient(circle at 36% 12%, rgba($white, .92) 0 .08rem, rgba($white, .15) .14rem, transparent .3rem),
+                radial-gradient(circle at 46% 64%, rgba($secondary-light, .9) 0 .095rem, rgba($secondary, .18) .16rem, transparent .34rem),
+                radial-gradient(circle at 54% 34%, rgba($primary-light, .96) 0 .075rem, rgba($primary, .2) .14rem, transparent .31rem),
+                radial-gradient(circle at 63% 81%, rgba($white, .88) 0 .085rem, rgba($white, .14) .15rem, transparent .3rem),
+                radial-gradient(circle at 70% 16%, rgba($secondary-light, .92) 0 .07rem, rgba($secondary, .17) .13rem, transparent .29rem),
+                radial-gradient(circle at 78% 53%, rgba($primary-light, .94) 0 .09rem, rgba($primary, .2) .16rem, transparent .34rem),
+                radial-gradient(circle at 87% 89%, rgba($white, .9) 0 .075rem, rgba($white, .14) .13rem, transparent .28rem),
+                radial-gradient(circle at 94% 27%, rgba($secondary-light, .94) 0 .085rem, rgba($secondary, .18) .15rem, transparent .32rem),
+                radial-gradient(circle at 2% 75%, rgba($primary-light, .9) 0 .07rem, transparent .26rem),
+                radial-gradient(circle at 32% 53%, rgba($white, .86) 0 .065rem, transparent .25rem),
+                radial-gradient(circle at 58% 5%, rgba($secondary-light, .9) 0 .075rem, transparent .28rem),
+                radial-gradient(circle at 82% 72%, rgba($primary-light, .9) 0 .07rem, transparent .27rem);
+            opacity: .62;
+
+            animation: space-stars-near-drift 29s ease-in-out infinite alternate-reverse;
+        }
     }
 
-    // Radial gradients provide soft nebulas without a costly animated blur.
-    &::after {
+    &__nebula {
         background:
-            radial-gradient(ellipse at 18% 32%, $space-nebula-blue 0%, transparent 48%),
-            radial-gradient(ellipse at 78% 68%, $space-nebula-green 0%, transparent 46%),
-            radial-gradient(ellipse at 62% 18%, $space-nebula-cyan 0%, transparent 40%);
-        opacity: .72;
+            radial-gradient(ellipse at 12% 27%, rgba($primary-dark, .22) 0%, rgba($primary-dark, .08) 26%, transparent 52%),
+            radial-gradient(ellipse at 61% 12%, rgba($tertiary, .12) 0%, transparent 39%),
+            radial-gradient(ellipse at 86% 72%, rgba($secondary, .17) 0%, rgba($secondary, .055) 31%, transparent 55%),
+            radial-gradient(ellipse at 42% 88%, rgba($primary, .1) 0%, transparent 43%),
+            radial-gradient(ellipse at 72% 48%, rgba($tertiary, .055) 0%, transparent 36%);
+        opacity: .82;
 
-        animation: space-nebula-drift 80s ease-in-out infinite alternate;
+        animation: space-nebula-drift 42s ease-in-out infinite alternate;
+    }
+
+    &__galaxy {
+        position: absolute;
+
+        width: clamp(19rem, 28vw, 45rem);
+        aspect-ratio: 1.85;
+
+        border-radius: 50%;
+        opacity: .28;
+        transform: rotate(-14deg);
+
+        background:
+            radial-gradient(ellipse at center, rgba($white, .72) 0 .35%, rgba($primary-light, .42) 1.5%, rgba($primary, .1) 12%, transparent 54%),
+            conic-gradient(from 24deg at 50% 50%, transparent 0 5%, rgba($primary, .2) 12%, transparent 24%, rgba($primary, .13) 37%, transparent 51%, rgba($primary, .17) 66%, transparent 78%, rgba($primary, .11) 90%, transparent);
+        -webkit-mask-image: radial-gradient(ellipse at center, black 0 10%, rgba(0, 0, 0, .82) 31%, transparent 71%);
+        mask-image: radial-gradient(ellipse at center, black 0 10%, rgba(0, 0, 0, .82) 31%, transparent 71%);
+        filter: blur(.22rem);
+
+        animation: space-galaxy-drift 64s ease-in-out infinite alternate;
+
+        &::after {
+            content: '';
+
+            position: absolute;
+            top: 50%;
+            left: 50%;
+
+            width: 1.2rem;
+            aspect-ratio: 1;
+
+            border-radius: 50%;
+            background: $white;
+            box-shadow:
+                0 0 1.2rem rgba($primary-light, .85),
+                0 0 3.4rem rgba($primary, .42);
+            transform: translate(-50%, -50%);
+
+            animation: space-galaxy-core 5.8s ease-in-out infinite alternate;
+        }
+
+        &--blue {
+            top: 7%;
+            right: 4%;
+        }
+
+        &--green {
+            bottom: 4%;
+            left: 8%;
+
+            background:
+                radial-gradient(ellipse at center, rgba($white, .68) 0 .35%, rgba($secondary-light, .38) 1.5%, rgba($secondary, .08) 12%, transparent 54%),
+                conic-gradient(from 58deg at 50% 50%, transparent 0 7%, rgba($secondary, .17) 14%, transparent 27%, rgba($secondary, .11) 41%, transparent 54%, rgba($secondary, .15) 68%, transparent 81%, rgba($secondary, .1) 92%, transparent);
+            animation-direction: alternate-reverse;
+            animation-duration: 78s;
+
+            &::after {
+                box-shadow:
+                    0 0 1.2rem rgba($secondary-light, .78),
+                    0 0 3.2rem rgba($secondary, .34);
+                animation-delay: -2.1s;
+            }
+        }
+    }
+
+    &__quasar {
+        position: absolute;
+        top: 35%;
+        left: 69%;
+
+        width: .65rem;
+        aspect-ratio: 1;
+
+        border-radius: 50%;
+        background: $white;
+        box-shadow:
+            0 0 .9rem $white,
+            0 0 2rem rgba($primary-light, .8),
+            0 0 5rem rgba($tertiary, .4);
+        opacity: .72;
+        transform: rotate(12deg);
+
+        animation: space-quasar-drift 18s ease-in-out infinite;
+
+        &::before,
+        &::after {
+            content: '';
+
+            position: absolute;
+            top: 50%;
+            left: 50%;
+
+            pointer-events: none;
+        }
+
+        &::before {
+            width: 16rem;
+            height: .12rem;
+
+            background: linear-gradient(90deg, transparent, rgba($primary-light, .55), $white, rgba($tertiary, .5), transparent);
+            transform: translate(-50%, -50%);
+            box-shadow: 0 0 1.1rem rgba($primary, .45);
+        }
+
+        &::after {
+            width: 7rem;
+            aspect-ratio: 1;
+
+            border: .1rem solid rgba($primary-light, .16);
+            border-radius: 50%;
+            transform: translate(-50%, -50%);
+        }
     }
 }
 
-// Canvas routes already run PIXI or Unity. Keep the lightweight star drift, but
-// release the larger nebula layer from continuous compositing behind the game.
-body:has(canvas) .app-shell::after {
-    animation: none;
-    transform: none;
+// Canvas routes already run PIXI or Unity. Preserve the quiet far-star drift,
+// but pause the larger decorative layers to protect the gameplay frame budget.
+body:has(canvas) {
+    .space-background__stars--near,
+    .space-background__nebula,
+    .space-background__galaxy,
+    .space-background__galaxy::after,
+    .space-background__quasar {
+        animation: none;
+    }
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .app-shell::before,
-    .app-shell::after {
+    .space-background__stars,
+    .space-background__nebula,
+    .space-background__galaxy,
+    .space-background__galaxy::after,
+    .space-background__quasar {
         animation: none;
-        transform: none;
     }
 }

@@ -649,8 +649,9 @@ nebulas, borders, and interaction highlights.
 Work in this order:
 
 1. Establish the shared animated space background with a static reduced-motion
-   fallback and no additional canvas or GPU renderer. **Implemented and
-   verified on 2026-08-26.**
+   fallback and no additional canvas or GPU renderer. Its refined version uses
+   hand-scattered depth layers, restrained nebulas, galaxies and a quasar, and
+   shared dark surface colors. **Implemented and verified on 2026-08-26.**
 2. Redesign Home while preserving its minimal welcome-and-quotes identity.
 3. Continue page by page, including the information-architecture and feedback
    work below, without globally restyling unfinished pages.

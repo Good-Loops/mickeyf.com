@@ -31,6 +31,14 @@ import NotFound from "@/pages/NotFound";
 const App: React.FC = () => {
   return (
 	<div className="app-shell">
+		<div className="space-background" aria-hidden="true">
+			<div className="space-background__stars space-background__stars--far" />
+			<div className="space-background__stars space-background__stars--near" />
+			<div className="space-background__nebula" />
+			<div className="space-background__galaxy space-background__galaxy--blue" />
+			<div className="space-background__galaxy space-background__galaxy--green" />
+			<div className="space-background__quasar" />
+		</div>
 		<Header />
 		<main className="main">
 			<Routes>
