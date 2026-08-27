@@ -5,27 +5,27 @@ schema preflight completed on the same date. On 2026-08-25, Mike approved the
 end state in which p4-Vega uses the generic leaderboard storage and the legacy
 `users.p4_score` column was retired after a verified cutover. The additive
 production schema and an initial p4-Vega data seed were applied and verified on
-2026-08-26. The exact frozen generic-only revision now serves 100% of
-production traffic, and a verified p4-enabled candidate waits at zero traffic.
-The exact legacy column grants are retired. The frozen dual writer is therefore
-no longer a valid rollback target. This document
-records the completed traffic cutover, grant retirement, and checksum-recorded
-column removal. It does not authorize submission enablement or another
-production mutation.
+2026-08-26. The verified p4-enabled generic-only revision now serves 100% of
+production traffic; the exact frozen generic-only revision remains ready at
+zero traffic as its schema-compatible rollback. The exact legacy column grants
+are retired. The frozen dual writer is therefore no longer a valid rollback
+target. This document records the completed traffic cutover, grant retirement,
+checksum-recorded column removal, and p4-Vega submission activation.
 
 Production now contains `schema_migrations`, `game_runs`, and
 `game_personal_bests` alongside `users`. The initial seed and the later
 post-drain backfill and frozen generic-only cutover reconciliations all match the
 same five p4-Vega personal bests exactly; `game_runs` is empty and
 `users.p4_score` has been removed. The
-frozen generic-only revision serves 100% of production traffic, and the drained
-dual writer has zero traffic. The p4-enabled candidate also has zero traffic.
+p4-enabled generic-only revision serves 100% of production traffic, and the
+frozen generic-only rollback and drained dual writer have zero traffic.
 
 The transitional p4-Vega dual-write repository was implemented and verified
 locally on 2026-08-25 with unit, rollback, and concurrent MySQL 8.0.31 tests.
 Its exact frozen revision and former enabled revision are retired and no longer
 schema-compatible. Migrations `0001`, `0002`, and `0003` are applied and
-verified. Submission enablement remains gated on separate review.
+verified. p4-Vega submission activation completed under separate review;
+Three Bosses submission remains disabled.
 
 The transitional read split was corrected and reverified on 2026-08-26 at
 `a127beac14c2662648c8aededa59374f5d7c87dd`. That split now describes the
@@ -43,9 +43,9 @@ that repository and one generic reader for both HTTP APIs. A disposable MySQL
 test physically drops the legacy column before successfully submitting and
 reading a score. Type-checking, 125 unit and security tests, 42 isolated MySQL
 integration tests, the production bundle, and image-only Cloud Build contract
-tests pass. This source now serves as the exact frozen generic-only production
-revision recorded below. Its traffic activation, grant retirement, and column
-removal are recorded below; submission enablement remains separate.
+tests pass. This source now serves as the exact generic-only production image
+recorded below. Its frozen cutover, grant retirement, column removal, and later
+p4-Vega submission activation are recorded below.
 The generic-only runtime fixture also creates `users` without the legacy column
 and proves both game repositories under the restricted application identity.
 
@@ -735,14 +735,21 @@ no-store headers, and no-cookie/no-redirect constraints passed after the drop;
 both p4 APIs retained the same five scores. The temporary maintenance account
 was deleted and then failed authentication, the Cloud SQL user list again
 contained only `cms_mickeyf` and `root`, and no build or Cloud SQL operation was
-unfinished. Submission enablement remains a separate product decision.
+unfinished. At that checkpoint, submission enablement remained a separate
+product decision.
 
 An enabled p4-Vega candidate, `mickeyf-org-p4-enabled-d5aee625`, was then
 created at zero traffic from the exact verified digest. Read smoke tests passed,
 anonymous p4 submission reached authentication with HTTP 401, and Three Bosses
-submission remained disabled with HTTP 403. Its temporary tag was removed;
-generation 123 still routes 100% to the frozen generic-only revision. No
-production write or database mutation occurred.
+submission remained disabled with HTTP 403. Its temporary tag was removed. On
+2026-08-26, validate-only preflight passed and etag-bound traffic-only operation
+`a54a5387-f780-44a9-b38d-d333db988cca` promoted the candidate to 100% at
+generation 124. A signed-in game over submitted score 0 with HTTP 200 on that
+revision without changing the existing 330 personal best or the five-row board
+(minimum 190, maximum 410, sum 1350). The frozen generic-only revision remains
+ready at zero traffic; an etag-bound validate-only rollback check passed. The
+incompatible `main` trigger remains disabled, Three Bosses remains disabled,
+and no build or Cloud SQL operation was unfinished.
 
 This evidence satisfied the metadata gate for the exact SQL and isolated local
 migration tests completed on 2026-08-25. That preflight did not by itself
@@ -883,14 +890,15 @@ legacy reader.
     checks, two zero-transaction samples, exact final reconciliation, and
     temporary-identity cleanup also completed on 2026-08-26. Exact grant
     retirement, runtime SQL probes, public smoke tests, and second temporary-
-    identity cleanup completed later the same day. Submission enablement remains
-    pending.**
+    identity cleanup completed later the same day. p4-Vega submission activation
+    completed under Step 13; Three Bosses remains disabled.**
 13. Revoke operational authorization for further legacy backfills, retire exact
     legacy equality as a cutover gate, verify the generic-authoritative rollback
     candidate, and only then deploy an explicitly approved revision with the
     positive opt-in enabled. Once new generic-only scores are accepted, exact
     equality with the stale legacy column is no longer expected. **Legacy
-    backfill commands are retired; submission enablement remains pending.**
+    backfill commands are retired; the exact p4-enabled generic-only revision
+    was promoted to 100% at generation 124 on 2026-08-26.**
 14. Remove the transitional backfill command, then prove that no
     deployable backend revision, job, operational query, or rollback candidate
     still reads or writes `users.p4_score`. Retain at least one
@@ -904,7 +912,8 @@ legacy reader.
     **Completed on 2026-08-26 as migration `0003`.**
 16. Verify the current p4-Vega submission and leaderboard paths, generic reads,
     migration history, and recovery procedure against the contracted schema.
-    **Completed on 2026-08-26; submissions remain frozen.**
+    **Completed on 2026-08-26; p4-Vega submissions are enabled and verified,
+    while Three Bosses submissions remain disabled.**
 17. Keep Three Bosses writes disabled. Its backend, browser client, and host
     bridge are prepared, but do not enable them until Unity canonicalizes one
     integer millisecond result for display, score, and transport; the Unity
@@ -950,6 +959,10 @@ only serialization mechanism.
   revision or forward fix; recover data into a separate instance from the
   verified personal-best data, backup, or point-in-time state rather than
   assuming the legacy column still exists.
+- The retained schema-compatible rollback is
+  `mickeyf-org-freeze-d5aee625983b4dafa90d0db9898341e8`, ready at zero traffic
+  with both submission flags false. Its generation-124 etag-bound validate-only
+  rollback check passed without changing live traffic.
 - Freeze score submissions before the final exact reconciliations rather than
   deleting submitted data.
 - If data recovery is required, restore the recorded backup or point-in-time

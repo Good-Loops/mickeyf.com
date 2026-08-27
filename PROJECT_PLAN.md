@@ -53,17 +53,17 @@ provided ranks remain `UNRANKED` and submission remains disabled.
 ## Phase 13 — Website and leaderboard integration
 
 The local Three Bosses result flow is stable enough for integration work.
-Continue Phase 13 on `feature/new-leaderboard`. Completing this broad branch
-does not authorize a merge or push to `main`: create the next broad feature
-branch from its final commit and retire the old branch instead. Keep `main`
-deferred until the Phase 14 site-wide responsive, information-architecture,
-and literal-dark redesign is complete and separately approved.
+Phase 13 completed on `feature/new-leaderboard` on 2026-08-26. This does not
+authorize a merge or push to `main`: rotate from its final commit into the next
+broad feature branch and retire the old branch instead. Keep `main` deferred
+until the Phase 14 site-wide responsive, information-architecture, and
+literal-dark redesign is complete and separately approved.
 
 ### Step 13.1 — multi-game contract and migration design
 
-**Storage migration and feature-branch frontend integration completed on
-2026-08-26; p4-Vega submission activation remains.** Approved by Mike and
-live-schema-preflighted on 2026-08-24. The
+**Storage migration, feature-branch frontend integration, and p4-Vega
+production submission activation completed on 2026-08-26.** Approved by Mike
+and live-schema-preflighted on 2026-08-24. The
 server-owned contract uses stable
 `p4-vega` and `three-bosses` identifiers. p4-Vega remains score-descending on
 its unchanged legacy endpoint. Three Bosses is completion-time-ascending but
@@ -175,13 +175,16 @@ closed, and the temporary maintenance identity was deleted. Because deferred
 `main` still contains the legacy writer, its automatic build trigger is disabled
 and must remain disabled until `main` becomes schema-compatible.
 
-A zero-traffic p4-enabled candidate, `mickeyf-org-p4-enabled-d5aee625`, now uses
-the same verified digest as the frozen production revision, with p4-Vega enabled
-and Three Bosses disabled. Its catalog and leaderboard reads passed; anonymous
-p4 submission reached the authentication boundary with HTTP 401, and Three
-Bosses submission remained HTTP 403. The temporary tag was removed. Cloud Run
-generation 123 still routes 100% to the frozen revision, so no live write or
-database mutation occurred.
+The p4-enabled revision `mickeyf-org-p4-enabled-d5aee625` uses the same verified
+digest as the frozen rollback revision, with p4-Vega enabled and Three Bosses
+disabled. After public smoke tests and validate-only traffic and rollback
+checks, etag-bound traffic-only operation
+`a54a5387-f780-44a9-b38d-d333db988cca` promoted it to 100% at Cloud Run
+generation 124. A signed-in p4-Vega game over submitted score 0 with HTTP 200;
+the existing 330 personal best remained unchanged, as did the five-row board
+(minimum 190, maximum 410, sum 1350). The rollback revision remains ready at
+zero traffic, the incompatible `main` trigger remains disabled, and no build or
+Cloud SQL operation was unfinished.
 
 Post-cutover cleanup removed the completed one-shot deployment package, the
 one-time p4 grant-retirement implementation and tests, and the obsolete
@@ -390,7 +393,7 @@ idempotent run history, transactional strict personal bests, and per-user and
 per-IP limits are covered by unit, security, rollback, concurrency, and
 isolated-MySQL tests. Rank remains `UNRANKED`. These routes have not been
 enabled for Three Bosses production writes: the routes are present in the
-serving frozen generic-only revision, but
+serving p4-enabled generic-only revision, but
 `THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=false` remains enforced. They do not
 replace the remaining submission-enablement gate.
 
@@ -403,7 +406,9 @@ and Submit Score button activation remain deliberately disconnected until the
 Three Bosses gameplay and ranking release gates are approved.
 
 The exact frozen generic-only revision first received 100% of production
-traffic at Cloud Run generation 121 and still serves 100% at generation 123.
+traffic at Cloud Run generation 121. The p4-enabled generic-only revision now
+serves 100% at generation 124; the frozen revision remains ready at zero traffic
+as the schema-compatible rollback target.
 The frozen dual writer is Ready but
 `Active=False`, reason `Retired`. Its 315-second drain, two delayed
 revision-specific zero-request log checks, two zero-transaction samples, the
@@ -430,11 +435,11 @@ The runtime identity can read ordinary `users` columns but receives
 `ER_COLUMNACCESS_DENIED_ERROR` for `p4_score`; public leaderboard and
 submission-freeze smoke tests passed. The subsequent checksum-recorded migration
 removed `users.p4_score` after fresh recovery evidence, and post-drop public
-verification passed. A separately approved enabled generic revision may now
-accept scores when product readiness permits. The retired frozen dual writer
-is no longer schema-compatible; rollback must use a generic-authoritative
-compatible revision or a forward fix. Submission enablement remains a separate
-later decision. The initial additive migrations remain unchanged.
+verification passed. The separately approved enabled generic revision now
+accepts p4-Vega scores; a signed-in zero-score smoke request returned HTTP 200
+without changing its existing personal best. The retired frozen dual writer is
+no longer schema-compatible; rollback must use the retained frozen generic-only
+revision or a forward fix. The initial additive migrations remain unchanged.
 
 The frozen generic-only candidate source was locally frozen and reviewed on
 2026-08-26 at exact commit

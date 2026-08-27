@@ -386,15 +386,20 @@ legacy `p4_score` column grants have since been retired; `users.p4_score` itself
 was dropped by checksum-recorded migration `0003` on 2026-08-26 after backup
 `1787787054951`. Post-drop schema verification and both public leaderboard
 contracts passed with the same five scores, and the temporary maintenance
-identity was deleted. Submission enablement is a separate later decision.
+identity was deleted. The later p4-Vega activation is recorded below.
 Exact evidence is recorded in
 [`backend/LEADERBOARD_DESIGN.md`](backend/LEADERBOARD_DESIGN.md).
 
-An enabled p4-Vega candidate, `mickeyf-org-p4-enabled-d5aee625`, was then
-created at zero traffic from the same verified image digest. Its anonymous
-submission probe reached authentication with HTTP 401, while Three Bosses
-remained disabled with HTTP 403. The temporary tag was removed and production
-continues to route 100% to the frozen generic-only revision.
+On 2026-08-26, traffic-only operation
+`a54a5387-f780-44a9-b38d-d333db988cca` promoted the enabled p4-Vega revision
+`mickeyf-org-p4-enabled-d5aee625` to 100% at Cloud Run generation 124. The
+revision uses the already verified generic-only image digest; p4-Vega writes
+are enabled while Three Bosses writes remain disabled. Public reads and gates
+passed, and a signed-in zero-score game over returned HTTP 200 without changing
+the existing personal best or the five-row leaderboard. The exact frozen
+generic-only revision remains ready at zero traffic, and a validate-only
+etag-bound rollback check passed. The incompatible deferred-`main` trigger
+remains disabled.
 
 The mutating backfill and its operator command were retired after the legacy
 column removal. The identity-free, read-only reconciliation remains because a
