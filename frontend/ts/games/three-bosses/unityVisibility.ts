@@ -1,4 +1,4 @@
-const RUN_SESSION_OBJECT = 'Three Bosses Run Session';
+export const THREE_BOSSES_RUN_SESSION_OBJECT = 'Three Bosses Run Session' as const;
 const PAUSE_METHOD = 'PauseForDocumentHidden';
 const RESUME_METHOD = 'ResumeFromDocumentHidden';
 
@@ -61,10 +61,10 @@ export const bindUnityVisibility = (
     let mainLoopPaused = false;
 
     const pauseReceiver = () => {
-        sendMessage.call(instance, RUN_SESSION_OBJECT, PAUSE_METHOD);
+        sendMessage.call(instance, THREE_BOSSES_RUN_SESSION_OBJECT, PAUSE_METHOD);
     };
     const resumeReceiver = () => {
-        sendMessage.call(instance, RUN_SESSION_OBJECT, RESUME_METHOD);
+        sendMessage.call(instance, THREE_BOSSES_RUN_SESSION_OBJECT, RESUME_METHOD);
     };
 
     const synchronize = () => {

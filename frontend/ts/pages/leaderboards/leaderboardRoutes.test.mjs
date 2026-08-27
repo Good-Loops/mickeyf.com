@@ -340,6 +340,19 @@ test('detail loader selects both known games and settles failures safely', async
         message: 'service unavailable',
     });
 
+    const mismatchedRules = await loadGameLeaderboardState('p4-vega', undefined, {
+        readCatalog: async () => catalog,
+        readGame: async () => ({
+            ...p4VegaLeaderboard,
+            rulesVersion: p4VegaGame.rulesVersion + 1,
+        }),
+    });
+    assert.deepEqual(mismatchedRules, {
+        status: 'error',
+        game: p4VegaGame,
+        message: 'The leaderboard service returned an unexpected response.',
+    });
+
     for (const gameId of ['p4-vega', 'three-bosses']) {
         const apiNotFound = await loadGameLeaderboardState(gameId, undefined, {
             readCatalog: async () => catalog,

@@ -2,21 +2,22 @@ import {
     isCanonicalThreeBossesRunId,
     isValidThreeBossesCompletionTimeMs,
     LEADERBOARD_CONTRACT_VERSION,
-    LEADERBOARD_RULES_VERSION,
     LeaderboardRequestError,
+    THREE_BOSSES_RULES_VERSION,
     type LeaderboardClientErrorCode,
     type ThreeBossesRunSubmissionRequest,
     type ThreeBossesRunSubmissionResponse,
 } from '../../services/leaderboardApi.ts';
+import { THREE_BOSSES_RUN_SESSION_OBJECT } from './unityVisibility.ts';
 
 export const THREE_BOSSES_SUBMISSION_BRIDGE_FUNCTION =
     'mickeyfThreeBossesSubmitRun' as const;
 export const THREE_BOSSES_SUBMISSION_RECEIVER_OBJECT =
-    'Three Bosses Run Session' as const;
+    THREE_BOSSES_RUN_SESSION_OBJECT;
 export const THREE_BOSSES_SUBMISSION_RESULT_METHOD =
     'ReceiveRunSubmissionResult' as const;
 
-export type ThreeBossesSubmissionBridgeCallback =
+type ThreeBossesSubmissionBridgeCallback =
     | Readonly<{
           success: true;
           runId: string;
@@ -95,7 +96,7 @@ function submissionKey(payload: UnityRunPayload): string {
 function requestFor(payload: UnityRunPayload): ThreeBossesRunSubmissionRequest {
     return {
         contractVersion: LEADERBOARD_CONTRACT_VERSION,
-        rulesVersion: LEADERBOARD_RULES_VERSION,
+        rulesVersion: THREE_BOSSES_RULES_VERSION,
         runId: payload.runId,
         completionTimeMs: payload.completionTimeMs,
     };

@@ -185,6 +185,7 @@ test('Three Bosses submission rejects invalid local input before fetch', async (
 test('Three Bosses submission fails closed on malformed success and error responses', async () => {
     const malformedSuccesses = [
         { ...runSubmissionResponse, runId: '6ba7b810-9dad-41d1-80b4-00c04fd430c8' },
+        { ...runSubmissionResponse, rulesVersion: 2 },
         { ...runSubmissionResponse, result: { ...runSubmissionResponse.result, completionTimeMs: 60_001 } },
         { ...runSubmissionResponse, unexpected: true },
     ];
@@ -239,7 +240,7 @@ test('unknown game errors retain their public code and encoded request path', as
     assert.equal(observedUrl, '/api/leaderboards/missing%2Fgame');
 });
 
-test('malformed and wrong-version success responses fail closed', async () => {
+test('malformed responses fail closed while game rules versions remain independent', async () => {
     const malformedApi = createLeaderboardApi('', async () => Response.json({
         ...catalog,
         contractVersion: 2,
@@ -258,15 +259,26 @@ test('malformed and wrong-version success responses fail closed', async () => {
             && error.code === 'INVALID_RESPONSE'
     );
 
-    const wrongRulesApi = createLeaderboardApi('', async () => Response.json({
+    const newerRulesResponse = {
         success: true,
         contractVersion: 1,
         gameId: 'p4-vega',
         rulesVersion: 2,
         entries: [],
+    };
+    const newerRulesApi = createLeaderboardApi('', async () =>
+        Response.json(newerRulesResponse));
+    assert.deepEqual(
+        await newerRulesApi.getGame('p4-vega'),
+        newerRulesResponse,
+    );
+
+    const invalidRulesApi = createLeaderboardApi('', async () => Response.json({
+        ...newerRulesResponse,
+        rulesVersion: 0,
     }));
     await assert.rejects(
-        wrongRulesApi.getGame('p4-vega'),
+        invalidRulesApi.getGame('p4-vega'),
         (error) => error instanceof LeaderboardRequestError
             && error.code === 'INVALID_RESPONSE'
     );

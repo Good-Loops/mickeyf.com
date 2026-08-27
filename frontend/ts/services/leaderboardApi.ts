@@ -7,18 +7,18 @@
  */
 
 export const LEADERBOARD_CONTRACT_VERSION = 1 as const;
-export const LEADERBOARD_PAGE_SIZE = 10 as const;
-export const LEADERBOARD_RULES_VERSION = 1 as const;
-export const THREE_BOSSES_MIN_COMPLETION_TIME_MS = 1 as const;
-export const THREE_BOSSES_MAX_COMPLETION_TIME_MS = 86_400_000 as const;
+export const THREE_BOSSES_RULES_VERSION = 1 as const;
+const LEADERBOARD_PAGE_SIZE = 10 as const;
+const THREE_BOSSES_MIN_COMPLETION_TIME_MS = 1 as const;
+const THREE_BOSSES_MAX_COMPLETION_TIME_MS = 86_400_000 as const;
 
 const CANONICAL_V4_UUID =
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
 
-export type LeaderboardGameId = 'p4-vega' | 'three-bosses';
-export type LeaderboardMetric = 'score' | 'completionTimeMs';
-export type LeaderboardRankState = 'not-applicable' | 'unranked' | 'ranked';
-export type LeaderboardSubmissionState = 'legacy-only' | 'disabled' | 'enabled';
+type LeaderboardGameId = 'p4-vega' | 'three-bosses';
+type LeaderboardMetric = 'score' | 'completionTimeMs';
+type LeaderboardRankState = 'not-applicable' | 'unranked' | 'ranked';
+type LeaderboardSubmissionState = 'legacy-only' | 'disabled' | 'enabled';
 
 export type LeaderboardCatalogGame = {
     gameId: LeaderboardGameId;
@@ -41,13 +41,13 @@ export type LeaderboardCatalogResponse = {
     games: LeaderboardCatalogGame[];
 };
 
-export type P4VegaLeaderboardEntry = {
+type P4VegaLeaderboardEntry = {
     position: number;
     userName: string;
     score: number;
 };
 
-export type ThreeBossesLeaderboardEntry = {
+type ThreeBossesLeaderboardEntry = {
     position: number;
     userName: string;
     score: number;
@@ -60,20 +60,20 @@ export type GameLeaderboardResponse =
           success: true;
           contractVersion: typeof LEADERBOARD_CONTRACT_VERSION;
           gameId: 'p4-vega';
-          rulesVersion: typeof LEADERBOARD_RULES_VERSION;
+          rulesVersion: number;
           entries: P4VegaLeaderboardEntry[];
       }
     | {
           success: true;
           contractVersion: typeof LEADERBOARD_CONTRACT_VERSION;
           gameId: 'three-bosses';
-          rulesVersion: typeof LEADERBOARD_RULES_VERSION;
+          rulesVersion: number;
           entries: ThreeBossesLeaderboardEntry[];
       };
 
 export type ThreeBossesRunSubmissionRequest = {
     contractVersion: typeof LEADERBOARD_CONTRACT_VERSION;
-    rulesVersion: typeof LEADERBOARD_RULES_VERSION;
+    rulesVersion: typeof THREE_BOSSES_RULES_VERSION;
     runId: string;
     completionTimeMs: number;
 };
@@ -82,7 +82,7 @@ export type ThreeBossesRunSubmissionResponse = {
     success: true;
     contractVersion: typeof LEADERBOARD_CONTRACT_VERSION;
     gameId: 'three-bosses';
-    rulesVersion: typeof LEADERBOARD_RULES_VERSION;
+    rulesVersion: typeof THREE_BOSSES_RULES_VERSION;
     runId: string;
     replayed: boolean;
     personalBest: boolean;
@@ -93,7 +93,7 @@ export type ThreeBossesRunSubmissionResponse = {
     };
 };
 
-export type LeaderboardApiErrorCode =
+type LeaderboardApiErrorCode =
     | 'UNKNOWN_GAME'
     | 'SUBMISSION_DISABLED'
     | 'UNSUPPORTED_CONTRACT_VERSION'
@@ -127,7 +127,7 @@ export class LeaderboardRequestError extends Error {
     }
 }
 
-export type LeaderboardApi = {
+type LeaderboardApi = {
     getCatalog(signal?: AbortSignal): Promise<LeaderboardCatalogResponse>;
     getGame(
         gameId: string,
@@ -181,7 +181,7 @@ function isThreeBossesRunSubmissionRequest(
             'completionTimeMs',
         ])
         && value.contractVersion === LEADERBOARD_CONTRACT_VERSION
-        && value.rulesVersion === LEADERBOARD_RULES_VERSION
+        && value.rulesVersion === THREE_BOSSES_RULES_VERSION
         && isCanonicalThreeBossesRunId(value.runId)
         && isValidThreeBossesCompletionTimeMs(value.completionTimeMs);
 }
@@ -250,7 +250,7 @@ function isGameResponse(
         || value.contractVersion !== LEADERBOARD_CONTRACT_VERSION
         || value.gameId !== requestedGameId
         || !isGameId(value.gameId)
-        || value.rulesVersion !== LEADERBOARD_RULES_VERSION
+        || !isPositiveInteger(value.rulesVersion)
         || !Array.isArray(value.entries)
         || value.entries.length > LEADERBOARD_PAGE_SIZE
     ) {
@@ -295,7 +295,7 @@ function isThreeBossesRunSubmissionResponse(
     return value.success === true
         && value.contractVersion === LEADERBOARD_CONTRACT_VERSION
         && value.gameId === 'three-bosses'
-        && value.rulesVersion === LEADERBOARD_RULES_VERSION
+        && value.rulesVersion === request.rulesVersion
         && value.runId === request.runId
         && typeof value.replayed === 'boolean'
         && typeof value.personalBest === 'boolean'
@@ -495,7 +495,7 @@ export function createLeaderboardApi(
                     'UNSUPPORTED_CONTRACT_VERSION'
                 );
             }
-            if (submission.rulesVersion !== LEADERBOARD_RULES_VERSION) {
+            if (submission.rulesVersion !== THREE_BOSSES_RULES_VERSION) {
                 throw new LeaderboardRequestError(
                     messageForApiError('UNSUPPORTED_RULES_VERSION'),
                     API_ERROR_STATUS.UNSUPPORTED_RULES_VERSION,

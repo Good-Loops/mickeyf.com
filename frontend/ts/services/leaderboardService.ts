@@ -13,10 +13,4 @@ export {
     type GameLeaderboardResponse,
     type LeaderboardCatalogGame,
     type LeaderboardCatalogResponse,
-    type LeaderboardClientErrorCode,
-    type LeaderboardGameId,
-    type LeaderboardRankState,
-    type LeaderboardSubmissionState,
-    type ThreeBossesRunSubmissionRequest,
-    type ThreeBossesRunSubmissionResponse,
 } from '@/services/leaderboardApi';

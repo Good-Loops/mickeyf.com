@@ -8,7 +8,7 @@ using UnityEngine.UI;
 
 /// <summary>
 /// Displays the local completion result. Submission remains disabled until the
-/// dedicated authenticated Three Bosses endpoint is implemented in Phase 13.
+/// timing, ranking, and release gates approve the Unity-to-browser integration.
 /// </summary>
 public sealed class EndScreenController : MonoBehaviour
 {
@@ -33,7 +33,7 @@ public sealed class EndScreenController : MonoBehaviour
         UiButtonStyle.Apply(backToMenuButton);
         UiButtonStyle.Apply(submitScoreButton);
 
-        // Phase 13 will connect this button to the dedicated Three Bosses API.
+        // The browser endpoint exists, but Unity activation is a separate release gate.
         // Keep it inert before the first rendered frame as well as after Start.
         if (submitScoreButton != null)
             submitScoreButton.interactable = false;

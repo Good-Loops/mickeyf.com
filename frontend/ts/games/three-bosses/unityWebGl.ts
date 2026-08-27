@@ -8,7 +8,7 @@ import {
     type ThreeBossesRunSubmitter,
 } from '@/games/three-bosses/unitySubmissionBridge';
 
-export type UnityWebGlInstance = UnityVisibilityBridgeInstance & Readonly<{
+type UnityWebGlInstance = UnityVisibilityBridgeInstance & Readonly<{
     Quit: () => Promise<void>;
     SetFullscreen?: (fullscreen: number) => void;
 }>;

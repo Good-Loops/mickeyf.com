@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { bindUnityVisibility } from './unityVisibility.ts';
+import {
+    bindUnityVisibility,
+    THREE_BOSSES_RUN_SESSION_OBJECT,
+} from './unityVisibility.ts';
 
-const receiver = 'Three Bosses Run Session';
+const receiver = THREE_BOSSES_RUN_SESSION_OBJECT;
 
 class FakeVisibilityDocument {
     constructor(hidden = false, focused = true) {

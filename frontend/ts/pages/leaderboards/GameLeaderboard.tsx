@@ -10,7 +10,7 @@ import {
     type LeaderboardCatalogGame,
 } from '@/services/leaderboardService';
 
-export type DetailState =
+type DetailState =
     | { status: 'loading' }
     | { status: 'not-found'; games: LeaderboardCatalogGame[] }
     | {
