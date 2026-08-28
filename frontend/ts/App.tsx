@@ -35,7 +35,7 @@ const App: React.FC = () => {
 			<div className="space-background__stars space-background__stars--far" />
 			<div className="space-background__stars space-background__stars--near" />
 			<div className="space-background__nebula" />
-			<div className="space-background__celestial space-background__celestial--galaxy-barred" />
+			<div className="space-background__celestial space-background__celestial--galaxy-interacting-pair" />
 			<div className="space-background__celestial space-background__celestial--galaxy-broad" />
 			<div className="space-background__celestial space-background__celestial--galaxy-edge" />
 			<div className="space-background__celestial space-background__celestial--galaxy-ring" />

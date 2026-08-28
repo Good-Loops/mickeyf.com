@@ -107,9 +107,9 @@
             animation-delay: var(--celestial-glow-delay);
         }
 
-        &--galaxy-barred {
-            --celestial-core-x: 46%;
-            --celestial-core-y: 50%;
+        &--galaxy-interacting-pair {
+            --celestial-core-x: 58%;
+            --celestial-core-y: 41%;
             --celestial-drift-duration: 34s;
             --celestial-glow-duration: 7.2s;
             --celestial-glow-delay: -2s;
@@ -117,10 +117,10 @@
             top: 7%;
             right: 5.5%;
 
-            width: clamp(6.2rem, 7vw, 8.8rem);
-            aspect-ratio: 560 / 540;
+            width: clamp(8.8rem, 10vw, 12rem);
+            aspect-ratio: 560 / 468;
 
-            background-image: url('../../ts/assets/backgrounds/galaxy-barred-realistic.webp');
+            background-image: url('../../ts/assets/backgrounds/galaxy-interacting-pair-realistic.webp');
         }
 
         &--galaxy-broad {
@@ -137,7 +137,7 @@
             top: 24%;
             left: 4.5%;
 
-            width: clamp(7.6rem, 9vw, 11rem);
+            width: clamp(10rem, 11.5vw, 14rem);
             aspect-ratio: 620 / 340;
 
             background-image: url('../../ts/assets/backgrounds/galaxy-broad-realistic.webp');
@@ -154,7 +154,7 @@
             bottom: 7%;
             left: 4%;
 
-            width: clamp(10.5rem, 12vw, 14rem);
+            width: clamp(14rem, 15vw, 18rem);
             aspect-ratio: 620 / 167;
 
             background-image: url('../../ts/assets/backgrounds/galaxy-edge-realistic.webp');
@@ -174,7 +174,7 @@
             right: 6%;
             bottom: 10%;
 
-            width: clamp(3.5rem, 4.2vw, 5rem);
+            width: clamp(4.6rem, 5.2vw, 6.4rem);
             aspect-ratio: 420 / 426;
 
             background-image: url('../../ts/assets/backgrounds/galaxy-ring-realistic.webp');
@@ -191,7 +191,7 @@
             top: 54%;
             right: 15%;
 
-            width: clamp(2.7rem, 3.4vw, 4rem);
+            width: clamp(2.2rem, 2.8vw, 3.3rem);
             aspect-ratio: 420 / 560;
 
             background-image: url('../../ts/assets/backgrounds/nebula-hourglass-realistic.webp');
@@ -211,7 +211,7 @@
             top: 69%;
             left: 10%;
 
-            width: clamp(3.8rem, 4.6vw, 5.6rem);
+            width: clamp(5.2rem, 6vw, 7.2rem);
             aspect-ratio: 360 / 397;
 
             background-image: url('../../ts/assets/backgrounds/wolf-rayet-cocoon-realistic.webp');
@@ -228,8 +228,8 @@
             top: 28%;
             right: 27%;
 
-            width: clamp(1.9rem, 2.3vw, 2.8rem);
-            aspect-ratio: 260 / 842;
+            width: clamp(3.4rem, 4vw, 4.8rem);
+            aspect-ratio: 360 / 622;
 
             background-image: url('../../ts/assets/backgrounds/quasar-jet-realistic.webp');
         }
@@ -247,7 +247,7 @@
             bottom: 22%;
             left: 44%;
 
-            width: clamp(6.4rem, 7.6vw, 9rem);
+            width: clamp(7.5rem, 8.8vw, 10.5rem);
             aspect-ratio: 560 / 453;
 
             background-image: url('../../ts/assets/backgrounds/wolf-rayet-shells-realistic.webp');
@@ -264,7 +264,7 @@
             top: 17%;
             left: 34%;
 
-            width: clamp(1.4rem, 1.8vw, 2.2rem);
+            width: clamp(1.1rem, 1.35vw, 1.7rem);
             aspect-ratio: 280 / 277;
 
             background-image: url('../../ts/assets/backgrounds/quasar-lensed-realistic.webp');
