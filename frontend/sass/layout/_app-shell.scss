@@ -117,7 +117,7 @@
             top: 7%;
             right: 5.5%;
 
-            width: clamp(5.5rem, 6.5vw, 8rem);
+            width: clamp(6.2rem, 7vw, 8.8rem);
             aspect-ratio: 560 / 540;
 
             background-image: url('../../ts/assets/backgrounds/galaxy-barred-realistic.webp');
@@ -137,7 +137,7 @@
             top: 24%;
             left: 4.5%;
 
-            width: clamp(6.5rem, 7.8vw, 9.5rem);
+            width: clamp(7.6rem, 9vw, 11rem);
             aspect-ratio: 620 / 340;
 
             background-image: url('../../ts/assets/backgrounds/galaxy-broad-realistic.webp');
@@ -154,7 +154,7 @@
             bottom: 7%;
             left: 4%;
 
-            width: clamp(8.5rem, 10.5vw, 12.5rem);
+            width: clamp(10.5rem, 12vw, 14rem);
             aspect-ratio: 620 / 167;
 
             background-image: url('../../ts/assets/backgrounds/galaxy-edge-realistic.webp');
@@ -174,7 +174,7 @@
             right: 6%;
             bottom: 10%;
 
-            width: clamp(4rem, 4.8vw, 5.8rem);
+            width: clamp(3.5rem, 4.2vw, 5rem);
             aspect-ratio: 420 / 426;
 
             background-image: url('../../ts/assets/backgrounds/galaxy-ring-realistic.webp');
@@ -191,10 +191,30 @@
             top: 54%;
             right: 15%;
 
-            width: clamp(3.2rem, 4vw, 4.8rem);
+            width: clamp(2.7rem, 3.4vw, 4rem);
             aspect-ratio: 420 / 560;
 
             background-image: url('../../ts/assets/backgrounds/nebula-hourglass-realistic.webp');
+        }
+
+        &--wolf-rayet-cocoon {
+            --celestial-core-x: 49%;
+            --celestial-core-y: 51%;
+            --celestial-drift-duration: 36s;
+            --celestial-drift-delay: -28s;
+            --celestial-glow: #{rgba($secondary, .42)};
+            --celestial-glow-size: .34rem;
+            --celestial-glow-radius: 1.25rem;
+            --celestial-glow-duration: 6.6s;
+            --celestial-glow-delay: -4.3s;
+
+            top: 69%;
+            left: 10%;
+
+            width: clamp(3.8rem, 4.6vw, 5.6rem);
+            aspect-ratio: 360 / 397;
+
+            background-image: url('../../ts/assets/backgrounds/wolf-rayet-cocoon-realistic.webp');
         }
 
         &--quasar-jet {
@@ -208,13 +228,15 @@
             top: 28%;
             right: 27%;
 
-            width: clamp(2.2rem, 2.7vw, 3.3rem);
+            width: clamp(1.9rem, 2.3vw, 2.8rem);
             aspect-ratio: 260 / 842;
 
             background-image: url('../../ts/assets/backgrounds/quasar-jet-realistic.webp');
         }
 
-        &--quasar-radio {
+        &--wolf-rayet-shells {
+            --celestial-core-x: 10%;
+            --celestial-core-y: 63%;
             --celestial-drift-duration: 31s;
             --celestial-drift-delay: -22s;
             --celestial-glow: #{rgba($secondary, .48)};
@@ -225,10 +247,10 @@
             bottom: 22%;
             left: 44%;
 
-            width: clamp(5rem, 6.4vw, 7.5rem);
-            aspect-ratio: 560 / 197;
+            width: clamp(6.4rem, 7.6vw, 9rem);
+            aspect-ratio: 560 / 453;
 
-            background-image: url('../../ts/assets/backgrounds/quasar-radio-realistic.webp');
+            background-image: url('../../ts/assets/backgrounds/wolf-rayet-shells-realistic.webp');
         }
 
         &--quasar-lensed {
@@ -242,7 +264,7 @@
             top: 17%;
             left: 34%;
 
-            width: clamp(2rem, 2.4vw, 3rem);
+            width: clamp(1.4rem, 1.8vw, 2.2rem);
             aspect-ratio: 280 / 277;
 
             background-image: url('../../ts/assets/backgrounds/quasar-lensed-realistic.webp');
