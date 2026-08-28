@@ -66,106 +66,186 @@
         animation: space-nebula-loop 46s ease-in-out infinite;
     }
 
-    &__galaxy {
+    &__celestial {
+        --celestial-core-x: 50%;
+        --celestial-core-y: 50%;
+        --celestial-drift-duration: 32s;
+        --celestial-drift-delay: -6s;
+        --celestial-glow: #{rgba($primary, .38)};
+        --celestial-glow-size: .65rem;
+        --celestial-glow-radius: 1.8rem;
+        --celestial-glow-duration: 7.2s;
+        --celestial-glow-delay: -2s;
+
         position: absolute;
 
-        width: clamp(14rem, 20vw, 27rem);
-        aspect-ratio: 720 / 528;
-
+        background-position: center;
+        background-repeat: no-repeat;
+        background-size: contain;
         opacity: .46;
 
-        animation: space-galaxy-float 24s ease-in-out infinite;
+        animation: space-celestial-drift var(--celestial-drift-duration) ease-in-out infinite;
+        animation-delay: var(--celestial-drift-delay);
 
-        &::before,
         &::after {
             content: '';
 
             position: absolute;
+            top: var(--celestial-core-y);
+            left: var(--celestial-core-x);
 
-            pointer-events: none;
-        }
-
-        &::before {
-            inset: 0;
-
-            background: url('../../ts/assets/backgrounds/galaxy-spiral-illustrated.webp') center / contain no-repeat;
-        }
-
-        &::after {
-            top: 50%;
-            left: 50%;
-
-            width: 1.1rem;
+            width: var(--celestial-glow-size);
             aspect-ratio: 1;
 
             border-radius: 50%;
-            background: radial-gradient(circle, rgba($white, .78), rgba($primary, .3) 32%, transparent 72%);
-            box-shadow: 0 0 2.4rem rgba($primary, .32);
+            background: radial-gradient(circle, rgba($white, .88), var(--celestial-glow) 32%, transparent 72%);
+            box-shadow: 0 0 var(--celestial-glow-radius) var(--celestial-glow);
             opacity: .34;
             transform: translate(-50%, -50%);
 
-            animation: space-galaxy-core 6.8s ease-in-out infinite;
+            animation: space-celestial-glow var(--celestial-glow-duration) ease-in-out infinite;
+            animation-delay: var(--celestial-glow-delay);
         }
 
-        &--blue {
-            top: 6%;
-            right: 4%;
+        &--galaxy-barred {
+            --celestial-core-x: 46%;
+            --celestial-core-y: 50%;
+            --celestial-drift-duration: 34s;
+            --celestial-glow-duration: 7.2s;
+            --celestial-glow-delay: -2s;
+
+            top: 7%;
+            right: 5.5%;
+
+            width: clamp(5.5rem, 6.5vw, 8rem);
+            aspect-ratio: 560 / 540;
+
+            background-image: url('../../ts/assets/backgrounds/galaxy-barred-realistic.webp');
         }
 
-        &--green {
-            bottom: 8%;
+        &--galaxy-broad {
+            --celestial-core-x: 49%;
+            --celestial-core-y: 46%;
+            --celestial-drift-duration: 38s;
+            --celestial-drift-delay: -19s;
+            --celestial-glow: #{rgba($primary, .44)};
+            --celestial-glow-size: .8rem;
+            --celestial-glow-radius: 2.2rem;
+            --celestial-glow-duration: 8.4s;
+            --celestial-glow-delay: -5.1s;
+
+            top: 24%;
+            left: 4.5%;
+
+            width: clamp(6.5rem, 7.8vw, 9.5rem);
+            aspect-ratio: 620 / 340;
+
+            background-image: url('../../ts/assets/backgrounds/galaxy-broad-realistic.webp');
+        }
+
+        &--galaxy-edge {
+            --celestial-drift-duration: 42s;
+            --celestial-drift-delay: -12s;
+            --celestial-glow: #{rgba($secondary, .34)};
+            --celestial-glow-size: .55rem;
+            --celestial-glow-duration: 6.9s;
+            --celestial-glow-delay: -3.7s;
+
+            bottom: 7%;
             left: 4%;
 
-            width: clamp(16rem, 24vw, 33rem);
-            aspect-ratio: 840 / 398;
+            width: clamp(8.5rem, 10.5vw, 12.5rem);
+            aspect-ratio: 620 / 167;
 
-            animation-delay: -11s;
-            animation-duration: 29s;
-
-            &::before {
-                background-image: url('../../ts/assets/backgrounds/galaxy-edge-illustrated.webp');
-            }
-
-            &::after {
-                background: radial-gradient(circle, rgba($white, .72), rgba($secondary, .26) 32%, transparent 72%);
-                box-shadow: 0 0 2.2rem rgba($secondary, .3);
-                animation-delay: -2.4s;
-            }
+            background-image: url('../../ts/assets/backgrounds/galaxy-edge-realistic.webp');
         }
-    }
 
-    &__quasar {
-        position: absolute;
-        top: 34%;
-        left: 69%;
+        &--galaxy-ring {
+            --celestial-core-x: 64%;
+            --celestial-core-y: 60%;
+            --celestial-drift-duration: 37s;
+            --celestial-drift-delay: -25s;
+            --celestial-glow: #{rgba($secondary, .32)};
+            --celestial-glow-size: .48rem;
+            --celestial-glow-radius: 1.3rem;
+            --celestial-glow-duration: 9.1s;
+            --celestial-glow-delay: -7.2s;
 
-        width: clamp(8rem, 11vw, 15rem);
-        aspect-ratio: 332 / 420;
+            right: 6%;
+            bottom: 10%;
 
-        background: url('../../ts/assets/backgrounds/quasar-pixel.webp') center / contain no-repeat;
-        opacity: .56;
+            width: clamp(4rem, 4.8vw, 5.8rem);
+            aspect-ratio: 420 / 426;
 
-        animation: space-quasar-loop 18s ease-in-out infinite;
+            background-image: url('../../ts/assets/backgrounds/galaxy-ring-realistic.webp');
+        }
 
-        &::after {
-            content: '';
+        &--nebula-hourglass {
+            --celestial-drift-duration: 29s;
+            --celestial-drift-delay: -15s;
+            --celestial-glow: #{rgba($secondary, .4)};
+            --celestial-glow-size: .46rem;
+            --celestial-glow-radius: 1.4rem;
+            --celestial-glow-duration: 6.4s;
 
-            position: absolute;
-            top: 50%;
-            left: 50%;
+            top: 54%;
+            right: 15%;
 
-            width: 1.1rem;
-            aspect-ratio: 1;
+            width: clamp(3.2rem, 4vw, 4.8rem);
+            aspect-ratio: 420 / 560;
 
-            border-radius: 50%;
-            background: radial-gradient(circle, $white, rgba($tertiary, .72) 25%, transparent 72%);
-            box-shadow:
-                0 0 1.2rem rgba($white, .56),
-                0 0 3.2rem rgba($tertiary, .36);
-            opacity: .58;
-            transform: translate(-50%, -50%);
+            background-image: url('../../ts/assets/backgrounds/nebula-hourglass-realistic.webp');
+        }
 
-            animation: space-quasar-core 4.6s ease-in-out infinite;
+        &--quasar-jet {
+            --celestial-drift-duration: 27s;
+            --celestial-drift-delay: -8s;
+            --celestial-glow: #{rgba($tertiary, .56)};
+            --celestial-glow-size: .42rem;
+            --celestial-glow-radius: 1.6rem;
+            --celestial-glow-duration: 5.2s;
+
+            top: 28%;
+            right: 27%;
+
+            width: clamp(2.2rem, 2.7vw, 3.3rem);
+            aspect-ratio: 260 / 842;
+
+            background-image: url('../../ts/assets/backgrounds/quasar-jet-realistic.webp');
+        }
+
+        &--quasar-radio {
+            --celestial-drift-duration: 31s;
+            --celestial-drift-delay: -22s;
+            --celestial-glow: #{rgba($secondary, .48)};
+            --celestial-glow-size: .4rem;
+            --celestial-glow-radius: 1.5rem;
+            --celestial-glow-duration: 5.8s;
+
+            bottom: 22%;
+            left: 44%;
+
+            width: clamp(5rem, 6.4vw, 7.5rem);
+            aspect-ratio: 560 / 197;
+
+            background-image: url('../../ts/assets/backgrounds/quasar-radio-realistic.webp');
+        }
+
+        &--quasar-lensed {
+            --celestial-drift-duration: 35s;
+            --celestial-drift-delay: -17s;
+            --celestial-glow: #{rgba($primary, .48)};
+            --celestial-glow-size: .38rem;
+            --celestial-glow-radius: 1.2rem;
+            --celestial-glow-duration: 4.8s;
+
+            top: 17%;
+            left: 34%;
+
+            width: clamp(2rem, 2.4vw, 3rem);
+            aspect-ratio: 280 / 277;
+
+            background-image: url('../../ts/assets/backgrounds/quasar-lensed-realistic.webp');
         }
     }
 }
@@ -175,11 +255,8 @@
 body:has(canvas) {
     .space-background__stars--near::before,
     .space-background__nebula,
-    .space-background__galaxy,
-    .space-background__galaxy::before,
-    .space-background__galaxy::after,
-    .space-background__quasar,
-    .space-background__quasar::after {
+    .space-background__celestial,
+    .space-background__celestial::after {
         animation: none;
     }
 }
@@ -187,11 +264,8 @@ body:has(canvas) {
 @media (prefers-reduced-motion: reduce) {
     .space-background__stars--near::before,
     .space-background__nebula,
-    .space-background__galaxy,
-    .space-background__galaxy::before,
-    .space-background__galaxy::after,
-    .space-background__quasar,
-    .space-background__quasar::after {
+    .space-background__celestial,
+    .space-background__celestial::after {
         animation: none;
     }
 }

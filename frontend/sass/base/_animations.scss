@@ -29,70 +29,34 @@
     }
 }
 
-@keyframes space-galaxy-float {
+@keyframes space-celestial-drift {
     0%,
     100% {
-        opacity: .38;
-        transform: translate3d(0, 0, 0) scale(.985);
+        opacity: .44;
+        transform: translate3d(0, 0, 0) scale(.995);
     }
 
-    38% {
-        opacity: .54;
-        transform: translate3d(.55vw, -.45vh, 0) scale(1.015);
+    40% {
+        opacity: .51;
+        transform: translate3d(.35vw, -.3vh, 0) scale(1.008);
     }
 
     72% {
-        opacity: .46;
-        transform: translate3d(-.4vw, .3vh, 0) scale(.995);
+        opacity: .47;
+        transform: translate3d(-.28vw, .22vh, 0) scale(.998);
     }
 }
 
-@keyframes space-galaxy-core {
+@keyframes space-celestial-glow {
     0%,
     100% {
-        opacity: .24;
-        transform: translate(-50%, -50%) scale(.88);
+        opacity: .22;
+        transform: translate(-50%, -50%) scale(.82);
     }
 
     50% {
-        opacity: .58;
-        transform: translate(-50%, -50%) scale(1.16);
-    }
-}
-
-@keyframes space-quasar-loop {
-    0%,
-    100% {
-        opacity: .46;
-        transform: translate3d(0, 0, 0) scale(.98);
-    }
-
-    25% {
-        opacity: .57;
-        transform: translate3d(.32vw, -.28vh, 0) scale(1.015);
-    }
-
-    50% {
-        opacity: .68;
-        transform: translate3d(0, -.55vh, 0) scale(1.035);
-    }
-
-    75% {
-        opacity: .55;
-        transform: translate3d(-.32vw, -.22vh, 0) scale(1.01);
-    }
-}
-
-@keyframes space-quasar-core {
-    0%,
-    100% {
-        opacity: .55;
-        transform: translate(-50%, -50%) scale(.72);
-    }
-
-    50% {
-        opacity: 1;
-        transform: translate(-50%, -50%) scale(1.35);
+        opacity: .72;
+        transform: translate(-50%, -50%) scale(1.24);
     }
 }
 
@@ -116,25 +80,15 @@
 
 @keyframes glow {
     from {
-        text-shadow: 0 0 5px $white, 
-                0 0 10px $white, 
-                0 0 15px $white, 
-                0 0 20px $primary, 
-                0 0 30px $primary, 
-                0 0 40px $primary, 
-                0 0 55px $primary, 
-                0 0 75px $primary;
+        text-shadow:
+            0 0 .08em rgba($white, .78),
+            0 0 .2em currentColor;
     }
 
     to {
-        text-shadow: 0 0 10px $white, 
-                0 0 15px $white, 
-                0 0 20px $white, 
-                0 0 25px $primary, 
-                0 0 35px $primary, 
-                0 0 50px $primary, 
-                0 0 70px $primary, 
-                0 0 100px $primary;
+        text-shadow:
+            0 0 .14em rgba($white, .9),
+            0 0 .36em currentColor;
     }
 }
 
@@ -154,4 +108,12 @@
 .fade-out {
     opacity: 0;
     transition: opacity 2s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .floating,
+    .glowing,
+    .glowing-floating {
+        animation: none;
+    }
 }

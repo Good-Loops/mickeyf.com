@@ -41,6 +41,7 @@
 
     &__title {
         @include title-coloring;
+        color: $secondary;
         font-size: clamp(4.4rem, 7vw, 8rem);
         line-height: 1;
         overflow-wrap: anywhere;

@@ -2,4 +2,8 @@
 
 .login {
     @include user-conection-form;
+
+    &__title {
+        color: $secondary;
+    }
 }

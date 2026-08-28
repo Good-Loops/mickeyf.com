@@ -4,6 +4,10 @@
     
     @include default-component;
 
+    &__title {
+        color: $secondary;
+    }
+
     &__grid {
     
         display: grid;

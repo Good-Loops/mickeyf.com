@@ -6,11 +6,23 @@
     width: 80vw;
 
     &__welcome-message {
-        color: $primary-mid;
         font-size: $font-size-m;
         text-align: center;
         font-weight: 600;
         font-family: $subheading-font;
+    }
+
+    &__welcome-line {
+        display: block;
+
+        &--blue {
+            color: $primary-mid;
+        }
+
+        &--green {
+            color: $secondary;
+            animation-delay: -.75s;
+        }
     }
 
     &__quotes-container {

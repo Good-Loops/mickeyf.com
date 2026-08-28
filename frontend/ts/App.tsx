@@ -35,9 +35,14 @@ const App: React.FC = () => {
 			<div className="space-background__stars space-background__stars--far" />
 			<div className="space-background__stars space-background__stars--near" />
 			<div className="space-background__nebula" />
-			<div className="space-background__galaxy space-background__galaxy--blue" />
-			<div className="space-background__galaxy space-background__galaxy--green" />
-			<div className="space-background__quasar" />
+			<div className="space-background__celestial space-background__celestial--galaxy-barred" />
+			<div className="space-background__celestial space-background__celestial--galaxy-broad" />
+			<div className="space-background__celestial space-background__celestial--galaxy-edge" />
+			<div className="space-background__celestial space-background__celestial--galaxy-ring" />
+			<div className="space-background__celestial space-background__celestial--nebula-hourglass" />
+			<div className="space-background__celestial space-background__celestial--quasar-jet" />
+			<div className="space-background__celestial space-background__celestial--quasar-radio" />
+			<div className="space-background__celestial space-background__celestial--quasar-lensed" />
 		</div>
 		<Header />
 		<main className="main">
