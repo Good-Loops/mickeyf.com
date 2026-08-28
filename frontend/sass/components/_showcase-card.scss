@@ -1,0 +1,111 @@
+@use '../abstracts' as *;
+
+.showcase-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(19rem, 28rem));
+    gap: clamp(2rem, 4vw, 3.6rem);
+    justify-content: center;
+    width: min(90vw, 60rem);
+}
+
+.showcase-card {
+    position: relative;
+    isolation: isolate;
+    overflow: hidden;
+
+    display: grid;
+    grid-template-rows: minmax(12rem, 1fr) auto;
+    min-height: 21rem;
+
+    border: .1rem solid rgba($primary-light, .18);
+    border-radius: 1.2rem;
+    color: inherit;
+    background:
+        linear-gradient(145deg, rgba($space-surface, .94), rgba($space-background, .88)),
+        $component-bg-gradient;
+    box-shadow:
+        0 1.4rem 3.4rem rgba(black, .28),
+        0 0 0 .1rem rgba($white, .025) inset;
+
+    transition:
+        border-color .4s ease,
+        box-shadow .4s ease,
+        transform .4s ease;
+
+    &::before {
+        content: '';
+        position: absolute;
+        z-index: -1;
+        inset: 0;
+        background:
+            linear-gradient(118deg, transparent 0 67%, rgba($primary, .055) 67.2% 67.7%, transparent 68%),
+            linear-gradient(62deg, transparent 0 78%, rgba($secondary, .04) 78.2% 78.7%, transparent 79%);
+        pointer-events: none;
+    }
+
+    &::after {
+        content: '';
+        position: absolute;
+        z-index: -1;
+        right: 1.2rem;
+        bottom: 1.2rem;
+        width: 2.8rem;
+        height: .2rem;
+        background: linear-gradient(90deg, rgba($primary, .72), rgba($tertiary, .16));
+        box-shadow: -1rem -.5rem 0 -.05rem rgba($secondary, .28);
+        pointer-events: none;
+    }
+
+    &:hover,
+    &:focus-visible {
+        border-color: rgba($primary, .48);
+        box-shadow:
+            0 1.8rem 4rem rgba(black, .36),
+            0 0 2.4rem rgba($primary, .09),
+            0 0 0 .1rem rgba($white, .04) inset;
+        transform: translateY(-.35rem);
+    }
+
+    &:focus-visible {
+        outline: .2rem solid rgba($primary-light, .8);
+        outline-offset: .35rem;
+    }
+
+    &:active {
+        transform: translateY(-.1rem) scale(.985);
+    }
+
+    &__visual {
+        position: relative;
+        align-self: center;
+        justify-self: center;
+        width: 11rem;
+        aspect-ratio: 1;
+        opacity: .86;
+    }
+
+    &__title {
+        margin: 0;
+        padding: 1.35rem 1.5rem 1.5rem;
+
+        border-top: .1rem solid rgba($primary-light, .09);
+        color: rgba($white, .9);
+        font-size: clamp(1.55rem, 2vw, 2rem);
+        font-weight: 500;
+        letter-spacing: .025em;
+        text-align: left;
+        text-shadow: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .showcase-card {
+        transition: none;
+
+        &:hover,
+        &:focus-visible,
+        &:active {
+            transform: none;
+        }
+    }
+}

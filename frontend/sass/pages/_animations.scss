@@ -3,142 +3,26 @@
 .animations {
     @include default-component;
 
-    &__title {
-        position: absolute;
-        width: .1rem;
-        height: .1rem;
-        margin: -.1rem;
-        padding: 0;
-        overflow: hidden;
-        clip: rect(0 0 0 0);
-        clip-path: inset(50%);
-        border: 0;
-        white-space: nowrap;
-    }
-
-    &__grid {
-        display: grid;
-        grid-template-columns: repeat(2, minmax(19rem, 28rem));
-        gap: clamp(2rem, 4vw, 3.6rem);
-        justify-content: center;
-        width: min(90vw, 60rem);
-    }
-
-    &__card {
-        position: relative;
-        isolation: isolate;
-        overflow: hidden;
-
-        display: grid;
-        grid-template-rows: minmax(12rem, 1fr) auto;
-        min-height: 21rem;
-
-        border: .1rem solid rgba($primary-light, .18);
-        border-radius: 1.2rem;
-        color: inherit;
-        background:
-            linear-gradient(145deg, rgba($space-surface, .94), rgba($space-background, .88)),
-            $component-bg-gradient;
-        box-shadow:
-            0 1.4rem 3.4rem rgba(black, .28),
-            0 0 0 .1rem rgba($white, .025) inset;
-
-        transition:
-            border-color .4s ease,
-            box-shadow .4s ease,
-            transform .4s ease;
-
-        &::before {
-            content: '';
-            position: absolute;
-            z-index: -1;
-            inset: 0;
+    &__card--circles {
+        .animations__visual {
             background:
-                linear-gradient(118deg, transparent 0 67%, rgba($primary, .055) 67.2% 67.7%, transparent 68%),
-                linear-gradient(62deg, transparent 0 78%, rgba($secondary, .04) 78.2% 78.7%, transparent 79%);
-            pointer-events: none;
-        }
-
-        &::after {
-            content: '';
-            position: absolute;
-            z-index: -1;
-            right: 1.2rem;
-            bottom: 1.2rem;
-            width: 2.8rem;
-            height: .2rem;
-            background: linear-gradient(90deg, rgba($primary, .72), rgba($tertiary, .16));
-            box-shadow: -1rem -.5rem 0 -.05rem rgba($secondary, .28);
-            pointer-events: none;
-        }
-
-        &:hover,
-        &:focus-visible {
-            border-color: rgba($primary, .48);
-            box-shadow:
-                0 1.8rem 4rem rgba(black, .36),
-                0 0 2.4rem rgba($primary, .09),
-                0 0 0 .1rem rgba($white, .04) inset;
-            transform: translateY(-.35rem);
-        }
-
-        &:focus-visible {
-            outline: .2rem solid rgba($primary-light, .8);
-            outline-offset: .35rem;
-        }
-
-        &:active {
-            transform: translateY(-.1rem) scale(.985);
-        }
-
-        &--circles {
-            .animations__visual {
-                background:
-                    radial-gradient(circle at 50% 50%, rgba($white, .92) 0 .18rem, transparent .24rem),
-                    radial-gradient(circle at 50% 50%, transparent 0 1.7rem, rgba($primary, .5) 1.78rem 1.9rem, transparent 1.98rem),
-                    radial-gradient(circle at 50% 50%, transparent 0 3.9rem, rgba($tertiary, .32) 4rem 4.14rem, transparent 4.24rem),
-                    radial-gradient(circle at 31% 38%, rgba($secondary, .58) 0 .42rem, rgba($secondary, .09) .5rem 1.25rem, transparent 1.35rem),
-                    radial-gradient(circle at 71% 66%, rgba($primary, .62) 0 .36rem, rgba($primary, .08) .46rem 1.1rem, transparent 1.2rem);
-                animation: animations-orbit 12s ease-in-out infinite alternate;
-            }
-        }
-
-        &--fractals {
-            .animations__visual {
-                background:
-                    repeating-conic-gradient(from 15deg at 50% 60%, rgba($primary, .36) 0 2deg, transparent 2deg 18deg),
-                    radial-gradient(circle at 50% 60%, rgba($secondary, .48) 0 .28rem, transparent .4rem 100%);
-                clip-path: polygon(50% 5%, 57% 35%, 84% 20%, 66% 48%, 96% 60%, 63% 66%, 75% 96%, 50% 72%, 25% 96%, 37% 66%, 4% 60%, 34% 48%, 16% 20%, 43% 35%);
-                filter: drop-shadow(0 0 .8rem rgba($primary, .22));
-                animation: animations-fractal-breathe 10s ease-in-out infinite alternate;
-            }
+                radial-gradient(circle at 50% 50%, rgba($white, .92) 0 .18rem, transparent .24rem),
+                radial-gradient(circle at 50% 50%, transparent 0 1.7rem, rgba($primary, .5) 1.78rem 1.9rem, transparent 1.98rem),
+                radial-gradient(circle at 50% 50%, transparent 0 3.9rem, rgba($tertiary, .32) 4rem 4.14rem, transparent 4.24rem),
+                radial-gradient(circle at 31% 38%, rgba($secondary, .58) 0 .42rem, rgba($secondary, .09) .5rem 1.25rem, transparent 1.35rem),
+                radial-gradient(circle at 71% 66%, rgba($primary, .62) 0 .36rem, rgba($primary, .08) .46rem 1.1rem, transparent 1.2rem);
+            animation: animations-orbit 12s ease-in-out infinite alternate;
         }
     }
 
-    &__visual {
-        align-self: center;
-        justify-self: center;
-        width: 11rem;
-        aspect-ratio: 1;
-        opacity: .86;
-    }
-
-    &__card-title {
-        margin: 0;
-        padding: 1.35rem 1.5rem 1.5rem;
-
-        border-top: .1rem solid rgba($primary-light, .09);
-        color: rgba($white, .9);
-        font-size: clamp(1.55rem, 2vw, 2rem);
-        font-weight: 500;
-        letter-spacing: .025em;
-        text-align: left;
-        text-shadow: none;
-    }
-
-    @media only screen and (max-width: $bp-m) {
-        &__grid {
-            grid-template-columns: minmax(18rem, 28rem);
+    &__card--fractals {
+        .animations__visual {
+            background:
+                repeating-conic-gradient(from 15deg at 50% 60%, rgba($primary, .36) 0 2deg, transparent 2deg 18deg),
+                radial-gradient(circle at 50% 60%, rgba($secondary, .48) 0 .28rem, transparent .4rem 100%);
+            clip-path: polygon(50% 5%, 57% 35%, 84% 20%, 66% 48%, 96% 60%, 63% 66%, 75% 96%, 50% 72%, 25% 96%, 37% 66%, 4% 60%, 34% 48%, 16% 20%, 43% 35%);
+            filter: drop-shadow(0 0 .8rem rgba($primary, .22));
+            animation: animations-fractal-breathe 10s ease-in-out infinite alternate;
         }
     }
 }

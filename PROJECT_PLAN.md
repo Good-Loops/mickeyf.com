@@ -654,6 +654,9 @@ Work in this order:
    and stellar dust shells, mathematically closed animation and glow loops,
    restrained ambient color, and shared dark surface colors.
    **Implemented and verified on 2026-08-28.**
+   After the page-by-page composition settles, run a dedicated celestial-glow
+   polish pass: make each body's halo visibly pulse or breathe without synchronized
+   timing, hard image borders, clipping, or motion when reduced motion is enabled.
 2. Redesign Home while preserving its minimal welcome-and-quotes identity.
 3. Continue page by page, including the information-architecture and feedback
    work below, without globally restyling unfinished pages.
