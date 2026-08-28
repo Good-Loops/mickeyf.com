@@ -78,34 +78,6 @@ $bps-menu: (
     ),
 );
 
-// Breakpoint Map for Animations Component
-$bps-animations: (
-    'xl': (
-        'width': $bp-xl,
-        'selectors': (
-            '.animations__title': (
-                'font-size': $font-size-l,
-            ),
-        )
-    ),
-    'l': (
-        'width': $bp-l,
-        'selectors': (
-            '.animations__title': (
-                'font-size': $font-size-m,
-            ),
-        )
-    ),
-    'm': (
-        'width': $bp-m,
-        'selectors': (
-            '.animations__title': (
-                'font-size': $font-size-s,
-            ),
-        )
-    ),
-);
-
 // Breakpoint Map for Games Component
 $bps-games: (
     'l': (
