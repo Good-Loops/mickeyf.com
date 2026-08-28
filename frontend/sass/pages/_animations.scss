@@ -2,15 +2,18 @@
 
 .animations {
     @include default-component;
-    row-gap: clamp(3rem, 7vh, 5rem);
 
     &__title {
-        color: rgba($white, .94);
-        font-size: clamp(3rem, 4vw, 4.6rem);
-        font-weight: 600;
-        letter-spacing: .035em;
-        -webkit-text-stroke: 0;
-        text-shadow: 0 0 .65em rgba($primary, .16);
+        position: absolute;
+        width: .1rem;
+        height: .1rem;
+        margin: -.1rem;
+        padding: 0;
+        overflow: hidden;
+        clip: rect(0 0 0 0);
+        clip-path: inset(50%);
+        border: 0;
+        white-space: nowrap;
     }
 
     &__grid {
