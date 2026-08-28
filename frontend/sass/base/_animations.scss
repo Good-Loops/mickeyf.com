@@ -50,13 +50,37 @@
 @keyframes space-celestial-glow {
     0%,
     100% {
-        opacity: .22;
-        transform: translate(-50%, -50%) scale(.82);
+        opacity: .28;
+        transform: translate(-50%, -50%) scale(.88);
     }
 
-    50% {
-        opacity: .72;
-        transform: translate(-50%, -50%) scale(1.24);
+    42% {
+        opacity: .82;
+        transform: translate(-50%, -50%) scale(1.38);
+    }
+
+    68% {
+        opacity: .52;
+        transform: translate(-50%, -50%) scale(1.12);
+    }
+}
+
+@keyframes space-celestial-aura {
+    0%,
+    100% {
+        filter: drop-shadow(0 0 .12rem var(--celestial-glow));
+    }
+
+    38% {
+        filter:
+            drop-shadow(0 0 .28rem var(--celestial-glow))
+            drop-shadow(0 0 var(--celestial-aura-radius) var(--celestial-glow));
+    }
+
+    72% {
+        filter:
+            drop-shadow(0 0 .18rem var(--celestial-glow))
+            drop-shadow(0 0 .55rem var(--celestial-glow));
     }
 }
 

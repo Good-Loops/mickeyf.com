@@ -17,15 +17,17 @@
     grid-template-rows: minmax(12rem, 1fr) auto;
     min-height: 21rem;
 
-    border: .1rem solid rgba($primary-light, .18);
+    border: .1rem solid rgba($white, .14);
     border-radius: 1.2rem;
     color: inherit;
     background:
-        linear-gradient(145deg, rgba($space-surface, .94), rgba($space-background, .88)),
-        $component-bg-gradient;
+        linear-gradient(145deg, rgba($white, .06), rgba($white, .012) 38%, rgba($space-background, .04));
     box-shadow:
-        0 1.4rem 3.4rem rgba(black, .28),
+        0 1.4rem 3.4rem rgba(black, .24),
+        0 .1rem 0 rgba($white, .1) inset,
         0 0 0 .1rem rgba($white, .025) inset;
+    backdrop-filter: blur(.3rem) saturate(125%);
+    -webkit-backdrop-filter: blur(.3rem) saturate(125%);
 
     transition:
         border-color .4s ease,
@@ -58,10 +60,11 @@
 
     &:hover,
     &:focus-visible {
-        border-color: rgba($primary, .48);
+        border-color: rgba($primary-light, .38);
         box-shadow:
-            0 1.8rem 4rem rgba(black, .36),
+            0 1.8rem 4rem rgba(black, .3),
             0 0 2.4rem rgba($primary, .09),
+            0 .1rem 0 rgba($white, .14) inset,
             0 0 0 .1rem rgba($white, .04) inset;
         transform: translateY(-.35rem);
     }
@@ -88,7 +91,7 @@
         margin: 0;
         padding: 1.35rem 1.5rem 1.5rem;
 
-        border-top: .1rem solid rgba($primary-light, .09);
+        border-top: .1rem solid rgba($white, .1);
         color: rgba($white, .9);
         font-size: clamp(1.55rem, 2vw, 2rem);
         font-weight: 500;
