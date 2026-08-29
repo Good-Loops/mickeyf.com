@@ -138,11 +138,11 @@ const Home: React.FC = () => {
 
 	return (
 		<section className="home">
-		<h1 className="home__welcome-message floating">
-			<span className="home__welcome-line home__welcome-line--blue glowing">
+		<h1 className="home__welcome-message">
+			<span className="home__welcome-line home__welcome-line--blue">
 				Welcome!
 			</span>
-			<span className="home__welcome-line home__welcome-line--green glowing">
+			<span className="home__welcome-line home__welcome-line--green">
 				Glad you're here
 			</span>
 		</h1>
