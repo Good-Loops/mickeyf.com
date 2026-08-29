@@ -254,127 +254,142 @@
     }
 }
 
-.leaderboard-card {
-    position: relative;
-    isolation: isolate;
-    overflow: hidden;
+.leaderboard--hub {
+    width: min(90vw, 60rem);
+    row-gap: clamp(2.8rem, 5vh, 4.2rem);
 
-    display: flex;
-    flex-direction: column;
-    gap: 1.4rem;
+    margin-block: 0;
+    padding: 0;
+
+    border: 0;
+    background: none;
+    box-shadow: none;
+
+    .leaderboard__header {
+        max-width: none;
+    }
+
+    .leaderboard__title {
+        color: rgba($white, .88);
+        font-family: $paragraph-font;
+        font-size: clamp(2.2rem, 3vw, 3rem);
+        font-weight: 500;
+        letter-spacing: .08em;
+        line-height: 1.1;
+        text-shadow: none;
+        -webkit-text-stroke: 0;
+
+        &:focus {
+            outline: none;
+        }
+    }
+
+    .leaderboard__cards {
+        grid-template-columns: repeat(auto-fit, minmax(19rem, 28rem));
+        gap: clamp(2rem, 4vw, 3.6rem);
+        justify-content: center;
+
+        width: min(90vw, 60rem);
+    }
+
+    .leaderboard__state {
+        width: min(90vw, 48rem);
+
+        border-color: rgba($white, .14);
+        color: rgba($white, .76);
+        background: linear-gradient(145deg, rgba($white, .055), rgba($space-background, .045));
+        box-shadow:
+            0 1.2rem 3rem rgba(black, .22),
+            0 .1rem 0 rgba($white, .08) inset;
+        backdrop-filter: blur(.45rem) saturate(125%);
+        -webkit-backdrop-filter: blur(.45rem) saturate(125%);
+
+        h2 {
+            color: rgba($white, .9);
+            font-family: $paragraph-font;
+            font-size: clamp(2rem, 3vw, 2.8rem);
+            font-weight: 600;
+        }
+
+        &--error {
+            border-color: rgba($tertiary, .3);
+        }
+    }
+
+    .leaderboard__action {
+        color: rgba($white, .92);
+        border: .1rem solid rgba($primary-light, .28);
+        background: rgba($primary, .09);
+
+        &:hover {
+            background: rgba($primary, .16);
+        }
+
+        &:focus-visible {
+            outline: .2rem solid rgba($primary-light, .78);
+            outline-offset: .3rem;
+        }
+    }
+}
+
+.leaderboard-card {
+    --leaderboard-accent: #{rgba($primary-light, .76)};
+
+    grid-template-rows: auto 1fr auto;
+    gap: 1.6rem;
 
     min-width: 0;
-    min-height: 20rem;
-    padding: clamp(2.4rem, 3vw, 3.2rem);
-
-    color: $white;
-
-    border: .2rem solid rgba($primary-light, .55);
-    border-radius: $default-border-radius;
-    background:
-        radial-gradient(circle at 92% 8%, rgba($primary, .22), transparent 34%),
-        linear-gradient(145deg, rgba($space-blue, .96), rgba($space-blue, .8));
-    box-shadow: $dark-box-shadow-s;
-
-    transition: transform .25s ease, border-color .25s ease, box-shadow .25s ease;
-
-    > * {
-        position: relative;
-        z-index: 1;
-    }
-
-    &::before {
-        content: '';
-
-        position: absolute;
-        inset: 0 0 auto;
-        z-index: 2;
-        height: .45rem;
-
-        background: linear-gradient(90deg, $primary, $tertiary);
-    }
+    min-height: 18rem;
+    padding: 2.2rem;
 
     &::after {
-        content: '';
-
-        position: absolute;
-        top: -8rem;
-        right: -5rem;
-        z-index: 0;
-
-        width: 17rem;
-        aspect-ratio: 1;
-
-        border: .1rem solid rgba($primary-light, .22);
-        border-radius: 50%;
-        box-shadow:
-            0 0 0 2.4rem rgba($primary, .05),
-            0 0 0 5rem rgba($primary, .035);
-
-        pointer-events: none;
+        background: linear-gradient(90deg, var(--leaderboard-accent), transparent);
+        box-shadow: -1rem -.5rem 0 -.05rem rgba($primary, .18);
     }
 
     &--three-bosses {
-        border-color: rgba($secondary-light, .65);
-
-        background:
-            radial-gradient(circle at 92% 8%, rgba($secondary, .2), transparent 34%),
-            linear-gradient(145deg, rgba($space-blue, .96), rgba($space-blue, .8));
-
-        &::before {
-            background: linear-gradient(90deg, $secondary, $tertiary);
-        }
-
-        &::after {
-            border-color: rgba($secondary-light, .22);
-            box-shadow:
-                0 0 0 2.4rem rgba($secondary, .05),
-                0 0 0 5rem rgba($secondary, .035);
-        }
+        --leaderboard-accent: #{rgba($secondary-light, .68)};
     }
 
     &__title {
-        color: $white;
-        font-family: $subheading-font;
-        font-size: clamp(3rem, 4vw, 4.2rem);
-        line-height: 1.05;
-        text-shadow: 0 .3rem 1.2rem rgba(black, .28);
+        margin: 0;
+
+        color: rgba($white, .92);
+        font-family: $paragraph-font;
+        font-size: clamp(2rem, 2.6vw, 2.7rem);
+        font-weight: 600;
+        letter-spacing: .015em;
+        line-height: 1.15;
+        text-shadow: none;
         overflow-wrap: anywhere;
     }
 
     &__metadata {
-        display: grid;
-        grid-template-columns: minmax(0, 1fr);
-        gap: 1rem;
-
-        margin-top: auto;
-        align-self: flex-start;
+        align-self: end;
 
         div {
-            display: flex;
-            align-items: baseline;
-            gap: .9rem;
+            display: grid;
+            gap: .25rem;
 
             width: fit-content;
             min-width: 0;
-            padding: .8rem 1.1rem;
+            padding-left: 1rem;
 
-            border: .1rem solid rgba($white, .14);
-            border-radius: 100vw;
-            background: rgba($white, .075);
+            border-left: .1rem solid var(--leaderboard-accent);
         }
 
         dt {
-            color: rgba($white, .65);
-            font-size: 1.2rem;
-            font-weight: 800;
-            letter-spacing: .08em;
+            color: rgba($white, .48);
+            font-size: 1.1rem;
+            font-weight: 600;
+            letter-spacing: .12em;
             text-transform: uppercase;
         }
 
         dd {
-            font-size: 1.6rem;
-            font-weight: 800;
+            color: var(--leaderboard-accent);
+            font-size: 1.55rem;
+            font-weight: 600;
             overflow-wrap: anywhere;
         }
     }
@@ -382,35 +397,30 @@
     &__footer {
         display: flex;
         justify-content: flex-end;
-        gap: 1rem;
 
-        padding-top: 1.2rem;
+        padding-top: 1rem;
 
-        color: $primary-light;
-        font-size: 1.5rem;
-        font-weight: 900;
+        border-top: .1rem solid rgba($white, .1);
+        color: var(--leaderboard-accent);
+        font-size: 1.3rem;
+        font-weight: 600;
+        letter-spacing: .04em;
 
-        border-top: .1rem solid rgba($white, .14);
+        span {
+            transition: transform .25s ease;
+        }
     }
 
-    &:hover {
-        transform: translateY(-.4rem);
-        border-color: $white;
-        box-shadow: 0 1.4rem 3rem rgba($space-blue, .28);
-    }
-
+    &:hover,
     &:focus-visible {
-        outline: .35rem solid $white;
-        outline-offset: .35rem;
+        .leaderboard-card__footer span {
+            transform: translateX(.2rem);
+        }
     }
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .leaderboard-card {
+    .leaderboard-card__footer span {
         transition: none;
-
-        &:hover {
-            transform: none;
-        }
     }
 }

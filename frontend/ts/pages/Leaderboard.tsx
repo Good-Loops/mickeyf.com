@@ -47,7 +47,7 @@ export function LeaderboardView({
     onRetry,
 }: LeaderboardViewProps) {
     return (
-        <section className="leaderboard" aria-labelledby="leaderboards-title">
+        <section className="leaderboard leaderboard--hub" aria-labelledby="leaderboards-title">
             <header className="leaderboard__header">
                 <RouteHeading id="leaderboards-title" className="leaderboard__title">
                     Leaderboards
@@ -82,10 +82,10 @@ export function LeaderboardView({
             )}
 
             {games.length > 0 && (
-                <nav className="leaderboard__cards" aria-label="Game leaderboards">
+                <nav className="leaderboard__cards showcase-grid" aria-label="Game leaderboards">
                     {games.map((game) => (
                         <Link
-                            className={`leaderboard-card leaderboard-card--${game.gameId}`}
+                            className={`showcase-card leaderboard-card leaderboard-card--${game.gameId}`}
                             key={game.gameId}
                             to={`/leaderboards/${game.gameId}`}
                         >

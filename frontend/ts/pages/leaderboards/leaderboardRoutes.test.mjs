@@ -151,7 +151,7 @@ function findElement(node, predicate) {
     return null;
 }
 
-test('hub renders loading, success, and error states with a retry action', () => {
+test('hub renders loading, success, empty, and error states with a retry action', () => {
     const loadingHtml = renderHub({
         games: [],
         isLoading: true,
@@ -172,6 +172,15 @@ test('hub renders loading, success, and error states with a retry action', () =>
     assert.match(successHtml, /href="\/leaderboards\/three-bosses"/);
     assert.match(successHtml, />Metric</);
     assert.match(successHtml, />Time</);
+
+    const emptyHtml = renderHub({
+        games: [],
+        isLoading: false,
+        errorMessage: null,
+        onRetry() {},
+    });
+    assert.match(emptyHtml, /No leaderboards yet/);
+    assert.match(emptyHtml, /Game leaderboards will appear here/);
 
     let retryCount = 0;
     const errorProps = {
