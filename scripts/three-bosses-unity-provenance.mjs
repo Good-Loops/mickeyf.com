@@ -156,7 +156,6 @@ const readUnityEditorVersion = async (repositoryRoot) => {
 };
 
 export const readCurrentUnityTreeProvenance = async ({ repositoryRoot }) => {
-  await assertCleanUnitySource(repositoryRoot);
   const sourceCommit = (await runGit(repositoryRoot, [
     "rev-parse",
     "--verify",
@@ -211,6 +210,8 @@ export const readCurrentUnityTreeProvenance = async ({ repositoryRoot }) => {
       throw new Error(`Unity source resolves outside its canonical source root: ${entry.path}.`);
     }
   }
+
+  await assertCleanUnitySource(repositoryRoot);
 
   return Object.freeze({
     sourceCommit,
