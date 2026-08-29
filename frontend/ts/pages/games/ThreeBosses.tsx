@@ -86,7 +86,7 @@ const ThreeBosses: React.FC = () => {
 
     return (
         <section className="three-bosses" data-three-bosses-local>
-            <h1 className="three-bosses__title canvas-title">Three Bosses</h1>
+            <h1 className="u-visually-hidden">Three Bosses</h1>
             <p className="three-bosses__local-note">Local WebGL playability prototype</p>
 
             <div className="three-bosses__canvas-wrapper" ref={frameRef}>
@@ -114,6 +114,10 @@ const ThreeBosses: React.FC = () => {
                     className="three-bosses__fullscreen-btn"
                 />
             </div>
+
+            <p className="three-bosses__orientation-hint">
+                For the best fullscreen experience, rotate your device to landscape.
+            </p>
         </section>
     );
 };
