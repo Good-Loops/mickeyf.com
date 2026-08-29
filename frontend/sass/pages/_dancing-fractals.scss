@@ -300,7 +300,7 @@
     }
 }
 
-@media (min-width: 52rem) {
+@include viewport-above($bp-m) {
     .dancing-fractals {
         --panel-width: 33rem;
 
@@ -340,7 +340,7 @@
     }
 }
 
-@media (max-width: 30rem) {
+@include viewport-at-most($bp-xs) {
     .dancing-fractals {
         width: min(92vw, 31rem);
         &__stage,

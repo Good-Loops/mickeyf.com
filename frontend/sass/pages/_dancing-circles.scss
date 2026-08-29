@@ -413,7 +413,7 @@
     }
 }
 
-@media (min-width: 50rem) {
+@include viewport-above($bp-m) {
     .dancing-circles {
         &__transport {
             grid-template-columns: auto 1fr auto;
@@ -431,7 +431,7 @@
     }
 }
 
-@media (max-width: 29rem) {
+@include viewport-at-most($bp-xs) {
     .dancing-circles {
         &__transport {
             grid-template-columns: auto 1fr;

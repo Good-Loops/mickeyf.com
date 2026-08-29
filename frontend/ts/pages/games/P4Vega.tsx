@@ -48,7 +48,7 @@ const P4Vega: React.FC = () => {
 
     return (
         <section className='p4-vega' data-p4-vega>
-            <h1 className='p4-vega__title canvas-title'>p4-Vega</h1>
+            <h1 className='u-visually-hidden'>p4-Vega</h1>
 
             <div
                 className="p4-vega__canvas-wrapper"
@@ -58,6 +58,14 @@ const P4Vega: React.FC = () => {
                     targetRef={canvasWrapperRef}
                     className="p4-vega__fullscreen-btn"
                 />
+                <button
+                    type="button"
+                    className="p4-vega__joystick p4-vega__joystick--fullscreen"
+                    data-p4-joystick
+                    aria-label="Movement joystick"
+                >
+                    <span className="p4-vega__joystick-thumb" data-p4-joystick-thumb />
+                </button>
             </div>
 
             <div className='p4-vega__ui'>
@@ -150,6 +158,19 @@ const P4Vega: React.FC = () => {
                     />
                 </div>
             </div>
+
+            <button
+                type="button"
+                className="p4-vega__joystick p4-vega__joystick--page"
+                data-p4-joystick
+                aria-label="Movement joystick"
+            >
+                <span className="p4-vega__joystick-thumb" data-p4-joystick-thumb />
+            </button>
+
+            <p className="p4-vega__orientation-hint">
+                For the best fullscreen experience, rotate your device to landscape.
+            </p>
         </section>   
     );
 }

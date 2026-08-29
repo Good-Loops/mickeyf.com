@@ -87,7 +87,7 @@ export function gameOver(gameLive: boolean, p4: P4): Promise<ContainerChild[]> {
                 active: () => {
                     const gameOverText = centeredSpaceGrotesk('GAME OVER', 63, 0xC80000, -20);
                     const totalWaterText = centeredSpaceGrotesk(`Total Water:  ${p4.totalWater}`, 40, 0xFFFFFF, 50);
-                    const retryText = centeredSpaceGrotesk('Press space to try again', 40, 0xFFFFFF, 100);
+                    const retryText = centeredSpaceGrotesk('Press space or tap to try again', 40, 0xFFFFFF, 100);
                     const texts = [gameOverText, totalWaterText, retryText];
                     const background = createBackgroundForText(texts, 10, 0xFFFFFF, 0.5, 10);
 

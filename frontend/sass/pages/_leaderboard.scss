@@ -241,7 +241,7 @@
         }
     }
 
-    @media only screen and (max-width: $bp-m) {
+    @include viewport-at-most($bp-m) {
         width: min(100% - 2rem, 112rem);
         margin-block: 2rem;
 

@@ -164,7 +164,7 @@
     }
 }
 
-@media (max-width: 60rem) {
+@include viewport-at-most($bp-xl) {
     .connect {
         grid-template-columns: 1fr;
         row-gap: clamp(2.4rem, 4vh, 3.4rem);

@@ -4,6 +4,25 @@
 @use 'fonts' as *;
 @use 'sass:map';
 
+//////////////////////// Responsive ////////////////////////
+@mixin viewport-at-most($breakpoint) {
+    @media only screen and (max-width: $breakpoint) {
+        @content;
+    }
+}
+
+@mixin viewport-above($breakpoint) {
+    @media only screen and (min-width: calc($breakpoint + .01em)) {
+        @content;
+    }
+}
+
+@mixin portrait-at-most($breakpoint) {
+    @media only screen and (max-width: $breakpoint) and (orientation: portrait) {
+        @content;
+    }
+}
+
 //////////////////////// Typography ////////////////////////
 // Main title coloring
 @mixin title-coloring {
