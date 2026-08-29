@@ -1,4 +1,5 @@
 using System.Collections;
+using System.Runtime.InteropServices;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
@@ -6,6 +7,11 @@ using UnityEngine.UI;
 
 public sealed class MainMenuController : MonoBehaviour
 {
+#if UNITY_WEBGL && !UNITY_EDITOR
+    [DllImport("__Internal")]
+    private static extern void MickeyfThreeBossesSignalReady();
+#endif
+
     [SerializeField] private Button playButton;
     [SerializeField] private Button audioButton;
     [SerializeField] private AudioToggleIcon audioButtonIcon;
@@ -37,9 +43,26 @@ public sealed class MainMenuController : MonoBehaviour
         Time.timeScale = 1f;
         RefreshAudioIcon();
 
+#if UNITY_WEBGL && !UNITY_EDITOR
+        StartCoroutine(SignalBrowserReadyAfterSplash());
+#endif
+
         if (playButton != null && EventSystem.current != null)
             EventSystem.current.SetSelectedGameObject(playButton.gameObject);
     }
+
+#if UNITY_WEBGL && !UNITY_EDITOR
+    private static IEnumerator SignalBrowserReadyAfterSplash()
+    {
+        while (!UnityEngine.Rendering.SplashScreen.isFinished)
+            yield return null;
+
+        // Ensure the menu has completed one visible frame after Unity removes
+        // its splash screen before the website dismisses its loading surface.
+        yield return new WaitForEndOfFrame();
+        MickeyfThreeBossesSignalReady();
+    }
+#endif
 
     private void OnDisable()
     {

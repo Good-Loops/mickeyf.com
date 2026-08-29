@@ -32,7 +32,10 @@ public sealed class AudioToggleIcon : MaskableGraphic
         if (size <= 0f)
             return;
 
-        Vector2 center = pixelRect.center;
+        // The speaker body extends farther left than the waves/cross extend
+        // right. Center the complete silhouette rather than only its origin.
+        float horizontalCenterOffset = audioEnabled ? -0.03f : -0.015f;
+        Vector2 center = pixelRect.center + Vector2.right * (horizontalCenterOffset * size);
         float stroke = Mathf.Max(1.5f, size * 0.075f);
         Color32 vertexColor = color;
 
