@@ -10,7 +10,7 @@ public sealed class AudioToggleIcon : MaskableGraphic
 {
     private const int ArcSegments = 8;
     private const int NarrowWebGlCanvasWidth = 900;
-    private const float NarrowWebGlHorizontalCorrection = 0.1f;
+    private const float NarrowWebGlHorizontalCorrection = 0.19f;
 
     [SerializeField] private bool audioEnabled = true;
 
