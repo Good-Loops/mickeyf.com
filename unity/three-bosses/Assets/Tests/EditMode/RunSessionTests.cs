@@ -204,7 +204,7 @@ namespace ThreeBosses.Run.Tests
 
             clock.Advance(100d);
             Assert.That(session.ElapsedSeconds, Is.EqualTo(60d).Within(0.0001d));
-            Assert.That(session.Score, Is.EqualTo(1667));
+            Assert.That(session.Score, Is.EqualTo(166667));
             Assert.That(session.Rank, Is.EqualTo("UNRANKED"));
         }
 
@@ -284,12 +284,97 @@ namespace ThreeBosses.Run.Tests
             Assert.That(session.Submitted, Is.False);
         }
 
-        [TestCase(100d, 1000)]
-        [TestCase(60d, 1667)]
-        [TestCase(40d, 2500)]
+        [TestCase(100d, 100000)]
+        [TestCase(60d, 166667)]
+        [TestCase(40d, 250000)]
         public void ScoreFormulaIsDeterministic(double seconds, int expected)
         {
             Assert.That(RunScoreCalculator.Calculate(seconds), Is.EqualTo(expected));
+        }
+
+        [TestCase(59.999d, "S")]
+        [TestCase(60d, "A")]
+        [TestCase(80d, "A")]
+        [TestCase(80.001d, "B")]
+        [TestCase(100d, "B")]
+        [TestCase(100.001d, "C")]
+        [TestCase(120d, "C")]
+        [TestCase(120.001d, "D")]
+        public void RankFormulaUsesApprovedTimeBands(double seconds, string expected)
+        {
+            Assert.That(RunRankCalculator.Calculate(seconds), Is.EqualTo(expected));
+        }
+
+        [TestCase(59.9994d, 59999, "S")]
+        [TestCase(59.9995d, 60000, "A")]
+        [TestCase(80.0004d, 80000, "A")]
+        [TestCase(80.0005d, 80001, "B")]
+        public void CanonicalMillisecondsOwnScoreAndRankBoundaries(
+            double seconds,
+            int expectedMilliseconds,
+            string expectedRank)
+        {
+            int milliseconds = RunScoreCalculator.CanonicalizeCompletionTimeMilliseconds(seconds);
+            Assert.That(milliseconds, Is.EqualTo(expectedMilliseconds));
+            Assert.That(
+                RunScoreCalculator.CalculateFromMilliseconds(milliseconds),
+                Is.EqualTo((int)Math.Round(
+                    (double)RunScoreCalculator.ScoreNumerator / milliseconds,
+                    MidpointRounding.AwayFromZero)));
+            Assert.That(
+                RunRankCalculator.CalculateFromMilliseconds(milliseconds),
+                Is.EqualTo(expectedRank));
+        }
+
+        [Test]
+        public void SubmissionCoordinatorAcceptsOnlyTheCanonicalServerResult()
+        {
+            CompleteRunAndSetResult(82d);
+            var coordinator = new RunSubmissionCoordinator(session);
+            coordinator.ConfigureTransport(true);
+
+            Assert.That(coordinator.Status, Is.EqualTo(RunSubmissionStatus.Ready));
+            Assert.That(coordinator.TryBegin(out RunSubmissionPayload payload), Is.True);
+            Assert.That(payload.RunId, Is.EqualTo(session.RunId.ToString("D")));
+            Assert.That(payload.CompletionTimeMilliseconds, Is.EqualTo(82000));
+            Assert.That(coordinator.Status, Is.EqualTo(RunSubmissionStatus.Submitting));
+
+            Assert.That(
+                coordinator.CompleteSuccess(payload.RunId, 82000, 121951, "B"),
+                Is.True);
+            Assert.That(session.Submitted, Is.True);
+            Assert.That(coordinator.Status, Is.EqualTo(RunSubmissionStatus.Submitted));
+        }
+
+        [Test]
+        public void SubmissionCoordinatorAllowsExactRetryAfterAuthorizationFailure()
+        {
+            CompleteRunAndSetResult(82d);
+            var coordinator = new RunSubmissionCoordinator(session);
+            coordinator.ConfigureTransport(true);
+            Assert.That(coordinator.TryBegin(out RunSubmissionPayload firstPayload), Is.True);
+
+            coordinator.CompleteFailure(firstPayload.RunId, "UNAUTHORIZED");
+            Assert.That(coordinator.Status, Is.EqualTo(RunSubmissionStatus.SignInRequired));
+            Assert.That(coordinator.TryBegin(out RunSubmissionPayload retryPayload), Is.True);
+            Assert.That(retryPayload.RunId, Is.EqualTo(firstPayload.RunId));
+            Assert.That(retryPayload.CompletionTimeMilliseconds, Is.EqualTo(82000));
+        }
+
+        [Test]
+        public void SubmissionCoordinatorRejectsMismatchedServerResult()
+        {
+            CompleteRunAndSetResult(82d);
+            var coordinator = new RunSubmissionCoordinator(session);
+            coordinator.ConfigureTransport(true);
+            Assert.That(coordinator.TryBegin(out RunSubmissionPayload payload), Is.True);
+
+            Assert.That(
+                coordinator.CompleteSuccess(payload.RunId, 82001, 121951, "B"),
+                Is.False);
+            Assert.That(session.Submitted, Is.False);
+            Assert.That(coordinator.Status, Is.EqualTo(RunSubmissionStatus.Rejected));
+            Assert.That(coordinator.LastErrorCode, Is.EqualTo("INVALID_RESPONSE"));
         }
 
         [TestCase(0d)]
@@ -299,12 +384,32 @@ namespace ThreeBosses.Run.Tests
         public void ScoreRejectsInvalidTimes(double seconds)
         {
             Assert.Throws<ArgumentOutOfRangeException>(() => RunScoreCalculator.Calculate(seconds));
+            Assert.Throws<ArgumentOutOfRangeException>(() => RunRankCalculator.Calculate(seconds));
         }
 
         private void StartRun()
         {
             session.BeginNewRun();
             Assert.That(session.StartRun(), Is.True);
+        }
+
+        private void CompleteRunAndSetResult(double totalSeconds)
+        {
+            StartRun();
+            DefeatCurrentBossAfter(totalSeconds / 4d, BossId.Bee);
+            DefeatCurrentBossAfter(totalSeconds / 4d, BossId.Cyborg);
+            clock.Advance(totalSeconds / 2d);
+            Assert.That(
+                session.RecordBossDefeat(BossId.Kraken),
+                Is.EqualTo(BossDefeatResult.RunCompleted));
+
+            int completionTimeMilliseconds =
+                RunScoreCalculator.CanonicalizeCompletionTimeMilliseconds(session.ElapsedSeconds);
+            Assert.That(
+                session.TrySetResult(
+                    RunScoreCalculator.CalculateFromMilliseconds(completionTimeMilliseconds),
+                    RunRankCalculator.CalculateFromMilliseconds(completionTimeMilliseconds)),
+                Is.True);
         }
 
         private void DefeatCurrentBossAfter(

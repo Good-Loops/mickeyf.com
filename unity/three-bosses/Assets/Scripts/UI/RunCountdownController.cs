@@ -9,6 +9,7 @@ using UnityEngine.UI;
 public sealed class RunCountdownController : MonoBehaviour
 {
     private const float DimmerAlpha = 0.56f;
+    private const float FirstNumberHoldSeconds = 0.2f;
 
     private static readonly Color ThreeTopColor = new(0.843f, 1f, 0.412f, 1f);
     private static readonly Color ThreeBottomColor = new(0.51f, 0.788f, 0f, 1f);
@@ -75,7 +76,24 @@ public sealed class RunCountdownController : MonoBehaviour
         if (screenFade != null)
             screenFade.FadeOut(entryFadeSeconds);
 
-        yield return AnimateLabel(numberDurationSeconds, false);
+        // Scene startup can produce an unusually large first unscaled delta.
+        // Give the first numeral one rendered frame and a guaranteed readable
+        // hold so loading work cannot make the countdown appear to start at 2.
+        yield return null;
+        SetLabel("3", ThreeTopColor, ThreeBottomColor, false);
+        countdownLabel.alpha = 1f;
+        countdownLabel.rectTransform.localScale = Vector3.one * 1.14f;
+
+        float firstNumberHoldSeconds = Mathf.Min(
+            FirstNumberHoldSeconds,
+            numberDurationSeconds);
+        if (firstNumberHoldSeconds > 0f)
+            yield return new WaitForSecondsRealtime(firstNumberHoldSeconds);
+
+        yield return AnimateLabel(
+            numberDurationSeconds - firstNumberHoldSeconds,
+            false,
+            startsFullyVisible: true);
         yield return ShowForDuration(
             "2",
             TwoTopColor,
@@ -136,7 +154,10 @@ public sealed class RunCountdownController : MonoBehaviour
         yield return AnimateLabel(durationSeconds, isGo);
     }
 
-    private IEnumerator AnimateLabel(float durationSeconds, bool isGo)
+    private IEnumerator AnimateLabel(
+        float durationSeconds,
+        bool isGo,
+        bool startsFullyVisible = false)
     {
         if (countdownLabel == null || durationSeconds <= 0f)
             yield break;
@@ -180,7 +201,9 @@ public sealed class RunCountdownController : MonoBehaviour
             else
             {
                 scale = Mathf.LerpUnclamped(1.14f, 0.96f, EaseOutCubic(progress));
-                fadeIn = Mathf.Clamp01(progress / 0.14f);
+                fadeIn = startsFullyVisible
+                    ? 1f
+                    : Mathf.Clamp01(progress / 0.14f);
                 fadeOut = Mathf.Clamp01((1f - progress) / 0.18f);
             }
 

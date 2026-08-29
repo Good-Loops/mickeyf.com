@@ -7,8 +7,8 @@ using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
 /// <summary>
-/// Displays the local completion result. Submission remains disabled until the
-/// timing, ranking, and release gates approve the Unity-to-browser integration.
+/// Displays the canonical completion result and delegates optional WebGL
+/// submission to the persistent run-session service.
 /// </summary>
 public sealed class EndScreenController : MonoBehaviour
 {
@@ -26,6 +26,8 @@ public sealed class EndScreenController : MonoBehaviour
     [SerializeField, Min(0f)] private float fadeDurationSeconds = 0.35f;
 
     private bool isNavigating;
+    private RunSessionService runSessionService;
+    private TMP_Text submitScoreLabel;
 
     private void Awake()
     {
@@ -33,28 +35,37 @@ public sealed class EndScreenController : MonoBehaviour
         UiButtonStyle.Apply(backToMenuButton);
         UiButtonStyle.Apply(submitScoreButton);
 
-        // The browser endpoint exists, but Unity activation is a separate release gate.
-        // Keep it inert before the first rendered frame as well as after Start.
         if (submitScoreButton != null)
+        {
             submitScoreButton.interactable = false;
+            submitScoreLabel = submitScoreButton.GetComponentInChildren<TMP_Text>();
+        }
     }
 
     private void OnEnable()
     {
         tryAgainButton.onClick.AddListener(TryAgain);
         backToMenuButton.onClick.AddListener(BackToMenu);
+        submitScoreButton.onClick.AddListener(SubmitScore);
+
+        runSessionService = RunSessionService.Instance;
+        runSessionService.SubmissionStateChanged += RefreshSubmitButton;
     }
 
     private void OnDisable()
     {
         tryAgainButton.onClick.RemoveListener(TryAgain);
         backToMenuButton.onClick.RemoveListener(BackToMenu);
+        submitScoreButton.onClick.RemoveListener(SubmitScore);
+
+        if (runSessionService != null)
+            runSessionService.SubmissionStateChanged -= RefreshSubmitButton;
     }
 
     private void Start()
     {
         Time.timeScale = 1f;
-        RunSession session = RunSessionService.Instance.Session;
+        RunSession session = runSessionService.Session;
         if (session.Phase != RunPhase.Completed)
         {
             Debug.LogError($"End screen opened while run phase is {session.Phase}.", this);
@@ -65,23 +76,30 @@ public sealed class EndScreenController : MonoBehaviour
         if (!session.HasResult)
         {
             double elapsedSeconds = session.ElapsedSeconds;
-            int score = elapsedSeconds > 0d &&
-                        !double.IsNaN(elapsedSeconds) &&
-                        !double.IsInfinity(elapsedSeconds)
-                ? RunScoreCalculator.Calculate(elapsedSeconds)
+            int completionTimeMilliseconds = elapsedSeconds > 0d &&
+                                             !double.IsNaN(elapsedSeconds) &&
+                                             !double.IsInfinity(elapsedSeconds)
+                ? RunScoreCalculator.CanonicalizeCompletionTimeMilliseconds(elapsedSeconds)
+                : 0;
+            int score = completionTimeMilliseconds > 0
+                ? RunScoreCalculator.CalculateFromMilliseconds(completionTimeMilliseconds)
                 : 0;
 
             if (score == 0)
                 Debug.LogWarning("Completed run has no positive elapsed time; using an unranked zero score.", this);
 
-            session.TrySetResult(score, UnrankedLabel);
+            string rank = score > 0
+                ? RunRankCalculator.CalculateFromMilliseconds(completionTimeMilliseconds)
+                : UnrankedLabel;
+            session.TrySetResult(score, rank);
         }
 
         completionTimeLabel.text = RunUiFormatter.FormatTime(session.ElapsedSeconds);
         scoreLabel.text = session.Score.ToString("N0");
         rankLabel.text = session.Rank;
 
-        submitScoreButton.interactable = false;
+        runSessionService.RefreshRunSubmissionState();
+        RefreshSubmitButton();
         screenFade?.FadeOut(fadeDurationSeconds);
         EventSystem.current?.SetSelectedGameObject(tryAgainButton.gameObject);
     }
@@ -91,8 +109,43 @@ public sealed class EndScreenController : MonoBehaviour
         if (isNavigating)
             return;
 
-        RunSessionService.Instance.Session.BeginNewRun();
+        runSessionService.Session.BeginNewRun();
         StartCoroutine(Navigate(firstLevelSceneName));
+    }
+
+    private void SubmitScore()
+    {
+        if (isNavigating)
+            return;
+
+        runSessionService.TrySubmitCurrentRun();
+        RefreshSubmitButton();
+    }
+
+    private void RefreshSubmitButton()
+    {
+        if (submitScoreButton == null || runSessionService == null)
+            return;
+
+        RunSubmissionStatus status = runSessionService.SubmissionStatus;
+        submitScoreButton.interactable = !isNavigating &&
+            (status == RunSubmissionStatus.Ready ||
+             status == RunSubmissionStatus.SignInRequired ||
+             status == RunSubmissionStatus.RetryableFailure);
+
+        string label = status switch
+        {
+            RunSubmissionStatus.Ready => "SUBMIT SCORE",
+            RunSubmissionStatus.Submitting => "SUBMITTING...",
+            RunSubmissionStatus.Submitted => "SUBMITTED",
+            RunSubmissionStatus.SignInRequired => "SIGN IN REQUIRED",
+            RunSubmissionStatus.RetryableFailure => "RETRY SUBMISSION",
+            RunSubmissionStatus.Rejected => "SUBMISSION FAILED",
+            _ => "SUBMISSION LOCKED"
+        };
+
+        if (submitScoreLabel != null)
+            submitScoreLabel.text = label;
     }
 
     private void BackToMenu()

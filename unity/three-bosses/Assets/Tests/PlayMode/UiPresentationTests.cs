@@ -243,6 +243,16 @@ namespace ThreeBosses.Tests
             Assert.That(GetProperty<string>(countdownLabel, "text"), Is.EqualTo("3"));
             Assert.That(GetProperty<float>(countdownLabel, "alpha"), Is.GreaterThan(0f));
 
+            float readableThreeDeadline = Time.realtimeSinceStartup + 0.15f;
+            while (Time.realtimeSinceStartup < readableThreeDeadline)
+            {
+                Assert.That(GetProperty<string>(countdownLabel, "text"), Is.EqualTo("3"));
+                Assert.That(
+                    GetProperty<float>(countdownLabel, "alpha"),
+                    Is.GreaterThanOrEqualTo(0.99f));
+                yield return null;
+            }
+
             float entryFadeDeadline = Time.realtimeSinceStartup + 0.75f;
             while (Time.realtimeSinceStartup < entryFadeDeadline)
             {
