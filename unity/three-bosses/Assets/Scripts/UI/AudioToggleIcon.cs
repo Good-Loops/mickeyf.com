@@ -39,7 +39,7 @@ public sealed class AudioToggleIcon : MaskableGraphic
 #if UNITY_WEBGL && !UNITY_EDITOR
         // Chrome's downscaled WebGL canvas gives the right-hand wave strokes
         // more visual weight than the native Editor render.
-        horizontalCenterOffset -= 0.15f;
+        horizontalCenterOffset -= 0.10f;
 #endif
         const float verticalCenterOffset = 0.055f;
         Vector2 center = pixelRect.center + new Vector2(
