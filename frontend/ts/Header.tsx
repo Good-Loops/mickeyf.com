@@ -115,7 +115,7 @@ const Header: React.FC = () => {
                     </li>
 
                     <li className="nav__item">
-                        <NavLink className="nav__link" to="/social">
+                        <NavLink className="nav__link" to="/connect">
                             Connect
                         </NavLink>
                     </li>

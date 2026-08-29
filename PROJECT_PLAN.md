@@ -693,6 +693,12 @@ dismissal, focus restoration, a reduced-motion-safe slide, and authenticated
 Account content in place of the old corner label. The final responsive phase
 still owns the compact/mobile navigation behavior.
 
+The canonical `/connect` profile hub was implemented and browser-verified on
+2026-08-28 with accessible external-profile links and the shared glass-card
+system; the retired `/social` route now resolves through the ordinary Not Found
+page. The feedback form remains deferred until its server validation, abuse
+controls, privacy language, and retention policy are designed together.
+
 ## Deferred tooling follow-up
 
 - TypeDoc drift CI guard: **deferred by owner decision on 2026-08-25**.

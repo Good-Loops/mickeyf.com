@@ -23,7 +23,7 @@ import {
 
 import Leaderboard from "@/pages/Leaderboard";
 import GameLeaderboard from "@/pages/leaderboards/GameLeaderboard";
-import Social from "@/pages/Social";
+import Connect from "@/pages/Connect";
 import Login from "@/pages/Login";
 import Register from "@/pages/Register";
 import NotFound from "@/pages/NotFound";
@@ -62,7 +62,7 @@ const App: React.FC = () => {
 
 				<Route path="/leaderboards" element={<Leaderboard />} />
 				<Route path="/leaderboards/:gameId" element={<GameLeaderboard />} />
-				<Route path="/social" element={<Social />} />
+				<Route path="/connect" element={<Connect />} />
 				<Route path="/login" element={<Login />} />
 				<Route path="/register" element={<Register />} />
 				<Route path="*" element={<NotFound />} />

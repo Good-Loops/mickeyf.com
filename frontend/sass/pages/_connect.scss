@@ -1,0 +1,81 @@
+@use '../abstracts' as *;
+
+.connect {
+    display: grid;
+    justify-items: center;
+    width: min(90vw, 70rem);
+
+    &__grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+        gap: clamp(1.6rem, 3vw, 2.8rem);
+        width: 100%;
+    }
+
+    &__link {
+        --connect-accent: #{rgba($primary-light, .46)};
+
+        grid-template-rows: minmax(9.5rem, 1fr) auto;
+        min-height: 15.5rem;
+
+        &:hover,
+        &:focus-visible {
+            border-color: var(--connect-accent);
+
+            .connect__visual {
+                filter: drop-shadow(0 0 1.2rem var(--connect-accent));
+                transform: scale(1.045);
+            }
+        }
+
+        &--tiktok {
+            --connect-accent: #{rgba($primary-light, .5)};
+        }
+
+        &--instagram {
+            --connect-accent: #{rgba($tertiary, .42)};
+        }
+
+        &--youtube {
+            --connect-accent: #{rgba($secondary-light, .46)};
+        }
+
+        &--github {
+            --connect-accent: #{rgba($white, .38)};
+        }
+    }
+
+    &__visual {
+        display: grid;
+        place-items: center;
+        width: 7.5rem;
+        transition:
+            filter .35s ease,
+            transform .35s ease;
+
+        svg {
+            width: 5.3rem;
+            height: 5.3rem;
+            fill: rgba($white, .84);
+        }
+    }
+
+    &__label {
+        color: rgba($white, .86);
+        font-size: 1.45rem;
+        font-weight: 500;
+        letter-spacing: .06em;
+        text-align: center;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .connect__visual {
+        transition: none;
+    }
+
+    .connect__link:hover .connect__visual,
+    .connect__link:focus-visible .connect__visual {
+        transform: none;
+    }
+}

@@ -238,25 +238,6 @@
     }
 }
 
-//////////////////////// Social Media ////////////////////////
-// Social media button styling
-@mixin social-media-btn {
-    @include default-btn;
-    padding-block: 2em;
-    width: 13em;
-    scale: .8;
-
-    fill: $primary-light;
-
-    &:hover {
-        @include default-btn-hover;
-    }
-
-    &:active {
-        @include default-btn-active;
-    }
-}
-
 //////////////////////// Shadows ////////////////////////
 // Box shadow effect
 @mixin box-shadow-effect {
