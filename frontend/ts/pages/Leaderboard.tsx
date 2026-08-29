@@ -48,11 +48,9 @@ export function LeaderboardView({
 }: LeaderboardViewProps) {
     return (
         <section className="leaderboard leaderboard--hub" aria-labelledby="leaderboards-title">
-            <header className="leaderboard__header">
-                <RouteHeading id="leaderboards-title" className="leaderboard__title">
-                    Leaderboards
-                </RouteHeading>
-            </header>
+            <RouteHeading id="leaderboards-title" className="u-visually-hidden">
+                Leaderboards
+            </RouteHeading>
 
             {isLoading && games.length === 0 && (
                 <div className="leaderboard__state" role="status" aria-live="polite">

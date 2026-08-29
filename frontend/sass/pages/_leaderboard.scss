@@ -265,25 +265,6 @@
     background: none;
     box-shadow: none;
 
-    .leaderboard__header {
-        max-width: none;
-    }
-
-    .leaderboard__title {
-        color: rgba($white, .88);
-        font-family: $paragraph-font;
-        font-size: clamp(2.2rem, 3vw, 3rem);
-        font-weight: 500;
-        letter-spacing: .08em;
-        line-height: 1.1;
-        text-shadow: none;
-        -webkit-text-stroke: 0;
-
-        &:focus {
-            outline: none;
-        }
-    }
-
     .leaderboard__cards {
         grid-template-columns: repeat(auto-fit, minmax(19rem, 28rem));
         gap: clamp(2rem, 4vw, 3.6rem);
