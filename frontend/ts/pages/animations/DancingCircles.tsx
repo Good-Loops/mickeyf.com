@@ -180,10 +180,6 @@ const DancingCircles: React.FC = () => {
 				/>
     	   </div>
 
-            <p className="dancing-circles__orientation-hint">
-                For the best fullscreen experience, rotate your device to landscape.
-            </p>
-
 			<div className="dancing-circles__transport">
                 <div className="dancing-circles__transport-controls">
                     <MusicControls
@@ -292,6 +288,10 @@ const DancingCircles: React.FC = () => {
                     )}
                 </div>
             </div>
+
+            <p className="dancing-circles__orientation-hint">
+                For the best fullscreen experience, rotate your device to landscape.
+            </p>
 		</section>
 	);
 };

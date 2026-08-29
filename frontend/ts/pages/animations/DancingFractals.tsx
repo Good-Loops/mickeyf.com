@@ -349,10 +349,6 @@ const DancingFractals: React.FC = () => {
                     />
                 </div>
 
-                <p className="dancing-fractals__orientation-hint">
-                    For the best fullscreen experience, rotate your device to landscape.
-                </p>
-
                 <div className="dancing-fractals__transport">
                     <div className="dancing-fractals__transport-left">
                         <MusicControls
@@ -384,6 +380,10 @@ const DancingFractals: React.FC = () => {
                         />
                     </div>
                 </div>
+
+                <p className="dancing-fractals__orientation-hint">
+                    For the best fullscreen experience, rotate your device to landscape.
+                </p>
             </div>
             <div className="dancing-fractals__ghost" aria-hidden="true" />
         </section>   
