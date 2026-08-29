@@ -132,7 +132,7 @@
 
             border: 0;
             font: inherit;
-            cursor: pointer;
+            cursor: $cursor-hover;
         }
 
         &-chevron {
@@ -210,7 +210,7 @@
             letter-spacing: .025em;
             text-align: left;
             text-decoration: none;
-            cursor: pointer;
+            cursor: $cursor-hover;
 
             transition:
                 color .2s ease,
