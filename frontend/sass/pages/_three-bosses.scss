@@ -40,6 +40,7 @@
         height: 100%;
         border-radius: .8rem;
         outline: none;
+        touch-action: none;
         cursor: $cursor !important;
 
         &:focus-visible {
@@ -97,6 +98,13 @@
             env(safe-area-inset-bottom),
             calc((100vh - (100vw * 9 / 16)) / 2 + .8rem)
         );
+    }
+
+    &__canvas-wrapper:fullscreen {
+        padding: 0;
+        border: 0;
+        box-shadow: none;
+        backdrop-filter: none;
     }
 
     &__canvas-wrapper:fullscreen &__canvas {

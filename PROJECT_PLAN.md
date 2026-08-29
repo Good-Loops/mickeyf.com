@@ -592,7 +592,13 @@ authentication checks are healthy; a disconnected-backend `Failed to fetch`
 message is not an acceptable clean-console result. Use the local browser to
 inspect the new Games entry and game page at desktop, narrow/mobile, and
 ultrawide sizes. Narrow/mobile acceptance covers the responsive website shell;
-gameplay acceptance remains desktop while the game requires keyboard controls.
+the 2026-08-29 shell audit added gesture isolation to the canvas and removed
+page-only glass framing from fullscreen. True mobile gameplay is a separate
+Unity Input System slice: retain the fixed 1280 × 720 internal world, route
+movement, jump, dash, aim, and fire through shared actions, and reuse one native
+touch HUD across all three boss scenes. Until that slice passes real Android
+multitouch, rotation, safe-area, and scene-transition checks, gameplay
+acceptance remains desktop.
 Verify direct navigation and refresh, loading and error states,
 canvas scaling, focus recovery, keyboard controls, fullscreen enter/exit,
 audio on/off persistence, pause/background behavior, all three boss levels,
