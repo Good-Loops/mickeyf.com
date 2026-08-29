@@ -29,6 +29,8 @@
     backdrop-filter: blur(.3rem) saturate(125%);
     -webkit-backdrop-filter: blur(.3rem) saturate(125%);
 
+    animation: showcase-card-float 5.6s ease-in-out infinite;
+
     transition:
         border-color .4s ease,
         box-shadow .4s ease,
@@ -78,6 +80,16 @@
         transform: translateY(-.1rem) scale(.985);
     }
 
+    &:nth-child(2n) {
+        animation-delay: -1.9s;
+        animation-duration: 6.2s;
+    }
+
+    &:nth-child(3n) {
+        animation-delay: -3.4s;
+        animation-duration: 5.1s;
+    }
+
     &__visual {
         position: relative;
         align-self: center;
@@ -101,8 +113,20 @@
     }
 }
 
+@keyframes showcase-card-float {
+    0%,
+    100% {
+        translate: 0 .12rem;
+    }
+
+    50% {
+        translate: 0 -.32rem;
+    }
+}
+
 @media (prefers-reduced-motion: reduce) {
     .showcase-card {
+        animation: none;
         transition: none;
 
         &:hover,
