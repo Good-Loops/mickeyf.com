@@ -41,6 +41,10 @@ Baseline keyboard controls are:
 - Aim: `A`, `D`, or `W`
 - Fire: Enter
 
+On touch devices, the battle scenes add a left-side movement/aim stick and
+right-side Jump, Dash, and Fire buttons. The keyboard controls remain active
+and unchanged on desktop.
+
 ## Play Mode verification
 
 Before publishing gameplay changes, traverse the complete enabled route and

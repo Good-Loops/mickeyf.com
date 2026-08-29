@@ -30,6 +30,9 @@ public sealed class PlayerWeaponController : MonoBehaviour
     private int shotsRemaining;
     private float nextFireTime;
     private bool isLocked;
+    private bool aimUpPressed;
+    private bool aimBackPressed;
+    private bool aimFrontPressed;
 
     private void Awake()
     {
@@ -41,14 +44,7 @@ public sealed class PlayerWeaponController : MonoBehaviour
         if (isLocked || (health != null && health.IsDead))
             return;
 
-        UpdateAimFromWAD();
         UpdateWeaponTransform();
-
-        if (current == null)
-            return;
-
-        if (Keyboard.current != null && Keyboard.current.enterKey.wasPressedThisFrame)
-            TryFire();
     }
 
     private void OnEnable()
@@ -59,6 +55,9 @@ public sealed class PlayerWeaponController : MonoBehaviour
     private void OnDisable()
     {
         if (health != null) health.Died -= OnOwnerDied;
+        aimUpPressed = false;
+        aimBackPressed = false;
+        aimFrontPressed = false;
     }
 
     private void OnOwnerDied()
@@ -84,19 +83,57 @@ public sealed class PlayerWeaponController : MonoBehaviour
         weaponRenderer.sprite = null;
     }
 
-    private void UpdateAimFromWAD()
+    private void OnAimUp(InputValue value)
     {
-        var kb = Keyboard.current;
-        if (kb == null) return;
-
-        if (kb.wKey.isPressed)
-            aimDir = AimDir.Up;
-        else if (kb.aKey.isPressed)
-            aimDir = AimDir.Back;
-        else if (kb.dKey.isPressed)
-            aimDir = AimDir.Front;
+        aimUpPressed = value.isPressed;
+        ResolveAimDirection();
     }
 
+    private void OnAimBack(InputValue value)
+    {
+        aimBackPressed = value.isPressed;
+        ResolveAimDirection();
+    }
+
+    private void OnAimFront(InputValue value)
+    {
+        aimFrontPressed = value.isPressed;
+        ResolveAimDirection();
+    }
+
+    private void OnFire(InputValue value)
+    {
+        if (!value.isPressed || !isActiveAndEnabled || isLocked ||
+            (health != null && health.IsDead) || current == null)
+            return;
+
+        TryFire();
+    }
+
+    private void ResolveAimDirection()
+    {
+        aimDir = ResolveAimDirection(
+            aimUpPressed,
+            aimBackPressed,
+            aimFrontPressed,
+            aimDir);
+    }
+
+    private static AimDir ResolveAimDirection(
+        bool aimUp,
+        bool aimBack,
+        bool aimFront,
+        AimDir currentAim)
+    {
+        if (aimUp)
+            return AimDir.Up;
+        if (aimBack)
+            return AimDir.Back;
+        if (aimFront)
+            return AimDir.Front;
+
+        return currentAim;
+    }
 
     private void UpdateWeaponTransform()
     {
