@@ -74,7 +74,7 @@ namespace ThreeBosses.Tests
         }
 
         [UnityTest]
-        public IEnumerator TouchHudFollowsTouchscreenAvailability()
+        public IEnumerator TouchHudRequiresHostPermissionAcrossBattleScenes()
         {
             Time.timeScale = 1f;
             DisarmActiveCountdownRestore();
@@ -95,29 +95,41 @@ namespace ThreeBosses.Tests
             Assert.That(controlsRootField, Is.Not.Null);
             GameObject controlsRoot = controlsRootField.GetValue(visibility) as GameObject;
             Assert.That(controlsRoot, Is.Not.Null);
-            MethodInfo refreshVisibility = visibilityType.GetMethod(
-                "RefreshVisibility",
+            Type serviceType = Type.GetType("RunSessionService, Assembly-CSharp");
+            Assert.That(serviceType, Is.Not.Null);
+            PropertyInfo serviceInstance = serviceType.GetProperty(
+                "Instance",
+                BindingFlags.Static | BindingFlags.Public);
+            Assert.That(serviceInstance, Is.Not.Null);
+            Component service = serviceInstance.GetValue(null) as Component;
+            Assert.That(service, Is.Not.Null);
+            MethodInfo configureTouchControls = serviceType.GetMethod(
+                "ConfigureTouchControls",
                 BindingFlags.Instance | BindingFlags.Public);
-            Assert.That(refreshVisibility, Is.Not.Null);
+            Assert.That(configureTouchControls, Is.Not.Null);
+            Assert.That(controlsRoot.activeSelf, Is.False);
 
-            Touchscreen addedTouchscreen = null;
-            try
-            {
-                if (Touchscreen.current == null)
-                    addedTouchscreen = InputSystem.AddDevice<Touchscreen>();
+            configureTouchControls.Invoke(service, new object[] { "1" });
+            Assert.That(controlsRoot.activeSelf, Is.True);
+            configureTouchControls.Invoke(service, new object[] { "1" });
+            Assert.That(controlsRoot.activeSelf, Is.True);
 
-                refreshVisibility.Invoke(visibility, null);
-                Assert.That(controlsRoot.activeSelf, Is.True);
-            }
-            finally
-            {
-                if (addedTouchscreen != null)
-                    InputSystem.RemoveDevice(addedTouchscreen);
-            }
+            SceneManager.LoadScene(BattleScenes[1]);
+            yield return null;
 
-            refreshVisibility.Invoke(visibility, null);
-            if (Touchscreen.current == null)
-                Assert.That(controlsRoot.activeSelf, Is.False);
+            Component nextVisibility = SceneManager.GetActiveScene()
+                .GetRootGameObjects()
+                .Select(root => root.GetComponent(visibilityType))
+                .Single(component => component != null);
+            GameObject nextControlsRoot = controlsRootField.GetValue(nextVisibility) as GameObject;
+            Assert.That(nextControlsRoot, Is.Not.Null);
+            Assert.That(
+                nextControlsRoot.activeSelf,
+                Is.True,
+                "The persistent browser permission must survive scene changes.");
+
+            configureTouchControls.Invoke(service, new object[] { "invalid" });
+            Assert.That(nextControlsRoot.activeSelf, Is.False);
         }
 
         [Test]

@@ -4,6 +4,7 @@ import {
 } from '@/config/featureFlags';
 import {
     bindUnityVisibility,
+    configureThreeBossesTouchControls,
     type UnityVisibilityBridgeInstance,
 } from '@/games/three-bosses/unityVisibility';
 import { bindThreeBossesGameReady } from '@/games/three-bosses/unityGameReady';
@@ -237,6 +238,7 @@ const startNewHandle = async ({
             // pause Unity's main loop, otherwise it cannot signal readiness.
             gameReady.startTimeout();
             await gameReady.promise;
+            configureThreeBossesTouchControls(instance);
             releaseVisibility = bindUnityVisibility(instance);
             releaseSubmissionBridge = bindThreeBossesSubmissionBridge(instance, submitRun);
             configureThreeBossesSubmission(instance, false);

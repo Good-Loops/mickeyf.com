@@ -1,6 +1,19 @@
 export const THREE_BOSSES_RUN_SESSION_OBJECT = 'Three Bosses Run Session' as const;
 const PAUSE_METHOD = 'PauseForDocumentHidden';
 const RESUME_METHOD = 'ResumeFromDocumentHidden';
+const CONFIGURE_TOUCH_CONTROLS_METHOD = 'ConfigureTouchControls';
+
+export type BrowserTouchEnvironment = Readonly<{
+    maxTouchPoints: number;
+    userAgent: string;
+    userAgentDataMobile?: boolean;
+}>;
+
+type NavigatorWithUserAgentData = Navigator & Readonly<{
+    userAgentData?: Readonly<{
+        mobile?: boolean;
+    }>;
+}>;
 
 type UnityMainLoop = Readonly<{
     pauseMainLoop?: () => void;
@@ -27,6 +40,53 @@ type VisibilityWindow = Readonly<{
     addEventListener: (type: 'blur' | 'focus', listener: EventListener) => void;
     removeEventListener: (type: 'blur' | 'focus', listener: EventListener) => void;
 }>;
+
+const MOBILE_BROWSER_PATTERN = /Android|iPhone|iPad|iPod/i;
+const IPAD_DESKTOP_MODE_PATTERN = /Macintosh/i;
+
+export const shouldEnableThreeBossesTouchControls = ({
+    maxTouchPoints,
+    userAgent,
+    userAgentDataMobile,
+}: BrowserTouchEnvironment): boolean => (
+    maxTouchPoints > 0
+    && (
+        userAgentDataMobile === true
+        || MOBILE_BROWSER_PATTERN.test(userAgent)
+        || (
+            maxTouchPoints > 1
+            && IPAD_DESKTOP_MODE_PATTERN.test(userAgent)
+        )
+    )
+);
+
+const readBrowserTouchEnvironment = (
+    browserNavigator: NavigatorWithUserAgentData = navigator as NavigatorWithUserAgentData,
+): BrowserTouchEnvironment => ({
+    maxTouchPoints: browserNavigator.maxTouchPoints ?? 0,
+    userAgent: browserNavigator.userAgent,
+    userAgentDataMobile: browserNavigator.userAgentData?.mobile,
+});
+
+/**
+ * Tells Unity whether the browser is a touch-first mobile device. The host is
+ * authoritative because Unity's WebGL mobile-platform flag is intentionally
+ * best-effort and can be hidden by browser privacy settings.
+ */
+export const configureThreeBossesTouchControls = (
+    instance: UnityVisibilityBridgeInstance,
+    environment: BrowserTouchEnvironment = readBrowserTouchEnvironment(),
+): void => {
+    if (typeof instance.SendMessage !== 'function') {
+        throw new Error('The Unity WebGL player is missing the required touch-controls API.');
+    }
+
+    instance.SendMessage(
+        THREE_BOSSES_RUN_SESSION_OBJECT,
+        CONFIGURE_TOUCH_CONTROLS_METHOD,
+        shouldEnableThreeBossesTouchControls(environment) ? '1' : '0',
+    );
+};
 
 /**
  * Couples one Unity player to page visibility and top-level window focus for

@@ -2,10 +2,78 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
     bindUnityVisibility,
+    configureThreeBossesTouchControls,
+    shouldEnableThreeBossesTouchControls,
     THREE_BOSSES_RUN_SESSION_OBJECT,
 } from './unityVisibility.ts';
 
 const receiver = THREE_BOSSES_RUN_SESSION_OBJECT;
+
+test('enables touch controls only for touch-capable mobile browsers', () => {
+    assert.equal(shouldEnableThreeBossesTouchControls({
+        maxTouchPoints: 0,
+        userAgent: 'Mozilla/5.0 (Linux; Android 10)',
+        userAgentDataMobile: true,
+    }), false);
+    assert.equal(shouldEnableThreeBossesTouchControls({
+        maxTouchPoints: 10,
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        userAgentDataMobile: false,
+    }), false);
+    assert.equal(shouldEnableThreeBossesTouchControls({
+        maxTouchPoints: 0,
+        userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)',
+        userAgentDataMobile: false,
+    }), false);
+    assert.equal(shouldEnableThreeBossesTouchControls({
+        maxTouchPoints: 5,
+        userAgent: 'Mozilla/5.0 (Linux; Android 10; K)',
+    }), true);
+    assert.equal(shouldEnableThreeBossesTouchControls({
+        maxTouchPoints: 5,
+        userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)',
+    }), true);
+    assert.equal(shouldEnableThreeBossesTouchControls({
+        maxTouchPoints: 5,
+        userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15)',
+    }), true);
+    assert.equal(shouldEnableThreeBossesTouchControls({
+        maxTouchPoints: 5,
+        userAgent: 'Mozilla/5.0',
+        userAgentDataMobile: true,
+    }), true);
+});
+
+test('sends the resolved mobile-touch permission to the persistent Unity service', () => {
+    const messages = [];
+    const instance = {
+        SendMessage: (...message) => messages.push(message),
+    };
+
+    configureThreeBossesTouchControls(instance, {
+        maxTouchPoints: 10,
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        userAgentDataMobile: false,
+    });
+    configureThreeBossesTouchControls(instance, {
+        maxTouchPoints: 5,
+        userAgent: 'Mozilla/5.0 (Linux; Android 10; K)',
+        userAgentDataMobile: true,
+    });
+
+    assert.deepEqual(messages, [
+        [receiver, 'ConfigureTouchControls', '0'],
+        [receiver, 'ConfigureTouchControls', '1'],
+    ]);
+
+    assert.throws(
+        () => configureThreeBossesTouchControls({}, {
+            maxTouchPoints: 5,
+            userAgent: 'Mozilla/5.0 (Linux; Android 10; K)',
+        }),
+        /missing the required touch-controls API/,
+    );
+});
 
 class FakeVisibilityDocument {
     constructor(hidden = false, focused = true) {

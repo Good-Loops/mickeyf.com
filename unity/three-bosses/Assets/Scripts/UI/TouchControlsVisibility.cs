@@ -1,36 +1,36 @@
 using UnityEngine;
-using UnityEngine.InputSystem;
 
 /// <summary>
-/// Keeps the gameplay touch HUD off keyboard-only devices while allowing it
-/// to appear whenever Unity detects a real touchscreen.
+/// Shows the gameplay touch HUD only when the browser or native host permits it.
 /// </summary>
 public sealed class TouchControlsVisibility : MonoBehaviour
 {
     [SerializeField] private GameObject controlsRoot;
 
-    public bool IsTouchscreenPresent => Touchscreen.current != null;
+    private RunSessionService runSessionService;
 
     private void OnEnable()
     {
-        InputSystem.onDeviceChange += OnInputDeviceChanged;
+        runSessionService = RunSessionService.Instance;
+        runSessionService.TouchControlsAvailabilityChanged += RefreshVisibility;
         RefreshVisibility();
     }
 
     private void OnDisable()
     {
-        InputSystem.onDeviceChange -= OnInputDeviceChanged;
+        if (runSessionService != null)
+            runSessionService.TouchControlsAvailabilityChanged -= RefreshVisibility;
+        runSessionService = null;
+
+        if (controlsRoot != null)
+            controlsRoot.SetActive(false);
     }
 
     public void RefreshVisibility()
     {
         if (controlsRoot != null)
-            controlsRoot.SetActive(IsTouchscreenPresent);
-    }
-
-    private void OnInputDeviceChanged(InputDevice device, InputDeviceChange change)
-    {
-        if (device is Touchscreen)
-            RefreshVisibility();
+            controlsRoot.SetActive(
+                runSessionService != null
+                && runSessionService.TouchControlsEnabled);
     }
 }

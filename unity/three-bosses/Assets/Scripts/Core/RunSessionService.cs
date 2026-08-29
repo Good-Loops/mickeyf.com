@@ -17,6 +17,7 @@ public sealed class RunSessionService : MonoBehaviour
     private RunSubmissionCoordinator submissionCoordinator;
     private bool isPausedForDocumentHidden;
     private bool audioWasPausedBeforeDocumentHidden;
+    private bool touchControlsEnabled;
 
     public static RunSessionService Instance
     {
@@ -31,8 +32,10 @@ public sealed class RunSessionService : MonoBehaviour
     public bool IsPausedForDocumentHidden => isPausedForDocumentHidden;
     public RunSubmissionStatus SubmissionStatus => submissionCoordinator.Status;
     public string SubmissionErrorCode => submissionCoordinator.LastErrorCode;
+    public bool TouchControlsEnabled => touchControlsEnabled;
 
     public event Action SubmissionStateChanged;
+    public event Action TouchControlsAvailabilityChanged;
 
 #if UNITY_WEBGL && !UNITY_EDITOR
     [DllImport("__Internal")]
@@ -65,6 +68,11 @@ public sealed class RunSessionService : MonoBehaviour
         Session = new RunSession(sessionClock);
         submissionCoordinator = new RunSubmissionCoordinator(Session);
         submissionCoordinator.Changed += OnSubmissionStateChanged;
+#if UNITY_WEBGL && !UNITY_EDITOR
+        touchControlsEnabled = false;
+#else
+        touchControlsEnabled = Application.isMobilePlatform;
+#endif
         DontDestroyOnLoad(gameObject);
     }
 
@@ -76,7 +84,22 @@ public sealed class RunSessionService : MonoBehaviour
         ResumeFromDocumentHidden();
         if (submissionCoordinator != null)
             submissionCoordinator.Changed -= OnSubmissionStateChanged;
+        TouchControlsAvailabilityChanged = null;
         instance = null;
+    }
+
+    /// <summary>
+    /// WebGL SendMessage endpoint. The browser host owns mobile-device
+    /// detection because Unity cannot classify WebGL mobile browsers reliably.
+    /// </summary>
+    public void ConfigureTouchControls(string enabledValue)
+    {
+        bool enabled = enabledValue == "1";
+        if (touchControlsEnabled == enabled)
+            return;
+
+        touchControlsEnabled = enabled;
+        TouchControlsAvailabilityChanged?.Invoke();
     }
 
     /// <summary>
