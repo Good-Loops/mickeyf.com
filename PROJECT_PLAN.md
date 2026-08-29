@@ -672,7 +672,7 @@ The header's information architecture must:
 
 - group Animations, Games, and Leaderboards into an accessible
   **Entertainment** dropdown;
-- group Login and Register into an accessible **Account** dropdown, with the
+- group Login and Sign up into an accessible **Account** dropdown, with the
   username and Logout represented coherently when authenticated;
 - make the navigation genuinely responsive and verify keyboard, focus, and
   disclosure behavior;
@@ -705,7 +705,15 @@ The Login page's glass form shell was implemented and browser-verified on
 2026-08-28 with visible field labels, password-manager autocomplete hints,
 custom cursor continuity, and a static reduced-motion-safe panel. Its existing
 authentication requests, alerts, loading guard, and success redirect remain
-unchanged; Register still owns the legacy shared form mixin until its own pass.
+unchanged. The companion Sign up pass replaces `/register` with `/signup` and
+retires the legacy form mixin without changing the registration contract.
+
+An optional **Stay signed in for 30 days** Login control is approved but still
+open. Unchecked sessions must retain the current four-hour lifetime; checked
+sessions may use a server-controlled thirty-day JWT and signed HTTP-only cookie
+without storing passwords or preferences in browser-readable storage. The
+stateless token's lack of per-session revocation must be tested and recorded as
+an accepted risk before this item is closed.
 
 ## Deferred tooling follow-up
 
