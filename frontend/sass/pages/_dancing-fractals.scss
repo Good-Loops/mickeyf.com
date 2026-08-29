@@ -4,7 +4,7 @@
     --panel-width: clamp(19rem, 23vw, 24rem);
 
     display: grid;
-    grid-template-areas: 'stage' 'ui';
+    grid-template-areas: 'stage' 'ui' 'hint';
     justify-items: center;
     gap: 1.4rem;
     width: min(96vw, 145rem);
@@ -89,7 +89,10 @@
 
     &__input[type='file'] { display: none; }
 
-    &__orientation-hint { display: none; }
+    &__orientation-hint {
+        grid-area: hint;
+        display: none;
+    }
 
     &__ui {
         grid-area: ui;

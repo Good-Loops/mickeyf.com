@@ -381,10 +381,11 @@ const DancingFractals: React.FC = () => {
                     </div>
                 </div>
 
-                <p className="dancing-fractals__orientation-hint">
-                    For the best fullscreen experience, rotate your device to landscape.
-                </p>
             </div>
+
+            <p className="dancing-fractals__orientation-hint">
+                For the best fullscreen experience, rotate your device to landscape.
+            </p>
             <div className="dancing-fractals__ghost" aria-hidden="true" />
         </section>   
     );
