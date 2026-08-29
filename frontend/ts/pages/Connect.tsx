@@ -2,7 +2,10 @@
  * Connect page ("/connect").
  * Links out to external profiles and community destinations.
  */
-import React from "react";
+import React, { type FormEvent, useState } from "react";
+
+const feedbackEmail = "mickeyf.plays@gmail.com";
+const feedbackSubject = "Feedback for mickeyf.com";
 
 const connectLinks = [
     {
@@ -28,6 +31,20 @@ const connectLinks = [
 ] as const;
 
 const Connect: React.FC = () => {
+    const [feedbackMessage, setFeedbackMessage] = useState("");
+
+    const openFeedbackEmail = (event: FormEvent<HTMLFormElement>) => {
+        event.preventDefault();
+
+        const message = feedbackMessage.trim();
+        if (!message) {
+            return;
+        }
+
+        const mailtoUrl = `mailto:${feedbackEmail}?subject=${encodeURIComponent(feedbackSubject)}&body=${encodeURIComponent(message)}`;
+        window.location.assign(mailtoUrl);
+    };
+
     return (
         <section className="connect" aria-labelledby="connect-title">
             <h1 id="connect-title" className="u-visually-hidden">Connect</h1>
@@ -50,6 +67,31 @@ const Connect: React.FC = () => {
                     </a>
                 ))}
             </div>
+            <form className="connect__feedback" onSubmit={openFeedbackEmail}>
+                <div className="connect__feedback-heading">
+                    <h2>Feedback</h2>
+                    <p id="feedback-email-note">
+                        Opens your email app with your feedback ready to send.
+                    </p>
+                </div>
+                <label className="u-visually-hidden" htmlFor="feedback-message">
+                    Your feedback
+                </label>
+                <textarea
+                    id="feedback-message"
+                    className="connect__feedback-message"
+                    value={feedbackMessage}
+                    onChange={(event) => setFeedbackMessage(event.target.value)}
+                    placeholder="Share an idea, report a problem, or say hello."
+                    maxLength={1500}
+                    rows={4}
+                    required
+                    aria-describedby="feedback-email-note"
+                />
+                <button className="connect__feedback-submit" type="submit">
+                    Open email
+                </button>
+            </form>
         </section>
     );
 };

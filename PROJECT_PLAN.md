@@ -696,8 +696,10 @@ still owns the compact/mobile navigation behavior.
 The canonical `/connect` profile hub was implemented and browser-verified on
 2026-08-28 with accessible external-profile links and the shared glass-card
 system; the retired `/social` route now resolves through the ordinary Not Found
-page. The feedback form remains deferred until its server validation, abuse
-controls, privacy language, and retention policy are designed together.
+page. Its feedback composer opens the visitor's configured email handler with a
+prefilled message, so the website stores and transmits no feedback itself. A
+future server-submitted replacement remains deferred until its validation,
+abuse controls, privacy language, and retention policy are designed together.
 
 ## Deferred tooling follow-up
 
