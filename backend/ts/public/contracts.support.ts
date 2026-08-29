@@ -31,6 +31,7 @@ export type {
     LeaderboardCatalogResponse,
     P4VegaLeaderboardEntry,
     ThreeBossesLeaderboardEntry,
+    ThreeBossesRank,
     ThreeBossesRunSubmissionRequest,
     ThreeBossesRunSubmissionResponse,
 } from '../leaderboards/leaderboardContract';

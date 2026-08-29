@@ -32,7 +32,7 @@ test('keeps p4-Vega on its legacy score-descending contract', () => {
     });
 });
 
-test('keeps Three Bosses unranked and submission-disabled', () => {
+test('publishes Three Bosses ranks while keeping submission disabled', () => {
     assert.deepEqual(getGameDefinition('three-bosses'), {
         gameId: 'three-bosses',
         displayName: 'Three Bosses',
@@ -42,7 +42,7 @@ test('keeps Three Bosses unranked and submission-disabled', () => {
         scoreLabel: 'Score',
         completionTimeLabel: 'Time',
         rankLabel: 'Rank',
-        rankState: 'unranked',
+        rankState: 'ranked',
         submissionState: 'disabled',
     });
 });

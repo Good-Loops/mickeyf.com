@@ -5,8 +5,8 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import {
-    isThreeBossesLocalEnabled,
-    THREE_BOSSES_LOCAL_ROUTE,
+    isThreeBossesEnabled,
+    THREE_BOSSES_ROUTE,
 } from "@/config/featureFlags";
 
 const Games: React.FC = () => {
@@ -24,10 +24,10 @@ const Games: React.FC = () => {
                     />
                     <h2 className="showcase-card__title">p4-Vega</h2>
                 </Link>
-                {isThreeBossesLocalEnabled && (
+                {isThreeBossesEnabled && (
                     <Link
                         className="showcase-card games__card games__card--three-bosses"
-                        to={THREE_BOSSES_LOCAL_ROUTE}
+                        to={THREE_BOSSES_ROUTE}
                     >
                         <span
                             className="showcase-card__visual games__visual"

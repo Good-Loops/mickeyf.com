@@ -53,7 +53,12 @@ jobs:
           npm --prefix backend audit --audit-level=low
           npm --prefix .github/firebase-deploy audit --audit-level=high --omit=dev
 
+      - name: Validate packaged Three Bosses WebGL release
+        run: npm run three-bosses:webgl:release:validate
+
       - name: Type-check and build frontend
+        env:
+          VITE_ENABLE_THREE_BOSSES_RELEASE: "1"
         run: |
           npm --prefix frontend test
           npm --prefix frontend run build
@@ -61,7 +66,10 @@ jobs:
       - name: Test local WebGL tooling
         run: |
           npm run test:three-bosses-webgl-build
+          npm run test:three-bosses-webgl-package
           npm run test:three-bosses-webgl-server
+          npm run test:three-bosses-webgl-hosting
+          npm --prefix .github/firebase-deploy run test:three-bosses-webgl-smoke
 
       - name: Validate isolated backend candidate build
         run: npm run test:cloudbuild-candidate

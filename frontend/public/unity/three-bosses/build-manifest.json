@@ -1,0 +1,39 @@
+{
+  "version": 2,
+  "buildId": "039d2cb4e51b4ca2bb686535bdd9d09f8c37c47ae923bf5f98988b2cde093686",
+  "certifiedBuildId": "26c3a6a8f42aba7c203122c2fbea06d64f0338b59c94843bfb7b68673181f7a3",
+  "sourceCommit": "8098ea0ec27a830ddee39d27ab02cdc71b2a982c",
+  "unitySourceDigest": "a36364e4a1e6c4c74f97c40490979fe713d87bf67be24c22f18310ea3e0a27d4",
+  "unitySourceFileCount": 976,
+  "unityEditorVersion": "6000.3.8f1",
+  "loaderUrl": "releases/039d2cb4e51b4ca2bb686535bdd9d09f8c37c47ae923bf5f98988b2cde093686/Build/three-bosses-webgl.loader.js",
+  "dataUrl": "releases/039d2cb4e51b4ca2bb686535bdd9d09f8c37c47ae923bf5f98988b2cde093686/Build/three-bosses-webgl.data.br",
+  "frameworkUrl": "releases/039d2cb4e51b4ca2bb686535bdd9d09f8c37c47ae923bf5f98988b2cde093686/Build/three-bosses-webgl.framework.js.br",
+  "codeUrl": "releases/039d2cb4e51b4ca2bb686535bdd9d09f8c37c47ae923bf5f98988b2cde093686/Build/three-bosses-webgl.wasm.br",
+  "streamingAssetsUrl": "releases/039d2cb4e51b4ca2bb686535bdd9d09f8c37c47ae923bf5f98988b2cde093686/StreamingAssets",
+  "companyName": "DefaultCompany",
+  "productName": "Three Bosses",
+  "productVersion": "1.0",
+  "assets": [
+    {
+      "path": "releases/039d2cb4e51b4ca2bb686535bdd9d09f8c37c47ae923bf5f98988b2cde093686/Build/three-bosses-webgl.data.br",
+      "sha256": "1667199addcd87466113aa22c5be75791ed4a3b2bfe0a6fcaa10b5a8d3198cbd",
+      "size": 27823112
+    },
+    {
+      "path": "releases/039d2cb4e51b4ca2bb686535bdd9d09f8c37c47ae923bf5f98988b2cde093686/Build/three-bosses-webgl.framework.js.br",
+      "sha256": "3b1bef95ef00a7ead508aea3d89beeace478003ed772abf54c8ef87a9614d1b3",
+      "size": 76486
+    },
+    {
+      "path": "releases/039d2cb4e51b4ca2bb686535bdd9d09f8c37c47ae923bf5f98988b2cde093686/Build/three-bosses-webgl.loader.js",
+      "sha256": "85046926687e3db353ef6c61c110b85fe7e182e662165fa7709666aceeb16946",
+      "size": 26982
+    },
+    {
+      "path": "releases/039d2cb4e51b4ca2bb686535bdd9d09f8c37c47ae923bf5f98988b2cde093686/Build/three-bosses-webgl.wasm.br",
+      "sha256": "aa6e8a817c1fa13ba0b3046ae94fc53c07c85badfc34ad3c472fda73e153e7bc",
+      "size": 9031049
+    }
+  ]
+}

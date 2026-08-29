@@ -9,6 +9,7 @@ export const getGameLeaderboard = leaderboardApi.getGame;
 export const submitThreeBossesRun = leaderboardApi.submitThreeBossesRun;
 
 export {
+    isThreeBossesSubmissionEnabled,
     LeaderboardRequestError,
     type GameLeaderboardResponse,
     type LeaderboardCatalogGame,

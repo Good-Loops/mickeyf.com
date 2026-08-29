@@ -9,6 +9,8 @@ import { Pool } from 'mysql2/promise';
 import {
     GameLeaderboardResponse,
     LEADERBOARD_CONTRACT_VERSION,
+    calculateThreeBossesRank,
+    calculateThreeBossesScore,
     LeaderboardApiError,
     LeaderboardCatalogGame,
     LeaderboardCatalogResponse,
@@ -123,14 +125,13 @@ export function createLeaderboardController({
                 rulesVersion: THREE_BOSSES_RULES_VERSION,
                 entries: rows.map(({
                     userName,
-                    score,
                     completionTimeMs,
                 }, index) => ({
                     position: index + 1,
                     userName,
-                    score,
+                    score: calculateThreeBossesScore(completionTimeMs),
                     completionTimeMs,
-                    rank: 'UNRANKED' as const,
+                    rank: calculateThreeBossesRank(completionTimeMs),
                 })),
             });
         }
@@ -232,9 +233,9 @@ export function createLeaderboardController({
             replayed: result.replayed,
             personalBest: result.personalBest,
             result: {
-                score: result.score,
+                score: calculateThreeBossesScore(result.completionTimeMs),
                 completionTimeMs: result.completionTimeMs,
-                rank: 'UNRANKED',
+                rank: calculateThreeBossesRank(result.completionTimeMs),
             },
         });
     }

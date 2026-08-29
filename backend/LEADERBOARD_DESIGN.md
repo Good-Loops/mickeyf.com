@@ -321,23 +321,25 @@ outcomes, rejects conflicting reuse, and enforces both database-backed per-user
 and per-instance IP limits. Unit, security, rollback, concurrency, and eight
 isolated MySQL integration tests passed. These routes are deployed in the
 serving revision, but Three Bosses submissions remain inactive because
-`THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=false`; the Unity submission bridge also
-remains disconnected.
+`THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=false`. The Unity caller, receiver, and
+browser bridge are connected locally and remain fail-closed behind that gate.
 
 The multi-game frontend slice was implemented locally on 2026-08-26.
 The canonical `/leaderboards` page is now a catalog-driven hub of leaderboard
 destinations, not a duplicate game launcher. Direct detail routes use the
 generic GET API, and p4-Vega no longer reads the legacy `/api/users`
 leaderboard operation in the browser. The Three Bosses route renders typed
-real rows while its catalog remains unranked and submission-disabled. A strict
+real rows while its catalog reports ranked and submission-disabled. A strict
 cookie-bearing POST client and lifecycle-safe Unity host bridge were committed
 at `c4349f7c`; they pass only canonical run metrics, never browser credentials,
-and preserve the same identity for uncertain retries. The Unity caller and
-receiver remain disconnected and the Submit Score button remains inert. The
+and preserve the same identity for uncertain retries. The Unity caller,
+receiver, and Submit Score state machine use the same canonical result and only
+become available when the server catalog reports enabled. The
 old singular frontend route is intentionally not retained because the owner
 approved a clean URL change before meaningful public adoption. Generic-only
-p4 storage and legacy-column removal are complete. p4 write enablement and Unity
-submission activation remain incomplete and separately gated.
+p4 storage, legacy-column removal, and p4 write enablement are complete. The
+Unity submission path is connected locally; only Three Bosses production
+activation remains incomplete and separately gated.
 
 ## Invariants
 
@@ -354,8 +356,9 @@ submission activation remain incomplete and separately gated.
 - The retired p4-Vega backfill was repeatable operational tooling rather than an
   HTTP endpoint or schema migration. Read-only reconciliation remains inside
   the destructive migration plan for safe replay against the pre-drop backup.
-- Three Bosses remains `UNRANKED` and its submission endpoint remains disabled
-  until the remaining Phase 12 release gates are approved.
+- Three Bosses uses the provisional rules-version-1 S–D rank bands; its
+  submission endpoint remains disabled until the remaining release gates are
+  approved.
 - A player identity always comes from verified authentication, never a client
   supplied user name.
 
@@ -364,8 +367,8 @@ current presentation and ordering policy:
 
 | Game ID | Primary order | Rank state | Submission state |
 | --- | --- | --- | --- |
-| `p4-vega` | score, descending | not applicable | legacy endpoint, frozen |
-| `three-bosses` | completion time, ascending | unranked | disabled |
+| `p4-vega` | score, descending | not applicable | legacy operation, enabled |
+| `three-bosses` | completion time, ascending | S–D time bands | disabled |
 
 Only a strict primary-metric improvement replaces a personal best. An equal
 result keeps the existing best and its original recorded timestamp. Equal
@@ -376,7 +379,7 @@ never compared.
 
 ## New API boundary
 
-The multi-game API will be additive rather than extending the operation switch
+The multi-game API is additive rather than extending the operation switch
 on `/api/users`:
 
 - `GET /api/leaderboards` lists the server-owned game catalog.
@@ -402,10 +405,17 @@ versioned transport and storage safety contract, not a rank threshold.
 
 Unity must first canonicalize its elapsed time using
 `Round(elapsedSeconds * 1000, MidpointRounding.AwayFromZero)` and calculate the
-displayed score from that same integer. The server calculates positive scores
-as `max(1, floor(100000000 / completionTimeMs + 0.5))`. Unity and backend parity
+displayed score from that same integer. The server calculates arcade-scale
+positive scores as
+`max(1, min(2147483647, floor(10000000000 / completionTimeMs + 0.5)))`.
+The upper bound preserves the signed `INT` storage contract. Unity and backend parity
 vectors are required before writes can be enabled. The server never accepts a
 client-provided score or rank for Three Bosses.
+
+Rules version 1 derives rank from the same canonical integer: `< 60,000` ms is
+S; `60,000–80,000` is A; `80,001–100,000` is B; `100,001–120,000` is C; and
+`> 120,000` is D. Boundary parity tests cover Unity and backend. These bands
+remain provisional until public write activation.
 
 An exact retry of the same `(gameId, userId, runId)` and canonical payload
 returns the original outcome with `replayed: true`. Reusing that identity with
@@ -914,11 +924,11 @@ legacy reader.
     migration history, and recovery procedure against the contracted schema.
     **Completed on 2026-08-26; p4-Vega submissions are enabled and verified,
     while Three Bosses submissions remain disabled.**
-17. Keep Three Bosses writes disabled. Its backend, browser client, and host
-    bridge are prepared, but do not enable them until Unity canonicalizes one
-    integer millisecond result for display, score, and transport; the Unity
-    caller/receiver and button are connected and tested; and its release,
-    ranking, and validation policy is approved.
+17. Keep Three Bosses writes disabled by default. Its backend, browser client,
+    host bridge, Unity caller/receiver, canonical score/rank calculation, and
+    button state machine are connected and tested. Enable writes only after the
+    content-addressed WebGL release, hosted runtime validation, signed-in
+    end-to-end run, and explicit production opt-in are approved.
 
 Transactions must use one acquired MySQL connection; transaction statements
 must not be issued through unrelated pooled queries.
@@ -971,7 +981,8 @@ only serialization mechanism.
 
 ## Deferred decisions
 
-- Three Bosses rank thresholds and labels.
+- Recalibrating the provisional rules-version-1 Three Bosses rank bands after
+  observing real completion data.
 - Enabling Three Bosses submission.
 - Whether an honor-based authenticated completion time is sufficient for a
   competitive leaderboard or stronger run attestation is required.

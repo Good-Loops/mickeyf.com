@@ -12,6 +12,7 @@ import {
 } from "node:fs/promises";
 import { basename, extname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
+import { normalizeUnityBuildProvenance } from "./three-bosses-unity-provenance.mjs";
 
 export const LOOPBACK_HOST = "127.0.0.1";
 export const DEFAULT_PORT = 4174;
@@ -110,7 +111,21 @@ const inspectBuildFiles = async (rootPath) => {
   };
 };
 
-const completionMarkerPayload = async (buildDirectory, fileStats) => {
+const assertReleaseRuntimeFiles = ({ code, data, framework, loader }) => {
+  const expected = [
+    [loader, /[.]loader[.]js$/u, "loader .loader.js"],
+    [data, /[.]data[.]br$/u, "Brotli data .data.br"],
+    [framework, /[.]framework[.]js[.]br$/u, "Brotli framework .framework.js.br"],
+    [code, /[.]wasm[.]br$/u, "Brotli WebAssembly .wasm.br"],
+  ];
+  for (const [fileName, pattern, label] of expected) {
+    if (!pattern.test(fileName)) {
+      throw new Error(`Release WebGL build requires exactly one ${label} asset.`);
+    }
+  }
+};
+
+const completionMarkerPayload = async (buildDirectory, fileStats, provenance) => {
   const files = await Promise.all(fileStats.map(async ({ fileName, stats }) => ({
     fileName,
     hash: createHash("sha256").update(await readFile(join(buildDirectory, fileName))).digest("hex"),
@@ -120,11 +135,24 @@ const completionMarkerPayload = async (buildDirectory, fileStats) => {
   const buildId = createHash("sha256")
     .update(files.map(({ fileName, hash, size }) => `${fileName}:${size}:${hash}`).join("|"))
     .digest("hex");
-  return { buildId, files, version: 1 };
+  if (!provenance) return { buildId, files, version: 1 };
+  return {
+    buildId,
+    files,
+    provenance: normalizeUnityBuildProvenance(provenance),
+    version: 2,
+  };
 };
 
 const completionMarkerMatches = (marker, expected) => {
-  if (marker?.version !== 1 || !Array.isArray(marker.files)) return false;
+  if (![1, 2].includes(marker?.version) || !Array.isArray(marker.files)) return false;
+  if (marker.version === 2) {
+    try {
+      normalizeUnityBuildProvenance(marker.provenance);
+    } catch {
+      return false;
+    }
+  }
   return marker.buildId === expected.buildId
     && expected.files.length === marker.files.length
     && expected.files.every((file, index) =>
@@ -152,9 +180,11 @@ export const invalidateBuildCompletionMarker = async (rootPath) => {
   });
 };
 
-export const writeBuildCompletionMarker = async (rootPath) => {
-  const { buildDirectory, fileStats } = await inspectBuildFiles(rootPath);
-  const payload = await completionMarkerPayload(buildDirectory, fileStats);
+export const writeBuildCompletionMarker = async (rootPath, { provenance } = {}) => {
+  const buildFiles = await inspectBuildFiles(rootPath);
+  if (provenance) assertReleaseRuntimeFiles(buildFiles);
+  const { buildDirectory, fileStats } = buildFiles;
+  const payload = await completionMarkerPayload(buildDirectory, fileStats, provenance);
   const markerPath = join(rootPath, BUILD_COMPLETION_MARKER);
   const temporaryPath = join(rootPath, `.${BUILD_COMPLETION_MARKER}.${randomUUID()}.tmp`);
   try {
@@ -294,7 +324,7 @@ export const createThreeBossesWebGlServer = ({ rootPath = defaultRoot() } = {}) 
       let markerFile;
       if (requestUrl.pathname.startsWith("/Build/")) {
         const marker = await readCompletionMarker(rootPath);
-        if (!marker.exists || marker.value?.version !== 1) {
+        if (!marker.exists || ![1, 2].includes(marker.value?.version)) {
           sendJson(response, 503, { error: "BUILD_UNAVAILABLE" }, method);
           return;
         }

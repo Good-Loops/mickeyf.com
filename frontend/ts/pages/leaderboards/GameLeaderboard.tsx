@@ -132,7 +132,7 @@ function formatCompletionTime(milliseconds: number): string {
 
 function getEmptyMessage(game: LeaderboardCatalogGame): string {
     if (game.submissionState === 'disabled') {
-        return `${game.displayName} is currently unranked, and score submission is disabled.`;
+        return `${game.displayName} score submission is not open yet.`;
     }
 
     return 'No results have been recorded for this leaderboard yet.';

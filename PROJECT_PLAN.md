@@ -8,12 +8,14 @@ each phase boundary.
 
 - Steps 12.1–12.9: implemented on the phase branch and undergoing gameplay and
   presentation polish.
-- Step 12.10 — rank calibration: **deferred by owner decision on 2026-08-18**.
-  Keep results `UNRANKED`; do not invent thresholds. Resume after several
-  representative normal human completion times are available and after run
-  timing semantics and transition pacing are finalized. This remains a
-  pre-release gate but does not block Phase 13 implementation while rank output
-  stays `UNRANKED` and score submission stays disabled.
+- Step 12.10 — provisional rank calibration: **implemented on 2026-08-29**.
+  Rules version 1 derives rank from the canonical active-combat time: under
+  `01:00` is S; `01:00.000` through `01:20.000` is A; `01:20.001` through
+  `01:40.000` is B; `01:40.001` through `02:00.000` is C; and anything slower
+  is D. The reported `01:22` warm-up is B and remains excluded from the ten
+  measured calibration runs. These bands may be refined before public write
+  activation; changing them after activation requires an explicit historical
+  reclassification or rules-version decision.
 - Step 12.11 — edge cases and presentation polish:
   - Step 12.11A — rename permanent Unity Editor utilities: **completed** in
     commit `46c3c775`.
@@ -44,11 +46,11 @@ each phase boundary.
     behavior on 2026-08-24. His continuous hands-on combat-feel, weapon,
     pickup, and full normal-route check remains before release.
 
-Phase 12 release acceptance still requires Step 12.10, the remaining hands-on
-gameplay check, passing Unity compilation and automated tests, clean asset/meta
-integrity, and a verified complete normal route. Per the owner's sequencing
-decision, those release gates may remain open while Phase 13 is implemented,
-provided ranks remain `UNRANKED` and submission remains disabled.
+Phase 12 release acceptance still requires the remaining hands-on gameplay
+check, passing Unity compilation and automated tests, clean asset/meta integrity,
+and a verified complete normal route. The provisional rank implementation is
+complete, but production submissions remain disabled until the release gate is
+explicitly enabled and verified.
 
 ## Phase 13 — Website and leaderboard integration
 
@@ -66,8 +68,8 @@ production submission activation completed on 2026-08-26.** Approved by Mike
 and live-schema-preflighted on 2026-08-24. The
 server-owned contract uses stable
 `p4-vega` and `three-bosses` identifiers. p4-Vega remains score-descending on
-its unchanged legacy endpoint. Three Bosses is completion-time-ascending but
-remains `UNRANKED` with submission disabled. Persistence will use an immutable
+its unchanged legacy endpoint. Three Bosses is completion-time-ascending with
+the provisional S–D rank bands above and submission disabled. Persistence uses an immutable
 run ledger for idempotency plus one personal-best row per player, game, and
 rules version so incompatible future rules are never compared.
 
@@ -190,11 +192,11 @@ Post-cutover cleanup removed the completed one-shot deployment package, the
 one-time p4 grant-retirement implementation and tests, and the obsolete
 empty-schema rollback. The immutable migrations, migration-0003 replay and
 recovery path, generic runtime-grant workflow, and read-only reconciliation
-remain. The frontend and Unity audit found no obsolete whole file; the dormant
-Three Bosses submission bridge remains intentionally ready for its future Unity
-connection. Pushing this branch to `main` would trigger the unrelated live
-Firebase release, so it does not shorten this isolated backend activation and
-remains deferred.
+remain. The frontend and Unity audit found no obsolete whole file. The Three
+Bosses submission bridge that was retained at this checkpoint is now connected
+to the Unity result flow and still fails closed until production activation.
+Pushing this branch to `main` would trigger the live Firebase release, so it
+remains deferred until the broader release gates are complete.
 
 The local generic-only grant contract was completed on 2026-08-26. p4-Vega and
 Three Bosses now share one database-scoped advisory lock per authenticated user,
@@ -391,19 +393,21 @@ authenticated run endpoint is complete behind the exact fail-closed
 validation, explicit cookie-origin protection, server-derived score, immutable
 idempotent run history, transactional strict personal bests, and per-user and
 per-IP limits are covered by unit, security, rollback, concurrency, and
-isolated-MySQL tests. Rank remains `UNRANKED`. These routes have not been
+isolated-MySQL tests. The server now derives the provisional S–D rank and
+arcade-scale score from the same canonical integer millisecond result. These routes have not been
 enabled for Three Bosses production writes: the routes are present in the
 serving p4-enabled generic-only revision, but
 `THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=false` remains enforced. They do not
 replace the remaining submission-enablement gate.
 
 The credential-safe browser submission client and Unity host bridge were
-committed at `c4349f7c`. Unity will later send only its canonical run ID and
-integer completion time; browser-managed cookies never enter the game binary,
-and uncertain results retry with the same identity. The Unity `.jslib` caller,
-result receiver, one-source millisecond canonicalization, score/rank parity,
-and Submit Score button activation remain deliberately disconnected until the
-Three Bosses gameplay and ranking release gates are approved.
+committed at `c4349f7c`; the Unity caller, receiver, canonical millisecond
+result, arcade score/rank parity, exact-run retry state machine, and end-screen
+Submit Score control were connected at `d1303eeb`. Unity sends only its run ID
+and integer completion time; browser-managed cookies never enter the game
+binary. The browser enables the Unity control only when the backend catalog
+reports submissions enabled, while the backend runtime opt-in remains the
+authoritative fail-closed gate.
 
 The exact frozen generic-only revision first received 100% of production
 traffic at Cloud Run generation 121. The p4-enabled generic-only revision now
@@ -529,18 +533,22 @@ notes](https://www.openssl-library.org/news/openssl-3.5-notes/index.html) and
 passed its historical two-hour source-freshness gate before
 `2026-08-26T23:06:14Z`; the gate was not weakened.
 
-### Step 13.2 — local Three Bosses website playability prototype (no publication)
+### Step 13.2 — Three Bosses WebGL integration and production preparation
 
 Status: In progress. The development-only Games card, route, external asset
 server, Unity loader, and first live browser launch/re-entry/fullscreen checks
-were implemented on 2026-08-25. The full three-level hands-on browser matrix
+were implemented on 2026-08-25. The production path now uses a same-origin,
+content-addressed Firebase Hosting release plus a no-store stable manifest,
+exact Brotli/MIME/cache headers, a source-bound release certificate, and
+offline plus hosted-byte validation. A fresh production candidate was built,
+packaged, validated through the Firebase Hosting emulator, and started in a
+real Chrome canvas on 2026-08-29. The full three-level hands-on browser matrix
 below remains a release gate; no WebGL build or route has been published.
 
-Before any public release, add Three Bosses to the website on the feature
-branch and prove that the actual Unity WebGL game is playable through the
-local site. This is a local integration and evaluation step only: do not merge
-it to `main`, publish the WebGL build, change Firebase Hosting, or expose a
-production game route until Mike separately approves release.
+Three Bosses is present on the feature branch and locally playable at
+`/games/three-bosses`. Before public release, complete the remaining hands-on
+gameplay matrix and a signed-in canonical submission check. Do not merge to
+`main` or publish until Mike separately approves release.
 
 Keep `/games/three-bosses` as the stable browser-facing local URL. Updating the
 game replaces the build at the same external location, so it normally does not
@@ -564,13 +572,15 @@ flag unset in CI and production builds. The integration must:
   second running instance during development remounts;
 - provide an appropriately sized game frame plus clear focus and fullscreen
   controls without trapping normal website navigation;
-- keep ranks `UNRANKED` and score submission disabled during this prototype;
-- keep generated build output separate from hand-authored source and document
-  the repeatable external build and local-serve commands before deciding which
-  artifacts, if any, should later be versioned or deployed; and
-- identify any Content Security Policy, compression, caching, MIME-type, or
-  static-path changes that a future deployment would require, but do not apply
-  production hosting changes during local playability testing.
+- display the provisional S–D ranks and arcade-scale score while keeping
+  server writes disabled until the independent runtime opt-in is approved;
+- keep development WebGL output outside the repository; create production
+  output only with `three-bosses:webgl:release:build`, then package the
+  certified bytes into one content-addressed release plus the stable manifest
+  with `three-bosses:webgl:package`; and
+- validate the packaged release before the frontend build, then verify Firebase
+  preview bytes, headers, CSP, compression, MIME types, cache policy, and actual
+  Unity startup before promotion.
 
 Before each build, require the Unity Editor to be ready, stopped, and not
 compiling. Afterward, review Git status and reject incidental `ProjectSettings`,
@@ -607,14 +617,15 @@ unchanged.
 Redesign `/leaderboards` as a multi-game experience rather than extending the
 current p4-Vega-only list in place.
 
-Frontend hub, generic reads, and the disabled submission transport:
-**implemented locally on 2026-08-26**. The plural route contains catalog-driven
+Frontend hub, generic reads, and the fail-closed submission transport:
+**implemented locally on 2026-08-26 and connected to Unity on 2026-08-29**. The plural route contains catalog-driven
 leaderboard cards, each linking to its own direct detail route. These are
 leaderboard destinations, not playable game cards; game launching remains
 under `/games`. The p4-Vega detail now uses the generic GET API, while Three
-Bosses reads typed real rows and remains unranked and submission-disabled. The
-browser submission transport and lifecycle-safe Unity bridge are complete but
-the Unity caller and button remain disconnected. Transport tests, production
+Bosses reads typed real rows and derives S–D ranks while submissions remain
+disabled by default. The browser transport, lifecycle-safe Unity bridge,
+Unity caller/receiver, and end-screen submission state machine are connected.
+Transport tests, production
 build, and desktop plus narrow browser checks pass. A disposable loopback API
 verified the populated p4-Vega table without applying approval-gated database
 migrations. Production storage, generic backend reads, and the frozen writer are

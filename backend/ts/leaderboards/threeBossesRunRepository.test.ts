@@ -27,7 +27,7 @@ test('reads only current Three Bosses rows in deterministic ascending order', as
             return [[
                 {
                     userName: 'fast-player',
-                    score: 2_000,
+                    score: 200_000,
                     completionTimeMs: 50_000,
                     internalUserId: 42,
                 },
@@ -37,7 +37,7 @@ test('reads only current Three Bosses rows in deterministic ascending order', as
 
     assert.deepEqual(await readThreeBossesLeaderboard(database), [{
         userName: 'fast-player',
-        score: 2_000,
+        score: 200_000,
         completionTimeMs: 50_000,
     }]);
     assert.deepEqual(queryValues, ['three-bosses', 1]);

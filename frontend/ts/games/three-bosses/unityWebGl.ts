@@ -1,10 +1,14 @@
-import { THREE_BOSSES_BUILD_BASE_PATH } from '@/config/featureFlags';
+import {
+    isThreeBossesReleaseEnabled,
+    THREE_BOSSES_BUILD_BASE_PATH,
+} from '@/config/featureFlags';
 import {
     bindUnityVisibility,
     type UnityVisibilityBridgeInstance,
 } from '@/games/three-bosses/unityVisibility';
 import {
     bindThreeBossesSubmissionBridge,
+    configureThreeBossesSubmission,
     type ThreeBossesRunSubmitter,
 } from '@/games/three-bosses/unitySubmissionBridge';
 
@@ -49,6 +53,7 @@ declare global {
 
 export type UnityWebGlHandle = Readonly<{
     quit: () => Promise<void>;
+    setSubmissionEnabled: (enabled: boolean) => void;
 }>;
 
 type StartUnityWebGlOptions = Readonly<{
@@ -68,20 +73,20 @@ const requireString = (
     const value = manifest[field];
 
     if (typeof value !== 'string' || value.trim().length === 0) {
-        throw new Error(`The local WebGL manifest is missing ${field}.`);
+        throw new Error(`The WebGL manifest is missing ${field}.`);
     }
 
     return value;
 };
 
-const resolveLocalAssetUrl = (value: string): string => {
+const resolveAssetUrl = (value: string): string => {
     const resolved = new URL(value, new URL(THREE_BOSSES_BUILD_BASE_PATH, window.location.origin));
 
     if (
         resolved.origin !== window.location.origin
         || !resolved.pathname.startsWith(THREE_BOSSES_BUILD_BASE_PATH)
     ) {
-        throw new Error('The local WebGL manifest referenced an asset outside its allowed path.');
+        throw new Error('The WebGL manifest referenced an asset outside its allowed path.');
     }
 
     return resolved.href;
@@ -95,7 +100,9 @@ const readManifest = async (signal: AbortSignal): Promise<UnityWebGlManifest> =>
     } catch (error) {
         if (signal.aborted) throw error;
         throw new Error(
-            'The local Three Bosses WebGL server is unavailable. Start it and rebuild the game if needed.',
+            isThreeBossesReleaseEnabled
+                ? 'The Three Bosses game assets are temporarily unavailable.'
+                : 'The local Three Bosses WebGL server is unavailable. Start it and rebuild the game if needed.',
         );
     }
 
@@ -104,13 +111,17 @@ const readManifest = async (signal: AbortSignal): Promise<UnityWebGlManifest> =>
         // empty HTTP 500 response, so surface the same actionable message as
         // a direct network failure.
         throw new Error(
-            'The local Three Bosses WebGL server is unavailable. Start it and rebuild the game if needed.',
+            isThreeBossesReleaseEnabled
+                ? 'The Three Bosses game assets are temporarily unavailable.'
+                : 'The local Three Bosses WebGL server is unavailable. Start it and rebuild the game if needed.',
         );
     }
 
     if (!response.ok) {
         throw new Error(
-            `The local Three Bosses WebGL build is unavailable (HTTP ${response.status}).`,
+            isThreeBossesReleaseEnabled
+                ? `The Three Bosses game assets are unavailable (HTTP ${response.status}).`
+                : `The local Three Bosses WebGL build is unavailable (HTTP ${response.status}).`,
         );
     }
 
@@ -192,28 +203,37 @@ const startNewHandle = async ({
     submitRun,
 }: StartUnityWebGlOptions): Promise<UnityWebGlHandle> => {
     const manifest = await readManifest(signal);
-    const loaderUrl = resolveLocalAssetUrl(manifest.loaderUrl);
+    const loaderUrl = resolveAssetUrl(manifest.loaderUrl);
     const { createUnityInstance, script } = await loadUnityFactory(loaderUrl, signal);
     let quitPromise: Promise<void> | null = null;
 
     try {
         const instance = await createUnityInstance(canvas, {
-            dataUrl: resolveLocalAssetUrl(manifest.dataUrl),
-            frameworkUrl: resolveLocalAssetUrl(manifest.frameworkUrl),
-            codeUrl: resolveLocalAssetUrl(manifest.codeUrl),
-            streamingAssetsUrl: resolveLocalAssetUrl(manifest.streamingAssetsUrl ?? 'StreamingAssets'),
+            dataUrl: resolveAssetUrl(manifest.dataUrl),
+            frameworkUrl: resolveAssetUrl(manifest.frameworkUrl),
+            codeUrl: resolveAssetUrl(manifest.codeUrl),
+            streamingAssetsUrl: resolveAssetUrl(manifest.streamingAssetsUrl ?? 'StreamingAssets'),
             companyName: manifest.companyName ?? 'DefaultCompany',
             productName: manifest.productName ?? 'Three Bosses',
             productVersion: manifest.productVersion ?? '1.0',
-            cacheControl: () => 'no-store',
+            cacheControl: (assetUrl) => {
+                if (!isThreeBossesReleaseEnabled) return 'no-store';
+
+                const pathname = new URL(assetUrl, window.location.origin).pathname;
+                return pathname.startsWith(`${THREE_BOSSES_BUILD_BASE_PATH}releases/`)
+                    ? 'immutable'
+                    : 'no-store';
+            },
         }, onProgress);
 
         let releaseVisibility: (() => void) | null = null;
         let releaseSubmissionBridge: (() => void) | null = null;
+        let browserBindingsReleased = false;
 
         try {
             releaseVisibility = bindUnityVisibility(instance);
             releaseSubmissionBridge = bindThreeBossesSubmissionBridge(instance, submitRun);
+            configureThreeBossesSubmission(instance, false);
         } catch (error) {
             try {
                 releaseSubmissionBridge?.();
@@ -230,6 +250,14 @@ const startNewHandle = async ({
         }
 
         const releaseBrowserBindings = () => {
+            if (browserBindingsReleased) return;
+            browserBindingsReleased = true;
+
+            try {
+                configureThreeBossesSubmission(instance, false);
+            } catch {
+                // The player may already be shutting down.
+            }
             try {
                 releaseSubmissionBridge?.();
             } catch {
@@ -266,7 +294,13 @@ const startNewHandle = async ({
             throw new DOMException('The WebGL load was cancelled.', 'AbortError');
         }
 
-        return { quit };
+        return {
+            quit,
+            setSubmissionEnabled: (enabled: boolean) => {
+                if (browserBindingsReleased) return;
+                configureThreeBossesSubmission(instance, enabled);
+            },
+        };
     } catch (error) {
         script.remove();
         clearUnityFactory(createUnityInstance);
@@ -275,7 +309,7 @@ const startNewHandle = async ({
 };
 
 /**
- * Starts the singleton local Unity player. A new route mount waits for any
+ * Starts the singleton Unity player. A new route mount waits for any
  * previous instance to quit before creating another one.
  */
 export const startThreeBossesWebGl = async (
@@ -305,6 +339,7 @@ export const startThreeBossesWebGl = async (
         const handle = await nextHandlePromise;
 
         return {
+            setSubmissionEnabled: handle.setSubmissionEnabled,
             quit: async () => {
                 await handle.quit();
                 if (activeHandlePromise === nextHandlePromise) {

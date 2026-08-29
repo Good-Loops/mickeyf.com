@@ -52,7 +52,7 @@ export const GAME_DEFINITIONS: Readonly<Record<GameId, LeaderboardGameDefinition
             scoreLabel: 'Score',
             completionTimeLabel: 'Time',
             rankLabel: 'Rank',
-            rankState: 'unranked',
+            rankState: 'ranked',
             submissionState: 'disabled',
         }),
     });

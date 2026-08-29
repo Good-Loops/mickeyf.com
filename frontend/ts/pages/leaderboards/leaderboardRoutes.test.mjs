@@ -55,7 +55,7 @@ const threeBossesGame = {
     primaryMetric: 'completionTimeMs',
     sortDirection: 'ascending',
     labels: { score: 'Score', completionTime: 'Time', rank: 'Rank' },
-    rankState: 'unranked',
+    rankState: 'ranked',
     submissionState: 'disabled',
 };
 
@@ -84,9 +84,9 @@ const threeBossesLeaderboard = {
         {
             position: 1,
             userName: 'Boss Hunter',
-            score: 1_634,
+            score: 163_308,
             completionTimeMs: 61_234,
-            rank: 'UNRANKED',
+            rank: 'A',
         },
     ],
 };
@@ -266,7 +266,7 @@ test('direct Three Bosses route renders success, empty, and error states', () =>
     assert.match(successHtml, />Three Bosses<\/h1>/);
     assert.match(successHtml, /Boss Hunter/);
     assert.match(successHtml, /1:01\.234/);
-    assert.match(successHtml, /UNRANKED/);
+    assert.match(successHtml, />A</);
 
     const emptyHtml = renderDetail('/leaderboards/three-bosses', {
         status: 'success',
@@ -274,7 +274,7 @@ test('direct Three Bosses route renders success, empty, and error states', () =>
         leaderboard: { ...threeBossesLeaderboard, entries: [] },
     });
     assert.match(emptyHtml, /No results yet/);
-    assert.match(emptyHtml, /Three Bosses is currently unranked/);
+    assert.match(emptyHtml, /Three Bosses score submission is not open yet/);
 
     const errorHtml = renderDetail('/leaderboards/three-bosses', {
         status: 'error',

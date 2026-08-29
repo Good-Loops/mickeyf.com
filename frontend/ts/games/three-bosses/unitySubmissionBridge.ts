@@ -16,6 +16,9 @@ export const THREE_BOSSES_SUBMISSION_RECEIVER_OBJECT =
     THREE_BOSSES_RUN_SESSION_OBJECT;
 export const THREE_BOSSES_SUBMISSION_RESULT_METHOD =
     'ReceiveRunSubmissionResult' as const;
+export const THREE_BOSSES_SUBMISSION_CONFIGURE_METHOD =
+    'ConfigureRunSubmission' as const;
+export const THREE_BOSSES_SUBMISSION_TIMEOUT_MS = 30_000 as const;
 
 type ThreeBossesSubmissionBridgeCallback =
     | Readonly<{
@@ -35,7 +38,7 @@ export type ThreeBossesRunSubmitter = (
     signal: AbortSignal
 ) => Promise<ThreeBossesRunSubmissionResponse>;
 
-type UnitySubmissionBridgeInstance = Readonly<{
+export type UnitySubmissionBridgeInstance = Readonly<{
     SendMessage?: (
         gameObjectName: string,
         methodName: string,
@@ -55,7 +58,23 @@ type UnityRunPayload = Readonly<{
 type ActiveSubmission = Readonly<{
     key: string;
     controller: AbortController;
+    cancelTimeout: () => void;
 }>;
+
+export function configureThreeBossesSubmission(
+    instance: UnitySubmissionBridgeInstance,
+    enabled: boolean,
+): void {
+    if (typeof instance.SendMessage !== 'function') {
+        throw new Error('The Unity WebGL player is missing the required submission API.');
+    }
+
+    instance.SendMessage(
+        THREE_BOSSES_SUBMISSION_RECEIVER_OBJECT,
+        THREE_BOSSES_SUBMISSION_CONFIGURE_METHOD,
+        enabled ? '1' : '0',
+    );
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -127,7 +146,8 @@ function isUncertainOutcome(code: LeaderboardClientErrorCode): boolean {
 export function bindThreeBossesSubmissionBridge(
     instance: UnitySubmissionBridgeInstance,
     submitRun: ThreeBossesRunSubmitter,
-    bridgeWindow: SubmissionBridgeWindow = window as unknown as SubmissionBridgeWindow
+    bridgeWindow: SubmissionBridgeWindow = window as unknown as SubmissionBridgeWindow,
+    submissionTimeoutMs: number = THREE_BOSSES_SUBMISSION_TIMEOUT_MS,
 ): () => void {
     const sendMessage = instance.SendMessage;
     if (typeof sendMessage !== 'function') {
@@ -186,13 +206,28 @@ export function bindThreeBossesSubmissionBridge(
         }
 
         const controller = new AbortController();
-        activeSubmission = { key, controller };
+        let timeoutId: ReturnType<typeof setTimeout> | null = null;
+        const cancelTimeout = () => {
+            if (timeoutId === null) return;
+            clearTimeout(timeoutId);
+            timeoutId = null;
+        };
+        activeSubmission = { key, controller, cancelTimeout };
         const request = requestFor(payload);
         const clearActiveSubmission = () => {
             if (activeSubmission?.controller === controller) {
+                activeSubmission.cancelTimeout();
                 activeSubmission = null;
             }
         };
+        timeoutId = setTimeout(() => {
+            if (disposed || activeSubmission?.controller !== controller) return;
+
+            uncertainSubmissionKey = key;
+            clearActiveSubmission();
+            controller.abort();
+            rejectLocally(payload.runId, 0, 'NETWORK_ERROR');
+        }, submissionTimeoutMs);
         let submissionPromise: Promise<ThreeBossesRunSubmissionResponse>;
 
         try {
@@ -203,12 +238,14 @@ export function bindThreeBossesSubmissionBridge(
 
         void submissionPromise
             .then((response) => {
+                cancelTimeout();
                 if (disposed || controller.signal.aborted) return;
                 clearActiveSubmission();
                 uncertainSubmissionKey = null;
                 deliver({ success: true, runId: payload.runId, response });
             })
             .catch((error: unknown) => {
+                cancelTimeout();
                 if (disposed || controller.signal.aborted) return;
 
                 const normalized = normalizedSubmissionError(error);
@@ -226,6 +263,7 @@ export function bindThreeBossesSubmissionBridge(
     return () => {
         if (disposed) return;
         disposed = true;
+        activeSubmission?.cancelTimeout();
         activeSubmission?.controller.abort();
         activeSubmission = null;
         uncertainSubmissionKey = null;

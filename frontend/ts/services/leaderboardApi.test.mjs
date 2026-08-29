@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
     createLeaderboardApi,
+    isThreeBossesSubmissionEnabled,
     LeaderboardRequestError,
 } from './leaderboardApi.ts';
 
@@ -26,7 +27,7 @@ const catalog = {
             primaryMetric: 'completionTimeMs',
             sortDirection: 'ascending',
             labels: { score: 'Score', completionTime: 'Time', rank: 'Rank' },
-            rankState: 'unranked',
+            rankState: 'ranked',
             submissionState: 'disabled',
         },
     ],
@@ -48,9 +49,9 @@ const runSubmissionResponse = {
     replayed: false,
     personalBest: true,
     result: {
-        score: 1_667,
+        score: 166_667,
         completionTimeMs: runSubmission.completionTimeMs,
-        rank: 'UNRANKED',
+        rank: 'A',
     },
 };
 
@@ -69,6 +70,26 @@ test('catalog read uses the generic GET endpoint and validates its contract', as
     assert.equal(observedInit.credentials, 'include');
     assert.equal(observedInit.headers.Accept, 'application/json');
     assert.equal(observedInit.body, undefined);
+});
+
+test('enables Unity submissions only for the exact ranked rules contract', () => {
+    const threeBosses = catalog.games[1];
+    assert.equal(isThreeBossesSubmissionEnabled(threeBosses), false);
+    assert.equal(isThreeBossesSubmissionEnabled({
+        ...threeBosses,
+        submissionState: 'enabled',
+    }), true);
+    assert.equal(isThreeBossesSubmissionEnabled({
+        ...threeBosses,
+        rulesVersion: 2,
+        submissionState: 'enabled',
+    }), false);
+    assert.equal(isThreeBossesSubmissionEnabled({
+        ...threeBosses,
+        rankState: 'unranked',
+        submissionState: 'enabled',
+    }), false);
+    assert.equal(isThreeBossesSubmissionEnabled(catalog.games[0]), false);
 });
 
 test('game read encodes its route parameter and preserves server order', async () => {

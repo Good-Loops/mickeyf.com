@@ -3,7 +3,9 @@ import test from 'node:test';
 import { LeaderboardRequestError } from '../../services/leaderboardApi.ts';
 import {
     bindThreeBossesSubmissionBridge,
+    configureThreeBossesSubmission,
     THREE_BOSSES_SUBMISSION_BRIDGE_FUNCTION,
+    THREE_BOSSES_SUBMISSION_CONFIGURE_METHOD,
     THREE_BOSSES_SUBMISSION_RECEIVER_OBJECT,
     THREE_BOSSES_SUBMISSION_RESULT_METHOD,
 } from './unitySubmissionBridge.ts';
@@ -26,9 +28,9 @@ const responseFor = (payload, replayed = false) => ({
     replayed,
     personalBest: !replayed,
     result: {
-        score: payload.completionTimeMs === 60_000 ? 1_667 : 1_695,
+        score: payload.completionTimeMs === 60_000 ? 166_667 : 169_492,
         completionTimeMs: payload.completionTimeMs,
-        rank: 'UNRANKED',
+        rank: payload.completionTimeMs === 60_000 ? 'A' : 'S',
     },
 });
 
@@ -54,6 +56,26 @@ const deferred = () => {
     });
     return { promise, resolve, reject };
 };
+
+test('configures Unity from the server-owned submission gate', () => {
+    const { instance, messages } = createInstance();
+
+    configureThreeBossesSubmission(instance, false);
+    configureThreeBossesSubmission(instance, true);
+
+    assert.deepEqual(messages, [
+        [
+            THREE_BOSSES_SUBMISSION_RECEIVER_OBJECT,
+            THREE_BOSSES_SUBMISSION_CONFIGURE_METHOD,
+            '0',
+        ],
+        [
+            THREE_BOSSES_SUBMISSION_RECEIVER_OBJECT,
+            THREE_BOSSES_SUBMISSION_CONFIGURE_METHOD,
+            '1',
+        ],
+    ]);
+});
 
 test('installs the stable Unity contract and submits only canonical run metrics', async () => {
     const bridgeWindow = {};
@@ -184,6 +206,55 @@ test('uncertain failures permit only an exact retry until the server confirms it
     cleanup();
 });
 
+test('times out a stalled request and permits only the exact run retry', async () => {
+    const bridgeWindow = {};
+    const { instance, messages } = createInstance();
+    const stalled = deferred();
+    const observedSignals = [];
+    let attempt = 0;
+    const cleanup = bindThreeBossesSubmissionBridge(
+        instance,
+        async (_request, signal) => {
+            observedSignals.push(signal);
+            attempt += 1;
+            return attempt === 1 ? stalled.promise : responseFor(firstPayload, true);
+        },
+        bridgeWindow,
+        5,
+    );
+
+    const submit = bridgeWindow[THREE_BOSSES_SUBMISSION_BRIDGE_FUNCTION];
+    submit(JSON.stringify(firstPayload));
+    await new Promise((resolve) => setTimeout(resolve, 15));
+
+    assert.equal(observedSignals[0].aborted, true);
+    assert.deepEqual(callbackAt(messages, 0), {
+        success: false,
+        runId: firstPayload.runId,
+        status: 0,
+        error: 'NETWORK_ERROR',
+    });
+
+    submit(JSON.stringify(secondPayload));
+    assert.deepEqual(callbackAt(messages, 1), {
+        success: false,
+        runId: secondPayload.runId,
+        status: 409,
+        error: 'IDEMPOTENCY_CONFLICT',
+    });
+
+    submit(JSON.stringify(firstPayload));
+    await flush();
+    assert.equal(attempt, 2);
+    assert.deepEqual(callbackAt(messages, 2), {
+        success: true,
+        runId: firstPayload.runId,
+        response: responseFor(firstPayload, true),
+    });
+
+    cleanup();
+});
+
 test('serializes typed API failures without exposing their private messages', async () => {
     const bridgeWindow = {};
     const { instance, messages } = createInstance();
@@ -224,7 +295,7 @@ test('rejects malformed or expanded Unity payloads before network work', () => {
 
     for (const value of [
         'not-json',
-        JSON.stringify({ ...firstPayload, score: 1_667 }),
+        JSON.stringify({ ...firstPayload, score: 166_667 }),
         JSON.stringify({ ...firstPayload, runId: firstPayload.runId.toUpperCase() }),
         JSON.stringify({ ...firstPayload, completionTimeMs: 0 }),
     ]) {

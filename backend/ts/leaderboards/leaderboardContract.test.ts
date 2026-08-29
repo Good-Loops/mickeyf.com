@@ -1,12 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+    calculateThreeBossesRank,
     calculateThreeBossesScore,
     isCanonicalV4RunId,
     isValidThreeBossesCompletionTimeMs,
     LEADERBOARD_CONTRACT_VERSION,
     LEADERBOARD_PAGE_SIZE,
     THREE_BOSSES_MAX_COMPLETION_TIME_MS,
+    THREE_BOSSES_MAX_SCORE,
     THREE_BOSSES_MIN_COMPLETION_TIME_MS,
     THREE_BOSSES_RULES_VERSION,
 } from './leaderboardContract';
@@ -59,11 +61,11 @@ test('bounds Three Bosses completion time to safe integer milliseconds', () => {
 
 test('derives deterministic Three Bosses scores from canonical milliseconds', () => {
     const vectors = [
-        [1, 100_000_000],
-        [1_000, 100_000],
-        [60_000, 1_667],
-        [40_000_000, 3],
-        [THREE_BOSSES_MAX_COMPLETION_TIME_MS, 1],
+        [1, THREE_BOSSES_MAX_SCORE],
+        [1_000, 10_000_000],
+        [60_000, 166_667],
+        [40_000_000, 250],
+        [THREE_BOSSES_MAX_COMPLETION_TIME_MS, 116],
     ] as const;
 
     for (const [completionTimeMs, expectedScore] of vectors) {
@@ -71,4 +73,23 @@ test('derives deterministic Three Bosses scores from canonical milliseconds', ()
     }
 
     assert.throws(() => calculateThreeBossesScore(0), RangeError);
+});
+
+test('derives provisional Three Bosses ranks at exact boundaries', () => {
+    const vectors = [
+        [59_999, 'S'],
+        [60_000, 'A'],
+        [80_000, 'A'],
+        [80_001, 'B'],
+        [100_000, 'B'],
+        [100_001, 'C'],
+        [120_000, 'C'],
+        [120_001, 'D'],
+    ] as const;
+
+    for (const [completionTimeMs, expectedRank] of vectors) {
+        assert.equal(calculateThreeBossesRank(completionTimeMs), expectedRank);
+    }
+
+    assert.throws(() => calculateThreeBossesRank(0), RangeError);
 });

@@ -19,6 +19,7 @@ type LeaderboardGameId = 'p4-vega' | 'three-bosses';
 type LeaderboardMetric = 'score' | 'completionTimeMs';
 type LeaderboardRankState = 'not-applicable' | 'unranked' | 'ranked';
 type LeaderboardSubmissionState = 'legacy-only' | 'disabled' | 'enabled';
+type ThreeBossesRank = 'S' | 'A' | 'B' | 'C' | 'D';
 
 export type LeaderboardCatalogGame = {
     gameId: LeaderboardGameId;
@@ -52,7 +53,7 @@ type ThreeBossesLeaderboardEntry = {
     userName: string;
     score: number;
     completionTimeMs: number;
-    rank: 'UNRANKED';
+    rank: ThreeBossesRank;
 };
 
 export type GameLeaderboardResponse =
@@ -89,7 +90,7 @@ export type ThreeBossesRunSubmissionResponse = {
     result: {
         score: number;
         completionTimeMs: number;
-        rank: 'UNRANKED';
+        rank: ThreeBossesRank;
     };
 };
 
@@ -156,6 +157,14 @@ function isPositiveInteger(value: unknown): value is number {
     return Number.isSafeInteger(value) && (value as number) > 0;
 }
 
+function isThreeBossesRank(value: unknown): value is ThreeBossesRank {
+    return value === 'S'
+        || value === 'A'
+        || value === 'B'
+        || value === 'C'
+        || value === 'D';
+}
+
 function isInteger(value: unknown): value is number {
     return Number.isSafeInteger(value);
 }
@@ -168,6 +177,15 @@ export function isValidThreeBossesCompletionTimeMs(value: unknown): value is num
     return Number.isSafeInteger(value)
         && (value as number) >= THREE_BOSSES_MIN_COMPLETION_TIME_MS
         && (value as number) <= THREE_BOSSES_MAX_COMPLETION_TIME_MS;
+}
+
+export function isThreeBossesSubmissionEnabled(
+    game: LeaderboardCatalogGame
+): boolean {
+    return game.gameId === 'three-bosses'
+        && game.rulesVersion === THREE_BOSSES_RULES_VERSION
+        && game.rankState === 'ranked'
+        && game.submissionState === 'enabled';
 }
 
 function isThreeBossesRunSubmissionRequest(
@@ -237,7 +255,7 @@ function isThreeBossesEntry(value: unknown): value is ThreeBossesLeaderboardEntr
         && typeof value.userName === 'string'
         && isInteger(value.score)
         && isPositiveInteger(value.completionTimeMs)
-        && value.rank === 'UNRANKED';
+        && isThreeBossesRank(value.rank);
 }
 
 function isGameResponse(
@@ -301,7 +319,7 @@ function isThreeBossesRunSubmissionResponse(
         && typeof value.personalBest === 'boolean'
         && isPositiveInteger(value.result.score)
         && value.result.completionTimeMs === request.completionTimeMs
-        && value.result.rank === 'UNRANKED';
+        && isThreeBossesRank(value.result.rank);
 }
 
 function isApiError(value: unknown): value is LeaderboardApiError {

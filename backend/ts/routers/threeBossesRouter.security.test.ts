@@ -65,7 +65,7 @@ function createReplayDatabase() {
                     if (sql.includes('FROM game_runs')) {
                         return [[{
                             rulesVersion: 1,
-                            score: 2_000,
+                            score: 200_000,
                             completionTimeMs: 50_000,
                             payloadFingerprint: createThreeBossesPayloadFingerprint(
                                 42,
@@ -221,9 +221,9 @@ test('enabled submissions enforce auth, Origin, JSON, and exact payload before d
             replayed: true,
             personalBest: true,
             result: {
-                score: 2_000,
+                score: 200_000,
                 completionTimeMs: 50_000,
-                rank: 'UNRANKED',
+                rank: 'S',
             },
         },
     };

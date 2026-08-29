@@ -37,12 +37,14 @@ function createFakeDatabase(queryError?: Error) {
             if (values?.[0] === 'three-bosses') return [[
                 {
                     userName: 'fast-player',
+                    // The public controller derives the canonical score from
+                    // time instead of trusting drifted stored presentation data.
                     score: 2_000,
                     completionTimeMs: 50_000,
                 },
                 {
                     userName: 'steady-player',
-                    score: 1_000,
+                    score: 100_000,
                     completionTimeMs: 100_000,
                 },
             ], []];
@@ -152,7 +154,7 @@ test('serves the exact catalog and game DTOs without enabling Three Bosses write
                             completionTime: 'Time',
                             rank: 'Rank',
                         },
-                        rankState: 'unranked',
+                        rankState: 'ranked',
                         submissionState: 'disabled',
                     },
                 ],
@@ -173,16 +175,16 @@ test('serves the exact catalog and game DTOs without enabling Three Bosses write
                         {
                             position: 1,
                             userName: 'fast-player',
-                            score: 2_000,
+                            score: 200_000,
                             completionTimeMs: 50_000,
-                            rank: 'UNRANKED',
+                            rank: 'S',
                         },
                         {
                             position: 2,
                             userName: 'steady-player',
-                            score: 1_000,
+                            score: 100_000,
                             completionTimeMs: 100_000,
-                            rank: 'UNRANKED',
+                            rank: 'B',
                         },
                     ],
                 },

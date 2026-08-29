@@ -290,16 +290,16 @@ test('reads the ten current-rule personal bests in deterministic completion orde
     );
 
     assert.deepEqual(await readThreeBossesLeaderboard(applicationPool), [
-        { userName: 'player-1', score: 2_000, completionTimeMs: 50_000 },
-        { userName: 'player-2', score: 1_667, completionTimeMs: 60_000 },
-        { userName: 'player-3', score: 1_667, completionTimeMs: 60_000 },
-        { userName: 'player-4', score: 1_667, completionTimeMs: 60_000 },
-        { userName: 'player-5', score: 1_429, completionTimeMs: 70_000 },
-        { userName: 'player-6', score: 1_250, completionTimeMs: 80_000 },
-        { userName: 'player-7', score: 1_111, completionTimeMs: 90_000 },
-        { userName: 'player-8', score: 1_000, completionTimeMs: 100_000 },
-        { userName: 'player-9', score: 909, completionTimeMs: 110_000 },
-        { userName: 'player-10', score: 833, completionTimeMs: 120_000 },
+        { userName: 'player-1', score: 200_000, completionTimeMs: 50_000 },
+        { userName: 'player-2', score: 166_667, completionTimeMs: 60_000 },
+        { userName: 'player-3', score: 166_667, completionTimeMs: 60_000 },
+        { userName: 'player-4', score: 166_667, completionTimeMs: 60_000 },
+        { userName: 'player-5', score: 142_857, completionTimeMs: 70_000 },
+        { userName: 'player-6', score: 125_000, completionTimeMs: 80_000 },
+        { userName: 'player-7', score: 111_111, completionTimeMs: 90_000 },
+        { userName: 'player-8', score: 100_000, completionTimeMs: 100_000 },
+        { userName: 'player-9', score: 90_909, completionTimeMs: 110_000 },
+        { userName: 'player-10', score: 83_333, completionTimeMs: 120_000 },
     ]);
 });
 
@@ -311,7 +311,7 @@ test('stores immutable runs, strict personal bests, exact replays, and conflicts
         replayed: false,
         personalBest: true,
         runId: firstRunId,
-        score: 1_667,
+        score: 166_667,
         completionTimeMs: 60_000,
     });
     assert.deepEqual(
@@ -361,7 +361,7 @@ test('stores immutable runs, strict personal bests, exact replays, and conflicts
           AND game_personal_bests.user_id = 1
     `);
     assert.deepEqual(personalBests, [{
-        score: 2_000,
+        score: 200_000,
         completionTimeMs: 50_000,
         runId: bestRunId,
     }]);
@@ -473,8 +473,8 @@ test('concurrent first submissions for different users avoid cross-user range lo
     assert.equal(await countRows('game_runs'), 2);
     assert.equal(await countRows('game_personal_bests'), 2);
     assert.deepEqual(await readThreeBossesLeaderboard(applicationPool), [
-        { userName: 'player-2', score: 2_000, completionTimeMs: 50_000 },
-        { userName: 'player-1', score: 1_667, completionTimeMs: 60_000 },
+        { userName: 'player-2', score: 200_000, completionTimeMs: 50_000 },
+        { userName: 'player-1', score: 166_667, completionTimeMs: 60_000 },
     ]);
 });
 

@@ -320,7 +320,7 @@ test('supports every current auth and leaderboard SQL path', async () => {
     assert.equal(improvement.personalBest, true);
     assert.deepEqual(await readThreeBossesLeaderboard(runtimePool), [{
         userName: 'player-1',
-        score: 2_000,
+        score: 200_000,
         completionTimeMs: 50_000,
     }]);
 });

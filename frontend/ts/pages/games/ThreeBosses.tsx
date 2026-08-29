@@ -1,12 +1,12 @@
-/**
- * Local-only Three Bosses Unity WebGL page.
- *
- * The route is feature-gated by App.tsx and is never registered in production.
- */
 import React, { useEffect, useRef, useState } from 'react';
 import FullscreenButton from '@/components/FullscreenButton';
+import { isThreeBossesLocalEnabled } from '@/config/featureFlags';
 import { startThreeBossesWebGl, type UnityWebGlHandle } from '@/games/three-bosses/unityWebGl';
-import { submitThreeBossesRun } from '@/services/leaderboardService';
+import {
+    getLeaderboardCatalog,
+    isThreeBossesSubmissionEnabled,
+    submitThreeBossesRun,
+} from '@/services/leaderboardService';
 
 type LoadState =
     | Readonly<{ kind: 'loading'; progress: number }>
@@ -21,10 +21,21 @@ const describeLoadError = (error: unknown): string => {
         const serialized = JSON.stringify(error);
         if (serialized && serialized !== '{}') return serialized;
     } catch {
-        // Fall through to the stable local-prototype message.
+        // Fall through to the stable user-facing message.
     }
 
-    return 'The local WebGL build failed to load.';
+    return 'The Three Bosses WebGL game failed to load.';
+};
+
+const readSubmissionGate = async (signal: AbortSignal): Promise<boolean> => {
+    try {
+        const catalog = await getLeaderboardCatalog(signal);
+        return catalog.games.some(isThreeBossesSubmissionEnabled);
+    } catch {
+        // Game loading remains independent from the API. Any catalog failure
+        // keeps the Unity submit control fail-closed.
+        return false;
+    }
 };
 
 const ThreeBosses: React.FC = () => {
@@ -42,6 +53,7 @@ const ThreeBosses: React.FC = () => {
 
         (async () => {
             try {
+                const submissionGatePromise = readSubmissionGate(controller.signal);
                 const nextHandle = await startThreeBossesWebGl({
                     canvas,
                     signal: controller.signal,
@@ -59,6 +71,10 @@ const ThreeBosses: React.FC = () => {
                 handle = nextHandle;
                 setLoadState({ kind: 'running' });
                 canvas.focus();
+
+                const submissionEnabled = await submissionGatePromise;
+                if (!cancelled)
+                    nextHandle.setSubmissionEnabled(submissionEnabled);
             } catch (error) {
                 if (cancelled || controller.signal.aborted) return;
 
@@ -85,11 +101,17 @@ const ThreeBosses: React.FC = () => {
         : 100;
 
     return (
-        <section className="three-bosses" data-three-bosses-local>
+        <section className="three-bosses">
             <h1 className="u-visually-hidden">Three Bosses</h1>
-            <p className="three-bosses__local-note">Local WebGL playability prototype</p>
+            {isThreeBossesLocalEnabled && (
+                <p className="three-bosses__local-note">Local WebGL playability prototype</p>
+            )}
 
-            <div className="three-bosses__canvas-wrapper" ref={frameRef}>
+            <div
+                className="three-bosses__canvas-wrapper"
+                data-three-bosses-state={loadState.kind}
+                ref={frameRef}
+            >
                 <canvas
                     aria-label="Three Bosses game"
                     className="three-bosses__canvas"

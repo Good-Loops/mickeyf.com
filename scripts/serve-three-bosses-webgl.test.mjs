@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
 import { request } from "node:http";
-import { mkdir, mkdtemp, rm, symlink, utimes, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, before, test } from "node:test";
 import { brotliCompressSync } from "node:zlib";
 import {
+  BUILD_COMPLETION_MARKER,
   invalidateBuildCompletionMarker,
   createThreeBossesWebGlServer,
   readBuildManifest,
@@ -18,6 +19,13 @@ let baseUrl;
 let server;
 let serverPort;
 let buildId;
+
+const releaseProvenance = Object.freeze({
+  sourceCommit: "a".repeat(40),
+  unityEditorVersion: "6000.3.8f1",
+  unitySourceDigest: "c".repeat(64),
+  unitySourceFileCount: 5,
+});
 
 const rawRequest = (requestPath, { headers = {}, method = "GET", port = serverPort } = {}) =>
   new Promise((resolvePromise, reject) => {
@@ -195,6 +203,47 @@ test("accepts incremental output only after an exact completion marker", async (
     await assert.rejects(() => readBuildManifest(incrementalRoot), /still being finalized/u);
   } finally {
     await rm(incrementalRoot, { recursive: true, force: true });
+  }
+});
+
+test("writes a version-two marker only for the exact Brotli release file set", async () => {
+  const releaseRoot = await mkdtemp(join(tmpdir(), "three-bosses-webgl-release-marker-"));
+  const buildPath = join(releaseRoot, "Build");
+  await mkdir(buildPath);
+  try {
+    await writeFile(join(buildPath, "release.loader.js"), "loader");
+    await writeFile(join(buildPath, "release.data.br"), "data");
+    await writeFile(join(buildPath, "release.framework.js.br"), "framework");
+    await writeFile(join(buildPath, "release.wasm.br"), "wasm");
+    await writeBuildCompletionMarker(releaseRoot, { provenance: releaseProvenance });
+
+    const marker = JSON.parse(await readFile(
+      join(releaseRoot, BUILD_COMPLETION_MARKER),
+      "utf8",
+    ));
+    assert.equal(marker.version, 2);
+    assert.deepEqual(marker.provenance, releaseProvenance);
+    assert.match((await readBuildManifest(releaseRoot)).codeUrl, /[.]wasm[.]br[?]/u);
+  } finally {
+    await rm(releaseRoot, { recursive: true, force: true });
+  }
+});
+
+test("rejects gzip assets when writing a release completion marker", async () => {
+  const releaseRoot = await mkdtemp(join(tmpdir(), "three-bosses-webgl-release-gzip-"));
+  const buildPath = join(releaseRoot, "Build");
+  await mkdir(buildPath);
+  try {
+    await writeFile(join(buildPath, "release.loader.js"), "loader");
+    await writeFile(join(buildPath, "release.data.gz"), "data");
+    await writeFile(join(buildPath, "release.framework.js.gz"), "framework");
+    await writeFile(join(buildPath, "release.wasm.gz"), "wasm");
+    await assert.rejects(
+      () => writeBuildCompletionMarker(releaseRoot, { provenance: releaseProvenance }),
+      /Brotli data/u,
+    );
+  } finally {
+    await rm(releaseRoot, { recursive: true, force: true });
   }
 });
 

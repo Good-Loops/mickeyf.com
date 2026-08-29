@@ -25,6 +25,11 @@ import {
   invalidateBuildCompletionMarker,
   writeBuildCompletionMarker,
 } from "./serve-three-bosses-webgl.mjs";
+import {
+  markerProvenanceFor,
+  readCommittedUnityProvenance,
+  sameUnityBuildProvenance,
+} from "./three-bosses-unity-provenance.mjs";
 
 export const GUARDED_PROJECT_PATHS = Object.freeze([
   "ProjectSettings/ProjectSettings.asset",
@@ -641,7 +646,10 @@ const assertEditorReady = async (invokeUnity, projectPath) => {
 };
 
 const submitBuild = async (invokeUnity, projectPath, outputPath) => {
-  const result = await commandResult(invokeUnity, [
+  // The Pipeline build command's documented default is exactly
+  // DetailedBuildReport. Omitting options also prevents any development,
+  // script-debugging, or profiler flag from leaking in through caller state.
+  const buildArguments = [
     "command",
     "build",
     "--project-path",
@@ -652,9 +660,13 @@ const submitBuild = async (invokeUnity, projectPath, outputPath) => {
     outputPath,
     "--confirm",
     "true",
-    "--format",
-    "json",
-  ], "Unity WebGL build submission");
+  ];
+  buildArguments.push("--format", "json");
+  const result = await commandResult(
+    invokeUnity,
+    buildArguments,
+    "Unity WebGL build submission",
+  );
 
   if (result?.status !== "queued" || typeof result.buildId !== "string" || !result.buildId) {
     throw new Error("Unity did not queue the WebGL build.");
@@ -684,6 +696,7 @@ export const runGuardedWebGlBuild = async ({
   outputPath = getDefaultOutputPath(),
   pollIntervalMs = DEFAULT_POLL_INTERVAL_MS,
   projectPath,
+  release = false,
   repoRoot = process.cwd(),
   sleep = sleepFor,
 } = {}) => {
@@ -704,6 +717,9 @@ export const runGuardedWebGlBuild = async ({
   }
   const projectPathspec = normalizeGitPath(projectRelative);
   const guardedRepoPaths = GUARDED_PROJECT_PATHS.map((path) => `${projectPathspec}/${path}`);
+  const releaseProvenance = release
+    ? markerProvenanceFor(await readCommittedUnityProvenance({ repositoryRoot: repoRoot }))
+    : null;
 
   const releaseLock = await acquireBuildLock(projectPath);
   let baseline;
@@ -863,7 +879,18 @@ export const runGuardedWebGlBuild = async ({
       try {
         // Publish while the cooperative lock is still held so another guarded
         // build cannot invalidate the output between cleanup and certification.
-        await writeBuildCompletionMarker(outputPath);
+        let certifiedProvenance;
+        if (releaseProvenance) {
+          certifiedProvenance = markerProvenanceFor(
+            await readCommittedUnityProvenance({ repositoryRoot: repoRoot }),
+          );
+          if (!sameUnityBuildProvenance(releaseProvenance, certifiedProvenance)) {
+            throw new Error("Unity release provenance changed while the WebGL build was running.");
+          }
+        }
+        await writeBuildCompletionMarker(outputPath, {
+          provenance: certifiedProvenance,
+        });
       } catch (error) {
         cleanupErrors.push(new Error(`Could not certify the completed WebGL build: ${error.message}`));
       }
@@ -899,6 +926,12 @@ const isMainModule = process.argv[1]
   && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));
 
 if (isMainModule) {
+  const cliArgs = process.argv.slice(2);
+  const release = cliArgs.length === 1 && cliArgs[0] === "--release";
+  if (cliArgs.length > 0 && !release) {
+    console.error("Usage: build-three-bosses-webgl.mjs [--release]");
+    process.exitCode = 1;
+  }
   let interruptSignal = null;
   const handlers = new Map();
   for (const signal of ["SIGINT", "SIGTERM"]) {
@@ -912,7 +945,11 @@ if (isMainModule) {
   }
 
   try {
-    const result = await runGuardedWebGlBuild({ getInterruptSignal: () => interruptSignal });
+    if (process.exitCode) throw new Error("Invalid command-line arguments.");
+    const result = await runGuardedWebGlBuild({
+      getInterruptSignal: () => interruptSignal,
+      release,
+    });
     console.log(
       `Unity WebGL build ${result.buildId} succeeded in ${result.buildTimeMs ?? "unknown"} ms `
       + `with ${result.actionableWarnings} actionable warning(s).`,

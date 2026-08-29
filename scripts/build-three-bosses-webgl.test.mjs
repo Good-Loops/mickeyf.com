@@ -52,7 +52,7 @@ const evalEnvelope = (result) => envelope({
   success: true,
 });
 
-const createFixture = async () => {
+const createFixture = async ({ commitSource = false } = {}) => {
   const repoRoot = await mkdtemp(join(tmpdir(), "three-bosses-build-guard-"));
   temporaryRoots.push(repoRoot);
   const outputPath = await mkdtemp(join(tmpdir(), "three-bosses-build-output-"));
@@ -81,11 +81,23 @@ const createFixture = async () => {
   const scenePath = join(projectPath, "Assets", "Scenes", "Main.unity");
   await mkdir(dirname(scenePath), { recursive: true });
   await writeFile(scenePath, "scene: baseline\n", "utf8");
+  await mkdir(join(projectPath, "Packages"), { recursive: true });
+  await writeFile(join(projectPath, "Packages", "manifest.json"), "{}\n", "utf8");
+  await writeFile(
+    join(projectPath, "ProjectSettings", "ProjectVersion.txt"),
+    "m_EditorVersion: 6000.3.8f1\n",
+    "utf8",
+  );
   await writeFile(join(repoRoot, ".gitignore"), "unity/three-bosses/Library/\n", "utf8");
 
   execFileSync("git", ["init", "--quiet"], { cwd: repoRoot });
   execFileSync("git", ["config", "core.autocrlf", "false"], { cwd: repoRoot });
+  execFileSync("git", ["config", "user.name", "Build Test"], { cwd: repoRoot });
+  execFileSync("git", ["config", "user.email", "build-test@example.invalid"], { cwd: repoRoot });
   execFileSync("git", ["add", "--", ".gitignore", "unity/three-bosses"], { cwd: repoRoot });
+  if (commitSource) {
+    execFileSync("git", ["commit", "--quiet", "-m", "Add Unity source"], { cwd: repoRoot });
+  }
 
   return { guardedBytes, outputPath, projectPath, repoRoot, scenePath };
 };
@@ -284,6 +296,100 @@ test("restores the exact pre-build working bytes after a successful build", asyn
   assert.match(combinedLogs, /known scanner-only Global Light diagnostics/u);
   assert.match(combinedLogs, /intentionally disabled/u);
   assert.match(combinedLogs, /temporarily unavailable/u);
+});
+
+test("release mode writes a provenance-bound completion marker", async () => {
+  const { outputPath, repoRoot } = await createFixture({ commitSource: true });
+  const fakeUnity = createFakeUnity({});
+  let releaseBuildArguments;
+  const invokeUnity = async (args) => {
+    if (args[1] === "build") releaseBuildArguments = args;
+    return fakeUnity(args);
+  };
+
+  await runGuardedWebGlBuild({
+    invokeUnity,
+    logger: quietLogger().logger,
+    outputPath,
+    pollIntervalMs: 0,
+    release: true,
+    repoRoot,
+    sleep: async () => {},
+  });
+
+  const marker = JSON.parse(await readFile(join(outputPath, BUILD_COMPLETION_MARKER), "utf8"));
+  assert.equal(marker.version, 2);
+  assert.equal(marker.provenance.unityEditorVersion, "6000.3.8f1");
+  assert.match(marker.provenance.sourceCommit, /^[a-f0-9]{40,64}$/u);
+  assert.match(marker.provenance.unitySourceDigest, /^[a-f0-9]{64}$/u);
+  assert.ok(marker.provenance.unitySourceFileCount > 0);
+  assert.equal(releaseBuildArguments.includes("--options"), false);
+  assert.equal(releaseBuildArguments.includes("Development"), false);
+  assert.equal(releaseBuildArguments.includes("AllowDebugging"), false);
+  assert.equal(releaseBuildArguments.includes("ConnectWithProfiler"), false);
+});
+
+test("release mode rejects dirty Unity source before invoking Unity", async () => {
+  const { outputPath, projectPath, repoRoot } = await createFixture({ commitSource: true });
+  await writeFile(join(projectPath, "Assets", "Uncommitted.cs"), "class Uncommitted {}\n");
+  let calls = 0;
+
+  await assert.rejects(
+    () => runGuardedWebGlBuild({
+      invokeUnity: async () => {
+        calls += 1;
+        return envelope({});
+      },
+      outputPath,
+      release: true,
+      repoRoot,
+    }),
+    /clean and committed/u,
+  );
+  assert.equal(calls, 0);
+});
+
+test("release mode rejects assume-unchanged Unity source before trusting clean status", async () => {
+  const { outputPath, repoRoot, scenePath } = await createFixture({ commitSource: true });
+  const relativeScenePath = "unity/three-bosses/Assets/Scenes/Main.unity";
+  execFileSync("git", ["update-index", "--assume-unchanged", relativeScenePath], {
+    cwd: repoRoot,
+  });
+  await writeFile(scenePath, "scene: hidden mutation\n");
+  let calls = 0;
+
+  await assert.rejects(
+    () => runGuardedWebGlBuild({
+      invokeUnity: async () => {
+        calls += 1;
+        return envelope({});
+      },
+      outputPath,
+      release: true,
+      repoRoot,
+    }),
+    /non-normal Git index flag: h /u,
+  );
+  assert.equal(calls, 0);
+});
+
+test("release mode rejects skip-worktree Unity source", async () => {
+  const { outputPath, repoRoot } = await createFixture({ commitSource: true });
+  execFileSync(
+    "git",
+    ["update-index", "--skip-worktree", "unity/three-bosses/Packages/manifest.json"],
+    { cwd: repoRoot },
+  );
+
+  await assert.rejects(
+    () => runGuardedWebGlBuild({
+      invokeUnity: async () => assert.fail("Unity must not be invoked."),
+      outputPath,
+      release: true,
+      repoRoot,
+    }),
+    /non-normal Git index flag: S /u,
+  );
 });
 
 test("restores guarded settings when Unity reports a failed build", async () => {

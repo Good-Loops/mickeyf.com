@@ -17,7 +17,14 @@ export const LEADERBOARD_CONTRACT_VERSION = 1 as const;
 export const LEADERBOARD_PAGE_SIZE = 10 as const;
 export const THREE_BOSSES_MIN_COMPLETION_TIME_MS = 1 as const;
 export const THREE_BOSSES_MAX_COMPLETION_TIME_MS = 86_400_000 as const;
-export const THREE_BOSSES_SCORE_NUMERATOR = 100_000_000 as const;
+export const THREE_BOSSES_SCORE_NUMERATOR = 10_000_000_000 as const;
+export const THREE_BOSSES_MAX_SCORE = 2_147_483_647 as const;
+export const THREE_BOSSES_S_RANK_MAX_EXCLUSIVE_MS = 60_000 as const;
+export const THREE_BOSSES_A_RANK_MAX_MS = 80_000 as const;
+export const THREE_BOSSES_B_RANK_MAX_MS = 100_000 as const;
+export const THREE_BOSSES_C_RANK_MAX_MS = 120_000 as const;
+
+export type ThreeBossesRank = 'S' | 'A' | 'B' | 'C' | 'D';
 
 const CANONICAL_V4_UUID =
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -54,7 +61,7 @@ export type ThreeBossesLeaderboardEntry = {
     userName: string;
     score: number;
     completionTimeMs: number;
-    rank: 'UNRANKED';
+    rank: ThreeBossesRank;
 };
 
 export type GameLeaderboardResponse =
@@ -91,7 +98,7 @@ export type ThreeBossesRunSubmissionResponse = {
     result: {
         score: number;
         completionTimeMs: number;
-        rank: 'UNRANKED';
+        rank: ThreeBossesRank;
     };
 };
 
@@ -133,6 +140,23 @@ export function calculateThreeBossesScore(completionTimeMs: number): number {
     // midpoint-away-from-zero rounding without a floating-point sign branch.
     return Math.max(
         1,
-        Math.floor(THREE_BOSSES_SCORE_NUMERATOR / completionTimeMs + 0.5)
+        Math.min(
+            THREE_BOSSES_MAX_SCORE,
+            Math.floor(THREE_BOSSES_SCORE_NUMERATOR / completionTimeMs + 0.5)
+        )
     );
+}
+
+export function calculateThreeBossesRank(
+    completionTimeMs: number
+): ThreeBossesRank {
+    if (!isValidThreeBossesCompletionTimeMs(completionTimeMs)) {
+        throw new RangeError('completionTimeMs is outside the version-one contract');
+    }
+
+    if (completionTimeMs < THREE_BOSSES_S_RANK_MAX_EXCLUSIVE_MS) return 'S';
+    if (completionTimeMs <= THREE_BOSSES_A_RANK_MAX_MS) return 'A';
+    if (completionTimeMs <= THREE_BOSSES_B_RANK_MAX_MS) return 'B';
+    if (completionTimeMs <= THREE_BOSSES_C_RANK_MAX_MS) return 'C';
+    return 'D';
 }

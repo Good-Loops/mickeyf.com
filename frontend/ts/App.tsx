@@ -17,8 +17,8 @@ import Games from "@/pages/Games";
 import P4Vega from "@/pages/games/P4Vega";
 import ThreeBosses from "@/pages/games/ThreeBosses";
 import {
-	isThreeBossesLocalEnabled,
-	THREE_BOSSES_LOCAL_ROUTE,
+	isThreeBossesEnabled,
+	THREE_BOSSES_ROUTE,
 } from '@/config/featureFlags';
 
 import Leaderboard from "@/pages/Leaderboard";
@@ -56,8 +56,8 @@ const App: React.FC = () => {
 				
 				<Route path="/games" element={<Games />} />
 				<Route path="/games/p4-Vega" element={<P4Vega />} />
-				{isThreeBossesLocalEnabled && (
-					<Route path={THREE_BOSSES_LOCAL_ROUTE} element={<ThreeBosses />} />
+				{isThreeBossesEnabled && (
+					<Route path={THREE_BOSSES_ROUTE} element={<ThreeBosses />} />
 				)}
 
 				<Route path="/leaderboards" element={<Leaderboard />} />
