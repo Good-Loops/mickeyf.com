@@ -47,15 +47,27 @@
 
         &--blue {
             color: transparent;
-            background: linear-gradient(105deg, rgba($white, .96), rgba($primary-light, .88) 58%, rgba($secondary-light, .72));
+            background: linear-gradient(
+                112deg,
+                rgba($white, .66),
+                rgba($primary-light, .38) 42%,
+                rgba($white, .5) 57%,
+                rgba($secondary-light, .28)
+            );
             background-clip: text;
             -webkit-background-clip: text;
+            -webkit-text-stroke: .06rem rgba($white, .22);
             font-family: $game-font;
             font-size: clamp(4.2rem, 7vw, 7.4rem);
             font-weight: 700;
             letter-spacing: .015em;
             line-height: .95;
-            text-shadow: 0 1.1rem 3rem rgba(black, .22);
+            text-shadow:
+                0 0 .25rem rgba($white, .28),
+                0 0 .9rem rgba($primary-light, .4),
+                0 0 2.3rem rgba($primary, .23),
+                0 1.1rem 3rem rgba(black, .22);
+            animation: home-welcome-glow 5.8s ease-in-out infinite;
         }
 
         &--green {
@@ -94,6 +106,31 @@
         max-width: 90vw;       
         max-height: 85vh;
         pointer-events: none; 
+    }
+}
+
+@keyframes home-welcome-glow {
+    0%,
+    100% {
+        text-shadow:
+            0 0 .2rem rgba($white, .22),
+            0 0 .72rem rgba($primary-light, .32),
+            0 0 1.8rem rgba($primary, .18),
+            0 1.1rem 3rem rgba(black, .22);
+    }
+
+    50% {
+        text-shadow:
+            0 0 .32rem rgba($white, .34),
+            0 0 1.1rem rgba($primary-light, .52),
+            0 0 2.8rem rgba($primary, .3),
+            0 1.1rem 3rem rgba(black, .22);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .home__welcome-line--blue {
+        animation: none;
     }
 }
 
