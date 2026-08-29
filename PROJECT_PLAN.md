@@ -701,6 +701,12 @@ prefilled message, so the website stores and transmits no feedback itself. A
 future server-submitted replacement remains deferred until its validation,
 abuse controls, privacy language, and retention policy are designed together.
 
+The Login page's glass form shell was implemented and browser-verified on
+2026-08-28 with visible field labels, password-manager autocomplete hints,
+custom cursor continuity, and a static reduced-motion-safe panel. Its existing
+authentication requests, alerts, loading guard, and success redirect remain
+unchanged; Register still owns the legacy shared form mixin until its own pass.
+
 ## Deferred tooling follow-up
 
 - TypeDoc drift CI guard: **deferred by owner decision on 2026-08-25**.

@@ -1,9 +1,120 @@
 @use '../abstracts' as *;
 
 .login {
-    @include user-conection-form;
+    display: grid;
+    justify-items: center;
+    width: min(90vw, 38rem);
 
-    &__title {
-        color: $secondary;
+    &__form-wrapper {
+        width: 100%;
+        padding: clamp(2rem, 4vw, 2.8rem);
+
+        border: .1rem solid rgba($white, .14);
+        border-radius: 1.2rem;
+        background: linear-gradient(145deg, rgba($white, .055), rgba($space-background, .04));
+        box-shadow:
+            0 1.4rem 3.4rem rgba(black, .24),
+            0 .1rem 0 rgba($white, .09) inset;
+        backdrop-filter: blur(.35rem) saturate(125%);
+        -webkit-backdrop-filter: blur(.35rem) saturate(125%);
+    }
+
+    &__form {
+        display: grid;
+        row-gap: 1.7rem;
+    }
+
+    &__field {
+        display: grid;
+        row-gap: .65rem;
+        cursor: $cursor;
+    }
+
+    &__label {
+        color: rgba($primary-light, .62);
+        font-size: 1.1rem;
+        font-weight: 600;
+        letter-spacing: .16em;
+        text-transform: uppercase;
+        cursor: $cursor;
+    }
+
+    &__input {
+        width: 100%;
+        padding: 1.05rem 1.2rem;
+
+        border: .1rem solid rgba($white, .14);
+        border-radius: .7rem;
+        outline: none;
+        color: rgba($white, .9);
+        background: rgba($space-background, .24);
+        box-shadow: 0 .1rem 0 rgba($white, .05) inset;
+        font: inherit;
+        font-size: 1.4rem;
+        user-select: text;
+
+        transition:
+            border-color .25s ease,
+            box-shadow .25s ease,
+            background-color .25s ease;
+
+        &:focus-visible {
+            border-color: rgba($primary-light, .52);
+            background: rgba($space-background, .32);
+            box-shadow:
+                0 0 0 .2rem rgba($primary, .09),
+                0 .1rem 0 rgba($white, .07) inset;
+        }
+    }
+
+    &__submit {
+        width: 100%;
+        margin-top: .4rem;
+        padding: .9rem 1.3rem;
+
+        border: .1rem solid rgba($primary-light, .26);
+        border-radius: .7rem;
+        color: rgba($white, .88);
+        background: rgba($primary, .075);
+        font-weight: 600;
+        letter-spacing: .055em;
+
+        transition:
+            border-color .25s ease,
+            background-color .25s ease,
+            box-shadow .25s ease,
+            transform .2s ease;
+
+        &:hover:not(:disabled),
+        &:focus-visible {
+            border-color: rgba($primary-light, .52);
+            background: rgba($primary, .13);
+            box-shadow: 0 0 1.6rem rgba($primary, .13);
+        }
+
+        &:focus-visible {
+            outline: .15rem solid rgba($primary-light, .7);
+            outline-offset: .2rem;
+        }
+
+        &:active:not(:disabled) {
+            transform: scale(.985);
+        }
+
+        &:disabled {
+            border-color: rgba($white, .1);
+            opacity: .55;
+            cursor: $cursor-notallowed;
+        }
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .login__submit {
+        transition: none;
+
+        &:active:not(:disabled) {
+            transform: none;
+        }
     }
 }

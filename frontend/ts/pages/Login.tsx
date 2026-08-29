@@ -28,36 +28,43 @@ const Login: React.FC = () => {
     };
 
     return (
-        <section className="login">
-        <h1 className="login__title">Log in</h1>
-        <div className="login__form-wrapper">
-            <form className="login__form" onSubmit={handleSubmit}>
-            <input
-                className="login__input login__input--user"
-                type="text"
-                name="user_name"
-                placeholder="Username"
-                required
-                value={userName}
-                onChange={(e) => setUserName(e.target.value)}
-            />
-            <input
-                className="login__input login__input--password"
-                type="password"
-                name="user_password"
-                placeholder="Password"
-                required
-                value={userPassword}
-                onChange={(e) => setUserPassword(e.target.value)}
-            />
-            <input
-                className="login__input login__input--btn"
-                type="submit"
-                value="Log In"
-                disabled={loading}
-            />
-            </form>
-        </div>
+        <section className="login" aria-labelledby="login-title">
+            <h1 id="login-title" className="u-visually-hidden">Log in</h1>
+            <div className="login__form-wrapper">
+                <form className="login__form" onSubmit={handleSubmit} aria-busy={loading}>
+                    <label className="login__field" htmlFor="login-username">
+                        <span className="login__label">Username</span>
+                        <input
+                            id="login-username"
+                            className="login__input"
+                            type="text"
+                            name="user_name"
+                            autoComplete="username"
+                            autoCapitalize="none"
+                            spellCheck={false}
+                            required
+                            value={userName}
+                            onChange={(event) => setUserName(event.target.value)}
+                        />
+                    </label>
+                    <label className="login__field" htmlFor="login-password">
+                        <span className="login__label">Password</span>
+                        <input
+                            id="login-password"
+                            className="login__input"
+                            type="password"
+                            name="user_password"
+                            autoComplete="current-password"
+                            required
+                            value={userPassword}
+                            onChange={(event) => setUserPassword(event.target.value)}
+                        />
+                    </label>
+                    <button className="login__submit" type="submit" disabled={loading}>
+                        {loading ? 'Logging in…' : 'Log in'}
+                    </button>
+                </form>
+            </div>
         </section>
     );
 };
