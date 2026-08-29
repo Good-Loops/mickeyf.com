@@ -691,7 +691,16 @@ browser-verified on 2026-08-28: Home, Entertainment, Connect, and Account now
 form the top level; both dropdowns use active states, outside-click and Escape
 dismissal, focus restoration, a reduced-motion-safe slide, and authenticated
 Account content in place of the old corner label. The final responsive phase
-still owns the compact/mobile navigation behavior.
+still owns full mobile-device navigation acceptance, but the compact glass
+header is now visible and browser-verified on the existing vertical web layout.
+
+The Dancing Circles visual pass was implemented and browser-verified on
+2026-08-29. It removes the visible page title, preserves the PIXI/audio logic,
+adds a transparent canvas with an accessible glass control rail, provides a
+dark-blue breathing background and a full in-page color picker, and keeps the
+fullscreen presentation consistent. Its desktop and vertical web layouts are
+complete for this redesign phase; broader physical-device and canvas
+responsiveness remain in the final responsive phase.
 
 The canonical `/connect` profile hub was implemented and browser-verified on
 2026-08-28 with accessible external-profile links and the shared glass-card

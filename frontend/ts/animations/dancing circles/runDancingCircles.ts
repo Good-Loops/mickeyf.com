@@ -33,6 +33,8 @@ type DancingCirclesDeps = {
     container: HTMLElement;
 };
 
+export const DEFAULT_DANCING_CIRCLES_CUSTOM_COLOR = '#46515b';
+
 /**
  * Starts the Dancing Circles animation inside the provided DOM container.
  *
@@ -50,7 +52,7 @@ export async function runDancingCircles({ container }: DancingCirclesDeps) {
 
     await app.init({
         antialias: true,
-        backgroundColor: 'hsl(204, 92%, 80%)',
+        backgroundAlpha: 0,
         width: CANVAS_WIDTH,
         height: CANVAS_HEIGHT,
     });
@@ -59,6 +61,8 @@ export async function runDancingCircles({ container }: DancingCirclesDeps) {
     const getNowMs = () => performance.now() - startMs;
 
     app.canvas.classList.add("dancing-circles__canvas");
+    app.canvas.setAttribute("role", "img");
+    app.canvas.setAttribute("aria-label", "Dancing Circles animation");
     container.append(app.canvas);
 
     const bounds = new CircleBounds(CANVAS_WIDTH, CANVAS_HEIGHT);
