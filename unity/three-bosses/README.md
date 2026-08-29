@@ -58,10 +58,14 @@ confirm:
 
 Boss 3 enters phase two at 50% health and expands its rune attack from two
 anchors to three. Defeating Boss 3 now freezes the active-combat timer and opens
-the final result scene. Rank calibration and score submission remain deferred;
-completed runs display `UNRANKED`, and Submit Score remains disabled.
+the final result scene. Rules version 1 derives an S–D rank and arcade-scale
+score from the canonical active-combat time. The end-screen submission flow is
+connected, but its button stays unavailable until the browser catalog reports
+enabled; production writes remain fail-closed by default.
 
-## Local website WebGL build
+## Website WebGL builds
+
+### Local development
 
 The local website prototype reads generated WebGL output from outside the
 repository. Before building, leave the Editor open on this exact project and
@@ -82,6 +86,26 @@ HTML directly. Set `THREE_BOSSES_WEBGL_DIR` to override the default external
 output directory. The stable local website URL is
 `http://localhost:5173/games/three-bosses`.
 
+### Production release
+
+A production artifact must be rebuilt from clean, committed Unity source with
+the Editor running in `-automated` mode:
+
+```powershell
+npm run three-bosses:webgl:release:build
+npm run three-bosses:webgl:package
+npm run three-bosses:webgl:release:validate
+```
+
+The release build keeps development, script-debugging, and profiler flags off
+and writes a version-two completion marker bound to the committed Unity source,
+required Editor version, source digest, file count, and exact Brotli runtime
+files. Packaging retains one immutable content-addressed release under
+`frontend/public/unity/three-bosses/releases` plus the stable no-store manifest.
+Firebase preview verification must confirm the hosted bytes, headers, and
+actual Unity browser startup before promotion. Never re-certify old output or
+publish Unity's generated `index.html`.
+
 `com.unity.pipeline` 0.5.0-exp.1 currently scans build scenes additively while
 looking for runtime managers. The three boss scenes each contain one valid
 Global Light 2D and are loaded singly during gameplay, but the scan makes those
@@ -101,7 +125,9 @@ Commit Unity source under `Assets/`, `Packages/`, and `ProjectSettings/`, plus
 the project documentation. Unity regenerates `Library/`, `Temp/`, `Obj/`,
 `bin/`, `Logs/`, `UserSettings/`, `Build/`, `Builds/`, `MemoryCaptures/`,
 `Recordings/`, and IDE project files locally; those paths are ignored and must
-not be committed. `Assets/_Recovery` is deliberately excluded.
+not be committed. `Assets/_Recovery` is ignored for local recovery only, but it
+must be absent before a release build because ignored source is not covered by
+provenance. Move recovered scenes to an external backup before certification.
 
 The project includes focused EditMode and PlayMode regression suites covering
 the run session, combat-only timer, countdown, UI feedback, death-animation
