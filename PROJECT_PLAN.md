@@ -612,10 +612,18 @@ work: add an in-game pause button and a simple pause menu. Pausing must freeze
 gameplay, active-combat timing, and audio consistently, and Resume must restore
 them cleanly.
 
+Fix the battle-scene player spawn so the character begins grounded instead of
+falling a small distance and incorrectly playing the landing VFX at startup.
+Keep the correction deterministic across all three battle scenes and verify it
+does not change countdown timing or legitimate landing feedback.
+
 Future Three Bosses presentation polish: replace the functional WebGL loading
 surface with a more distinctive, on-theme loading screen. Keep the displayed
 progress tied to real loader progress, preserve useful failure states, and keep
 the artwork lightweight enough that it does not delay the game it introduces.
+As a prerequisite, fix the current handoff so the React loading surface releases
+before Unity's `Made with Unity` splash is shown; the two loading layers must not
+sit on top of one another.
 
 Website presentation polish: **completed and browser-verified on 2026-08-25**.
 At a 1920 × 1080 desktop viewport, the Three Bosses frame now matches the
