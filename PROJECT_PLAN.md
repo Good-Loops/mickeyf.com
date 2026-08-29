@@ -676,14 +676,22 @@ The header's information architecture must:
   username and Logout represented coherently when authenticated;
 - make the navigation genuinely responsive and verify keyboard, focus, and
   disclosure behavior;
-- choose a clearer replacement name for **Social** before changing that area,
-  including deliberate handling of the existing route;
-- add a dedicated user-feedback page with server-side validation, abuse/rate
-  limiting, and an explicit privacy and retention policy; and
+- replace **Social** with one **Connect** destination that combines the existing
+  external-profile links with a clearly separated user-feedback form; handle
+  the existing route deliberately when that page is redesigned;
+- give the Connect feedback form server-side validation, abuse/rate limiting,
+  and an explicit privacy and retention policy; and
 - after the navigation and content structure are settled, redesign the full
   website with a more professional, responsive, literally dark visual theme.
   "Dark" here means a deliberate dark color palette with readable contrast,
   not a gloomy or moody creative direction.
+
+The desktop glass header and its information architecture were implemented and
+browser-verified on 2026-08-28: Home, Entertainment, Connect, and Account now
+form the top level; both dropdowns use active states, outside-click and Escape
+dismissal, focus restoration, a reduced-motion-safe slide, and authenticated
+Account content in place of the old corner label. The final responsive phase
+still owns the compact/mobile navigation behavior.
 
 ## Deferred tooling follow-up
 

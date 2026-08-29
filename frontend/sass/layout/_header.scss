@@ -1,18 +1,10 @@
-@use '../abstracts' as *;
-
 .header {
-    min-height: 5vh;
+    position: relative;
+    z-index: 10;
 
-    &__user {
-        position: absolute;
-        top: 1rem;
-        right: 1rem;
-        font-size: 1.2rem;
-        color: $secondary;
-    }
-}
-
-.logout {
-    display: none;
+    display: flex;
+    justify-content: center;
+    min-height: clamp(5.6rem, 7vh, 7rem);
+    padding: clamp(.8rem, 1.6vh, 1.4rem) 1.5rem 0;
 }
 

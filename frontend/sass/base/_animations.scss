@@ -84,6 +84,18 @@
     }
 }
 
+@keyframes nav-dropdown-enter {
+    from {
+        opacity: 0;
+        transform: translate(-50%, -.65rem) scale(.98);
+    }
+
+    to {
+        opacity: 1;
+        transform: translate(-50%, 0) scale(1);
+    }
+}
+
 @keyframes float {
     0% {
         transform: translateY(0px);
