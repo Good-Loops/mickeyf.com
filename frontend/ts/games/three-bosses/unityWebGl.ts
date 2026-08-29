@@ -6,6 +6,7 @@ import {
     bindUnityVisibility,
     type UnityVisibilityBridgeInstance,
 } from '@/games/three-bosses/unityVisibility';
+import { bindThreeBossesGameReady } from '@/games/three-bosses/unityGameReady';
 import {
     bindThreeBossesSubmissionBridge,
     configureThreeBossesSubmission,
@@ -48,7 +49,6 @@ type UnityWebGlManifest = Readonly<{
 declare global {
     interface Window {
         createUnityInstance?: CreateUnityInstance;
-        mickeyfThreeBossesSignalReady?: () => void;
     }
 }
 
@@ -65,59 +65,7 @@ type StartUnityWebGlOptions = Readonly<{
 }>;
 
 const manifestUrl = `${THREE_BOSSES_BUILD_BASE_PATH}build-manifest.json`;
-const gameReadyTimeoutMs = 30_000;
 let activeHandlePromise: Promise<UnityWebGlHandle> | null = null;
-
-type GameReadyBinding = Readonly<{
-    promise: Promise<void>;
-    release: () => void;
-}>;
-
-const bindGameReadySignal = (signal: AbortSignal): GameReadyBinding => {
-    if (window.mickeyfThreeBossesSignalReady !== undefined) {
-        throw new Error('A Three Bosses readiness bridge is already active.');
-    }
-
-    let settled = false;
-    let resolveReady: (() => void) | null = null;
-    let rejectReady: ((reason: unknown) => void) | null = null;
-    let timeoutId: ReturnType<typeof setTimeout> | null = null;
-
-    const clear = () => {
-        if (timeoutId !== null) {
-            clearTimeout(timeoutId);
-            timeoutId = null;
-        }
-        signal.removeEventListener('abort', onAbort);
-        if (window.mickeyfThreeBossesSignalReady === onReady) {
-            delete window.mickeyfThreeBossesSignalReady;
-        }
-    };
-    const finish = (callback: () => void) => {
-        if (settled) return;
-        settled = true;
-        clear();
-        callback();
-    };
-    const onReady = () => finish(() => resolveReady?.());
-    const onAbort = () => finish(() => rejectReady?.(
-        new DOMException('The WebGL load was cancelled.', 'AbortError'),
-    ));
-    const promise = new Promise<void>((resolve, reject) => {
-        resolveReady = resolve;
-        rejectReady = reject;
-    });
-
-    window.mickeyfThreeBossesSignalReady = onReady;
-    signal.addEventListener('abort', onAbort, { once: true });
-    timeoutId = setTimeout(() => finish(() => rejectReady?.(
-        new Error('The Three Bosses main menu did not become ready in time.'),
-    )), gameReadyTimeoutMs);
-
-    if (signal.aborted) onAbort();
-
-    return { promise, release: clear };
-};
 
 const requireString = (
     manifest: Record<string, unknown>,
@@ -258,7 +206,7 @@ const startNewHandle = async ({
     const manifest = await readManifest(signal);
     const loaderUrl = resolveAssetUrl(manifest.loaderUrl);
     const { createUnityInstance, script } = await loadUnityFactory(loaderUrl, signal);
-    const gameReady = bindGameReadySignal(signal);
+    const gameReady = bindThreeBossesGameReady(signal);
     let quitPromise: Promise<void> | null = null;
 
     try {
@@ -285,10 +233,13 @@ const startNewHandle = async ({
         let browserBindingsReleased = false;
 
         try {
+            // The menu must render once before an unfocused tab is allowed to
+            // pause Unity's main loop, otherwise it cannot signal readiness.
+            gameReady.startTimeout();
+            await gameReady.promise;
             releaseVisibility = bindUnityVisibility(instance);
             releaseSubmissionBridge = bindThreeBossesSubmissionBridge(instance, submitRun);
             configureThreeBossesSubmission(instance, false);
-            await gameReady.promise;
         } catch (error) {
             try {
                 releaseSubmissionBridge?.();
