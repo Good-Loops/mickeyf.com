@@ -9,6 +9,8 @@ using UnityEngine.UI;
 public sealed class AudioToggleIcon : MaskableGraphic
 {
     private const int ArcSegments = 8;
+    private const int NarrowWebGlCanvasWidth = 900;
+    private const float NarrowWebGlHorizontalCorrection = 0.1f;
 
     [SerializeField] private bool audioEnabled = true;
 
@@ -40,6 +42,12 @@ public sealed class AudioToggleIcon : MaskableGraphic
         // Chrome's downscaled WebGL canvas gives the right-hand wave strokes
         // more visual weight than the native Editor render.
         horizontalCenterOffset -= 0.135f;
+
+        // At narrow canvas resolutions the final browser downsampling makes
+        // that remaining imbalance read as a full CSS pixel. Keep the desktop
+        // correction unchanged and compensate only for the compact player.
+        if (Screen.width <= NarrowWebGlCanvasWidth)
+            horizontalCenterOffset -= NarrowWebGlHorizontalCorrection;
 #endif
         const float verticalCenterOffset = 0.055f;
         Vector2 center = pixelRect.center + new Vector2(
