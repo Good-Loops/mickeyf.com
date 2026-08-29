@@ -32,10 +32,19 @@ public sealed class AudioToggleIcon : MaskableGraphic
         if (size <= 0f)
             return;
 
-        // The speaker body extends farther left than the waves/cross extend
-        // right. Center the complete silhouette rather than only its origin.
+        // Center the complete silhouette rather than only its drawing origin.
+        // A small upward optical correction keeps the downscaled WebGL icon
+        // from landing a full pixel below the button's visual center.
         float horizontalCenterOffset = audioEnabled ? -0.03f : -0.015f;
-        Vector2 center = pixelRect.center + Vector2.right * (horizontalCenterOffset * size);
+#if UNITY_WEBGL && !UNITY_EDITOR
+        // Chrome's downscaled WebGL canvas gives the right-hand wave strokes
+        // more visual weight than the native Editor render.
+        horizontalCenterOffset -= 0.15f;
+#endif
+        const float verticalCenterOffset = 0.055f;
+        Vector2 center = pixelRect.center + new Vector2(
+            horizontalCenterOffset * size,
+            verticalCenterOffset * size);
         float stroke = Mathf.Max(1.5f, size * 0.075f);
         Color32 vertexColor = color;
 
