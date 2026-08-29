@@ -89,6 +89,8 @@
 
     &__input[type='file'] { display: none; }
 
+    &__orientation-hint { display: none; }
+
     &__ui {
         grid-area: ui;
         position: relative;
@@ -350,6 +352,17 @@
         &__canvas {
             width: 100%;
             height: auto;
+        }
+
+        &__orientation-hint {
+            display: block;
+            max-width: 26rem;
+            margin: -.4rem 0 -.2rem;
+            color: rgba($primary-light, .56);
+            font-size: .78rem;
+            letter-spacing: .025em;
+            line-height: 1.35;
+            text-align: center;
         }
 
         &__ui { gap: .7rem; padding: .7rem; }

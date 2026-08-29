@@ -76,6 +76,10 @@
         box-shadow: none;
     }
 
+    &__orientation-hint {
+        display: none;
+    }
+
     &__transport {
         display: grid;
         grid-template-columns: auto 1fr;
@@ -480,6 +484,17 @@
         &__fullscreen-btn {
             width: 2.75rem;
             height: 2.75rem;
+        }
+
+        &__orientation-hint {
+            display: block;
+            max-width: 26rem;
+            margin: -.45rem 0 -.55rem;
+            color: rgba($primary-light, .56);
+            font-size: .78rem;
+            letter-spacing: .025em;
+            line-height: 1.35;
+            text-align: center;
         }
 
         .music-controls {
