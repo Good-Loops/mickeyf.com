@@ -44,47 +44,34 @@
         isolation: isolate;
         padding: .7rem;
 
-        border: .16rem solid rgba($white, .17);
-        border-radius: 1.2rem;
-        background-color: #2c4668;
-        background-image: linear-gradient(145deg, rgba($white, .035), transparent 34%, rgba($white, .012));
+        border: .14rem solid rgba($white, .16);
+        border-radius: 1.15rem;
+        background: linear-gradient(145deg, rgba($white, .075), rgba($space-background, .12));
         box-shadow:
-            0 1.4rem 3.4rem rgba(black, .24),
-            0 .1rem 0 rgba($white, .1) inset,
-            0 0 0 .1rem rgba($white, .035);
-        backdrop-filter: blur(.35rem) saturate(125%);
-        -webkit-backdrop-filter: blur(.35rem) saturate(125%);
-        animation: dancing-circles-background-drift 7s ease-in-out infinite;
-
-        &::before,
-        &::after {
+            0 1.3rem 3rem rgba(black, .24),
+            0 .1rem 0 rgba($white, .1) inset;
+        backdrop-filter: blur(.4rem) saturate(120%);
+        -webkit-backdrop-filter: blur(.4rem) saturate(120%);
+        &::before {
             content: '';
             position: absolute;
-            z-index: 2;
-            inset: -.2rem;
-            border-radius: 1.25rem;
+            z-index: 0;
+            inset: .7rem;
+            border-radius: .72rem;
+            background-color: #2c4668;
             pointer-events: none;
-        }
-
-        &::before {
-            border: .14rem solid rgba($primary-light, .24);
-            box-shadow: 0 0 .9rem rgba($primary, .15);
-            animation: dancing-circles-blue-glow 7.5s ease-in-out infinite;
-        }
-
-        &::after {
-            border: .12rem solid rgba($secondary-light, .18);
-            box-shadow: 0 0 .8rem rgba($secondary, .1);
-            animation: dancing-circles-green-glow 7.5s ease-in-out infinite;
+            animation: dancing-circles-background-drift 7s ease-in-out infinite;
         }
     }
 
-    &--custom-background &__canvas-wrapper {
+    &--custom-background &__canvas-wrapper::before {
         background-color: var(--dancing-circles-background);
         animation: none;
     }
 
     &__canvas {
+        position: relative;
+        z-index: 1;
         display: block;
         box-shadow: none;
     }
@@ -488,6 +475,11 @@
         &__color-picker {
             right: 2.55rem;
             transform: none;
+        }
+
+        &__fullscreen-btn {
+            width: 2.75rem;
+            height: 2.75rem;
         }
 
         .music-controls {

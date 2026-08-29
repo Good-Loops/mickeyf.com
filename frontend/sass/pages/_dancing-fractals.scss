@@ -1,461 +1,366 @@
 @use '../abstracts' as *;
 
 .dancing-fractals {
-    position: relative;
+    --panel-width: clamp(19rem, 23vw, 24rem);
+
     display: grid;
-    column-gap: 3rem;
-    padding-top: 8rem;
-
-    --ui-w: clamp(14rem, 22vw, 22rem);
-
-    grid-template-columns: var(--ui-w) minmax(0, 1fr) var(--ui-w);
-    grid-template-areas: "ui stage ghost";
-
-    align-items: start;
-
-    // Title centered above everything
-    &__title {
-        justify-self: center;
-        position: absolute;
-        top: -9rem;        // adjust visually
-        left: 50%;
-        transform: translateX(-50%);
-        margin: 0;
-        pointer-events: none;
-        z-index: 2;
-    }
+    grid-template-areas: 'stage' 'ui';
+    justify-items: center;
+    gap: 1.4rem;
+    width: min(96vw, 145rem);
 
     &__stage {
         grid-area: stage;
-
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        gap: 1.2rem;
-
-        width: fit-content;
-        justify-self: center;
+        display: grid;
+        justify-items: center;
+        gap: 1rem;
+        min-width: 0;
     }
 
-    &__ghost {
-        grid-area: ghost;
-    }
+    &__ghost { display: none; }
 
     &__canvas-wrapper {
-        width: fit-content;
-        align-self: center;
         position: relative;
+        isolation: isolate;
+        width: fit-content;
+        padding: .7rem;
+        overflow: hidden;
+        border: .14rem solid rgba($white, .16);
+        border-radius: 1.15rem;
+        background: linear-gradient(145deg, rgba($white, .075), rgba($space-background, .12));
+        box-shadow: 0 1.3rem 3rem rgba(black, .24), 0 .1rem 0 rgba($white, .1) inset;
+        backdrop-filter: blur(.4rem) saturate(120%);
+        -webkit-backdrop-filter: blur(.4rem) saturate(120%);
     }
 
-    // PIXI canvas in the middle/right column
     &__canvas {
-        @include canvas-shadow-effect;
-        border-radius: 0.75rem;
+        display: block;
         overflow: hidden;
+        border-radius: .72rem;
+        box-shadow: none;
     }
 
     &__transport {
         display: grid;
-        grid-template-columns: 1fr auto 1fr;
+        grid-template-columns: auto 1fr;
         align-items: center;
-        gap: 1rem;
-
-        width: 100%;
-
-        &-left {
-            grid-column: 1 / 2;
-            justify-self: start;
-            display: flex;
-        }
+        gap: .75rem;
+        width: min(100%, 31rem);
+        padding: .55rem;
+        border: .1rem solid rgba($white, .11);
+        border-radius: .85rem;
+        background: linear-gradient(145deg, rgba($white, .045), rgba($space-background, .05));
+        box-shadow: 0 .8rem 2rem rgba(black, .16), 0 .1rem 0 rgba($white, .06) inset;
+        backdrop-filter: blur(.45rem) saturate(120%);
+        -webkit-backdrop-filter: blur(.45rem) saturate(120%);
     }
 
     &__upload {
-        grid-column: 2 / 3;
-        justify-self: center;
-
-        display: flex;
-        align-items: center;
-        gap: 1.2rem;
+        width: 100%;
 
         &-btn {
-            justify-self: center;
-
-            @include default-btn;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 100%;
+            min-height: 3.2rem;
+            padding: .55rem .85rem;
+            border: .1rem solid rgba($primary-light, .25);
+            border-radius: .6rem;
+            color: rgba($white, .84);
+            background: rgba($primary, .07);
+            font-size: 1.05rem;
+            font-weight: 500;
+            letter-spacing: .045em;
+            cursor: $cursor-hover;
+            transition: border-color .22s ease, background-color .22s ease, box-shadow .22s ease, transform .18s ease;
 
             &:hover,
-            &:focus {
-                @include default-btn-hover;
+            &:focus-visible {
+                border-color: rgba($primary-light, .5);
+                background: rgba($primary, .13);
+                box-shadow: 0 0 1.2rem rgba($primary, .12);
             }
 
-            &:active {
-                @include default-btn-active;
-            }
+            &:focus-visible { outline: .15rem solid rgba($primary-light, .68); }
+            &:active { transform: scale(.985); }
         }
     }
 
-    &__input[type="file"] {
-        display: none;
-    }
+    &__input[type='file'] { display: none; }
 
-    // Left-side UI panel
     &__ui {
         grid-area: ui;
-
-        position: sticky;
-        top: 1rem;
-
-        overflow: auto;
-        max-height: calc(100vh - 2rem);
-
-        display: flex;
-        flex-direction: column;
-        gap: 1.5rem;
-        width: fit-content;
-        max-width: clamp(14rem, 22vw, 22rem);
-
-        padding: 1rem 1.25rem;
-        border-radius: 0.75rem;
-        background: rgba(0, 0, 0, 0.35);
-        backdrop-filter: blur(6px);
-        box-shadow: 0 10px 25px rgba(0, 0, 0, 0.35);
+        position: relative;
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: .85rem;
+        width: min(100%, 31rem);
+        padding: .8rem;
+        border: .1rem solid rgba($white, .12);
+        border-radius: .9rem;
+        color: rgba($white, .8);
+        background: linear-gradient(145deg, rgba($white, .055), rgba($space-background, .08));
+        box-shadow: 0 1rem 2.5rem rgba(black, .2), 0 .1rem 0 rgba($white, .08) inset;
+        backdrop-filter: blur(.7rem) saturate(125%);
+        -webkit-backdrop-filter: blur(.7rem) saturate(125%);
 
         &--locked {
-            opacity: .6;
-            pointer-events: none;
+            opacity: .58;
             cursor: $cursor-notallowed, not-allowed !important;
-
-            // Force cursor inheritance inside locked UI
-            * {
-                cursor: inherit !important;
-            }
-
-            input[type='range']::-webkit-slider-thumb {
-                cursor: inherit !important;
-            }
-
-            input[type='range']::-moz-range-thumb {
-                cursor: inherit !important;
-            }
-
-            input[type='range']::-ms-thumb {
-                cursor: inherit !important;
-            }
+            * { cursor: inherit !important; }
         }
 
         &--overlay {
             position: absolute;
+            z-index: $front;
             inset: 0;
-            z-index: $front; 
-
-            pointer-events: all;
-            cursor: $cursor-notallowed, not-allowed !important;
-
-            background: rgba(0, 0, 0, 0.05);
             border-radius: inherit;
+            background: rgba(black, .08);
+            cursor: $cursor-notallowed, not-allowed !important;
         }
 
-        &--selector {
-            display: flex;
-            align-items: center;
-            gap: 0.75rem;
-        }
-
-        &--label {
-            font-size: 0.85rem;
-            text-transform: uppercase;
-            letter-spacing: 0.08em;
-            opacity: 0.8;
-            white-space: nowrap;
-        }
-
-        // Dropdown container / theming for shared .dropdown styles
         &--dropdown {
-            flex: 1;
+            grid-column: 1 / -1;
 
             .dropdown__button {
-                padding: 0.45rem 0.6rem;
-                background: rgba(255, 255, 255, 0.06);
-                border-radius: 0.4rem;
-                border: 1px solid rgba(255, 255, 255, 0.15);
+                min-height: 3rem;
+                padding: .5rem .7rem;
+                border: .1rem solid rgba($white, .13);
+                border-radius: .55rem;
+                color: rgba($white, .88);
+                background: rgba($white, .035);
 
-                color: #f5f5f5;
-
-                &:hover {
-                    border-color: rgba(255, 255, 255, 0.35);
-                    background: rgba(255, 255, 255, 0.2);
+                &:hover,
+                &:focus-visible {
+                    border-color: rgba($primary-light, .38);
+                    background: rgba($primary, .09);
                 }
-
-                &:disabled {
-                    opacity: 0.65;
-                }
-            }
-
-            .dropdown__caret {
-                opacity: 0.75;
-                color: rgba(255, 255, 255, 0.85);
-                text-shadow: 0 0 4px rgba(255, 255, 255, 0.4);
             }
 
             .dropdown__menu {
-                background: rgba(50, 80, 120, .65);
-                backdrop-filter: blur(12px);
-                -webkit-backdrop-filter: blur(12px);
-
-                border-radius: 0.6rem;
-                border: 1px solid rgba(255, 255, 255, .22);
-
-                box-shadow:
-                    0 8px 20px rgba(0, 0, 0, .35),
-                    0 0 0 1px rgba(255, 255, 255, .12) inset;
+                border: .1rem solid rgba($white, .15);
+                border-radius: .65rem;
+                background: rgba($space-background, .82);
+                box-shadow: 0 .9rem 2rem rgba(black, .28);
+                backdrop-filter: blur(.9rem) saturate(125%);
             }
 
             .dropdown__option {
-                color: rgba(255, 255, 255, 0.92);
-
-                &:hover {
-                    background: rgba(255, 255, 255, 0.08);
-                    backdrop-filter: blur(12px);
-                    color: #fff;
-                }
+                color: rgba($white, .8);
+                &:hover,
+                &:focus-visible { color: $white; background: rgba($primary, .1); }
             }
         }
 
         &--restart-btn {
-            padding: .4rem .8rem;
-            font-size: .85rem;
-            border-radius: 999px;
-            border: 1px solid rgba(255, 255, 255, 0.25);
-            background: rgba(255, 255, 255, 0.06);
-            color: #f5f5f5;
-            white-space: nowrap;
-            transition: all .2s ease;
+            min-height: 2.8rem;
+            padding: .45rem .65rem;
+            border: .1rem solid rgba($white, .13);
+            border-radius: .55rem;
+            color: rgba($white, .76);
+            background: rgba($white, .035);
+            font: inherit;
+            font-size: .86rem;
+            cursor: $cursor-hover;
 
-            &:hover {
-                background: rgba(255, 255, 255, 0.12);
-            }
-
-            &:active {
-                transform: translateY(1px);
-            }
-
-            &:disabled {
-                opacity: 0.5;
-                cursor: inherit;
-            }
+            &:hover,
+            &:focus-visible { border-color: rgba($primary-light, .38); color: $white; background: rgba($primary, .09); }
+            &:focus-visible { outline: .14rem solid rgba($primary-light, .65); }
+            &:disabled { opacity: .45; }
         }
 
-        &--lifetime {
-            display: flex;
-            flex-direction: column;
-            gap: 0.6rem;
-            font-size: 0.95rem;
+        &--lifetime,
+        &--controls-wrapper {
+            grid-column: 1 / -1;
+            padding-top: .65rem;
+            border-top: .1rem solid rgba($white, .075);
         }
+
+        &--lifetime,
+        &--controls,
+        &--controls__group { display: grid; gap: .7rem; }
 
         &--checkbox {
             display: flex;
             align-items: center;
-            gap: 0.55rem;
-            cursor: $cursor;
-            font-size: 1rem;
-
-            // Hide native checkbox
-            input[type='checkbox'] {
-                position: absolute;
-                opacity: 0;
-                width: 0;
-                height: 0;
-                pointer-events: none;
-            }
-
-            // The visible checkbox circle
-            &-box {
-                flex-shrink: 0;
-                width: 1.05rem;
-                height: 1.05rem;
-
-                border-radius: 50%;   // <-- ROUND NOW
-                background: rgba(255, 255, 255, 0.18);
-                border: 1px solid rgba(255, 255, 255, 0.4);
-
-                display: flex;
-                align-items: center;
-                justify-content: center;
-
-                cursor: $cursor-hover;
-                transition: all 0.2s ease;
-                box-shadow: 0 0 4px rgba(255, 255, 255, 0.15);
-            }
-
-            &:hover &-box {
-                background: rgba(255, 255, 255, 0.27);
-                box-shadow: 0 0 6px rgba(255, 255, 255, 0.35);
-            }
-
-            // The dot (soft, glowing, not black)
-            &-box::after {
-                content: "";
-                width: 0.45rem;
-                height: 0.45rem;
-
-                border-radius: 50%;
-                background: #e8faff; // soft light-cyan dot
-                box-shadow:
-                    0 0 5px rgba(200, 255, 255, 0.9),
-                    0 0 10px rgba(200, 255, 255, 0.5);
-
-                opacity: 0;  // hidden by default
-                transition: opacity 0.2s ease;
-            }
-
-            // When checked → show glowing dot + brighter ring
-            input[type='checkbox']:checked + &-box {
-                background: #ffffff;
-                border-color: #ffffff;
-                box-shadow:
-                    0 0 8px rgba(255, 255, 255, 1),
-                    0 0 15px rgba(200, 255, 255, 0.7);
-            }
-
-            input[type='checkbox']:checked + &-box::after {
-                opacity: 1;
-            }
-
-            &-text {
-                cursor: $cursor;
-            }
-        }
-
-        &--lifetime-slider {
-            display: flex;
-            flex-direction: column;
-            gap: 0.25rem;
-            cursor: $cursor;
-
-            input[type='range'] {
-                width: 100%;
-            }
-        }
-
-        &--controls-wrapper {
-            display: flex;
-            flex-direction: column;
-            gap: 1.2rem;
-        }
-
-        &--controls {
-            display: flex;
-            flex-direction: column;
-            gap: 1.2rem;
-        }
-
-        &--controls__group {
-            display: flex;
-            flex-direction: column;
-            gap: 0.5rem;
-            cursor: $cursor;
-
-            label {
-                cursor: $cursor;
-                font-size: 0.95rem;
-            }
-
-            input[type='range'] {
-                width: 100%;
-                margin-top: .1rem;
-            }
-        }
-
-        // --- FPS / Lifetime debug bubble ---
-        &--debug {
-            align-self: flex-end;
-            font-size: 0.75rem;
-            padding: 0.2rem 0.5rem;
-            border-radius: 999px;
-            background: rgba(0, 0, 0, 0.6);
-            color: #f5f5f5;
-            opacity: 0.8;
-        }
-
-        /* General slider reset */
-        &--slider {
-            appearance: none;
-            -webkit-appearance: none;
-            width: 100%;
-            height: 4px;
-            border-radius: 4px;
-            background: rgba(255, 255, 255, 0.25);
-            outline: none;
+            gap: .55rem;
+            width: fit-content;
+            font-size: .9rem;
             cursor: $cursor-hover;
-            transition: background 0.2s ease;
+
+            input { position: absolute; width: 1px; height: 1px; opacity: 0; }
+
+            &-box {
+                display: grid;
+                place-items: center;
+                width: 1.15rem;
+                height: 1.15rem;
+                border: .1rem solid rgba($white, .28);
+                border-radius: .3rem;
+                background: rgba($white, .04);
+
+                &::after {
+                    content: '';
+                    width: .45rem;
+                    height: .45rem;
+                    border-radius: .12rem;
+                    background: rgba($secondary-light, .92);
+                    box-shadow: 0 0 .55rem rgba($secondary, .45);
+                    opacity: 0;
+                }
+            }
+
+            input:checked + &-box {
+                border-color: rgba($secondary-light, .62);
+                &::after { opacity: 1; }
+            }
+
+            input:focus-visible + &-box { outline: .14rem solid rgba($primary-light, .68); }
         }
 
-        /* Hover effect */
-        &--slider:hover {
-            background: rgba(255, 255, 255, 0.4);
+        &--lifetime-slider,
+        &--controls__group label {
+            display: grid;
+            gap: .35rem;
+            color: rgba($primary-light, .7);
+            font-size: .86rem;
         }
 
-        /* WebKit track (Chrome, Edge, Safari) */
-        &--slider::-webkit-slider-runnable-track {
-            height: 4px;
-            border-radius: 4px;
-            background: linear-gradient(
-                to right,
-                #b8ffcf,
-                #8cf6e2, 
-                #7fd6ff, 
-                #b5c9ff  
-            );
+        &--slider {
+            width: 100%;
+            height: .32rem;
+            appearance: none;
+            border-radius: 99rem;
+            background: linear-gradient(90deg, rgba($secondary-light, .7), rgba($primary-light, .72));
+            cursor: $cursor-hover;
+
+            &::-webkit-slider-thumb {
+                width: 1rem;
+                height: 1rem;
+                appearance: none;
+                border: .13rem solid rgba($white, .9);
+                border-radius: 50%;
+                background: rgba($space-background, .88);
+            }
+
+            &::-moz-range-thumb {
+                width: .75rem;
+                height: .75rem;
+                border: .13rem solid rgba($white, .9);
+                border-radius: 50%;
+                background: rgba($space-background, .88);
+            }
+
+            &:focus-visible { outline: .14rem solid rgba($primary-light, .68); outline-offset: .2rem; }
+            &:disabled { opacity: .35; }
         }
 
-        /* WebKit thumb */
-        &--slider::-webkit-slider-thumb {
-            -webkit-appearance: none;
-            height: 12px;
-            width: 12px;
-            margin-top: -4px; /* centers thumb */
-            border-radius: 50%;
-            background: #fff;
-            box-shadow:
-                0 0 5px rgba(255, 255, 255, 0.9),
-                0 0 12px rgba(255, 255, 255, 0.4);
-            cursor: $cursor;
-            transition: transform 0.1s ease, box-shadow 0.2s ease;
+        &--debug {
+            grid-column: 1 / -1;
+            justify-self: end;
+            padding: .25rem .5rem;
+            border-radius: 99rem;
+            color: rgba($primary-light, .52);
+            background: rgba(black, .14);
+            font-size: .7rem;
         }
+    }
 
-        &--slider::-webkit-slider-thumb:hover {
-            transform: scale(1.15);
-            box-shadow:
-                0 0 8px rgba(255, 255, 255, 1),
-                0 0 15px rgba(255, 255, 255, 0.5);
-        }
+    .music-controls {
+        gap: .35rem;
+        padding: .28rem;
+        border: .1rem solid rgba($white, .075);
+        background: rgba($space-background, .14);
+        box-shadow: none;
 
-        /* Firefox track */
-        &--slider::-moz-range-track {
-            height: 4px;
-            border-radius: 4px;
-            background: linear-gradient(
-                to right,
-                #b8ffcf,
-                #8cf6e2,
-                #7fd6ff,
-                #b5c9ff
-            );
-        }
-
-        /* Firefox thumb */
-        &--slider::-moz-range-thumb {
-            height: 12px;
-            width: 12px;
-            border: none;
-            border-radius: 50%;
-            background: #fff;
-            box-shadow:
-                0 0 5px rgba(255, 255, 255, 0.9),
-                0 0 12px rgba(255, 255, 255, 0.4);
-            cursor: $cursor;
+        &__btn {
+            width: 2.55rem;
+            height: 2.55rem;
+            border: .1rem solid rgba($white, .1);
+            color: rgba($primary-light, .7);
+            background: rgba($white, .04);
+            box-shadow: none;
         }
     }
 
     @include canvas-fullscreen-button-position('dancing-fractals');
     @include block-canvas-fullscreen('dancing-fractals');
+
+    &__fullscreen-btn {
+        width: 3.3rem;
+        height: 3.3rem;
+        border: .1rem solid rgba($white, .13);
+        background: rgba($space-background, .24);
+    }
+}
+
+@media (min-width: 52rem) {
+    .dancing-fractals {
+        --panel-width: 33rem;
+
+        grid-template-columns: var(--panel-width) minmax(0, 1fr);
+        grid-template-areas: 'ui stage';
+        align-items: center;
+        gap: clamp(1.5rem, 3vw, 3rem);
+
+        &__ui {
+            position: sticky;
+            top: 1rem;
+            width: var(--panel-width);
+            max-height: calc(100svh - 3rem);
+            gap: 1rem;
+            padding: 1rem;
+            overflow-y: auto;
+
+            &--restart-btn,
+            &--lifetime-slider,
+            &--controls__group label {
+                font-size: 1.08rem;
+            }
+
+            &--checkbox {
+                font-size: 1.08rem;
+            }
+
+            &--debug {
+                font-size: .78rem;
+            }
+
+            &--dropdown .dropdown__button {
+                min-height: 3.6rem;
+                font-size: 1.08rem;
+            }
+        }
+    }
+}
+
+@media (max-width: 30rem) {
+    .dancing-fractals {
+        width: min(92vw, 31rem);
+        &__stage,
+        &__ui,
+        &__transport { width: 100%; }
+
+        &__canvas-wrapper {
+            width: 100%;
+            box-sizing: border-box;
+        }
+
+        &__canvas {
+            width: 100%;
+            height: auto;
+        }
+
+        &__ui { gap: .7rem; padding: .7rem; }
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .dancing-fractals {
+        &__upload-btn,
+        &__ui--restart-btn,
+        &__ui--slider { transition: none; }
+        &__upload-btn:active { transform: none; }
+    }
 }

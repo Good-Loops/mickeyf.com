@@ -702,6 +702,15 @@ fullscreen presentation consistent. Its desktop and vertical web layouts are
 complete for this redesign phase; broader physical-device and canvas
 responsiveness remain in the final responsive phase.
 
+The Dancing Fractals visual pass was implemented and browser-verified in both
+the vertical in-app layout and desktop Chrome on 2026-08-29. The canvas,
+stationary audio transport, fractal selector, configuration controls, and
+statistics now use the shared glass system; the visible title is removed while
+the accessible heading remains. The vertical canvas frame matches the control
+panel width, the desktop grid reserves independent panel and stage columns,
+and auto-dispose now defaults to off. Fractal rendering and audio behavior are
+otherwise unchanged.
+
 The canonical `/connect` profile hub was implemented and browser-verified on
 2026-08-28 with accessible external-profile links and the shared glass-card
 system; the retired `/social` route now resolves through the ordinary Not Found

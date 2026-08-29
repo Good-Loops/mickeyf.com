@@ -44,6 +44,8 @@ export async function createFractalHost(container: HTMLElement): Promise<Fractal
 
     container.append(app.canvas);
     app.canvas.classList.add('dancing-fractals__canvas');
+    app.canvas.setAttribute('role', 'img');
+    app.canvas.setAttribute('aria-label', 'Dancing Fractals animation');
 
     const centerX = app.screen.width / 2;
     const centerY = app.screen.height / 2;
