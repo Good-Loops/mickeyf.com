@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
     bindThreeBossesGameReady,
+    handOffThreeBossesCanvas,
     THREE_BOSSES_GAME_READY_TIMEOUT_MS,
 } from './unityGameReady.ts';
 
@@ -82,4 +83,33 @@ test('aborting rejects the pending readiness wait and clears its timer', async (
     await assert.rejects(binding.promise, { name: 'AbortError' });
     assert.equal(scheduled.size, 0);
     assert.equal(readyWindow.mickeyfThreeBossesSignalReady, undefined);
+});
+
+test('yields the canvas before waiting for the post-splash menu frame', async () => {
+    const events = [];
+    let resolveMenuReady;
+    let startupSettled = false;
+    const menuReady = new Promise((resolve) => {
+        resolveMenuReady = resolve;
+    });
+    const binding = {
+        promise: menuReady,
+        startTimeout: () => events.push('timeout-started'),
+        release() {},
+    };
+
+    const startup = handOffThreeBossesCanvas(
+        binding,
+        () => events.push('canvas-owned'),
+    ).then(() => {
+        startupSettled = true;
+    });
+
+    assert.deepEqual(events, ['canvas-owned', 'timeout-started']);
+    await Promise.resolve();
+    assert.equal(startupSettled, false);
+
+    resolveMenuReady();
+    await startup;
+    assert.equal(startupSettled, true);
 });

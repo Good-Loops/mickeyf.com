@@ -21,6 +21,20 @@ export type ThreeBossesGameReadyBinding = Readonly<{
     release: () => void;
 }>;
 
+/**
+ * Yields the canvas to Unity before waiting for its post-splash menu frame.
+ * These are separate milestones: the browser must stop covering Unity's own
+ * splash, while gameplay bindings still wait for the rendered main menu.
+ */
+export const handOffThreeBossesCanvas = async (
+    binding: ThreeBossesGameReadyBinding,
+    onCanvasOwned: () => void = () => undefined,
+): Promise<void> => {
+    onCanvasOwned();
+    binding.startTimeout();
+    await binding.promise;
+};
+
 const browserClock: GameReadyClock = {
     schedule: (callback, delayMs) => window.setTimeout(callback, delayMs),
     cancel: (timeoutId) => window.clearTimeout(timeoutId),

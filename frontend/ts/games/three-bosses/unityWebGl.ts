@@ -7,7 +7,10 @@ import {
     configureThreeBossesTouchControls,
     type UnityVisibilityBridgeInstance,
 } from '@/games/three-bosses/unityVisibility';
-import { bindThreeBossesGameReady } from '@/games/three-bosses/unityGameReady';
+import {
+    bindThreeBossesGameReady,
+    handOffThreeBossesCanvas,
+} from '@/games/three-bosses/unityGameReady';
 import {
     bindThreeBossesSubmissionBridge,
     configureThreeBossesSubmission,
@@ -62,6 +65,7 @@ type StartUnityWebGlOptions = Readonly<{
     canvas: HTMLCanvasElement;
     signal: AbortSignal;
     onProgress: (progress: number) => void;
+    onCanvasOwned?: () => void;
     submitRun: ThreeBossesRunSubmitter;
 }>;
 
@@ -202,6 +206,7 @@ const startNewHandle = async ({
     canvas,
     signal,
     onProgress,
+    onCanvasOwned,
     submitRun,
 }: StartUnityWebGlOptions): Promise<UnityWebGlHandle> => {
     const manifest = await readManifest(signal);
@@ -234,10 +239,9 @@ const startNewHandle = async ({
         let browserBindingsReleased = false;
 
         try {
-            // The menu must render once before an unfocused tab is allowed to
-            // pause Unity's main loop, otherwise it cannot signal readiness.
-            gameReady.startTimeout();
-            await gameReady.promise;
+            // Yield the canvas before the Unity splash, but keep bindings
+            // behind the later main-menu readiness signal.
+            await handOffThreeBossesCanvas(gameReady, onCanvasOwned);
             configureThreeBossesTouchControls(instance);
             releaseVisibility = bindUnityVisibility(instance);
             releaseSubmissionBridge = bindThreeBossesSubmissionBridge(instance, submitRun);

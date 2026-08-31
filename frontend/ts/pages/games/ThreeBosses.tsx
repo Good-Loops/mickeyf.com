@@ -42,6 +42,7 @@ const ThreeBosses: React.FC = () => {
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const frameRef = useRef<HTMLDivElement | null>(null);
     const [loadState, setLoadState] = useState<LoadState>({ kind: 'loading', progress: 0 });
+    const [hasUnityCanvasControl, setHasUnityCanvasControl] = useState(false);
 
     useEffect(() => {
         const canvas = canvasRef.current;
@@ -51,6 +52,8 @@ const ThreeBosses: React.FC = () => {
         let cancelled = false;
         let handle: UnityWebGlHandle | null = null;
 
+        setHasUnityCanvasControl(false);
+
         (async () => {
             try {
                 const submissionGatePromise = readSubmissionGate(controller.signal);
@@ -59,6 +62,9 @@ const ThreeBosses: React.FC = () => {
                     signal: controller.signal,
                     onProgress: (progress) => {
                         if (!cancelled) setLoadState({ kind: 'loading', progress });
+                    },
+                    onCanvasOwned: () => {
+                        if (!cancelled) setHasUnityCanvasControl(true);
                     },
                     submitRun: submitThreeBossesRun,
                 });
@@ -99,6 +105,8 @@ const ThreeBosses: React.FC = () => {
     const progressPercent = loadState.kind === 'loading'
         ? Math.round(loadState.progress * 100)
         : 100;
+    const showStatus = loadState.kind === 'error'
+        || (loadState.kind === 'loading' && !hasUnityCanvasControl);
 
     return (
         <section className="three-bosses">
@@ -122,7 +130,7 @@ const ThreeBosses: React.FC = () => {
                     width={960}
                 />
 
-                {loadState.kind !== 'running' && (
+                {showStatus && (
                     <div className="three-bosses__status" role={loadState.kind === 'error' ? 'alert' : 'status'}>
                         {loadState.kind === 'loading'
                             ? `Loading Three Bosses… ${progressPercent}%`
