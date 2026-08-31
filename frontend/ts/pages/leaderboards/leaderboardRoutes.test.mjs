@@ -134,6 +134,10 @@ function renderDetail(path, state) {
     );
 }
 
+function assertDetailSurface(html) {
+    assert.match(html, /class="leaderboard leaderboard--detail"/);
+}
+
 function findElement(node, predicate) {
     if (!React.isValidElement(node)) {
         return null;
@@ -229,21 +233,30 @@ test('hub catalog request can retry the same loader after a transient error', as
 });
 
 test('direct p4-Vega route renders success, empty, and error states', () => {
+    const loadingHtml = renderDetail('/leaderboards/p4-vega', {
+        status: 'loading',
+    });
+    assertDetailSurface(loadingHtml);
+    assert.match(loadingHtml, /Loading leaderboard…/);
+
     const successHtml = renderDetail('/leaderboards/p4-vega', {
         status: 'success',
         game: p4VegaGame,
         leaderboard: p4VegaLeaderboard,
     });
+    assertDetailSurface(successHtml);
     assert.match(successHtml, /id="game-leaderboard-title"/);
     assert.match(successHtml, />p4-Vega<\/h1>/);
     assert.match(successHtml, /Vega Pilot/);
     assert.match(successHtml, /12,345/);
+    assert.doesNotMatch(successHtml, /Game leaderboard|Leaderboard status/);
 
     const emptyHtml = renderDetail('/leaderboards/p4-vega', {
         status: 'success',
         game: p4VegaGame,
         leaderboard: { ...p4VegaLeaderboard, entries: [] },
     });
+    assertDetailSurface(emptyHtml);
     assert.match(emptyHtml, /No results yet/);
     assert.match(emptyHtml, /No results have been recorded/);
 
@@ -252,6 +265,7 @@ test('direct p4-Vega route renders success, empty, and error states', () => {
         game: p4VegaGame,
         message: 'Scores are taking a tea break.',
     });
+    assertDetailSurface(errorHtml);
     assert.match(errorHtml, /p4-Vega leaderboard unavailable/);
     assert.match(errorHtml, /Scores are taking a tea break\./);
     assert.match(errorHtml, />Try again<\/button>/);
@@ -263,6 +277,7 @@ test('direct Three Bosses route renders success, empty, and error states', () =>
         game: threeBossesGame,
         leaderboard: threeBossesLeaderboard,
     });
+    assertDetailSurface(successHtml);
     assert.match(successHtml, />Three Bosses<\/h1>/);
     assert.match(successHtml, /Boss Hunter/);
     assert.match(successHtml, /1:01\.234/);
@@ -273,6 +288,7 @@ test('direct Three Bosses route renders success, empty, and error states', () =>
         game: threeBossesGame,
         leaderboard: { ...threeBossesLeaderboard, entries: [] },
     });
+    assertDetailSurface(emptyHtml);
     assert.match(emptyHtml, /No results yet/);
     assert.match(emptyHtml, /Three Bosses score submission is not open yet/);
 
@@ -281,6 +297,7 @@ test('direct Three Bosses route renders success, empty, and error states', () =>
         game: threeBossesGame,
         message: 'Runs could not be loaded.',
     });
+    assertDetailSurface(errorHtml);
     assert.match(errorHtml, /Three Bosses leaderboard unavailable/);
     assert.match(errorHtml, /Runs could not be loaded\./);
     assert.match(errorHtml, />Try again<\/button>/);
@@ -292,6 +309,7 @@ test('unknown direct route renders not-found recovery links', () => {
         games: catalog.games,
     });
 
+    assertDetailSurface(html);
     assert.match(html, /Leaderboard not found/);
     assert.match(html, /No leaderboard matches “not-a-game”/);
     assert.match(html, /href="\/leaderboards"/);

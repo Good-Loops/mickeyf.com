@@ -88,28 +88,6 @@ export async function loadGameLeaderboardState(
     }
 }
 
-function formatRankState(game: LeaderboardCatalogGame): string {
-    switch (game.rankState) {
-        case 'ranked':
-            return 'Ranked';
-        case 'unranked':
-            return 'Unranked';
-        case 'not-applicable':
-            return 'High scores';
-    }
-}
-
-function formatSubmissionState(game: LeaderboardCatalogGame): string {
-    switch (game.submissionState) {
-        case 'enabled':
-            return 'Submissions open';
-        case 'disabled':
-            return 'Submissions disabled';
-        case 'legacy-only':
-            return 'In-game submissions';
-    }
-}
-
 function formatCompletionTime(milliseconds: number): string {
     const hours = Math.floor(milliseconds / 3_600_000);
     const minutes = Math.floor((milliseconds % 3_600_000) / 60_000);
@@ -240,7 +218,10 @@ export function GameLeaderboardView({
 
     if (state.status === 'loading') {
         return (
-            <section className="leaderboard" aria-labelledby="leaderboard-loading-title">
+            <section
+                className="leaderboard leaderboard--detail"
+                aria-labelledby="leaderboard-loading-title"
+            >
                 <div className="leaderboard__state" role="status" aria-live="polite">
                     <RouteHeading
                         id="leaderboard-loading-title"
@@ -255,7 +236,10 @@ export function GameLeaderboardView({
 
     if (state.status === 'not-found') {
         return (
-            <section className="leaderboard" aria-labelledby="leaderboard-not-found-title">
+            <section
+                className="leaderboard leaderboard--detail"
+                aria-labelledby="leaderboard-not-found-title"
+            >
                 <div className="leaderboard__state leaderboard__state--error" role="alert">
                     <RouteHeading
                         id="leaderboard-not-found-title"
@@ -283,7 +267,10 @@ export function GameLeaderboardView({
 
     if (state.status === 'error') {
         return (
-            <section className="leaderboard" aria-labelledby="leaderboard-error-title">
+            <section
+                className="leaderboard leaderboard--detail"
+                aria-labelledby="leaderboard-error-title"
+            >
                 <div className="leaderboard__state leaderboard__state--error" role="alert">
                     <RouteHeading
                         id="leaderboard-error-title"
@@ -310,12 +297,14 @@ export function GameLeaderboardView({
     }
 
     return (
-        <section className="leaderboard" aria-labelledby="game-leaderboard-title">
+        <section
+            className="leaderboard leaderboard--detail"
+            aria-labelledby="game-leaderboard-title"
+        >
             <header className="leaderboard__header leaderboard__header--detail">
                 <Link className="leaderboard__back-link" to="/leaderboards">
                     ← All leaderboards
                 </Link>
-                <p className="leaderboard__eyebrow">Game leaderboard</p>
                 <RouteHeading
                     id="game-leaderboard-title"
                     className="leaderboard__title"
@@ -323,10 +312,6 @@ export function GameLeaderboardView({
                 >
                     {state.game.displayName}
                 </RouteHeading>
-                <div className="leaderboard__badges" aria-label="Leaderboard status">
-                    <span>{formatRankState(state.game)}</span>
-                    <span>{formatSubmissionState(state.game)}</span>
-                </div>
             </header>
 
             <LeaderboardTable game={state.game} leaderboard={state.leaderboard} />
