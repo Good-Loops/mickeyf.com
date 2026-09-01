@@ -200,6 +200,25 @@ test('falls back for an explicitly unsupported native request', async () => {
     assert.equal(isCanvasFullscreen(target, fullscreenDocument), true);
 });
 
+test('does not enable the fallback when an unsupported request rejects after disconnection', async () => {
+    const target = createElement();
+    const fullscreenDocument = createDocument([target]);
+
+    target.requestFullscreen = async () => {
+        target.isConnected = false;
+        const error = new Error('Unsupported');
+        error.name = 'NotSupportedError';
+        throw error;
+    };
+
+    assert.equal(await toggleCanvasFullscreen(target, fullscreenDocument), false);
+    assert.equal(target.getAttribute(CANVAS_FULLSCREEN_FALLBACK_ATTRIBUTE), null);
+    assert.equal(
+        fullscreenDocument.documentElement.classList.contains(CANVAS_FULLSCREEN_ROOT_CLASS),
+        false,
+    );
+});
+
 test('does not hide a native permission denial behind the CSS fallback', async () => {
     const target = createElement();
     const fullscreenDocument = createDocument([target]);

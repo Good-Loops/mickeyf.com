@@ -242,6 +242,7 @@ export const enterCanvasFullscreen = async (
         return true;
     } catch (error) {
         if (!isUnsupportedFullscreenError(error)) throw error;
+        if (!isFullscreenTargetConnected(target)) return false;
 
         enableCanvasFullscreenFallback(target, fullscreenDocument);
         return true;
