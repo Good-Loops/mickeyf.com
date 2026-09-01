@@ -255,6 +255,9 @@ namespace ThreeBosses.Tests
             Assert.That(pauseMenu.interactable, Is.True);
             Assert.That(pauseMenu.blocksRaycasts, Is.True);
             Assert.That(playerInput.enabled, Is.False);
+            Assert.That(
+                EventSystem.current?.currentSelectedGameObject,
+                Is.SameAs(resumeButton.gameObject));
 
             resumeButton.onClick.Invoke();
             yield return null;
@@ -262,6 +265,10 @@ namespace ThreeBosses.Tests
             Assert.That(GetProperty<bool>(service, "IsPausedByUser"), Is.False);
             Assert.That(pauseMenu.alpha, Is.EqualTo(0f));
             Assert.That(playerInput.enabled, Is.True);
+            Assert.That(
+                EventSystem.current?.currentSelectedGameObject,
+                Is.Null,
+                "Gameplay must not retain a selectable UI target because Enter is bound to Fire.");
 
             playerInput.enabled = false;
             pauseButton.onClick.Invoke();

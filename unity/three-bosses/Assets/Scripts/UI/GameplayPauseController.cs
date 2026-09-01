@@ -85,7 +85,8 @@ public sealed class GameplayPauseController : MonoBehaviour
         RestorePlayerInput();
         SetPauseMenuVisible(false);
         RefreshPauseButton();
-        EventSystem.current?.SetSelectedGameObject(pauseButton?.gameObject);
+        // Enter is both Fire and UI Submit, so gameplay must not retain a selected button.
+        EventSystem.current?.SetSelectedGameObject(null);
     }
 
     public void ReturnToMainMenu()
