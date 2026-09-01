@@ -23,6 +23,50 @@ const SUBMISSION_GATE_RETRY_DELAY_MS = 750;
 
 type LeaderboardCatalogReader = typeof getLeaderboardCatalog;
 
+type ThreeBossesLoadingStatusProps = Readonly<{
+    progressPercent: number;
+}>;
+
+const clampProgressPercent = (progressPercent: number): number => (
+    Math.min(100, Math.max(0, Math.round(progressPercent)))
+);
+
+export const ThreeBossesLoadingStatus: React.FC<ThreeBossesLoadingStatusProps> = ({
+    progressPercent,
+}) => {
+    const normalizedProgress = clampProgressPercent(progressPercent);
+
+    return (
+        <div className="three-bosses__loading">
+            <span className="three-bosses__loading-eyebrow">Preparing arena</span>
+            <div className="three-bosses__loading-bosses" aria-hidden="true">
+                <span className="three-bosses__loading-boss three-bosses__loading-boss--bee">I</span>
+                <span className="three-bosses__loading-boss three-bosses__loading-boss--cyborg">II</span>
+                <span className="three-bosses__loading-boss three-bosses__loading-boss--kraken">III</span>
+            </div>
+            <span className="three-bosses__loading-title">Three Bosses</span>
+            <div className="three-bosses__loading-progress">
+                <div
+                    aria-label="Loading Three Bosses"
+                    aria-valuemax={100}
+                    aria-valuemin={0}
+                    aria-valuenow={normalizedProgress}
+                    className="three-bosses__loading-track"
+                    role="progressbar"
+                >
+                    <span
+                        className="three-bosses__loading-fill"
+                        style={{ width: `${normalizedProgress}%` }}
+                    />
+                </div>
+                <span className="three-bosses__loading-percent" aria-hidden="true">
+                    {normalizedProgress}%
+                </span>
+            </div>
+        </div>
+    );
+};
+
 const describeLoadError = (error: unknown): string => {
     if (error instanceof Error && error.message) return error.message;
     if (typeof error === 'string' && error.trim()) return error;
@@ -194,10 +238,23 @@ const ThreeBosses: React.FC = () => {
                 />
 
                 {showStatus && (
-                    <div className="three-bosses__status" role={loadState.kind === 'error' ? 'alert' : 'status'}>
-                        {loadState.kind === 'loading'
-                            ? `Loading Three Bosses… ${progressPercent}%`
-                            : loadState.message}
+                    <div
+                        aria-atomic="true"
+                        className="three-bosses__status"
+                        role={loadState.kind === 'error' ? 'alert' : 'status'}
+                    >
+                        {loadState.kind === 'loading' ? (
+                            <ThreeBossesLoadingStatus progressPercent={progressPercent} />
+                        ) : (
+                            <div className="three-bosses__load-error">
+                                <span className="three-bosses__load-error-title">
+                                    Startup interrupted
+                                </span>
+                                <span className="three-bosses__load-error-message">
+                                    {loadState.message}
+                                </span>
+                            </div>
+                        )}
                     </div>
                 )}
 

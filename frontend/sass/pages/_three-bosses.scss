@@ -1,5 +1,8 @@
 @use '../abstracts' as *;
 
+$three-bosses-red: hsl(4, 84%, 58%);
+$three-bosses-violet: hsl(274, 88%, 68%);
+
 .three-bosses {
     display: grid;
     justify-items: center;
@@ -74,15 +77,225 @@
         inset: .45rem;
         display: grid;
         place-items: center;
-        padding: 2rem;
+        isolation: isolate;
+        overflow: hidden;
+        padding: clamp(1rem, 3vw, 2rem);
         border-radius: .8rem;
         color: rgba($white, .82);
-        background: rgba($space-background, .86);
+        background:
+            radial-gradient(circle at 19% 50%, rgba($secondary, .1), transparent 30%),
+            radial-gradient(circle at 50% 50%, rgba($three-bosses-red, .1), transparent 27%),
+            radial-gradient(circle at 81% 50%, rgba($three-bosses-violet, .1), transparent 30%),
+            linear-gradient(145deg, rgba($space-background, .94), rgba($space-background-soft, .9));
         font-size: $font-size-xxs;
         line-height: 1.45;
         text-align: center;
         backdrop-filter: blur(1rem);
         pointer-events: none;
+
+        &::before {
+            content: '';
+            position: absolute;
+            inset: 0;
+            z-index: -1;
+            background-image:
+                linear-gradient(rgba($primary-light, .035) .1rem, transparent .1rem),
+                linear-gradient(90deg, rgba($primary-light, .035) .1rem, transparent .1rem);
+            background-size: 2.4rem 2.4rem;
+            mask-image: radial-gradient(ellipse at center, black 0 24%, transparent 72%);
+            opacity: .8;
+        }
+
+        &::after {
+            content: '';
+            position: absolute;
+            inset: 0;
+            z-index: -1;
+            border: .1rem solid rgba($white, .05);
+            border-radius: inherit;
+            box-shadow: inset 0 0 3rem rgba(black, .42);
+        }
+    }
+
+    &__loading,
+    &__load-error {
+        position: relative;
+        z-index: 1;
+        width: min(78%, 48rem);
+        border: .1rem solid rgba($white, .13);
+        border-radius: .9rem;
+        background:
+            linear-gradient(90deg, rgba($secondary, .55), transparent) left top / 38% .1rem no-repeat,
+            linear-gradient(180deg, rgba($secondary, .42), transparent) left top / .1rem 56% no-repeat,
+            linear-gradient(270deg, rgba($three-bosses-violet, .55), transparent) right bottom / 38% .1rem no-repeat,
+            linear-gradient(0deg, rgba($three-bosses-violet, .42), transparent) right bottom / .1rem 56% no-repeat,
+            rgba($space-background, .46);
+        box-shadow:
+            0 1.4rem 3.2rem rgba(black, .28),
+            inset 0 .1rem 0 rgba($white, .07);
+        backdrop-filter: blur(1rem) saturate(120%);
+        -webkit-backdrop-filter: blur(1rem) saturate(120%);
+    }
+
+    &__loading {
+        display: grid;
+        justify-items: center;
+        padding: clamp(1.3rem, 3vw, 2.6rem) clamp(1.5rem, 4vw, 3.4rem);
+    }
+
+    &__loading-eyebrow {
+        color: rgba($primary-light, .56);
+        font-family: $heading-font;
+        font-size: .88rem;
+        font-weight: 700;
+        letter-spacing: .2em;
+        text-transform: uppercase;
+    }
+
+    &__loading-bosses {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        width: min(70%, 17rem);
+        margin-block: .7rem .45rem;
+
+        &::before {
+            content: '';
+            position: absolute;
+            top: 50%;
+            right: 1.2rem;
+            left: 1.2rem;
+            height: .1rem;
+            background: linear-gradient(
+                90deg,
+                rgba($secondary, .42),
+                rgba($three-bosses-red, .5),
+                rgba($three-bosses-violet, .42)
+            );
+            box-shadow: 0 0 .8rem rgba($primary, .15);
+        }
+    }
+
+    &__loading-boss {
+        position: relative;
+        z-index: 1;
+        display: grid;
+        place-items: center;
+        width: 2.35rem;
+        aspect-ratio: 1;
+        border: .1rem solid currentcolor;
+        border-radius: 50%;
+        background: rgba($space-background, .9);
+        font-family: $heading-font;
+        font-size: .7rem;
+        font-weight: 700;
+        animation: three-bosses-loading-breathe 3.8s ease-in-out infinite;
+
+        &--bee {
+            color: rgba($secondary-light, .9);
+            box-shadow: 0 0 1rem rgba($secondary, .28);
+            animation-delay: -2.4s;
+        }
+
+        &--cyborg {
+            width: 2.7rem;
+            color: rgba($three-bosses-red, .94);
+            box-shadow: 0 0 1.15rem rgba($three-bosses-red, .3);
+            animation-delay: -1.2s;
+        }
+
+        &--kraken {
+            color: rgba($three-bosses-violet, .92);
+            box-shadow: 0 0 1rem rgba($three-bosses-violet, .3);
+        }
+    }
+
+    &__loading-title {
+        color: rgba($white, .9);
+        font-family: $game-font;
+        font-size: clamp(1.55rem, 3.6vw, 2.4rem);
+        font-weight: 700;
+        letter-spacing: .12em;
+        line-height: 1;
+        text-transform: uppercase;
+        text-shadow: 0 0 1.2rem rgba($primary-light, .14);
+    }
+
+    &__loading-progress {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr) auto;
+        align-items: center;
+        gap: .9rem;
+        width: 100%;
+        margin-top: 1rem;
+    }
+
+    &__loading-track {
+        height: .55rem;
+        overflow: hidden;
+        border: .1rem solid rgba($white, .11);
+        border-radius: 100vw;
+        background: rgba(black, .34);
+        box-shadow: inset 0 .1rem .35rem rgba(black, .55);
+    }
+
+    &__loading-fill {
+        position: relative;
+        display: block;
+        height: 100%;
+        overflow: hidden;
+        border-radius: inherit;
+        background: linear-gradient(
+            90deg,
+            rgba($secondary, .9),
+            rgba($three-bosses-red, .94) 52%,
+            rgba($three-bosses-violet, .94)
+        );
+        box-shadow: 0 0 1rem rgba($primary, .28);
+        transition: width .18s ease-out;
+
+        &::after {
+            content: '';
+            position: absolute;
+            inset-block: 0;
+            left: -45%;
+            width: 38%;
+            background: linear-gradient(90deg, transparent, rgba($white, .72), transparent);
+            animation: three-bosses-loading-scan 1.9s linear infinite;
+        }
+    }
+
+    &__loading-percent {
+        min-width: 3.1rem;
+        color: rgba($primary-light, .72);
+        font-family: $heading-font;
+        font-size: .9rem;
+        font-weight: 700;
+        letter-spacing: .06em;
+        text-align: right;
+    }
+
+    &__load-error {
+        display: grid;
+        gap: .55rem;
+        padding: clamp(1.5rem, 4vw, 2.4rem);
+        border-color: rgba($three-bosses-red, .28);
+    }
+
+    &__load-error-title {
+        color: rgba($white, .9);
+        font-family: $game-font;
+        font-size: 1.35rem;
+        font-weight: 700;
+        letter-spacing: .08em;
+        text-transform: uppercase;
+    }
+
+    &__load-error-message {
+        color: rgba($primary-light, .68);
+        font-size: 1rem;
+        line-height: 1.5;
     }
 
     &__orientation-hint { display: none; }
@@ -155,6 +368,26 @@
     }
 }
 
+@keyframes three-bosses-loading-breathe {
+    0%,
+    100% {
+        filter: brightness(.78);
+        opacity: .66;
+        transform: scale(.94);
+    }
+
+    50% {
+        filter: brightness(1.18);
+        opacity: 1;
+        transform: scale(1.06);
+    }
+}
+
+@keyframes three-bosses-loading-scan {
+    from { transform: translateX(0); }
+    to { transform: translateX(390%); }
+}
+
 @include portrait-at-most($bp-s) {
     .three-bosses {
         gap: .8rem;
@@ -177,6 +410,36 @@
             width: 2.75rem;
             height: 2.75rem;
             padding: .4rem;
+        }
+
+        &__loading,
+        &__load-error {
+            width: min(88%, 29rem);
+        }
+
+        &__loading {
+            padding: 1.1rem 1.3rem;
+        }
+
+        &__loading-bosses {
+            margin-block: .55rem .35rem;
+        }
+
+        &__loading-progress {
+            margin-top: .8rem;
+        }
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .three-bosses {
+        &__loading-boss,
+        &__loading-fill::after {
+            animation: none;
+        }
+
+        &__loading-fill {
+            transition: none;
         }
     }
 }

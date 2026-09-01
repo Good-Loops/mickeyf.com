@@ -24,6 +24,7 @@ const {
     readThreeBossesSubmissionGate,
     ThreeBossesAvailabilityGate,
     ThreeBossesDesktopOnly,
+    ThreeBossesLoadingStatus,
 } = await viteServer.ssrLoadModule(
     '/ts/pages/games/ThreeBosses.tsx',
 );
@@ -76,6 +77,22 @@ test('the mobile direct-route surface does not render a Unity canvas', () => {
 
     assert.match(html, /currently available on desktop only/);
     assert.doesNotMatch(html, /<canvas/);
+});
+
+test('the branded loading surface exposes real, normalized progress without a heavy image', () => {
+    const html = renderToStaticMarkup(
+        React.createElement(ThreeBossesLoadingStatus, { progressPercent: 41.6 }),
+    );
+
+    assert.match(html, /Preparing arena/);
+    assert.match(html, /Three Bosses/);
+    assert.match(html, /aria-label="Loading Three Bosses"/);
+    assert.match(html, /aria-valuemin="0"/);
+    assert.match(html, /aria-valuemax="100"/);
+    assert.match(html, /aria-valuenow="42"/);
+    assert.match(html, /width:42%/);
+    assert.match(html, />42%<\/span>/);
+    assert.doesNotMatch(html, /<img/);
 });
 
 test('signed-out players are told to authenticate before starting a ranked run', () => {

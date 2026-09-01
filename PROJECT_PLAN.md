@@ -644,13 +644,12 @@ build was loaded and browser-verified on 2026-09-01; countdown timing and
 legitimate airborne-to-ground landing feedback remain covered by regression
 tests.
 
-Optional future Three Bosses presentation polish: replace the functional WebGL
-loading surface with a more distinctive, on-theme loading screen. Keep the
-displayed progress tied to real loader progress, preserve useful failure states,
-and keep the artwork lightweight enough that it does not delay the game it
-introduces. The prerequisite handoff is complete: the React loading surface now
-releases before Unity's `Made with Unity` splash, so the two layers no longer
-overlap.
+Three Bosses loading presentation polish was completed on 2026-09-01. The
+lightweight, CSS-only glass surface uses the three encounter colors, geometric
+signals, and Unity's real loading progress without adding a duplicate image
+download. Errors retain a dedicated alert surface, reduced-motion users keep a
+static presentation, and the React layer releases before Unity's `Made with
+Unity` splash so the two layers never overlap.
 
 Website presentation polish: **completed and browser-verified on 2026-08-25**.
 At a 1920 × 1080 desktop viewport, the Three Bosses frame now matches the
