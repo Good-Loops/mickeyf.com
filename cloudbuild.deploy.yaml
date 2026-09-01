@@ -910,6 +910,8 @@ steps:
             json.dump(message, handle)
         PY
 
+  # Cloud Build caps each args value at 10,000 characters, so the Python probe
+  # is carried in two bounded arguments and reconstructed on stdin.
   - id: 'Smoke test tagged candidate anonymously'
     name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:alpine@sha256:de1a989b158694a614852e7b53673097da3bdb394b8186d6102386b7a10d73c7'
     entrypoint: 'bash'
@@ -921,7 +923,9 @@ steps:
 
         readonly STATE_JSON='/workspace/verified-stage-a.json'
         readonly SERVICE_JSON='/workspace/service-after.json'
-        python3 - "$$STATE_JSON" "$$SERVICE_JSON" <<'PY'
+        printf '%s%s' "$$1" "$$2" | python3 - "$$STATE_JSON" "$$SERVICE_JSON"
+      - '_'
+      - |2
         import json
         import errno
         import math
@@ -1096,6 +1100,7 @@ steps:
         if not no_store(auth_headers) or auth_headers.get_all("Set-Cookie"):
             reject("anonymous authentication response headers are unsafe")
 
+      - |2
         catalog, catalog_headers = request("/api/leaderboards", 200)
         expected_catalog = {
             "success": True,
@@ -1255,7 +1260,6 @@ steps:
         if not no_store(board_headers) or board_headers.get_all("Set-Cookie"):
             reject("leaderboard response headers are unsafe")
         print("Tagged candidate anonymous HTTP and database-read smoke tests passed.")
-        PY
     timeout: '120s'
 
   - id: 'Plan bounded candidate tag expiry'
