@@ -35,6 +35,8 @@ const readNativeFullscreenElement = (
     ?? null
 );
 
+const isFullscreenTargetConnected = (target: HTMLElement): boolean => target.isConnected;
+
 export const isCanvasFullscreenFallback = (target: HTMLElement): boolean => (
     target.getAttribute(CANVAS_FULLSCREEN_FALLBACK_ATTRIBUTE)
     === CANVAS_FULLSCREEN_FALLBACK_VALUE
@@ -214,7 +216,7 @@ export const enterCanvasFullscreen = async (
     fullscreenDocument: WebKitFullscreenDocument = document,
     confirmationTimeoutMs: number = NATIVE_FULLSCREEN_CONFIRMATION_TIMEOUT_MS,
 ): Promise<boolean> => {
-    if (target.isConnected === false) {
+    if (!isFullscreenTargetConnected(target)) {
         throw new TypeError('The fullscreen target is not connected to the document.');
     }
 
@@ -232,6 +234,8 @@ export const enterCanvasFullscreen = async (
             fullscreenDocument,
             confirmationTimeoutMs,
         )) {
+            if (!isFullscreenTargetConnected(target)) return false;
+
             enableCanvasFullscreenFallback(target, fullscreenDocument);
             watchForLateNativeFullscreen(target, fullscreenDocument);
         }

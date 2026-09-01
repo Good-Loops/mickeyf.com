@@ -26,6 +26,7 @@ const createElement = () => {
         children: [],
         getAttribute: (name) => attributes.get(name) ?? null,
         hasAttribute: (name) => attributes.has(name),
+        isConnected: true,
         parentElement: null,
         removeAttribute: (name) => attributes.delete(name),
         setAttribute: (name, value) => attributes.set(name, value),
@@ -137,6 +138,24 @@ test('falls back when a prefixed WebKit request silently fails to enter fullscre
     assert.equal(
         target.getAttribute(CANVAS_FULLSCREEN_FALLBACK_ATTRIBUTE),
         CANVAS_FULLSCREEN_FALLBACK_VALUE,
+    );
+});
+
+test('does not enable the fallback after its target disconnects while awaiting confirmation', async () => {
+    const target = createElement();
+    const fullscreenDocument = createDocument([target]);
+
+    target.webkitRequestFullscreen = () => {
+        setTimeout(() => {
+            target.isConnected = false;
+        }, 0);
+    };
+
+    assert.equal(await toggleCanvasFullscreen(target, fullscreenDocument, 10), false);
+    assert.equal(target.getAttribute(CANVAS_FULLSCREEN_FALLBACK_ATTRIBUTE), null);
+    assert.equal(
+        fullscreenDocument.documentElement.classList.contains(CANVAS_FULLSCREEN_ROOT_CLASS),
+        false,
     );
 });
 
