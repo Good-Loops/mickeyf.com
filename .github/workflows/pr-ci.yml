@@ -46,6 +46,9 @@ jobs:
           npm --prefix backend ci --no-audit
           npm --prefix .github/firebase-deploy ci --ignore-scripts --no-audit --no-fund
 
+      - name: Validate Firebase deploy dependency tree
+        run: npm --prefix .github/firebase-deploy ls --omit=dev
+
       - name: Audit npm dependencies
         run: |
           npm audit --audit-level=low
@@ -62,6 +65,17 @@ jobs:
         run: |
           npm --prefix frontend test
           npm --prefix frontend run build
+
+      - name: Reject development-only Three Bosses UI from release bundle
+        run: |
+          if grep -R -F -n -- "Local WebGL playability prototype" frontend/dist/index.html frontend/dist/assets; then
+            echo "The release bundle contains the development-only Three Bosses notice." >&2
+            exit 1
+          fi
+          if grep -R -F -n -- "/__local/three-bosses/" frontend/dist/index.html frontend/dist/assets; then
+            echo "The release bundle contains the local Three Bosses asset path." >&2
+            exit 1
+          fi
 
       - name: Test local WebGL tooling
         run: |

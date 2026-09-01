@@ -111,7 +111,7 @@ export function createMainController({
             ...sessionCookieOptions(isProduction),
             maxAge: SESSION_MAX_AGE_MS,
         });
-        return res.json({ success: true, token, user_name: user.user_name });
+        return res.json({ success: true, user_name: user.user_name });
     }
 
     async function submitScore(req: Request, res: Response) {

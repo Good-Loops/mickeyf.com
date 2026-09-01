@@ -565,8 +565,13 @@ output outside the repository at
 `%LOCALAPPDATA%\mickeyf.com\three-bosses-webgl`, serve it only on loopback at
 `127.0.0.1:4174`, and proxy it through the Vite development server at
 `/__local/three-bosses/`. Register the card and route only when both
-`import.meta.env.DEV` and `VITE_ENABLE_THREE_BOSSES_LOCAL=1` are true. Keep the
-flag unset in CI and production builds. The integration must:
+`import.meta.env.DEV` and `VITE_ENABLE_THREE_BOSSES_LOCAL=1` are true. Release
+builds instead require both `import.meta.env.PROD` and
+`VITE_ENABLE_THREE_BOSSES_RELEASE=1`, and load the packaged same-origin player
+from `/unity/three-bosses/`. The local prototype notice and
+`/__local/three-bosses/` path are development-only; PR and Firebase release
+workflows reject a production bundle containing either one. The integration
+must:
 
 - add a Three Bosses entry to the local Games page and a dedicated game page
   that follows the existing site's layout, typography, spacing, controls, and
@@ -772,6 +777,10 @@ custom cursor continuity, and a static reduced-motion-safe panel. Its existing
 authentication requests, alerts, loading guard, and success redirect remain
 unchanged. The companion Sign up pass replaces `/register` with `/signup` and
 retires the legacy form mixin without changing the registration contract.
+Alpha 0.6.0 authentication hardening keeps the login JWT exclusively in the
+signed HTTP-only session cookie; the successful login JSON now returns only
+`success` and `user_name`. Existing cookie authentication and the backend's
+Bearer-token compatibility path remain unchanged.
 
 An optional **Stay signed in for 30 days** Login control is approved but still
 open. Unchecked sessions must retain the current four-hour lifetime; checked

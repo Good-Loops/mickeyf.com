@@ -128,7 +128,7 @@ export type SignupResponse = { success: true } | ApiError;
 
 /** @category Backend — DTOs */
 export type LoginResponse =
-    | { success: true; token: string; user_name: string }
+    | { success: true; user_name: string }
     | ApiError;
 
 /**
@@ -158,7 +158,8 @@ export type GetLeaderboardResponse =
  * POST /users response body.
  *
  * Notes:
- * - Response is operation-dependent and may include success flags, tokens, leaderboards, or error codes.
+ * - Response is operation-dependent and may include success flags, user data, leaderboards, or error codes.
+ * - Successful login stores the session JWT only in the signed HTTP-only cookie; the JSON body never exposes it.
  *
  * @category Backend — DTOs
  */

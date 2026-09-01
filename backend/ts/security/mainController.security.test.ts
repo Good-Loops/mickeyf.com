@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import bcrypt from 'bcryptjs';
-import { Request, Response } from 'express';
+import { CookieOptions, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { Pool, PoolConnection } from 'mysql2/promise';
 import { createMainController } from '../controllers/mainController';
@@ -12,7 +12,7 @@ function responseRecorder() {
     const state: {
         status: number;
         body?: Record<string, unknown>;
-        cookie?: { name: string; value: string; options: unknown };
+        cookie?: { name: string; value: string; options: CookieOptions };
     } = { status: 200 };
     const response = {
         status(status: number) {
@@ -23,7 +23,7 @@ function responseRecorder() {
             state.body = body;
             return this;
         },
-        cookie(name: string, value: string, options: unknown) {
+        cookie(name: string, value: string, options: CookieOptions) {
             state.cookie = { name, value, options };
             return this;
         },
@@ -106,7 +106,7 @@ test('database failures reject for the async wrapper and central error handler',
     );
 });
 
-test('successful login preserves the JWT response and signed session cookie contract', async () => {
+test('successful login keeps the JWT only in the signed session cookie', async () => {
     const passwordHash = await bcrypt.hash('valid-password', 4);
     const database = {
         query: async () => [[{
@@ -124,12 +124,20 @@ test('successful login preserves the JWT response and signed session cookie cont
         user_password: 'valid-password',
     }), response);
 
-    assert.equal(state.body?.success, true);
-    assert.equal(state.body?.user_name, 'player');
-    assert.equal(typeof state.body?.token, 'string');
+    assert.deepEqual(state.body, { success: true, user_name: 'player' });
     assert.equal(state.cookie?.name, 'session');
-    assert.equal(state.cookie?.value, state.body?.token);
-    const decoded = jwt.verify(state.body?.token as string, sessionSecret, {
+    assert.deepEqual(state.cookie?.options, {
+        httpOnly: true,
+        secure: false,
+        sameSite: 'lax',
+        signed: true,
+        priority: 'high',
+        path: '/',
+        maxAge: 4 * 60 * 60 * 1000,
+    });
+    const cookieToken = state.cookie?.value;
+    assert.equal(typeof cookieToken, 'string');
+    const decoded = jwt.verify(cookieToken as string, sessionSecret, {
         algorithms: ['HS256'],
     });
     if (typeof decoded === 'string') {

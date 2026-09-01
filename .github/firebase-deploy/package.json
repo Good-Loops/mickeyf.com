@@ -13,6 +13,7 @@
   },
   "dependencies": {
     "firebase-tools": "15.28.1",
+    "picomatch": "4.0.4",
     "playwright-core": "1.62.1"
   },
   "overrides": {

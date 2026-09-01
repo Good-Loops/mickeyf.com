@@ -1,11 +1,12 @@
 /**
  * Shared request authentication for endpoints that accept the login JWT.
  *
- * The login flow stores the JWT in a signed `session` cookie and also returns it
- * for legacy Bearer-token callers. Cookie-parser verifies the outer cookie
- * signature before placing the token in `req.signedCookies`; this module then
- * verifies the JWT signature and validates the identity claims before exposing
- * them to application code.
+ * The login flow stores the JWT only in a signed `session` cookie; the JSON
+ * response does not expose it. Cookie-parser verifies the outer cookie signature
+ * before placing the token in `req.signedCookies`; this module then verifies the
+ * JWT signature and validates the identity claims before exposing them to
+ * application code. Bearer verification remains as a compatibility path for
+ * callers that already possess a valid token.
  */
 import { Request } from 'express';
 import jwt from 'jsonwebtoken';

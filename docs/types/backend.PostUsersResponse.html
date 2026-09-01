@@ -15,11 +15,12 @@
 <div class="tsd-comment tsd-typography"><p>POST /users response body.</p>
 <p>Notes:</p>
 <ul>
-<li>Response is operation-dependent and may include success flags, tokens, leaderboards, or error codes.</li>
+<li>Response is operation-dependent and may include success flags, user data, leaderboards, or error codes.</li>
+<li>Successful login stores the session JWT only in the signed HTTP-only cookie; the JSON body never exposes it.</li>
 </ul>
 </div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/Good-Loops/mickeyf.com/blob/main/backend/ts/routers/mainRouter.contract.ts#L165">backend/ts/routers/mainRouter.contract.ts:165</a></li></ul></aside></div>
+<li>Defined in <a href="https://github.com/Good-Loops/mickeyf.com/blob/main/backend/ts/routers/mainRouter.contract.ts#L166">backend/ts/routers/mainRouter.contract.ts:166</a></li></ul></aside></div>
 <div class="col-sidebar">
 <div class="page-menu">
 <div class="tsd-navigation settings">

@@ -64,6 +64,17 @@ jobs:
           VITE_PROD_API_URL: https://mickeyf-org-j7yuum4tiq-uc.a.run.app
           VITE_ENABLE_THREE_BOSSES_RELEASE: "1"
 
+      - name: Reject development-only Three Bosses UI from release bundle
+        run: |
+          if grep -R -F -n -- "Local WebGL playability prototype" frontend/dist/index.html frontend/dist/assets; then
+            echo "The release bundle contains the development-only Three Bosses notice." >&2
+            exit 1
+          fi
+          if grep -R -F -n -- "/__local/three-bosses/" frontend/dist/index.html frontend/dist/assets; then
+            echo "The release bundle contains the local Three Bosses asset path." >&2
+            exit 1
+          fi
+
       - name: Upload immutable frontend artifact
         id: upload
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
