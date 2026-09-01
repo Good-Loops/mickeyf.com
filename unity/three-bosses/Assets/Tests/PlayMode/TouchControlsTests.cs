@@ -11,6 +11,7 @@ using UnityEngine.InputSystem.OnScreen;
 using UnityEngine.InputSystem.UI;
 using UnityEngine.SceneManagement;
 using UnityEngine.TestTools;
+using UnityEngine.UI;
 
 namespace ThreeBosses.Tests
 {
@@ -49,6 +50,7 @@ namespace ThreeBosses.Tests
                     visibilityControllers,
                     Has.Length.EqualTo(1),
                     $"{sceneName} must contain exactly one touch HUD.");
+                AssertTouchHudLayout(visibilityControllers[0], sceneName);
 
                 OnScreenStick[] sticks = FindInActiveScene<OnScreenStick>();
                 Assert.That(sticks, Has.Length.EqualTo(1));
@@ -157,8 +159,103 @@ namespace ThreeBosses.Tests
                 Is.True,
                 "The persistent browser permission must survive scene changes.");
 
-            configureTouchControls.Invoke(service, new object[] { "invalid" });
+            configureTouchControls.Invoke(service, new object[] { "0" });
             Assert.That(nextControlsRoot.activeSelf, Is.False);
+
+            DisarmActiveCountdownRestore();
+            SceneManager.LoadScene(BattleScenes[2]);
+            yield return null;
+
+            Component finalVisibility = SceneManager.GetActiveScene()
+                .GetRootGameObjects()
+                .Select(root => root.GetComponent(visibilityType))
+                .Single(component => component != null);
+            GameObject finalControlsRoot = controlsRootField.GetValue(finalVisibility) as GameObject;
+            Assert.That(finalControlsRoot, Is.Not.Null);
+            Assert.That(
+                finalControlsRoot.activeSelf,
+                Is.False,
+                "Disabled touch permission must survive the final scene transition.");
+
+            configureTouchControls.Invoke(service, new object[] { "invalid" });
+            Assert.That(finalControlsRoot.activeSelf, Is.False);
+        }
+
+        [Test]
+        public void TouchSafeAreaNormalizesFullScreenAndAsymmetricInsets()
+        {
+            Type layoutType = Type.GetType("TouchSafeAreaLayout, Assembly-CSharp");
+            Assert.That(layoutType, Is.Not.Null);
+            MethodInfo calculateAnchors = layoutType.GetMethod(
+                "CalculateAnchors",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.That(calculateAnchors, Is.Not.Null);
+
+            AssertAnchors(
+                calculateAnchors,
+                new Rect(0f, 0f, 1280f, 720f),
+                new Vector2(1280f, 720f),
+                new Rect(0f, 0f, 1f, 1f));
+            AssertAnchors(
+                calculateAnchors,
+                new Rect(80f, 0f, 1200f, 720f),
+                new Vector2(1280f, 720f),
+                Rect.MinMaxRect(0.0625f, 0f, 1f, 1f));
+            AssertAnchors(
+                calculateAnchors,
+                new Rect(0f, 40f, 720f, 1240f),
+                new Vector2(720f, 1280f),
+                Rect.MinMaxRect(0f, 0.03125f, 1f, 1f));
+        }
+
+        [Test]
+        public void PauseButtonTracksTheSafeAreaTopRightCorner()
+        {
+            Type pauseControllerType = Type.GetType("GameplayPauseController, Assembly-CSharp");
+            Assert.That(pauseControllerType, Is.Not.Null);
+            MethodInfo applySafeArea = pauseControllerType.GetMethod(
+                "ApplyTopRightSafeArea",
+                BindingFlags.Static | BindingFlags.NonPublic);
+            Assert.That(applySafeArea, Is.Not.Null);
+
+            var button = new GameObject("Pause Button", typeof(RectTransform));
+            try
+            {
+                RectTransform rect = button.GetComponent<RectTransform>();
+                rect.pivot = Vector2.one;
+                rect.sizeDelta = new Vector2(48f, 40f);
+                rect.anchoredPosition = new Vector2(-24f, -54f);
+                var safeArea = new Rect(0f, 0f, 1200f, 680f);
+                var screenSize = new Vector2(1280f, 720f);
+                applySafeArea.Invoke(
+                    null,
+                    new object[]
+                    {
+                        rect,
+                        safeArea,
+                        screenSize
+                    });
+
+                var expected = new Vector2(0.9375f, 0.9444444f);
+                Assert.That(rect.anchorMin.x, Is.EqualTo(expected.x).Within(0.0001f));
+                Assert.That(rect.anchorMin.y, Is.EqualTo(expected.y).Within(0.0001f));
+                Assert.That(rect.anchorMax.x, Is.EqualTo(expected.x).Within(0.0001f));
+                Assert.That(rect.anchorMax.y, Is.EqualTo(expected.y).Within(0.0001f));
+                Assert.That(rect.anchoredPosition, Is.EqualTo(new Vector2(-24f, -54f)));
+
+                Vector2 anchorPoint = Vector2.Scale(rect.anchorMin, screenSize);
+                Vector2 elementMinimum = anchorPoint + rect.anchoredPosition -
+                    Vector2.Scale(rect.pivot, rect.sizeDelta);
+                Vector2 elementMaximum = elementMinimum + rect.sizeDelta;
+                Assert.That(elementMinimum.x, Is.GreaterThanOrEqualTo(safeArea.xMin));
+                Assert.That(elementMinimum.y, Is.GreaterThanOrEqualTo(safeArea.yMin));
+                Assert.That(elementMaximum.x, Is.LessThanOrEqualTo(safeArea.xMax));
+                Assert.That(elementMaximum.y, Is.LessThanOrEqualTo(safeArea.yMax));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(button);
+            }
         }
 
         [Test]
@@ -269,6 +366,108 @@ namespace ThreeBosses.Tests
             object currentAim)
         {
             return resolver.Invoke(null, new[] { (object)aimUp, aimBack, aimFront, currentAim });
+        }
+
+        private static void AssertTouchHudLayout(Component visibility, string sceneName)
+        {
+            Transform controls = visibility.transform.Find("Touch HUD/Controls");
+            Assert.That(controls, Is.Not.Null, $"{sceneName} is missing the touch controls root.");
+
+            RectTransform controlsRect = controls as RectTransform;
+            Assert.That(controlsRect.anchorMin, Is.EqualTo(Vector2.zero), sceneName);
+            Assert.That(controlsRect.anchorMax, Is.EqualTo(Vector2.one), sceneName);
+
+            Type layoutType = Type.GetType("TouchSafeAreaLayout, Assembly-CSharp");
+            Assert.That(layoutType, Is.Not.Null);
+            Component layout = controls.parent.GetComponent(layoutType);
+            Assert.That(layout, Is.Not.Null, $"{sceneName} is missing safe-area layout.");
+            FieldInfo controlsRootField = layoutType.GetField(
+                "controlsRoot",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(controlsRootField, Is.Not.Null);
+            Assert.That(controlsRootField.GetValue(layout), Is.SameAs(controlsRect));
+
+            AssertGlassControl(
+                controls.Find("Movement Stick"),
+                new Vector2(96f, 96f),
+                new Vector2(90f, 90f),
+                0.085f,
+                0.10f,
+                false,
+                sceneName);
+            Transform handle = controls.Find("Movement Stick/Handle");
+            Assert.That(((RectTransform)handle).sizeDelta, Is.EqualTo(new Vector2(38f, 38f)), sceneName);
+            Assert.That(handle.GetComponent<Image>().raycastPadding, Is.EqualTo(new Vector4(-40f, -40f, -40f, -40f)), sceneName);
+            Assert.That(handle.GetComponent<Image>().color.a, Is.EqualTo(0.28f).Within(0.001f), sceneName);
+            Assert.That(handle.GetComponent<OnScreenStick>().movementRange, Is.EqualTo(29f), sceneName);
+
+            AssertGlassControl(
+                controls.Find("Jump Button"),
+                new Vector2(64f, 64f),
+                new Vector2(58f, 58f),
+                0.085f,
+                0.10f,
+                true,
+                sceneName);
+            AssertGlassControl(
+                controls.Find("Dash Button"),
+                new Vector2(64f, 64f),
+                new Vector2(58f, 58f),
+                0.085f,
+                0.10f,
+                true,
+                sceneName);
+            AssertGlassControl(
+                controls.Find("Fire Button"),
+                new Vector2(72f, 72f),
+                new Vector2(66f, 66f),
+                0.11f,
+                0.12f,
+                true,
+                sceneName);
+        }
+
+        private static void AssertGlassControl(
+            Transform control,
+            Vector2 visibleSize,
+            Vector2 surfaceSize,
+            float rimAlpha,
+            float surfaceAlpha,
+            bool acceptsRaycasts,
+            string sceneName)
+        {
+            Assert.That(control, Is.Not.Null, sceneName);
+            Assert.That(((RectTransform)control).sizeDelta, Is.EqualTo(visibleSize), sceneName);
+
+            Image rim = control.GetComponent<Image>();
+            Assert.That(rim, Is.Not.Null, sceneName);
+            Assert.That(rim.raycastTarget, Is.EqualTo(acceptsRaycasts), sceneName);
+            Assert.That(rim.color.a, Is.EqualTo(rimAlpha).Within(0.001f), sceneName);
+            Assert.That(control.GetComponent<Outline>(), Is.Null, sceneName);
+
+            Transform surface = control.Find("Surface");
+            Assert.That(surface, Is.Not.Null, sceneName);
+            Assert.That(((RectTransform)surface).sizeDelta, Is.EqualTo(surfaceSize), sceneName);
+            Image surfaceImage = surface.GetComponent<Image>();
+            Assert.That(surfaceImage, Is.Not.Null, sceneName);
+            Assert.That(surfaceImage.raycastTarget, Is.False, sceneName);
+            Assert.That(surfaceImage.color.a, Is.EqualTo(surfaceAlpha).Within(0.001f), sceneName);
+
+            if (acceptsRaycasts)
+                Assert.That(rim.raycastPadding, Is.EqualTo(new Vector4(-20f, -20f, -20f, -20f)), sceneName);
+        }
+
+        private static void AssertAnchors(
+            MethodInfo calculateAnchors,
+            Rect safeArea,
+            Vector2 screenSize,
+            Rect expected)
+        {
+            Rect actual = (Rect)calculateAnchors.Invoke(null, new object[] { safeArea, screenSize });
+            Assert.That(actual.xMin, Is.EqualTo(expected.xMin).Within(0.0001f));
+            Assert.That(actual.yMin, Is.EqualTo(expected.yMin).Within(0.0001f));
+            Assert.That(actual.xMax, Is.EqualTo(expected.xMax).Within(0.0001f));
+            Assert.That(actual.yMax, Is.EqualTo(expected.yMax).Within(0.0001f));
         }
 
         private static void AssertInputContract(InputActionAsset actions)

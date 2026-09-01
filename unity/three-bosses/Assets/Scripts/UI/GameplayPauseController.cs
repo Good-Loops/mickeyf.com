@@ -21,6 +21,8 @@ public sealed class GameplayPauseController : MonoBehaviour
     private bool isNavigating;
     private bool ownsPlayerInputGate;
     private bool playerInputWasEnabled;
+    private Rect lastSafeArea = new(-1f, -1f, -1f, -1f);
+    private Vector2Int lastScreenSize = new(-1, -1);
 
     private void Awake()
     {
@@ -33,11 +35,13 @@ public sealed class GameplayPauseController : MonoBehaviour
         pauseButton?.onClick.AddListener(TogglePause);
         resumeButton?.onClick.AddListener(ResumeGameplay);
         mainMenuButton?.onClick.AddListener(ReturnToMainMenu);
+        RefreshPauseButtonSafeArea(true);
         RefreshPauseButton();
     }
 
     private void Update()
     {
+        RefreshPauseButtonSafeArea();
         RefreshPauseButton();
 
         if (!isNavigating && Keyboard.current?.escapeKey.wasPressedThisFrame == true)
@@ -111,6 +115,31 @@ public sealed class GameplayPauseController : MonoBehaviour
                           runSessionService.CanPauseByUser;
         if (pauseButton.gameObject.activeSelf != shouldShow)
             pauseButton.gameObject.SetActive(shouldShow);
+    }
+
+    private void RefreshPauseButtonSafeArea(bool force = false)
+    {
+        Rect safeArea = Screen.safeArea;
+        var screenSize = new Vector2Int(Screen.width, Screen.height);
+        if (!force && safeArea == lastSafeArea && screenSize == lastScreenSize)
+            return;
+
+        lastSafeArea = safeArea;
+        lastScreenSize = screenSize;
+        ApplyTopRightSafeArea(pauseButton?.transform as RectTransform, safeArea, screenSize);
+    }
+
+    internal static void ApplyTopRightSafeArea(
+        RectTransform element,
+        Rect safeArea,
+        Vector2 screenSize)
+    {
+        if (element == null)
+            return;
+
+        Vector2 topRightAnchor = TouchSafeAreaLayout.CalculateAnchors(safeArea, screenSize).max;
+        element.anchorMin = topRightAnchor;
+        element.anchorMax = topRightAnchor;
     }
 
     private void SetPauseMenuVisible(bool visible)
