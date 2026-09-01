@@ -29,6 +29,35 @@ namespace ThreeBosses.Run.Tests
         }
 
         [Test]
+        public void BeginNewRunRaisesOneEventWithTheAssignedRunId()
+        {
+            int eventCount = 0;
+            Guid signaledRunId = Guid.Empty;
+            session.NormalRunStarted += runId =>
+            {
+                eventCount++;
+                signaledRunId = runId;
+            };
+
+            session.BeginNewRun();
+
+            Assert.That(eventCount, Is.EqualTo(1));
+            Assert.That(signaledRunId, Is.Not.EqualTo(Guid.Empty));
+            Assert.That(signaledRunId, Is.EqualTo(session.RunId));
+        }
+
+        [Test]
+        public void BeginPracticeDoesNotRaiseNormalRunStarted()
+        {
+            int eventCount = 0;
+            session.NormalRunStarted += _ => eventCount++;
+
+            session.BeginPractice(BossId.Bee);
+
+            Assert.That(eventCount, Is.Zero);
+        }
+
+        [Test]
         public void StartRunCanOnlySucceedOnce()
         {
             session.BeginNewRun();
@@ -223,7 +252,7 @@ namespace ThreeBosses.Run.Tests
         public void PracticeRunCannotBeSubmitted()
         {
             session.BeginPractice(BossId.Kraken);
-            clock.Advance(7d);
+            clock.Advance(10d);
 
             Assert.That(session.RecordBossDefeat(BossId.Kraken), Is.EqualTo(BossDefeatResult.RunCompleted));
             Assert.That(session.TrySetResult(RunScoreCalculator.Calculate(session.ElapsedSeconds), "UNRANKED"), Is.True);
@@ -290,6 +319,26 @@ namespace ThreeBosses.Run.Tests
         public void ScoreFormulaIsDeterministic(double seconds, int expected)
         {
             Assert.That(RunScoreCalculator.Calculate(seconds), Is.EqualTo(expected));
+        }
+
+        [Test]
+        public void ScoreAndRankShareTheMinimumCompletionTimeBoundary()
+        {
+            const int belowMinimumMilliseconds =
+                RunScoreCalculator.MinimumCompletionTimeMilliseconds - 1;
+
+            Assert.Throws<ArgumentOutOfRangeException>(
+                () => RunScoreCalculator.CalculateFromMilliseconds(belowMinimumMilliseconds));
+            Assert.Throws<ArgumentOutOfRangeException>(
+                () => RunRankCalculator.CalculateFromMilliseconds(belowMinimumMilliseconds));
+            Assert.That(
+                RunScoreCalculator.CalculateFromMilliseconds(
+                    RunScoreCalculator.MinimumCompletionTimeMilliseconds),
+                Is.EqualTo(1000000));
+            Assert.That(
+                RunRankCalculator.CalculateFromMilliseconds(
+                    RunScoreCalculator.MinimumCompletionTimeMilliseconds),
+                Is.EqualTo("S"));
         }
 
         [TestCase(59.999d, "S")]
@@ -359,6 +408,25 @@ namespace ThreeBosses.Run.Tests
             Assert.That(coordinator.TryBegin(out RunSubmissionPayload retryPayload), Is.True);
             Assert.That(retryPayload.RunId, Is.EqualTo(firstPayload.RunId));
             Assert.That(retryPayload.CompletionTimeMilliseconds, Is.EqualTo(82000));
+        }
+
+        [Test]
+        public void SubmissionCoordinatorRequiresANewRunWhenStartTicketWasUnavailable()
+        {
+            CompleteRunAndSetResult(82d);
+            var coordinator = new RunSubmissionCoordinator(session);
+            coordinator.ConfigureTransport(true);
+            Assert.That(coordinator.TryBegin(out RunSubmissionPayload payload), Is.True);
+
+            coordinator.CompleteFailure(
+                payload.RunId,
+                RunSubmissionCoordinator.RunTicketUnavailableErrorCode);
+
+            Assert.That(coordinator.Status, Is.EqualTo(RunSubmissionStatus.Rejected));
+            Assert.That(
+                coordinator.LastErrorCode,
+                Is.EqualTo(RunSubmissionCoordinator.RunTicketUnavailableErrorCode));
+            Assert.That(coordinator.TryBegin(out _), Is.False);
         }
 
         [Test]

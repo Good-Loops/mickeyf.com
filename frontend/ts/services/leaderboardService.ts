@@ -6,6 +6,7 @@ const leaderboardApi = createLeaderboardApi(API_BASE);
 
 export const getLeaderboardCatalog = leaderboardApi.getCatalog;
 export const getGameLeaderboard = leaderboardApi.getGame;
+export const issueThreeBossesRunTicket = leaderboardApi.issueThreeBossesRunTicket;
 export const submitThreeBossesRun = leaderboardApi.submitThreeBossesRun;
 
 export {

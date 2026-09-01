@@ -9,6 +9,8 @@ import type {
     LeaderboardCatalogResponse,
     ThreeBossesRunSubmissionRequest,
     ThreeBossesRunSubmissionResponse,
+    ThreeBossesRunTicketRequest,
+    ThreeBossesRunTicketResponse,
 } from '../leaderboards/leaderboardContract';
 import type { RouteContract } from './routeContract';
 
@@ -44,11 +46,25 @@ export type SubmitThreeBossesRunResponse =
           | 'SERVER_ERROR'
       >;
 
+/** @category Backend — DTOs */
+export type IssueThreeBossesRunTicketResponse =
+    | ThreeBossesRunTicketResponse
+    | LeaderboardApiError<
+          | 'SUBMISSION_DISABLED'
+          | 'UNSUPPORTED_CONTRACT_VERSION'
+          | 'UNSUPPORTED_RULES_VERSION'
+          | 'INVALID_RUN'
+          | 'UNAUTHORIZED'
+          | 'RATE_LIMITED'
+          | 'SERVER_ERROR'
+      >;
+
 /** @category Backend — Contracts */
 export type LeaderboardRoutesContract = {
     readonly routes: readonly (
         | RouteContract<GetLeaderboardCatalogRequest, GetLeaderboardCatalogResponse>
         | RouteContract<GetGameLeaderboardRequest, GetGameLeaderboardResponse>
+        | RouteContract<ThreeBossesRunTicketRequest, IssueThreeBossesRunTicketResponse>
         | RouteContract<ThreeBossesRunSubmissionRequest, SubmitThreeBossesRunResponse>
     )[];
 };
@@ -63,6 +79,14 @@ export const leaderboardRoutesContract: LeaderboardRoutesContract = {
             auth: 'public',
             request: {} as GetLeaderboardCatalogRequest,
             response: {} as GetLeaderboardCatalogResponse,
+        },
+        {
+            id: 'leaderboards.three-bosses.issue-run-ticket',
+            method: 'POST',
+            path: '/three-bosses/run-tickets',
+            auth: 'user',
+            request: {} as ThreeBossesRunTicketRequest,
+            response: {} as IssueThreeBossesRunTicketResponse,
         },
         {
             id: 'leaderboards.three-bosses.submit-run',

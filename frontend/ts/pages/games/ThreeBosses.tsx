@@ -5,6 +5,7 @@ import { isThreeBossesAvailableInCurrentBrowser } from '@/games/three-bosses/uni
 import { startThreeBossesWebGl, type UnityWebGlHandle } from '@/games/three-bosses/unityWebGl';
 import {
     getLeaderboardCatalog,
+    issueThreeBossesRunTicket,
     isThreeBossesSubmissionEnabled,
     submitThreeBossesRun,
 } from '@/services/leaderboardService';
@@ -13,6 +14,12 @@ type LoadState =
     | Readonly<{ kind: 'loading'; progress: number }>
     | Readonly<{ kind: 'running' }>
     | Readonly<{ kind: 'error'; message: string }>;
+
+const SUBMISSION_GATE_ATTEMPTS = 3;
+const SUBMISSION_GATE_ATTEMPT_TIMEOUT_MS = 5_000;
+const SUBMISSION_GATE_RETRY_DELAY_MS = 750;
+
+type LeaderboardCatalogReader = typeof getLeaderboardCatalog;
 
 const describeLoadError = (error: unknown): string => {
     if (error instanceof Error && error.message) return error.message;
@@ -28,15 +35,62 @@ const describeLoadError = (error: unknown): string => {
     return 'The Three Bosses WebGL game failed to load.';
 };
 
-const readSubmissionGate = async (signal: AbortSignal): Promise<boolean> => {
-    try {
-        const catalog = await getLeaderboardCatalog(signal);
-        return catalog.games.some(isThreeBossesSubmissionEnabled);
-    } catch {
-        // Game loading remains independent from the API. Any catalog failure
-        // keeps the Unity submit control fail-closed.
-        return false;
+const waitForSubmissionGateRetry = (
+    signal: AbortSignal,
+    delayMs: number,
+): Promise<boolean> => new Promise((resolve) => {
+    if (signal.aborted) {
+        resolve(false);
+        return;
     }
+
+    const onAbort = () => {
+        clearTimeout(timeoutId);
+        resolve(false);
+    };
+    const timeoutId = setTimeout(() => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(true);
+    }, delayMs);
+
+    signal.addEventListener('abort', onAbort, { once: true });
+});
+
+const readSubmissionGateAttempt = async (
+    signal: AbortSignal,
+    readCatalog: LeaderboardCatalogReader,
+): Promise<boolean> => {
+    const attemptController = new AbortController();
+    const abortAttempt = () => attemptController.abort();
+    const timeoutId = setTimeout(abortAttempt, SUBMISSION_GATE_ATTEMPT_TIMEOUT_MS);
+
+    if (signal.aborted) abortAttempt();
+    else signal.addEventListener('abort', abortAttempt, { once: true });
+
+    try {
+        const catalog = await readCatalog(attemptController.signal);
+        return catalog.games.some(isThreeBossesSubmissionEnabled);
+    } finally {
+        clearTimeout(timeoutId);
+        signal.removeEventListener('abort', abortAttempt);
+    }
+};
+
+export const readThreeBossesSubmissionGate = async (
+    signal: AbortSignal,
+    readCatalog: LeaderboardCatalogReader = getLeaderboardCatalog,
+    retryDelayMs: number = SUBMISSION_GATE_RETRY_DELAY_MS,
+): Promise<boolean> => {
+    for (let attempt = 1; attempt <= SUBMISSION_GATE_ATTEMPTS; attempt += 1) {
+        try {
+            return await readSubmissionGateAttempt(signal, readCatalog);
+        } catch {
+            if (signal.aborted || attempt === SUBMISSION_GATE_ATTEMPTS) return false;
+            if (!await waitForSubmissionGateRetry(signal, retryDelayMs)) return false;
+        }
+    }
+
+    return false;
 };
 
 const ThreeBosses: React.FC = () => {
@@ -57,7 +111,7 @@ const ThreeBosses: React.FC = () => {
 
         (async () => {
             try {
-                const submissionGatePromise = readSubmissionGate(controller.signal);
+                const submissionGatePromise = readThreeBossesSubmissionGate(controller.signal);
                 const nextHandle = await startThreeBossesWebGl({
                     canvas,
                     signal: controller.signal,
@@ -67,6 +121,7 @@ const ThreeBosses: React.FC = () => {
                     onCanvasOwned: () => {
                         if (!cancelled) setHasUnityCanvasControl(true);
                     },
+                    issueRunTicket: issueThreeBossesRunTicket,
                     submitRun: submitThreeBossesRun,
                 });
 

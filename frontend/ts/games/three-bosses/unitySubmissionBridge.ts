@@ -5,6 +5,8 @@ import {
     LeaderboardRequestError,
     THREE_BOSSES_RULES_VERSION,
     type LeaderboardClientErrorCode,
+    type ThreeBossesRunTicketRequest,
+    type ThreeBossesRunTicketResponse,
     type ThreeBossesRunSubmissionRequest,
     type ThreeBossesRunSubmissionResponse,
 } from '../../services/leaderboardApi.ts';
@@ -12,6 +14,8 @@ import { THREE_BOSSES_RUN_SESSION_OBJECT } from './unityVisibility.ts';
 
 export const THREE_BOSSES_SUBMISSION_BRIDGE_FUNCTION =
     'mickeyfThreeBossesSubmitRun' as const;
+export const THREE_BOSSES_RUN_BEGIN_BRIDGE_FUNCTION =
+    'mickeyfThreeBossesBeginRun' as const;
 export const THREE_BOSSES_SUBMISSION_RECEIVER_OBJECT =
     THREE_BOSSES_RUN_SESSION_OBJECT;
 export const THREE_BOSSES_SUBMISSION_RESULT_METHOD =
@@ -19,6 +23,12 @@ export const THREE_BOSSES_SUBMISSION_RESULT_METHOD =
 export const THREE_BOSSES_SUBMISSION_CONFIGURE_METHOD =
     'ConfigureRunSubmission' as const;
 export const THREE_BOSSES_SUBMISSION_TIMEOUT_MS = 30_000 as const;
+export const THREE_BOSSES_RUN_TICKET_UNAVAILABLE_ERROR =
+    'RUN_TICKET_UNAVAILABLE' as const;
+
+type ThreeBossesSubmissionBridgeError =
+    | LeaderboardClientErrorCode
+    | typeof THREE_BOSSES_RUN_TICKET_UNAVAILABLE_ERROR;
 
 type ThreeBossesSubmissionBridgeCallback =
     | Readonly<{
@@ -30,13 +40,18 @@ type ThreeBossesSubmissionBridgeCallback =
           success: false;
           runId: string | null;
           status: number;
-          error: LeaderboardClientErrorCode;
+          error: ThreeBossesSubmissionBridgeError;
       }>;
 
 export type ThreeBossesRunSubmitter = (
     request: ThreeBossesRunSubmissionRequest,
     signal: AbortSignal
 ) => Promise<ThreeBossesRunSubmissionResponse>;
+
+export type ThreeBossesRunTicketIssuer = (
+    request: ThreeBossesRunTicketRequest,
+    signal: AbortSignal
+) => Promise<ThreeBossesRunTicketResponse>;
 
 export type UnitySubmissionBridgeInstance = Readonly<{
     SendMessage?: (
@@ -47,6 +62,7 @@ export type UnitySubmissionBridgeInstance = Readonly<{
 }>;
 
 type SubmissionBridgeWindow = {
+    mickeyfThreeBossesBeginRun?: (runId: string) => void;
     mickeyfThreeBossesSubmitRun?: (payloadJson: string) => void;
 };
 
@@ -60,6 +76,30 @@ type ActiveSubmission = Readonly<{
     controller: AbortController;
     cancelTimeout: () => void;
 }>;
+
+type RunTicketOutcome =
+    | Readonly<{ success: true; response: ThreeBossesRunTicketResponse }>
+    | Readonly<{
+          success: false;
+          status: number;
+          error: LeaderboardClientErrorCode;
+      }>;
+
+type ActiveRunTicket = Readonly<{
+    runId: string;
+    controller: AbortController;
+    outcome: Promise<RunTicketOutcome>;
+}>;
+
+type SubmissionAttemptOutcome =
+    | Readonly<{
+          kind: 'ticket-unavailable';
+          status: number;
+      }>
+    | Readonly<{
+          kind: 'submitted';
+          response: ThreeBossesRunSubmissionResponse;
+      }>;
 
 export function configureThreeBossesSubmission(
     instance: UnitySubmissionBridgeInstance,
@@ -112,12 +152,24 @@ function submissionKey(payload: UnityRunPayload): string {
     return `${payload.runId}\n${payload.completionTimeMs}`;
 }
 
-function requestFor(payload: UnityRunPayload): ThreeBossesRunSubmissionRequest {
+function ticketRequestFor(runId: string): ThreeBossesRunTicketRequest {
+    return {
+        contractVersion: LEADERBOARD_CONTRACT_VERSION,
+        rulesVersion: THREE_BOSSES_RULES_VERSION,
+        runId,
+    };
+}
+
+function submissionRequestFor(
+    payload: UnityRunPayload,
+    runTicket: string
+): ThreeBossesRunSubmissionRequest {
     return {
         contractVersion: LEADERBOARD_CONTRACT_VERSION,
         rulesVersion: THREE_BOSSES_RULES_VERSION,
         runId: payload.runId,
         completionTimeMs: payload.completionTimeMs,
+        runTicket,
     };
 }
 
@@ -145,6 +197,7 @@ function isUncertainOutcome(code: LeaderboardClientErrorCode): boolean {
  */
 export function bindThreeBossesSubmissionBridge(
     instance: UnitySubmissionBridgeInstance,
+    issueRunTicket: ThreeBossesRunTicketIssuer,
     submitRun: ThreeBossesRunSubmitter,
     bridgeWindow: SubmissionBridgeWindow = window as unknown as SubmissionBridgeWindow,
     submissionTimeoutMs: number = THREE_BOSSES_SUBMISSION_TIMEOUT_MS,
@@ -153,11 +206,15 @@ export function bindThreeBossesSubmissionBridge(
     if (typeof sendMessage !== 'function') {
         throw new Error('The Unity WebGL player is missing the required submission callback API.');
     }
-    if (bridgeWindow[THREE_BOSSES_SUBMISSION_BRIDGE_FUNCTION] !== undefined) {
+    if (
+        bridgeWindow[THREE_BOSSES_RUN_BEGIN_BRIDGE_FUNCTION] !== undefined
+        || bridgeWindow[THREE_BOSSES_SUBMISSION_BRIDGE_FUNCTION] !== undefined
+    ) {
         throw new Error('A Three Bosses submission bridge is already active.');
     }
 
     let disposed = false;
+    let activeRunTicket: ActiveRunTicket | null = null;
     let activeSubmission: ActiveSubmission | null = null;
     let uncertainSubmissionKey: string | null = null;
 
@@ -179,9 +236,36 @@ export function bindThreeBossesSubmissionBridge(
     const rejectLocally = (
         runId: string | null,
         status: number,
-        error: LeaderboardClientErrorCode
+        error: ThreeBossesSubmissionBridgeError
     ): void => {
         deliver({ success: false, runId, status, error });
+    };
+
+    const beginRunFromUnity = (runId: string): void => {
+        if (disposed || !isCanonicalThreeBossesRunId(runId)) return;
+        if (activeRunTicket?.runId === runId) return;
+
+        activeRunTicket?.controller.abort();
+        activeSubmission?.cancelTimeout();
+        activeSubmission?.controller.abort();
+        activeSubmission = null;
+        uncertainSubmissionKey = null;
+
+        const controller = new AbortController();
+        const request = ticketRequestFor(runId);
+        const outcome = Promise.resolve()
+            .then(() => issueRunTicket(request, controller.signal))
+            .then<RunTicketOutcome>((response) => ({ success: true, response }))
+            .catch((error: unknown): RunTicketOutcome => {
+                const normalized = normalizedSubmissionError(error);
+                return {
+                    success: false,
+                    status: normalized.status,
+                    error: normalized.code,
+                };
+            });
+
+        activeRunTicket = { runId, controller, outcome };
     };
 
     const submitFromUnity = (payloadJson: string): void => {
@@ -205,6 +289,12 @@ export function bindThreeBossesSubmissionBridge(
             return;
         }
 
+        const runTicket = activeRunTicket;
+        if (!runTicket || runTicket.runId !== payload.runId) {
+            rejectLocally(payload.runId, 400, 'INVALID_RUN');
+            return;
+        }
+
         const controller = new AbortController();
         let timeoutId: ReturnType<typeof setTimeout> | null = null;
         const cancelTimeout = () => {
@@ -213,7 +303,6 @@ export function bindThreeBossesSubmissionBridge(
             timeoutId = null;
         };
         activeSubmission = { key, controller, cancelTimeout };
-        const request = requestFor(payload);
         const clearActiveSubmission = () => {
             if (activeSubmission?.controller === controller) {
                 activeSubmission.cancelTimeout();
@@ -228,21 +317,45 @@ export function bindThreeBossesSubmissionBridge(
             controller.abort();
             rejectLocally(payload.runId, 0, 'NETWORK_ERROR');
         }, submissionTimeoutMs);
-        let submissionPromise: Promise<ThreeBossesRunSubmissionResponse>;
+        const submissionPromise = runTicket.outcome.then<SubmissionAttemptOutcome>(
+            async (ticketOutcome) => {
+                if (!ticketOutcome.success) {
+                    return {
+                        kind: 'ticket-unavailable',
+                        status: ticketOutcome.status,
+                    };
+                }
 
-        try {
-            submissionPromise = submitRun(request, controller.signal);
-        } catch (error) {
-            submissionPromise = Promise.reject(error);
-        }
+                const response = await submitRun(
+                    submissionRequestFor(payload, ticketOutcome.response.runTicket),
+                    controller.signal
+                );
+
+                return { kind: 'submitted', response };
+            }
+        );
 
         void submissionPromise
-            .then((response) => {
+            .then((outcome) => {
                 cancelTimeout();
                 if (disposed || controller.signal.aborted) return;
                 clearActiveSubmission();
                 uncertainSubmissionKey = null;
-                deliver({ success: true, runId: payload.runId, response });
+
+                if (outcome.kind === 'ticket-unavailable') {
+                    rejectLocally(
+                        payload.runId,
+                        outcome.status,
+                        THREE_BOSSES_RUN_TICKET_UNAVAILABLE_ERROR,
+                    );
+                    return;
+                }
+
+                deliver({
+                    success: true,
+                    runId: payload.runId,
+                    response: outcome.response,
+                });
             })
             .catch((error: unknown) => {
                 cancelTimeout();
@@ -258,11 +371,14 @@ export function bindThreeBossesSubmissionBridge(
             });
     };
 
+    bridgeWindow[THREE_BOSSES_RUN_BEGIN_BRIDGE_FUNCTION] = beginRunFromUnity;
     bridgeWindow[THREE_BOSSES_SUBMISSION_BRIDGE_FUNCTION] = submitFromUnity;
 
     return () => {
         if (disposed) return;
         disposed = true;
+        activeRunTicket?.controller.abort();
+        activeRunTicket = null;
         activeSubmission?.cancelTimeout();
         activeSubmission?.controller.abort();
         activeSubmission = null;
@@ -270,6 +386,9 @@ export function bindThreeBossesSubmissionBridge(
 
         if (bridgeWindow[THREE_BOSSES_SUBMISSION_BRIDGE_FUNCTION] === submitFromUnity) {
             delete bridgeWindow[THREE_BOSSES_SUBMISSION_BRIDGE_FUNCTION];
+        }
+        if (bridgeWindow[THREE_BOSSES_RUN_BEGIN_BRIDGE_FUNCTION] === beginRunFromUnity) {
+            delete bridgeWindow[THREE_BOSSES_RUN_BEGIN_BRIDGE_FUNCTION];
         }
     };
 }

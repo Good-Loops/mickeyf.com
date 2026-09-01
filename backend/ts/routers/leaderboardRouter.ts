@@ -23,15 +23,26 @@ export function createLeaderboardRouter(
 
     router.get('/', controller.getCatalog);
     if (options.threeBossesRunSubmissionsEnabled) {
+        const mutationIpRateLimiter = createThreeBossesSubmissionIpRateLimiter();
+        router.post(
+            '/three-bosses/run-tickets',
+            mutationIpRateLimiter,
+            json({ limit: '32kb', strict: true }),
+            asyncHandler(controller.issueThreeBossesRunTicket)
+        );
         router.post(
             '/three-bosses/runs',
-            createThreeBossesSubmissionIpRateLimiter(),
+            mutationIpRateLimiter,
             json({ limit: '32kb', strict: true }),
             asyncHandler(controller.submitThreeBossesRun)
         );
     } else {
         // Keep disabled responses independent of auth, persistence, and the
         // opt-in route's dedicated limiter.
+        router.post(
+            '/three-bosses/run-tickets',
+            asyncHandler(controller.issueThreeBossesRunTicket)
+        );
         router.post(
             '/three-bosses/runs',
             asyncHandler(controller.submitThreeBossesRun)

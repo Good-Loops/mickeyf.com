@@ -5,13 +5,21 @@ import {
     hasAllowedThreeBossesMutationOrigin,
     isJsonSubmissionRequest,
     validateThreeBossesRunSubmission,
+    validateThreeBossesRunTicketRequest,
 } from './threeBossesRunRequest';
+import { THREE_BOSSES_RUN_TICKET_MAX_LENGTH } from './threeBossesRunTicket';
 
 const validRun = Object.freeze({
     contractVersion: 1,
     rulesVersion: 1,
     runId: '123e4567-e89b-42d3-a456-426614174000',
     completionTimeMs: 50_000,
+    runTicket: 'signed-run-ticket',
+});
+const validTicketRequest = Object.freeze({
+    contractVersion: validRun.contractVersion,
+    rulesVersion: validRun.rulesVersion,
+    runId: validRun.runId,
 });
 
 test('accepts only the exact version-one plain JSON shape', () => {
@@ -25,6 +33,7 @@ test('accepts only the exact version-one plain JSON shape', () => {
         [],
         { ...validRun, score: 2_000 },
         { ...validRun, completionTimeMs: undefined },
+        { ...validRun, runTicket: undefined },
         Object.assign(Object.create(null), validRun),
     ]) {
         assert.deepEqual(validateThreeBossesRunSubmission(body), {
@@ -54,15 +63,53 @@ test('projects version errors separately from invalid run fields', () => {
         { ...validRun, runId: validRun.runId.toUpperCase() },
         { ...validRun, runId: '123e4567-e89b-12d3-a456-426614174000' },
         { ...validRun, completionTimeMs: 0 },
+        { ...validRun, completionTimeMs: 9_999 },
         { ...validRun, completionTimeMs: 86_400_001 },
         { ...validRun, completionTimeMs: 1.5 },
         { ...validRun, completionTimeMs: '50000' },
+        { ...validRun, runTicket: '' },
+        { ...validRun, runTicket: 'x'.repeat(THREE_BOSSES_RUN_TICKET_MAX_LENGTH + 1) },
     ]) {
         assert.deepEqual(validateThreeBossesRunSubmission(body), {
             valid: false,
             error: 'INVALID_RUN',
         });
     }
+});
+
+test('accepts only an exact versioned run-ticket request', () => {
+    assert.deepEqual(validateThreeBossesRunTicketRequest(validTicketRequest), {
+        valid: true,
+        input: validTicketRequest,
+    });
+
+    for (const body of [
+        null,
+        [],
+        { ...validTicketRequest, completionTimeMs: 50_000 },
+        { ...validTicketRequest, runId: validTicketRequest.runId.toUpperCase() },
+        Object.assign(Object.create(null), validTicketRequest),
+    ]) {
+        assert.deepEqual(validateThreeBossesRunTicketRequest(body), {
+            valid: false,
+            error: 'INVALID_RUN',
+        });
+    }
+
+    assert.deepEqual(validateThreeBossesRunTicketRequest({
+        ...validTicketRequest,
+        contractVersion: 2,
+    }), {
+        valid: false,
+        error: 'UNSUPPORTED_CONTRACT_VERSION',
+    });
+    assert.deepEqual(validateThreeBossesRunTicketRequest({
+        ...validTicketRequest,
+        rulesVersion: 2,
+    }), {
+        valid: false,
+        error: 'UNSUPPORTED_RULES_VERSION',
+    });
 });
 
 test('requires application/json while allowing standard media-type parameters', () => {

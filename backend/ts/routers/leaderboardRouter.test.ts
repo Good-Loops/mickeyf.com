@@ -104,6 +104,12 @@ test('publishes the additive read and authenticated run route contracts', () => 
                 auth: 'public',
             },
             {
+                id: 'leaderboards.three-bosses.issue-run-ticket',
+                method: 'POST',
+                path: '/three-bosses/run-tickets',
+                auth: 'user',
+            },
+            {
                 id: 'leaderboards.three-bosses.submit-run',
                 method: 'POST',
                 path: '/three-bosses/runs',
@@ -209,6 +215,21 @@ test('serves the exact catalog and game DTOs without enabling Three Bosses write
                         { position: 1, userName: 'historical-player', score: 1_200 },
                         { position: 2, userName: 'current-player', score: 990 },
                     ],
+                },
+            }
+        );
+        assert.deepEqual(
+            await requestJson(
+                origin,
+                '/api/leaderboards/three-bosses/run-tickets',
+                'POST'
+            ),
+            {
+                status: 403,
+                body: {
+                    success: false,
+                    contractVersion: 1,
+                    error: 'SUBMISSION_DISABLED',
                 },
             }
         );

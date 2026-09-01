@@ -12,7 +12,7 @@ namespace ThreeBosses.Run
 
         public static string CalculateFromMilliseconds(int completionTimeMilliseconds)
         {
-            if (completionTimeMilliseconds < 1 ||
+            if (completionTimeMilliseconds < RunScoreCalculator.MinimumCompletionTimeMilliseconds ||
                 completionTimeMilliseconds > RunScoreCalculator.MaximumCompletionTimeMilliseconds)
             {
                 throw new ArgumentOutOfRangeException(nameof(completionTimeMilliseconds));

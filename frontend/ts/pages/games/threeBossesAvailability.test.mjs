@@ -21,6 +21,7 @@ after(async () => {
 
 const { GamesView } = await viteServer.ssrLoadModule('/ts/pages/Games.tsx');
 const {
+    readThreeBossesSubmissionGate,
     ThreeBossesAvailabilityGate,
     ThreeBossesDesktopOnly,
 } = await viteServer.ssrLoadModule(
@@ -84,4 +85,70 @@ test('the route gate selects the desktop-only surface from the current mobile br
     assert.match(html, /currently available on desktop only/);
     assert.doesNotMatch(html, /<canvas/);
     assert.doesNotMatch(html, /Local WebGL playability prototype/);
+});
+
+test('the submission gate retries transient catalog failures before enabling ranked runs', async () => {
+    const controller = new AbortController();
+    let attempts = 0;
+
+    const enabled = await readThreeBossesSubmissionGate(
+        controller.signal,
+        async () => {
+            attempts += 1;
+            if (attempts < 3) throw new Error('temporary catalog failure');
+
+            return {
+                games: [{
+                    gameId: 'three-bosses',
+                    displayName: 'Three Bosses',
+                    rulesVersion: 1,
+                    primaryMetric: 'completionTimeMs',
+                    sortDirection: 'ascending',
+                    labels: { score: 'Score', completionTime: 'Time', rank: 'Rank' },
+                    rankState: 'ranked',
+                    submissionState: 'enabled',
+                }],
+            };
+        },
+        0,
+    );
+
+    assert.equal(enabled, true);
+    assert.equal(attempts, 3);
+});
+
+test('the submission-gate retry stops promptly when the player lifecycle ends', async () => {
+    const controller = new AbortController();
+    let attempts = 0;
+    const pending = readThreeBossesSubmissionGate(
+        controller.signal,
+        async () => {
+            attempts += 1;
+            throw new Error('temporary catalog failure');
+        },
+        60_000,
+    );
+
+    await new Promise((resolve) => setImmediate(resolve));
+    controller.abort();
+
+    assert.equal(await pending, false);
+    assert.equal(attempts, 1);
+});
+
+test('the submission gate remains fail-closed after its bounded retry window', async () => {
+    const controller = new AbortController();
+    let attempts = 0;
+
+    const enabled = await readThreeBossesSubmissionGate(
+        controller.signal,
+        async () => {
+            attempts += 1;
+            throw new Error('persistent catalog failure');
+        },
+        0,
+    );
+
+    assert.equal(enabled, false);
+    assert.equal(attempts, 3);
 });

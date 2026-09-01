@@ -314,12 +314,15 @@ positions. Three Bosses reads real current-rule personal bests in completion-
 time order even while writes are disabled. Its complete authenticated run
 route remains fail-closed unless the exact
 `THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=true` runtime opt-in is present. It
-validates exact JSON/version/UUID/time input, derives score server-side,
+issues a short-lived signed ticket at normal run start, validates exact
+JSON/version/UUID/time/ticket input, derives score server-side,
 requires an allowed browser Origin for cookie mutations, serializes immutable
 runs and personal bests on one transaction connection, preserves exact replay
 outcomes, rejects conflicting reuse, and enforces both database-backed per-user
 and per-instance IP limits. Unit, security, rollback, concurrency, and eight
-isolated MySQL integration tests passed. These routes are deployed in the
+isolated MySQL integration tests passed at the original checkpoint; the Alpha
+ticket path later passed ten focused Three Bosses integration tests. These
+routes are deployed in the
 serving revision, but Three Bosses submissions remain inactive because
 `THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=false`. The Unity caller, receiver, and
 browser bridge are connected locally and remain fail-closed behind that gate.
@@ -357,8 +360,8 @@ activation remains incomplete and separately gated.
   HTTP endpoint or schema migration. Read-only reconciliation remains inside
   the destructive migration plan for safe replay against the pre-drop backup.
 - Three Bosses uses the provisional rules-version-1 S–D rank bands; its
-  submission endpoint remains disabled until the remaining release gates are
-  approved.
+  submission endpoints remain fail-closed until the remaining release gates
+  are approved.
 - A player identity always comes from verified authentication, never a client
   supplied user name.
 
@@ -368,7 +371,7 @@ current presentation and ordering policy:
 | Game ID | Primary order | Rank state | Submission state |
 | --- | --- | --- | --- |
 | `p4-vega` | score, descending | not applicable | legacy operation, enabled |
-| `three-bosses` | completion time, ascending | S–D time bands | disabled |
+| `three-bosses` | completion time, ascending | S–D time bands | runtime-gated |
 
 Only a strict primary-metric improvement replaces a personal best. An equal
 result keeps the existing best and its original recorded timestamp. Equal
@@ -385,11 +388,13 @@ on `/api/users`:
 - `GET /api/leaderboards` lists the server-owned game catalog.
 - `GET /api/leaderboards/:gameId` returns exactly the first ten rows for one
   game. Version one has no client-controlled limit or sort parameter.
+- `POST /api/leaderboards/three-bosses/run-tickets` issues an authenticated,
+  user/run/version-bound ticket when a normal ranked run begins.
 - `POST /api/leaderboards/three-bosses/runs` accepts an authenticated run only
-  after Three Bosses submission is enabled. p4-Vega continues to write through
-  its legacy operation and has no generic run endpoint in version one. The
-  legacy operation keeps its HTTP contract while its persistence moves to
-  `game_personal_bests`.
+  after Three Bosses submission is enabled and the matching signed ticket is
+  valid. p4-Vega continues to write through its legacy operation and has no
+  generic run endpoint in version one. The legacy operation keeps its HTTP
+  contract while its persistence moves to `game_personal_bests`.
 
 Exact version-one DTOs and mechanical bounds are defined in
 `ts/leaderboards/leaderboardContract.ts`. New responses carry
@@ -400,8 +405,14 @@ the code-owned game catalog; route input is never interpolated into `ORDER BY`.
 
 Three Bosses submissions, once enabled, use `contractVersion: 1`,
 `rulesVersion: 1`, a canonical lowercase RFC 4122 version-four UUID, and an
-integer `completionTimeMs` from 1 through 86,400,000 inclusive. The bound is a
-versioned transport and storage safety contract, not a rank threshold.
+integer `completionTimeMs` from 10,000 through 86,400,000 inclusive. Before
+gameplay, the browser requests a 30-minute HS256 ticket derived from the session
+secret with a separate signing context. The ticket stays in memory and binds
+the authenticated user, run ID, contract, rules, issuer, audience, purpose,
+exact start time, and exact expiry. Submission verifies that the reported
+active-combat time does not exceed elapsed wall time beyond a 2.5-second
+issuance tolerance. This blocks fabricated instant runs and cross-user/run
+reuse, but is deliberately not described as server-authoritative anti-cheat.
 
 Unity must first canonicalize its elapsed time using
 `Round(elapsedSeconds * 1000, MidpointRounding.AwayFromZero)` and calculate the
@@ -426,6 +437,7 @@ different data returns `IDEMPOTENCY_CONFLICT` and changes no rows.
 | Condition | HTTP | Error/result |
 | --- | ---: | --- |
 | Catalog or leaderboard read succeeds | 200 | typed success DTO |
+| Ranked-run ticket is issued | 201 | signed ticket and exact expiry |
 | New Three Bosses run is accepted | 201 | run result, `replayed: false` |
 | Exact run retry succeeds | 200 | original result, `replayed: true` |
 | Unknown exact game ID on a leaderboard read | 404 | `UNKNOWN_GAME` |
@@ -445,9 +457,10 @@ The implemented endpoint enforces a fail-closed limit of ten accepted new runs
 per authenticated user per 15 minutes from the shared database inside the
 user-locked transaction. Exact idempotent replays return the stored result
 without consuming another accepted-run slot. The general API limit remains,
-and a dedicated per-instance IP ceiling permits 30 submission requests per 15
-minutes. Reevaluate a distributed IP limiter before increasing Cloud Run scale
-or treating the leaderboard as competitive infrastructure.
+and one dedicated per-instance IP ceiling permits 30 combined ticket and
+submission requests per 15 minutes. Reevaluate a distributed IP limiter before
+increasing Cloud Run scale or treating the leaderboard as competitive
+infrastructure.
 
 ## Frontend route contract
 
@@ -926,8 +939,9 @@ legacy reader.
     while Three Bosses submissions remain disabled.**
 17. Keep Three Bosses writes disabled by default. Its backend, browser client,
     host bridge, Unity caller/receiver, canonical score/rank calculation, and
-    button state machine are connected and tested. Enable writes only after the
-    content-addressed WebGL release, hosted runtime validation, signed-in
+    button state machine are connected and tested. The Alpha candidate also
+    requires the signed start ticket described above. Enable writes only after
+    the content-addressed WebGL release, hosted runtime validation, signed-in
     end-to-end run, and explicit production opt-in are approved.
 
 Transactions must use one acquired MySQL connection; transaction statements

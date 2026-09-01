@@ -4,6 +4,8 @@ import { LeaderboardRequestError } from '../../services/leaderboardApi.ts';
 import {
     bindThreeBossesSubmissionBridge,
     configureThreeBossesSubmission,
+    THREE_BOSSES_RUN_BEGIN_BRIDGE_FUNCTION,
+    THREE_BOSSES_RUN_TICKET_UNAVAILABLE_ERROR,
     THREE_BOSSES_SUBMISSION_BRIDGE_FUNCTION,
     THREE_BOSSES_SUBMISSION_CONFIGURE_METHOD,
     THREE_BOSSES_SUBMISSION_RECEIVER_OBJECT,
@@ -18,6 +20,18 @@ const secondPayload = {
     runId: '6ba7b810-9dad-41d1-80b4-00c04fd430c8',
     completionTimeMs: 59_000,
 };
+
+const ticketFor = (runId) => ({
+    success: true,
+    contractVersion: 1,
+    gameId: 'three-bosses',
+    rulesVersion: 1,
+    runId,
+    runTicket: `signed-ticket-for-${runId}`,
+    expiresAt: '2026-08-31T12:30:00.000Z',
+});
+
+const issueTicket = async (request) => ticketFor(request.runId);
 
 const responseFor = (payload, replayed = false) => ({
     success: true,
@@ -80,10 +94,16 @@ test('configures Unity from the server-owned submission gate', () => {
 test('installs the stable Unity contract and submits only canonical run metrics', async () => {
     const bridgeWindow = {};
     const { instance, messages } = createInstance();
+    const ticketRequests = [];
     const requests = [];
     const signals = [];
     const cleanup = bindThreeBossesSubmissionBridge(
         instance,
+        async (request, signal) => {
+            ticketRequests.push(request);
+            signals.push(signal);
+            return ticketFor(request.runId);
+        },
         async (request, signal) => {
             requests.push(request);
             signals.push(signal);
@@ -92,17 +112,25 @@ test('installs the stable Unity contract and submits only canonical run metrics'
         bridgeWindow,
     );
 
+    assert.equal(typeof bridgeWindow[THREE_BOSSES_RUN_BEGIN_BRIDGE_FUNCTION], 'function');
     assert.equal(typeof bridgeWindow[THREE_BOSSES_SUBMISSION_BRIDGE_FUNCTION], 'function');
+    bridgeWindow[THREE_BOSSES_RUN_BEGIN_BRIDGE_FUNCTION](firstPayload.runId);
     bridgeWindow[THREE_BOSSES_SUBMISSION_BRIDGE_FUNCTION](JSON.stringify(firstPayload));
     await flush();
 
+    assert.deepEqual(ticketRequests, [{
+        contractVersion: 1,
+        rulesVersion: 1,
+        runId: firstPayload.runId,
+    }]);
     assert.deepEqual(requests, [{
         contractVersion: 1,
         rulesVersion: 1,
         runId: firstPayload.runId,
         completionTimeMs: firstPayload.completionTimeMs,
+        runTicket: ticketFor(firstPayload.runId).runTicket,
     }]);
-    assert.equal(signals[0] instanceof AbortSignal, true);
+    assert.equal(signals.every((signal) => signal instanceof AbortSignal), true);
     assert.deepEqual(messages[0].slice(0, 2), [
         THREE_BOSSES_SUBMISSION_RECEIVER_OBJECT,
         THREE_BOSSES_SUBMISSION_RESULT_METHOD,
@@ -112,11 +140,130 @@ test('installs the stable Unity contract and submits only canonical run metrics'
         runId: firstPayload.runId,
         response: responseFor(firstPayload),
     });
-    assert.equal(JSON.stringify(requests).includes('token'), false);
+    assert.equal(JSON.stringify(messages).includes(ticketFor(firstPayload.runId).runTicket), false);
     assert.equal(JSON.stringify(messages).includes('session'), false);
 
     cleanup();
+    assert.equal(bridgeWindow[THREE_BOSSES_RUN_BEGIN_BRIDGE_FUNCTION], undefined);
     assert.equal(bridgeWindow[THREE_BOSSES_SUBMISSION_BRIDGE_FUNCTION], undefined);
+});
+
+test('fails closed when Unity submits a run that never received a start ticket', () => {
+    const bridgeWindow = {};
+    const { instance, messages } = createInstance();
+    let ticketCount = 0;
+    let submitCount = 0;
+    const cleanup = bindThreeBossesSubmissionBridge(
+        instance,
+        async () => {
+            ticketCount += 1;
+            return ticketFor(firstPayload.runId);
+        },
+        async () => {
+            submitCount += 1;
+            return responseFor(firstPayload);
+        },
+        bridgeWindow,
+    );
+
+    bridgeWindow[THREE_BOSSES_SUBMISSION_BRIDGE_FUNCTION](JSON.stringify(firstPayload));
+
+    assert.equal(ticketCount, 0);
+    assert.equal(submitCount, 0);
+    assert.deepEqual(callbackAt(messages, 0), {
+        success: false,
+        runId: firstPayload.runId,
+        status: 400,
+        error: 'INVALID_RUN',
+    });
+    cleanup();
+});
+
+test('a new run aborts and replaces the prior in-memory ticket', async () => {
+    const bridgeWindow = {};
+    const { instance, messages } = createInstance();
+    const firstTicket = deferred();
+    const ticketSignals = [];
+    const ticketRequests = [];
+    const cleanup = bindThreeBossesSubmissionBridge(
+        instance,
+        async (request, signal) => {
+            ticketRequests.push(request);
+            ticketSignals.push(signal);
+            return request.runId === firstPayload.runId
+                ? firstTicket.promise
+                : ticketFor(request.runId);
+        },
+        async (request) => responseFor({
+            runId: request.runId,
+            completionTimeMs: request.completionTimeMs,
+        }),
+        bridgeWindow,
+    );
+
+    const begin = bridgeWindow[THREE_BOSSES_RUN_BEGIN_BRIDGE_FUNCTION];
+    begin(firstPayload.runId);
+    await flush();
+    begin(secondPayload.runId);
+    await flush();
+
+    assert.deepEqual(ticketRequests.map(({ runId }) => runId), [
+        firstPayload.runId,
+        secondPayload.runId,
+    ]);
+    assert.equal(ticketSignals[0].aborted, true);
+    assert.equal(ticketSignals[1].aborted, false);
+
+    bridgeWindow[THREE_BOSSES_SUBMISSION_BRIDGE_FUNCTION](JSON.stringify(secondPayload));
+    await flush();
+    assert.equal(callbackAt(messages, 0).success, true);
+    cleanup();
+});
+
+test('requires a new run after ticket issuance fails instead of exposing a false retry', async () => {
+    const bridgeWindow = {};
+    const { instance, messages } = createInstance();
+    let submitCount = 0;
+    const cleanup = bindThreeBossesSubmissionBridge(
+        instance,
+        async () => {
+            throw new LeaderboardRequestError(
+                'private authentication detail',
+                401,
+                'UNAUTHORIZED',
+            );
+        },
+        async () => {
+            submitCount += 1;
+            return responseFor(firstPayload);
+        },
+        bridgeWindow,
+    );
+
+    bridgeWindow[THREE_BOSSES_RUN_BEGIN_BRIDGE_FUNCTION](firstPayload.runId);
+    await flush();
+    assert.deepEqual(messages, []);
+
+    bridgeWindow[THREE_BOSSES_SUBMISSION_BRIDGE_FUNCTION](JSON.stringify(firstPayload));
+    await flush();
+    assert.equal(submitCount, 0);
+    assert.deepEqual(callbackAt(messages, 0), {
+        success: false,
+        runId: firstPayload.runId,
+        status: 401,
+        error: THREE_BOSSES_RUN_TICKET_UNAVAILABLE_ERROR,
+    });
+    assert.equal(messages[0][2].includes('private authentication detail'), false);
+
+    bridgeWindow[THREE_BOSSES_SUBMISSION_BRIDGE_FUNCTION](JSON.stringify(firstPayload));
+    await flush();
+    assert.equal(submitCount, 0);
+    assert.equal(messages.length, 2);
+    assert.equal(
+        callbackAt(messages, 1).error,
+        THREE_BOSSES_RUN_TICKET_UNAVAILABLE_ERROR,
+    );
+    cleanup();
 });
 
 test('coalesces an identical in-flight call and rejects overlapping different data', async () => {
@@ -126,6 +273,7 @@ test('coalesces an identical in-flight call and rejects overlapping different da
     let submitCount = 0;
     const cleanup = bindThreeBossesSubmissionBridge(
         instance,
+        issueTicket,
         async () => {
             submitCount += 1;
             return pending.promise;
@@ -134,9 +282,11 @@ test('coalesces an identical in-flight call and rejects overlapping different da
     );
 
     const submit = bridgeWindow[THREE_BOSSES_SUBMISSION_BRIDGE_FUNCTION];
+    bridgeWindow[THREE_BOSSES_RUN_BEGIN_BRIDGE_FUNCTION](firstPayload.runId);
     submit(JSON.stringify(firstPayload));
     submit(JSON.stringify(firstPayload));
     submit(JSON.stringify(secondPayload));
+    await flush();
 
     assert.equal(submitCount, 1);
     assert.deepEqual(callbackAt(messages, 0), {
@@ -160,6 +310,7 @@ test('uncertain failures permit only an exact retry until the server confirms it
     let attempt = 0;
     const cleanup = bindThreeBossesSubmissionBridge(
         instance,
+        issueTicket,
         async (request) => {
             requests.push(request);
             attempt += 1;
@@ -176,6 +327,7 @@ test('uncertain failures permit only an exact retry until the server confirms it
     );
 
     const submit = bridgeWindow[THREE_BOSSES_SUBMISSION_BRIDGE_FUNCTION];
+    bridgeWindow[THREE_BOSSES_RUN_BEGIN_BRIDGE_FUNCTION](firstPayload.runId);
     submit(JSON.stringify(firstPayload));
     await flush();
     assert.deepEqual(callbackAt(messages, 0), {
@@ -214,6 +366,7 @@ test('times out a stalled request and permits only the exact run retry', async (
     let attempt = 0;
     const cleanup = bindThreeBossesSubmissionBridge(
         instance,
+        issueTicket,
         async (_request, signal) => {
             observedSignals.push(signal);
             attempt += 1;
@@ -224,6 +377,7 @@ test('times out a stalled request and permits only the exact run retry', async (
     );
 
     const submit = bridgeWindow[THREE_BOSSES_SUBMISSION_BRIDGE_FUNCTION];
+    bridgeWindow[THREE_BOSSES_RUN_BEGIN_BRIDGE_FUNCTION](firstPayload.runId);
     submit(JSON.stringify(firstPayload));
     await new Promise((resolve) => setTimeout(resolve, 15));
 
@@ -260,12 +414,14 @@ test('serializes typed API failures without exposing their private messages', as
     const { instance, messages } = createInstance();
     const cleanup = bindThreeBossesSubmissionBridge(
         instance,
+        issueTicket,
         async () => {
             throw new LeaderboardRequestError('private diagnostic', 401, 'UNAUTHORIZED');
         },
         bridgeWindow,
     );
 
+    bridgeWindow[THREE_BOSSES_RUN_BEGIN_BRIDGE_FUNCTION](firstPayload.runId);
     bridgeWindow[THREE_BOSSES_SUBMISSION_BRIDGE_FUNCTION](JSON.stringify(firstPayload));
     await flush();
 
@@ -285,6 +441,7 @@ test('rejects malformed or expanded Unity payloads before network work', () => {
     let submitCount = 0;
     const cleanup = bindThreeBossesSubmissionBridge(
         instance,
+        issueTicket,
         async () => {
             submitCount += 1;
             return responseFor(firstPayload);
@@ -322,6 +479,7 @@ test('cleanup aborts active work, removes only its global, and suppresses late c
     let observedSignal;
     const cleanup = bindThreeBossesSubmissionBridge(
         instance,
+        issueTicket,
         async (_request, signal) => {
             observedSignal = signal;
             return pending.promise;
@@ -329,7 +487,9 @@ test('cleanup aborts active work, removes only its global, and suppresses late c
         bridgeWindow,
     );
 
+    bridgeWindow[THREE_BOSSES_RUN_BEGIN_BRIDGE_FUNCTION](firstPayload.runId);
     bridgeWindow[THREE_BOSSES_SUBMISSION_BRIDGE_FUNCTION](JSON.stringify(firstPayload));
+    await flush();
     cleanup();
     cleanup();
 

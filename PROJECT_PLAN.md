@@ -49,8 +49,9 @@ each phase boundary.
 Phase 12 release acceptance still requires the remaining hands-on gameplay
 check, passing Unity compilation and automated tests, clean asset/meta integrity,
 and a verified complete normal route. The provisional rank implementation is
-complete, but production submissions remain disabled until the release gate is
-explicitly enabled and verified.
+complete. The Alpha score-submission candidate is now implemented behind the
+fail-closed release gate; live production remains disabled until the packaged
+player and authenticated production preview are explicitly approved.
 
 ## Phase 13 — Website and leaderboard integration
 
@@ -543,7 +544,11 @@ exact Brotli/MIME/cache headers, a source-bound release certificate, and
 offline plus hosted-byte validation. A fresh production candidate was built,
 packaged, validated through the Firebase Hosting emulator, and started in a
 real Chrome canvas on 2026-08-29. The full three-level hands-on browser matrix
-below remains a release gate; no WebGL build or route has been published.
+below remains a release gate; no WebGL build or route has been published. On
+2026-08-31, the Alpha score path gained a server-issued, user/run/version-bound
+30-minute ticket, a 10-second minimum completion bound, exact-replay safety,
+and one authenticated HTTP/MySQL integration covering ticket issuance,
+submission, replay, personal best, and leaderboard readback.
 
 Three Bosses is present on the feature branch and locally playable at
 `/games/three-bosses`. Before public release, complete the remaining hands-on
@@ -573,7 +578,7 @@ flag unset in CI and production builds. The integration must:
 - provide an appropriately sized game frame plus clear focus and fullscreen
   controls without trapping normal website navigation;
 - display the provisional S–D ranks and arcade-scale score while keeping
-  server writes disabled until the independent runtime opt-in is approved;
+  server writes fail-closed until the independent runtime opt-in is approved;
 - keep development WebGL output outside the repository; create production
   output only with `three-bosses:webgl:release:build`, then package the
   certified bytes into one content-addressed release plus the stable manifest
@@ -653,6 +658,9 @@ under `/games`. The p4-Vega detail now uses the generic GET API, while Three
 Bosses reads typed real rows and derives S–D ranks while submissions remain
 disabled by default. The browser transport, lifecycle-safe Unity bridge,
 Unity caller/receiver, and end-screen submission state machine are connected.
+The 2026-08-31 release candidate adds a server-signed run-start ticket kept only
+in browser memory, binds it to the authenticated run, and rejects impossible or
+expired completion claims before persistence.
 Transport tests, production
 build, and desktop plus narrow browser checks pass. A disposable loopback API
 verified the populated p4-Vega table without applying approval-gated database

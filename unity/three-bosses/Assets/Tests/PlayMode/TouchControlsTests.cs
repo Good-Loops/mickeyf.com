@@ -142,6 +142,7 @@ namespace ThreeBosses.Tests
             configureTouchControls.Invoke(service, new object[] { "1" });
             Assert.That(controlsRoot.activeSelf, Is.True);
 
+            DisarmActiveCountdownRestore();
             SceneManager.LoadScene(BattleScenes[1]);
             yield return null;
 

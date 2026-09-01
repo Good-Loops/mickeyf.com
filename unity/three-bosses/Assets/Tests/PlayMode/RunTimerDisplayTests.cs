@@ -28,6 +28,7 @@ namespace ThreeBosses.Tests
 
             foreach (string sceneName in BattleScenes)
             {
+                ReleaseCountdownGateBeforeSceneChange();
                 SceneManager.LoadScene(sceneName);
                 yield return null;
 
@@ -189,6 +190,7 @@ namespace ThreeBosses.Tests
         public IEnumerator TearDown()
         {
             Time.timeScale = 1f;
+            ReleaseCountdownGateBeforeSceneChange();
             SceneManager.LoadScene("MainMenu");
             yield return null;
 
@@ -199,6 +201,18 @@ namespace ThreeBosses.Tests
             MonoBehaviour service = UnityEngine.Object.FindFirstObjectByType(serviceType) as MonoBehaviour;
             if (service != null)
                 UnityEngine.Object.Destroy(service.gameObject);
+        }
+
+        private static void ReleaseCountdownGateBeforeSceneChange()
+        {
+            Type countdownType = Type.GetType("RunCountdownController, Assembly-CSharp");
+            if (countdownType == null)
+                return;
+
+            MonoBehaviour countdown =
+                UnityEngine.Object.FindFirstObjectByType(countdownType) as MonoBehaviour;
+            if (countdown != null && countdown.enabled)
+                countdown.enabled = false;
         }
 
         private static string FormatTime(double elapsedSeconds)

@@ -21,6 +21,7 @@ export type {
     GetGameLeaderboardResponse,
     GetLeaderboardCatalogRequest,
     GetLeaderboardCatalogResponse,
+    IssueThreeBossesRunTicketResponse,
     SubmitThreeBossesRunResponse,
 } from '../routers/leaderboardRouter.contract';
 export type {
@@ -34,6 +35,8 @@ export type {
     ThreeBossesRank,
     ThreeBossesRunSubmissionRequest,
     ThreeBossesRunSubmissionResponse,
+    ThreeBossesRunTicketRequest,
+    ThreeBossesRunTicketResponse,
 } from '../leaderboards/leaderboardContract';
 export {
     LEADERBOARD_CONTRACT_VERSION,

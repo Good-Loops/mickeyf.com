@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
+import { once } from 'node:events';
+import { AddressInfo } from 'node:net';
 import { randomUUID } from 'node:crypto';
 import { after, before, beforeEach, test } from 'node:test';
+import express from 'express';
+import jwt from 'jsonwebtoken';
 import mysql, {
     Connection,
     Pool,
@@ -11,6 +15,7 @@ import { loadMigrationConfig } from '../config/migrationConfig';
 import type { MigrationConnection } from '../migrations/leaderboardSchema';
 import { loadMigrationManifest } from '../migrations/migrationManifest';
 import { applyMigrations } from '../migrations/migrationRunner';
+import { createLeaderboardRouter } from '../routers/leaderboardRouter';
 import { calculateThreeBossesScore } from './leaderboardContract';
 import {
     readThreeBossesLeaderboard,
@@ -520,4 +525,117 @@ test('a valid token for a deleted user is rejected without creating history', as
     );
     assert.equal(await countRows('game_runs'), 0);
     assert.equal(await countRows('game_personal_bests'), 0);
+});
+
+test('signed-in HTTP ticket, submission, replay, and leaderboard form one round trip', {
+    timeout: 20_000,
+}, async () => {
+    const sessionSecret = 'isolated-three-bosses-round-trip-secret';
+    const runId = randomUUID();
+    const bearerToken = jwt.sign(
+        { user_id: 1, user_name: 'player-1' },
+        sessionSecret,
+        { algorithm: 'HS256', expiresIn: '5m' }
+    );
+    const app = express();
+    app.use('/api/leaderboards', createLeaderboardRouter(applicationPool, {
+        sessionSecret,
+        allowedMutationOrigins: [],
+        threeBossesRunSubmissionsEnabled: true,
+    }));
+
+    const server = app.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const address = server.address() as AddressInfo;
+    const apiOrigin = `http://127.0.0.1:${address.port}`;
+    const authenticatedJsonRequest = async (path: string, body: unknown) => {
+        const response = await fetch(`${apiOrigin}${path}`, {
+            method: 'POST',
+            headers: {
+                accept: 'application/json',
+                authorization: `Bearer ${bearerToken}`,
+                'content-type': 'application/json',
+            },
+            body: JSON.stringify(body),
+        });
+        return { status: response.status, body: await response.json() };
+    };
+
+    try {
+        const ticketRequest = { contractVersion: 1, rulesVersion: 1, runId };
+        const ticket = await authenticatedJsonRequest(
+            '/api/leaderboards/three-bosses/run-tickets',
+            ticketRequest
+        );
+        assert.equal(ticket.status, 201);
+        assert.equal((ticket.body as { runId: string }).runId, runId);
+        assert.equal(
+            typeof (ticket.body as { runTicket: unknown }).runTicket,
+            'string'
+        );
+
+        // The production check allows 2.5 seconds for ticket issuance. Waiting
+        // 7.6 seconds proves the minimum 10-second active-combat result against
+        // real wall time without weakening the controller for tests.
+        await new Promise((resolve) => setTimeout(resolve, 7_600));
+
+        const submission = {
+            ...ticketRequest,
+            completionTimeMs: 10_000,
+            runTicket: (ticket.body as { runTicket: string }).runTicket,
+        };
+        const accepted = await authenticatedJsonRequest(
+            '/api/leaderboards/three-bosses/runs',
+            submission
+        );
+        assert.deepEqual(accepted, {
+            status: 201,
+            body: {
+                success: true,
+                contractVersion: 1,
+                gameId: 'three-bosses',
+                rulesVersion: 1,
+                runId,
+                replayed: false,
+                personalBest: true,
+                result: {
+                    score: 1_000_000,
+                    completionTimeMs: 10_000,
+                    rank: 'S',
+                },
+            },
+        });
+
+        const replay = await authenticatedJsonRequest(
+            '/api/leaderboards/three-bosses/runs',
+            submission
+        );
+        assert.equal(replay.status, 200);
+        assert.equal((replay.body as { replayed: boolean }).replayed, true);
+
+        const leaderboardResponse = await fetch(
+            `${apiOrigin}/api/leaderboards/three-bosses`,
+            { headers: { accept: 'application/json' } }
+        );
+        assert.equal(leaderboardResponse.status, 200);
+        assert.deepEqual(await leaderboardResponse.json(), {
+            success: true,
+            contractVersion: 1,
+            gameId: 'three-bosses',
+            rulesVersion: 1,
+            entries: [{
+                position: 1,
+                userName: 'player-1',
+                score: 1_000_000,
+                completionTimeMs: 10_000,
+                rank: 'S',
+            }],
+        });
+        assert.equal(await countRows('game_runs'), 1);
+        assert.equal(await countRows('game_personal_bests'), 1);
+    } finally {
+        await new Promise<void>((resolve, reject) => {
+            server.close((error) => error ? reject(error) : resolve());
+        });
+    }
 });

@@ -27,7 +27,10 @@ export const leaderboardRequestErrorHandler: ErrorRequestHandler = (
     const requestBodyError = error as RequestBodyError;
     if (
         req.method === 'POST'
-        && req.path === '/three-bosses/runs'
+        && (
+            req.path === '/three-bosses/runs'
+            || req.path === '/three-bosses/run-tickets'
+        )
         && (
             requestBodyError.type === 'entity.parse.failed'
             || requestBodyError.type === 'entity.too.large'

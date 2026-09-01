@@ -8,7 +8,6 @@ import {
     LEADERBOARD_CONTRACT_VERSION,
     LEADERBOARD_PAGE_SIZE,
     THREE_BOSSES_MAX_COMPLETION_TIME_MS,
-    THREE_BOSSES_MAX_SCORE,
     THREE_BOSSES_MIN_COMPLETION_TIME_MS,
     THREE_BOSSES_RULES_VERSION,
 } from './leaderboardContract';
@@ -45,6 +44,7 @@ test('bounds Three Bosses completion time to safe integer milliseconds', () => {
     for (const value of [
         0,
         -1,
+        THREE_BOSSES_MIN_COMPLETION_TIME_MS - 1,
         1.5,
         THREE_BOSSES_MAX_COMPLETION_TIME_MS + 1,
         Number.NaN,
@@ -61,8 +61,7 @@ test('bounds Three Bosses completion time to safe integer milliseconds', () => {
 
 test('derives deterministic Three Bosses scores from canonical milliseconds', () => {
     const vectors = [
-        [1, THREE_BOSSES_MAX_SCORE],
-        [1_000, 10_000_000],
+        [THREE_BOSSES_MIN_COMPLETION_TIME_MS, 1_000_000],
         [60_000, 166_667],
         [40_000_000, 250],
         [THREE_BOSSES_MAX_COMPLETION_TIME_MS, 116],
@@ -72,7 +71,10 @@ test('derives deterministic Three Bosses scores from canonical milliseconds', ()
         assert.equal(calculateThreeBossesScore(completionTimeMs), expectedScore);
     }
 
-    assert.throws(() => calculateThreeBossesScore(0), RangeError);
+    assert.throws(
+        () => calculateThreeBossesScore(THREE_BOSSES_MIN_COMPLETION_TIME_MS - 1),
+        RangeError
+    );
 });
 
 test('derives provisional Three Bosses ranks at exact boundaries', () => {

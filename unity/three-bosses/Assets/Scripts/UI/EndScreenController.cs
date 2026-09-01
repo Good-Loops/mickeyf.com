@@ -140,6 +140,10 @@ public sealed class EndScreenController : MonoBehaviour
             RunSubmissionStatus.Submitted => "SUBMITTED",
             RunSubmissionStatus.SignInRequired => "SIGN IN REQUIRED",
             RunSubmissionStatus.RetryableFailure => "RETRY SUBMISSION",
+            RunSubmissionStatus.Rejected when
+                runSessionService.SubmissionErrorCode ==
+                    RunSubmissionCoordinator.RunTicketUnavailableErrorCode =>
+                "START A NEW RUN",
             RunSubmissionStatus.Rejected => "SUBMISSION FAILED",
             _ => "SUBMISSION LOCKED"
         };

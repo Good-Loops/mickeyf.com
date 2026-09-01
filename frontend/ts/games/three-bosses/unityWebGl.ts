@@ -14,6 +14,7 @@ import {
 import {
     bindThreeBossesSubmissionBridge,
     configureThreeBossesSubmission,
+    type ThreeBossesRunTicketIssuer,
     type ThreeBossesRunSubmitter,
 } from '@/games/three-bosses/unitySubmissionBridge';
 
@@ -66,6 +67,7 @@ type StartUnityWebGlOptions = Readonly<{
     signal: AbortSignal;
     onProgress: (progress: number) => void;
     onCanvasOwned?: () => void;
+    issueRunTicket: ThreeBossesRunTicketIssuer;
     submitRun: ThreeBossesRunSubmitter;
 }>;
 
@@ -207,6 +209,7 @@ const startNewHandle = async ({
     signal,
     onProgress,
     onCanvasOwned,
+    issueRunTicket,
     submitRun,
 }: StartUnityWebGlOptions): Promise<UnityWebGlHandle> => {
     const manifest = await readManifest(signal);
@@ -244,7 +247,11 @@ const startNewHandle = async ({
             await handOffThreeBossesCanvas(gameReady, onCanvasOwned);
             configureThreeBossesTouchControls(instance);
             releaseVisibility = bindUnityVisibility(instance);
-            releaseSubmissionBridge = bindThreeBossesSubmissionBridge(instance, submitRun);
+            releaseSubmissionBridge = bindThreeBossesSubmissionBridge(
+                instance,
+                issueRunTicket,
+                submitRun
+            );
             configureThreeBossesSubmission(instance, false);
         } catch (error) {
             try {

@@ -101,6 +101,16 @@ separate release gate:
 THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=true
 ```
 
+When that gate is open, a normal run first obtains a short-lived, signed ticket
+from `POST /api/leaderboards/three-bosses/run-tickets`. The browser keeps the
+ticket in memory and presents it with the matching completion. The backend
+binds it to the authenticated user, run ID, contract, and rules version; checks
+that the reported active-combat time is possible within elapsed wall time; and
+then derives score and rank itself. Tickets expire after 30 minutes and runs
+shorter than 10 seconds are rejected. This is a proportionate Alpha integrity
+check, not server-authoritative anti-cheat: a modified client can still report
+a plausible slower time.
+
 On native Windows, Compose finds the ADC file under `%APPDATA%` automatically.
 Set `GOOGLE_APPLICATION_CREDENTIALS_HOST` in `.env` only to override that
 location; use forward slashes in an override path. Create or refresh
@@ -217,7 +227,9 @@ Production enables the route with `VITE_ENABLE_THREE_BOSSES_RELEASE=1` and
 Firebase Hosting supplies the required Brotli, WebAssembly, CSP, MIME, and
 cache headers. Publishing the game does not enable score writes: the backend's
 independent `THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=true` opt-in must be reviewed
-and activated separately.
+and activated separately. Alpha 0.6.0 activates them together only after the
+fresh packaged player, authenticated run-ticket round trip, leaderboard
+readback, and production preview have all passed.
 
 ### Stop development
 

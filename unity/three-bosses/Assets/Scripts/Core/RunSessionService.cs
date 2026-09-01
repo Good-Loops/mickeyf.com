@@ -49,6 +49,9 @@ public sealed class RunSessionService : MonoBehaviour
 
 #if UNITY_WEBGL && !UNITY_EDITOR
     [DllImport("__Internal")]
+    private static extern void MickeyfThreeBossesBeginRun(string runId);
+
+    [DllImport("__Internal")]
     private static extern void MickeyfThreeBossesSubmitRun(string payloadJson);
 #endif
 
@@ -76,6 +79,7 @@ public sealed class RunSessionService : MonoBehaviour
         gameObject.name = ServiceObjectName;
         sessionClock = new PausableMonotonicClock(new UnityRealtimeClock());
         Session = new RunSession(sessionClock);
+        Session.NormalRunStarted += OnNormalRunStarted;
         submissionCoordinator = new RunSubmissionCoordinator(Session);
         submissionCoordinator.Changed += OnSubmissionStateChanged;
 #if UNITY_WEBGL && !UNITY_EDITOR
@@ -93,6 +97,8 @@ public sealed class RunSessionService : MonoBehaviour
 
         ResumeFromDocumentHidden();
         ResumeFromUserPause();
+        if (Session != null)
+            Session.NormalRunStarted -= OnNormalRunStarted;
         if (submissionCoordinator != null)
             submissionCoordinator.Changed -= OnSubmissionStateChanged;
         TouchControlsAvailabilityChanged = null;
@@ -295,6 +301,22 @@ public sealed class RunSessionService : MonoBehaviour
     private void OnSubmissionStateChanged()
     {
         SubmissionStateChanged?.Invoke();
+    }
+
+    private void OnNormalRunStarted(Guid runId)
+    {
+#if UNITY_WEBGL && !UNITY_EDITOR
+        try
+        {
+            MickeyfThreeBossesBeginRun(runId.ToString("D"));
+        }
+        catch (Exception exception)
+        {
+            Debug.LogWarning(
+                $"Three Bosses run-start bridge failed: {exception.Message}",
+                this);
+        }
+#endif
     }
 
     [Serializable]

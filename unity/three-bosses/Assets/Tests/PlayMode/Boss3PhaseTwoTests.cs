@@ -128,13 +128,16 @@ namespace ThreeBosses.Tests
                 BindingFlags.Instance | BindingFlags.Public);
 
             Assert.That(loaderHandlerField.GetValue(loader), Is.SameAs(handler));
-            Assert.That((float)fadeStartField.GetValue(loader), Is.EqualTo(0.9f));
+            float fadeStartDelaySeconds = (float)fadeStartField.GetValue(loader);
+            Assert.That(fadeStartDelaySeconds, Is.EqualTo(0.9f));
             Assert.That((float)fadeDurationField.GetValue(loader), Is.EqualTo(0.5f));
             Assert.That((float)loadDelayField.GetValue(loader), Is.EqualTo(1.4f));
 
             float timeScaleBeforeLock = Time.timeScale;
             int healthBeforeLock = (int)currentHealth.GetValue(health);
             int remainsBeforeDeath = CountBehavioursOfType(remainsType);
+            float deathHandoffDeadline =
+                Time.realtimeSinceStartup + fadeStartDelaySeconds;
             bossFixture.SetHealth(0);
 
             bool damageApplied = (bool)tryTakeDamage.Invoke(health, new object[] { 1 });
@@ -144,9 +147,17 @@ namespace ThreeBosses.Tests
             Assert.That(playerBody.simulated, Is.False);
             Assert.That(Time.timeScale, Is.EqualTo(timeScaleBeforeLock));
 
-            yield return new WaitForSecondsRealtime(0.5f);
+            while (
+                bossFixture.IsDeathVisualActive
+                && Time.realtimeSinceStartup < deathHandoffDeadline)
+            {
+                yield return null;
+            }
 
-            Assert.That(bossFixture.IsDeathVisualActive, Is.False);
+            Assert.That(
+                bossFixture.IsDeathVisualActive,
+                Is.False,
+                "Kraken's death animation did not hand off before the screen fade.");
             Assert.That(
                 CountBehavioursOfType(remainsType),
                 Is.GreaterThan(remainsBeforeDeath),

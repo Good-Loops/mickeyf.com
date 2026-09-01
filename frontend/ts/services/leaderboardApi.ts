@@ -9,8 +9,9 @@
 export const LEADERBOARD_CONTRACT_VERSION = 1 as const;
 export const THREE_BOSSES_RULES_VERSION = 1 as const;
 const LEADERBOARD_PAGE_SIZE = 10 as const;
-const THREE_BOSSES_MIN_COMPLETION_TIME_MS = 1 as const;
+const THREE_BOSSES_MIN_COMPLETION_TIME_MS = 10_000 as const;
 const THREE_BOSSES_MAX_COMPLETION_TIME_MS = 86_400_000 as const;
+const THREE_BOSSES_RUN_TICKET_MAX_LENGTH = 2_048 as const;
 
 const CANONICAL_V4_UUID =
     /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -77,6 +78,23 @@ export type ThreeBossesRunSubmissionRequest = {
     rulesVersion: typeof THREE_BOSSES_RULES_VERSION;
     runId: string;
     completionTimeMs: number;
+    runTicket: string;
+};
+
+export type ThreeBossesRunTicketRequest = {
+    contractVersion: typeof LEADERBOARD_CONTRACT_VERSION;
+    rulesVersion: typeof THREE_BOSSES_RULES_VERSION;
+    runId: string;
+};
+
+export type ThreeBossesRunTicketResponse = {
+    success: true;
+    contractVersion: typeof LEADERBOARD_CONTRACT_VERSION;
+    gameId: 'three-bosses';
+    rulesVersion: typeof THREE_BOSSES_RULES_VERSION;
+    runId: string;
+    runTicket: string;
+    expiresAt: string;
 };
 
 export type ThreeBossesRunSubmissionResponse = {
@@ -134,6 +152,10 @@ type LeaderboardApi = {
         gameId: string,
         signal?: AbortSignal
     ): Promise<GameLeaderboardResponse>;
+    issueThreeBossesRunTicket(
+        request: ThreeBossesRunTicketRequest,
+        signal?: AbortSignal
+    ): Promise<ThreeBossesRunTicketResponse>;
     submitThreeBossesRun(
         request: ThreeBossesRunSubmissionRequest,
         signal?: AbortSignal
@@ -188,6 +210,33 @@ export function isThreeBossesSubmissionEnabled(
         && game.submissionState === 'enabled';
 }
 
+function isRunTicket(value: unknown): value is string {
+    return typeof value === 'string'
+        && value.length > 0
+        && value.length <= THREE_BOSSES_RUN_TICKET_MAX_LENGTH;
+}
+
+function isIsoTimestamp(value: unknown): value is string {
+    if (typeof value !== 'string') return false;
+    const milliseconds = Date.parse(value);
+    return Number.isFinite(milliseconds)
+        && new Date(milliseconds).toISOString() === value;
+}
+
+function isThreeBossesRunTicketRequest(
+    value: unknown
+): value is ThreeBossesRunTicketRequest {
+    return isRecord(value)
+        && hasExactKeys(value, [
+            'contractVersion',
+            'rulesVersion',
+            'runId',
+        ])
+        && value.contractVersion === LEADERBOARD_CONTRACT_VERSION
+        && value.rulesVersion === THREE_BOSSES_RULES_VERSION
+        && isCanonicalThreeBossesRunId(value.runId);
+}
+
 function isThreeBossesRunSubmissionRequest(
     value: unknown
 ): value is ThreeBossesRunSubmissionRequest {
@@ -197,11 +246,13 @@ function isThreeBossesRunSubmissionRequest(
             'rulesVersion',
             'runId',
             'completionTimeMs',
+            'runTicket',
         ])
         && value.contractVersion === LEADERBOARD_CONTRACT_VERSION
         && value.rulesVersion === THREE_BOSSES_RULES_VERSION
         && isCanonicalThreeBossesRunId(value.runId)
-        && isValidThreeBossesCompletionTimeMs(value.completionTimeMs);
+        && isValidThreeBossesCompletionTimeMs(value.completionTimeMs)
+        && isRunTicket(value.runTicket);
 }
 
 function isGameId(value: unknown): value is LeaderboardGameId {
@@ -320,6 +371,29 @@ function isThreeBossesRunSubmissionResponse(
         && isPositiveInteger(value.result.score)
         && value.result.completionTimeMs === request.completionTimeMs
         && isThreeBossesRank(value.result.rank);
+}
+
+function isThreeBossesRunTicketResponse(
+    value: unknown,
+    request: ThreeBossesRunTicketRequest
+): value is ThreeBossesRunTicketResponse {
+    return isRecord(value)
+        && hasExactKeys(value, [
+            'success',
+            'contractVersion',
+            'gameId',
+            'rulesVersion',
+            'runId',
+            'runTicket',
+            'expiresAt',
+        ])
+        && value.success === true
+        && value.contractVersion === LEADERBOARD_CONTRACT_VERSION
+        && value.gameId === 'three-bosses'
+        && value.rulesVersion === request.rulesVersion
+        && value.runId === request.runId
+        && isRunTicket(value.runTicket)
+        && isIsoTimestamp(value.expiresAt);
 }
 
 function isApiError(value: unknown): value is LeaderboardApiError {
@@ -491,6 +565,53 @@ export function createLeaderboardApi(
                 throw new LeaderboardRequestError(
                     'The leaderboard service returned an unexpected response.',
                     200,
+                    'INVALID_RESPONSE'
+                );
+            }
+
+            return payload;
+        },
+
+        async issueThreeBossesRunTicket(ticketRequest, signal) {
+            if (!isRecord(ticketRequest)) {
+                throw new LeaderboardRequestError(
+                    messageForApiError('INVALID_RUN'),
+                    API_ERROR_STATUS.INVALID_RUN,
+                    'INVALID_RUN'
+                );
+            }
+            if (ticketRequest.contractVersion !== LEADERBOARD_CONTRACT_VERSION) {
+                throw new LeaderboardRequestError(
+                    messageForApiError('UNSUPPORTED_CONTRACT_VERSION'),
+                    API_ERROR_STATUS.UNSUPPORTED_CONTRACT_VERSION,
+                    'UNSUPPORTED_CONTRACT_VERSION'
+                );
+            }
+            if (ticketRequest.rulesVersion !== THREE_BOSSES_RULES_VERSION) {
+                throw new LeaderboardRequestError(
+                    messageForApiError('UNSUPPORTED_RULES_VERSION'),
+                    API_ERROR_STATUS.UNSUPPORTED_RULES_VERSION,
+                    'UNSUPPORTED_RULES_VERSION'
+                );
+            }
+            if (!isThreeBossesRunTicketRequest(ticketRequest)) {
+                throw new LeaderboardRequestError(
+                    messageForApiError('INVALID_RUN'),
+                    API_ERROR_STATUS.INVALID_RUN,
+                    'INVALID_RUN'
+                );
+            }
+
+            const { payload, status } = await request(
+                '/api/leaderboards/three-bosses/run-tickets',
+                'POST',
+                signal,
+                ticketRequest
+            );
+            if (!isThreeBossesRunTicketResponse(payload, ticketRequest) || status !== 201) {
+                throw new LeaderboardRequestError(
+                    'The leaderboard service returned an unexpected response.',
+                    status,
                     'INVALID_RESPONSE'
                 );
             }

@@ -65,7 +65,10 @@ anchors to three. Defeating Boss 3 now freezes the active-combat timer and opens
 the final result scene. Rules version 1 derives an S–D rank and arcade-scale
 score from the canonical active-combat time. The end-screen submission flow is
 connected, but its button stays unavailable until the browser catalog reports
-enabled; production writes remain fail-closed by default.
+enabled; production writes remain fail-closed by default. A normal WebGL run
+signals its canonical run ID at start so the browser can obtain the matching
+short-lived server ticket. Practice runs never request a ticket, and the Unity
+player never receives or stores the signed value.
 
 ## Website WebGL builds
 

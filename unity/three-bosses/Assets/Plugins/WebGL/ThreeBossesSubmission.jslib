@@ -11,6 +11,19 @@ mergeInto(LibraryManager.library, {
         signalReady();
     },
 
+    MickeyfThreeBossesBeginRun: function (runIdPointer) {
+        try {
+            var beginRun = globalThis.mickeyfThreeBossesBeginRun;
+            if (typeof beginRun !== 'function') {
+                return;
+            }
+
+            beginRun(UTF8ToString(runIdPointer));
+        } catch (error) {
+            console.warn('The Three Bosses run-start bridge failed.', error);
+        }
+    },
+
     MickeyfThreeBossesSubmitRun: function (payloadPointer) {
         var submitRun = globalThis.mickeyfThreeBossesSubmitRun;
         if (typeof submitRun !== 'function') {

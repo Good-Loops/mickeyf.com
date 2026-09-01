@@ -31,6 +31,8 @@ namespace ThreeBosses.Run
     /// </summary>
     public sealed class RunSubmissionCoordinator
     {
+        public const string RunTicketUnavailableErrorCode = "RUN_TICKET_UNAVAILABLE";
+
         private readonly RunSession session;
 
         private Guid trackedRunId;

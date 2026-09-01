@@ -62,6 +62,8 @@ namespace ThreeBosses.Run
         public bool IsEligibleForSubmission =>
             !IsPracticeRun && Phase == RunPhase.Completed && BossesDefeated == BossCount;
 
+        public event Action<Guid> NormalRunStarted;
+
         public double ElapsedSeconds
         {
             get
@@ -90,6 +92,7 @@ namespace ThreeBosses.Run
             RunId = Guid.NewGuid();
             CurrentBoss = BossId.Bee;
             Phase = RunPhase.Countdown;
+            NormalRunStarted?.Invoke(RunId);
         }
 
         public bool StartRun()

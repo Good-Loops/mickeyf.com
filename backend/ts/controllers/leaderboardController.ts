@@ -15,6 +15,7 @@ import {
     LeaderboardCatalogGame,
     LeaderboardCatalogResponse,
     ThreeBossesRunSubmissionResponse,
+    ThreeBossesRunTicketResponse,
 } from '../leaderboards/leaderboardContract';
 import {
     GAME_IDS,
@@ -32,7 +33,12 @@ import {
     hasAllowedThreeBossesMutationOrigin,
     isJsonSubmissionRequest,
     validateThreeBossesRunSubmission,
+    validateThreeBossesRunTicketRequest,
 } from '../leaderboards/threeBossesRunRequest';
+import {
+    issueThreeBossesRunTicket,
+    verifyThreeBossesRunTicket,
+} from '../leaderboards/threeBossesRunTicket';
 import { authenticateRequest } from '../security/requestAuthentication';
 
 type LeaderboardControllerDependencies = {
@@ -51,6 +57,16 @@ type ThreeBossesRunSubmissionResponseBody = ThreeBossesRunSubmissionResponse
           | 'INVALID_RUN'
           | 'UNAUTHORIZED'
           | 'IDEMPOTENCY_CONFLICT'
+          | 'RATE_LIMITED'
+          | 'SERVER_ERROR'
+      >;
+type ThreeBossesRunTicketResponseBody = ThreeBossesRunTicketResponse
+    | LeaderboardApiError<
+          | 'SUBMISSION_DISABLED'
+          | 'UNSUPPORTED_CONTRACT_VERSION'
+          | 'UNSUPPORTED_RULES_VERSION'
+          | 'INVALID_RUN'
+          | 'UNAUTHORIZED'
           | 'RATE_LIMITED'
           | 'SERVER_ERROR'
       >;
@@ -196,6 +212,18 @@ export function createLeaderboardController({
             });
         }
 
+        if (!verifyThreeBossesRunTicket(
+            sessionSecret,
+            authentication.identity.userId,
+            validation.input
+        )) {
+            return res.status(400).json({
+                success: false,
+                contractVersion: LEADERBOARD_CONTRACT_VERSION,
+                error: 'INVALID_RUN',
+            });
+        }
+
         const result = await submitThreeBossesRun(
             database,
             authentication.identity.userId,
@@ -240,9 +268,72 @@ export function createLeaderboardController({
         });
     }
 
+    async function issueThreeBossesRunTicketHandler(
+        req: Request,
+        res: Response<ThreeBossesRunTicketResponseBody>
+    ) {
+        if (!threeBossesRunSubmissionsEnabled) {
+            return res.status(403).json({
+                success: false,
+                contractVersion: LEADERBOARD_CONTRACT_VERSION,
+                error: 'SUBMISSION_DISABLED',
+            });
+        }
+
+        const authentication = authenticateRequest(req, sessionSecret);
+        if (!authentication.authenticated) {
+            return res.status(401).json({
+                success: false,
+                contractVersion: LEADERBOARD_CONTRACT_VERSION,
+                error: 'UNAUTHORIZED',
+            });
+        }
+
+        if (!hasAllowedThreeBossesMutationOrigin(req, allowedMutationOrigins)) {
+            return res.status(401).json({
+                success: false,
+                contractVersion: LEADERBOARD_CONTRACT_VERSION,
+                error: 'UNAUTHORIZED',
+            });
+        }
+
+        if (!isJsonSubmissionRequest(req)) {
+            return res.status(400).json({
+                success: false,
+                contractVersion: LEADERBOARD_CONTRACT_VERSION,
+                error: 'INVALID_RUN',
+            });
+        }
+
+        const validation = validateThreeBossesRunTicketRequest(req.body);
+        if (!validation.valid) {
+            return res.status(400).json({
+                success: false,
+                contractVersion: LEADERBOARD_CONTRACT_VERSION,
+                error: validation.error,
+            });
+        }
+
+        const ticket = issueThreeBossesRunTicket(
+            sessionSecret,
+            authentication.identity.userId,
+            validation.input
+        );
+        return res.status(201).json({
+            success: true,
+            contractVersion: LEADERBOARD_CONTRACT_VERSION,
+            gameId: 'three-bosses',
+            rulesVersion: THREE_BOSSES_RULES_VERSION,
+            runId: validation.input.runId,
+            runTicket: ticket.runTicket,
+            expiresAt: ticket.expiresAt,
+        });
+    }
+
     return {
         getCatalog,
         getGameLeaderboard,
+        issueThreeBossesRunTicket: issueThreeBossesRunTicketHandler,
         submitThreeBossesRun: submitThreeBossesRunHandler,
     };
 }

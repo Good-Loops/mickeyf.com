@@ -4,6 +4,7 @@ namespace ThreeBosses.Run
 {
     public static class RunScoreCalculator
     {
+        public const int MinimumCompletionTimeMilliseconds = 10000;
         public const int MaximumCompletionTimeMilliseconds = 86400000;
         public const long ScoreNumerator = 10000000000L;
 
@@ -20,7 +21,8 @@ namespace ThreeBosses.Run
             double roundedMilliseconds = Math.Round(
                 elapsedSeconds * 1000d,
                 MidpointRounding.AwayFromZero);
-            if (roundedMilliseconds < 1d || roundedMilliseconds > MaximumCompletionTimeMilliseconds)
+            if (roundedMilliseconds < MinimumCompletionTimeMilliseconds ||
+                roundedMilliseconds > MaximumCompletionTimeMilliseconds)
                 throw new ArgumentOutOfRangeException(nameof(elapsedSeconds));
 
             return (int)roundedMilliseconds;
@@ -28,7 +30,7 @@ namespace ThreeBosses.Run
 
         public static int CalculateFromMilliseconds(int completionTimeMilliseconds)
         {
-            if (completionTimeMilliseconds < 1 ||
+            if (completionTimeMilliseconds < MinimumCompletionTimeMilliseconds ||
                 completionTimeMilliseconds > MaximumCompletionTimeMilliseconds)
             {
                 throw new ArgumentOutOfRangeException(nameof(completionTimeMilliseconds));

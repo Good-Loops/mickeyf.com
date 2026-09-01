@@ -15,7 +15,7 @@ export { THREE_BOSSES_RULES_VERSION } from './gameCatalog';
 
 export const LEADERBOARD_CONTRACT_VERSION = 1 as const;
 export const LEADERBOARD_PAGE_SIZE = 10 as const;
-export const THREE_BOSSES_MIN_COMPLETION_TIME_MS = 1 as const;
+export const THREE_BOSSES_MIN_COMPLETION_TIME_MS = 10_000 as const;
 export const THREE_BOSSES_MAX_COMPLETION_TIME_MS = 86_400_000 as const;
 export const THREE_BOSSES_SCORE_NUMERATOR = 10_000_000_000 as const;
 export const THREE_BOSSES_MAX_SCORE = 2_147_483_647 as const;
@@ -85,6 +85,23 @@ export type ThreeBossesRunSubmissionRequest = {
     rulesVersion: typeof THREE_BOSSES_RULES_VERSION;
     runId: string;
     completionTimeMs: number;
+    runTicket: string;
+};
+
+export type ThreeBossesRunTicketRequest = {
+    contractVersion: typeof LEADERBOARD_CONTRACT_VERSION;
+    rulesVersion: typeof THREE_BOSSES_RULES_VERSION;
+    runId: string;
+};
+
+export type ThreeBossesRunTicketResponse = {
+    success: true;
+    contractVersion: typeof LEADERBOARD_CONTRACT_VERSION;
+    gameId: 'three-bosses';
+    rulesVersion: typeof THREE_BOSSES_RULES_VERSION;
+    runId: string;
+    runTicket: string;
+    expiresAt: string;
 };
 
 export type ThreeBossesRunSubmissionResponse = {

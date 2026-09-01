@@ -38,6 +38,23 @@ const runSubmission = {
     rulesVersion: 1,
     runId: '550e8400-e29b-41d4-a716-446655440000',
     completionTimeMs: 60_000,
+    runTicket: 'signed.run.ticket',
+};
+
+const runTicketRequest = {
+    contractVersion: 1,
+    rulesVersion: 1,
+    runId: runSubmission.runId,
+};
+
+const runTicketResponse = {
+    success: true,
+    contractVersion: 1,
+    gameId: 'three-bosses',
+    rulesVersion: 1,
+    runId: runSubmission.runId,
+    runTicket: runSubmission.runTicket,
+    expiresAt: '2026-08-31T12:30:00.000Z',
 };
 
 const runSubmissionResponse = {
@@ -140,6 +157,28 @@ test('Three Bosses submission sends the exact cookie-bearing JSON contract', asy
     assert.equal(observedInit.headers.Authorization, undefined);
 });
 
+test('Three Bosses run ticket issuance uses the exact cookie-bearing start contract', async () => {
+    let observedUrl;
+    let observedInit;
+    const controller = new AbortController();
+    const api = createLeaderboardApi('https://api.example.test/', async (url, init) => {
+        observedUrl = url;
+        observedInit = init;
+        return Response.json(runTicketResponse, { status: 201 });
+    });
+
+    assert.deepEqual(
+        await api.issueThreeBossesRunTicket(runTicketRequest, controller.signal),
+        runTicketResponse,
+    );
+    assert.equal(observedUrl, 'https://api.example.test/api/leaderboards/three-bosses/run-tickets');
+    assert.equal(observedInit.method, 'POST');
+    assert.equal(observedInit.credentials, 'include');
+    assert.equal(observedInit.body, JSON.stringify(runTicketRequest));
+    assert.equal(observedInit.signal, controller.signal);
+    assert.equal(observedInit.headers.Authorization, undefined);
+});
+
 test('Three Bosses exact replays require HTTP 200 and retain the typed result', async () => {
     const replay = {
         ...runSubmissionResponse,
@@ -192,6 +231,10 @@ test('Three Bosses submission rejects invalid local input before fetch', async (
         { ...runSubmission, rulesVersion: 2 },
         { ...runSubmission, runId: runSubmission.runId.toUpperCase() },
         { ...runSubmission, completionTimeMs: 0 },
+        { ...runSubmission, completionTimeMs: 9_999 },
+        { ...runSubmission, runTicket: '' },
+        { ...runSubmission, runTicket: 'x'.repeat(2_049) },
+        (({ runTicket: _runTicket, ...withoutTicket }) => withoutTicket)(runSubmission),
         { ...runSubmission, score: 1_667 },
     ]) {
         await assert.rejects(
@@ -201,6 +244,43 @@ test('Three Bosses submission rejects invalid local input before fetch', async (
         );
     }
     assert.equal(fetchCount, 0);
+});
+
+test('Three Bosses ticket issuance validates input and response exactly', async () => {
+    let fetchCount = 0;
+    const noFetchApi = createLeaderboardApi('', async () => {
+        fetchCount += 1;
+        throw new Error('fetch must not run');
+    });
+
+    for (const invalidRequest of [
+        { ...runTicketRequest, contractVersion: 2 },
+        { ...runTicketRequest, rulesVersion: 2 },
+        { ...runTicketRequest, runId: runTicketRequest.runId.toUpperCase() },
+        { ...runTicketRequest, extra: true },
+    ]) {
+        await assert.rejects(
+            noFetchApi.issueThreeBossesRunTicket(invalidRequest),
+            (error) => error instanceof LeaderboardRequestError
+                && error.status === 400,
+        );
+    }
+    assert.equal(fetchCount, 0);
+
+    for (const malformed of [
+        { ...runTicketResponse, runId: '6ba7b810-9dad-41d1-80b4-00c04fd430c8' },
+        { ...runTicketResponse, runTicket: '' },
+        { ...runTicketResponse, expiresAt: 'not-a-date' },
+        { ...runTicketResponse, unexpected: true },
+    ]) {
+        const api = createLeaderboardApi('', async () =>
+            Response.json(malformed, { status: 201 }));
+        await assert.rejects(
+            api.issueThreeBossesRunTicket(runTicketRequest),
+            (error) => error instanceof LeaderboardRequestError
+                && error.code === 'INVALID_RESPONSE',
+        );
+    }
 });
 
 test('Three Bosses submission fails closed on malformed success and error responses', async () => {
