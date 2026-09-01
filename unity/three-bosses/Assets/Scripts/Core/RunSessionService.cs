@@ -41,7 +41,7 @@ public sealed class RunSessionService : MonoBehaviour
         Session.Phase == RunPhase.Running &&
         Time.timeScale > 0f;
     public RunSubmissionStatus SubmissionStatus => submissionCoordinator.Status;
-    public string SubmissionErrorCode => submissionCoordinator.LastErrorCode;
+    public bool SubmissionRequiresNewRun => submissionCoordinator.RequiresNewRun;
     public bool TouchControlsEnabled => touchControlsEnabled;
 
     public event Action SubmissionStateChanged;

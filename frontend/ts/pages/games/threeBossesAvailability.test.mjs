@@ -27,6 +27,9 @@ const {
 } = await viteServer.ssrLoadModule(
     '/ts/pages/games/ThreeBosses.tsx',
 );
+const { default: ScoreSubmissionNotice } = await viteServer.ssrLoadModule(
+    '/ts/components/ScoreSubmissionNotice.tsx',
+);
 
 const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
 
@@ -73,6 +76,48 @@ test('the mobile direct-route surface does not render a Unity canvas', () => {
 
     assert.match(html, /currently available on desktop only/);
     assert.doesNotMatch(html, /<canvas/);
+});
+
+test('signed-out players are told to authenticate before starting a ranked run', () => {
+    const signedOutHtml = renderToStaticMarkup(
+        React.createElement(
+            MemoryRouter,
+            null,
+            React.createElement(ScoreSubmissionNotice, {
+                isAuthenticated: false,
+                loading: false,
+            }),
+        ),
+    );
+    const signedInHtml = renderToStaticMarkup(
+        React.createElement(
+            MemoryRouter,
+            null,
+            React.createElement(ScoreSubmissionNotice, {
+                isAuthenticated: true,
+                loading: false,
+            }),
+        ),
+    );
+    const loadingHtml = renderToStaticMarkup(
+        React.createElement(
+            MemoryRouter,
+            null,
+            React.createElement(ScoreSubmissionNotice, {
+                isAuthenticated: false,
+                loading: true,
+            }),
+        ),
+    );
+
+    assert.match(signedOutHtml, /Log in/);
+    assert.match(signedOutHtml, /sign up/);
+    assert.match(signedOutHtml, /before starting a run to submit scores/);
+    assert.match(signedOutHtml, /href="\/login"/);
+    assert.match(signedOutHtml, /href="\/signup"/);
+    assert.match(signedOutHtml, /role="status"/);
+    assert.equal(signedInHtml, '');
+    assert.equal(loadingHtml, '');
 });
 
 test('the route gate selects the desktop-only surface from the current mobile browser identity', () => {

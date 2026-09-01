@@ -52,6 +52,12 @@ namespace ThreeBosses.Run
         public RunSubmissionStatus Status => status;
         public string LastErrorCode => lastErrorCode;
         public bool TransportEnabled => transportEnabled;
+        public bool RequiresNewRun =>
+            status == RunSubmissionStatus.Rejected &&
+            string.Equals(
+                lastErrorCode,
+                RunTicketUnavailableErrorCode,
+                StringComparison.Ordinal);
 
         public void ConfigureTransport(bool enabled)
         {

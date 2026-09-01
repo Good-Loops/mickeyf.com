@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import FullscreenButton from '@/components/FullscreenButton';
+import ScoreSubmissionNotice from '@/components/ScoreSubmissionNotice';
 import { isThreeBossesLocalEnabled } from '@/config/featureFlags';
+import { useAuth } from '@/context/AuthContext';
 import { isThreeBossesAvailableInCurrentBrowser } from '@/games/three-bosses/unityVisibility';
 import { startThreeBossesWebGl, type UnityWebGlHandle } from '@/games/three-bosses/unityWebGl';
 import {
@@ -94,6 +96,7 @@ export const readThreeBossesSubmissionGate = async (
 };
 
 const ThreeBosses: React.FC = () => {
+    const { isAuthenticated, loading: authLoading } = useAuth();
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const frameRef = useRef<HTMLDivElement | null>(null);
     const [loadState, setLoadState] = useState<LoadState>({ kind: 'loading', progress: 0 });
@@ -170,6 +173,10 @@ const ThreeBosses: React.FC = () => {
             {isThreeBossesLocalEnabled && (
                 <p className="three-bosses__local-note">Local WebGL playability prototype</p>
             )}
+            <ScoreSubmissionNotice
+                isAuthenticated={isAuthenticated}
+                loading={authLoading}
+            />
 
             <div
                 className="three-bosses__canvas-wrapper"

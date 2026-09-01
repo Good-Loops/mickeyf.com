@@ -1,9 +1,15 @@
 /**
  * Fullscreen toggle button.
- * Bridges the DOM Fullscreen API into a small React control.
- * Subscribes to `fullscreenchange` and must unregister on unmount.
+ * Bridges native fullscreen and the iPhone viewport fallback into one control.
+ * Subscribes to fullscreen and keyboard events and unregisters on unmount.
  */
-import React, { useEffect, useState, useRef } from "react";
+import React, { useCallback, useEffect, useRef, useState } from "react";
+import {
+    clearCanvasFullscreenFallback,
+    isCanvasFullscreen,
+    isCanvasFullscreenFallback,
+    toggleCanvasFullscreen,
+} from '@/components/fullscreenMode';
 
 interface FullscreenButtonProps {
     targetRef?: React.RefObject<HTMLElement | HTMLDivElement | null>;
@@ -66,19 +72,36 @@ const FullscreenButton: React.FC<FullscreenButtonProps> = ({
     label,
 }) => {
     const [isFullscreen, setIsFullscreen] = useState(false);
+    const previousFocusRef = useRef<HTMLElement | null>(null);
+
+    const restorePreviousFocus = useCallback(() => {
+        const previousFocus = previousFocusRef.current;
+        previousFocusRef.current = null;
+
+        if (previousFocus?.isConnected) {
+            previousFocus.focus({ preventScroll: true });
+            return;
+        }
+
+        focusRef?.current?.focus({ preventScroll: true });
+    }, [focusRef]);
 
     const toggle = async () => {
         const target = targetRef?.current ?? document.documentElement;
         if (!target) return;
 
         try {
-            if (document.fullscreenElement) {
-                await document.exitFullscreen();
-            } else {
-                await target.requestFullscreen();
+            const wasFullscreen = isCanvasFullscreen(target);
+            if (!wasFullscreen) {
+                previousFocusRef.current = document.activeElement instanceof HTMLElement
+                    ? document.activeElement
+                    : null;
             }
 
-            focusRef?.current?.focus({ preventScroll: true });
+            const nextFullscreen = await toggleCanvasFullscreen(target);
+            setIsFullscreen(nextFullscreen);
+            if (nextFullscreen) focusRef?.current?.focus({ preventScroll: true });
+            else restorePreviousFocus();
         } catch (error) {
             // Browsers can deny fullscreen when the click is not considered a
             // direct user gesture. Leave the control retryable and avoid an
@@ -88,17 +111,35 @@ const FullscreenButton: React.FC<FullscreenButtonProps> = ({
     };
 
     useEffect(() => {
+        const target = targetRef?.current ?? document.documentElement;
+
         const update = () => {
-            const target = targetRef?.current ?? document.documentElement;
-            setIsFullscreen(document.fullscreenElement === target);
+            const nextFullscreen = isCanvasFullscreen(target);
+            setIsFullscreen(nextFullscreen);
+            if (!nextFullscreen && previousFocusRef.current) restorePreviousFocus();
+        };
+
+        const exitFallbackWithEscape = (event: KeyboardEvent) => {
+            if (event.key !== 'Escape' || !isCanvasFullscreenFallback(target)) return;
+
+            clearCanvasFullscreenFallback(target);
+            setIsFullscreen(false);
+            restorePreviousFocus();
         };
 
         // Must unregister on unmount to prevent leaked listeners.
         document.addEventListener("fullscreenchange", update);
+        document.addEventListener("webkitfullscreenchange", update);
+        document.addEventListener('keydown', exitFallbackWithEscape);
 
-        return () =>
+        return () => {
             document.removeEventListener("fullscreenchange", update);
-    }, [targetRef]);
+            document.removeEventListener("webkitfullscreenchange", update);
+            document.removeEventListener('keydown', exitFallbackWithEscape);
+            clearCanvasFullscreenFallback(target);
+            if (previousFocusRef.current) restorePreviousFocus();
+        };
+    }, [restorePreviousFocus, targetRef]);
 
     return (
         <button

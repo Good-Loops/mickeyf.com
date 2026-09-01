@@ -212,7 +212,9 @@
 }
 
 @media (hover: none) and (pointer: coarse) {
-    .p4-vega__canvas-wrapper:fullscreen .p4-vega__joystick--fullscreen {
+    .p4-vega__canvas-wrapper:fullscreen .p4-vega__joystick--fullscreen,
+    .p4-vega__canvas-wrapper:-webkit-full-screen .p4-vega__joystick--fullscreen,
+    .p4-vega__canvas-wrapper[data-canvas-fullscreen='fallback'] .p4-vega__joystick--fullscreen {
         position: absolute;
         z-index: $front-9;
         top: 50%;
@@ -223,6 +225,12 @@
 
     .p4-vega[data-joystick-side='left']
         .p4-vega__canvas-wrapper:fullscreen
+        .p4-vega__joystick--fullscreen,
+    .p4-vega[data-joystick-side='left']
+        .p4-vega__canvas-wrapper:-webkit-full-screen
+        .p4-vega__joystick--fullscreen,
+    .p4-vega[data-joystick-side='left']
+        .p4-vega__canvas-wrapper[data-canvas-fullscreen='fallback']
         .p4-vega__joystick--fullscreen {
         right: auto;
         left: 2rem;
@@ -248,6 +256,14 @@
 
         &__joystick,
         &__joystick-preference { display: none; }
+
+        &--submission-notice {
+            grid-template-areas:
+                'notice notice'
+                'ui canvas';
+
+            > .score-submission-notice { grid-area: notice; }
+        }
     }
 }
 
