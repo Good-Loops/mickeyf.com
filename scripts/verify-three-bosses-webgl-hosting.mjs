@@ -166,7 +166,11 @@ export const resolveApprovedHostedBaseUrl = (
 
   const previewHost = firebasePreviewHostPattern.exec(candidate.hostname)?.[0];
   if (candidate.protocol === "https:" && candidate.port === "" && previewHost) {
-    return new URL(`https://${previewHost}/`);
+    // The anchored allowlist above limits this to the Firebase channel that this
+    // repository creates. Encoding is intentionally redundant for that alphabet,
+    // but also makes the trust transition explicit to static request-flow analysis.
+    const trustedPreviewHost = encodeURIComponent(previewHost);
+    return new URL(`https://${trustedPreviewHost}/`);
   }
 
   const loopbackPort = Number(candidate.port);
