@@ -108,29 +108,47 @@
         }
     }
 
-    & &__canvas-wrapper:fullscreen &__fullscreen-btn {
+    & &__canvas-wrapper:fullscreen &__fullscreen-btn,
+    & &__canvas-wrapper:-webkit-full-screen &__fullscreen-btn,
+    & &__canvas-wrapper[data-canvas-fullscreen='fallback'] &__fullscreen-btn {
         right: max(
             .8rem,
             env(safe-area-inset-right),
             calc((100vw - (100vh * 16 / 9)) / 2 + .8rem)
+        );
+        right: max(
+            .8rem,
+            env(safe-area-inset-right),
+            calc((100vw - (100dvh * 16 / 9)) / 2 + .8rem)
         );
         bottom: max(
             .8rem,
             env(safe-area-inset-bottom),
             calc((100vh - (100vw * 9 / 16)) / 2 + .8rem)
         );
+        bottom: max(
+            .8rem,
+            env(safe-area-inset-bottom),
+            calc((100dvh - (100vw * 9 / 16)) / 2 + .8rem)
+        );
     }
 
-    &__canvas-wrapper:fullscreen {
+    &__canvas-wrapper:fullscreen,
+    &__canvas-wrapper:-webkit-full-screen,
+    &__canvas-wrapper[data-canvas-fullscreen='fallback'] {
         padding: 0;
         border: 0;
         box-shadow: none;
         backdrop-filter: none;
     }
 
-    &__canvas-wrapper:fullscreen &__canvas {
+    &__canvas-wrapper:fullscreen &__canvas,
+    &__canvas-wrapper:-webkit-full-screen &__canvas,
+    &__canvas-wrapper[data-canvas-fullscreen='fallback'] &__canvas {
         width: min(100vw, calc(100vh * 16 / 9)) !important;
+        width: min(100vw, calc(100dvh * 16 / 9)) !important;
         height: min(100vh, calc(100vw * 9 / 16)) !important;
+        height: min(100dvh, calc(100vw * 9 / 16)) !important;
         aspect-ratio: 16 / 9;
         flex: 0 0 auto;
         border-radius: 0;

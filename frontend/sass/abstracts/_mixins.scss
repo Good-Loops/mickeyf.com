@@ -276,10 +276,12 @@
 
     // In fullscreen the wrapper fills the viewport, so the same rule
     // keeps the button in the bottom-right corner of the screen.
-    .#{$block}__canvas-wrapper:fullscreen .#{$block}__fullscreen-btn {
+    .#{$block}__canvas-wrapper:fullscreen .#{$block}__fullscreen-btn,
+    .#{$block}__canvas-wrapper:-webkit-full-screen .#{$block}__fullscreen-btn,
+    .#{$block}__canvas-wrapper[data-canvas-fullscreen='fallback'] .#{$block}__fullscreen-btn {
         position: absolute;
-        bottom: 1rem;
-        right: 1rem;
+        right: max(1rem, env(safe-area-inset-right));
+        bottom: max(1rem, env(safe-area-inset-bottom));
     }
 }
 
@@ -379,9 +381,12 @@
 
 ///////////////////////// Canvas ////////////////////////
 @mixin block-canvas-fullscreen($block) {
-    .#{$block}__canvas-wrapper:fullscreen {
+    .#{$block}__canvas-wrapper:fullscreen,
+    .#{$block}__canvas-wrapper:-webkit-full-screen,
+    .#{$block}__canvas-wrapper[data-canvas-fullscreen='fallback'] {
         width: 100vw;
         height: 100vh;
+        height: 100dvh;
         margin: 0;
         border-radius: 0;
 
@@ -391,11 +396,23 @@
         background: #000;
     }
 
-    .#{$block}__canvas-wrapper:fullscreen .#{$block}__canvas {
+    .#{$block}__canvas-wrapper[data-canvas-fullscreen='fallback'] {
+        position: fixed;
+        z-index: $front + 1;
+        inset: 0;
+        box-sizing: border-box;
+        max-width: none;
+        max-height: none;
+    }
+
+    .#{$block}__canvas-wrapper:fullscreen .#{$block}__canvas,
+    .#{$block}__canvas-wrapper:-webkit-full-screen .#{$block}__canvas,
+    .#{$block}__canvas-wrapper[data-canvas-fullscreen='fallback'] .#{$block}__canvas {
         width: 100%;
         height: auto;
         max-width: 100vw;
         max-height: 100vh;
+        max-height: 100dvh;
         display: block;
     }
 }

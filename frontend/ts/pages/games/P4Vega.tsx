@@ -7,6 +7,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useAuth } from '@/context/AuthContext';
 import { p4Vega } from '@/games/p4-Vega/p4-Vega';
 import FullscreenButton from "@/components/FullscreenButton";
+import ScoreSubmissionNotice from '@/components/ScoreSubmissionNotice';
 import Dropdown from '@/components/Dropdown';
 
 type JoystickSide = 'left' | 'right';
@@ -22,6 +23,7 @@ const P4Vega: React.FC = () => {
 
     const [selectedKey, setSelectedKey] = useState<string>('C');
     const [selectedScale, setSelectedScale] = useState<string>('Major');
+    const showSubmissionNotice = !loading && !isAuthenticated;
     const [joystickSide, setJoystickSide] = useState<JoystickSide>(() => {
         if (typeof window === 'undefined') return 'right';
         const savedSide = window.localStorage.getItem(JOYSTICK_SIDE_STORAGE_KEY);
@@ -61,8 +63,16 @@ const P4Vega: React.FC = () => {
     }, [loading]);
 
     return (
-        <section className='p4-vega' data-p4-vega data-joystick-side={joystickSide}>
+        <section
+            className={`p4-vega${showSubmissionNotice ? ' p4-vega--submission-notice' : ''}`}
+            data-p4-vega
+            data-joystick-side={joystickSide}
+        >
             <h1 className='u-visually-hidden'>p4-Vega</h1>
+            <ScoreSubmissionNotice
+                isAuthenticated={isAuthenticated}
+                loading={loading}
+            />
 
             <div
                 className="p4-vega__canvas-wrapper"

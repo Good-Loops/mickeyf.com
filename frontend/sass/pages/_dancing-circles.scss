@@ -372,7 +372,9 @@
     @include block-canvas-fullscreen('dancing-circles');
     @include canvas-fullscreen-button-position('dancing-circles');
 
-    &__canvas-wrapper:fullscreen {
+    &__canvas-wrapper:fullscreen,
+    &__canvas-wrapper:-webkit-full-screen,
+    &__canvas-wrapper[data-canvas-fullscreen='fallback'] {
         padding: 0;
         border: 0;
         background-color: #2c4668;
@@ -387,7 +389,9 @@
         }
     }
 
-    &--custom-background &__canvas-wrapper:fullscreen {
+    &--custom-background &__canvas-wrapper:fullscreen,
+    &--custom-background &__canvas-wrapper:-webkit-full-screen,
+    &--custom-background &__canvas-wrapper[data-canvas-fullscreen='fallback'] {
         background-color: var(--dancing-circles-background);
         animation: none;
     }

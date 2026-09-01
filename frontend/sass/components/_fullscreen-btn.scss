@@ -16,3 +16,9 @@
         background-color: rgba(255, 255, 255, 0.1);
     }
 }
+
+html.canvas-fullscreen-fallback-active,
+html.canvas-fullscreen-fallback-active body {
+    overflow: hidden;
+    overscroll-behavior: none;
+}
