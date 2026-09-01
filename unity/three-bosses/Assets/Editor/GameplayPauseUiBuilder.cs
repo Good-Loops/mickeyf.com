@@ -93,11 +93,12 @@ public static class GameplayPauseUiBuilder
             new Vector2(1f, 1f),
             new Vector2(1f, 1f),
             new Vector2(-24f, -54f),
-            new Vector2(110f, 38f),
-            "PAUSE",
+            new Vector2(48f, 40f),
+            string.Empty,
             16f,
             font,
             new Color(0.006f, 0.018f, 0.026f, 0.48f));
+        CreatePauseIcon(pauseButton.transform);
 
         GameObject overlayObject = CreateUiObject("Pause Menu", root.transform);
         RectTransform overlayRect = overlayObject.GetComponent<RectTransform>();
@@ -276,6 +277,27 @@ public static class GameplayPauseUiBuilder
         Stretch(label.rectTransform);
         label.margin = new Vector4(10f, 2f, 10f, 2f);
         return button;
+    }
+
+    private static void CreatePauseIcon(Transform parent)
+    {
+        Image leftBar = CreateImage("Pause Icon Left", parent, TextColor);
+        SetAnchoredRect(
+            leftBar.rectTransform,
+            new Vector2(0.5f, 0.5f),
+            new Vector2(0.5f, 0.5f),
+            new Vector2(-4.5f, 0f),
+            new Vector2(4f, 16f));
+        leftBar.raycastTarget = false;
+
+        Image rightBar = CreateImage("Pause Icon Right", parent, TextColor);
+        SetAnchoredRect(
+            rightBar.rectTransform,
+            new Vector2(0.5f, 0.5f),
+            new Vector2(0.5f, 0.5f),
+            new Vector2(4.5f, 0f),
+            new Vector2(4f, 16f));
+        rightBar.raycastTarget = false;
     }
 
     private static void AddOutline(GameObject target, Color color, float distance)

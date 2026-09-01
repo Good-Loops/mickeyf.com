@@ -608,11 +608,18 @@ remaining hands-on gameplay or browser-specific defects before public-release
 work begins.
 
 The Alpha 0.6.0 pre-release pause slice is implemented in all three battle
-scenes: a compact Pause button opens a simple Resume/Main Menu overlay. User
+scenes: a compact pause-icon button opens a simple Resume/Main Menu overlay. User
 pause and browser-visibility pause compose safely, gameplay input is gated,
 and gameplay, active-combat timing, and audio restore only after every active
 pause reason is released. Further visual polish remains part of the later
 Three Bosses polish phase.
+
+For Alpha 0.6.0, playable Three Bosses is desktop-only. Recognized Android and
+iOS browsers do not receive the Games card, and direct mobile navigation shows
+an explicit desktop-only message without instantiating Unity. The Three Bosses
+leaderboard remains available on mobile. Narrow desktop windows and Windows
+touch laptops remain supported; full mobile gameplay waits for the later
+physical-device polish and acceptance pass.
 
 Fix the battle-scene player spawn so the character begins grounded instead of
 falling a small distance and incorrectly playing the landing VFX at startup.

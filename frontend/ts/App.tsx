@@ -15,7 +15,8 @@ import DancingFractals from "@/pages/animations/DancingFractals";
 
 import Games from "@/pages/Games";
 import P4Vega from "@/pages/games/P4Vega";
-import ThreeBosses from "@/pages/games/ThreeBosses";
+import { ThreeBossesAvailabilityGate } from "@/pages/games/ThreeBosses";
+import { isThreeBossesAvailableInCurrentBrowser } from '@/games/three-bosses/unityVisibility';
 import {
 	isThreeBossesEnabled,
 	THREE_BOSSES_ROUTE,
@@ -29,7 +30,10 @@ import SignUp from "@/pages/SignUp";
 import NotFound from "@/pages/NotFound";
 
 const App: React.FC = () => {
-  return (
+	const threeBossesAvailable = isThreeBossesEnabled
+		&& isThreeBossesAvailableInCurrentBrowser();
+
+	return (
 	<div className="app-shell">
 		<div className="space-background" aria-hidden="true">
 			<div className="space-background__stars space-background__stars--far" />
@@ -54,10 +58,16 @@ const App: React.FC = () => {
 				<Route path="/animations/dancing-circles" element={<DancingCircles />} />
 				<Route path="/animations/dancing-fractals" element={<DancingFractals />} />
 				
-				<Route path="/games" element={<Games />} />
+				<Route
+					path="/games"
+					element={<Games threeBossesAvailable={threeBossesAvailable} />}
+				/>
 				<Route path="/games/p4-Vega" element={<P4Vega />} />
 				{isThreeBossesEnabled && (
-					<Route path={THREE_BOSSES_ROUTE} element={<ThreeBosses />} />
+					<Route
+						path={THREE_BOSSES_ROUTE}
+						element={<ThreeBossesAvailabilityGate />}
+					/>
 				)}
 
 				<Route path="/leaderboards" element={<Leaderboard />} />

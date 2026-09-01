@@ -5,11 +5,14 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import {
-    isThreeBossesEnabled,
     THREE_BOSSES_ROUTE,
 } from "@/config/featureFlags";
 
-const Games: React.FC = () => {
+type GamesProps = Readonly<{
+    threeBossesAvailable: boolean;
+}>;
+
+export const GamesView: React.FC<GamesProps> = ({ threeBossesAvailable }) => {
     return (
         <section className="games">
             <h1 className="u-visually-hidden">Games</h1>
@@ -24,7 +27,7 @@ const Games: React.FC = () => {
                     />
                     <h2 className="showcase-card__title">p4-Vega</h2>
                 </Link>
-                {isThreeBossesEnabled && (
+                {threeBossesAvailable && (
                     <Link
                         className="showcase-card games__card games__card--three-bosses"
                         to={THREE_BOSSES_ROUTE}
@@ -40,5 +43,7 @@ const Games: React.FC = () => {
         </section>
     );
 };
+
+const Games = GamesView;
 
 export default Games;

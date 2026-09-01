@@ -218,6 +218,30 @@ namespace ThreeBosses.Tests
             PlayerInput playerInput = UnityEngine.Object.FindFirstObjectByType<PlayerInput>();
 
             Assert.That(pauseButton.gameObject.activeSelf, Is.True);
+            Assert.That(
+                pauseButton.GetComponent<RectTransform>().sizeDelta,
+                Is.EqualTo(new Vector2(48f, 40f)));
+            Assert.That(
+                pauseButton.transform.Find("Label")?.GetComponent("TextMeshProUGUI"),
+                Is.Not.Null);
+            Component pauseLabel = pauseButton.transform.Find("Label")
+                ?.GetComponent("TextMeshProUGUI");
+            Assert.That(
+                pauseLabel?.GetType().GetProperty("text")?.GetValue(pauseLabel),
+                Is.EqualTo(string.Empty));
+            Image leftPauseBar = pauseButton.transform.Find("Pause Icon Left")
+                ?.GetComponent<Image>();
+            Image rightPauseBar = pauseButton.transform.Find("Pause Icon Right")
+                ?.GetComponent<Image>();
+            Assert.That(leftPauseBar, Is.Not.Null);
+            Assert.That(rightPauseBar, Is.Not.Null);
+            Assert.That(leftPauseBar.rectTransform.sizeDelta, Is.EqualTo(new Vector2(4f, 16f)));
+            Assert.That(rightPauseBar.rectTransform.sizeDelta, Is.EqualTo(new Vector2(4f, 16f)));
+            Assert.That(leftPauseBar.rectTransform.anchoredPosition, Is.EqualTo(new Vector2(-4.5f, 0f)));
+            Assert.That(rightPauseBar.rectTransform.anchoredPosition, Is.EqualTo(new Vector2(4.5f, 0f)));
+            Assert.That(leftPauseBar.raycastTarget, Is.False);
+            Assert.That(rightPauseBar.raycastTarget, Is.False);
+            Assert.That(leftPauseBar.color, Is.EqualTo(rightPauseBar.color));
             Assert.That(pauseMenu, Is.Not.Null);
             Assert.That(playerInput, Is.Not.Null);
             Assert.That(playerInput.enabled, Is.True);

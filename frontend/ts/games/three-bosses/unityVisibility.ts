@@ -3,7 +3,7 @@ const PAUSE_METHOD = 'PauseForDocumentHidden';
 const RESUME_METHOD = 'ResumeFromDocumentHidden';
 const CONFIGURE_TOUCH_CONTROLS_METHOD = 'ConfigureTouchControls';
 
-export type BrowserTouchEnvironment = Readonly<{
+export type BrowserDeviceEnvironment = Readonly<{
     maxTouchPoints: number;
     userAgent: string;
     userAgentDataMobile?: boolean;
@@ -44,29 +44,41 @@ type VisibilityWindow = Readonly<{
 const MOBILE_BROWSER_PATTERN = /Android|iPhone|iPad|iPod/i;
 const IPAD_DESKTOP_MODE_PATTERN = /Macintosh/i;
 
-export const shouldEnableThreeBossesTouchControls = ({
+export const isThreeBossesMobileBrowser = ({
     maxTouchPoints,
     userAgent,
     userAgentDataMobile,
-}: BrowserTouchEnvironment): boolean => (
-    maxTouchPoints > 0
-    && (
-        userAgentDataMobile === true
-        || MOBILE_BROWSER_PATTERN.test(userAgent)
-        || (
-            maxTouchPoints > 1
-            && IPAD_DESKTOP_MODE_PATTERN.test(userAgent)
-        )
+}: BrowserDeviceEnvironment): boolean => (
+    userAgentDataMobile === true
+    || MOBILE_BROWSER_PATTERN.test(userAgent)
+    || (
+        maxTouchPoints > 1
+        && IPAD_DESKTOP_MODE_PATTERN.test(userAgent)
     )
 );
 
-const readBrowserTouchEnvironment = (
+export const shouldEnableThreeBossesTouchControls = (
+    environment: BrowserDeviceEnvironment,
+): boolean => (
+    environment.maxTouchPoints > 0
+    && isThreeBossesMobileBrowser(environment)
+);
+
+const readBrowserDeviceEnvironment = (
     browserNavigator: NavigatorWithUserAgentData = navigator as NavigatorWithUserAgentData,
-): BrowserTouchEnvironment => ({
+): BrowserDeviceEnvironment => ({
     maxTouchPoints: browserNavigator.maxTouchPoints ?? 0,
     userAgent: browserNavigator.userAgent,
     userAgentDataMobile: browserNavigator.userAgentData?.mobile,
 });
+
+export const isThreeBossesAvailableInCurrentBrowser = (
+    environment: BrowserDeviceEnvironment | undefined = typeof navigator === 'undefined'
+        ? undefined
+        : readBrowserDeviceEnvironment(),
+): boolean => (
+    environment === undefined || !isThreeBossesMobileBrowser(environment)
+);
 
 /**
  * Tells Unity whether the browser is a touch-first mobile device. The host is
@@ -75,7 +87,7 @@ const readBrowserTouchEnvironment = (
  */
 export const configureThreeBossesTouchControls = (
     instance: UnityVisibilityBridgeInstance,
-    environment: BrowserTouchEnvironment = readBrowserTouchEnvironment(),
+    environment: BrowserDeviceEnvironment = readBrowserDeviceEnvironment(),
 ): void => {
     if (typeof instance.SendMessage !== 'function') {
         throw new Error('The Unity WebGL player is missing the required touch-controls API.');

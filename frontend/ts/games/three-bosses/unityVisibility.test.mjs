@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
     bindUnityVisibility,
     configureThreeBossesTouchControls,
+    isThreeBossesMobileBrowser,
     shouldEnableThreeBossesTouchControls,
     THREE_BOSSES_RUN_SESSION_OBJECT,
 } from './unityVisibility.ts';
@@ -42,6 +43,36 @@ test('enables touch controls only for touch-capable mobile browsers', () => {
         userAgent: 'Mozilla/5.0',
         userAgentDataMobile: true,
     }), true);
+});
+
+test('blocks mobile browsers without mistaking desktop touch devices for phones', () => {
+    assert.equal(isThreeBossesMobileBrowser({
+        maxTouchPoints: 0,
+        userAgent: 'Mozilla/5.0 (Linux; Android 10)',
+    }), true);
+    assert.equal(isThreeBossesMobileBrowser({
+        maxTouchPoints: 5,
+        userAgent: 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X)',
+    }), true);
+    assert.equal(isThreeBossesMobileBrowser({
+        maxTouchPoints: 0,
+        userAgent: 'Mozilla/5.0',
+        userAgentDataMobile: true,
+    }), true);
+    assert.equal(isThreeBossesMobileBrowser({
+        maxTouchPoints: 5,
+        userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15)',
+    }), true);
+    assert.equal(isThreeBossesMobileBrowser({
+        maxTouchPoints: 10,
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        userAgentDataMobile: false,
+    }), false);
+    assert.equal(isThreeBossesMobileBrowser({
+        maxTouchPoints: 0,
+        userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)',
+        userAgentDataMobile: false,
+    }), false);
 });
 
 test('sends the resolved mobile-touch permission to the persistent Unity service', () => {

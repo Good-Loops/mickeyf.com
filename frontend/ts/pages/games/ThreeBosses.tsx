@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import FullscreenButton from '@/components/FullscreenButton';
 import { isThreeBossesLocalEnabled } from '@/config/featureFlags';
+import { isThreeBossesAvailableInCurrentBrowser } from '@/games/three-bosses/unityVisibility';
 import { startThreeBossesWebGl, type UnityWebGlHandle } from '@/games/three-bosses/unityWebGl';
 import {
     getLeaderboardCatalog,
@@ -151,5 +152,20 @@ const ThreeBosses: React.FC = () => {
         </section>
     );
 };
+
+export const ThreeBossesDesktopOnly: React.FC = () => (
+    <section className="three-bosses three-bosses--desktop-only">
+        <h1 className="u-visually-hidden">Three Bosses</h1>
+        <p className="three-bosses__availability-note" role="status">
+            Three Bosses is currently available on desktop only.
+        </p>
+    </section>
+);
+
+export const ThreeBossesAvailabilityGate: React.FC = () => (
+    isThreeBossesAvailableInCurrentBrowser()
+        ? <ThreeBosses />
+        : <ThreeBossesDesktopOnly />
+);
 
 export default ThreeBosses;
