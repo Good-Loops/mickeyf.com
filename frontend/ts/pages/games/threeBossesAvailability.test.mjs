@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import test, { after } from 'node:test';
 import React from 'react';
@@ -23,6 +24,7 @@ const { GamesView } = await viteServer.ssrLoadModule('/ts/pages/Games.tsx');
 const {
     readThreeBossesSubmissionGate,
     ThreeBossesAvailabilityGate,
+    ThreeBossesControlsGuide,
     ThreeBossesDesktopOnly,
     ThreeBossesLoadingStatus,
 } = await viteServer.ssrLoadModule(
@@ -77,6 +79,7 @@ test('the mobile direct-route surface does not render a Unity canvas', () => {
 
     assert.match(html, /currently available on desktop only/);
     assert.doesNotMatch(html, /<canvas/);
+    assert.doesNotMatch(html, /Keyboard controls/);
 });
 
 test('the branded loading surface exposes real, normalized progress without a heavy image', () => {
@@ -93,6 +96,54 @@ test('the branded loading surface exposes real, normalized progress without a he
     assert.match(html, /width:42%/);
     assert.match(html, />42%<\/span>/);
     assert.doesNotMatch(html, /<img/);
+});
+
+test('the desktop keyboard guide stays aligned with the live Unity bindings', async () => {
+    const html = renderToStaticMarkup(
+        React.createElement(ThreeBossesControlsGuide),
+    );
+    const inputActions = JSON.parse(await readFile(
+        fileURLToPath(new URL(
+            '../../../../unity/three-bosses/Assets/PlayerInputActions.inputactions',
+            import.meta.url,
+        )),
+        'utf8',
+    ));
+    const pauseController = await readFile(
+        fileURLToPath(new URL(
+            '../../../../unity/three-bosses/Assets/Scripts/UI/GameplayPauseController.cs',
+            import.meta.url,
+        )),
+        'utf8',
+    );
+    const gameplayBindings = inputActions.maps
+        .find(({ name }) => name === 'Gameplay')
+        ?.bindings ?? [];
+    const hasBinding = (action, path) => gameplayBindings.some((binding) => (
+        binding.action === action && binding.path === path
+    ));
+
+    assert.match(html, /^<section[^>]*class="three-bosses__controls"/);
+    assert.match(html, /<h2[^>]*>Keyboard controls<\/h2>/);
+    assert.match(html, /Move left \/ right/);
+    assert.match(html, /Aim up \/ left \/ right/);
+    assert.match(html, /Jump \/ double jump/);
+    assert.match(html, /Dash/);
+    assert.match(html, /Fire/);
+    assert.match(html, /Pause \/ resume/);
+    assert.doesNotMatch(html, /<(?:details|summary)|role="(?:dialog|menu)"/);
+
+    assert.equal(hasBinding('Move', '<Keyboard>/a'), true);
+    assert.equal(hasBinding('Move', '<Keyboard>/d'), true);
+    assert.equal(hasBinding('Move', '<Keyboard>/leftArrow'), true);
+    assert.equal(hasBinding('Move', '<Keyboard>/rightArrow'), true);
+    assert.equal(hasBinding('AimUp', '<Keyboard>/w'), true);
+    assert.equal(hasBinding('AimBack', '<Keyboard>/a'), true);
+    assert.equal(hasBinding('AimFront', '<Keyboard>/d'), true);
+    assert.equal(hasBinding('Jump', '<Keyboard>/space'), true);
+    assert.equal(hasBinding('Dash', '<Keyboard>/leftShift'), true);
+    assert.equal(hasBinding('Fire', '<Keyboard>/enter'), true);
+    assert.match(pauseController, /Keyboard\.current\?\.escapeKey\.wasPressedThisFrame/);
 });
 
 test('signed-out players are told to authenticate before starting a ranked run', () => {

@@ -27,6 +27,38 @@ type ThreeBossesLoadingStatusProps = Readonly<{
     progressPercent: number;
 }>;
 
+type ThreeBossesControlBinding = Readonly<{
+    action: string;
+    keys: readonly string[];
+    alternateKeys?: readonly string[];
+}>;
+
+const THREE_BOSSES_DESKTOP_CONTROLS: readonly ThreeBossesControlBinding[] = [
+    { keys: ['A', 'D'], alternateKeys: ['←', '→'], action: 'Move left / right' },
+    { keys: ['W', 'A', 'D'], action: 'Aim up / left / right' },
+    { keys: ['Space'], action: 'Jump / double jump' },
+    { keys: ['Left Shift'], action: 'Dash' },
+    { keys: ['Enter'], action: 'Fire' },
+    { keys: ['Esc'], action: 'Pause / resume' },
+];
+
+const ThreeBossesControlKeyGroup: React.FC<Readonly<{ keys: readonly string[] }>> = ({
+    keys,
+}) => (
+    <span className="three-bosses__control-key-group">
+        {keys.map((key, index) => (
+            <React.Fragment key={key}>
+                {index > 0 && (
+                    <span aria-hidden="true" className="three-bosses__control-separator">
+                        /
+                    </span>
+                )}
+                <kbd>{key}</kbd>
+            </React.Fragment>
+        ))}
+    </span>
+);
+
 const clampProgressPercent = (progressPercent: number): number => (
     Math.min(100, Math.max(0, Math.round(progressPercent)))
 );
@@ -66,6 +98,33 @@ export const ThreeBossesLoadingStatus: React.FC<ThreeBossesLoadingStatusProps> =
         </div>
     );
 };
+
+export const ThreeBossesControlsGuide: React.FC = () => (
+    <section
+        aria-labelledby="three-bosses-controls-title"
+        className="three-bosses__controls"
+    >
+        <h2 className="three-bosses__controls-title" id="three-bosses-controls-title">
+            Keyboard controls
+        </h2>
+        <dl className="three-bosses__controls-list">
+            {THREE_BOSSES_DESKTOP_CONTROLS.map(({ action, alternateKeys, keys }) => (
+                <div className="three-bosses__control" key={action}>
+                    <dt className="three-bosses__control-keys">
+                        <ThreeBossesControlKeyGroup keys={keys} />
+                        {alternateKeys && (
+                            <>
+                                <span className="three-bosses__control-alternative">or</span>
+                                <ThreeBossesControlKeyGroup keys={alternateKeys} />
+                            </>
+                        )}
+                    </dt>
+                    <dd className="three-bosses__control-action">{action}</dd>
+                </div>
+            ))}
+        </dl>
+    </section>
+);
 
 const describeLoadError = (error: unknown): string => {
     if (error instanceof Error && error.message) return error.message;
@@ -264,6 +323,8 @@ const ThreeBosses: React.FC = () => {
                     className="three-bosses__fullscreen-btn"
                 />
             </div>
+
+            <ThreeBossesControlsGuide />
 
             <p className="three-bosses__orientation-hint">
                 For the best fullscreen experience, rotate your device to landscape.

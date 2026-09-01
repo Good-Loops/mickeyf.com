@@ -625,10 +625,12 @@ and gameplay, active-combat timing, and audio restore only after every active
 pause reason is released. Further visual polish remains part of the later
 Three Bosses polish phase.
 
-Future Three Bosses onboarding: add a concise keybindings guide/manual that is
-easy to reach before or during a run, documents the active desktop controls,
-and stays synchronized with the game's real input bindings. Extend it with the
-touch layout when mobile gameplay is released.
+Three Bosses desktop onboarding now includes a concise glass keybindings strip
+below the game on desktop-sized layouts only. It documents the primary movement,
+aiming, jump, dash, fire, and pause bindings without obstructing the canvas, and
+its regression test checks those labels against the Unity Input System asset so
+the guide cannot silently drift from the game. Mobile instructions will come
+from the touch HUD when mobile gameplay is released.
 
 For Alpha 0.6.0, playable Three Bosses is desktop-only. Recognized Android and
 iOS browsers do not receive the Games card, and direct mobile navigation shows

@@ -298,6 +298,103 @@ $three-bosses-violet: hsl(274, 88%, 68%);
         line-height: 1.5;
     }
 
+    &__controls {
+        display: grid;
+        grid-template-columns: auto minmax(0, 1fr);
+        align-items: center;
+        gap: 1rem;
+        width: min(100%, 92rem);
+        padding: .7rem .85rem;
+        border: .1rem solid rgba($white, .12);
+        border-radius: .85rem;
+        background: rgba($space-background, .2);
+        box-shadow:
+            inset 0 .1rem 0 rgba($white, .05),
+            0 .7rem 1.8rem rgba(black, .16);
+        backdrop-filter: blur(1rem) saturate(115%);
+        -webkit-backdrop-filter: blur(1rem) saturate(115%);
+    }
+
+    &__controls-title {
+        margin: 0;
+        padding: .3rem 1rem .3rem .2rem;
+        border-right: .1rem solid rgba($white, .1);
+        color: rgba($primary-light, .58);
+        font-family: $heading-font;
+        font-size: .92rem;
+        font-weight: 700;
+        letter-spacing: .16em;
+        line-height: 1.45;
+        text-align: center;
+        text-transform: uppercase;
+    }
+
+    &__controls-list {
+        display: grid;
+        grid-template-columns: repeat(6, minmax(0, 1fr));
+        gap: .65rem;
+        margin: 0;
+        padding: 0;
+    }
+
+    &__control {
+        display: grid;
+        justify-items: center;
+        gap: .28rem;
+        min-width: 0;
+        color: rgba($white, .68);
+        font-size: .92rem;
+        line-height: 1.25;
+        text-align: center;
+    }
+
+    &__control-keys {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        flex-wrap: wrap;
+        gap: .3rem;
+        min-height: 1.7rem;
+    }
+
+    &__control-key-group {
+        display: flex;
+        align-items: center;
+        gap: .22rem;
+
+        kbd {
+            min-width: 1.7rem;
+            padding: .28rem .42rem;
+            border: .1rem solid rgba($primary-light, .26);
+            border-radius: .38rem;
+            background: linear-gradient(145deg, rgba($white, .1), rgba($primary, .05));
+            box-shadow:
+                inset 0 .1rem 0 rgba($white, .09),
+                0 .2rem .45rem rgba(black, .2);
+            color: rgba($white, .86);
+            font-family: $paragraph-font;
+            font-size: 1.05rem;
+            font-weight: 700;
+            letter-spacing: .03em;
+            white-space: nowrap;
+        }
+    }
+
+    &__control-separator {
+        color: rgba($primary-light, .34);
+        font-size: .8rem;
+    }
+
+    &__control-alternative {
+        color: rgba($primary-light, .42);
+        font-size: .78rem;
+        text-transform: uppercase;
+    }
+
+    &__control-action {
+        margin: 0;
+    }
+
     &__orientation-hint { display: none; }
 
     @include canvas-fullscreen-button-position('three-bosses');
@@ -428,7 +525,12 @@ $three-bosses-violet: hsl(274, 88%, 68%);
         &__loading-progress {
             margin-top: .8rem;
         }
+
     }
+}
+
+@include viewport-at-most($bp-m) {
+    .three-bosses__controls { display: none; }
 }
 
 @media (prefers-reduced-motion: reduce) {
