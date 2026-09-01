@@ -1,5 +1,5 @@
 @use '../abstracts' as *;
 
 .login {
-    @include user-conection-form;
+    @include account-form;
 }

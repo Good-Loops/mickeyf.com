@@ -1,0 +1,36 @@
+# Isolated, image-only backend candidate build.
+# A separately reviewed manual trigger must supply a full Git COMMIT_SHA.
+steps:
+  - id: 'Require exact source commit'
+    name: 'gcr.io/cloud-builders/docker:latest@sha256:661e95acd923514f71f47ce7b390e06a8d31b15febecf772e506babf62960528'
+    entrypoint: 'sh'
+    args:
+      - '-ceu'
+      - |-
+        commit='$COMMIT_SHA'
+        test "$${#commit}" -eq 40
+        case "$$commit" in
+          *[!0-9a-f]*) printf 'COMMIT_SHA must be 40 lowercase hexadecimal characters.\n' >&2; exit 1 ;;
+        esac
+
+  - id: 'Build backend candidate image'
+    name: 'gcr.io/cloud-builders/docker:latest@sha256:661e95acd923514f71f47ce7b390e06a8d31b15febecf772e506babf62960528'
+    args:
+      - 'build'
+      - '-t'
+      - 'us-central1-docker.pkg.dev/${_GCP_PROJECT_ID}/${_REPO_NAME}/${_REPO_NAME}:$COMMIT_SHA'
+      - '.'
+    dir: '.'
+
+images:
+  - 'us-central1-docker.pkg.dev/${_GCP_PROJECT_ID}/${_REPO_NAME}/${_REPO_NAME}:$COMMIT_SHA'
+
+substitutions:
+  _GCP_PROJECT_ID: 'noted-reef-387021'
+  _REPO_NAME: 'cloud-run-source-deploy'
+
+serviceAccount: 'projects/noted-reef-387021/serviceAccounts/cloud-build@noted-reef-387021.iam.gserviceaccount.com'
+
+options:
+  logging: 'CLOUD_LOGGING_ONLY'
+  requestedVerifyOption: 'VERIFIED'

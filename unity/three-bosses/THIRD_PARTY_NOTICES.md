@@ -42,6 +42,22 @@ Official license reference:
 
 https://openfontlicense.org/open-font-license-official-text/
 
+## Oxanium
+
+The Three Bosses countdown UI uses the Oxanium Bold display font:
+
+- `Assets/Art/UI/Fonts/Oxanium-Bold.ttf`
+- `Assets/Art/UI/Fonts/Oxanium-Bold SDF.asset`
+- `Assets/Art/UI/Fonts/Oxanium-OFL.txt`
+
+Copyright 2019 The Oxanium Project Authors
+(https://github.com/sevmeyer/oxanium).
+
+Oxanium is licensed under the SIL Open Font License, Version 1.1. The complete
+license text is preserved beside the font and must remain with redistributed
+copies of the Font Software. This copy is pinned to upstream commit
+`a8f39e0c71186190027a093e9001459410192d1e`.
+
 ## Unity Package Manager dependencies
 
 `Packages/manifest.json` and `Packages/packages-lock.json` identify Unity

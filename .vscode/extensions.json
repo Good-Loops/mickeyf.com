@@ -1,6 +1,8 @@
 {
     "recommendations": [
         "ReinaldoJavierMenendezAlonso.restore-terminals-color-icon",
-        "visualstudiotoolsforunity.vstuc"
+        "visualstudiotoolsforunity.vstuc",
+        "GitHub.vscode-github-actions",
+        "ms-azuretools.vscode-containers"
     ]
 }

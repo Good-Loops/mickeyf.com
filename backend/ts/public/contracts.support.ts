@@ -16,3 +16,41 @@ export type { SubmitScoreResponse } from '../routers/mainRouter.contract';
 export type { GetLeaderboardResponse } from '../routers/mainRouter.contract';
 export type { PostUsersResponse } from '../routers/mainRouter.contract';
 export type { GetUsersResponse } from '../routers/mainRouter.contract';
+export type {
+    GetGameLeaderboardRequest,
+    GetGameLeaderboardResponse,
+    GetLeaderboardCatalogRequest,
+    GetLeaderboardCatalogResponse,
+    IssueThreeBossesRunTicketResponse,
+    SubmitThreeBossesRunResponse,
+} from '../routers/leaderboardRouter.contract';
+export type {
+    GameLeaderboardResponse,
+    LeaderboardApiError,
+    LeaderboardApiErrorCode,
+    LeaderboardCatalogGame,
+    LeaderboardCatalogResponse,
+    P4VegaLeaderboardEntry,
+    ThreeBossesLeaderboardEntry,
+    ThreeBossesRank,
+    ThreeBossesRunSubmissionRequest,
+    ThreeBossesRunSubmissionResponse,
+    ThreeBossesRunTicketRequest,
+    ThreeBossesRunTicketResponse,
+} from '../leaderboards/leaderboardContract';
+export {
+    LEADERBOARD_CONTRACT_VERSION,
+    LEADERBOARD_PAGE_SIZE,
+} from '../leaderboards/leaderboardContract';
+export {
+    GAME_IDS,
+    P4_VEGA_RULES_VERSION,
+    THREE_BOSSES_RULES_VERSION,
+} from '../leaderboards/gameCatalog';
+export type {
+    GameId,
+    LeaderboardMetric,
+    RankState,
+    SortDirection,
+    SubmissionState,
+} from '../leaderboards/gameCatalog';

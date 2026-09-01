@@ -24,6 +24,7 @@ $bp-xl: 61.25em; // 980px
 $bp-l: 55em; // 880px
 $bp-m: 48.75em; // 780px
 $bp-s: 34.375em; // 550px
+$bp-xs: 30em; // 480px
 
 ///////////////////// Font Sizes //////////////////////
 $font-size-xxs: 1.3rem;
@@ -44,7 +45,7 @@ $bps-nav: (
         'width': $bp-xl,
         'selectors': (
             '.nav': (
-                'font-size': 2.3rem,
+                'font-size': 1.45rem,
             ),
         )
     ), 
@@ -73,122 +74,6 @@ $bps-menu: (
         'selectors': (
             '.menu-btn': (
                 'display': block,
-            ),
-        )
-    ),
-);
-
-// Breakpoint Map for Animations Component
-$bps-animations: (
-    'xl': (
-        'width': $bp-xl,
-        'selectors': (
-            '.animations__title': (
-                'font-size': $font-size-l,
-            ),
-        )
-    ),
-    'l': (
-        'width': $bp-l,
-        'selectors': (
-            '.animations__title': (
-                'font-size': $font-size-m,
-            ),
-        )
-    ),
-    'm': (
-        'width': $bp-m,
-        'selectors': (
-            '.animations__title': (
-                'font-size': $font-size-s,
-            ),
-        )
-    ),
-);
-
-// Breakpoint Map for Games Component
-$bps-games: (
-    'l': (
-        'width': $bp-l,
-        'selectors': (
-            '.games__title': (
-                'font-size': $font-size-l,
-            ),
-        )
-    ),
-    'm': (
-        'width': $bp-m,
-        'selectors': (
-            '.games__title': (
-                'font-size': $font-size-m,
-            ),
-        )
-    ),
-);
-
-// Breakpoint Map for Social Media Component
-$bps-social-media: (
-    '5xl': (
-        'width': $bp-5xl,
-        'selectors': (
-            '.social-media__grid': (
-                'column-gap': 2em,
-            ),
-            '.social-media__grid-anchor': (
-                'scale': .8,
-            ),
-        )
-    ),
-    '3xl': (
-        'width': $bp-3xl,
-        'selectors': (
-            '.social-media__title': ( 
-                'margin-bottom': -5em,
-            ),
-            '.social-media__grid': (
-                'grid-template-rows': 1fr 1fr,    
-                'column-gap': 0em,
-            ),
-            '.social-media__grid-anchor': (
-                'scale': .7,
-            ),
-        )
-    ),
-    'l': (
-        'width': $bp-l,
-        'selectors': (
-            '.social-media__title': (
-                'font-size': $font-size-m,
-            ),
-        )
-    ),
-    'm': (
-        'width': $bp-m,
-        'selectors': (
-            '.social-media__grid-anchor': (
-                'scale': .5,
-                'margin': -2em,
-            ),
-            '.social-media__title': (
-                'font-size': $font-size-s,
-                'display': inline-block,
-                'padding-inline': 3em,
-                'text-align': center,
-            ),
-        )
-    ),
-    's': (
-        'width': $bp-s,
-        'selectors': (
-            '.social-media': (
-                'margin-bottom': 0,
-            ),
-            '.social-media__grid': (
-                'grid-auto-flow': row,
-            ),
-            '.social-media__grid-anchor': (
-                'scale': .4,
-                'margin-block': -5em,
             ),
         )
     ),

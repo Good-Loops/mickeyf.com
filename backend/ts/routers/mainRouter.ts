@@ -22,7 +22,17 @@ import {
 } from '../security/requestRateLimits';
 import { handleGetUsersNotSupported } from './mainRouter.handlers';
 
-export function createMainRouter(sessionSecret: string, isProduction: boolean): Router {
+type MainRouterDependencies = {
+    sessionSecret: string;
+    isProduction: boolean;
+    p4VegaScoreSubmissionsEnabled: boolean;
+};
+
+export function createMainRouter({
+    sessionSecret,
+    isProduction,
+    p4VegaScoreSubmissionsEnabled,
+}: MainRouterDependencies): Router {
     /**
      * Configured Express router for core API routes.
      *
@@ -34,6 +44,7 @@ export function createMainRouter(sessionSecret: string, isProduction: boolean): 
         database: pool,
         sessionSecret,
         isProduction,
+        p4VegaScoreSubmissionsEnabled,
     });
 
     /** POST /users — core API request multiplexer (mutating/command-style). */

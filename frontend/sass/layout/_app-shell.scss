@@ -1,0 +1,323 @@
+@use '../abstracts' as *;
+
+.app-shell {
+    position: relative;
+    isolation: isolate;
+
+    min-height: 100svh;
+}
+
+.space-background {
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+
+    overflow: hidden;
+    pointer-events: none;
+
+    &__stars,
+    &__nebula {
+        position: absolute;
+        inset: 0;
+    }
+
+    // Seeded SVG atlases provide hundreds of naturally clustered stars without
+    // an authored grid. The near layer moves by exactly one repeated tile, so
+    // its last frame is pixel-identical to its first frame.
+    &__stars {
+        &--far {
+            background-image: url('../../ts/assets/backgrounds/stars-far.svg');
+            background-repeat: repeat;
+            background-size: 48rem 48rem;
+            opacity: .58;
+        }
+
+        &--near {
+            opacity: .62;
+
+            &::before {
+                content: '';
+
+                position: absolute;
+                // The loop moves down and right, so only the starting edges
+                // need one tile of overscan.
+                inset: -73rem 0 0 -73rem;
+
+                background-image: url('../../ts/assets/backgrounds/stars-near.svg');
+                background-repeat: repeat;
+                background-size: 73rem 73rem;
+
+                animation: space-stars-near-scroll 92s linear infinite;
+            }
+        }
+    }
+
+    &__nebula {
+        inset: -9vmax;
+
+        background:
+            radial-gradient(ellipse at 10% 25%, rgba($primary-dark, .24) 0%, rgba($primary-dark, .085) 28%, transparent 54%),
+            radial-gradient(ellipse at 59% 9%, rgba($tertiary, .14) 0%, transparent 42%),
+            radial-gradient(ellipse at 88% 73%, rgba($secondary, .19) 0%, rgba($secondary, .06) 32%, transparent 57%),
+            radial-gradient(ellipse at 38% 91%, rgba($primary, .12) 0%, transparent 46%),
+            radial-gradient(ellipse at 72% 46%, rgba($tertiary, .065) 0%, transparent 39%);
+        opacity: .82;
+
+        animation: space-nebula-loop 46s ease-in-out infinite;
+    }
+
+    &__celestial {
+        --celestial-core-x: 50%;
+        --celestial-core-y: 50%;
+        --celestial-drift-duration: 32s;
+        --celestial-drift-delay: -6s;
+        --celestial-glow: #{rgba($primary, .38)};
+        --celestial-glow-size: .65rem;
+        --celestial-glow-radius: 1.8rem;
+        --celestial-glow-duration: 7.2s;
+        --celestial-glow-delay: -2s;
+        --celestial-aura-radius: .95rem;
+        --celestial-aura-delay: -2.8s;
+
+        position: absolute;
+
+        background-position: center;
+        background-repeat: no-repeat;
+        background-size: contain;
+        opacity: .46;
+
+        animation:
+            space-celestial-drift var(--celestial-drift-duration) ease-in-out infinite,
+            space-celestial-aura var(--celestial-glow-duration) ease-in-out infinite;
+        animation-delay:
+            var(--celestial-drift-delay),
+            var(--celestial-aura-delay);
+
+        &::after {
+            content: '';
+
+            position: absolute;
+            top: var(--celestial-core-y);
+            left: var(--celestial-core-x);
+
+            width: var(--celestial-glow-size);
+            aspect-ratio: 1;
+
+            border-radius: 50%;
+            background: radial-gradient(circle, rgba($white, .78), var(--celestial-glow) 36%, transparent 74%);
+            box-shadow: 0 0 var(--celestial-glow-radius) var(--celestial-glow);
+            opacity: .34;
+            transform: translate(-50%, -50%);
+            mix-blend-mode: screen;
+            pointer-events: none;
+
+            animation: space-celestial-glow var(--celestial-glow-duration) ease-in-out infinite;
+            animation-delay: var(--celestial-glow-delay);
+        }
+
+        &--galaxy-interacting-pair {
+            --celestial-core-x: 58%;
+            --celestial-core-y: 41%;
+            --celestial-drift-duration: 34s;
+            --celestial-glow-duration: 7.2s;
+            --celestial-glow-delay: -2s;
+            --celestial-aura-radius: 1.25rem;
+            --celestial-aura-delay: -4.8s;
+
+            top: 7%;
+            right: 5.5%;
+
+            width: clamp(8.8rem, 10vw, 12rem);
+            aspect-ratio: 560 / 468;
+
+            background-image: url('../../ts/assets/backgrounds/galaxy-interacting-pair-realistic.webp');
+        }
+
+        &--galaxy-broad {
+            --celestial-core-x: 49%;
+            --celestial-core-y: 46%;
+            --celestial-drift-duration: 38s;
+            --celestial-drift-delay: -19s;
+            --celestial-glow: #{rgba($primary, .44)};
+            --celestial-glow-size: .8rem;
+            --celestial-glow-radius: 2.2rem;
+            --celestial-glow-duration: 8.4s;
+            --celestial-glow-delay: -5.1s;
+            --celestial-aura-radius: 1.35rem;
+            --celestial-aura-delay: -1.6s;
+
+            top: 24%;
+            left: 4.5%;
+
+            width: clamp(10rem, 11.5vw, 14rem);
+            aspect-ratio: 620 / 340;
+
+            background-image: url('../../ts/assets/backgrounds/galaxy-broad-realistic.webp');
+        }
+
+        &--galaxy-edge {
+            --celestial-drift-duration: 42s;
+            --celestial-drift-delay: -12s;
+            --celestial-glow: #{rgba($secondary, .34)};
+            --celestial-glow-size: .55rem;
+            --celestial-glow-duration: 6.9s;
+            --celestial-glow-delay: -3.7s;
+            --celestial-aura-radius: .95rem;
+            --celestial-aura-delay: -5.4s;
+
+            bottom: 7%;
+            left: 4%;
+
+            width: clamp(14rem, 15vw, 18rem);
+            aspect-ratio: 620 / 167;
+
+            background-image: url('../../ts/assets/backgrounds/galaxy-edge-realistic.webp');
+        }
+
+        &--galaxy-ring {
+            --celestial-core-x: 64%;
+            --celestial-core-y: 60%;
+            --celestial-drift-duration: 37s;
+            --celestial-drift-delay: -25s;
+            --celestial-glow: #{rgba($secondary, .32)};
+            --celestial-glow-size: .48rem;
+            --celestial-glow-radius: 1.3rem;
+            --celestial-glow-duration: 9.1s;
+            --celestial-glow-delay: -7.2s;
+            --celestial-aura-radius: .8rem;
+            --celestial-aura-delay: -2.2s;
+
+            right: 6%;
+            bottom: 10%;
+
+            width: clamp(4.6rem, 5.2vw, 6.4rem);
+            aspect-ratio: 420 / 426;
+
+            background-image: url('../../ts/assets/backgrounds/galaxy-ring-realistic.webp');
+        }
+
+        &--nebula-hourglass {
+            --celestial-drift-duration: 29s;
+            --celestial-drift-delay: -15s;
+            --celestial-glow: #{rgba($secondary, .4)};
+            --celestial-glow-size: .46rem;
+            --celestial-glow-radius: 1.4rem;
+            --celestial-glow-duration: 6.4s;
+            --celestial-aura-radius: .65rem;
+            --celestial-aura-delay: -4.9s;
+
+            top: 54%;
+            right: 15%;
+
+            width: clamp(2.2rem, 2.8vw, 3.3rem);
+            aspect-ratio: 420 / 560;
+
+            background-image: url('../../ts/assets/backgrounds/nebula-hourglass-realistic.webp');
+        }
+
+        &--wolf-rayet-cocoon {
+            --celestial-core-x: 49%;
+            --celestial-core-y: 51%;
+            --celestial-drift-duration: 36s;
+            --celestial-drift-delay: -28s;
+            --celestial-glow: #{rgba($secondary, .42)};
+            --celestial-glow-size: .34rem;
+            --celestial-glow-radius: 1.25rem;
+            --celestial-glow-duration: 6.6s;
+            --celestial-glow-delay: -4.3s;
+            --celestial-aura-radius: 1.15rem;
+            --celestial-aura-delay: -1.1s;
+
+            top: 66%;
+            left: 13%;
+
+            width: clamp(5.2rem, 6vw, 7.2rem);
+            aspect-ratio: 360 / 397;
+
+            background-image: url('../../ts/assets/backgrounds/wolf-rayet-cocoon-realistic.webp');
+        }
+
+        &--quasar-jet {
+            --celestial-drift-duration: 27s;
+            --celestial-drift-delay: -8s;
+            --celestial-glow: #{rgba($tertiary, .56)};
+            --celestial-glow-size: .42rem;
+            --celestial-glow-radius: 1.6rem;
+            --celestial-glow-duration: 5.2s;
+            --celestial-aura-radius: .95rem;
+            --celestial-aura-delay: -3.6s;
+
+            top: 28%;
+            right: 27%;
+
+            width: clamp(4.5rem, 5.2vw, 6.2rem);
+            aspect-ratio: 360 / 622;
+
+            background-image: url('../../ts/assets/backgrounds/quasar-jet-realistic.webp');
+        }
+
+        &--wolf-rayet-shells {
+            --celestial-core-x: 10%;
+            --celestial-core-y: 63%;
+            --celestial-drift-duration: 31s;
+            --celestial-drift-delay: -22s;
+            --celestial-glow: #{rgba($secondary, .48)};
+            --celestial-glow-size: .4rem;
+            --celestial-glow-radius: 1.5rem;
+            --celestial-glow-duration: 5.8s;
+            --celestial-aura-radius: 1.2rem;
+            --celestial-aura-delay: -5.1s;
+
+            bottom: 22%;
+            left: 44%;
+
+            width: clamp(7.5rem, 8.8vw, 10.5rem);
+            aspect-ratio: 560 / 453;
+
+            background-image: url('../../ts/assets/backgrounds/wolf-rayet-shells-realistic.webp');
+        }
+
+        &--quasar-lensed {
+            --celestial-drift-duration: 35s;
+            --celestial-drift-delay: -17s;
+            --celestial-glow: #{rgba($primary, .48)};
+            --celestial-glow-size: .38rem;
+            --celestial-glow-radius: 1.2rem;
+            --celestial-glow-duration: 4.8s;
+            --celestial-aura-radius: .65rem;
+            --celestial-aura-delay: -1.8s;
+
+            top: 17%;
+            left: 34%;
+
+            width: clamp(1.1rem, 1.35vw, 1.7rem);
+            aspect-ratio: 280 / 277;
+
+            background-image: url('../../ts/assets/backgrounds/quasar-lensed-realistic.webp');
+        }
+    }
+}
+
+// Unity and PIXI already own a frame loop. Keep the richer sky visible there,
+// but make every decorative layer static so it does not compete for frames.
+body:has(canvas) {
+    .space-background__stars--near::before,
+    .space-background__nebula,
+    .space-background__celestial,
+    .space-background__celestial::after {
+        animation: none;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .space-background__stars--near::before,
+    .space-background__nebula,
+    .space-background__celestial,
+    .space-background__celestial::after {
+        animation: none;
+    }
+
+    .space-background__celestial {
+        filter: drop-shadow(0 0 .35rem var(--celestial-glow));
+    }
+}

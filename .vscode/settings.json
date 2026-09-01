@@ -13,6 +13,7 @@
         }
     },
     "terminal.integrated.defaultProfile.windows": "Git Bash",
+    "terminal.integrated.shellIntegration.enabled": true,
     "editor.inlineSuggest.enabled": true,
     "editor.suggest.preview": true,
     "editor.tabCompletion": "onlySnippets",

@@ -1,0 +1,226 @@
+import React, { useEffect, useRef, useState } from 'react';
+import FullscreenButton from '@/components/FullscreenButton';
+import { isThreeBossesLocalEnabled } from '@/config/featureFlags';
+import { isThreeBossesAvailableInCurrentBrowser } from '@/games/three-bosses/unityVisibility';
+import { startThreeBossesWebGl, type UnityWebGlHandle } from '@/games/three-bosses/unityWebGl';
+import {
+    getLeaderboardCatalog,
+    issueThreeBossesRunTicket,
+    isThreeBossesSubmissionEnabled,
+    submitThreeBossesRun,
+} from '@/services/leaderboardService';
+
+type LoadState =
+    | Readonly<{ kind: 'loading'; progress: number }>
+    | Readonly<{ kind: 'running' }>
+    | Readonly<{ kind: 'error'; message: string }>;
+
+const SUBMISSION_GATE_ATTEMPTS = 3;
+const SUBMISSION_GATE_ATTEMPT_TIMEOUT_MS = 5_000;
+const SUBMISSION_GATE_RETRY_DELAY_MS = 750;
+
+type LeaderboardCatalogReader = typeof getLeaderboardCatalog;
+
+const describeLoadError = (error: unknown): string => {
+    if (error instanceof Error && error.message) return error.message;
+    if (typeof error === 'string' && error.trim()) return error;
+
+    try {
+        const serialized = JSON.stringify(error);
+        if (serialized && serialized !== '{}') return serialized;
+    } catch {
+        // Fall through to the stable user-facing message.
+    }
+
+    return 'The Three Bosses WebGL game failed to load.';
+};
+
+const waitForSubmissionGateRetry = (
+    signal: AbortSignal,
+    delayMs: number,
+): Promise<boolean> => new Promise((resolve) => {
+    if (signal.aborted) {
+        resolve(false);
+        return;
+    }
+
+    const onAbort = () => {
+        clearTimeout(timeoutId);
+        resolve(false);
+    };
+    const timeoutId = setTimeout(() => {
+        signal.removeEventListener('abort', onAbort);
+        resolve(true);
+    }, delayMs);
+
+    signal.addEventListener('abort', onAbort, { once: true });
+});
+
+const readSubmissionGateAttempt = async (
+    signal: AbortSignal,
+    readCatalog: LeaderboardCatalogReader,
+): Promise<boolean> => {
+    const attemptController = new AbortController();
+    const abortAttempt = () => attemptController.abort();
+    const timeoutId = setTimeout(abortAttempt, SUBMISSION_GATE_ATTEMPT_TIMEOUT_MS);
+
+    if (signal.aborted) abortAttempt();
+    else signal.addEventListener('abort', abortAttempt, { once: true });
+
+    try {
+        const catalog = await readCatalog(attemptController.signal);
+        return catalog.games.some(isThreeBossesSubmissionEnabled);
+    } finally {
+        clearTimeout(timeoutId);
+        signal.removeEventListener('abort', abortAttempt);
+    }
+};
+
+export const readThreeBossesSubmissionGate = async (
+    signal: AbortSignal,
+    readCatalog: LeaderboardCatalogReader = getLeaderboardCatalog,
+    retryDelayMs: number = SUBMISSION_GATE_RETRY_DELAY_MS,
+): Promise<boolean> => {
+    for (let attempt = 1; attempt <= SUBMISSION_GATE_ATTEMPTS; attempt += 1) {
+        try {
+            return await readSubmissionGateAttempt(signal, readCatalog);
+        } catch {
+            if (signal.aborted || attempt === SUBMISSION_GATE_ATTEMPTS) return false;
+            if (!await waitForSubmissionGateRetry(signal, retryDelayMs)) return false;
+        }
+    }
+
+    return false;
+};
+
+const ThreeBosses: React.FC = () => {
+    const canvasRef = useRef<HTMLCanvasElement | null>(null);
+    const frameRef = useRef<HTMLDivElement | null>(null);
+    const [loadState, setLoadState] = useState<LoadState>({ kind: 'loading', progress: 0 });
+    const [hasUnityCanvasControl, setHasUnityCanvasControl] = useState(false);
+
+    useEffect(() => {
+        const canvas = canvasRef.current;
+        if (!canvas) return;
+
+        const controller = new AbortController();
+        let cancelled = false;
+        let handle: UnityWebGlHandle | null = null;
+
+        setHasUnityCanvasControl(false);
+
+        (async () => {
+            try {
+                const submissionGatePromise = readThreeBossesSubmissionGate(controller.signal);
+                const nextHandle = await startThreeBossesWebGl({
+                    canvas,
+                    signal: controller.signal,
+                    onProgress: (progress) => {
+                        if (!cancelled) setLoadState({ kind: 'loading', progress });
+                    },
+                    onCanvasOwned: () => {
+                        if (!cancelled) setHasUnityCanvasControl(true);
+                    },
+                    issueRunTicket: issueThreeBossesRunTicket,
+                    submitRun: submitThreeBossesRun,
+                });
+
+                if (cancelled) {
+                    await nextHandle.quit();
+                    return;
+                }
+
+                handle = nextHandle;
+                setLoadState({ kind: 'running' });
+                canvas.focus();
+
+                const submissionEnabled = await submissionGatePromise;
+                if (!cancelled)
+                    nextHandle.setSubmissionEnabled(submissionEnabled);
+            } catch (error) {
+                if (cancelled || controller.signal.aborted) return;
+
+                setLoadState({
+                    kind: 'error',
+                    message: describeLoadError(error),
+                });
+            }
+        })();
+
+        return () => {
+            cancelled = true;
+            controller.abort();
+            if (handle) {
+                void handle.quit().catch((error: unknown) => {
+                    console.error('Three Bosses WebGL cleanup failed.', error);
+                });
+            }
+        };
+    }, []);
+
+    const progressPercent = loadState.kind === 'loading'
+        ? Math.round(loadState.progress * 100)
+        : 100;
+    const showStatus = loadState.kind === 'error'
+        || (loadState.kind === 'loading' && !hasUnityCanvasControl);
+
+    return (
+        <section className="three-bosses">
+            <h1 className="u-visually-hidden">Three Bosses</h1>
+            {isThreeBossesLocalEnabled && (
+                <p className="three-bosses__local-note">Local WebGL playability prototype</p>
+            )}
+
+            <div
+                className="three-bosses__canvas-wrapper"
+                data-three-bosses-state={loadState.kind}
+                ref={frameRef}
+            >
+                <canvas
+                    aria-label="Three Bosses game"
+                    className="three-bosses__canvas"
+                    height={540}
+                    id="three-bosses-unity-canvas"
+                    ref={canvasRef}
+                    tabIndex={0}
+                    width={960}
+                />
+
+                {showStatus && (
+                    <div className="three-bosses__status" role={loadState.kind === 'error' ? 'alert' : 'status'}>
+                        {loadState.kind === 'loading'
+                            ? `Loading Three Bosses… ${progressPercent}%`
+                            : loadState.message}
+                    </div>
+                )}
+
+                <FullscreenButton
+                    targetRef={frameRef}
+                    focusRef={canvasRef}
+                    className="three-bosses__fullscreen-btn"
+                />
+            </div>
+
+            <p className="three-bosses__orientation-hint">
+                For the best fullscreen experience, rotate your device to landscape.
+            </p>
+        </section>
+    );
+};
+
+export const ThreeBossesDesktopOnly: React.FC = () => (
+    <section className="three-bosses three-bosses--desktop-only">
+        <h1 className="u-visually-hidden">Three Bosses</h1>
+        <p className="three-bosses__availability-note" role="status">
+            Three Bosses is currently available on desktop only.
+        </p>
+    </section>
+);
+
+export const ThreeBossesAvailabilityGate: React.FC = () => (
+    isThreeBossesAvailableInCurrentBrowser()
+        ? <ThreeBosses />
+        : <ThreeBossesDesktopOnly />
+);
+
+export default ThreeBosses;

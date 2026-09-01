@@ -1,6 +1,6 @@
 # Three Bosses asset provenance
 
-Last reviewed: 2026-08-17
+Last reviewed: 2026-08-18
 
 This document records provenance and the basis for including assets in this
 repository. It is not a license grant.
@@ -61,6 +61,16 @@ The following images were generated using ChatGPT:
 
 - `Assets/Sprites/Environment/GreenLight.png`
 - `Assets/Sprites/Environment/FlickeringLight.png`
+- `Assets/Art/UI/Screens/Menu.png`
+- `Assets/Art/UI/Screens/Boss1Defeated.png`
+- `Assets/Art/UI/Screens/Boss2Defeated.png`
+- `Assets/Art/UI/Screens/BeeDefeat.png`
+- `Assets/Art/UI/Screens/CyborgDefeat.png`
+- `Assets/Art/UI/Screens/KrakenDefeat.png`
+- `Assets/Art/UI/Screens/End.png`
+
+The seven screen images under `Assets/Art/UI/Screens` retain their embedded
+C2PA Content Credentials. Those credentials must not be removed or altered.
 
 The project owner confirms that the generation inputs were authorized and that
 these outputs may be published with the project. These files are disclosed as

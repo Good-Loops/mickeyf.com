@@ -7,10 +7,20 @@
     "npm": "11.6.2"
   },
   "packageManager": "npm@11.6.2",
+  "scripts": {
+    "three-bosses:webgl:preview:smoke": "node smoke-three-bosses-webgl-preview.mjs",
+    "test:three-bosses-webgl-smoke": "node --test smoke-three-bosses-webgl-preview.test.mjs"
+  },
   "dependencies": {
-    "firebase-tools": "15.27.0"
+    "firebase-tools": "15.28.1",
+    "picomatch": "4.0.4",
+    "playwright-core": "1.62.1"
   },
   "overrides": {
-    "re2": "1.26.1"
+    "re2": "1.26.1",
+    "@opentelemetry/core": "2.8.0",
+    "gaxios": {
+      "uuid": "11.1.1"
+    }
   }
 }

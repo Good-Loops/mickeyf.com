@@ -1,0 +1,179 @@
+@use '../abstracts' as *;
+
+.connect {
+    display: grid;
+    grid-template-columns: minmax(30rem, 36rem) minmax(40rem, 52rem);
+    gap: clamp(2.8rem, 5vw, 5rem);
+    align-items: center;
+    justify-content: center;
+    width: min(92vw, 93rem);
+
+    &__grid {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(13rem, 1fr));
+        gap: clamp(1.6rem, 3vw, 2.8rem);
+        width: 100%;
+    }
+
+    &__link {
+        --connect-accent: #{rgba($primary-light, .46)};
+
+        grid-template-rows: minmax(9.5rem, 1fr) auto;
+        min-height: 15.5rem;
+
+        &:hover,
+        &:focus-visible {
+            border-color: var(--connect-accent);
+
+            .connect__visual {
+                filter: drop-shadow(0 0 1.2rem var(--connect-accent));
+                transform: scale(1.045);
+            }
+        }
+
+    }
+
+    &__visual {
+        display: grid;
+        place-items: center;
+        width: 7.5rem;
+        transition:
+            filter .35s ease,
+            transform .35s ease;
+
+        svg {
+            width: 5.3rem;
+            height: 5.3rem;
+            fill: rgba($white, .84);
+        }
+    }
+
+    &__label {
+        color: rgba($white, .86);
+        font-size: 1.45rem;
+        font-weight: 500;
+        letter-spacing: .06em;
+        text-align: center;
+    }
+
+    &__feedback {
+        display: grid;
+        grid-template-columns: 1fr auto;
+        gap: 1.4rem;
+        width: min(100%, 52rem);
+        padding: clamp(1.8rem, 3vw, 2.4rem);
+
+        border: .1rem solid rgba($white, .14);
+        border-radius: 1.2rem;
+        background: linear-gradient(145deg, rgba($white, .055), rgba($space-background, .04));
+        box-shadow:
+            0 1.4rem 3.4rem rgba(black, .22),
+            0 .1rem 0 rgba($white, .09) inset;
+        backdrop-filter: blur(.35rem) saturate(125%);
+        -webkit-backdrop-filter: blur(.35rem) saturate(125%);
+    }
+
+    &__feedback-heading {
+        grid-column: 1 / -1;
+
+        h2 {
+            color: rgba($white, .9);
+            font-size: 1.8rem;
+            font-weight: 600;
+            letter-spacing: .04em;
+        }
+
+        p {
+            margin-top: .45rem;
+            color: rgba($primary-light, .62);
+            font-size: 1.15rem;
+            letter-spacing: .025em;
+        }
+    }
+
+    &__feedback-message {
+        grid-column: 1 / -1;
+        width: 100%;
+        min-height: 8.8rem;
+        max-height: 16rem;
+        padding: 1.2rem 1.35rem;
+        resize: vertical;
+
+        border: .1rem solid rgba($white, .13);
+        border-radius: .75rem;
+        outline: none;
+        color: rgba($white, .88);
+        background: rgba($space-background, .24);
+        box-shadow: 0 .1rem 0 rgba($white, .055) inset;
+        font: inherit;
+        font-size: 1.3rem;
+        line-height: 1.5;
+        user-select: text;
+
+        &::placeholder {
+            color: rgba($white, .38);
+        }
+
+        &:focus-visible {
+            border-color: rgba($primary-light, .48);
+            box-shadow:
+                0 0 0 .2rem rgba($primary, .09),
+                0 .1rem 0 rgba($white, .07) inset;
+        }
+    }
+
+    &__feedback-submit {
+        grid-column: 2;
+        justify-self: end;
+        padding: .75rem 1.2rem;
+
+        border: .1rem solid rgba($primary-light, .25);
+        border-radius: .65rem;
+        color: rgba($white, .86);
+        background: rgba($primary, .075);
+        font-weight: 500;
+        letter-spacing: .05em;
+
+        transition:
+            border-color .25s ease,
+            background-color .25s ease,
+            box-shadow .25s ease;
+
+        &:hover,
+        &:focus-visible {
+            border-color: rgba($primary-light, .5);
+            background: rgba($primary, .13);
+            box-shadow: 0 0 1.4rem rgba($primary, .12);
+        }
+
+        &:focus-visible {
+            outline: .15rem solid rgba($primary-light, .68);
+            outline-offset: .2rem;
+        }
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .connect__visual {
+        transition: none;
+    }
+
+    .connect__link:hover .connect__visual,
+    .connect__link:focus-visible .connect__visual {
+        transform: none;
+    }
+}
+
+@include viewport-at-most($bp-xl) {
+    .connect {
+        grid-template-columns: 1fr;
+        row-gap: clamp(2.4rem, 4vh, 3.4rem);
+        justify-items: center;
+        width: min(90vw, 70rem);
+
+        &__grid,
+        &__feedback {
+            width: 100%;
+        }
+    }
+}

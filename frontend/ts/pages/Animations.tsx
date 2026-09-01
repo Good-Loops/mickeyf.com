@@ -8,21 +8,31 @@ import { Link } from "react-router-dom";
 const Animations: React.FC = () => {
     return (
         <section className="animations">
-            <h1 className="animations__title">Animations</h1>
-            <div className="animations__grid">
-                <div className="animations__grid-item">
-                    <Link to="/animations/dancing-circles">
-                        <h3 className="animations__grid-item--dancing-circles floating">Dancing Circles</h3>
-                    </Link>
-                </div> 
-                <div className="animations__grid-item">
-                    <Link to="/animations/dancing-fractals">
-                        <h3 className="animations__grid-item--dancing-circles floating">Dancing Fractals</h3>
-                    </Link>
-                </div>
+            <h1 className="u-visually-hidden">Animations</h1>
+            <div className="showcase-grid">
+                <Link
+                    className="showcase-card animations__card animations__card--circles"
+                    to="/animations/dancing-circles"
+                >
+                    <span
+                        className="showcase-card__visual animations__visual"
+                        aria-hidden="true"
+                    />
+                    <h2 className="showcase-card__title">Dancing Circles</h2>
+                </Link>
+                <Link
+                    className="showcase-card animations__card animations__card--fractals"
+                    to="/animations/dancing-fractals"
+                >
+                    <span
+                        className="showcase-card__visual animations__visual"
+                        aria-hidden="true"
+                    />
+                    <h2 className="showcase-card__title">Dancing Fractals</h2>
+                </Link>
             </div>
         </section>
     );
-}
+};
 
 export default Animations;

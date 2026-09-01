@@ -1,5 +1,101 @@
 @use '../abstracts' as *;
 
+@keyframes space-stars-near-scroll {
+    from {
+        transform: translate3d(0, 0, 0);
+    }
+
+    to {
+        // Equal to the repeated tile size, so the final frame is the first.
+        transform: translate3d(73rem, 73rem, 0);
+    }
+}
+
+@keyframes space-nebula-loop {
+    0%,
+    100% {
+        opacity: .72;
+        transform: translate3d(-2vw, 1vh, 0) scale(1.03);
+    }
+
+    33% {
+        opacity: .94;
+        transform: translate3d(2.4vw, -1.5vh, 0) scale(1.075);
+    }
+
+    66% {
+        opacity: .82;
+        transform: translate3d(.8vw, 2vh, 0) scale(1.045);
+    }
+}
+
+@keyframes space-celestial-drift {
+    0%,
+    100% {
+        opacity: .44;
+        transform: translate3d(0, 0, 0) scale(.995);
+    }
+
+    40% {
+        opacity: .51;
+        transform: translate3d(.35vw, -.3vh, 0) scale(1.008);
+    }
+
+    72% {
+        opacity: .47;
+        transform: translate3d(-.28vw, .22vh, 0) scale(.998);
+    }
+}
+
+@keyframes space-celestial-glow {
+    0%,
+    100% {
+        opacity: .28;
+        transform: translate(-50%, -50%) scale(.88);
+    }
+
+    42% {
+        opacity: .82;
+        transform: translate(-50%, -50%) scale(1.38);
+    }
+
+    68% {
+        opacity: .52;
+        transform: translate(-50%, -50%) scale(1.12);
+    }
+}
+
+@keyframes space-celestial-aura {
+    0%,
+    100% {
+        filter: drop-shadow(0 0 .12rem var(--celestial-glow));
+    }
+
+    38% {
+        filter:
+            drop-shadow(0 0 .28rem var(--celestial-glow))
+            drop-shadow(0 0 var(--celestial-aura-radius) var(--celestial-glow));
+    }
+
+    72% {
+        filter:
+            drop-shadow(0 0 .18rem var(--celestial-glow))
+            drop-shadow(0 0 .55rem var(--celestial-glow));
+    }
+}
+
+@keyframes nav-dropdown-enter {
+    from {
+        opacity: 0;
+        transform: translate(-50%, -.65rem) scale(.98);
+    }
+
+    to {
+        opacity: 1;
+        transform: translate(-50%, 0) scale(1);
+    }
+}
+
 @keyframes float {
     0% {
         transform: translateY(0px);
@@ -20,25 +116,15 @@
 
 @keyframes glow {
     from {
-        text-shadow: 0 0 5px $white, 
-                0 0 10px $white, 
-                0 0 15px $white, 
-                0 0 20px $primary, 
-                0 0 30px $primary, 
-                0 0 40px $primary, 
-                0 0 55px $primary, 
-                0 0 75px $primary;
+        text-shadow:
+            0 0 .08em rgba($white, .78),
+            0 0 .2em currentColor;
     }
 
     to {
-        text-shadow: 0 0 10px $white, 
-                0 0 15px $white, 
-                0 0 20px $white, 
-                0 0 25px $primary, 
-                0 0 35px $primary, 
-                0 0 50px $primary, 
-                0 0 70px $primary, 
-                0 0 100px $primary;
+        text-shadow:
+            0 0 .14em rgba($white, .9),
+            0 0 .36em currentColor;
     }
 }
 
@@ -58,4 +144,12 @@
 .fade-out {
     opacity: 0;
     transition: opacity 2s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .floating,
+    .glowing,
+    .glowing-floating {
+        animation: none;
+    }
 }

@@ -4,6 +4,25 @@
 @use 'fonts' as *;
 @use 'sass:map';
 
+//////////////////////// Responsive ////////////////////////
+@mixin viewport-at-most($breakpoint) {
+    @media only screen and (max-width: $breakpoint) {
+        @content;
+    }
+}
+
+@mixin viewport-above($breakpoint) {
+    @media only screen and (min-width: calc($breakpoint + .01em)) {
+        @content;
+    }
+}
+
+@mixin portrait-at-most($breakpoint) {
+    @media only screen and (max-width: $breakpoint) and (orientation: portrait) {
+        @content;
+    }
+}
+
 //////////////////////// Typography ////////////////////////
 // Main title coloring
 @mixin title-coloring {
@@ -33,90 +52,143 @@
 
 
 //////////////////////// Forms ////////////////////////
-/// Default form styling
-@mixin user-conection-form {
+/// Shared glass form styling for the unauthenticated account pages.
+@mixin account-form {
     display: grid;
-    row-gap: 3rem;
-
     justify-items: center;
-
-    margin-bottom: 10svh;
-
-    &__title {
-        font-size: $font-size-m;
-        @include title-coloring;
-    }
+    width: min(90vw, 38rem);
 
     &__form-wrapper {
-        background: $component-bg-gradient;
-        border-radius: 1.5em;
+        width: 100%;
+        padding: clamp(2rem, 4vw, 2.8rem);
 
-        padding-block: 4em;
-        width: 80%;
-        justify-self: center;
+        border: .1rem solid rgba($white, .14);
+        border-radius: 1.2rem;
+        background: linear-gradient(145deg, rgba($white, .055), rgba($space-background, .04));
+        box-shadow:
+            0 1.4rem 3.4rem rgba(black, .24),
+            0 .1rem 0 rgba($white, .09) inset;
+        backdrop-filter: blur(.35rem) saturate(125%);
+        -webkit-backdrop-filter: blur(.35rem) saturate(125%);
     }
 
     &__form {
-        grid-column: 2 / 3;
-
         display: grid;
-        grid-gap: 2rem;
-        grid-template-columns: repeat(3, 1fr);
+        row-gap: 1.7rem;
+    }
+
+    &__field {
+        display: grid;
+        row-gap: .65rem;
+        cursor: $cursor;
+    }
+
+    &__label {
+        color: rgba($primary-light, .62);
+        font-size: 1.1rem;
+        font-weight: 600;
+        letter-spacing: .16em;
+        text-transform: uppercase;
+        cursor: $cursor;
     }
 
     &__input {
-        background-color: $primary-light;
-        border: .15em solid $gray-light;
-        border-radius: .4em;
+        width: 100%;
+        padding: 1.05rem 1.2rem;
 
-        transition: border 0.7s;
+        border: .1rem solid rgba($white, .14);
+        border-radius: .7rem;
         outline: none;
+        color: rgba($white, .9);
+        background: rgba($space-background, .24);
+        box-shadow: 0 .1rem 0 rgba($white, .05) inset;
+        font: inherit;
+        font-size: 1.4rem;
+        user-select: text;
 
-        font-family: var(--font);
-        font-size: 3.8rem;
-        color: $gray;
+        transition:
+            border-color .25s ease,
+            box-shadow .25s ease,
+            background-color .25s ease;
 
-        grid-column: 1 / 4;
-        justify-self: center;
-        width: 80%;
-
-        padding: .2em;
-
-        &:focus {
-            border: .15em solid $gray;
+        &:focus-visible {
+            border-color: rgba($primary-light, .52);
+            background: rgba($space-background, .32);
+            box-shadow:
+                0 0 0 .2rem rgba($primary, .09),
+                0 .1rem 0 rgba($white, .07) inset;
         }
 
-        &--username {
-            grid-row: 1 / 2;
+        // Browsers otherwise replace the glass surface with a pale autofill
+        // color after restoring saved credentials.
+        &:-webkit-autofill,
+        &:-webkit-autofill:hover,
+        &:-webkit-autofill:focus,
+        &:autofill {
+            caret-color: rgba($white, .9);
+            -webkit-text-fill-color: rgba($white, .9);
+            -webkit-box-shadow: 0 0 0 100rem $space-background-soft inset;
+            box-shadow: 0 0 0 100rem $space-background-soft inset;
         }
 
-        &--email {
-            grid-row: 2 / 3;
+        &:-webkit-autofill:focus-visible,
+        &:autofill:focus-visible {
+            -webkit-box-shadow:
+                0 0 0 100rem $space-background-soft inset,
+                0 0 0 .2rem rgba($primary, .09);
+            box-shadow:
+                0 0 0 100rem $space-background-soft inset,
+                0 0 0 .2rem rgba($primary, .09);
+        }
+    }
+
+    &__submit {
+        width: 100%;
+        margin-top: .4rem;
+        padding: .9rem 1.3rem;
+
+        border: .1rem solid rgba($primary-light, .26);
+        border-radius: .7rem;
+        color: rgba($white, .88);
+        background: rgba($primary, .075);
+        font-weight: 600;
+        letter-spacing: .055em;
+
+        transition:
+            border-color .25s ease,
+            background-color .25s ease,
+            box-shadow .25s ease,
+            transform .2s ease;
+
+        &:hover:not(:disabled),
+        &:focus-visible {
+            border-color: rgba($primary-light, .52);
+            background: rgba($primary, .13);
+            box-shadow: 0 0 1.6rem rgba($primary, .13);
         }
 
-        &--password {
-            grid-row: 3 / 4;
+        &:focus-visible {
+            outline: .15rem solid rgba($primary-light, .7);
+            outline-offset: .2rem;
         }
 
-        &--btn {
-            width: 100%;
-            margin-top: 2rem;
-            font-size: 3rem;
+        &:active:not(:disabled) {
+            transform: scale(.985);
+        }
 
-            grid-row: 4 / 5;
-            grid-column: 2 / 3;
+        &:disabled {
+            border-color: rgba($white, .1);
+            opacity: .55;
+            cursor: $cursor-notallowed;
+        }
+    }
 
-            border: .18em solid $gray-light;
-            border-radius: .5em;
-            transition: all 0.7s;
+    @media (prefers-reduced-motion: reduce) {
+        &__submit {
+            transition: none;
 
-            &:active {
-                transform: scale(.7);
-            }
-
-            &:hover {
-                cursor: $cursor-hover;
-                border: .18em solid $gray;
+            &:active:not(:disabled) {
+                transform: none;
             }
         }
     }
@@ -235,25 +307,6 @@
         white-space: nowrap;
         color: $white-darker;
         font-size: $font-size-xxs;
-    }
-}
-
-//////////////////////// Social Media ////////////////////////
-// Social media button styling
-@mixin social-media-btn {
-    @include default-btn;
-    padding-block: 2em;
-    width: 13em;
-    scale: .8;
-
-    fill: $primary-light;
-
-    &:hover {
-        @include default-btn-hover;
-    }
-
-    &:active {
-        @include default-btn-active;
     }
 }
 

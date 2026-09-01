@@ -1,5 +1,11 @@
 # Stage B canonical source-less inline configuration.
 #
+# This tracked main-only phase must never be repointed at a feature branch. Any
+# pre-main rollout uses a separate, temporary, exact-commit candidate trust
+# path. Stage A validation pins the reviewed main commit. Anonymous HTTP 401
+# responses prove that both submission gates are open without performing a
+# write; they do not prove which persistence implementation is running.
+#
 # Store these contents inline on the Pub/Sub trigger; do not attach repository
 # source. Configure exactly these two payload bindings:
 #   _SOURCE_BUILD_ID = $(body.message.attributes.buildId)
@@ -653,7 +659,7 @@ steps:
             --concurrency=80 --timeout=300s --max-instances=10 --cpu-boost --ingress=all \
             --startup-probe='timeoutSeconds=240,periodSeconds=240,failureThreshold=1,tcpSocket.port=8080' \
             --liveness-probe='' --set-cloudsql-instances="$$CLOUD_SQL" \
-            --set-env-vars="NODE_ENV=production,CLOUD_SQL_CONNECTION_NAME=$$CLOUD_SQL,DB_USER=cms_mickeyf,DB_NAME=cms" \
+            --set-env-vars="NODE_ENV=production,CLOUD_SQL_CONNECTION_NAME=$$CLOUD_SQL,DB_USER=cms_mickeyf,DB_NAME=cms,P4_VEGA_SCORE_SUBMISSIONS_ENABLED=true,THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=true" \
             --set-secrets='DB_PASS=DB_PASS:1,SESSION_SECRET=SESSION_SECRET:2' \
             --update-labels="source-build-id=$$SOURCE_BUILD_ID,source-commit=$$COMMIT_SHA" \
             --no-traffic --tag="$$CANDIDATE_TAG" --quiet; then
@@ -842,14 +848,16 @@ steps:
             reject("service ingress does not match")
 
         env_items = container.get("env") or []
-        if len(env_items) != 6 or len({item.get("name") for item in env_items}) != 6:
-            reject("environment is not the exact six-variable configuration")
+        if len(env_items) != 8 or len({item.get("name") for item in env_items}) != 8:
+            reject("environment is not the exact eight-variable configuration")
         env = {item.get("name"): item for item in env_items}
         plain = {
             "NODE_ENV": "production",
             "CLOUD_SQL_CONNECTION_NAME": "noted-reef-387021:us-central1:cms-mickeyf",
             "DB_USER": "cms_mickeyf",
             "DB_NAME": "cms",
+            "P4_VEGA_SCORE_SUBMISSIONS_ENABLED": "true",
+            "THREE_BOSSES_RUN_SUBMISSIONS_ENABLED": "true",
         }
         for name, value in plain.items():
             if env.get(name) != {"name": name, "value": value}:
@@ -902,6 +910,8 @@ steps:
             json.dump(message, handle)
         PY
 
+  # Cloud Build caps each args value at 10,000 characters, so the Python probe
+  # is carried in two bounded arguments and reconstructed on stdin.
   - id: 'Smoke test tagged candidate anonymously'
     name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:alpine@sha256:de1a989b158694a614852e7b53673097da3bdb394b8186d6102386b7a10d73c7'
     entrypoint: 'bash'
@@ -913,7 +923,9 @@ steps:
 
         readonly STATE_JSON='/workspace/verified-stage-a.json'
         readonly SERVICE_JSON='/workspace/service-after.json'
-        python3 - "$$STATE_JSON" "$$SERVICE_JSON" <<'PY'
+        printf '%s%s' "$$1" "$$2" | python3 - "$$STATE_JSON" "$$SERVICE_JSON"
+      - '_'
+      - |2
         import json
         import errno
         import math
@@ -1088,6 +1100,151 @@ steps:
         if not no_store(auth_headers) or auth_headers.get_all("Set-Cookie"):
             reject("anonymous authentication response headers are unsafe")
 
+      - |2
+        catalog, catalog_headers = request("/api/leaderboards", 200)
+        expected_catalog = {
+            "success": True,
+            "contractVersion": 1,
+            "games": [
+                {
+                    "gameId": "p4-vega",
+                    "displayName": "p4-Vega",
+                    "rulesVersion": 1,
+                    "primaryMetric": "score",
+                    "sortDirection": "descending",
+                    "labels": {"score": "Score", "completionTime": None, "rank": None},
+                    "rankState": "not-applicable",
+                    "submissionState": "legacy-only",
+                },
+                {
+                    "gameId": "three-bosses",
+                    "displayName": "Three Bosses",
+                    "rulesVersion": 1,
+                    "primaryMetric": "completionTimeMs",
+                    "sortDirection": "ascending",
+                    "labels": {"score": "Score", "completionTime": "Time", "rank": "Rank"},
+                    "rankState": "ranked",
+                    "submissionState": "enabled",
+                },
+            ],
+        }
+        if (catalog != expected_catalog
+                or catalog.get("success") is not True
+                or type(catalog.get("contractVersion")) is not int
+                or any(type(game.get("rulesVersion")) is not int for game in catalog["games"])):
+            reject("leaderboard catalog response contract does not match")
+        if not no_store(catalog_headers) or catalog_headers.get_all("Set-Cookie"):
+            reject("leaderboard catalog response headers are unsafe")
+
+        generic_board, generic_board_headers = request("/api/leaderboards/p4-vega", 200)
+        if (not isinstance(generic_board, dict)
+                or set(generic_board) != {"success", "contractVersion", "gameId", "rulesVersion", "entries"}
+                or generic_board.get("success") is not True
+                or type(generic_board.get("contractVersion")) is not int
+                or generic_board.get("contractVersion") != 1
+                or generic_board.get("gameId") != "p4-vega"
+                or type(generic_board.get("rulesVersion")) is not int
+                or generic_board.get("rulesVersion") != 1
+                or not isinstance(generic_board.get("entries"), list)
+                or len(generic_board["entries"]) > 10):
+            reject("generic p4-Vega leaderboard response contract does not match")
+        for position, row in enumerate(generic_board["entries"], start=1):
+            score = row.get("score") if isinstance(row, dict) else None
+            if (not isinstance(row, dict) or set(row) != {"position", "userName", "score"}
+                    or type(row.get("position")) is not int
+                    or row.get("position") != position
+                    or not isinstance(row.get("userName"), str)
+                    or isinstance(score, bool) or not isinstance(score, (int, float))
+                    or (isinstance(score, float) and not math.isfinite(score))):
+                reject("generic p4-Vega leaderboard entry contract does not match")
+        if not no_store(generic_board_headers) or generic_board_headers.get_all("Set-Cookie"):
+            reject("generic p4-Vega leaderboard response headers are unsafe")
+
+        bosses, bosses_headers = request("/api/leaderboards/three-bosses", 200)
+        if (not isinstance(bosses, dict)
+                or set(bosses) != {"success", "contractVersion", "gameId", "rulesVersion", "entries"}
+                or bosses.get("success") is not True
+                or type(bosses.get("contractVersion")) is not int
+                or bosses.get("contractVersion") != 1
+                or bosses.get("gameId") != "three-bosses"
+                or type(bosses.get("rulesVersion")) is not int
+                or bosses.get("rulesVersion") != 1
+                or not isinstance(bosses.get("entries"), list)
+                or len(bosses["entries"]) > 10):
+            reject("Three Bosses leaderboard response contract does not match")
+        previous_completion_time = None
+        for position, row in enumerate(bosses["entries"], start=1):
+            score = row.get("score") if isinstance(row, dict) else None
+            completion_time = row.get("completionTimeMs") if isinstance(row, dict) else None
+            if (not isinstance(row, dict)
+                    or set(row) != {"position", "userName", "score", "completionTimeMs", "rank"}
+                    or type(row.get("position")) is not int
+                    or row.get("position") != position
+                    or not isinstance(row.get("userName"), str)
+                    or type(score) is not int or score <= 0
+                    or type(completion_time) is not int or completion_time <= 0
+                    or row.get("rank") not in {"S", "A", "B", "C", "D"}
+                    or (previous_completion_time is not None
+                        and completion_time < previous_completion_time)):
+                reject("Three Bosses leaderboard entry contract does not match")
+            previous_completion_time = completion_time
+        if not no_store(bosses_headers) or bosses_headers.get_all("Set-Cookie"):
+            reject("Three Bosses leaderboard response headers are unsafe")
+
+        unknown_game, unknown_game_headers = request("/api/leaderboards/P4-Vega", 404)
+        if unknown_game != {
+            "success": False,
+            "contractVersion": 1,
+            "error": "UNKNOWN_GAME",
+        } or (unknown_game.get("success") is not False
+                or type(unknown_game.get("contractVersion")) is not int):
+            reject("unknown leaderboard game response contract does not match")
+        if not no_store(unknown_game_headers) or unknown_game_headers.get_all("Set-Cookie"):
+            reject("unknown leaderboard game response headers are unsafe")
+
+        anonymous_ticket, anonymous_ticket_headers = request(
+            "/api/leaderboards/three-bosses/run-tickets", 401, {
+                "contractVersion": 1,
+                "rulesVersion": 1,
+                "runId": "123e4567-e89b-42d3-a456-426614174000",
+            }
+        )
+        if anonymous_ticket != {
+            "success": False,
+            "contractVersion": 1,
+            "error": "UNAUTHORIZED",
+        }:
+            reject("enabled Three Bosses anonymous run-ticket contract does not match")
+        if not no_store(anonymous_ticket_headers) or anonymous_ticket_headers.get_all("Set-Cookie"):
+            reject("anonymous Three Bosses run-ticket response headers are unsafe")
+
+        anonymous_run, anonymous_run_headers = request(
+            "/api/leaderboards/three-bosses/runs", 401, {
+                "contractVersion": 1,
+                "rulesVersion": 1,
+                "runId": "123e4567-e89b-42d3-a456-426614174000",
+                "completionTimeMs": 60000,
+                "runTicket": "anonymous-gate-probe",
+            }
+        )
+        if anonymous_run != {
+            "success": False,
+            "contractVersion": 1,
+            "error": "UNAUTHORIZED",
+        }:
+            reject("enabled Three Bosses anonymous-submission contract does not match")
+        if not no_store(anonymous_run_headers) or anonymous_run_headers.get_all("Set-Cookie"):
+            reject("anonymous Three Bosses submission response headers are unsafe")
+
+        anonymous_p4_submission, anonymous_p4_submission_headers = request(
+            "/api/users", 401, {"type": "submit_score", "p4_score": 10}
+        )
+        if anonymous_p4_submission != {"error": "UNAUTHORIZED"}:
+            reject("enabled p4-Vega anonymous-submission contract does not match")
+        if (not no_store(anonymous_p4_submission_headers)
+                or anonymous_p4_submission_headers.get_all("Set-Cookie")):
+            reject("anonymous p4-Vega submission response headers are unsafe")
+
         board, board_headers = request("/api/users", 200, {"type": "get_leaderboard"})
         if (not isinstance(board, dict) or set(board) != {"success", "leaderboard"}
                 or board.get("success") is not True or not isinstance(board.get("leaderboard"), list)
@@ -1103,7 +1260,6 @@ steps:
         if not no_store(board_headers) or board_headers.get_all("Set-Cookie"):
             reject("leaderboard response headers are unsafe")
         print("Tagged candidate anonymous HTTP and database-read smoke tests passed.")
-        PY
     timeout: '120s'
 
   - id: 'Plan bounded candidate tag expiry'

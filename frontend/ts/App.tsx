@@ -15,16 +15,40 @@ import DancingFractals from "@/pages/animations/DancingFractals";
 
 import Games from "@/pages/Games";
 import P4Vega from "@/pages/games/P4Vega";
+import { ThreeBossesAvailabilityGate } from "@/pages/games/ThreeBosses";
+import { isThreeBossesAvailableInCurrentBrowser } from '@/games/three-bosses/unityVisibility';
+import {
+	isThreeBossesEnabled,
+	THREE_BOSSES_ROUTE,
+} from '@/config/featureFlags';
 
 import Leaderboard from "@/pages/Leaderboard";
-import Social from "@/pages/Social";
+import GameLeaderboard from "@/pages/leaderboards/GameLeaderboard";
+import Connect from "@/pages/Connect";
 import Login from "@/pages/Login";
-import Register from "@/pages/Register";
+import SignUp from "@/pages/SignUp";
 import NotFound from "@/pages/NotFound";
 
 const App: React.FC = () => {
-  return (
+	const threeBossesAvailable = isThreeBossesEnabled
+		&& isThreeBossesAvailableInCurrentBrowser();
+
+	return (
 	<div className="app-shell">
+		<div className="space-background" aria-hidden="true">
+			<div className="space-background__stars space-background__stars--far" />
+			<div className="space-background__stars space-background__stars--near" />
+			<div className="space-background__nebula" />
+			<div className="space-background__celestial space-background__celestial--galaxy-interacting-pair" />
+			<div className="space-background__celestial space-background__celestial--galaxy-broad" />
+			<div className="space-background__celestial space-background__celestial--galaxy-edge" />
+			<div className="space-background__celestial space-background__celestial--galaxy-ring" />
+			<div className="space-background__celestial space-background__celestial--nebula-hourglass" />
+			<div className="space-background__celestial space-background__celestial--wolf-rayet-cocoon" />
+			<div className="space-background__celestial space-background__celestial--quasar-jet" />
+			<div className="space-background__celestial space-background__celestial--wolf-rayet-shells" />
+			<div className="space-background__celestial space-background__celestial--quasar-lensed" />
+		</div>
 		<Header />
 		<main className="main">
 			<Routes>
@@ -34,13 +58,23 @@ const App: React.FC = () => {
 				<Route path="/animations/dancing-circles" element={<DancingCircles />} />
 				<Route path="/animations/dancing-fractals" element={<DancingFractals />} />
 				
-				<Route path="/games/*" element={<Games />} />
+				<Route
+					path="/games"
+					element={<Games threeBossesAvailable={threeBossesAvailable} />}
+				/>
 				<Route path="/games/p4-Vega" element={<P4Vega />} />
+				{isThreeBossesEnabled && (
+					<Route
+						path={THREE_BOSSES_ROUTE}
+						element={<ThreeBossesAvailabilityGate />}
+					/>
+				)}
 
-				<Route path="/leaderboard" element={<Leaderboard />} />
-				<Route path="/social" element={<Social />} />
+				<Route path="/leaderboards" element={<Leaderboard />} />
+				<Route path="/leaderboards/:gameId" element={<GameLeaderboard />} />
+				<Route path="/connect" element={<Connect />} />
 				<Route path="/login" element={<Login />} />
-				<Route path="/register" element={<Register />} />
+				<Route path="/signup" element={<SignUp />} />
 				<Route path="*" element={<NotFound />} />
 			</Routes>
 		</main>

@@ -46,6 +46,9 @@ jobs:
           npm --prefix backend ci --no-audit
           npm --prefix .github/firebase-deploy ci --ignore-scripts --no-audit --no-fund
 
+      - name: Validate Firebase deploy dependency tree
+        run: npm --prefix .github/firebase-deploy ls --omit=dev
+
       - name: Audit npm dependencies
         run: |
           npm audit --audit-level=low
@@ -53,15 +56,43 @@ jobs:
           npm --prefix backend audit --audit-level=low
           npm --prefix .github/firebase-deploy audit --audit-level=high --omit=dev
 
+      - name: Validate packaged Three Bosses WebGL release
+        run: npm run three-bosses:webgl:release:validate
+
       - name: Type-check and build frontend
+        env:
+          VITE_ENABLE_THREE_BOSSES_RELEASE: "1"
         run: |
           npm --prefix frontend test
           npm --prefix frontend run build
+
+      - name: Reject development-only Three Bosses UI from release bundle
+        run: |
+          if grep -R -F -n -- "Local WebGL playability prototype" frontend/dist/index.html frontend/dist/assets; then
+            echo "The release bundle contains the development-only Three Bosses notice." >&2
+            exit 1
+          fi
+          if grep -R -F -n -- "/__local/three-bosses/" frontend/dist/index.html frontend/dist/assets; then
+            echo "The release bundle contains the local Three Bosses asset path." >&2
+            exit 1
+          fi
+
+      - name: Test local WebGL tooling
+        run: |
+          npm run test:three-bosses-webgl-build
+          npm run test:three-bosses-webgl-package
+          npm run test:three-bosses-webgl-server
+          npm run test:three-bosses-webgl-hosting
+          npm --prefix .github/firebase-deploy run test:three-bosses-webgl-smoke
+
+      - name: Validate isolated backend candidate build
+        run: npm run test:cloudbuild-candidate
 
       - name: Test and build backend
         run: |
           npm --prefix backend test
           npm --prefix backend run test:unit
+          npm --prefix backend run test:migrations
           npm --prefix backend run prod
 
       - name: Build documentation

@@ -1,9 +1,26 @@
 import { createHash } from 'node:crypto';
 import { Request } from 'express';
 import { ipKeyGenerator, rateLimit } from 'express-rate-limit';
+import { LEADERBOARD_CONTRACT_VERSION } from '../leaderboards/leaderboardContract';
 import { operationType } from './userRequestValidation';
 
 const RATE_LIMIT_MESSAGE = Object.freeze({ error: 'RATE_LIMITED' });
+const LEADERBOARD_RATE_LIMIT_MESSAGE = Object.freeze({
+    success: false as const,
+    contractVersion: LEADERBOARD_CONTRACT_VERSION,
+    error: 'RATE_LIMITED' as const,
+});
+const LEADERBOARD_API_PATH = /^\/api\/leaderboards(?:\/|$)/i;
+export const THREE_BOSSES_SUBMISSION_IP_LIMIT = 30 as const;
+
+export function generalApiRateLimitMessage(
+    req: Pick<Request, 'originalUrl'>
+) {
+    const [path] = req.originalUrl.split('?', 1);
+    return LEADERBOARD_API_PATH.test(path)
+        ? LEADERBOARD_RATE_LIMIT_MESSAGE
+        : RATE_LIMIT_MESSAGE;
+}
 
 export function isAuthenticationOperation(req: Pick<Request, 'body'>): boolean {
     const operation = operationType(req.body);
@@ -37,7 +54,21 @@ export function createGeneralApiRateLimiter() {
         limit: 600,
         standardHeaders: 'draft-8',
         legacyHeaders: false,
-        message: RATE_LIMIT_MESSAGE,
+        handler: (req, res, _next, options) => {
+            res.status(options.statusCode).json(generalApiRateLimitMessage(req));
+        },
+        passOnStoreError: false,
+    });
+}
+
+/** Per-instance abuse ceiling for the opt-in Three Bosses mutation route. */
+export function createThreeBossesSubmissionIpRateLimiter() {
+    return rateLimit({
+        windowMs: 15 * 60 * 1000,
+        limit: THREE_BOSSES_SUBMISSION_IP_LIMIT,
+        standardHeaders: 'draft-8',
+        legacyHeaders: false,
+        message: LEADERBOARD_RATE_LIMIT_MESSAGE,
         passOnStoreError: false,
     });
 }

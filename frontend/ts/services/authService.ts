@@ -20,7 +20,7 @@ type LoginPayload = {
 };
 
 type LoginSuccess = {
-    token: string;
+    success: true;
     user_name: string;
 };
 

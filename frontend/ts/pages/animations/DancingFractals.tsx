@@ -44,7 +44,7 @@ const DancingFractals: React.FC = () => {
      // Which fractal is currently selected
     const [fractalKind, setFractalKind] = useState<FractalKind>('tree');
 
-    const [autoDisposeEnabled, setAutoDisposeEnabled] = useState(true);
+    const [autoDisposeEnabled, setAutoDisposeEnabled] = useState(false);
     const [lifetime, setLifetime] = useState(30); // seconds
     const [remainingLifetime, setRemainingLifetime] = useState<number | null>(null);
 
@@ -215,6 +215,13 @@ const DancingFractals: React.FC = () => {
     const handlePause = () => audioEngine.pause();
     const handleStop = () => audioEngine.stop();
 
+    const handleUploadKeyDown = (event: React.KeyboardEvent<HTMLLabelElement>) => {
+        if (event.key !== 'Enter' && event.key !== ' ') return;
+
+        event.preventDefault();
+        fileInputRef.current?.click();
+    };
+
     return (
         <section className='dancing-fractals'>
             <aside className={uiClassName} style={uiStyle}>
@@ -335,7 +342,7 @@ const DancingFractals: React.FC = () => {
             <div className="dancing-fractals__stage">
 
                 <div className="dancing-fractals__canvas-wrapper" ref={containerRef}>
-                    <h1 className='dancing-fractals__title canvas-title'>Dancing Fractals</h1>
+                    <h1 className='u-visually-hidden'>Dancing Fractals</h1>
                     <FullscreenButton 
                         targetRef={containerRef} 
                         className='dancing-fractals__fullscreen-btn'
@@ -353,10 +360,13 @@ const DancingFractals: React.FC = () => {
                         />
                     </div>
 
-                    <div className="dancing-fractals__upload floating">
+                    <div className="dancing-fractals__upload">
                         <label
                             className="dancing-fractals__upload-btn"
                             htmlFor="fractal-music-upload"
+                            role="button"
+                            tabIndex={0}
+                            onKeyDown={handleUploadKeyDown}
                         >
                             Upload Music
                         </label>
@@ -370,7 +380,12 @@ const DancingFractals: React.FC = () => {
                         />
                     </div>
                 </div>
+
             </div>
+
+            <p className="dancing-fractals__orientation-hint">
+                For the best fullscreen experience, rotate your device to landscape.
+            </p>
             <div className="dancing-fractals__ghost" aria-hidden="true" />
         </section>   
     );

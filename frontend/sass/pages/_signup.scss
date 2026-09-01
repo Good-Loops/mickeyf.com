@@ -1,0 +1,5 @@
+@use '../abstracts' as *;
+
+.signup {
+    @include account-form;
+}

@@ -23,7 +23,7 @@ env:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
       contents: read
@@ -50,6 +50,9 @@ jobs:
       - name: Use project npm version
         run: npm install --global npm@11.6.2 --no-audit --no-fund
 
+      - name: Validate packaged Three Bosses WebGL release
+        run: node scripts/package-three-bosses-webgl-release.mjs --validate-packaged
+
       - name: Install dependencies
         run: npm ci
         working-directory: frontend
@@ -59,6 +62,18 @@ jobs:
         working-directory: frontend
         env:
           VITE_PROD_API_URL: https://mickeyf-org-j7yuum4tiq-uc.a.run.app
+          VITE_ENABLE_THREE_BOSSES_RELEASE: "1"
+
+      - name: Reject development-only Three Bosses UI from release bundle
+        run: |
+          if grep -R -F -n -- "Local WebGL playability prototype" frontend/dist/index.html frontend/dist/assets; then
+            echo "The release bundle contains the development-only Three Bosses notice." >&2
+            exit 1
+          fi
+          if grep -R -F -n -- "/__local/three-bosses/" frontend/dist/index.html frontend/dist/assets; then
+            echo "The release bundle contains the local Three Bosses asset path." >&2
+            exit 1
+          fi
 
       - name: Upload immutable frontend artifact
         id: upload
@@ -73,8 +88,10 @@ jobs:
 
   build_and_deploy:
     needs: build
-    runs-on: ubuntu-latest
-    timeout-minutes: 55
+    runs-on: ubuntu-24.04
+    # Keep enough job-level headroom for post-promotion verification and the
+    # failure-triggered rollback; individual release gates remain bounded below.
+    timeout-minutes: 75
     permissions:
       actions: read
       contents: read
@@ -93,6 +110,7 @@ jobs:
             .firebaserc
             firebase.json
             .github/firebase-deploy
+            scripts/verify-three-bosses-webgl-hosting.mjs
           sparse-checkout-cone-mode: false
 
       - name: Set up Node.js
@@ -113,7 +131,7 @@ jobs:
           npm ls --omit=dev
 
           version="$(./node_modules/.bin/firebase --version)"
-          if [[ "$version" != "15.27.0" ]]; then
+          if [[ "$version" != "15.28.1" ]]; then
             echo "Unexpected Firebase CLI version: $version" >&2
             exit 1
           fi
@@ -213,6 +231,7 @@ jobs:
           mkdir -p frontend/dist
           python3 - "$archive" frontend/dist <<'PY'
           import pathlib
+          import re
           import shutil
           import stat
           import sys
@@ -260,7 +279,12 @@ jobs:
 
                   file_count += 1
                   total_size += entry.file_size
-                  if entry.file_size > 16 * 1024 * 1024 or total_size > 64 * 1024 * 1024:
+                  is_unity_data = re.fullmatch(
+                      r"unity/three-bosses/releases/[a-f0-9]{64}/Build/[^/]+[.]data[.]br",
+                      normalized,
+                  ) is not None
+                  entry_limit = (32 if is_unity_data else 16) * 1024 * 1024
+                  if entry.file_size > entry_limit or total_size > 64 * 1024 * 1024:
                       raise SystemExit("Artifact expands beyond the allowed size.")
                   target.parent.mkdir(parents=True, exist_ok=True)
                   with bundle.open(entry) as source, target.open("xb") as output:
@@ -563,10 +587,176 @@ jobs:
           echo "version-name=$preview_version" >> "$GITHUB_OUTPUT"
           echo "url=$preview_url" >> "$GITHUB_OUTPUT"
 
+      - name: Verify preview Three Bosses WebGL payload
+        timeout-minutes: 10
+        run: >-
+          node scripts/verify-three-bosses-webgl-hosting.mjs
+          --base-url "${{ steps.preview.outputs.url }}"
+          --manifest frontend/dist/unity/three-bosses/build-manifest.json
+
+      - name: Resolve the hosted runner Chrome
+        id: chrome
+        shell: bash
+        run: |
+          set -euo pipefail
+          chrome_path="$(command -v google-chrome || command -v google-chrome-stable || true)"
+          if [[ -z "$chrome_path" || ! -x "$chrome_path" ]]; then
+            echo "The pinned runner image does not provide Google Chrome." >&2
+            exit 1
+          fi
+          chrome_path="$(realpath "$chrome_path")"
+          "$chrome_path" --version
+          echo "path=$chrome_path" >> "$GITHUB_OUTPUT"
+
+      - name: Start Three Bosses in the Firebase preview
+        id: preview-smoke
+        timeout-minutes: 10
+        run: >-
+          node .github/firebase-deploy/smoke-three-bosses-webgl-preview.mjs
+          --base-url "${{ steps.preview.outputs.url }}"
+          --chrome-executable "${{ steps.chrome.outputs.path }}"
+          --artifacts "$RUNNER_TEMP/three-bosses-webgl-smoke"
+
+      - name: Upload Three Bosses startup diagnostics
+        if: ${{ always() && steps.preview-smoke.outcome == 'failure' }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: three-bosses-webgl-smoke-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/three-bosses-webgl-smoke
+          if-no-files-found: warn
+          retention-days: 7
+          overwrite: false
+
+      - name: Require enabled production Three Bosses submissions
+        timeout-minutes: 2
+        env:
+          PRODUCTION_API_URL: https://mickeyf-org-j7yuum4tiq-uc.a.run.app
+        run: |
+          set -euo pipefail
+          python3 - "$PRODUCTION_API_URL" <<'PY'
+          import json
+          import sys
+          import urllib.error
+          import urllib.parse
+          import urllib.request
+
+          origin = sys.argv[1]
+          parsed = urllib.parse.urlsplit(origin)
+          if (
+              parsed.scheme != "https"
+              or parsed.username is not None
+              or parsed.password is not None
+              or parsed.port is not None
+              or parsed.path not in ("", "/")
+              or parsed.query
+              or parsed.fragment
+          ):
+              raise SystemExit("Production API URL is not a canonical HTTPS origin.")
+
+          class NoRedirect(urllib.request.HTTPRedirectHandler):
+              def redirect_request(self, req, fp, code, msg, headers, newurl):
+                  return None
+
+          opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
+
+          def request(path, expected_status, payload=None):
+              data = None if payload is None else json.dumps(payload, separators=(",", ":")).encode("ascii")
+              headers = {
+                  "Accept": "application/json",
+                  "Accept-Encoding": "identity",
+                  "User-Agent": "mickeyf-firebase-promotion-gate/1",
+              }
+              if data is not None:
+                  headers["Content-Type"] = "application/json"
+              req = urllib.request.Request(
+                  origin + path,
+                  data=data,
+                  headers=headers,
+                  method="POST" if data is not None else "GET",
+              )
+              try:
+                  response = opener.open(req, timeout=30)
+              except urllib.error.HTTPError as error:
+                  response = error
+              with response:
+                  if response.status != expected_status:
+                      raise SystemExit(f"{path} returned HTTP {response.status}; expected {expected_status}.")
+                  if response.headers.get_content_type().lower() != "application/json":
+                      raise SystemExit(f"{path} did not return JSON.")
+                  if response.headers.get_all("Set-Cookie"):
+                      raise SystemExit(f"{path} unexpectedly set a cookie.")
+                  cache_directives = {
+                      directive.strip().lower()
+                      for value in response.headers.get_all("Cache-Control", [])
+                      for directive in value.split(",")
+                  }
+                  if "no-store" not in cache_directives:
+                      raise SystemExit(f"{path} did not return Cache-Control: no-store.")
+                  body = response.read(64 * 1024 + 1)
+                  if len(body) > 64 * 1024:
+                      raise SystemExit(f"{path} exceeded the response body limit.")
+              try:
+                  return json.loads(body.decode("utf-8"))
+              except (UnicodeError, json.JSONDecodeError) as error:
+                  raise SystemExit(f"{path} returned malformed JSON.") from error
+
+          catalog = request("/api/leaderboards", 200)
+          if not isinstance(catalog, dict) or catalog.get("success") is not True:
+              raise SystemExit("Production leaderboard catalog response is malformed.")
+          games = catalog.get("games")
+          if not isinstance(games, list):
+              raise SystemExit("Production leaderboard catalog games are malformed.")
+          three_bosses = [game for game in games if isinstance(game, dict) and game.get("gameId") == "three-bosses"]
+          if len(three_bosses) != 1 or (
+              three_bosses[0].get("rulesVersion") != 1
+              or three_bosses[0].get("rankState") != "ranked"
+              or three_bosses[0].get("submissionState") != "enabled"
+          ):
+              raise SystemExit("Production Three Bosses catalog entry is not ranked and enabled.")
+
+          anonymous_ticket = request("/api/leaderboards/three-bosses/run-tickets", 401, {
+              "contractVersion": 1,
+              "rulesVersion": 1,
+              "runId": "123e4567-e89b-42d3-a456-426614174000",
+          })
+          if anonymous_ticket != {
+              "success": False,
+              "contractVersion": 1,
+              "error": "UNAUTHORIZED",
+          }:
+              raise SystemExit("Production Three Bosses anonymous run-ticket gate is not open.")
+
+          anonymous = request("/api/leaderboards/three-bosses/runs", 401, {
+              "contractVersion": 1,
+              "rulesVersion": 1,
+              "runId": "123e4567-e89b-42d3-a456-426614174000",
+              "completionTimeMs": 60000,
+              "runTicket": "anonymous-gate-probe",
+          })
+          if anonymous != {
+              "success": False,
+              "contractVersion": 1,
+              "error": "UNAUTHORIZED",
+          }:
+              raise SystemExit("Production Three Bosses anonymous submission gate is not open.")
+
+          print("Production Three Bosses ticket and submission gates are ranked, enabled, and write-safe.")
+          PY
+
+      - name: Refresh Google Cloud access token for promotion
+        id: promotion-auth
+        uses: google-github-actions/auth@7c6bc770dae815cd3e89ee6cdf493a5fab2cc093 # v3
+        with:
+          project_id: noted-reef-387021
+          workload_identity_provider: projects/1012884798546/locations/global/workloadIdentityPools/github-actions-firebase/providers/github-mickeyf-com-main
+          service_account: github-action-635373308@noted-reef-387021.iam.gserviceaccount.com
+          token_format: access_token
+          access_token_lifetime: 3600s
+
       - name: Promote and verify Firebase Hosting
         id: deploy
         env:
-          FIREBASE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          FIREBASE_ACCESS_TOKEN: ${{ steps.promotion-auth.outputs.access_token }}
           PREVIOUS_RELEASE_NAME: ${{ steps.baseline.outputs.previous-release-name }}
           PREVIOUS_VERSION_NAME: ${{ steps.baseline.outputs.previous-version-name }}
           PREVIEW_VERSION_NAME: ${{ steps.preview.outputs.version-name }}
@@ -802,10 +992,17 @@ jobs:
 
           echo "deployed-version-id=${deployed_version##*/}" >> "$GITHUB_OUTPUT"
 
+      - name: Verify live Three Bosses WebGL payload
+        timeout-minutes: 10
+        run: >-
+          node scripts/verify-three-bosses-webgl-hosting.mjs
+          --base-url "https://mickeyf.com"
+          --manifest frontend/dist/unity/three-bosses/build-manifest.json
+
       - name: Restore previous Firebase release on failure
         if: ${{ failure() && steps.auth.outcome == 'success' && steps.baseline.outcome == 'success' }}
         env:
-          FIREBASE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          FIREBASE_ACCESS_TOKEN: ${{ steps.promotion-auth.outputs.access_token || steps.auth.outputs.access_token }}
           PREVIOUS_INDEX_SHA256: ${{ steps.baseline.outputs.previous-index-sha256 }}
           PREVIOUS_RELEASE_NAME: ${{ steps.baseline.outputs.previous-release-name }}
           PREVIOUS_VERSION_NAME: ${{ steps.baseline.outputs.previous-version-name }}
@@ -1026,7 +1223,7 @@ jobs:
         if: ${{ always() && steps.auth.outcome == 'success' && steps.preview.outputs.cleanup-authorized == 'true' }}
         continue-on-error: true
         env:
-          FIREBASE_ACCESS_TOKEN: ${{ steps.auth.outputs.access_token }}
+          FIREBASE_ACCESS_TOKEN: ${{ steps.promotion-auth.outputs.access_token || steps.auth.outputs.access_token }}
         run: |
           set -euo pipefail
 

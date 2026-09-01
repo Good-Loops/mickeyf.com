@@ -6,16 +6,32 @@
 .gitignore text eol=lf
 .dockerignore text eol=lf
 .gcloudignore text eol=lf
+.env.example text eol=lf
 Dockerfile text eol=lf
 *.cs text eol=lf
 *.json text eol=lf
 *.yml text eol=lf
 *.yaml text eol=lf
+*.sql text eol=lf
+*.mjs text eol=lf
 *.ts text eol=lf
 *.tsx text eol=lf
 *.scss text eol=lf
+*.svg text eol=lf
 *.md text eol=lf
 /resources/project-structure.txt text eol=lf
+
+# Content-addressed Unity release bytes must survive checkout unchanged.
+# The stable build manifest remains ordinary normalized JSON outside this tree.
+/frontend/public/unity/three-bosses/releases/** -text -eol
+
+# TypeDoc source and generated text use LF on every platform.
+/docs-src/typedoc.css text eol=lf
+/docs/**/*.html text eol=lf
+/docs/**/*.js text eol=lf
+/docs/**/*.css text eol=lf
+/docs/**/*.svg text eol=lf
+/docs/.nojekyll text eol=lf
 
 # Unity serialized assets. text=auto protects unexpected binary serialization;
 # textual assets use LF.

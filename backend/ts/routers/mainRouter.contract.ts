@@ -97,6 +97,7 @@ export type ApiErrorCode =
     | 'UNAUTHORIZED'
     | 'INVALID_SCORE'
     | 'IDENTITY_MISMATCH'
+    | 'SUBMISSIONS_FROZEN'
     | 'RATE_LIMITED'
     | 'PAYLOAD_TOO_LARGE'
     | 'INVALID_REQUEST'
@@ -127,10 +128,17 @@ export type SignupResponse = { success: true } | ApiError;
 
 /** @category Backend — DTOs */
 export type LoginResponse =
-    | { success: true; token: string; user_name: string }
+    | { success: true; user_name: string }
     | ApiError;
 
-/** @category Backend — DTOs */
+/**
+ * Score submission response.
+ *
+ * While the operational freeze is active, the endpoint returns HTTP 503 with
+ * `{ error: 'SUBMISSIONS_FROZEN' }`.
+ *
+ * @category Backend — DTOs
+ */
 export type SubmitScoreResponse =
     | { success: true; personalBest: boolean }
     | ApiError;
@@ -141,7 +149,7 @@ export type GetLeaderboardResponse =
           success: true;
           leaderboard: Array<{
               user_name: string;
-              p4_score: number | null;
+              p4_score: number;
           }>;
       }
     | ApiError;
@@ -150,7 +158,8 @@ export type GetLeaderboardResponse =
  * POST /users response body.
  *
  * Notes:
- * - Response is operation-dependent and may include success flags, tokens, leaderboards, or error codes.
+ * - Response is operation-dependent and may include success flags, user data, leaderboards, or error codes.
+ * - Successful login stores the session JWT only in the signed HTTP-only cookie; the JSON body never exposes it.
  *
  * @category Backend — DTOs
  */

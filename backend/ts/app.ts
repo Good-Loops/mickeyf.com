@@ -9,10 +9,11 @@ import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import helmet from 'helmet';
 import { loadRuntimeConfig } from './config/runtimeConfig';
-import { closeDatabasePool, verifyDatabaseConnection } from './db/dbConfig';
+import { closeDatabasePool, pool, verifyDatabaseConnection } from './db/dbConfig';
 import { preventSensitiveResponseCaching } from './middleware/apiResponseSecurity';
 import { notFoundHandler, requestErrorHandler } from './middleware/errorHandling';
 import { createAuthRouter } from './routers/authRouter';
+import { createLeaderboardRouter } from './routers/leaderboardRouter';
 import { createMainRouter } from './routers/mainRouter';
 import { createGeneralApiRateLimiter } from './security/requestRateLimits';
 
@@ -48,12 +49,24 @@ app.use(cors({
     maxAge: 600,
 }));
 app.use(['/api', '/auth'], preventSensitiveResponseCaching);
-app.use(express.json({ limit: '32kb', strict: true }));
 app.use(cookieParser(runtimeConfig.sessionSecret));
 
 const generalApiRateLimiter = createGeneralApiRateLimiter();
 app.use(['/api', '/auth'], generalApiRateLimiter);
-app.use('/api', createMainRouter(runtimeConfig.sessionSecret, runtimeConfig.isProduction));
+app.use('/api/leaderboards', createLeaderboardRouter(pool, {
+    sessionSecret: runtimeConfig.sessionSecret,
+    allowedMutationOrigins: runtimeConfig.corsOrigins,
+    threeBossesRunSubmissionsEnabled:
+        runtimeConfig.threeBossesRunSubmissionsEnabled,
+}));
+// Keep this parser after the leaderboard router. That router owns its POST
+// parser so a disabled Three Bosses endpoint rejects before reading a body.
+app.use(express.json({ limit: '32kb', strict: true }));
+app.use('/api', createMainRouter({
+    sessionSecret: runtimeConfig.sessionSecret,
+    isProduction: runtimeConfig.isProduction,
+    p4VegaScoreSubmissionsEnabled: runtimeConfig.p4VegaScoreSubmissionsEnabled,
+}));
 app.use('/auth', createAuthRouter(runtimeConfig.sessionSecret, runtimeConfig.isProduction));
 
 app.use(notFoundHandler);
@@ -63,7 +76,16 @@ async function startServer(): Promise<void> {
     try {
         await verifyDatabaseConnection();
         app.listen(runtimeConfig.port, () => {
-            console.log(`Listening on ${runtimeConfig.port}`);
+            console.log('Backend listening', {
+                port: runtimeConfig.port,
+                p4VegaScoreSubmissions: runtimeConfig.p4VegaScoreSubmissionsEnabled
+                    ? 'enabled'
+                    : 'frozen',
+                threeBossesRunSubmissions:
+                    runtimeConfig.threeBossesRunSubmissionsEnabled
+                        ? 'enabled'
+                        : 'disabled',
+            });
         });
     } catch (error: unknown) {
         console.error('Backend startup failed', {

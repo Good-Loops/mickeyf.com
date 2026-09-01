@@ -241,6 +241,12 @@ public sealed class Boss2Controller : MonoBehaviour, IBossEffectReceiver, IInvul
         if (visualRenderer == null)
             return;
 
+        if (IsDead)
+        {
+            visualRenderer.color = baseColor;
+            return;
+        }
+
         if (isTransitioning)
         {
             if (phaseFlashVisible)
@@ -282,13 +288,23 @@ public sealed class Boss2Controller : MonoBehaviour, IBossEffectReceiver, IInvul
             lastHealth = health.CurrentHealth;
             ResetHurtThreshold();
             health.HealthChanged += OnHealthChanged;
+            health.Died += OnDied;
         }
     }
 
     private void OnDisable()
     {
         if (health != null)
+        {
             health.HealthChanged -= OnHealthChanged;
+            health.Died -= OnDied;
+        }
+    }
+
+    private void OnDied()
+    {
+        if (visualRenderer != null)
+            visualRenderer.color = baseColor;
     }
 
     private void OnHealthChanged(int current, int max)
@@ -483,7 +499,7 @@ public sealed class Boss2Controller : MonoBehaviour, IBossEffectReceiver, IInvul
 
         if (animator != null)
         {
-            bool pauseAnimator = IsFrozenNow() || isTransitioning;
+            bool pauseAnimator = !IsDead && (IsFrozenNow() || isTransitioning);
             animator.speed = pauseAnimator ? 0f : 1f;
         }
     }

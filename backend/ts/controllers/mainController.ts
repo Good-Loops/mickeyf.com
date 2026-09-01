@@ -6,7 +6,11 @@
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
-import { Pool, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
+import { Pool, RowDataPacket } from 'mysql2/promise';
+import {
+    readP4VegaLeaderboard,
+    submitP4VegaScore,
+} from '../leaderboards/p4VegaScoreRepository';
 import { User } from '../types/customTypes';
 import { authorizeScoreSubmission } from '../security/scoreSubmissionAuthorization';
 import { sessionCookieOptions } from '../security/sessionCookie';
@@ -17,9 +21,10 @@ import {
 } from '../security/userRequestValidation';
 
 type ControllerDependencies = {
-    database: Pick<Pool, 'query'>;
+    database: Pick<Pool, 'getConnection' | 'query'>;
     sessionSecret: string;
     isProduction: boolean;
+    p4VegaScoreSubmissionsEnabled: boolean;
 };
 
 type LoginUserRow = RowDataPacket & Pick<User, 'user_id' | 'user_name' | 'user_password'>;
@@ -35,6 +40,7 @@ export function createMainController({
     database,
     sessionSecret,
     isProduction,
+    p4VegaScoreSubmissionsEnabled,
 }: ControllerDependencies) {
     async function addUser(req: Request, res: Response) {
         const validation = validateSignupRequest(req.body);
@@ -105,41 +111,39 @@ export function createMainController({
             ...sessionCookieOptions(isProduction),
             maxAge: SESSION_MAX_AGE_MS,
         });
-        return res.json({ success: true, token, user_name: user.user_name });
+        return res.json({ success: true, user_name: user.user_name });
     }
 
     async function submitScore(req: Request, res: Response) {
+        if (!p4VegaScoreSubmissionsEnabled) {
+            // This gate runs before authentication so operations can probe a
+            // frozen revision without allowing it to acquire a DB connection.
+            return res.status(503).json({ error: 'SUBMISSIONS_FROZEN' });
+        }
+
         const authorization = authorizeScoreSubmission(req, sessionSecret);
         if (!authorization.authorized) {
             return res.status(authorization.status).json({ error: authorization.error });
         }
 
-        const [result] = await database.query<ResultSetHeader>(
-            {
-                sql: `UPDATE users
-                    SET p4_score = ?
-                    WHERE user_id = ?
-                    AND (p4_score IS NULL OR p4_score < ?)`,
-                timeout: DATABASE_QUERY_TIMEOUT_MS,
-            },
-            [authorization.score, authorization.identity.userId, authorization.score]
+        const personalBest = await submitP4VegaScore(
+            database,
+            authorization.identity.userId,
+            authorization.score
         );
 
-        return res.json({ success: true, personalBest: result.affectedRows === 1 });
+        return res.json({ success: true, personalBest });
     }
 
     async function getLeaderboard(_req: Request, res: Response) {
-        const [rows] = await database.query<RowDataPacket[]>(
-            {
-                sql: `SELECT user_name, p4_score
-                    FROM users
-                    WHERE p4_score IS NOT NULL
-                    ORDER BY p4_score DESC
-                    LIMIT 10`,
-                timeout: DATABASE_QUERY_TIMEOUT_MS,
-            }
-        );
-        return res.json({ success: true, leaderboard: rows });
+        const rows = await readP4VegaLeaderboard(database);
+        return res.json({
+            success: true,
+            leaderboard: rows.map(({ userName, score }) => ({
+                user_name: userName,
+                p4_score: score,
+            })),
+        });
     }
 
     return async function mainController(req: Request, res: Response) {

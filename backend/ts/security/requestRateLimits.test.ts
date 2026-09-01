@@ -2,10 +2,36 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Request } from 'express';
 import {
+    generalApiRateLimitMessage,
     isAuthenticationOperation,
     isLoginOperation,
     loginAccountRateLimitKey,
 } from './requestRateLimits';
+
+test('general rate-limit errors are versioned only for the leaderboard API', () => {
+    for (const originalUrl of [
+        '/api/leaderboards',
+        '/api/leaderboards/',
+        '/api/leaderboards/p4-vega?sort=unsafe',
+        '/API/LEADERBOARDS/three-bosses',
+    ]) {
+        assert.deepEqual(generalApiRateLimitMessage({ originalUrl }), {
+            success: false,
+            contractVersion: 1,
+            error: 'RATE_LIMITED',
+        });
+    }
+
+    for (const originalUrl of [
+        '/api/users',
+        '/auth/verify-token',
+        '/api/leaderboards-other',
+    ]) {
+        assert.deepEqual(generalApiRateLimitMessage({ originalUrl }), {
+            error: 'RATE_LIMITED',
+        });
+    }
+});
 
 test('only signup and login operations use the stricter authentication limiter', () => {
     assert.equal(isAuthenticationOperation({ body: { type: 'signup' } }), true);

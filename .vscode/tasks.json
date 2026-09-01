@@ -38,6 +38,23 @@
       "problemMatcher": []
     },
     {
+      "label": "Three Bosses: WebGL build",
+      "type": "npm",
+      "script": "three-bosses:webgl:build",
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "runOptions": { "instanceLimit": 1 }
+    },
+    {
+      "label": "Three Bosses: WebGL assets",
+      "type": "npm",
+      "script": "three-bosses:webgl:serve",
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "runOptions": { "instanceLimit": 1 }
+    },
+    {
       "label": "Backend: dev",
       "type": "npm",
       "script": "dev",
@@ -93,8 +110,17 @@
       "problemMatcher": []
     },
     {
+      "label": "Backend: local stack",
+      "type": "npm",
+      "script": "backend:dev:local",
+      "isBackground": true,
+      "problemMatcher": [],
+      "presentation": { "reveal": "always", "panel": "dedicated" },
+      "runOptions": { "instanceLimit": 1 }
+    },
+    {
       "label": "Development: app",
-      "dependsOn": ["Frontend: dev", "Backend: watch", "Backend: dev"],
+      "dependsOn": ["Frontend: dev", "Backend: local stack"],
       "dependsOrder": "parallel",
       "problemMatcher": []
     }

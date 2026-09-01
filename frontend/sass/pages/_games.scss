@@ -1,25 +1,102 @@
 @use '../abstracts' as *;
 
 .games {
-
     @include default-component;
 
-    &__grid-item {
-        font-size: 2rem;
+    &__card--p4 {
+        .games__visual {
+            width: 13rem;
+            aspect-ratio: 16 / 10;
+            background:
+                radial-gradient(circle at 78% 28%, rgba($primary, .68) 0 .18rem, rgba($primary, .1) .32rem .95rem, transparent 1.05rem),
+                radial-gradient(circle at 66% 68%, rgba(hsl(4, 84%, 58%), .58) 0 .16rem, rgba(hsl(4, 84%, 58%), .08) .3rem .82rem, transparent .92rem),
+                radial-gradient(circle at 28% 26%, rgba(hsl(49, 90%, 62%), .56) 0 .15rem, rgba(hsl(49, 90%, 62%), .07) .28rem .74rem, transparent .84rem),
+                linear-gradient(180deg, transparent 0 64%, rgba($primary, .13) 65%, transparent 67%);
+            animation: games-vega-drift 11s ease-in-out infinite alternate;
 
-        &--p4 {
-            @include default-btn;
-
-            &:hover {
-                @include default-btn-hover;
+            &::before {
+                content: '';
+                position: absolute;
+                top: 44%;
+                left: 32%;
+                width: 4.8rem;
+                height: 2.4rem;
+                clip-path: polygon(0 50%, 58% 12%, 100% 50%, 58% 88%);
+                background: linear-gradient(90deg, rgba($primary, .24), rgba($white, .82));
+                filter: drop-shadow(0 0 .7rem rgba($primary, .32));
+                transform: rotate(-9deg);
             }
 
-            &:active {
-                @include default-btn-active;
+            &::after {
+                content: '';
+                position: absolute;
+                top: 59%;
+                left: 6%;
+                width: 4.2rem;
+                height: .12rem;
+                background: linear-gradient(90deg, transparent, rgba($primary, .46));
+                transform: rotate(-9deg);
+            }
+        }
+    }
+
+    &__card--three-bosses {
+        .games__visual {
+            width: 13rem;
+            aspect-ratio: 16 / 10;
+            background:
+                radial-gradient(circle at 24% 50%, rgba($secondary, .68) 0 .28rem, rgba($secondary, .1) .44rem 2rem, transparent 2.15rem),
+                radial-gradient(circle at 50% 50%, rgba(hsl(4, 84%, 58%), .72) 0 .3rem, rgba(hsl(4, 84%, 58%), .11) .48rem 2.1rem, transparent 2.25rem),
+                radial-gradient(circle at 76% 50%, rgba(hsl(274, 88%, 68%), .7) 0 .28rem, rgba(hsl(274, 88%, 68%), .1) .44rem 2rem, transparent 2.15rem),
+                linear-gradient(90deg, transparent 8%, rgba($primary-light, .08) 50%, transparent 92%);
+            animation: games-boss-signal 8s ease-in-out infinite alternate;
+
+            &::before {
+                content: '';
+                position: absolute;
+                inset: 1.2rem 0;
+                background: repeating-linear-gradient(120deg, transparent 0 1.5rem, rgba($primary-light, .05) 1.55rem 1.65rem);
+                clip-path: polygon(0 50%, 14% 8%, 86% 8%, 100% 50%, 86% 92%, 14% 92%);
             }
 
+            &::after {
+                content: '';
+                position: absolute;
+                top: 50%;
+                left: 50%;
+                width: 9rem;
+                height: .1rem;
+                background: linear-gradient(90deg, rgba($secondary, .18), rgba($white, .36), rgba(hsl(274, 88%, 68%), .18));
+                transform: translate(-50%, -50%);
+            }
         }
     }
 }
 
-@include generate-media-queries($bps-games);
+@keyframes games-vega-drift {
+    from {
+        transform: translate3d(-.15rem, .08rem, 0) scale(.98);
+    }
+
+    to {
+        transform: translate3d(.2rem, -.12rem, 0) scale(1.02);
+    }
+}
+
+@keyframes games-boss-signal {
+    from {
+        opacity: .74;
+        transform: scale(.97);
+    }
+
+    to {
+        opacity: .94;
+        transform: scale(1.02);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .games__visual {
+        animation: none;
+    }
+}

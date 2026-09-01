@@ -4,6 +4,7 @@
         "target": "ES2016",
         "module": "esnext",
         "moduleResolution": "bundler",
+        "allowImportingTsExtensions": true,
         "outDir": "public/dist",
         "paths": {
             "@/*": ["./ts/*"]

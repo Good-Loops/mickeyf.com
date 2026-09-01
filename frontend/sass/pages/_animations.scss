@@ -1,32 +1,56 @@
 @use '../abstracts' as *;
 
 .animations {
-    
     @include default-component;
 
-    &__grid {
-    
-        display: grid;
-        grid-auto-flow: column;
-        gap: 4em;
+    &__card--circles {
+        .animations__visual {
+            background:
+                radial-gradient(circle at 50% 50%, rgba($white, .92) 0 .18rem, transparent .24rem),
+                radial-gradient(circle at 50% 50%, transparent 0 1.7rem, rgba($primary, .5) 1.78rem 1.9rem, transparent 1.98rem),
+                radial-gradient(circle at 50% 50%, transparent 0 3.9rem, rgba($tertiary, .32) 4rem 4.14rem, transparent 4.24rem),
+                radial-gradient(circle at 31% 38%, rgba($secondary, .58) 0 .42rem, rgba($secondary, .09) .5rem 1.25rem, transparent 1.35rem),
+                radial-gradient(circle at 71% 66%, rgba($primary, .62) 0 .36rem, rgba($primary, .08) .46rem 1.1rem, transparent 1.2rem);
+            animation: animations-orbit 12s ease-in-out infinite alternate;
+        }
+    }
 
-        &-item {
-            font-size: $font-size-m;
-
-            &--dancing-circles {
-                @include default-btn;
-
-                &:hover {
-                    @include default-btn-hover;
-                }
-
-                &:active {
-                    @include default-btn-active;
-                }
-
-            }
+    &__card--fractals {
+        .animations__visual {
+            background:
+                repeating-conic-gradient(from 15deg at 50% 60%, rgba($primary, .36) 0 2deg, transparent 2deg 18deg),
+                radial-gradient(circle at 50% 60%, rgba($secondary, .48) 0 .28rem, transparent .4rem 100%);
+            clip-path: polygon(50% 5%, 57% 35%, 84% 20%, 66% 48%, 96% 60%, 63% 66%, 75% 96%, 50% 72%, 25% 96%, 37% 66%, 4% 60%, 34% 48%, 16% 20%, 43% 35%);
+            filter: drop-shadow(0 0 .8rem rgba($primary, .22));
+            animation: animations-fractal-breathe 10s ease-in-out infinite alternate;
         }
     }
 }
 
-@include generate-media-queries($bps-animations);
+@keyframes animations-orbit {
+    from {
+        transform: rotate(-4deg) scale(.97);
+    }
+
+    to {
+        transform: rotate(4deg) scale(1.03);
+    }
+}
+
+@keyframes animations-fractal-breathe {
+    from {
+        opacity: .72;
+        transform: scale(.96);
+    }
+
+    to {
+        opacity: .94;
+        transform: scale(1.025);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .animations__visual {
+        animation: none;
+    }
+}

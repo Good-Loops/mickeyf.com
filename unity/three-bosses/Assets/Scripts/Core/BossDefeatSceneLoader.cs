@@ -1,11 +1,16 @@
 using System.Collections;
+using ThreeBosses.Run;
 using UnityEngine;
 using UnityEngine.SceneManagement;
+using UnityEngine.Serialization;
 
 public sealed class BossDefeatSceneLoader : MonoBehaviour
 {
     [SerializeField] private HealthComponent bossHealth;
-    [SerializeField] private string nextSceneName;
+    [SerializeField] private BossId bossId = BossId.Bee;
+    [SerializeField, FormerlySerializedAs("nextSceneName")]
+    private string transitionSceneName = "BossTransition";
+    [SerializeField] private string endSceneName = "End";
 
     [Header("Timing")]
     [SerializeField, Min(0f)] private float loadDelaySeconds = 5f;
@@ -14,8 +19,15 @@ public sealed class BossDefeatSceneLoader : MonoBehaviour
 
     [Header("Optional")]
     [SerializeField] private ScreenFade screenFade;
+    [SerializeField] private PlayerDeathHandler playerDeathHandler;
 
     private bool hasStartedTransition;
+
+    private void Awake()
+    {
+        if (playerDeathHandler == null)
+            playerDeathHandler = FindFirstObjectByType<PlayerDeathHandler>();
+    }
 
     private void OnEnable()
     {
@@ -34,22 +46,40 @@ public sealed class BossDefeatSceneLoader : MonoBehaviour
         if (hasStartedTransition)
             return;
 
+        BossDefeatResult result = RunSessionService.Instance.Session.RecordBossDefeat(bossId);
+        if (result == BossDefeatResult.Rejected)
+        {
+            Debug.LogWarning($"Ignored an out-of-sequence {bossId} defeat.", this);
+            return;
+        }
+
+        string destinationSceneName = result == BossDefeatResult.RunCompleted
+            ? endSceneName
+            : transitionSceneName;
+
+        if (string.IsNullOrWhiteSpace(destinationSceneName))
+        {
+            Debug.LogError($"No destination scene is configured for {bossId} defeat.", this);
+            return;
+        }
+
         hasStartedTransition = true;
-        StartCoroutine(LoadSceneAfterDelay());
+        playerDeathHandler?.LockForBossDefeat();
+        StartCoroutine(LoadSceneAfterDelay(destinationSceneName));
     }
 
-    private IEnumerator LoadSceneAfterDelay()
+    private IEnumerator LoadSceneAfterDelay(string destinationSceneName)
     {
-         if (fadeStartDelaySeconds > 0f)
-            yield return new WaitForSeconds(fadeStartDelaySeconds);
+        if (fadeStartDelaySeconds > 0f)
+            yield return new WaitForSecondsRealtime(fadeStartDelaySeconds);
 
         if (screenFade != null)
             screenFade.FadeIn(fadeDurationSeconds);
 
         float remainingDelay = Mathf.Max(0f, loadDelaySeconds - fadeStartDelaySeconds);
         if (remainingDelay > 0f)
-            yield return new WaitForSeconds(remainingDelay);
+            yield return new WaitForSecondsRealtime(remainingDelay);
 
-        SceneManager.LoadScene(nextSceneName);
+        SceneManager.LoadScene(destinationSceneName);
     }
 }

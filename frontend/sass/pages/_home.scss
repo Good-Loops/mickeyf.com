@@ -6,11 +6,98 @@
     width: 80vw;
 
     &__welcome-message {
-        color: $primary-mid;
-        font-size: $font-size-m;
+        position: relative;
+        isolation: isolate;
+
+        width: fit-content;
+        margin: 0 auto;
+        padding: 1.5rem 3.4rem 1.7rem;
+
+        color: rgba($white, .94);
+        font-family: $paragraph-font;
         text-align: center;
-        font-weight: 600;
-        font-family: $subheading-font;
+
+        &::before,
+        &::after {
+            content: '';
+            position: absolute;
+            width: 2.2rem;
+            height: 2.2rem;
+            opacity: .58;
+            pointer-events: none;
+        }
+
+        &::before {
+            top: 0;
+            left: 0;
+            border-top: .1rem solid rgba($primary-light, .72);
+            border-left: .1rem solid rgba($primary-light, .72);
+        }
+
+        &::after {
+            right: 0;
+            bottom: 0;
+            border-right: .1rem solid rgba($secondary-light, .48);
+            border-bottom: .1rem solid rgba($secondary-light, .48);
+        }
+    }
+
+    &__welcome-line {
+        display: block;
+
+        &--blue {
+            color: transparent;
+            background: linear-gradient(
+                112deg,
+                rgba($white, .66),
+                rgba($primary-light, .38) 42%,
+                rgba($white, .5) 57%,
+                rgba($secondary-light, .28)
+            );
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-stroke: .06rem rgba($white, .22);
+            font-family: $game-font;
+            font-size: clamp(4.2rem, 7vw, 7.4rem);
+            font-weight: 700;
+            letter-spacing: .015em;
+            line-height: .95;
+            text-shadow:
+                0 0 .25rem rgba($white, .28),
+                0 0 .9rem rgba($primary-light, .4),
+                0 0 2.3rem rgba($primary, .23),
+                0 1.1rem 3rem rgba(black, .22);
+            animation: home-welcome-glow 5.8s ease-in-out infinite;
+        }
+
+        &--green {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 1.1rem;
+
+            margin-top: 1.3rem;
+
+            color: rgba($primary-light, .68);
+            font-family: $paragraph-font;
+            font-size: clamp(1.15rem, 1.5vw, 1.55rem);
+            font-weight: 500;
+            letter-spacing: .24em;
+            line-height: 1.35;
+            text-transform: uppercase;
+
+            &::before,
+            &::after {
+                content: '';
+                width: clamp(1.8rem, 3vw, 3.4rem);
+                height: .1rem;
+                background: linear-gradient(90deg, transparent, rgba($primary-light, .44));
+            }
+
+            &::after {
+                background: linear-gradient(90deg, rgba($secondary-light, .38), transparent);
+            }
+        }
     }
 
     &__quotes-container {
@@ -19,6 +106,31 @@
         max-width: 90vw;       
         max-height: 85vh;
         pointer-events: none; 
+    }
+}
+
+@keyframes home-welcome-glow {
+    0%,
+    100% {
+        text-shadow:
+            0 0 .2rem rgba($white, .22),
+            0 0 .72rem rgba($primary-light, .32),
+            0 0 1.8rem rgba($primary, .18),
+            0 1.1rem 3rem rgba(black, .22);
+    }
+
+    50% {
+        text-shadow:
+            0 0 .32rem rgba($white, .34),
+            0 0 1.1rem rgba($primary-light, .52),
+            0 0 2.8rem rgba($primary, .3),
+            0 1.1rem 3rem rgba(black, .22);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .home__welcome-line--blue {
+        animation: none;
     }
 }
 

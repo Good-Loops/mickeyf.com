@@ -11,9 +11,13 @@
 <li><a href="../modules/backend.html">backend</a></li>
 <li><a href="" aria-current="page">SubmitScoreResponse</a></li></ul>
 <h1>Type Alias SubmitScoreResponse</h1></div>
-<div class="tsd-signature"><span class="tsd-kind-type-alias">SubmitScoreResponse</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">{</span> <span class="tsd-kind-property">personalBest</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">boolean</span><span class="tsd-signature-symbol">;</span> <span class="tsd-kind-property">success</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">true</span> <span class="tsd-signature-symbol">}</span> <span class="tsd-signature-symbol">|</span> <a href="backend.ApiError.html" class="tsd-signature-type tsd-kind-type-alias">ApiError</a></div><aside class="tsd-sources">
+<div class="tsd-signature"><span class="tsd-kind-type-alias">SubmitScoreResponse</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">{</span> <span class="tsd-kind-property">personalBest</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">boolean</span><span class="tsd-signature-symbol">;</span> <span class="tsd-kind-property">success</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">true</span> <span class="tsd-signature-symbol">}</span> <span class="tsd-signature-symbol">|</span> <a href="backend.ApiError.html" class="tsd-signature-type tsd-kind-type-alias">ApiError</a></div>
+<div class="tsd-comment tsd-typography"><p>Score submission response.</p>
+<p>While the operational freeze is active, the endpoint returns HTTP 503 with
+<code>{ error: 'SUBMISSIONS_FROZEN' }</code>.</p>
+</div><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/Good-Loops/mickeyf.com/blob/ef45b2f897ad77fb6e0046f9fdf3efa7241eb1bc/backend/ts/routers/mainRouter.contract.ts#L134">backend/ts/routers/mainRouter.contract.ts:134</a></li></ul></aside></div>
+<li>Defined in <a href="https://github.com/Good-Loops/mickeyf.com/blob/main/backend/ts/routers/mainRouter.contract.ts#L142">backend/ts/routers/mainRouter.contract.ts:142</a></li></ul></aside></div>
 <div class="col-sidebar">
 <div class="page-menu">
 <div class="tsd-navigation settings">

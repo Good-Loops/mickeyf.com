@@ -1,55 +1,367 @@
 @use '../abstracts' as *;
 
-.dancing-circles {
-    display: grid;
-    grid-template-columns: 1fr auto 1fr;
-    gap: 3em;
-    align-items: start;
-
-    &__title {
-        grid-column: 1 / -1;
-        justify-self: center;
+@keyframes dancing-circles-background-drift {
+    0%,
+    100% {
+        background-color: #2c4668;
     }
 
+    50% {
+        background-color: #517ead;
+    }
+}
+
+@keyframes dancing-circles-blue-glow {
+    0%,
+    100% {
+        opacity: .13;
+    }
+
+    50% {
+        opacity: .32;
+    }
+}
+
+@keyframes dancing-circles-green-glow {
+    0%,
+    100% {
+        opacity: .3;
+    }
+
+    50% {
+        opacity: .11;
+    }
+}
+
+.dancing-circles {
+    display: grid;
+    justify-items: center;
+    row-gap: clamp(1.5rem, 3vh, 2.4rem);
+    width: fit-content;
+    max-width: 90vw;
+
     &__canvas-wrapper {
-        grid-column: 2 / 3;
-        justify-self: center;
+        isolation: isolate;
+        padding: .7rem;
+
+        border: .14rem solid rgba($white, .16);
+        border-radius: 1.15rem;
+        background: linear-gradient(145deg, rgba($white, .075), rgba($space-background, .12));
+        box-shadow:
+            0 1.3rem 3rem rgba(black, .24),
+            0 .1rem 0 rgba($white, .1) inset;
+        backdrop-filter: blur(.4rem) saturate(120%);
+        -webkit-backdrop-filter: blur(.4rem) saturate(120%);
+        &::before {
+            content: '';
+            position: absolute;
+            z-index: 0;
+            inset: .7rem;
+            border-radius: .72rem;
+            background-color: #2c4668;
+            pointer-events: none;
+            animation: dancing-circles-background-drift 7s ease-in-out infinite;
+        }
+    }
+
+    &--custom-background &__canvas-wrapper::before {
+        background-color: var(--dancing-circles-background);
+        animation: none;
     }
 
     &__canvas {
-        @include canvas-shadow-effect;
+        position: relative;
+        z-index: 1;
+        display: block;
+        box-shadow: none;
+    }
+
+    &__orientation-hint {
+        display: none;
     }
 
     &__transport {
-        grid-column: 2 / 3;
-
         display: grid;
-        grid-template-columns: 1fr auto 1fr;
+        grid-template-columns: auto 1fr;
+        grid-template-areas:
+            'music upload'
+            'background background';
         align-items: center;
-        width: 100%;
-        column-gap: 1rem;
+        gap: 1rem;
+        width: min(100%, 58rem);
+        padding: .65rem;
+
+        border: .1rem solid rgba($white, .11);
+        border-radius: .9rem;
+        background: linear-gradient(145deg, rgba($white, .04), rgba($space-background, .025));
+        box-shadow:
+            0 .9rem 2.4rem rgba(black, .18),
+            0 .1rem 0 rgba($white, .06) inset;
+        backdrop-filter: blur(.35rem) saturate(120%);
+        -webkit-backdrop-filter: blur(.35rem) saturate(120%);
         
         &-controls {
-            grid-column: 1 / 2;
-            justify-self: center;
+            grid-area: music;
+            min-width: 0;
         }
     }
 
     &__upload {
-        grid-column: 2 / 3;
+        grid-area: upload;
+        justify-self: end;
+    }
+
+    &__background-controls {
+        position: relative;
+        grid-area: background;
         justify-self: center;
+        display: inline-flex;
+        align-items: center;
+        gap: .4rem;
+        padding: .4rem;
+
+        border: .1rem solid rgba($white, .1);
+        border-radius: .7rem;
+        background: linear-gradient(145deg, rgba($white, .045), rgba($space-background, .1));
+        box-shadow: 0 .1rem 0 rgba($white, .06) inset;
+        backdrop-filter: blur(.45rem) saturate(120%);
+        -webkit-backdrop-filter: blur(.45rem) saturate(120%);
+    }
+
+    &__background-mode {
+        display: inline-flex;
+        align-items: center;
+        gap: .55rem;
+        min-height: 2.9rem;
+        padding: .5rem .75rem;
+
+        border: .1rem solid rgba($white, .11);
+        border-radius: .5rem;
+        color: rgba($primary-light, .68);
+        background: rgba($white, .025);
+        font-size: 1.05rem;
+        letter-spacing: .045em;
+
+        transition:
+            border-color .25s ease,
+            color .25s ease,
+            background-color .25s ease;
+
+        &[aria-pressed="true"] {
+            border-color: rgba($primary-light, .58);
+            color: rgba($white, .96);
+            background: linear-gradient(145deg, rgba($primary, .19), rgba($secondary, .1));
+            box-shadow:
+                0 0 .8rem rgba($primary-light, .12),
+                0 .1rem 0 rgba($white, .1) inset;
+        }
+
+        &:hover,
+        &:focus-visible {
+            border-color: rgba($primary-light, .42);
+            color: rgba($white, .92);
+            background: rgba($primary, .1);
+        }
+
+        &:focus-visible {
+            outline: .15rem solid rgba($primary-light, .68);
+            outline-offset: .15rem;
+        }
+    }
+
+    &__background-label {
+        padding: 0 .35rem;
+        color: rgba($primary-light, .58);
+        font-size: .76rem;
+        font-weight: 700;
+        letter-spacing: .11em;
+        text-transform: uppercase;
+    }
+
+    &__background-state {
+        display: grid;
+        place-items: center;
+        width: 1.15rem;
+        height: 1.15rem;
+
+        border: .1rem solid rgba($secondary-light, .4);
+        border-radius: 50%;
+        color: rgba($secondary-light, .92);
+        background: rgba($secondary, .1);
+        font-size: .7rem;
+        font-weight: 700;
+        line-height: 1;
+    }
+
+    &__color-swatch {
+        width: 1.35rem;
+        height: 1.35rem;
+        border: .1rem solid rgba($white, .24);
+        border-radius: .35rem;
+        box-shadow: 0 0 0 .1rem rgba(black, .2) inset;
+    }
+
+    &__color-picker {
+        position: absolute;
+        right: 0;
+        top: calc(100% + .65rem);
+        z-index: 4;
+        display: grid;
+        gap: .65rem;
+        width: 11.75rem;
+        padding: .75rem;
+
+        border: .1rem solid rgba($primary-light, .24);
+        border-radius: .75rem;
+        background: linear-gradient(145deg, rgba($white, .09), rgba(black, .22));
+        box-shadow:
+            0 1rem 2.4rem rgba(black, .34),
+            0 .1rem 0 rgba($white, .09) inset;
+        backdrop-filter: blur(1rem) saturate(130%);
+        -webkit-backdrop-filter: blur(1rem) saturate(130%);
+    }
+
+    &__color-field {
+        position: relative;
+        height: 6.4rem;
+        overflow: hidden;
+        border: .1rem solid rgba($white, .18);
+        border-radius: .55rem;
+        background-image:
+            linear-gradient(to top, black, transparent),
+            linear-gradient(to right, white, transparent);
+        box-shadow: 0 .2rem .8rem rgba(black, .28) inset;
+        cursor: crosshair;
+        touch-action: none;
+
+        &:focus-visible {
+            outline: .15rem solid rgba($primary-light, .72);
+            outline-offset: .12rem;
+        }
+    }
+
+    &__color-field-handle {
+        position: absolute;
+        width: .85rem;
+        height: .85rem;
+        border: .14rem solid white;
+        border-radius: 50%;
+        box-shadow: 0 0 0 .1rem rgba(black, .65), 0 .15rem .35rem rgba(black, .45);
+        pointer-events: none;
+        transform: translate(-50%, -50%);
+    }
+
+    &__hue-control input {
+        display: block;
+        width: 100%;
+        height: .7rem;
+        margin: 0;
+        appearance: none;
+        border: .1rem solid rgba($white, .18);
+        border-radius: 99rem;
+        background: linear-gradient(to right, #f00, #ff0, #0f0, #0ff, #00f, #f0f, #f00);
+
+        &::-webkit-slider-thumb {
+            width: 1rem;
+            height: 1rem;
+            appearance: none;
+            border: .14rem solid white;
+            border-radius: 50%;
+            background: transparent;
+            box-shadow: 0 0 0 .1rem rgba(black, .65), 0 .15rem .3rem rgba(black, .4);
+        }
+
+        &::-moz-range-thumb {
+            width: .75rem;
+            height: .75rem;
+            border: .14rem solid white;
+            border-radius: 50%;
+            background: transparent;
+            box-shadow: 0 0 0 .1rem rgba(black, .65), 0 .15rem .3rem rgba(black, .4);
+        }
+
+        &:focus-visible {
+            outline: .15rem solid rgba($primary-light, .72);
+            outline-offset: .18rem;
+        }
+    }
+
+    .music-controls {
+        gap: .45rem;
+        padding: .35rem;
+        border: .1rem solid rgba($white, .08);
+        background: rgba($space-background, .18);
+        box-shadow: none;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+
+        &__btn {
+            width: 2.8rem;
+            height: 2.8rem;
+            border: .1rem solid rgba($white, .1);
+            color: rgba($primary-light, .72);
+            background: rgba($white, .045);
+            box-shadow: none;
+
+            &:hover:not(:disabled),
+            &:focus-visible {
+                border-color: rgba($primary-light, .38);
+                color: rgba($white, .92);
+                background: rgba($primary, .11);
+                box-shadow: 0 0 1.2rem rgba($primary, .12);
+            }
+
+            &:focus-visible {
+                outline: .15rem solid rgba($primary-light, .68);
+                outline-offset: .15rem;
+            }
+
+            &:disabled {
+                opacity: .35;
+            }
+        }
+
+        &--disabled {
+            opacity: 1;
+        }
     }
 
     &__upload-btn {
-        @include default-btn;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 3.6rem;
+        padding: .75rem 1.1rem;
 
-        &:not(.playing):hover,
-        &:not(.playing):focus {
-            @include default-btn-hover;
+        border: .1rem solid rgba($primary-light, .24);
+        border-radius: .65rem;
+        color: rgba($white, .84);
+        background: rgba($primary, .065);
+        font-size: 1.25rem;
+        font-weight: 500;
+        letter-spacing: .055em;
+        cursor: $cursor-hover;
+
+        transition:
+            border-color .25s ease,
+            background-color .25s ease,
+            box-shadow .25s ease,
+            transform .2s ease;
+
+        &:hover,
+        &:focus-visible {
+            border-color: rgba($primary-light, .5);
+            background: rgba($primary, .13);
+            box-shadow: 0 0 1.4rem rgba($primary, .13);
         }
 
-        &:not(.playing):active {
-            @include default-btn-active;
+        &:focus-visible {
+            outline: .15rem solid rgba($primary-light, .68);
+            outline-offset: .2rem;
+        }
+
+        &:active {
+            transform: scale(.985);
         }
     }
 
@@ -59,4 +371,163 @@
 
     @include block-canvas-fullscreen('dancing-circles');
     @include canvas-fullscreen-button-position('dancing-circles');
+
+    &__canvas-wrapper:fullscreen {
+        padding: 0;
+        border: 0;
+        background-color: #2c4668;
+        background-image: none;
+        box-shadow: none;
+        backdrop-filter: none;
+        -webkit-backdrop-filter: none;
+
+        &::before,
+        &::after {
+            display: none;
+        }
+    }
+
+    &--custom-background &__canvas-wrapper:fullscreen {
+        background-color: var(--dancing-circles-background);
+        animation: none;
+    }
+
+    &__fullscreen-btn {
+        width: 3.4rem;
+        height: 3.4rem;
+        border: .1rem solid rgba($white, .13);
+        background: rgba($space-background, .2);
+        box-shadow: 0 .4rem 1.2rem rgba(black, .18);
+        cursor: $cursor-hover;
+
+        &:hover,
+        &:focus-visible {
+            border-color: rgba($primary-light, .42);
+            background: rgba($space-background, .36);
+        }
+
+        &:focus-visible {
+            outline: .15rem solid rgba($primary-light, .68);
+            outline-offset: .18rem;
+        }
+    }
+}
+
+@include viewport-above($bp-m) {
+    .dancing-circles {
+        &__transport {
+            grid-template-columns: auto 1fr auto;
+            grid-template-areas: 'music upload background';
+        }
+
+        &__background-controls {
+            justify-self: end;
+        }
+
+        &__color-picker {
+            top: auto;
+            bottom: calc(100% + .65rem);
+        }
+    }
+}
+
+@include viewport-at-most($bp-xs) {
+    .dancing-circles {
+        &__transport {
+            grid-template-columns: auto 1fr;
+            width: min(100%, 29rem);
+            gap: .65rem .8rem;
+            padding: .65rem;
+            border-radius: .8rem;
+        }
+
+        &__transport-controls {
+            justify-self: start;
+        }
+
+        &__upload {
+            width: 100%;
+        }
+
+        &__upload-btn {
+            width: 100%;
+            min-height: 3.4rem;
+            padding: .6rem .85rem;
+            font-size: 1.05rem;
+        }
+
+        &__background-controls {
+            display: grid;
+            grid-template-columns: repeat(2, auto);
+            width: 100%;
+            justify-content: center;
+            gap: .45rem;
+            padding: .55rem;
+        }
+
+        &__background-label {
+            grid-column: 1 / -1;
+            padding: 0 0 .1rem;
+            text-align: center;
+        }
+
+        &__background-mode {
+            justify-content: center;
+            padding-inline: .6rem;
+        }
+
+        &__color-picker {
+            right: 2.55rem;
+            transform: none;
+        }
+
+        &__fullscreen-btn {
+            width: 2.75rem;
+            height: 2.75rem;
+        }
+
+        &__orientation-hint {
+            display: block;
+            max-width: 26rem;
+            margin: -.45rem 0 -.55rem;
+            color: rgba($primary-light, .56);
+            font-size: .78rem;
+            letter-spacing: .025em;
+            line-height: 1.35;
+            text-align: center;
+        }
+
+        .music-controls {
+            &__btn {
+                width: 2.65rem;
+                height: 2.65rem;
+            }
+        }
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .dancing-circles {
+        &__upload-btn,
+        &__background-mode,
+        .music-controls__btn,
+        &__fullscreen-btn {
+            transition: none;
+        }
+
+        &__canvas-wrapper {
+            background-color: var(--dancing-circles-background, #46515b);
+            animation: none;
+
+            &::before,
+            &::after {
+                opacity: .2;
+                animation: none;
+            }
+        }
+
+        &__upload-btn:active {
+            transform: none;
+        }
+    }
 }

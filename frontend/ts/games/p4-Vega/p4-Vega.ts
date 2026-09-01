@@ -318,8 +318,10 @@ export async function p4Vega(container?: HTMLElement, auth?: P4VegaAuth): Promis
      * Cleanup invariant: listeners registered here must be removed by the disposer.
      */
     const handleKeydown = (key: Event): void => {
+        const code = (<KeyboardEvent>key).code;
+        if (!['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown', 'Space'].includes(code)) return;
         key.preventDefault();
-        switch ((<KeyboardEvent>key).code) {
+        switch (code) {
             case 'ArrowRight':
                 p4.isMovingRight = true;
                 break;
@@ -342,8 +344,10 @@ export async function p4Vega(container?: HTMLElement, auth?: P4VegaAuth): Promis
 
     /** Complements `handleKeydown` by clearing movement flags on key release. */
     const handleKeyup = (key: Event): void => {
+        const code = (<KeyboardEvent>key).code;
+        if (!['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown'].includes(code)) return;
         key.preventDefault();
-        switch ((<KeyboardEvent>key).code) {
+        switch (code) {
             case 'ArrowRight':
                 p4.isMovingRight = false;
                 break;
@@ -393,6 +397,78 @@ export async function p4Vega(container?: HTMLElement, auth?: P4VegaAuth): Promis
         element: notesPlayingCheckbox,
         event: "change",
         handler: toggleNotesPlaying,
+    });
+
+    const attachJoystick = (joystick: HTMLElement): void => {
+        const joystickThumb = joystick.querySelector<HTMLElement>('[data-p4-joystick-thumb]');
+        if (!joystickThumb) return;
+        let joystickPointerId: number | null = null;
+
+        const resetJoystick = (): void => {
+            p4.isMovingRight = false;
+            p4.isMovingLeft = false;
+            p4.isMovingUp = false;
+            p4.isMovingDown = false;
+            joystickThumb.style.transform = 'translate(0, 0)';
+        };
+
+        const updateJoystick = (event: PointerEvent): void => {
+            if (event.pointerId !== joystickPointerId) return;
+            event.preventDefault();
+
+            const bounds = joystick.getBoundingClientRect();
+            const radius = bounds.width * .32;
+            const offsetX = event.clientX - (bounds.left + bounds.width * .5);
+            const offsetY = event.clientY - (bounds.top + bounds.height * .5);
+            const distance = Math.hypot(offsetX, offsetY);
+            const scale = distance > radius ? radius / distance : 1;
+            const x = offsetX * scale;
+            const y = offsetY * scale;
+            const threshold = radius * .22;
+
+            joystickThumb.style.transform = `translate(${x}px, ${y}px)`;
+            p4.isMovingLeft = x < -threshold;
+            p4.isMovingRight = x > threshold;
+            p4.isMovingUp = y < -threshold;
+            p4.isMovingDown = y > threshold;
+        };
+
+        const startJoystick = (event: Event): void => {
+            if (!(event instanceof PointerEvent)) return;
+            joystickPointerId = event.pointerId;
+            joystick.setPointerCapture(event.pointerId);
+            updateJoystick(event);
+        };
+
+        const stopJoystick = (event: Event): void => {
+            if (!(event instanceof PointerEvent) || event.pointerId !== joystickPointerId) return;
+            event.preventDefault();
+            joystickPointerId = null;
+            resetJoystick();
+        };
+
+        joystick.addEventListener('pointerdown', startJoystick);
+        registeredListeners.push({ element: joystick, event: 'pointerdown', handler: startJoystick });
+        joystick.addEventListener('pointermove', updateJoystick as EventListener);
+        registeredListeners.push({ element: joystick, event: 'pointermove', handler: updateJoystick as EventListener });
+        ['pointerup', 'pointercancel', 'lostpointercapture'].forEach((event) => {
+            joystick.addEventListener(event, stopJoystick);
+            registeredListeners.push({ element: joystick, event, handler: stopJoystick });
+        });
+    };
+
+    container?.closest('[data-p4-vega]')
+        ?.querySelectorAll<HTMLElement>('[data-p4-joystick]')
+        .forEach(attachJoystick);
+
+    const handleCanvasPointerUp = (): void => {
+        if (!gameLive) void restart();
+    };
+    canvas.addEventListener('pointerup', handleCanvasPointerUp);
+    registeredListeners.push({
+        element: canvas,
+        event: 'pointerup',
+        handler: handleCanvasPointerUp,
     });
 
     return () => {

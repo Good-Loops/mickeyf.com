@@ -1,6 +1,6 @@
 {
     "name": "frontend",
-    "version": "0.5.0",
+    "version": "0.6.0",
     "packageManager": "npm@11.6.2",
     "engines": {
         "node": ">=22.0.0 <23.0.0",
@@ -8,7 +8,7 @@
     },
     "scripts": {
         "dev": "vite",
-        "test": "tsc -p tsconfig.json --noEmit",
+        "test": "tsc -p tsconfig.json --noEmit && node --experimental-strip-types --test ts/games/three-bosses/unityGameReady.test.mjs ts/games/three-bosses/unitySubmissionBridge.test.mjs ts/games/three-bosses/unityVisibility.test.mjs ts/pages/games/threeBossesAvailability.test.mjs ts/pages/leaderboards/leaderboardRoutes.test.mjs ts/services/leaderboardApi.test.mjs",
         "build": "vite build",
         "preview": "vite preview",
         "docs:json": "typedoc --options typedoc.json"
