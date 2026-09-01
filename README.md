@@ -172,10 +172,13 @@ npm run docs:dev
 The command rebuilds the tracked `docs/` output before serving it. Review the
 resulting Git diff and do not commit generated changes accidentally.
 
-### Local Three Bosses WebGL prototype
+### Three Bosses WebGL development and Alpha packaging
 
-Three Bosses is available on the local Games page only when the development
-feature flag is explicitly enabled. It is not included in the public site.
+Three Bosses is available locally when the development feature flag is
+explicitly enabled. Its Alpha release uses a separate, certified same-origin
+package. The playable route is desktop-only for Alpha 0.6.0; recognized mobile
+browsers receive the desktop-only notice without instantiating Unity, while the
+Three Bosses leaderboard remains available.
 
 1. Build the Unity project to the external, ignored location documented in
    [`unity/three-bosses/README.md`](unity/three-bosses/README.md).
@@ -194,19 +197,27 @@ feature flag is explicitly enabled. It is not included in the public site.
 4. Start or restart the frontend, then open
    `http://localhost:5173/games/three-bosses`.
 
-The Games page and route exist only in Vite development mode with that exact
-flag. The frontend proxies generated assets through
-`/__local/three-bosses/`; nothing is copied into `frontend/`, committed, or
-published. Rebuilding in the same external folder does not change the browser
-URL because the local manifest discovers the current Unity filenames.
+In development, the frontend proxies generated assets through
+`/__local/three-bosses/`; the local build remains outside the repository and
+the generated manifest discovers the current Unity filenames.
 
-Publishing remains a separate, approval-gated design task. A future Hosting
-integration must serve precompressed `.br` files with their original content
-type plus `Content-Encoding: br`, support WebAssembly in the Content Security
-Policy, use hashed/versioned caching safely, preserve the SPA rewrite, and
-recheck Firebase artifact-size limits. Cross-origin isolation headers are only
-needed if a future Unity build enables WebGL threads; they must not be added
-blindly because they affect every embedded resource on the page.
+Prepare the releasable package only from clean, committed Unity source and an
+automated, ready, stopped Editor:
+
+```powershell
+npm run three-bosses:webgl:release:build
+npm run three-bosses:webgl:package
+npm run three-bosses:webgl:release:validate
+```
+
+The release build stays under `%LOCALAPPDATA%`; packaging copies only the
+certified, content-addressed runtime into
+`frontend/public/unity/three-bosses/`. Do not hand-edit those packaged files.
+Production enables the route with `VITE_ENABLE_THREE_BOSSES_RELEASE=1` and
+Firebase Hosting supplies the required Brotli, WebAssembly, CSP, MIME, and
+cache headers. Publishing the game does not enable score writes: the backend's
+independent `THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=true` opt-in must be reviewed
+and activated separately.
 
 ### Stop development
 
