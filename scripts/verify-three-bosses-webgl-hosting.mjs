@@ -143,6 +143,11 @@ const validateLocalManifest = (manifest) => {
   }
 };
 
+const encodeManifestAssetPath = (assetPath) => assetPath
+  .split("/")
+  .map((segment) => encodeURIComponent(segment))
+  .join("/");
+
 export const resolveApprovedHostedBaseUrl = (
   baseUrl,
   { allowLoopbackForTests = false } = {},
@@ -294,7 +299,8 @@ export const verifyHostedThreeBossesWebGlRelease = async ({
 
   const assetBase = new URL("/unity/three-bosses/", base);
   for (const asset of manifest.assets) {
-    const hostedAsset = await requestRaw(new URL(asset.path, assetBase), {
+    const trustedAssetPath = encodeManifestAssetPath(asset.path);
+    const hostedAsset = await requestRaw(new URL(trustedAssetPath, assetBase), {
       acceptEncoding: asset.path.endsWith(".br") ? "br" : "identity",
       maxBytes: asset.size,
     });
