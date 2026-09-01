@@ -106,8 +106,9 @@ npm run three-bosses:webgl:release:validate
 
 The release build keeps development, script-debugging, and profiler flags off
 and writes a version-two completion marker bound to the committed Unity source,
-required Editor version, source digest, file count, and exact Brotli runtime
-files. Packaging retains one immutable content-addressed release under
+required Editor version, source digest, file count, and exact uncompressed
+runtime files. Firebase Hosting performs transport compression; packaging
+retains one immutable content-addressed release under
 `frontend/public/unity/three-bosses/releases` plus the stable no-store manifest.
 Firebase preview verification must confirm the hosted bytes, headers, and
 actual Unity browser startup before promotion. Never re-certify old output or

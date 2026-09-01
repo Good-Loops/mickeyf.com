@@ -111,7 +111,7 @@ test("rejects an arbitrary Chrome executable path", () => {
 
 test("matches only Three Bosses Unity runtime requests", () => {
   assert.equal(
-    isThreeBossesRuntimeUrl("https://preview.example/unity/three-bosses/releases/a/game.wasm.br"),
+    isThreeBossesRuntimeUrl("https://preview.example/unity/three-bosses/releases/a/game.wasm"),
     true,
   );
   assert.equal(
@@ -161,7 +161,7 @@ test("fails a Unity asset response and writes screenshot plus diagnostics", asyn
       onGoto: (page) => page.emit("response", {
         request: () => ({ method: () => "GET" }),
         status: () => 503,
-        url: () => "https://preview.example/unity/three-bosses/releases/a/game.data.br",
+        url: () => "https://preview.example/unity/three-bosses/releases/a/game.data",
       }),
     });
   } catch (error) {
@@ -183,7 +183,7 @@ test("fails a Unity request transport error", async () => {
       onGoto: (page) => page.emit("requestfailed", {
         failure: () => ({ errorText: "net::ERR_CONNECTION_RESET" }),
         method: () => "GET",
-        url: () => "https://preview.example/unity/three-bosses/releases/a/game.wasm.br",
+        url: () => "https://preview.example/unity/three-bosses/releases/a/game.wasm",
       }),
     }),
     /runtime asset failed/u,

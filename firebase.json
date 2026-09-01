@@ -77,12 +77,8 @@
         ]
       },
       {
-        "regex": "^[/\\\\]unity[/\\\\]three-bosses[/\\\\]releases[/\\\\][A-Za-z0-9_-]+[/\\\\]Build[/\\\\][^/\\\\]+[.]data[.]br$",
+        "regex": "^[/\\\\]unity[/\\\\]three-bosses[/\\\\]releases[/\\\\][A-Za-z0-9_-]+[/\\\\]Build[/\\\\][^/\\\\]+[.]data$",
         "headers": [
-          {
-            "key": "Content-Encoding",
-            "value": "br"
-          },
           {
             "key": "Content-Type",
             "value": "application/octet-stream"
@@ -90,12 +86,8 @@
         ]
       },
       {
-        "regex": "^[/\\\\]unity[/\\\\]three-bosses[/\\\\]releases[/\\\\][A-Za-z0-9_-]+[/\\\\]Build[/\\\\][^/\\\\]+[.]framework[.]js[.]br$",
+        "regex": "^[/\\\\]unity[/\\\\]three-bosses[/\\\\]releases[/\\\\][A-Za-z0-9_-]+[/\\\\]Build[/\\\\][^/\\\\]+[.]framework[.]js$",
         "headers": [
-          {
-            "key": "Content-Encoding",
-            "value": "br"
-          },
           {
             "key": "Content-Type",
             "value": "text/javascript; charset=utf-8"
@@ -103,12 +95,8 @@
         ]
       },
       {
-        "regex": "^[/\\\\]unity[/\\\\]three-bosses[/\\\\]releases[/\\\\][A-Za-z0-9_-]+[/\\\\]Build[/\\\\][^/\\\\]+[.]wasm[.]br$",
+        "regex": "^[/\\\\]unity[/\\\\]three-bosses[/\\\\]releases[/\\\\][A-Za-z0-9_-]+[/\\\\]Build[/\\\\][^/\\\\]+[.]wasm$",
         "headers": [
-          {
-            "key": "Content-Encoding",
-            "value": "br"
-          },
           {
             "key": "Content-Type",
             "value": "application/wasm"

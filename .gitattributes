@@ -23,7 +23,7 @@ Dockerfile text eol=lf
 
 # Content-addressed Unity release bytes must survive checkout unchanged.
 # The stable build manifest remains ordinary normalized JSON outside this tree.
-/frontend/public/unity/three-bosses/releases/** -text -eol
+/frontend/public/unity/three-bosses/releases/** -text -eol -diff
 
 # TypeDoc source and generated text use LF on every platform.
 /docs-src/typedoc.css text eol=lf

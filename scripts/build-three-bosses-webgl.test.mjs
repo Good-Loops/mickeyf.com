@@ -60,10 +60,10 @@ const createFixture = async ({ commitSource = false } = {}) => {
   const buildPath = join(outputPath, "Build");
   await mkdir(buildPath);
   await Promise.all([
-    writeFile(join(buildPath, "fixture.data.br"), "data"),
-    writeFile(join(buildPath, "fixture.framework.js.br"), "framework"),
+    writeFile(join(buildPath, "fixture.data"), "data"),
+    writeFile(join(buildPath, "fixture.framework.js"), "framework"),
     writeFile(join(buildPath, "fixture.loader.js"), "loader"),
-    writeFile(join(buildPath, "fixture.wasm.br"), "wasm"),
+    writeFile(join(buildPath, "fixture.wasm"), "wasm"),
   ]);
   await writeBuildCompletionMarker(outputPath);
   const projectPath = join(repoRoot, "unity", "three-bosses");
