@@ -1,39 +1,39 @@
 {
   "version": 2,
-  "buildId": "ec781d032f009426f9c63b25d9268f2725c383bca41aadb8864be0a99e72824f",
-  "certifiedBuildId": "a3abf73c507177584fc4d907bbde45abf294c26c96763c82d6773171a6ac6a52",
-  "sourceCommit": "22bda1a76f811a5be212eb1de2615001aae2d7f5",
-  "unitySourceDigest": "987bf64150462b08d5900aa3dc0690912418949cef9979449a758b8ab66f847e",
-  "unitySourceFileCount": 976,
+  "buildId": "e8911080397bcd032bc287494bc8605ef9bdd36ebc1e42330847578bd7008b92",
+  "certifiedBuildId": "dd3826790a45b6514897f0c98094c308bae813cfc53aaea1489f9b1f161db593",
+  "sourceCommit": "dc89d34868f14e76b16e7db15725c76c929d5f06",
+  "unitySourceDigest": "1c855f091b53bdc24c45bdf446083f0d7d9bc82fef5ae3a14799af271053119f",
+  "unitySourceFileCount": 986,
   "unityEditorVersion": "6000.3.8f1",
-  "loaderUrl": "releases/ec781d032f009426f9c63b25d9268f2725c383bca41aadb8864be0a99e72824f/Build/three-bosses-webgl.loader.js",
-  "dataUrl": "releases/ec781d032f009426f9c63b25d9268f2725c383bca41aadb8864be0a99e72824f/Build/three-bosses-webgl.data.br",
-  "frameworkUrl": "releases/ec781d032f009426f9c63b25d9268f2725c383bca41aadb8864be0a99e72824f/Build/three-bosses-webgl.framework.js.br",
-  "codeUrl": "releases/ec781d032f009426f9c63b25d9268f2725c383bca41aadb8864be0a99e72824f/Build/three-bosses-webgl.wasm.br",
-  "streamingAssetsUrl": "releases/ec781d032f009426f9c63b25d9268f2725c383bca41aadb8864be0a99e72824f/StreamingAssets",
+  "loaderUrl": "releases/e8911080397bcd032bc287494bc8605ef9bdd36ebc1e42330847578bd7008b92/Build/three-bosses-webgl.loader.js",
+  "dataUrl": "releases/e8911080397bcd032bc287494bc8605ef9bdd36ebc1e42330847578bd7008b92/Build/three-bosses-webgl.data.br",
+  "frameworkUrl": "releases/e8911080397bcd032bc287494bc8605ef9bdd36ebc1e42330847578bd7008b92/Build/three-bosses-webgl.framework.js.br",
+  "codeUrl": "releases/e8911080397bcd032bc287494bc8605ef9bdd36ebc1e42330847578bd7008b92/Build/three-bosses-webgl.wasm.br",
+  "streamingAssetsUrl": "releases/e8911080397bcd032bc287494bc8605ef9bdd36ebc1e42330847578bd7008b92/StreamingAssets",
   "companyName": "DefaultCompany",
   "productName": "Three Bosses",
   "productVersion": "1.0",
   "assets": [
     {
-      "path": "releases/ec781d032f009426f9c63b25d9268f2725c383bca41aadb8864be0a99e72824f/Build/three-bosses-webgl.data.br",
-      "sha256": "a9f488475232f460ff4e6f15bddc1b03277a5443d7b2befa57f8c5b5313e9080",
-      "size": 27814842
+      "path": "releases/e8911080397bcd032bc287494bc8605ef9bdd36ebc1e42330847578bd7008b92/Build/three-bosses-webgl.data.br",
+      "sha256": "f4d6f71f2da0852245cefeabde206e5dbfb70ded422e85ecb2a8d14a02c26a15",
+      "size": 27857454
     },
     {
-      "path": "releases/ec781d032f009426f9c63b25d9268f2725c383bca41aadb8864be0a99e72824f/Build/three-bosses-webgl.framework.js.br",
-      "sha256": "efc624d389bc243843acb9472b48a4122270d723a45ab51611b3fc49ac9645de",
-      "size": 76477
+      "path": "releases/e8911080397bcd032bc287494bc8605ef9bdd36ebc1e42330847578bd7008b92/Build/three-bosses-webgl.framework.js.br",
+      "sha256": "60d4a848d62b83a49ca8509c69f03276a735ef4b3f3469a08edd180da40cd359",
+      "size": 76567
     },
     {
-      "path": "releases/ec781d032f009426f9c63b25d9268f2725c383bca41aadb8864be0a99e72824f/Build/three-bosses-webgl.loader.js",
-      "sha256": "bbab44d4e82d35b49788f88a46819e291b8eb7630cd5e60e93b5b5455f58a0e2",
+      "path": "releases/e8911080397bcd032bc287494bc8605ef9bdd36ebc1e42330847578bd7008b92/Build/three-bosses-webgl.loader.js",
+      "sha256": "a3c4feff464a23f490257aaa81efc0fb6f3b88f5c02012240bbd112e8225c248",
       "size": 26982
     },
     {
-      "path": "releases/ec781d032f009426f9c63b25d9268f2725c383bca41aadb8864be0a99e72824f/Build/three-bosses-webgl.wasm.br",
-      "sha256": "7d38d7380e8776fb3dc24639ae1136cf6bf7bb20d1f5f20cd52468410fe54283",
-      "size": 9030678
+      "path": "releases/e8911080397bcd032bc287494bc8605ef9bdd36ebc1e42330847578bd7008b92/Build/three-bosses-webgl.wasm.br",
+      "sha256": "e9934c5f4508d1478f1532d4c585f88532ad45e9f0196812358c1a9ef0ee1869",
+      "size": 9042776
     }
   ]
 }
