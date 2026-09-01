@@ -625,6 +625,11 @@ and gameplay, active-combat timing, and audio restore only after every active
 pause reason is released. Further visual polish remains part of the later
 Three Bosses polish phase.
 
+Future Three Bosses onboarding: add a concise keybindings guide/manual that is
+easy to reach before or during a run, documents the active desktop controls,
+and stays synchronized with the game's real input bindings. Extend it with the
+touch layout when mobile gameplay is released.
+
 For Alpha 0.6.0, playable Three Bosses is desktop-only. Recognized Android and
 iOS browsers do not receive the Games card, and direct mobile navigation shows
 an explicit desktop-only message without instantiating Unity. The Three Bosses
@@ -632,18 +637,20 @@ leaderboard remains available on mobile. Narrow desktop windows and Windows
 touch laptops remain supported; full mobile gameplay waits for the later
 physical-device polish and acceptance pass.
 
-Fix the battle-scene player spawn so the character begins grounded instead of
-falling a small distance and incorrectly playing the landing VFX at startup.
-Keep the correction deterministic across all three battle scenes and verify it
-does not change countdown timing or legitimate landing feedback.
+The battle-scene spawn correction was completed in commit `c0bd6d35`: all
+three scenes now begin at the grounded position, and `PlayerMotor` baselines its
+grounded state before evaluating landing feedback. The fresh external WebGL
+build was loaded and browser-verified on 2026-09-01; countdown timing and
+legitimate airborne-to-ground landing feedback remain covered by regression
+tests.
 
-Future Three Bosses presentation polish: replace the functional WebGL loading
-surface with a more distinctive, on-theme loading screen. Keep the displayed
-progress tied to real loader progress, preserve useful failure states, and keep
-the artwork lightweight enough that it does not delay the game it introduces.
-As a prerequisite, fix the current handoff so the React loading surface releases
-before Unity's `Made with Unity` splash is shown; the two loading layers must not
-sit on top of one another.
+Optional future Three Bosses presentation polish: replace the functional WebGL
+loading surface with a more distinctive, on-theme loading screen. Keep the
+displayed progress tied to real loader progress, preserve useful failure states,
+and keep the artwork lightweight enough that it does not delay the game it
+introduces. The prerequisite handoff is complete: the React loading surface now
+releases before Unity's `Made with Unity` splash, so the two layers no longer
+overlap.
 
 Website presentation polish: **completed and browser-verified on 2026-08-25**.
 At a 1920 × 1080 desktop viewport, the Three Bosses frame now matches the
