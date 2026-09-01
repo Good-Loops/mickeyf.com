@@ -70,6 +70,34 @@ namespace ThreeBosses.Tests
                 EventSystem[] eventSystems = FindInActiveScene<EventSystem>();
                 Assert.That(eventSystems, Has.Length.EqualTo(1));
                 Assert.That(eventSystems[0].GetComponent<InputSystemUIInputModule>(), Is.Not.Null);
+
+                Type pauseControllerType = Type.GetType(
+                    "GameplayPauseController, Assembly-CSharp");
+                Assert.That(pauseControllerType, Is.Not.Null);
+                Component[] pauseControllers = SceneManager.GetActiveScene()
+                    .GetRootGameObjects()
+                    .SelectMany(root => root.GetComponentsInChildren(pauseControllerType, true))
+                    .ToArray();
+                Assert.That(
+                    pauseControllers,
+                    Has.Length.EqualTo(1),
+                    $"{sceneName} must contain exactly one gameplay pause controller.");
+
+                FieldInfo pauseMenuField = pauseControllerType.GetField(
+                    "pauseMenu",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                FieldInfo playerInputField = pauseControllerType.GetField(
+                    "playerInput",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.That(pauseMenuField, Is.Not.Null);
+                Assert.That(playerInputField, Is.Not.Null);
+
+                CanvasGroup pauseMenu = pauseMenuField.GetValue(pauseControllers[0]) as CanvasGroup;
+                Assert.That(pauseMenu, Is.Not.Null);
+                Assert.That(pauseMenu.alpha, Is.EqualTo(0f));
+                Assert.That(pauseMenu.interactable, Is.False);
+                Assert.That(pauseMenu.blocksRaycasts, Is.False);
+                Assert.That(playerInputField.GetValue(pauseControllers[0]), Is.SameAs(playerInput));
             }
         }
 

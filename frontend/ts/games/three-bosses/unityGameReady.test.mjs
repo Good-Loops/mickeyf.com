@@ -85,6 +85,23 @@ test('aborting rejects the pending readiness wait and clears its timer', async (
     assert.equal(readyWindow.mickeyfThreeBossesSignalReady, undefined);
 });
 
+test('an early abort remains observable after the readiness consumer attaches later', async () => {
+    const controller = new AbortController();
+    const readyWindow = {};
+    const { clock } = createClock();
+    const binding = bindThreeBossesGameReady(
+        controller.signal,
+        readyWindow,
+        clock,
+    );
+
+    controller.abort();
+    await new Promise((resolve) => setImmediate(resolve));
+
+    await assert.rejects(binding.promise, { name: 'AbortError' });
+    assert.equal(readyWindow.mickeyfThreeBossesSignalReady, undefined);
+});
+
 test('yields the canvas before waiting for the post-splash menu frame', async () => {
     const events = [];
     let resolveMenuReady;

@@ -5,6 +5,7 @@ using System.Reflection;
 using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.EventSystems;
+using UnityEngine.InputSystem;
 using UnityEngine.SceneManagement;
 using UnityEngine.TestTools;
 using UnityEngine.UI;
@@ -177,6 +178,89 @@ namespace ThreeBosses.Tests
         }
 
         [UnityTest]
+        public IEnumerator PauseMenuStopsResumesAndReturnsToTheMainMenu()
+        {
+            Time.timeScale = 1f;
+            SceneManager.LoadScene("Level1_BeeBoss");
+            yield return null;
+
+            Type countdownType = RequireType("RunCountdownController, Assembly-CSharp");
+            Behaviour countdown = UnityEngine.Object.FindFirstObjectByType(countdownType) as Behaviour;
+            Assert.That(countdown, Is.Not.Null);
+            countdown.enabled = false;
+
+            Type serviceType = RequireType("RunSessionService, Assembly-CSharp");
+            object service = serviceType.GetProperty(
+                    "Instance",
+                    BindingFlags.Public | BindingFlags.Static)
+                ?.GetValue(null);
+            object session = serviceType.GetProperty(
+                    "Session",
+                    BindingFlags.Public | BindingFlags.Instance)
+                ?.GetValue(service);
+            Assert.That(session, Is.Not.Null);
+
+            Type bossIdType = Type.GetType("ThreeBosses.Run.BossId, ThreeBosses.Run");
+            Assert.That(bossIdType, Is.Not.Null);
+            MethodInfo beginPractice = session.GetType().GetMethod("BeginPractice");
+            Assert.That(beginPractice, Is.Not.Null);
+            beginPractice.Invoke(session, new[] { Enum.Parse(bossIdType, "Bee") });
+            Time.timeScale = 1f;
+            yield return null;
+
+            Button[] buttons = UnityEngine.Object.FindObjectsByType<Button>(
+                FindObjectsInactive.Include,
+                FindObjectsSortMode.None);
+            Button pauseButton = buttons.Single(button => button.gameObject.name == "Pause Button");
+            Button resumeButton = buttons.Single(button => button.gameObject.name == "Resume Button");
+            Button mainMenuButton = buttons.Single(button => button.gameObject.name == "Main Menu Button");
+            CanvasGroup pauseMenu = GameObject.Find("Pause Menu")?.GetComponent<CanvasGroup>();
+            PlayerInput playerInput = UnityEngine.Object.FindFirstObjectByType<PlayerInput>();
+
+            Assert.That(pauseButton.gameObject.activeSelf, Is.True);
+            Assert.That(pauseMenu, Is.Not.Null);
+            Assert.That(playerInput, Is.Not.Null);
+            Assert.That(playerInput.enabled, Is.True);
+            Assert.That(pauseMenu.alpha, Is.EqualTo(0f));
+
+            pauseButton.onClick.Invoke();
+            yield return null;
+            Assert.That(Time.timeScale, Is.EqualTo(0f));
+            Assert.That(GetProperty<bool>(service, "IsPausedByUser"), Is.True);
+            Assert.That(pauseMenu.alpha, Is.EqualTo(1f));
+            Assert.That(pauseMenu.interactable, Is.True);
+            Assert.That(pauseMenu.blocksRaycasts, Is.True);
+            Assert.That(playerInput.enabled, Is.False);
+
+            resumeButton.onClick.Invoke();
+            yield return null;
+            Assert.That(Time.timeScale, Is.EqualTo(1f));
+            Assert.That(GetProperty<bool>(service, "IsPausedByUser"), Is.False);
+            Assert.That(pauseMenu.alpha, Is.EqualTo(0f));
+            Assert.That(playerInput.enabled, Is.True);
+
+            playerInput.enabled = false;
+            pauseButton.onClick.Invoke();
+            yield return null;
+            resumeButton.onClick.Invoke();
+            yield return null;
+            Assert.That(
+                playerInput.enabled,
+                Is.False,
+                "Resume must not enable PlayerInput when it was already disabled before pausing.");
+            playerInput.enabled = true;
+
+            pauseButton.onClick.Invoke();
+            yield return null;
+            mainMenuButton.onClick.Invoke();
+            yield return null;
+
+            Assert.That(SceneManager.GetActiveScene().name, Is.EqualTo("MainMenu"));
+            Assert.That(Time.timeScale, Is.EqualTo(1f));
+            Assert.That(GetProperty<bool>(service, "IsPausedByUser"), Is.False);
+        }
+
+        [UnityTest]
         public IEnumerator CountdownGatesGameplayBeforeTheBossCanAdvance()
         {
             Time.timeScale = 1f;
@@ -339,6 +423,7 @@ namespace ThreeBosses.Tests
         public IEnumerator TearDown()
         {
             Time.timeScale = 1f;
+            DisarmActiveCountdownRestore();
             SceneManager.LoadScene("MainMenu");
             yield return null;
 
@@ -355,6 +440,25 @@ namespace ThreeBosses.Tests
             Type type = Type.GetType(qualifiedName);
             Assert.That(type, Is.Not.Null, $"Type {qualifiedName} was not found.");
             return type;
+        }
+
+        private static void DisarmActiveCountdownRestore()
+        {
+            Type countdownType = Type.GetType("RunCountdownController, Assembly-CSharp");
+            FieldInfo ownsGameplayGate = countdownType?.GetField(
+                "ownsGameplayGate",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            if (countdownType == null || ownsGameplayGate == null)
+                return;
+
+            foreach (GameObject root in SceneManager.GetActiveScene().GetRootGameObjects())
+            {
+                foreach (MonoBehaviour behaviour in root.GetComponentsInChildren<MonoBehaviour>(true))
+                {
+                    if (behaviour != null && behaviour.GetType() == countdownType)
+                        ownsGameplayGate.SetValue(behaviour, false);
+                }
+            }
         }
 
         private static MethodInfo RequireMethod(Type type, string name)

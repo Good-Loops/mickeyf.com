@@ -85,6 +85,11 @@ export const bindThreeBossesGameReady = (
         rejectReady = reject;
     });
 
+    // Unity can still be compiling when route cleanup aborts this binding.
+    // Observe that early rejection immediately; callers still receive the
+    // original rejecting promise when they reach the readiness await.
+    void promise.catch(() => undefined);
+
     readyWindow.mickeyfThreeBossesSignalReady = onReady;
     signal.addEventListener('abort', onAbort, { once: true });
 

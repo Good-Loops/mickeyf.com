@@ -2,7 +2,10 @@ mergeInto(LibraryManager.library, {
     MickeyfThreeBossesSignalReady: function () {
         var signalReady = globalThis.mickeyfThreeBossesSignalReady;
         if (typeof signalReady !== 'function') {
-            throw new Error('The Three Bosses readiness bridge is unavailable.');
+            // The browser removes this one-shot bridge after the first main
+            // menu frame. Returning to the menu later is already ready and
+            // must not halt Unity's WebGL main loop.
+            return;
         }
 
         signalReady();

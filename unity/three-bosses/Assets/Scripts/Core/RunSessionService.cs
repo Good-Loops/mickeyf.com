@@ -16,7 +16,10 @@ public sealed class RunSessionService : MonoBehaviour
     private PausableMonotonicClock sessionClock;
     private RunSubmissionCoordinator submissionCoordinator;
     private bool isPausedForDocumentHidden;
-    private bool audioWasPausedBeforeDocumentHidden;
+    private bool isPausedByUser;
+    private bool audioWasPausedBeforeAnyPause;
+    private bool ownsAudioPause;
+    private float timeScaleBeforeUserPause = 1f;
     private bool touchControlsEnabled;
 
     public static RunSessionService Instance
@@ -30,6 +33,13 @@ public sealed class RunSessionService : MonoBehaviour
 
     public RunSession Session { get; private set; }
     public bool IsPausedForDocumentHidden => isPausedForDocumentHidden;
+    public bool IsPausedByUser => isPausedByUser;
+    public bool CanPauseByUser =>
+        !isPausedByUser &&
+        !isPausedForDocumentHidden &&
+        Session != null &&
+        Session.Phase == RunPhase.Running &&
+        Time.timeScale > 0f;
     public RunSubmissionStatus SubmissionStatus => submissionCoordinator.Status;
     public string SubmissionErrorCode => submissionCoordinator.LastErrorCode;
     public bool TouchControlsEnabled => touchControlsEnabled;
@@ -82,6 +92,7 @@ public sealed class RunSessionService : MonoBehaviour
             return;
 
         ResumeFromDocumentHidden();
+        ResumeFromUserPause();
         if (submissionCoordinator != null)
             submissionCoordinator.Changed -= OnSubmissionStateChanged;
         TouchControlsAvailabilityChanged = null;
@@ -205,10 +216,8 @@ public sealed class RunSessionService : MonoBehaviour
         if (isPausedForDocumentHidden)
             return;
 
-        sessionClock.Pause();
-        audioWasPausedBeforeDocumentHidden = AudioListener.pause;
-        AudioListener.pause = true;
         isPausedForDocumentHidden = true;
+        RefreshSharedPauseState();
     }
 
     /// <summary>
@@ -220,9 +229,54 @@ public sealed class RunSessionService : MonoBehaviour
         if (!isPausedForDocumentHidden)
             return;
 
-        sessionClock.Resume();
-        AudioListener.pause = audioWasPausedBeforeDocumentHidden;
         isPausedForDocumentHidden = false;
+        RefreshSharedPauseState();
+    }
+
+    public bool TryPauseForUser()
+    {
+        if (!CanPauseByUser)
+            return false;
+
+        timeScaleBeforeUserPause = Time.timeScale;
+        isPausedByUser = true;
+        Time.timeScale = 0f;
+        RefreshSharedPauseState();
+        return true;
+    }
+
+    public bool ResumeFromUserPause()
+    {
+        if (!isPausedByUser)
+            return false;
+
+        isPausedByUser = false;
+        Time.timeScale = timeScaleBeforeUserPause;
+        RefreshSharedPauseState();
+        return true;
+    }
+
+    private void RefreshSharedPauseState()
+    {
+        bool shouldPause = isPausedForDocumentHidden || isPausedByUser;
+        if (shouldPause)
+        {
+            if (sessionClock.Pause())
+            {
+                audioWasPausedBeforeAnyPause = AudioListener.pause;
+                ownsAudioPause = true;
+            }
+
+            AudioListener.pause = true;
+            return;
+        }
+
+        sessionClock.Resume();
+        if (!ownsAudioPause)
+            return;
+
+        AudioListener.pause = audioWasPausedBeforeAnyPause;
+        ownsAudioPause = false;
     }
 
     private static void EnsureInstance()

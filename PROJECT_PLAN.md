@@ -607,10 +607,12 @@ network errors, and that the rest of the website still works. Record any
 remaining hands-on gameplay or browser-specific defects before public-release
 work begins.
 
-Future gameplay polish, deferred until after the current local playability
-work: add an in-game pause button and a simple pause menu. Pausing must freeze
-gameplay, active-combat timing, and audio consistently, and Resume must restore
-them cleanly.
+The Alpha 0.6.0 pre-release pause slice is implemented in all three battle
+scenes: a compact Pause button opens a simple Resume/Main Menu overlay. User
+pause and browser-visibility pause compose safely, gameplay input is gated,
+and gameplay, active-combat timing, and audio restore only after every active
+pause reason is released. Further visual polish remains part of the later
+Three Bosses polish phase.
 
 Fix the battle-scene player spawn so the character begins grounded instead of
 falling a small distance and incorrectly playing the landing VFX at startup.
