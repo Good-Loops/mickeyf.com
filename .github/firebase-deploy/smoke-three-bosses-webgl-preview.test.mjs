@@ -1,8 +1,8 @@
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { homedir, platform, tmpdir } from "node:os";
+import { join, resolve } from "node:path";
 import { afterEach, test } from "node:test";
 import {
   isThreeBossesRuntimeUrl,
@@ -11,6 +11,12 @@ import {
 } from "./smoke-three-bosses-webgl-preview.mjs";
 
 const roots = [];
+const trustedChromePaths = {
+  darwin: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+  linux: "/opt/google/chrome/google-chrome",
+  win32: join(homedir(), "AppData", "Local", "Google", "Chrome", "Application", "chrome.exe"),
+};
+const trustedChromePath = trustedChromePaths[platform()];
 
 afterEach(async () => {
   await Promise.all(roots.splice(0).map((root) => rm(root, {
@@ -76,20 +82,31 @@ const runSmoke = async (overrides = {}) => {
 test("parses explicit CLI values and environment fallbacks", () => {
   const fromEnvironment = parseThreeBossesSmokeArguments([], {
     BASE_URL: "https://preview.example",
-    CHROME_EXECUTABLE: "/opt/google/chrome",
+    CHROME_EXECUTABLE: trustedChromePath,
     THREE_BOSSES_SMOKE_ARTIFACTS: "artifacts/smoke",
   });
   assert.equal(fromEnvironment.baseUrl, "https://preview.example/");
+  assert.equal(fromEnvironment.chromeExecutable, resolve(trustedChromePath));
   assert.match(fromEnvironment.artifactDirectory, /artifacts[\\/]smoke$/u);
 
   const fromCli = parseThreeBossesSmokeArguments([
     "--base-url", "http://127.0.0.1:5000",
-    "--chrome-executable", "/custom/chrome",
+    "--chrome-executable", trustedChromePath,
     "--artifacts", "output",
   ], {});
   assert.equal(fromCli.baseUrl, "http://127.0.0.1:5000/");
-  assert.match(fromCli.chromeExecutable, /custom[\\/]chrome$/u);
+  assert.equal(fromCli.chromeExecutable, resolve(trustedChromePath));
   assert.match(fromCli.artifactDirectory, /output$/u);
+});
+
+test("rejects an arbitrary Chrome executable path", () => {
+  assert.throws(
+    () => parseThreeBossesSmokeArguments([
+      "--base-url", "https://preview.example",
+      "--chrome-executable", "/tmp/caller-controlled/chrome",
+    ], {}),
+    /approved system installation/u,
+  );
 });
 
 test("matches only Three Bosses Unity runtime requests", () => {

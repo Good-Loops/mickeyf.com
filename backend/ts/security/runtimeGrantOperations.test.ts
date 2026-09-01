@@ -95,6 +95,30 @@ test('exact runtime grants produce a stable reduced no-op plan', () => {
     });
 });
 
+test('the plan digest binds the non-secret account credential-expiry state', () => {
+    const currentPlan = createRuntimeGrantPlan(exactSnapshot(), SETTINGS, RUNTIME_ACCOUNT);
+    const expiredPlan = createRuntimeGrantPlan({
+        ...exactSnapshot(),
+        passwordExpired: true,
+    }, SETTINGS, RUNTIME_ACCOUNT);
+
+    assert.equal(currentPlan.observed.passwordExpired, false);
+    assert.equal(expiredPlan.observed.passwordExpired, true);
+    assert.notEqual(currentPlan.sha256, expiredPlan.sha256);
+});
+
+test('the plan digest rejects malformed account credential-expiry metadata', () => {
+    const malformedSnapshot = {
+        ...exactSnapshot(),
+        passwordExpired: 'N',
+    } as unknown as RuntimeGrantSnapshot;
+
+    assert.throws(
+        () => createRuntimeGrantPlan(malformedSnapshot, SETTINGS, RUNTIME_ACCOUNT),
+        /credential-expiry metadata is invalid/u
+    );
+});
+
 test('the exact broad role produces only additive grants and one reviewed removal', () => {
     const snapshot: RuntimeGrantSnapshot = {
         ...exactSnapshot(),

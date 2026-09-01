@@ -12,6 +12,7 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
+import { homedir, tmpdir } from "node:os";
 import {
   basename,
   dirname,
@@ -66,6 +67,9 @@ const maxReleaseAssetCount = 2_000;
 const maxReleaseBytes = 64 * 1024 * 1024;
 const maxUnityDataBytes = 32 * 1024 * 1024;
 const maxOtherAssetBytes = 16 * 1024 * 1024;
+const trustedExternalBuildRoots = Object.freeze([
+  ...new Set([homedir(), tmpdir()].map((path) => resolve(path))),
+]);
 
 const defaultExternalBuildRoot = () => {
   if (process.env.THREE_BOSSES_WEBGL_DIR) return resolve(process.env.THREE_BOSSES_WEBGL_DIR);
@@ -101,7 +105,25 @@ const pathExists = async (path) => {
 
 const isContainedPath = (basePath, targetPath) => {
   const fromBase = relative(basePath, targetPath);
-  return fromBase === "" || (!fromBase.startsWith(`..${sep}`) && !isAbsolute(fromBase));
+  return fromBase === ""
+    || (fromBase !== ".." && !fromBase.startsWith(`..${sep}`) && !isAbsolute(fromBase));
+};
+
+const resolveTrustedExternalBuildPath = (path) => {
+  const resolvedPath = resolve(path);
+  for (const trustedRoot of trustedExternalBuildRoots) {
+    if (resolvedPath.startsWith(`${trustedRoot}${sep}`)) return resolvedPath;
+  }
+  throw new Error("The certified external WebGL build must stay inside the user or temporary directory.");
+};
+
+const canonicalizeTrustedExternalBuildRoot = async (path) => {
+  const trustedPath = resolveTrustedExternalBuildPath(path);
+  const rootStats = await lstat(trustedPath);
+  if (rootStats.isSymbolicLink() || !rootStats.isDirectory()) {
+    throw new Error("The certified external WebGL build must be a real directory.");
+  }
+  return resolveTrustedExternalBuildPath(await realpath(trustedPath));
 };
 
 const ensureRealDirectoryChain = async ({ basePath, create = false, label, targetPath }) => {
@@ -696,7 +718,7 @@ export const packageThreeBossesWebGlRelease = async ({
   publicRoot = join(repositoryRoot, "frontend", "public", "unity", "three-bosses"),
 } = {}) => {
   const resolvedRepositoryRoot = resolve(repositoryRoot);
-  const resolvedExternalBuildRoot = resolve(externalBuildRoot);
+  const resolvedExternalBuildRoot = await canonicalizeTrustedExternalBuildRoot(externalBuildRoot);
   const resolvedPublicRoot = resolve(publicRoot);
   const stagingRoot = join(
     resolvedRepositoryRoot,

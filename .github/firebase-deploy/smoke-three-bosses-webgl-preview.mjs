@@ -1,5 +1,6 @@
 import { access, mkdir, writeFile } from "node:fs/promises";
-import { resolve } from "node:path";
+import { homedir, platform } from "node:os";
+import { join, resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 
 const pagePath = "/games/three-bosses";
@@ -10,6 +11,31 @@ const defaultArtifactDirectory = resolve(
   "three-bosses-webgl-smoke",
 );
 const defaultTimeoutMs = 120_000;
+const chromeExecutablePathsByPlatform = Object.freeze({
+  darwin: ["/Applications/Google Chrome.app/Contents/MacOS/Google Chrome"],
+  linux: [
+    "/opt/google/chrome/chrome",
+    "/opt/google/chrome/google-chrome",
+    "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
+  ],
+  win32: [
+    "C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe",
+    "C:\\Program Files (x86)\\Google\\Chrome\\Application\\chrome.exe",
+    join(homedir(), "AppData", "Local", "Google", "Chrome", "Application", "chrome.exe"),
+  ],
+});
+const trustedChromeExecutablePaths = Object.freeze(
+  (chromeExecutablePathsByPlatform[platform()] ?? []).map((path) => resolve(path)),
+);
+
+export const resolveTrustedChromeExecutable = (chromeExecutable) => {
+  const resolvedExecutable = resolve(chromeExecutable);
+  if (!trustedChromeExecutablePaths.includes(resolvedExecutable)) {
+    throw new Error("Three Bosses smoke Chrome must use an approved system installation.");
+  }
+  return resolvedExecutable;
+};
 
 const sanitizeUrl = (value) => {
   try {
@@ -72,7 +98,7 @@ export const parseThreeBossesSmokeArguments = (
   return {
     artifactDirectory: resolve(artifactDirectory),
     baseUrl: parsedBaseUrl.href,
-    chromeExecutable: resolve(chromeExecutable),
+    chromeExecutable: resolveTrustedChromeExecutable(chromeExecutable),
   };
 };
 

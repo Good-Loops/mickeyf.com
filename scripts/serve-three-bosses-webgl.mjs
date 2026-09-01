@@ -10,7 +10,17 @@ import {
   unlink,
   writeFile,
 } from "node:fs/promises";
-import { basename, extname, isAbsolute, join, normalize, relative, resolve, sep } from "node:path";
+import {
+  basename,
+  extname,
+  isAbsolute,
+  join,
+  normalize,
+  parse,
+  relative,
+  resolve,
+  sep,
+} from "node:path";
 import { fileURLToPath } from "node:url";
 import { normalizeUnityBuildProvenance } from "./three-bosses-unity-provenance.mjs";
 
@@ -34,6 +44,26 @@ const contentTypes = new Map([
   [".json", "application/json; charset=utf-8"],
   [".wasm", "application/wasm"],
 ]);
+
+const normalizeConfiguredRootPath = (rootPath) => {
+  if (typeof rootPath !== "string" || !rootPath || rootPath.includes("\0")) {
+    throw new TypeError("The Unity WebGL root must be a non-empty filesystem path.");
+  }
+
+  const normalizedRootPath = resolve(rootPath);
+  const volumeRoot = parse(normalizedRootPath).root;
+  const fromVolumeRoot = relative(volumeRoot, normalizedRootPath);
+  if (
+    !fromVolumeRoot
+    || fromVolumeRoot === ".."
+    || fromVolumeRoot.startsWith(`..${sep}`)
+    || isAbsolute(fromVolumeRoot)
+  ) {
+    throw new Error("The Unity WebGL root must name a directory beneath the filesystem root.");
+  }
+
+  return normalizedRootPath;
+};
 
 const setCommonHeaders = (response) => {
   response.setHeader("Cache-Control", "no-store");
@@ -75,7 +105,8 @@ const buildStem = (fileName) => fileName.replace(
 );
 
 const inspectBuildFiles = async (rootPath) => {
-  const buildDirectory = join(rootPath, "Build");
+  const configuredRootPath = normalizeConfiguredRootPath(rootPath);
+  const buildDirectory = join(configuredRootPath, "Build");
   const entries = (await readdir(buildDirectory, { withFileTypes: true }))
     .filter((entry) => entry.isFile())
     .map((entry) => entry.name)
@@ -108,6 +139,7 @@ const inspectBuildFiles = async (rootPath) => {
     fileStats,
     framework,
     loader,
+    rootPath: configuredRootPath,
   };
 };
 
@@ -163,10 +195,14 @@ const completionMarkerMatches = (marker, expected) => {
 };
 
 const readCompletionMarker = async (rootPath) => {
+  const configuredRootPath = normalizeConfiguredRootPath(rootPath);
   try {
     return {
       exists: true,
-      value: JSON.parse(await readFile(join(rootPath, BUILD_COMPLETION_MARKER), "utf8")),
+      value: JSON.parse(await readFile(
+        join(configuredRootPath, BUILD_COMPLETION_MARKER),
+        "utf8",
+      )),
     };
   } catch (error) {
     if (error.code === "ENOENT") return { exists: false, value: null };
@@ -175,7 +211,8 @@ const readCompletionMarker = async (rootPath) => {
 };
 
 export const invalidateBuildCompletionMarker = async (rootPath) => {
-  await unlink(join(rootPath, BUILD_COMPLETION_MARKER)).catch((error) => {
+  const configuredRootPath = normalizeConfiguredRootPath(rootPath);
+  await unlink(join(configuredRootPath, BUILD_COMPLETION_MARKER)).catch((error) => {
     if (error.code !== "ENOENT") throw error;
   });
 };
@@ -183,10 +220,13 @@ export const invalidateBuildCompletionMarker = async (rootPath) => {
 export const writeBuildCompletionMarker = async (rootPath, { provenance } = {}) => {
   const buildFiles = await inspectBuildFiles(rootPath);
   if (provenance) assertReleaseRuntimeFiles(buildFiles);
-  const { buildDirectory, fileStats } = buildFiles;
+  const { buildDirectory, fileStats, rootPath: configuredRootPath } = buildFiles;
   const payload = await completionMarkerPayload(buildDirectory, fileStats, provenance);
-  const markerPath = join(rootPath, BUILD_COMPLETION_MARKER);
-  const temporaryPath = join(rootPath, `.${BUILD_COMPLETION_MARKER}.${randomUUID()}.tmp`);
+  const markerPath = join(configuredRootPath, BUILD_COMPLETION_MARKER);
+  const temporaryPath = join(
+    configuredRootPath,
+    `.${BUILD_COMPLETION_MARKER}.${randomUUID()}.tmp`,
+  );
   try {
     await writeFile(
       temporaryPath,
@@ -210,12 +250,13 @@ export const readBuildManifest = async (rootPath) => {
     files,
     framework,
     loader,
+    rootPath: configuredRootPath,
   } = await inspectBuildFiles(rootPath);
 
   // The marker is removed before a guarded build and rewritten atomically only
   // after Unity and repository cleanup succeed. Requiring it keeps same-name
   // incremental builds fail-closed while payload files are being replaced.
-  const marker = await readCompletionMarker(rootPath);
+  const marker = await readCompletionMarker(configuredRootPath);
   const expectedMarker = await completionMarkerPayload(buildDirectory, fileStats);
   if (!marker.exists || !completionMarkerMatches(marker.value, expectedMarker)) {
     throw new Error("Unity WebGL build is still being finalized.");
@@ -246,7 +287,8 @@ const resolveRequestFile = async (rootPath, requestPath) => {
     return null;
   }
 
-  const rootRealPath = await realpath(rootPath);
+  const configuredRootPath = normalizeConfiguredRootPath(rootPath);
+  const rootRealPath = await realpath(configuredRootPath);
   const candidatePath = resolve(rootRealPath, relativePath);
   const candidateRealPath = await realpath(candidatePath);
   const fromRoot = relative(rootRealPath, candidateRealPath);
@@ -272,8 +314,9 @@ const getContentMetadata = (filePath) => {
   };
 };
 
-export const createThreeBossesWebGlServer = ({ rootPath = defaultRoot() } = {}) =>
-  createHttpServer(async (request, response) => {
+export const createThreeBossesWebGlServer = ({ rootPath = defaultRoot() } = {}) => {
+  const configuredRootPath = normalizeConfiguredRootPath(rootPath);
+  return createHttpServer(async (request, response) => {
     const method = request.method ?? "GET";
     if (!isAllowedHost(request.headers.host)) {
       sendJson(response, 421, { error: "INVALID_HOST" }, method);
@@ -296,7 +339,7 @@ export const createThreeBossesWebGlServer = ({ rootPath = defaultRoot() } = {}) 
 
     if (requestUrl.pathname === "/build-manifest.json") {
       try {
-        sendJson(response, 200, await readBuildManifest(rootPath), method);
+        sendJson(response, 200, await readBuildManifest(configuredRootPath), method);
       } catch {
         sendJson(response, 503, {
           error: "BUILD_UNAVAILABLE",
@@ -315,7 +358,7 @@ export const createThreeBossesWebGlServer = ({ rootPath = defaultRoot() } = {}) 
     }
 
     try {
-      const filePath = await resolveRequestFile(rootPath, requestUrl.pathname);
+      const filePath = await resolveRequestFile(configuredRootPath, requestUrl.pathname);
       if (!filePath) {
         sendJson(response, 404, { error: "NOT_FOUND" }, method);
         return;
@@ -323,7 +366,7 @@ export const createThreeBossesWebGlServer = ({ rootPath = defaultRoot() } = {}) 
 
       let markerFile;
       if (requestUrl.pathname.startsWith("/Build/")) {
-        const marker = await readCompletionMarker(rootPath);
+        const marker = await readCompletionMarker(configuredRootPath);
         if (!marker.exists || ![1, 2].includes(marker.value?.version)) {
           sendJson(response, 503, { error: "BUILD_UNAVAILABLE" }, method);
           return;
@@ -374,6 +417,7 @@ export const createThreeBossesWebGlServer = ({ rootPath = defaultRoot() } = {}) 
       sendJson(response, 404, { error: "NOT_FOUND" }, method);
     }
   });
+};
 
 const isMainModule = process.argv[1]
   && resolve(process.argv[1]) === resolve(fileURLToPath(import.meta.url));

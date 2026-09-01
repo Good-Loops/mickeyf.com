@@ -11,7 +11,7 @@ import {
   stat,
   unlink,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import {
   dirname,
   isAbsolute,
@@ -501,6 +501,18 @@ const sleepFor = (milliseconds) => new Promise((resolvePromise) => {
   setTimeout(resolvePromise, milliseconds);
 });
 
+const trustedExternalBuildRoots = Object.freeze([
+  ...new Set([homedir(), tmpdir()].map((path) => resolve(path))),
+]);
+
+const resolveTrustedExternalBuildPath = (path) => {
+  const resolvedPath = resolve(path);
+  for (const trustedRoot of trustedExternalBuildRoots) {
+    if (resolvedPath.startsWith(`${trustedRoot}${sep}`)) return resolvedPath;
+  }
+  throw new Error("The Unity WebGL output directory must stay inside the user or temporary directory.");
+};
+
 const canonicalizePotentialPath = async (path) => {
   const missingSegments = [];
   let cursor = resolve(path);
@@ -702,17 +714,21 @@ export const runGuardedWebGlBuild = async ({
 } = {}) => {
   repoRoot = resolve(repoRoot);
   projectPath = resolve(projectPath ?? join(repoRoot, "unity", "three-bosses"));
-  outputPath = resolve(outputPath);
+  outputPath = resolveTrustedExternalBuildPath(outputPath);
   invokeUnity ??= (args) => invokeUnityCli(args, { cwd: repoRoot });
-  const [canonicalRepoRoot, canonicalOutputPath] = await Promise.all([
+  const [canonicalRepoRoot, unresolvedCanonicalOutputPath] = await Promise.all([
     realpath(repoRoot),
     canonicalizePotentialPath(outputPath),
   ]);
+  const canonicalOutputPath = resolveTrustedExternalBuildPath(unresolvedCanonicalOutputPath);
   if (isAtOrInside(canonicalRepoRoot, canonicalOutputPath)) {
     throw new Error("The Unity WebGL output directory must be outside the repository.");
   }
   const projectRelative = relative(repoRoot, projectPath);
-  if (!projectRelative || projectRelative.startsWith(`..${sep}`) || isAbsolute(projectRelative)) {
+  if (!projectRelative
+      || projectRelative === ".."
+      || projectRelative.startsWith(`..${sep}`)
+      || isAbsolute(projectRelative)) {
     throw new Error("The Unity project must be inside the repository root.");
   }
   const projectPathspec = normalizeGitPath(projectRelative);

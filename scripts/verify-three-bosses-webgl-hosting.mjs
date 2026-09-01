@@ -17,6 +17,9 @@ const defaultManifestPath = resolve(
   "build-manifest.json",
 );
 const hashPattern = /^[a-f0-9]{64}$/u;
+const firebasePreviewHostPattern =
+  /^noted-reef-387021--gha-[1-9][0-9]*-[1-9][0-9]*-[a-z0-9]+[.]web[.]app$/u;
+const liveOrigin = "https://mickeyf.com";
 const retryDelaysMs = [500, 1_500, 3_000];
 const retryableHttpStatuses = new Set([502, 503, 504]);
 
@@ -140,6 +143,45 @@ const validateLocalManifest = (manifest) => {
   }
 };
 
+export const resolveApprovedHostedBaseUrl = (
+  baseUrl,
+  { allowLoopbackForTests = false } = {},
+) => {
+  if (typeof baseUrl !== "string" || baseUrl.length === 0 || baseUrl.length > 512) {
+    throw new Error("Hosted WebGL base URL is invalid.");
+  }
+
+  let candidate;
+  try {
+    candidate = new URL(baseUrl);
+  } catch {
+    throw new Error("Hosted WebGL base URL is invalid.");
+  }
+  if (candidate.username || candidate.password || candidate.pathname !== "/"
+      || candidate.search || candidate.hash) {
+    throw new Error("Hosted WebGL base URL must be an exact trusted origin.");
+  }
+
+  if (candidate.origin === liveOrigin) return new URL(`${liveOrigin}/`);
+
+  const previewHost = firebasePreviewHostPattern.exec(candidate.hostname)?.[0];
+  if (candidate.protocol === "https:" && candidate.port === "" && previewHost) {
+    return new URL(`https://${previewHost}/`);
+  }
+
+  const loopbackPort = Number(candidate.port);
+  if (allowLoopbackForTests === true
+      && candidate.protocol === "http:"
+      && candidate.hostname === "127.0.0.1"
+      && Number.isInteger(loopbackPort)
+      && loopbackPort >= 1
+      && loopbackPort <= 65_535) {
+    return new URL(`http://127.0.0.1:${loopbackPort}/`);
+  }
+
+  throw new Error("Hosted WebGL base URL is not an approved deployment origin.");
+};
+
 const transportError = (message, cause) => {
   const error = new Error(message, cause ? { cause } : undefined);
   error.retryable = true;
@@ -227,11 +269,9 @@ const requestRaw = async (url, options) => {
 export const verifyHostedThreeBossesWebGlRelease = async ({
   baseUrl,
   manifestPath = defaultManifestPath,
+  allowLoopbackForTests = false,
 } = {}) => {
-  const base = new URL(baseUrl);
-  if (base.protocol !== "https:" && base.protocol !== "http:") {
-    throw new Error("Hosted WebGL base URL must use HTTP or HTTPS.");
-  }
+  const base = resolveApprovedHostedBaseUrl(baseUrl, { allowLoopbackForTests });
 
   const localManifestBytes = await readFile(resolve(manifestPath));
   const manifest = JSON.parse(localManifestBytes.toString("utf8"));

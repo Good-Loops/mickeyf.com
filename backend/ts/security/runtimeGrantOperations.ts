@@ -154,6 +154,12 @@ type RuntimeGrantPlanPayload = Readonly<{
     operations: RuntimeGrantOperationPhases;
 }>;
 
+type RuntimeGrantDigestSnapshot = Readonly<
+    Omit<RuntimeGrantSnapshot, 'passwordExpired'> & {
+        credentialExpiryState: 'current' | 'expired';
+    }
+>;
+
 export type RuntimeGrantPlan = RuntimeGrantPlanPayload & Readonly<{
     sha256: string;
 }>;
@@ -885,6 +891,47 @@ function buildOperationPhases(
     };
 }
 
+function runtimeGrantDigestSnapshot(
+    snapshot: RuntimeGrantSnapshot
+): RuntimeGrantDigestSnapshot {
+    const credentialExpired = snapshot.passwordExpired;
+    if (credentialExpired !== true && credentialExpired !== false) {
+        throw new Error('Runtime account credential-expiry metadata is invalid');
+    }
+    // This plan contains only inspection metadata. Select a fixed marker for
+    // MySQL's misleadingly named `password_expired` boolean so it cannot flow
+    // into the integrity hash as though it were credential material.
+    return {
+        databaseName: snapshot.databaseName,
+        currentUser: snapshot.currentUser,
+        serverUuid: snapshot.serverUuid,
+        serverVersion: snapshot.serverVersion,
+        versionComment: snapshot.versionComment,
+        mandatoryRoles: snapshot.mandatoryRoles,
+        activateAllRolesOnLogin: snapshot.activateAllRolesOnLogin,
+        partialRevokes: snapshot.partialRevokes,
+        maintenanceHasProcessPrivilege: snapshot.maintenanceHasProcessPrivilege,
+        exactAccountCount: snapshot.exactAccountCount,
+        accountNameCount: snapshot.accountNameCount,
+        accountLocked: snapshot.accountLocked,
+        credentialExpiryState: credentialExpired ? 'expired' : 'current',
+        hasPrivilegeRestrictions: snapshot.hasPrivilegeRestrictions,
+        staticGlobalPrivileges: snapshot.staticGlobalPrivileges,
+        availableColumns: snapshot.availableColumns,
+        globalPrivileges: snapshot.globalPrivileges,
+        dynamicGlobalPrivileges: snapshot.dynamicGlobalPrivileges,
+        schemaPrivileges: snapshot.schemaPrivileges,
+        tablePrivileges: snapshot.tablePrivileges,
+        columnPrivileges: snapshot.columnPrivileges,
+        routinePrivileges: snapshot.routinePrivileges,
+        assignedRoles: snapshot.assignedRoles,
+        defaultRoles: snapshot.defaultRoles,
+        proxyPrivileges: snapshot.proxyPrivileges,
+        inboundProxyPrivileges: snapshot.inboundProxyPrivileges,
+        outgoingRoleEdges: snapshot.outgoingRoleEdges,
+    };
+}
+
 export function createRuntimeGrantPlan(
     snapshot: RuntimeGrantSnapshot,
     settings: RuntimeGrantSettings,
@@ -925,8 +972,21 @@ export function createRuntimeGrantPlan(
             expected
         ),
     };
+    const digestPayload = {
+        formatVersion: payload.formatVersion,
+        database: payload.database,
+        runtimeAccount: payload.runtimeAccount,
+        approvedRole: payload.approvedRole,
+        state: payload.state,
+        server: payload.server,
+        expectedColumnPrivileges: payload.expectedColumnPrivileges,
+        observed: runtimeGrantDigestSnapshot(payload.observed),
+        blockers: payload.blockers,
+        compliant: payload.compliant,
+        operations: payload.operations,
+    };
     const sha256 = createHash('sha256')
-        .update(JSON.stringify(payload), 'utf8')
+        .update(JSON.stringify(digestPayload), 'utf8')
         .digest('hex');
     return { ...payload, sha256 };
 }

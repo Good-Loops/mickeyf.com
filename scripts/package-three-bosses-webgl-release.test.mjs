@@ -12,8 +12,8 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { join, parse, resolve } from "node:path";
 import { afterEach, test } from "node:test";
 import { pathToFileURL } from "node:url";
 import { promisify } from "node:util";
@@ -180,6 +180,16 @@ test("packages one verified content-addressed release with provenance", async ()
     publicRoot: join(repositoryRoot, "frontend", "public", "unity", "three-bosses"),
   });
   assert.equal(validated.buildId, first.buildId);
+});
+
+test("rejects an external build outside trusted local roots", async () => {
+  const repositoryRoot = await createRepository();
+  const externalBuildRoot = resolve(parse(homedir()).root, "three-bosses-untrusted-build");
+
+  await assert.rejects(
+    () => packageFixture({ repositoryRoot, externalBuildRoot }),
+    /must stay inside the user or temporary directory/u,
+  );
 });
 
 test("keeps only the current packaged release after a content change", async () => {

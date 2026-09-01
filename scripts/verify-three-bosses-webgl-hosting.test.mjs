@@ -5,7 +5,10 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, test } from "node:test";
-import { verifyHostedThreeBossesWebGlRelease } from "./verify-three-bosses-webgl-hosting.mjs";
+import {
+  resolveApprovedHostedBaseUrl,
+  verifyHostedThreeBossesWebGlRelease,
+} from "./verify-three-bosses-webgl-hosting.mjs";
 
 const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const buildId = "a".repeat(64);
@@ -23,6 +26,13 @@ let server;
 let baseUrl;
 let mutateResponse;
 let transientManifestFailures;
+
+const verifyRelease = (overrides = {}) => verifyHostedThreeBossesWebGlRelease({
+  baseUrl,
+  manifestPath,
+  allowLoopbackForTests: true,
+  ...overrides,
+});
 
 const headersFor = (relativePath) => {
   const headers = { "Cache-Control": "public, max-age=31536000, immutable" };
@@ -102,8 +112,21 @@ afterEach(async () => {
 });
 
 test("verifies every hosted runtime byte and required header", async () => {
-  const result = await verifyHostedThreeBossesWebGlRelease({ baseUrl, manifestPath });
+  const result = await verifyRelease();
   assert.deepEqual(result, { assetCount: 4, buildId });
+});
+
+test("canonicalizes the exact live and project-specific Firebase preview origins", () => {
+  assert.equal(
+    resolveApprovedHostedBaseUrl("https://mickeyf.com").href,
+    "https://mickeyf.com/",
+  );
+  assert.equal(
+    resolveApprovedHostedBaseUrl(
+      "https://noted-reef-387021--gha-123-4-a1b2c3.web.app",
+    ).href,
+    "https://noted-reef-387021--gha-123-4-a1b2c3.web.app/",
+  );
 });
 
 test("rejects a hosted runtime byte mismatch", async () => {
@@ -111,7 +134,7 @@ test("rejects a hosted runtime byte mismatch", async () => {
     ? { ...response, body: Buffer.from("evil\n") }
     : response;
   await assert.rejects(
-    () => verifyHostedThreeBossesWebGlRelease({ baseUrl, manifestPath }),
+    () => verifyRelease(),
     /does not match its manifest/u,
   );
 });
@@ -121,7 +144,7 @@ test("rejects an immutable runtime with a weak cache policy", async () => {
     ? { ...response, headers: { ...response.headers, "Cache-Control": "no-cache" } }
     : response;
   await assert.rejects(
-    () => verifyHostedThreeBossesWebGlRelease({ baseUrl, manifestPath }),
+    () => verifyRelease(),
     /missing Cache-Control public/u,
   );
 });
@@ -143,7 +166,7 @@ test("rejects a manifest with directives that weaken no-store", async () => {
   });
 
   await assert.rejects(
-    () => verifyHostedThreeBossesWebGlRelease({ baseUrl, manifestPath }),
+    () => verifyRelease(),
     /conflicting cache policy/u,
   );
 });
@@ -156,14 +179,14 @@ test("rejects a Brotli runtime with the wrong encoding", async () => {
       }
     : response;
   await assert.rejects(
-    () => verifyHostedThreeBossesWebGlRelease({ baseUrl, manifestPath }),
+    () => verifyRelease(),
     /missing Content-Encoding br/u,
   );
 });
 
 test("retries a transient hosted response without weakening verification", async () => {
   transientManifestFailures = 1;
-  const result = await verifyHostedThreeBossesWebGlRelease({ baseUrl, manifestPath });
+  const result = await verifyRelease();
   assert.deepEqual(result, { assetCount: 4, buildId });
 });
 
@@ -184,7 +207,35 @@ test("rejects a deployment that cannot compile the Unity WebAssembly runtime", a
   });
 
   await assert.rejects(
-    () => verifyHostedThreeBossesWebGlRelease({ baseUrl, manifestPath }),
+    () => verifyRelease(),
     /must allow wasm-unsafe-eval/u,
   );
+});
+
+test("rejects unapproved and structurally ambiguous deployment origins", async () => {
+  for (const untrustedBaseUrl of [
+    "http://169.254.169.254",
+    "https://mickeyf.com.attacker.example",
+    "https://user@mickeyf.com",
+    "https://mickeyf.com:8443",
+    "https://mickeyf.com/unexpected",
+    "https://noted-reef-387021--foreign-preview.web.app",
+  ]) {
+    await assert.rejects(
+      () => verifyHostedThreeBossesWebGlRelease({
+        baseUrl: untrustedBaseUrl,
+        manifestPath,
+      }),
+      /invalid|exact trusted origin|not an approved deployment origin/u,
+    );
+  }
+});
+
+test("permits loopback only through the explicit test boundary", async () => {
+  await assert.rejects(
+    () => verifyHostedThreeBossesWebGlRelease({ baseUrl, manifestPath }),
+    /not an approved deployment origin/u,
+  );
+  const result = await verifyRelease();
+  assert.deepEqual(result, { assetCount: 4, buildId });
 });

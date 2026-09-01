@@ -8,8 +8,8 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { homedir, tmpdir } from "node:os";
+import { dirname, join, parse, resolve } from "node:path";
 import { afterEach, test } from "node:test";
 
 import {
@@ -613,6 +613,23 @@ test("rejects a WebGL output directory inside the repository before Unity runs",
     projectPath,
     repoRoot,
   }), /must be outside the repository/u);
+  assert.equal(unityInvoked, false);
+});
+
+test("rejects a WebGL output directory outside trusted local roots", async () => {
+  const { projectPath, repoRoot } = await createFixture();
+  const outputPath = resolve(parse(homedir()).root, "three-bosses-untrusted-output");
+  let unityInvoked = false;
+
+  await assert.rejects(() => runGuardedWebGlBuild({
+    invokeUnity: async () => {
+      unityInvoked = true;
+      throw new Error("Unity should not be invoked");
+    },
+    outputPath,
+    projectPath,
+    repoRoot,
+  }), /must stay inside the user or temporary directory/u);
   assert.equal(unityInvoked, false);
 });
 

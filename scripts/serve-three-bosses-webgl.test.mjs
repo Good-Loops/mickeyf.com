@@ -2,7 +2,7 @@ import assert from "node:assert/strict";
 import { request } from "node:http";
 import { mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, parse } from "node:path";
 import { after, before, test } from "node:test";
 import { brotliCompressSync } from "node:zlib";
 import {
@@ -92,6 +92,20 @@ test("returns a synthetic manifest without absolute host paths", async () => {
   assert.equal(manifest.dataUrl, `Build/test.data.br?buildId=${manifest.buildId}`);
   assert.match(manifest.buildId, /^[a-f0-9]{64}$/u);
   assert.equal(JSON.stringify(manifest).includes(rootPath), false);
+});
+
+test("normalizes configured build roots but rejects filesystem roots and NUL bytes", async () => {
+  const normalizedManifest = await readBuildManifest(join(rootPath, "Build", ".."));
+  assert.equal(normalizedManifest.buildId, buildId);
+
+  assert.throws(
+    () => createThreeBossesWebGlServer({ rootPath: parse(tmpdir()).root }),
+    /beneath the filesystem root/u,
+  );
+  assert.throws(
+    () => createThreeBossesWebGlServer({ rootPath: `${rootPath}\0escape` }),
+    /non-empty filesystem path/u,
+  );
 });
 
 test("serves compressed WebAssembly with Unity-compatible headers", async () => {
