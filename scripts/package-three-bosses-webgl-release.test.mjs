@@ -100,9 +100,9 @@ const createCertifiedBuild = async ({
   await writeFile(join(externalBuildRoot, "index.html"), "<!doctype html>\n");
   await writeFile(join(externalBuildRoot, "TemplateData", "style.css"), "body {}\n");
   await writeFile(join(externalBuildRoot, "Build", "game.loader.js"), "loader\n");
-  await writeFile(join(externalBuildRoot, "Build", "game.data.br"), "data\n");
-  await writeFile(join(externalBuildRoot, "Build", "game.framework.js.br"), "framework\n");
-  await writeFile(join(externalBuildRoot, "Build", "game.wasm.br"), "wasm\n");
+  await writeFile(join(externalBuildRoot, "Build", "game.data"), "data\n");
+  await writeFile(join(externalBuildRoot, "Build", "game.framework.js"), "framework\n");
+  await writeFile(join(externalBuildRoot, "Build", "game.wasm"), "wasm\n");
 
   if (streamingAssets) {
     await mkdir(join(externalBuildRoot, "StreamingAssets", "catalog"), { recursive: true });
@@ -196,7 +196,7 @@ test("keeps only the current packaged release after a content change", async () 
   const repositoryRoot = await createRepository();
   const externalBuildRoot = await createCertifiedBuild();
   const first = await packageFixture({ repositoryRoot, externalBuildRoot });
-  await writeFile(join(externalBuildRoot, "Build", "game.data.br"), "different data\n");
+  await writeFile(join(externalBuildRoot, "Build", "game.data"), "different data\n");
   await writeBuildCompletionMarker(externalBuildRoot, {
     provenance: markerProvenanceFor(
       await readCommittedUnityProvenance({ repositoryRoot }),
@@ -600,7 +600,7 @@ test("rejects changed, extra, and missing packaged files", async (t) => {
     const repositoryRoot = await createRepository();
     const externalBuildRoot = await createCertifiedBuild();
     const packaged = await packageFixture({ repositoryRoot, externalBuildRoot });
-    await rm(join(packaged.releasePath, "Build", "game.data.br"));
+    await rm(join(packaged.releasePath, "Build", "game.data"));
 
     await assert.rejects(
       () => validatePackagedThreeBossesWebGlRelease({
@@ -669,9 +669,9 @@ test("source digest is deterministic regardless of entry order", () => {
 
 test("enforces deploy entry, per-file, and total resource caps at their boundaries", () => {
   assert.doesNotThrow(() => assertWebGlReleaseResourceCaps([
-    { relativePath: "Build/game.data.br", size: 32 * 1024 * 1024 },
-    { relativePath: "Build/game.wasm.br", size: 16 * 1024 * 1024 },
-    { relativePath: "Build/game.framework.js.br", size: 16 * 1024 * 1024 },
+    { relativePath: "Build/game.data", size: 64 * 1024 * 1024 },
+    { relativePath: "Build/game.wasm", size: 48 * 1024 * 1024 },
+    { relativePath: "Build/game.framework.js", size: 16 * 1024 * 1024 },
   ]));
   assert.doesNotThrow(() => assertWebGlReleaseResourceCaps(
     Array.from({ length: 2_000 }, (_, index) => ({
@@ -680,17 +680,20 @@ test("enforces deploy entry, per-file, and total resource caps at their boundari
     })),
   ));
   assert.throws(() => assertWebGlReleaseResourceCaps([
-    { relativePath: "Build/game.data.br", size: (32 * 1024 * 1024) + 1 },
+    { relativePath: "Build/game.data", size: (64 * 1024 * 1024) + 1 },
   ]), /per-file size cap/u);
   assert.throws(() => assertWebGlReleaseResourceCaps([
-    { relativePath: "Build/game.wasm.br", size: (16 * 1024 * 1024) + 1 },
+    { relativePath: "Build/game.wasm", size: (64 * 1024 * 1024) + 1 },
   ]), /per-file size cap/u);
   assert.throws(() => assertWebGlReleaseResourceCaps([
-    { relativePath: "Build/game.data.br", size: 32 * 1024 * 1024 },
-    { relativePath: "Build/game.wasm.br", size: 16 * 1024 * 1024 },
-    { relativePath: "Build/game.framework.js.br", size: 16 * 1024 * 1024 },
+    { relativePath: "Build/game.framework.js", size: (16 * 1024 * 1024) + 1 },
+  ]), /per-file size cap/u);
+  assert.throws(() => assertWebGlReleaseResourceCaps([
+    { relativePath: "Build/game.data", size: 64 * 1024 * 1024 },
+    { relativePath: "Build/game.wasm", size: 48 * 1024 * 1024 },
+    { relativePath: "Build/game.framework.js", size: 16 * 1024 * 1024 },
     { relativePath: "Build/game.loader.js", size: 1 },
-  ]), /64 MiB/u);
+  ]), /128 MiB/u);
   assert.throws(() => assertWebGlReleaseResourceCaps(
     Array.from({ length: 2_001 }, (_, index) => ({
       relativePath: `Build/asset-${index}.bin`,
@@ -753,7 +756,7 @@ test("rejects a release marker for an earlier Unity source tree", async () => {
 test("rejects a changed build after certification", async () => {
   const repositoryRoot = await createRepository();
   const externalBuildRoot = await createCertifiedBuild();
-  await writeFile(join(externalBuildRoot, "Build", "game.data.br"), "changed\n");
+  await writeFile(join(externalBuildRoot, "Build", "game.data"), "changed\n");
 
   await assert.rejects(
     () => packageFixture({ repositoryRoot, externalBuildRoot }),

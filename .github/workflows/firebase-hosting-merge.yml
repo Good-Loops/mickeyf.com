@@ -279,12 +279,12 @@ jobs:
 
                   file_count += 1
                   total_size += entry.file_size
-                  is_unity_data = re.fullmatch(
-                      r"unity/three-bosses/releases/[a-f0-9]{64}/Build/[^/]+[.]data[.]br",
+                  is_large_unity_runtime = re.fullmatch(
+                      r"unity/three-bosses/releases/[a-f0-9]{64}/Build/[^/]+[.](?:data|wasm)",
                       normalized,
                   ) is not None
-                  entry_limit = (32 if is_unity_data else 16) * 1024 * 1024
-                  if entry.file_size > entry_limit or total_size > 64 * 1024 * 1024:
+                  entry_limit = (64 if is_large_unity_runtime else 16) * 1024 * 1024
+                  if entry.file_size > entry_limit or total_size > 128 * 1024 * 1024:
                       raise SystemExit("Artifact expands beyond the allowed size.")
                   target.parent.mkdir(parents=True, exist_ok=True)
                   with bundle.open(entry) as source, target.open("xb") as output:

@@ -88,28 +88,18 @@ const assertImmutableHeaders = (headers) => {
 };
 
 const assertRuntimeHeaders = (assetPath, headers) => {
-  if (assetPath.endsWith(".loader.js")) {
-    if (headers["content-encoding"] !== undefined) {
-      throw new Error("Hosted WebGL loader must remain uncompressed for hash verification.");
-    }
-    const type = requireHeader(headers, "content-type").toLowerCase();
-    if (!type.startsWith("text/javascript") && !type.startsWith("application/javascript")) {
-      throw new Error("Hosted WebGL loader has an invalid JavaScript content type.");
-    }
-    return;
+  if (headers["content-encoding"] !== undefined) {
+    throw new Error("Hosted WebGL asset must honor identity encoding for hash verification.");
   }
 
-  const expected = assetPath.endsWith(".data.br")
+  const expected = assetPath.endsWith(".data")
     ? "application/octet-stream"
-    : assetPath.endsWith(".framework.js.br")
+    : assetPath.endsWith(".framework.js") || assetPath.endsWith(".loader.js")
       ? "text/javascript"
-      : assetPath.endsWith(".wasm.br")
+      : assetPath.endsWith(".wasm")
         ? "application/wasm"
         : null;
   if (expected === null) return;
-  if (requireHeader(headers, "content-encoding").toLowerCase() !== "br") {
-    throw new Error("Hosted WebGL Brotli runtime asset is missing Content-Encoding br.");
-  }
   const type = requireHeader(headers, "content-type").toLowerCase();
   const javascriptCompatible = expected === "text/javascript"
     && type.startsWith("application/javascript");
@@ -301,7 +291,7 @@ export const verifyHostedThreeBossesWebGlRelease = async ({
   for (const asset of manifest.assets) {
     const trustedAssetPath = encodeManifestAssetPath(asset.path);
     const hostedAsset = await requestRaw(new URL(trustedAssetPath, assetBase), {
-      acceptEncoding: asset.path.endsWith(".br") ? "br" : "identity",
+      acceptEncoding: "identity",
       maxBytes: asset.size,
     });
     if (hostedAsset.size !== asset.size || hostedAsset.sha256 !== asset.sha256) {

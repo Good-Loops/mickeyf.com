@@ -223,9 +223,10 @@ npm run three-bosses:webgl:release:validate
 The release build stays under `%LOCALAPPDATA%`; packaging copies only the
 certified, content-addressed runtime into
 `frontend/public/unity/three-bosses/`. Do not hand-edit those packaged files.
-Production enables the route with `VITE_ENABLE_THREE_BOSSES_RELEASE=1` and
-Firebase Hosting supplies the required Brotli, WebAssembly, CSP, MIME, and
-cache headers. Publishing the game does not enable score writes: the backend's
+Production enables the route with `VITE_ENABLE_THREE_BOSSES_RELEASE=1`. Unity
+emits uncompressed runtime files so Firebase Hosting can negotiate Brotli or
+gzip itself while supplying the required WebAssembly, CSP, MIME, and cache
+headers. Publishing the game does not enable score writes: the backend's
 independent `THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=true` opt-in must be reviewed
 and activated separately. Alpha 0.6.0 activates them together only after the
 fresh packaged player, authenticated run-ticket round trip, leaderboard

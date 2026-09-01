@@ -146,9 +146,9 @@ const inspectBuildFiles = async (rootPath) => {
 const assertReleaseRuntimeFiles = ({ code, data, framework, loader }) => {
   const expected = [
     [loader, /[.]loader[.]js$/u, "loader .loader.js"],
-    [data, /[.]data[.]br$/u, "Brotli data .data.br"],
-    [framework, /[.]framework[.]js[.]br$/u, "Brotli framework .framework.js.br"],
-    [code, /[.]wasm[.]br$/u, "Brotli WebAssembly .wasm.br"],
+    [data, /[.]data$/u, "uncompressed data .data"],
+    [framework, /[.]framework[.]js$/u, "uncompressed framework .framework.js"],
+    [code, /[.]wasm$/u, "uncompressed WebAssembly .wasm"],
   ];
   for (const [fileName, pattern, label] of expected) {
     if (!pattern.test(fileName)) {

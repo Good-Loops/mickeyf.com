@@ -220,15 +220,15 @@ test("accepts incremental output only after an exact completion marker", async (
   }
 });
 
-test("writes a version-two marker only for the exact Brotli release file set", async () => {
+test("writes a version-two marker only for the exact uncompressed release file set", async () => {
   const releaseRoot = await mkdtemp(join(tmpdir(), "three-bosses-webgl-release-marker-"));
   const buildPath = join(releaseRoot, "Build");
   await mkdir(buildPath);
   try {
     await writeFile(join(buildPath, "release.loader.js"), "loader");
-    await writeFile(join(buildPath, "release.data.br"), "data");
-    await writeFile(join(buildPath, "release.framework.js.br"), "framework");
-    await writeFile(join(buildPath, "release.wasm.br"), "wasm");
+    await writeFile(join(buildPath, "release.data"), "data");
+    await writeFile(join(buildPath, "release.framework.js"), "framework");
+    await writeFile(join(buildPath, "release.wasm"), "wasm");
     await writeBuildCompletionMarker(releaseRoot, { provenance: releaseProvenance });
 
     const marker = JSON.parse(await readFile(
@@ -237,7 +237,7 @@ test("writes a version-two marker only for the exact Brotli release file set", a
     ));
     assert.equal(marker.version, 2);
     assert.deepEqual(marker.provenance, releaseProvenance);
-    assert.match((await readBuildManifest(releaseRoot)).codeUrl, /[.]wasm[.]br[?]/u);
+    assert.match((await readBuildManifest(releaseRoot)).codeUrl, /[.]wasm[?]/u);
   } finally {
     await rm(releaseRoot, { recursive: true, force: true });
   }
@@ -254,7 +254,25 @@ test("rejects gzip assets when writing a release completion marker", async () =>
     await writeFile(join(buildPath, "release.wasm.gz"), "wasm");
     await assert.rejects(
       () => writeBuildCompletionMarker(releaseRoot, { provenance: releaseProvenance }),
-      /Brotli data/u,
+      /uncompressed data/u,
+    );
+  } finally {
+    await rm(releaseRoot, { recursive: true, force: true });
+  }
+});
+
+test("rejects Brotli assets when writing a release completion marker", async () => {
+  const releaseRoot = await mkdtemp(join(tmpdir(), "three-bosses-webgl-release-brotli-"));
+  const buildPath = join(releaseRoot, "Build");
+  await mkdir(buildPath);
+  try {
+    await writeFile(join(buildPath, "release.loader.js"), "loader");
+    await writeFile(join(buildPath, "release.data.br"), "data");
+    await writeFile(join(buildPath, "release.framework.js.br"), "framework");
+    await writeFile(join(buildPath, "release.wasm.br"), "wasm");
+    await assert.rejects(
+      () => writeBuildCompletionMarker(releaseRoot, { provenance: releaseProvenance }),
+      /uncompressed data/u,
     );
   } finally {
     await rm(releaseRoot, { recursive: true, force: true });

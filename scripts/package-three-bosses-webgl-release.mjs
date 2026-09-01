@@ -64,9 +64,10 @@ const manifestKeys = [
 const manifestAssetKeys = ["path", "sha256", "size"].sort(comparePaths);
 const windowsRenameRetryDelaysMs = [25, 100, 250, 500];
 const maxReleaseAssetCount = 2_000;
-const maxReleaseBytes = 64 * 1024 * 1024;
-const maxUnityDataBytes = 32 * 1024 * 1024;
+const maxReleaseBytes = 128 * 1024 * 1024;
+const maxLargeUnityRuntimeBytes = 64 * 1024 * 1024;
 const maxOtherAssetBytes = 16 * 1024 * 1024;
+const largeUnityRuntimePattern = /[.](?:data|wasm)$/u;
 const trustedExternalBuildRoots = Object.freeze([
   ...new Set([homedir(), tmpdir()].map((path) => resolve(path))),
 ]);
@@ -228,15 +229,15 @@ export const assertWebGlReleaseResourceCaps = (assets) => {
     if (!Number.isSafeInteger(asset.size) || asset.size <= 0) {
       throw new Error("WebGL release assets must have a positive safe-integer size.");
     }
-    const perFileLimit = asset.relativePath?.endsWith(".data.br")
-      ? maxUnityDataBytes
+    const perFileLimit = largeUnityRuntimePattern.test(asset.relativePath ?? "")
+      ? maxLargeUnityRuntimeBytes
       : maxOtherAssetBytes;
     if (asset.size > perFileLimit) {
       throw new Error("WebGL release asset exceeds its deploy per-file size cap.");
     }
     totalSize += asset.size;
     if (!Number.isSafeInteger(totalSize) || totalSize > maxReleaseBytes) {
-      throw new Error("WebGL release exceeds the 64 MiB expanded deploy cap.");
+      throw new Error("WebGL release exceeds the 128 MiB expanded deploy cap.");
     }
   }
 };
@@ -284,9 +285,9 @@ const inspectExternalRoot = async (externalBuildRoot) => {
   const buildUrlFields = ["loaderUrl", "dataUrl", "frameworkUrl", "codeUrl"];
   const exactPatterns = [
     /[.]loader[.]js$/u,
-    /[.]data[.]br$/u,
-    /[.]framework[.]js[.]br$/u,
-    /[.]wasm[.]br$/u,
+    /[.]data$/u,
+    /[.]framework[.]js$/u,
+    /[.]wasm$/u,
   ];
   const expectedBuildFiles = buildUrlFields.map((field, index) => {
     const value = localManifest[field];
@@ -296,7 +297,7 @@ const inspectExternalRoot = async (externalBuildRoot) => {
     const fileName = decodeURIComponent(basename(new URL(value, "https://release.invalid/").pathname));
     assertSafeRelativeAssetPath(fileName, `Certified WebGL ${field}`);
     if (!exactPatterns[index].test(fileName)) {
-      throw new Error("Release WebGL assets must use the exact Brotli production file set.");
+      throw new Error("Release WebGL assets must use the exact uncompressed production file set.");
     }
     return fileName;
   });
@@ -617,9 +618,9 @@ const parsePackagedManifest = (manifest) => {
     }
   };
   selectRuntimeAsset("loaderUrl", /^Build\/[^/]+[.]loader[.]js$/u);
-  selectRuntimeAsset("dataUrl", /^Build\/[^/]+[.]data[.]br$/u);
-  selectRuntimeAsset("frameworkUrl", /^Build\/[^/]+[.]framework[.]js[.]br$/u);
-  selectRuntimeAsset("codeUrl", /^Build\/[^/]+[.]wasm[.]br$/u);
+  selectRuntimeAsset("dataUrl", /^Build\/[^/]+[.]data$/u);
+  selectRuntimeAsset("frameworkUrl", /^Build\/[^/]+[.]framework[.]js$/u);
+  selectRuntimeAsset("codeUrl", /^Build\/[^/]+[.]wasm$/u);
   if (assets.filter((asset) => asset.relativePath.startsWith("Build/")).length !== 4) {
     throw new Error("Packaged WebGL release contains unexpected Build assets.");
   }

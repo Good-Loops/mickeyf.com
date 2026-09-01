@@ -540,7 +540,8 @@ Status: In progress. The development-only Games card, route, external asset
 server, Unity loader, and first live browser launch/re-entry/fullscreen checks
 were implemented on 2026-08-25. The production path now uses a same-origin,
 content-addressed Firebase Hosting release plus a no-store stable manifest,
-exact Brotli/MIME/cache headers, a source-bound release certificate, and
+Firebase-managed transport compression, exact MIME/cache headers, a
+source-bound release certificate, and
 offline plus hosted-byte validation. A fresh production candidate was built,
 packaged, validated through the Firebase Hosting emulator, and started in a
 real Chrome canvas on 2026-08-29. The full three-level hands-on browser matrix
@@ -589,8 +590,8 @@ must:
   certified bytes into one content-addressed release plus the stable manifest
   with `three-bosses:webgl:package`; and
 - validate the packaged release before the frontend build, then verify Firebase
-  preview bytes, headers, CSP, compression, MIME types, cache policy, and actual
-  Unity startup before promotion.
+  preview bytes, headers, CSP, negotiated compression, MIME types, cache policy,
+  and actual Unity startup before promotion.
 
 Before each build, require the Unity Editor to be ready, stopped, and not
 compiling. Afterward, review Git status and reject incidental `ProjectSettings`,

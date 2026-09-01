@@ -14,9 +14,9 @@ const sha256 = (value) => createHash("sha256").update(value).digest("hex");
 const buildId = "a".repeat(64);
 const runtimeFiles = new Map([
   ["Build/game.loader.js", Buffer.from("loader\n")],
-  ["Build/game.data.br", Buffer.from("data\n")],
-  ["Build/game.framework.js.br", Buffer.from("framework\n")],
-  ["Build/game.wasm.br", Buffer.from("wasm\n")],
+  ["Build/game.data", Buffer.from("data\n")],
+  ["Build/game.framework.js", Buffer.from("framework\n")],
+  ["Build/game.wasm", Buffer.from("wasm\n")],
 ]);
 
 let root;
@@ -38,14 +38,11 @@ const headersFor = (relativePath) => {
   const headers = { "Cache-Control": "public, max-age=31536000, immutable" };
   if (relativePath.endsWith(".loader.js")) {
     headers["Content-Type"] = "text/javascript; charset=utf-8";
-  } else if (relativePath.endsWith(".data.br")) {
-    headers["Content-Encoding"] = "br";
+  } else if (relativePath.endsWith(".data")) {
     headers["Content-Type"] = "application/octet-stream";
-  } else if (relativePath.endsWith(".framework.js.br")) {
-    headers["Content-Encoding"] = "br";
+  } else if (relativePath.endsWith(".framework.js")) {
     headers["Content-Type"] = "text/javascript; charset=utf-8";
   } else {
-    headers["Content-Encoding"] = "br";
     headers["Content-Type"] = "application/wasm";
   }
   return headers;
@@ -130,7 +127,7 @@ test("canonicalizes the exact live and project-specific Firebase preview origins
 });
 
 test("rejects a hosted runtime byte mismatch", async () => {
-  mutateResponse = (relativePath, response) => relativePath.endsWith(".wasm.br")
+  mutateResponse = (relativePath, response) => relativePath.endsWith(".wasm")
     ? { ...response, body: Buffer.from("evil\n") }
     : response;
   await assert.rejects(
@@ -140,7 +137,7 @@ test("rejects a hosted runtime byte mismatch", async () => {
 });
 
 test("rejects an immutable runtime with a weak cache policy", async () => {
-  mutateResponse = (relativePath, response) => relativePath.endsWith(".data.br")
+  mutateResponse = (relativePath, response) => relativePath.endsWith(".data")
     ? { ...response, headers: { ...response.headers, "Cache-Control": "no-cache" } }
     : response;
   await assert.rejects(
@@ -171,8 +168,8 @@ test("rejects a manifest with directives that weaken no-store", async () => {
   );
 });
 
-test("rejects a Brotli runtime with the wrong encoding", async () => {
-  mutateResponse = (relativePath, response) => relativePath.endsWith(".framework.js.br")
+test("rejects a runtime that ignores the identity encoding request", async () => {
+  mutateResponse = (relativePath, response) => relativePath.endsWith(".framework.js")
     ? {
         ...response,
         headers: { ...response.headers, "Content-Encoding": "gzip" },
@@ -180,7 +177,7 @@ test("rejects a Brotli runtime with the wrong encoding", async () => {
     : response;
   await assert.rejects(
     () => verifyRelease(),
-    /missing Content-Encoding br/u,
+    /must honor identity encoding/u,
   );
 });
 
