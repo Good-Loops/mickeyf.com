@@ -426,6 +426,7 @@ namespace ThreeBosses.Run.Tests
             Assert.That(
                 coordinator.LastErrorCode,
                 Is.EqualTo(RunSubmissionCoordinator.RunTicketUnavailableErrorCode));
+            Assert.That(coordinator.RequiresNewRun, Is.True);
             Assert.That(coordinator.TryBegin(out _), Is.False);
         }
 

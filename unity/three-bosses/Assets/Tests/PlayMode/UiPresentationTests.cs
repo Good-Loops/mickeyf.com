@@ -443,6 +443,94 @@ namespace ThreeBosses.Tests
             Assert.That(GetProperty<string>(timerLabel, "text"), Is.Not.EqualTo("00:00.000"));
         }
 
+        [UnityTest]
+        public IEnumerator MissingRunTicketActionStartsANewRun()
+        {
+            Type serviceType = RequireType("RunSessionService, Assembly-CSharp");
+            object service = serviceType.GetProperty(
+                    "Instance",
+                    BindingFlags.Public | BindingFlags.Static)
+                ?.GetValue(null);
+            object session = GetProperty<object>(service, "Session");
+
+            RequireMethod(session.GetType(), "BeginNewRun").Invoke(session, null);
+            Assert.That((bool)RequireMethod(session.GetType(), "StartRun").Invoke(session, null), Is.True);
+            yield return new WaitForSecondsRealtime(0.02f);
+
+            Type bossIdType = RequireType("ThreeBosses.Run.BossId, ThreeBosses.Run");
+            MethodInfo recordBossDefeat = RequireMethod(session.GetType(), "RecordBossDefeat");
+            MethodInfo enterNextBoss = RequireMethod(session.GetType(), "EnterNextBoss");
+            object bee = Enum.Parse(bossIdType, "Bee");
+            object cyborg = Enum.Parse(bossIdType, "Cyborg");
+            object kraken = Enum.Parse(bossIdType, "Kraken");
+
+            recordBossDefeat.Invoke(session, new[] { bee });
+            enterNextBoss.Invoke(session, new[] { cyborg });
+            yield return new WaitForSecondsRealtime(0.02f);
+            recordBossDefeat.Invoke(session, new[] { cyborg });
+            enterNextBoss.Invoke(session, new[] { kraken });
+            yield return new WaitForSecondsRealtime(0.02f);
+            recordBossDefeat.Invoke(session, new[] { kraken });
+
+            FieldInfo finalElapsedSecondsField = session.GetType().GetField(
+                "finalElapsedSeconds",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(finalElapsedSecondsField, Is.Not.Null);
+            finalElapsedSecondsField.SetValue(session, 82d);
+            double elapsedSeconds = GetProperty<double>(session, "ElapsedSeconds");
+            Type scoreCalculatorType = RequireType(
+                "ThreeBosses.Run.RunScoreCalculator, ThreeBosses.Run");
+            Type rankCalculatorType = RequireType(
+                "ThreeBosses.Run.RunRankCalculator, ThreeBosses.Run");
+            int score = (int)RequireMethod(scoreCalculatorType, "Calculate")
+                .Invoke(null, new object[] { elapsedSeconds });
+            string rank = (string)RequireMethod(rankCalculatorType, "Calculate")
+                .Invoke(null, new object[] { elapsedSeconds });
+            Assert.That(
+                (bool)RequireMethod(session.GetType(), "TrySetResult")
+                    .Invoke(session, new object[] { score, rank }),
+                Is.True);
+
+            RequireMethod(serviceType, "ConfigureRunSubmission").Invoke(service, new object[] { "1" });
+            FieldInfo coordinatorField = serviceType.GetField(
+                "submissionCoordinator",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(coordinatorField, Is.Not.Null);
+            object coordinator = coordinatorField.GetValue(service);
+            object[] beginArguments = { null };
+            Assert.That(
+                (bool)RequireMethod(coordinator.GetType(), "TryBegin")
+                    .Invoke(coordinator, beginArguments),
+                Is.True);
+            object submissionPayload = beginArguments[0];
+            string runId = GetProperty<string>(submissionPayload, "RunId");
+            RequireMethod(coordinator.GetType(), "CompleteFailure").Invoke(
+                coordinator,
+                new object[] { runId, "RUN_TICKET_UNAVAILABLE" });
+
+            SceneManager.LoadScene("End");
+            yield return null;
+
+            Button startNewRunButton = UnityEngine.Object.FindObjectsByType<Button>(
+                    FindObjectsInactive.Include,
+                    FindObjectsSortMode.None)
+                .Single(button => button.gameObject.name == "Submit Score Button");
+            Assert.That(startNewRunButton.interactable, Is.True);
+            Component startNewRunLabel = startNewRunButton.GetComponentInChildren(
+                RequireType("TMPro.TextMeshProUGUI, Unity.TextMeshPro"));
+            Assert.That(
+                GetProperty<string>(startNewRunLabel, "text"),
+                Is.EqualTo("START A NEW RUN"));
+
+            startNewRunButton.onClick.Invoke();
+            yield return null;
+
+            Assert.That(GetProperty<object>(session, "Phase").ToString(), Is.EqualTo("Countdown"));
+
+            yield return new WaitForSecondsRealtime(0.4f);
+            Assert.That(SceneManager.GetActiveScene().name, Is.EqualTo("Level1_BeeBoss"));
+        }
+
         [UnityTearDown]
         public IEnumerator TearDown()
         {

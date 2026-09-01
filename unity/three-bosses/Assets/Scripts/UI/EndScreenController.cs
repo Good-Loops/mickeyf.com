@@ -118,6 +118,12 @@ public sealed class EndScreenController : MonoBehaviour
         if (isNavigating)
             return;
 
+        if (runSessionService.SubmissionRequiresNewRun)
+        {
+            TryAgain();
+            return;
+        }
+
         runSessionService.TrySubmitCurrentRun();
         RefreshSubmitButton();
     }
@@ -131,7 +137,8 @@ public sealed class EndScreenController : MonoBehaviour
         submitScoreButton.interactable = !isNavigating &&
             (status == RunSubmissionStatus.Ready ||
              status == RunSubmissionStatus.SignInRequired ||
-             status == RunSubmissionStatus.RetryableFailure);
+             status == RunSubmissionStatus.RetryableFailure ||
+             runSessionService.SubmissionRequiresNewRun);
 
         string label = status switch
         {
@@ -141,8 +148,7 @@ public sealed class EndScreenController : MonoBehaviour
             RunSubmissionStatus.SignInRequired => "SIGN IN REQUIRED",
             RunSubmissionStatus.RetryableFailure => "RETRY SUBMISSION",
             RunSubmissionStatus.Rejected when
-                runSessionService.SubmissionErrorCode ==
-                    RunSubmissionCoordinator.RunTicketUnavailableErrorCode =>
+                runSessionService.SubmissionRequiresNewRun =>
                 "START A NEW RUN",
             RunSubmissionStatus.Rejected => "SUBMISSION FAILED",
             _ => "SUBMISSION LOCKED"
