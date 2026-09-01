@@ -34,6 +34,7 @@ jobs:
     outputs:
       artifact-id: ${{ steps.upload.outputs.artifact-id }}
       artifact-digest: ${{ steps.upload.outputs.artifact-digest }}
+      artifact-name: ${{ steps.artifact-identity.outputs.name }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -85,6 +86,17 @@ jobs:
           include-hidden-files: true
           retention-days: 1
           overwrite: false
+
+      - name: Record immutable frontend artifact identity
+        id: artifact-identity
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ ! "$ARTIFACT_NAME" =~ ^frontend-dist-[0-9a-f]{40}-[1-9][0-9]*-[1-9][0-9]*$ ]]; then
+            echo "Artifact name is not canonical." >&2
+            exit 1
+          fi
+          echo "name=$ARTIFACT_NAME" >> "$GITHUB_OUTPUT"
 
   build_and_deploy:
     needs: build
@@ -142,7 +154,7 @@ jobs:
           DOWNLOAD_TOKEN: ${{ github.token }}
           EXPECTED_ARTIFACT_ID: ${{ needs.build.outputs.artifact-id }}
           EXPECTED_ARTIFACT_DIGEST: ${{ needs.build.outputs.artifact-digest }}
-          EXPECTED_ARTIFACT_NAME: frontend-dist-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          EXPECTED_ARTIFACT_NAME: ${{ needs.build.outputs.artifact-name }}
           EXPECTED_HEAD_SHA: ${{ github.sha }}
           EXPECTED_REPOSITORY_ID: ${{ github.repository_id }}
           EXPECTED_RUN_ID: ${{ github.run_id }}
@@ -515,12 +527,17 @@ jobs:
           preview_body="$RUNNER_TEMP/firebase-preview.html"
           preview_headers="$RUNNER_TEMP/firebase-preview.headers"
           verified="false"
-          for attempt in $(seq 1 12); do
+          for attempt in $(seq 1 36); do
             code="$(curl --silent --show-error --max-time 10 --connect-timeout 5 \
               --proto '=https' --tlsv1.2 --max-redirs 0 \
               --dump-header "$preview_headers" --output "$preview_body" --write-out '%{http_code}' \
               "${preview_url}/?release=${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" || true)"
-            if [[ "$code" == "200" ]] && [[ "$(sha256sum "$preview_body" | awk '{print $1}')" == "$expected_hash" ]] && \
+            observed_hash="$(sha256sum "$preview_body" 2>/dev/null | awk '{print $1}' || true)"
+            artifact_match="false"
+            if [[ "$code" == "200" ]] && [[ "$observed_hash" == "$expected_hash" ]]; then
+              artifact_match="true"
+            fi
+            if [[ "$artifact_match" == "true" ]] && \
               python3 - "$preview_headers" firebase.json <<'PY'
           import json
           import re
@@ -576,6 +593,9 @@ jobs:
             then
               verified="true"
               break
+            fi
+            if (( attempt == 1 || attempt % 6 == 0 )); then
+              echo "Preview convergence attempt ${attempt}/36: HTTP ${code}; artifact-match=${artifact_match}; observed-sha256=${observed_hash:-missing}."
             fi
             sleep 5
           done
@@ -923,12 +943,17 @@ jobs:
           live_headers="$RUNNER_TEMP/firebase-live-after.headers"
           verified="false"
 
-          for attempt in $(seq 1 12); do
+          for attempt in $(seq 1 36); do
             code="$(curl --silent --show-error --max-time 10 --connect-timeout 5 \
               --proto '=https' --tlsv1.2 --max-redirs 0 \
               --dump-header "$live_headers" --output "$live_body" --write-out '%{http_code}' \
               "https://mickeyf.com/?release=${GITHUB_SHA}-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" || true)"
-            if [[ "$code" == "200" ]] && [[ "$(sha256sum "$live_body" | awk '{print $1}')" == "$expected_hash" ]] && \
+            observed_hash="$(sha256sum "$live_body" 2>/dev/null | awk '{print $1}' || true)"
+            artifact_match="false"
+            if [[ "$code" == "200" ]] && [[ "$observed_hash" == "$expected_hash" ]]; then
+              artifact_match="true"
+            fi
+            if [[ "$artifact_match" == "true" ]] && \
               python3 - "$live_headers" firebase.json <<'PY'
           import json
           import re
@@ -971,6 +996,9 @@ jobs:
             then
               verified="true"
               break
+            fi
+            if (( attempt == 1 || attempt % 6 == 0 )); then
+              echo "Live convergence attempt ${attempt}/36: HTTP ${code}; artifact-match=${artifact_match}; observed-sha256=${observed_hash:-missing}."
             fi
             sleep 5
           done
@@ -1205,7 +1233,7 @@ jobs:
           fi
 
           restored_body="$RUNNER_TEMP/firebase-live-restored.html"
-          for attempt in $(seq 1 12); do
+          for attempt in $(seq 1 36); do
             code="$(curl --silent --show-error --max-time 10 --connect-timeout 5 \
               --proto '=https' --tlsv1.2 --max-redirs 0 \
               --output "$restored_body" --write-out '%{http_code}' \
