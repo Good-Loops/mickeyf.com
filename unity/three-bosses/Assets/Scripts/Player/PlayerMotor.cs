@@ -69,6 +69,12 @@ public sealed class PlayerMotor : MonoBehaviour
         defaultGravityScale = rb.gravityScale;
     }
 
+    private void Start()
+    {
+        IsGrounded = CheckGrounded();
+        wasGrounded = IsGrounded;
+    }
+
     private void Update()
     {
         if(health != null && health.IsDead)

@@ -531,6 +531,77 @@ namespace ThreeBosses.Tests
             Assert.That(SceneManager.GetActiveScene().name, Is.EqualTo("Level1_BeeBoss"));
         }
 
+        [UnityTest]
+        public IEnumerator BattleScenesStartGroundedWithoutPlayingLandingDust()
+        {
+            string[] battleScenes =
+            {
+                "Level1_BeeBoss",
+                "Level2_CyborgBoss",
+                "Level3_Kraken",
+            };
+
+            Type motorType = RequireType("PlayerMotor, Assembly-CSharp");
+
+            foreach (string sceneName in battleScenes)
+            {
+                Time.timeScale = 1f;
+                DisarmActiveCountdownRestore();
+                SceneManager.LoadScene(sceneName);
+                yield return null;
+
+                Component motor = UnityEngine.Object.FindFirstObjectByType(
+                    motorType,
+                    FindObjectsInactive.Include) as Component;
+                Assert.That(motor, Is.Not.Null, $"{sceneName} is missing PlayerMotor.");
+                Assert.That(
+                    GetProperty<bool>(motor, "IsGrounded"),
+                    Is.True,
+                    $"{sceneName} must start with the player grounded.");
+
+                CapsuleCollider2D playerCollider = motor.GetComponent<CapsuleCollider2D>();
+                CompositeCollider2D floorCollider = SceneManager.GetActiveScene()
+                    .GetRootGameObjects()
+                    .SelectMany(root => root.GetComponentsInChildren<CompositeCollider2D>(true))
+                    .Single(collider => collider.gameObject.layer == 3);
+                ColliderDistance2D floorDistance = playerCollider.Distance(floorCollider);
+                Assert.That(floorDistance.isValid, Is.True);
+                Assert.That(
+                    Mathf.Abs(floorDistance.distance),
+                    Is.LessThanOrEqualTo(0.01f),
+                    $"{sceneName} player must begin in physical contact with the floor.");
+                Assert.That(CountLandingDustClones(), Is.Zero);
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator LandingAfterStartupStillPlaysDustOnce()
+        {
+            Time.timeScale = 1f;
+            SceneManager.LoadScene("Level1_BeeBoss");
+            yield return null;
+
+            Type motorType = RequireType("PlayerMotor, Assembly-CSharp");
+            Component motor = UnityEngine.Object.FindFirstObjectByType(
+                motorType,
+                FindObjectsInactive.Include) as Component;
+            Assert.That(motor, Is.Not.Null);
+            Assert.That(CountLandingDustClones(), Is.Zero);
+
+            Vector3 groundedPosition = motor.transform.position;
+            motor.transform.position = groundedPosition + Vector3.up;
+            Physics2D.SyncTransforms();
+            yield return null;
+            Assert.That(GetProperty<bool>(motor, "IsGrounded"), Is.False);
+
+            motor.transform.position = groundedPosition;
+            Physics2D.SyncTransforms();
+            yield return null;
+
+            Assert.That(GetProperty<bool>(motor, "IsGrounded"), Is.True);
+            Assert.That(CountLandingDustClones(), Is.EqualTo(1));
+        }
+
         [UnityTearDown]
         public IEnumerator TearDown()
         {
@@ -580,6 +651,14 @@ namespace ThreeBosses.Tests
                 BindingFlags.Instance | BindingFlags.Static | BindingFlags.Public);
             Assert.That(method, Is.Not.Null, $"Method {type.FullName}.{name} was not found.");
             return method;
+        }
+
+        private static int CountLandingDustClones()
+        {
+            return UnityEngine.Object.FindObjectsByType<ParticleSystem>(
+                    FindObjectsInactive.Include,
+                    FindObjectsSortMode.None)
+                .Count(particleSystem => particleSystem.name == "VFX_LandDust(Clone)");
         }
 
         private static T GetProperty<T>(object target, string name)
