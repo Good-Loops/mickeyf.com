@@ -357,6 +357,11 @@
             height: auto;
         }
 
+        &__fullscreen-btn {
+            width: 2.75rem;
+            height: 2.75rem;
+        }
+
         &__orientation-hint {
             display: block;
             max-width: 26rem;
