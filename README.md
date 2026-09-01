@@ -456,8 +456,10 @@ anything, the hook intentionally stops that commit so you can review the
 result and commit again; a Unity file that is only partially staged is
 rejected instead of being modified. Unity can remain open as long as any
 edited scene is saved before you start the commit and is not saved again
-while the hook runs. See [`.githooks/README.md`](.githooks/README.md) for
-details, including the `--no-verify` bypass.
+while the hook runs. Unity's canonical `ProjectSettings.asset` whitespace is
+excluded so the Editor does not recreate formatting churn after every save.
+See [`.githooks/README.md`](.githooks/README.md) for details, including the
+`--no-verify` bypass.
 
 Test the normalizer itself with:
 

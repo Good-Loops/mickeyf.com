@@ -182,7 +182,14 @@ def check_security_settings(errors: list[str]) -> None:
         if value not in player:
             errors.append(f"Unity security setting is missing: {value}")
 
-    for field in ("ps4Passcode", "metroCertificatePassword", "cloudProjectId", "organizationId"):
+    # Unity 6000.3.8f1 generates a random PS4 passcode whenever this field is
+    # blank, even for this WebGL-only project. A public all-zero placeholder
+    # keeps Unity's serialization stable without committing a credential.
+    ps4_passcode = re.search(r"^[ \t]*ps4Passcode:[ \t]*(\S+)", player, re.MULTILINE)
+    if ps4_passcode and ps4_passcode.group(1) != "0" * 32:
+        errors.append("Unity PS4 passcode must stay blank or use the all-zero placeholder")
+
+    for field in ("metroCertificatePassword", "cloudProjectId", "organizationId"):
         if re.search(rf"^[ \t]*{field}:[ \t]*\S+", player, re.MULTILINE):
             errors.append(f"Unity credential or cloud identifier must stay blank: {field}")
 

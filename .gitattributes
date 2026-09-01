@@ -38,6 +38,7 @@ Dockerfile text eol=lf
 *.unity eol=lf
 *.prefab eol=lf
 *.asset eol=lf
+/unity/three-bosses/ProjectSettings/ProjectSettings.asset whitespace=-trailing-space
 *.meta text eol=lf
 *.mat eol=lf
 *.anim eol=lf

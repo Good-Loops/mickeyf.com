@@ -4,6 +4,9 @@ import { basename, dirname, extname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
 const UNITY_PROJECT_PATHSPEC = 'unity/three-bosses';
+const CANONICAL_UNITY_WHITESPACE_PATHS = new Set([
+    'unity/three-bosses/ProjectSettings/ProjectSettings.asset',
+]);
 
 const ELIGIBLE_EXTENSIONS = new Set([
     '.unity',
@@ -31,7 +34,9 @@ export function parseNulDelimitedList(output) {
  * @returns {boolean}
  */
 export function isEligibleAssetPath(filePath) {
-    return ELIGIBLE_EXTENSIONS.has(extname(filePath).toLowerCase());
+    const normalizedPath = filePath.replaceAll('\\', '/');
+    return !CANONICAL_UNITY_WHITESPACE_PATHS.has(normalizedPath)
+        && ELIGIBLE_EXTENSIONS.has(extname(normalizedPath).toLowerCase());
 }
 
 /**

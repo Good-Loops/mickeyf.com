@@ -63,6 +63,17 @@ describe('isEligibleAssetPath', () => {
             assert.equal(isEligibleAssetPath(`Assets/Thing${extension}`), false);
         });
     }
+
+    test('preserves Unity canonical whitespace in ProjectSettings.asset', () => {
+        assert.equal(
+            isEligibleAssetPath('unity/three-bosses/ProjectSettings/ProjectSettings.asset'),
+            false,
+        );
+        assert.equal(
+            isEligibleAssetPath('unity\\three-bosses\\ProjectSettings\\ProjectSettings.asset'),
+            false,
+        );
+    });
 });
 
 describe('containsNulByte', () => {

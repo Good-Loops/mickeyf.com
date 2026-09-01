@@ -29,6 +29,10 @@ which normalizes Unity-generated trailing spaces and tabs in staged text
 assets under `unity/three-bosses` (`.unity`, `.prefab`, `.asset`, `.meta`,
 `.mat`, `.anim`, `.controller`).
 
+`ProjectSettings/ProjectSettings.asset` is intentionally excluded. Unity 6
+owns that file's whitespace serialization; rewriting it in the hook makes the
+Editor restore the same bytes on its next save and creates permanent churn.
+
 - If normalization changes any file, the hook **stops the current commit on
   purpose**. Inspect the diff of the newly normalized, already re-staged
   files, then run the commit again. The second attempt proceeds normally
