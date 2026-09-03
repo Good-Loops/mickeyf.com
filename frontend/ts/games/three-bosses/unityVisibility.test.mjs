@@ -3,6 +3,7 @@ import test from 'node:test';
 import {
     bindUnityVisibility,
     configureThreeBossesTouchControls,
+    isThreeBossesAvailableInCurrentBrowser,
     isThreeBossesMobileBrowser,
     shouldEnableThreeBossesTouchControls,
     THREE_BOSSES_RUN_SESSION_OBJECT,
@@ -73,6 +74,18 @@ test('blocks mobile browsers without mistaking desktop touch devices for phones'
         userAgent: 'Mozilla/5.0 (Macintosh; Intel Mac OS X 14_0)',
         userAgentDataMobile: false,
     }), false);
+});
+
+test('allows an explicit preview without changing real touch-device detection', () => {
+    const android = {
+        maxTouchPoints: 5,
+        userAgent: 'Mozilla/5.0 (Linux; Android 15)',
+        userAgentDataMobile: true,
+    };
+
+    assert.equal(isThreeBossesAvailableInCurrentBrowser(android), false);
+    assert.equal(isThreeBossesAvailableInCurrentBrowser(android, true), true);
+    assert.equal(shouldEnableThreeBossesTouchControls(android), true);
 });
 
 test('sends the resolved mobile-touch permission to the persistent Unity service', () => {

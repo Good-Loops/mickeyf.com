@@ -1,7 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
 import FullscreenButton from '@/components/FullscreenButton';
 import ScoreSubmissionNotice from '@/components/ScoreSubmissionNotice';
-import { isThreeBossesLocalEnabled } from '@/config/featureFlags';
+import {
+    isThreeBossesLocalEnabled,
+    isThreeBossesMobilePreviewRequested,
+} from '@/config/featureFlags';
 import { useAuth } from '@/context/AuthContext';
 import { isThreeBossesAvailableInCurrentBrowser } from '@/games/three-bosses/unityVisibility';
 import { startThreeBossesWebGl, type UnityWebGlHandle } from '@/games/three-bosses/unityWebGl';
@@ -343,7 +346,10 @@ export const ThreeBossesDesktopOnly: React.FC = () => (
 );
 
 export const ThreeBossesAvailabilityGate: React.FC = () => (
-    isThreeBossesAvailableInCurrentBrowser()
+    isThreeBossesAvailableInCurrentBrowser(
+        undefined,
+        isThreeBossesMobilePreviewRequested(),
+    )
         ? <ThreeBosses />
         : <ThreeBossesDesktopOnly />
 );

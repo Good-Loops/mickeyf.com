@@ -76,8 +76,11 @@ export const isThreeBossesAvailableInCurrentBrowser = (
     environment: BrowserDeviceEnvironment | undefined = typeof navigator === 'undefined'
         ? undefined
         : readBrowserDeviceEnvironment(),
+    allowMobilePreview = false,
 ): boolean => (
-    environment === undefined || !isThreeBossesMobileBrowser(environment)
+    allowMobilePreview
+    || environment === undefined
+    || !isThreeBossesMobileBrowser(environment)
 );
 
 /**

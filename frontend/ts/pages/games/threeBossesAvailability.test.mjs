@@ -33,6 +33,9 @@ const {
 const { default: ScoreSubmissionNotice } = await viteServer.ssrLoadModule(
     '/ts/components/ScoreSubmissionNotice.tsx',
 );
+const { isThreeBossesMobilePreviewRequested } = await viteServer.ssrLoadModule(
+    '/ts/config/featureFlags.ts',
+);
 
 const originalNavigator = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
 
@@ -80,6 +83,21 @@ test('the mobile direct-route surface does not render a Unity canvas', () => {
     assert.match(html, /currently available on desktop only/);
     assert.doesNotMatch(html, /<canvas/);
     assert.doesNotMatch(html, /Keyboard controls/);
+});
+
+test('the mobile preview query is exact and remains behind the local feature gate', () => {
+    assert.equal(
+        isThreeBossesMobilePreviewRequested('?three-bosses-mobile-preview=1', true),
+        true,
+    );
+    assert.equal(
+        isThreeBossesMobilePreviewRequested('?three-bosses-mobile-preview=true', true),
+        false,
+    );
+    assert.equal(
+        isThreeBossesMobilePreviewRequested('?three-bosses-mobile-preview=1', false),
+        false,
+    );
 });
 
 test('the branded loading surface exposes real, normalized progress without a heavy image', () => {
