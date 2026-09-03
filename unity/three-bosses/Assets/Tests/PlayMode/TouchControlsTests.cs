@@ -463,74 +463,125 @@ namespace ThreeBosses.Tests
             Assert.That(controlsRootField, Is.Not.Null);
             Assert.That(controlsRootField.GetValue(layout), Is.SameAs(controlsRect));
 
-            AssertGlassControl(
-                controls.Find("Movement Stick"),
-                new Vector2(96f, 96f),
-                new Vector2(90f, 90f),
-                0.085f,
-                0.10f,
-                false,
-                sceneName);
+            Transform movementStick = controls.Find("Movement Stick");
             Transform handle = controls.Find("Movement Stick/Handle");
-            Assert.That(((RectTransform)handle).sizeDelta, Is.EqualTo(new Vector2(38f, 38f)), sceneName);
-            Assert.That(handle.GetComponent<Image>().raycastPadding, Is.EqualTo(new Vector4(-40f, -40f, -40f, -40f)), sceneName);
-            Assert.That(handle.GetComponent<Image>().color.a, Is.EqualTo(0.28f).Within(0.001f), sceneName);
-            Assert.That(handle.GetComponent<OnScreenStick>().movementRange, Is.EqualTo(29f), sceneName);
+            Assert.That(handle, Is.Not.Null, sceneName);
+            OnScreenStick stick = handle.GetComponent<OnScreenStick>();
+            Assert.That(stick, Is.Not.Null, sceneName);
+            Assert.That(stick.movementRange, Is.EqualTo(29f), sceneName);
 
             AssertGlassControl(
-                controls.Find("Jump Button"),
-                new Vector2(64f, 64f),
-                new Vector2(58f, 58f),
-                0.085f,
-                0.10f,
-                true,
+                movementStick,
+                new Vector2(96f, 96f),
+                "JoystickBase",
+                stick,
+                false,
+                Vector4.zero,
                 sceneName);
             AssertGlassControl(
-                controls.Find("Dash Button"),
-                new Vector2(64f, 64f),
-                new Vector2(58f, 58f),
-                0.085f,
-                0.10f,
+                handle,
+                new Vector2(38f, 38f),
+                "JoystickKnob",
+                stick,
                 true,
+                new Vector4(-40f, -40f, -40f, -40f),
+                sceneName);
+
+            Transform jump = controls.Find("Jump Button");
+            Transform dash = controls.Find("Dash Button");
+            Transform fire = controls.Find("Fire Button");
+            Assert.That(jump, Is.Not.Null, sceneName);
+            Assert.That(dash, Is.Not.Null, sceneName);
+            Assert.That(fire, Is.Not.Null, sceneName);
+            Vector4 buttonHitPadding = new(-20f, -20f, -20f, -20f);
+            AssertGlassControl(
+                jump,
+                new Vector2(64f, 64f),
+                "Jump",
+                jump.GetComponent<OnScreenButton>(),
+                true,
+                buttonHitPadding,
                 sceneName);
             AssertGlassControl(
-                controls.Find("Fire Button"),
+                dash,
+                new Vector2(64f, 64f),
+                "Dash",
+                dash.GetComponent<OnScreenButton>(),
+                true,
+                buttonHitPadding,
+                sceneName);
+            AssertGlassControl(
+                fire,
                 new Vector2(72f, 72f),
-                new Vector2(66f, 66f),
-                0.11f,
-                0.12f,
+                "Fire",
+                fire.GetComponent<OnScreenButton>(),
                 true,
+                buttonHitPadding,
                 sceneName);
+
+            Type textType = Type.GetType("TMPro.TMP_Text, Unity.TextMeshPro");
+            Assert.That(textType, Is.Not.Null);
+            Assert.That(controls.GetComponentsInChildren(textType, true), Is.Empty,
+                $"{sceneName} must use icons rather than text labels in the touch HUD.");
+            Assert.That(controls.GetComponentsInChildren<Selectable>(true), Is.Empty,
+                $"{sceneName} touch actions must not become selectable UI buttons.");
+            Type graphicType = Type.GetType("TouchControlGraphic, Assembly-CSharp");
+            Assert.That(graphicType, Is.Not.Null);
+            Assert.That(controls.GetComponentsInChildren(graphicType, true), Has.Length.EqualTo(5), sceneName);
+            Assert.That(
+                controls.GetComponentsInChildren<Graphic>(true)
+                    .Where(graphic => graphic.raycastTarget)
+                    .Select(graphic => graphic.gameObject),
+                Is.EquivalentTo(new[] { handle.gameObject, jump.gameObject, dash.gameObject, fire.gameObject }),
+                $"{sceneName} decorative glass and icons must not intercept touch input.");
         }
 
         private static void AssertGlassControl(
             Transform control,
             Vector2 visibleSize,
-            Vector2 surfaceSize,
-            float rimAlpha,
-            float surfaceAlpha,
+            string expectedStyle,
+            OnScreenControl expectedInputSource,
             bool acceptsRaycasts,
+            Vector4 raycastPadding,
             string sceneName)
         {
             Assert.That(control, Is.Not.Null, sceneName);
             Assert.That(((RectTransform)control).sizeDelta, Is.EqualTo(visibleSize), sceneName);
+            Assert.That(expectedInputSource, Is.Not.Null, sceneName);
 
-            Image rim = control.GetComponent<Image>();
-            Assert.That(rim, Is.Not.Null, sceneName);
-            Assert.That(rim.raycastTarget, Is.EqualTo(acceptsRaycasts), sceneName);
-            Assert.That(rim.color.a, Is.EqualTo(rimAlpha).Within(0.001f), sceneName);
+            Image hitArea = control.GetComponent<Image>();
+            Assert.That(hitArea, Is.Not.Null, sceneName);
+            Assert.That(hitArea.raycastTarget, Is.EqualTo(acceptsRaycasts), sceneName);
+            Assert.That(hitArea.raycastPadding, Is.EqualTo(raycastPadding), sceneName);
+            Assert.That(hitArea.color.a, Is.Zero, sceneName);
             Assert.That(control.GetComponent<Outline>(), Is.Null, sceneName);
+            Assert.That(control.Find("Surface"), Is.Null, sceneName);
+            Assert.That(control.Find("Label"), Is.Null, sceneName);
 
-            Transform surface = control.Find("Surface");
-            Assert.That(surface, Is.Not.Null, sceneName);
-            Assert.That(((RectTransform)surface).sizeDelta, Is.EqualTo(surfaceSize), sceneName);
-            Image surfaceImage = surface.GetComponent<Image>();
-            Assert.That(surfaceImage, Is.Not.Null, sceneName);
-            Assert.That(surfaceImage.raycastTarget, Is.False, sceneName);
-            Assert.That(surfaceImage.color.a, Is.EqualTo(surfaceAlpha).Within(0.001f), sceneName);
+            Transform visual = control.Find("Visual");
+            Assert.That(visual, Is.Not.Null, sceneName);
+            RectTransform visualRect = visual as RectTransform;
+            Assert.That(visualRect, Is.Not.Null, sceneName);
+            Assert.That(visualRect.anchorMin, Is.EqualTo(Vector2.zero), sceneName);
+            Assert.That(visualRect.anchorMax, Is.EqualTo(Vector2.one), sceneName);
+            Assert.That(visualRect.offsetMin, Is.EqualTo(Vector2.zero), sceneName);
+            Assert.That(visualRect.offsetMax, Is.EqualTo(Vector2.zero), sceneName);
 
-            if (acceptsRaycasts)
-                Assert.That(rim.raycastPadding, Is.EqualTo(new Vector4(-20f, -20f, -20f, -20f)), sceneName);
+            Type graphicType = Type.GetType("TouchControlGraphic, Assembly-CSharp");
+            Assert.That(graphicType, Is.Not.Null);
+            Assert.That(visual.GetComponents<Graphic>(), Has.Length.EqualTo(1), sceneName);
+            MaskableGraphic graphic = visual.GetComponent(graphicType) as MaskableGraphic;
+            Assert.That(graphic, Is.Not.Null, sceneName);
+            Assert.That(graphic.raycastTarget, Is.False, sceneName);
+            PropertyInfo style = graphicType.GetProperty("ControlStyle");
+            PropertyInfo inputSource = graphicType.GetProperty("InputSource");
+            PropertyInfo isPressed = graphicType.GetProperty("IsPressed");
+            Assert.That(style, Is.Not.Null);
+            Assert.That(inputSource, Is.Not.Null);
+            Assert.That(isPressed, Is.Not.Null);
+            Assert.That(style.GetValue(graphic).ToString(), Is.EqualTo(expectedStyle), sceneName);
+            Assert.That(inputSource.GetValue(graphic), Is.SameAs(expectedInputSource), sceneName);
+            Assert.That(isPressed.GetValue(graphic), Is.False, sceneName);
         }
 
         private static void AssertAnchors(
