@@ -55,6 +55,10 @@ namespace ThreeBosses.Tests
                 OnScreenStick[] sticks = FindInActiveScene<OnScreenStick>();
                 Assert.That(sticks, Has.Length.EqualTo(1));
                 Assert.That(sticks[0].controlPath, Is.EqualTo("<Gamepad>/leftStick"));
+                Assert.That(
+                    sticks[0].useIsolatedInputActions,
+                    Is.False,
+                    $"{sceneName} must use the EventSystem drag path supported by mobile WebGL.");
 
                 string[] buttonPaths = FindInActiveScene<OnScreenButton>()
                     .Select(button => button.controlPath)
@@ -101,6 +105,78 @@ namespace ThreeBosses.Tests
                 Assert.That(pauseMenu.blocksRaycasts, Is.False);
                 Assert.That(playerInputField.GetValue(pauseControllers[0]), Is.SameAs(playerInput));
             }
+        }
+
+        [UnityTest]
+        public IEnumerator TouchStickDragReachesGameplayAndReturnsToNeutral()
+        {
+            Time.timeScale = 1f;
+            DisarmActiveCountdownRestore();
+            SceneManager.LoadScene(BattleScenes[0]);
+            yield return null;
+
+            Type serviceType = Type.GetType("RunSessionService, Assembly-CSharp");
+            Assert.That(serviceType, Is.Not.Null);
+            Component service = serviceType
+                .GetProperty("Instance", BindingFlags.Static | BindingFlags.Public)
+                ?.GetValue(null) as Component;
+            Assert.That(service, Is.Not.Null);
+            MethodInfo configureTouchControls = serviceType.GetMethod(
+                "ConfigureTouchControls",
+                BindingFlags.Instance | BindingFlags.Public);
+            Assert.That(configureTouchControls, Is.Not.Null);
+            configureTouchControls.Invoke(service, new object[] { "1" });
+            yield return null;
+
+            OnScreenStick stick = FindInActiveScene<OnScreenStick>().Single();
+            Assert.That(stick.useIsolatedInputActions, Is.False);
+            Assert.That(stick.control, Is.Not.Null);
+
+            PlayerInput playerInput = FindInActiveScene<PlayerInput>().Single();
+            // Battle scenes intentionally gate input during their countdown.
+            // This test exercises the same enabled PlayerInput state used after GO.
+            playerInput.enabled = true;
+            InputAction move = playerInput.actions.FindAction("Gameplay/Move", true);
+            Type motorType = Type.GetType("PlayerMotor, Assembly-CSharp");
+            Assert.That(motorType, Is.Not.Null);
+            Component motor = SceneManager.GetActiveScene()
+                .GetRootGameObjects()
+                .SelectMany(root => root.GetComponentsInChildren(motorType, true))
+                .Single();
+            FieldInfo moveInputField = motorType.GetField(
+                "moveInput",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(moveInputField, Is.Not.Null);
+
+            RectTransform handle = (RectTransform)stick.transform;
+            Vector2 restingPosition = handle.anchoredPosition;
+            Vector2 pressPosition = RectTransformUtility.WorldToScreenPoint(null, handle.position);
+            var pointer = new PointerEventData(EventSystem.current)
+            {
+                button = PointerEventData.InputButton.Left,
+                position = pressPosition,
+                pressPosition = pressPosition,
+            };
+
+            stick.OnPointerDown(pointer);
+            pointer.position += Vector2.right * stick.movementRange;
+            stick.OnDrag(pointer);
+            InputSystem.Update();
+
+            Assert.That(handle.anchoredPosition.x, Is.GreaterThan(restingPosition.x));
+            Assert.That(stick.control.ReadValueAsObject(), Is.Not.Null);
+            Assert.That(move.ReadValue<Vector2>().x, Is.GreaterThan(0.5f));
+            Assert.That(
+                ((Vector2)moveInputField.GetValue(motor)).x,
+                Is.GreaterThan(0.5f),
+                "The UI drag must reach PlayerMotor through PlayerInput.");
+
+            stick.OnPointerUp(pointer);
+            InputSystem.Update();
+
+            Assert.That(handle.anchoredPosition, Is.EqualTo(restingPosition));
+            Assert.That(move.ReadValue<Vector2>(), Is.EqualTo(Vector2.zero));
+            Assert.That((Vector2)moveInputField.GetValue(motor), Is.EqualTo(Vector2.zero));
         }
 
         [UnityTest]
