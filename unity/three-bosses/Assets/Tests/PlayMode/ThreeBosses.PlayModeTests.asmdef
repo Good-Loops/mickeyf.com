@@ -2,7 +2,8 @@
   "name": "ThreeBosses.PlayModeTests",
   "rootNamespace": "ThreeBosses.Tests",
   "references": [
-    "Unity.InputSystem"
+    "Unity.InputSystem",
+    "Unity.InputSystem.TestFramework"
   ],
   "includePlatforms": [],
   "excludePlatforms": [],

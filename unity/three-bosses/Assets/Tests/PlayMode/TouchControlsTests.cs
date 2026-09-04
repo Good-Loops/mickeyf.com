@@ -6,7 +6,6 @@ using NUnit.Framework;
 using UnityEngine;
 using UnityEngine.EventSystems;
 using UnityEngine.InputSystem;
-using UnityEngine.InputSystem.LowLevel;
 using UnityEngine.InputSystem.OnScreen;
 using UnityEngine.InputSystem.UI;
 using UnityEngine.SceneManagement;
@@ -111,72 +110,113 @@ namespace ThreeBosses.Tests
         public IEnumerator TouchStickDragReachesGameplayAndReturnsToNeutral()
         {
             Time.timeScale = 1f;
-            DisarmActiveCountdownRestore();
-            SceneManager.LoadScene(BattleScenes[0]);
-            yield return null;
+            var inputFixture = new InputTestFixture();
+            PlayerInput playerInput = null;
+            InputActionAsset playerActions = null;
 
-            Type serviceType = Type.GetType("RunSessionService, Assembly-CSharp");
-            Assert.That(serviceType, Is.Not.Null);
-            Component service = serviceType
-                .GetProperty("Instance", BindingFlags.Static | BindingFlags.Public)
-                ?.GetValue(null) as Component;
-            Assert.That(service, Is.Not.Null);
-            MethodInfo configureTouchControls = serviceType.GetMethod(
-                "ConfigureTouchControls",
-                BindingFlags.Instance | BindingFlags.Public);
-            Assert.That(configureTouchControls, Is.Not.Null);
-            configureTouchControls.Invoke(service, new object[] { "1" });
-            yield return null;
-
-            OnScreenStick stick = FindInActiveScene<OnScreenStick>().Single();
-            Assert.That(stick.useIsolatedInputActions, Is.False);
-            Assert.That(stick.control, Is.Not.Null);
-
-            PlayerInput playerInput = FindInActiveScene<PlayerInput>().Single();
-            // Battle scenes intentionally gate input during their countdown.
-            // This test exercises the same enabled PlayerInput state used after GO.
-            playerInput.enabled = true;
-            InputAction move = playerInput.actions.FindAction("Gameplay/Move", true);
-            Type motorType = Type.GetType("PlayerMotor, Assembly-CSharp");
-            Assert.That(motorType, Is.Not.Null);
-            Component motor = SceneManager.GetActiveScene()
-                .GetRootGameObjects()
-                .SelectMany(root => root.GetComponentsInChildren(motorType, true))
-                .Single();
-            FieldInfo moveInputField = motorType.GetField(
-                "moveInput",
-                BindingFlags.Instance | BindingFlags.NonPublic);
-            Assert.That(moveInputField, Is.Not.Null);
-
-            RectTransform handle = (RectTransform)stick.transform;
-            Vector2 restingPosition = handle.anchoredPosition;
-            Vector2 pressPosition = RectTransformUtility.WorldToScreenPoint(null, handle.position);
-            var pointer = new PointerEventData(EventSystem.current)
+            try
             {
-                button = PointerEventData.InputButton.Left,
-                position = pressPosition,
-                pressPosition = pressPosition,
-            };
+                inputFixture.Setup();
+                DisarmActiveCountdownRestore();
+                SceneManager.LoadScene(BattleScenes[0]);
+                yield return null;
 
-            stick.OnPointerDown(pointer);
-            pointer.position += Vector2.right * stick.movementRange;
-            stick.OnDrag(pointer);
-            InputSystem.Update();
+                Type serviceType = Type.GetType("RunSessionService, Assembly-CSharp");
+                Assert.That(serviceType, Is.Not.Null);
+                Component service = serviceType
+                    .GetProperty("Instance", BindingFlags.Static | BindingFlags.Public)
+                    ?.GetValue(null) as Component;
+                Assert.That(service, Is.Not.Null);
+                MethodInfo configureTouchControls = serviceType.GetMethod(
+                    "ConfigureTouchControls",
+                    BindingFlags.Instance | BindingFlags.Public);
+                Assert.That(configureTouchControls, Is.Not.Null);
+                configureTouchControls.Invoke(service, new object[] { "1" });
+                yield return null;
 
-            Assert.That(handle.anchoredPosition.x, Is.GreaterThan(restingPosition.x));
-            Assert.That(stick.control.ReadValueAsObject(), Is.Not.Null);
-            Assert.That(move.ReadValue<Vector2>().x, Is.GreaterThan(0.5f));
-            Assert.That(
-                ((Vector2)moveInputField.GetValue(motor)).x,
-                Is.GreaterThan(0.5f),
-                "The UI drag must reach PlayerMotor through PlayerInput.");
+                OnScreenStick stick = FindInActiveScene<OnScreenStick>().Single();
+                Assert.That(stick.useIsolatedInputActions, Is.False);
+                Assert.That(stick.control, Is.Not.Null);
 
-            stick.OnPointerUp(pointer);
-            InputSystem.Update();
+                playerInput = FindInActiveScene<PlayerInput>().Single();
+                // Battle scenes intentionally gate input during their countdown.
+                // This test exercises the same enabled PlayerInput state used after GO.
+                playerInput.enabled = true;
+                playerInput.ActivateInput();
+                yield return null;
+                Assert.That(
+                    playerInput.devices.Contains(stick.control.device),
+                    Is.True,
+                    "PlayerInput must pair with the touch HUD's virtual gamepad when gameplay input activates.");
+                playerActions = playerInput.actions;
+                playerActions.devices = new InputDevice[] { stick.control.device };
+                InputAction move = playerActions.FindAction("Gameplay/Move", true);
+                move.Disable();
+                move.Enable();
+                Assert.That(move.enabled, Is.True);
+                Assert.That(
+                    move.controls.Contains(stick.control),
+                    Is.True,
+                    "Gameplay/Move must resolve the touch HUD's virtual stick binding.");
+                Type motorType = Type.GetType("PlayerMotor, Assembly-CSharp");
+                Assert.That(motorType, Is.Not.Null);
+                Component motor = SceneManager.GetActiveScene()
+                    .GetRootGameObjects()
+                    .SelectMany(root => root.GetComponentsInChildren(motorType, true))
+                    .Single();
+                FieldInfo moveInputField = motorType.GetField(
+                    "moveInput",
+                    BindingFlags.Instance | BindingFlags.NonPublic);
+                Assert.That(moveInputField, Is.Not.Null);
 
-            Assert.That(handle.anchoredPosition, Is.EqualTo(restingPosition));
-            Assert.That(move.ReadValue<Vector2>(), Is.EqualTo(Vector2.zero));
-            Assert.That((Vector2)moveInputField.GetValue(motor), Is.EqualTo(Vector2.zero));
+                RectTransform handle = (RectTransform)stick.transform;
+                Vector2 restingPosition = handle.anchoredPosition;
+                Vector2 pressPosition = RectTransformUtility.WorldToScreenPoint(null, handle.position);
+                var pointer = new PointerEventData(EventSystem.current)
+                {
+                    button = PointerEventData.InputButton.Left,
+                    position = pressPosition,
+                    pressPosition = pressPosition,
+                };
+
+                stick.OnPointerDown(pointer);
+                pointer.position += Vector2.right * stick.movementRange;
+                stick.OnDrag(pointer);
+                yield return null;
+
+                Assert.That(handle.anchoredPosition.x, Is.GreaterThan(restingPosition.x));
+                Assert.That(
+                    ((Vector2)stick.control.ReadValueAsObject()).x,
+                    Is.GreaterThan(0.5f),
+                    "The UI drag must drive the virtual gamepad stick.");
+                Assert.That(move.ReadValue<Vector2>().x, Is.GreaterThan(0.5f));
+                Assert.That(
+                    ((Vector2)moveInputField.GetValue(motor)).x,
+                    Is.GreaterThan(0.5f),
+                    "The UI drag must reach PlayerMotor through PlayerInput.");
+
+                stick.OnPointerUp(pointer);
+                yield return null;
+
+                Assert.That(handle.anchoredPosition, Is.EqualTo(restingPosition));
+                Assert.That(move.ReadValue<Vector2>(), Is.EqualTo(Vector2.zero));
+                Assert.That((Vector2)moveInputField.GetValue(motor), Is.EqualTo(Vector2.zero));
+            }
+            finally
+            {
+                try
+                {
+                    DisableActiveOnScreenControls();
+                    if (playerActions != null)
+                        playerActions.devices = null;
+                    if (playerInput != null)
+                        playerInput.enabled = false;
+                }
+                finally
+                {
+                    inputFixture.TearDown();
+                }
+            }
         }
 
         [UnityTest]
@@ -364,53 +404,68 @@ namespace ThreeBosses.Tests
         public IEnumerator FireActionRequiresReleaseBeforeAnotherPress()
         {
             Time.timeScale = 1f;
-            DisarmActiveCountdownRestore();
-            SceneManager.LoadScene(BattleScenes[0]);
-            yield return null;
-
-            PlayerInput playerInput = FindInActiveScene<PlayerInput>().Single();
-            playerInput.enabled = false;
-            InputAction fire = playerInput.actions.FindAction("Gameplay/Fire", true);
-            Gamepad gamepad = InputSystem.AddDevice<Gamepad>();
+            var inputFixture = new InputTestFixture();
+            InputActionAsset inputActions = null;
+            InputAction fire = null;
+            Gamepad gamepad = null;
             int performedCount = 0;
 
             void CountPerformed(InputAction.CallbackContext _) => performedCount++;
 
             try
             {
-                playerInput.actions.devices = new InputDevice[] { gamepad };
+                inputFixture.Setup();
+                DisarmActiveCountdownRestore();
+                SceneManager.LoadScene(BattleScenes[0]);
+                yield return null;
+
+                PlayerInput playerInput = FindInActiveScene<PlayerInput>().Single();
+                playerInput.enabled = false;
+                inputActions = UnityEngine.Object.Instantiate(playerInput.actions);
+                fire = inputActions.FindAction("Gameplay/Fire", true);
+                gamepad = InputSystem.AddDevice<Gamepad>();
+                inputActions.devices = new InputDevice[] { gamepad };
                 fire.performed += CountPerformed;
                 fire.Enable();
 
-                InputSystem.QueueStateEvent(
-                    gamepad,
-                    new GamepadState().WithButton(GamepadButton.West));
-                InputSystem.Update();
+                inputFixture.Press(gamepad.buttonWest);
+                yield return null;
                 Assert.That(performedCount, Is.EqualTo(1));
 
-                InputSystem.QueueStateEvent(
-                    gamepad,
-                    new GamepadState().WithButton(GamepadButton.West));
-                InputSystem.Update();
+                inputFixture.Press(gamepad.buttonWest);
+                yield return null;
                 Assert.That(
                     performedCount,
                     Is.EqualTo(1),
                     "Holding Fire must not repeatedly dispatch presses.");
 
-                InputSystem.QueueStateEvent(gamepad, new GamepadState());
-                InputSystem.Update();
-                InputSystem.QueueStateEvent(
-                    gamepad,
-                    new GamepadState().WithButton(GamepadButton.West));
-                InputSystem.Update();
+                inputFixture.Release(gamepad.buttonWest);
+                yield return null;
+                inputFixture.Press(gamepad.buttonWest);
+                yield return null;
                 Assert.That(performedCount, Is.EqualTo(2));
             }
             finally
             {
-                fire.performed -= CountPerformed;
-                fire.Disable();
-                if (gamepad.added)
-                    InputSystem.RemoveDevice(gamepad);
+                try
+                {
+                    if (fire != null)
+                    {
+                        fire.performed -= CountPerformed;
+                        fire.Disable();
+                    }
+                    if (inputActions != null)
+                    {
+                        inputActions.devices = null;
+                        UnityEngine.Object.DestroyImmediate(inputActions);
+                    }
+                    if (gamepad != null && gamepad.added)
+                        InputSystem.RemoveDevice(gamepad);
+                }
+                finally
+                {
+                    inputFixture.TearDown();
+                }
             }
         }
 
@@ -652,6 +707,17 @@ namespace ThreeBosses.Tests
                 .GetRootGameObjects()
                 .SelectMany(root => root.GetComponentsInChildren<T>(true))
                 .ToArray();
+        }
+
+        private static void DisableActiveOnScreenControls()
+        {
+            // Virtual devices must be released before the isolated input test
+            // runtime is restored, or scene teardown will retain stale state.
+            foreach (OnScreenControl control in FindInActiveScene<OnScreenControl>())
+            {
+                if (control.isActiveAndEnabled)
+                    control.enabled = false;
+            }
         }
 
         private static void DisarmActiveCountdownRestore()
