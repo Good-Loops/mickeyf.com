@@ -21,6 +21,7 @@ public sealed class RunSessionService : MonoBehaviour
     private bool ownsAudioPause;
     private float timeScaleBeforeUserPause = 1f;
     private bool touchControlsEnabled;
+    private bool usePortraitUiLayout;
 
     public static RunSessionService Instance
     {
@@ -43,9 +44,11 @@ public sealed class RunSessionService : MonoBehaviour
     public RunSubmissionStatus SubmissionStatus => submissionCoordinator.Status;
     public bool SubmissionRequiresNewRun => submissionCoordinator.RequiresNewRun;
     public bool TouchControlsEnabled => touchControlsEnabled;
+    public bool UsePortraitUiLayout => usePortraitUiLayout;
 
     public event Action SubmissionStateChanged;
     public event Action TouchControlsAvailabilityChanged;
+    public event Action PortraitUiLayoutChanged;
 
 #if UNITY_WEBGL && !UNITY_EDITOR
     [DllImport("__Internal")]
@@ -102,6 +105,7 @@ public sealed class RunSessionService : MonoBehaviour
         if (submissionCoordinator != null)
             submissionCoordinator.Changed -= OnSubmissionStateChanged;
         TouchControlsAvailabilityChanged = null;
+        PortraitUiLayoutChanged = null;
         instance = null;
     }
 
@@ -117,6 +121,20 @@ public sealed class RunSessionService : MonoBehaviour
 
         touchControlsEnabled = enabled;
         TouchControlsAvailabilityChanged?.Invoke();
+    }
+
+    /// <summary>
+    /// WebGL SendMessage endpoint. The browser reports its outer viewport
+    /// orientation because Unity only sees the fixed 16:9 game canvas.
+    /// </summary>
+    public void ConfigurePortraitUiLayout(string enabledValue)
+    {
+        bool enabled = enabledValue == "1";
+        if (usePortraitUiLayout == enabled)
+            return;
+
+        usePortraitUiLayout = enabled;
+        PortraitUiLayoutChanged?.Invoke();
     }
 
     /// <summary>

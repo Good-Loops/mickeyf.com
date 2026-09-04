@@ -653,11 +653,15 @@ color. The completion screen's existing total time remains the final Kraken
 split, so this presentation change does not alter timing, scoring, ranks, or
 submission behavior.
 
-Deferred Three Bosses mobile UI polish: center the text groups in
-`Transition_BeeToCyborg`, `Transition_CyborgToKraken`, `Defeat_Bee`,
-`Defeat_Cyborg`, and `Defeat_Kraken` at portrait aspect ratios without changing
-their desktop composition. Verify every affected screen on Android and iOS
-before enabling public mobile gameplay.
+Three Bosses portrait outcome layout is implemented. The browser now reports
+the real outer-viewport orientation to Unity, because the embedded player keeps
+rendering at 16:9 even when the phone is upright. Defeat times use the canvas
+center, while the two transition split labels form a compact centered row in
+the clear space between the baked logo and result heading; returning to
+landscape restores every authored desktop transform exactly. The Bee defeat
+screen is verified on a physical Android device and all five scenes have
+automated portrait/desktop restoration coverage. Complete the remaining
+hands-on scene pass on Android and iOS before enabling public mobile gameplay.
 
 For Alpha 0.6.0, playable Three Bosses is desktop-only. Recognized Android and
 iOS browsers do not receive the Games card, and direct mobile navigation shows

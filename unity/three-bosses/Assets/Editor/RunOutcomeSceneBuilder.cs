@@ -54,13 +54,15 @@ public static class RunOutcomeSceneBuilder
                 $"{ScreenRoot}/Boss1Defeated.png",
                 BossId.Cyborg,
                 "Level2_CyborgBoss",
-                new Color(0.58f, 0.86f, 0f, 1f));
+                new Color(0.58f, 0.86f, 0f, 1f),
+                315f);
             BuildTransitionScene(
                 CyborgTransitionPath,
                 $"{ScreenRoot}/Boss2Defeated.png",
                 BossId.Kraken,
                 "Level3_Kraken",
-                new Color(1f, 0.12f, 0.08f, 1f));
+                new Color(1f, 0.12f, 0.08f, 1f),
+                298f);
 
             BuildDefeatScene(
                 BeeDefeatPath,
@@ -129,12 +131,52 @@ public static class RunOutcomeSceneBuilder
         }
     }
 
+    [MenuItem("Three Bosses/Results/Refresh Portrait Text Layout")]
+    public static void RefreshPortraitTextLayout()
+    {
+        if (EditorApplication.isPlayingOrWillChangePlaymode)
+            throw new InvalidOperationException("Exit Play Mode before refreshing portrait text layout.");
+
+        Scene originalScene = SceneManager.GetActiveScene();
+        if (originalScene.isDirty)
+            throw new InvalidOperationException("Save the active scene before refreshing portrait text layout.");
+
+        string originalPath = originalScene.path;
+
+        try
+        {
+            RefreshPortraitTextLayoutScene(
+                BeeTransitionPath,
+                315f,
+                "Boss Split Caption",
+                "Boss Split Value");
+            RefreshPortraitTextLayoutScene(
+                CyborgTransitionPath,
+                298f,
+                "Boss Split Caption",
+                "Boss Split Value");
+            RefreshPortraitTextLayoutScene(BeeDefeatPath, null, "Time Survived Value");
+            RefreshPortraitTextLayoutScene(CyborgDefeatPath, null, "Time Survived Value");
+            RefreshPortraitTextLayoutScene(KrakenDefeatPath, null, "Time Survived Value");
+
+            AssetDatabase.SaveAssets();
+            AssetDatabase.Refresh();
+            Debug.Log("Portrait text layout was refreshed in all transition and defeat scenes.");
+        }
+        finally
+        {
+            if (!string.IsNullOrWhiteSpace(originalPath))
+                EditorSceneManager.OpenScene(originalPath, OpenSceneMode.Single);
+        }
+    }
+
     private static void BuildTransitionScene(
         string scenePath,
         string spritePath,
         BossId expectedPendingBoss,
         string destinationSceneName,
-        Color accent)
+        Color accent,
+        float portraitSplitTop)
     {
         Scene scene = CreateArtworkScene(
             spritePath,
@@ -157,6 +199,7 @@ public static class RunOutcomeSceneBuilder
             32f);
         SetTopLeftRect(splitTimeLabel.rectTransform, new Rect(74f, 88f, 300f, 44f));
         ConfigureSplitTimeText(splitTimeLabel, accent);
+        AddPortraitSplitRow(artRoot, portraitSplitTop, splitCaption, splitTimeLabel);
 
         GameObject controllerObject = new("Transition Controller");
         BossTransitionScreenController controller = controllerObject.AddComponent<BossTransitionScreenController>();
@@ -184,6 +227,7 @@ public static class RunOutcomeSceneBuilder
         TMP_Text timeLabel = CreateText("Time Survived Value", artRoot, "00:00.000", 52f);
         SetTopLeftRect(timeLabel.rectTransform, timeRect);
         ConfigureValueText(timeLabel, accent);
+        AddPortraitTextLayout(artRoot, timeLabel);
 
         Button tryAgainButton = CreateButton("Try Again Button", artRoot, tryAgainRect, "TRY AGAIN", 32f, accent);
         Button backToMenuButton = CreateButton("Back To Menu Button", artRoot, menuRect, "BACK TO MENU", 30f, accent);
@@ -379,6 +423,83 @@ public static class RunOutcomeSceneBuilder
         return scene.GetRootGameObjects()
             .SelectMany(root => root.GetComponentsInChildren<T>(true))
             .FirstOrDefault();
+    }
+
+    private static void RefreshPortraitTextLayoutScene(
+        string scenePath,
+        float? portraitSplitTop,
+        params string[] targetNames)
+    {
+        Scene scene = EditorSceneManager.OpenScene(scenePath, OpenSceneMode.Single);
+        RectTransform[] artRoots = scene.GetRootGameObjects()
+            .SelectMany(root => root.GetComponentsInChildren<RectTransform>(true))
+            .Where(rectTransform => rectTransform.name == "Art Root")
+            .ToArray();
+
+        if (artRoots.Length != 1)
+            throw new InvalidOperationException(
+                $"{scene.name} must contain exactly one Art Root; found {artRoots.Length}.");
+
+        RectTransform artRoot = artRoots[0];
+        TMP_Text[] targets = targetNames
+            .Select(targetName => artRoot.GetComponentsInChildren<TMP_Text>(true)
+                .SingleOrDefault(candidate => candidate.name == targetName)
+                ?? throw new InvalidOperationException(
+                    $"{scene.name} is missing {targetName} under Art Root."))
+            .ToArray();
+
+        PortraitTextGroupLayout[] layouts = artRoot.GetComponents<PortraitTextGroupLayout>();
+        if (layouts.Length > 1)
+            throw new InvalidOperationException(
+                $"{scene.name} contains duplicate portrait text layouts.");
+
+        PortraitTextGroupLayout layout = layouts.SingleOrDefault()
+            ?? artRoot.gameObject.AddComponent<PortraitTextGroupLayout>();
+        ConfigurePortraitTextLayout(layout, targets, portraitSplitTop);
+        EditorUtility.SetDirty(layout);
+
+        SaveScene(scene, scenePath);
+    }
+
+    private static void AddPortraitTextLayout(RectTransform artRoot, params TMP_Text[] targets)
+    {
+        PortraitTextGroupLayout layout = artRoot.gameObject.AddComponent<PortraitTextGroupLayout>();
+        ConfigurePortraitTextLayout(layout, targets, null);
+    }
+
+    private static void AddPortraitSplitRow(
+        RectTransform artRoot,
+        float portraitTop,
+        params TMP_Text[] targets)
+    {
+        PortraitTextGroupLayout layout = artRoot.gameObject.AddComponent<PortraitTextGroupLayout>();
+        ConfigurePortraitTextLayout(layout, targets, portraitTop);
+    }
+
+    private static void ConfigurePortraitTextLayout(
+        PortraitTextGroupLayout layout,
+        IReadOnlyList<TMP_Text> targets,
+        float? portraitSplitTop)
+    {
+        SetObjectReferences(layout, "textTargets", targets);
+
+        Vector2[] positions = portraitSplitTop.HasValue
+            ? new[]
+            {
+                new Vector2(-150f, -portraitSplitTop.Value),
+                new Vector2(150f, -portraitSplitTop.Value),
+            }
+            : System.Array.Empty<Vector2>();
+        Vector2[] sizes = portraitSplitTop.HasValue
+            ? new[]
+            {
+                new Vector2(300f, 36f),
+                new Vector2(300f, 36f),
+            }
+            : System.Array.Empty<Vector2>();
+
+        SetVector2Values(layout, "portraitPositions", positions);
+        SetVector2Values(layout, "portraitSizes", sizes);
     }
 
     private static GameObject FindOrCreateRoot(Scene scene, string name)
@@ -617,6 +738,42 @@ public static class RunOutcomeSceneBuilder
         SerializedProperty property = serializedObject.FindProperty(propertyName)
             ?? throw new InvalidOperationException($"{target.GetType().Name} is missing {propertyName}.");
         property.objectReferenceValue = value;
+        serializedObject.ApplyModifiedPropertiesWithoutUndo();
+    }
+
+    private static void SetObjectReferences(
+        UnityEngine.Object target,
+        string propertyName,
+        IReadOnlyList<UnityEngine.Object> values)
+    {
+        SerializedObject serializedObject = new(target);
+        SerializedProperty property = serializedObject.FindProperty(propertyName)
+            ?? throw new InvalidOperationException($"{target.GetType().Name} is missing {propertyName}.");
+        if (!property.isArray)
+            throw new InvalidOperationException($"{target.GetType().Name}.{propertyName} is not an array.");
+
+        property.arraySize = values.Count;
+        for (int index = 0; index < values.Count; index++)
+            property.GetArrayElementAtIndex(index).objectReferenceValue = values[index];
+
+        serializedObject.ApplyModifiedPropertiesWithoutUndo();
+    }
+
+    private static void SetVector2Values(
+        UnityEngine.Object target,
+        string propertyName,
+        IReadOnlyList<Vector2> values)
+    {
+        SerializedObject serializedObject = new(target);
+        SerializedProperty property = serializedObject.FindProperty(propertyName)
+            ?? throw new InvalidOperationException($"{target.GetType().Name} is missing {propertyName}.");
+        if (!property.isArray)
+            throw new InvalidOperationException($"{target.GetType().Name}.{propertyName} is not an array.");
+
+        property.arraySize = values.Count;
+        for (int index = 0; index < values.Count; index++)
+            property.GetArrayElementAtIndex(index).vector2Value = values[index];
+
         serializedObject.ApplyModifiedPropertiesWithoutUndo();
     }
 

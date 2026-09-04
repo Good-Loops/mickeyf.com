@@ -2,6 +2,7 @@ export const THREE_BOSSES_RUN_SESSION_OBJECT = 'Three Bosses Run Session' as con
 const PAUSE_METHOD = 'PauseForDocumentHidden';
 const RESUME_METHOD = 'ResumeFromDocumentHidden';
 const CONFIGURE_TOUCH_CONTROLS_METHOD = 'ConfigureTouchControls';
+const CONFIGURE_PORTRAIT_UI_METHOD = 'ConfigurePortraitUiLayout';
 
 export type BrowserDeviceEnvironment = Readonly<{
     maxTouchPoints: number;
@@ -13,6 +14,13 @@ type NavigatorWithUserAgentData = Navigator & Readonly<{
     userAgentData?: Readonly<{
         mobile?: boolean;
     }>;
+}>;
+
+type ResponsiveWindow = Readonly<{
+    innerWidth: number;
+    innerHeight: number;
+    addEventListener: (type: 'resize' | 'orientationchange', listener: EventListener) => void;
+    removeEventListener: (type: 'resize' | 'orientationchange', listener: EventListener) => void;
 }>;
 
 type UnityMainLoop = Readonly<{
@@ -64,6 +72,14 @@ export const shouldEnableThreeBossesTouchControls = (
     && isThreeBossesMobileBrowser(environment)
 );
 
+export const shouldUseThreeBossesPortraitLayout = (
+    environment: BrowserDeviceEnvironment,
+    viewport: Pick<ResponsiveWindow, 'innerWidth' | 'innerHeight'>,
+): boolean => (
+    shouldEnableThreeBossesTouchControls(environment)
+    && viewport.innerHeight > viewport.innerWidth
+);
+
 const readBrowserDeviceEnvironment = (
     browserNavigator: NavigatorWithUserAgentData = navigator as NavigatorWithUserAgentData,
 ): BrowserDeviceEnvironment => ({
@@ -101,6 +117,46 @@ export const configureThreeBossesTouchControls = (
         CONFIGURE_TOUCH_CONTROLS_METHOD,
         shouldEnableThreeBossesTouchControls(environment) ? '1' : '0',
     );
+};
+
+/**
+ * Keeps Unity's outcome-screen presentation aligned with the browser's real
+ * orientation. Unity itself always renders into a 16:9 canvas and therefore
+ * cannot infer that the surrounding mobile page is portrait.
+ */
+export const bindThreeBossesPortraitLayout = (
+    instance: UnityVisibilityBridgeInstance,
+    environment: BrowserDeviceEnvironment = readBrowserDeviceEnvironment(),
+    viewportWindow: ResponsiveWindow = window,
+): (() => void) => {
+    if (typeof instance.SendMessage !== 'function') {
+        throw new Error('The Unity WebGL player is missing the required portrait-layout API.');
+    }
+
+    let lastEnabled: boolean | null = null;
+    const synchronize = (): void => {
+        const enabled = shouldUseThreeBossesPortraitLayout(environment, viewportWindow);
+        if (enabled === lastEnabled) return;
+
+        instance.SendMessage?.(
+            THREE_BOSSES_RUN_SESSION_OBJECT,
+            CONFIGURE_PORTRAIT_UI_METHOD,
+            enabled ? '1' : '0',
+        );
+        lastEnabled = enabled;
+    };
+
+    synchronize();
+    viewportWindow.addEventListener('resize', synchronize);
+    viewportWindow.addEventListener('orientationchange', synchronize);
+
+    let released = false;
+    return () => {
+        if (released) return;
+        released = true;
+        viewportWindow.removeEventListener('resize', synchronize);
+        viewportWindow.removeEventListener('orientationchange', synchronize);
+    };
 };
 
 /**

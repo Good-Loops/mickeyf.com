@@ -634,6 +634,7 @@ GameObject:
   m_Component:
   - component: {fileID: 974741859}
   - component: {fileID: 974741860}
+  - component: {fileID: 974741861}
   m_Layer: 0
   m_Name: Art Root
   m_TagString: Untagged
@@ -678,6 +679,22 @@ MonoBehaviour:
   m_EditorClassIdentifier: UnityEngine.UI::UnityEngine.UI.AspectRatioFitter
   m_AspectMode: 3
   m_AspectRatio: 1.7768332
+--- !u!114 &974741861
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 974741858}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 41f0277d50eb23548bc744e3a232abe4, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Assembly-CSharp::PortraitTextGroupLayout
+  textTargets:
+  - {fileID: 1210882732}
+  portraitPositions: []
+  portraitSizes: []
 --- !u!1 &1035911064
 GameObject:
   m_ObjectHideFlags: 0

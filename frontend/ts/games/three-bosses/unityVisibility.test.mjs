@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+    bindThreeBossesPortraitLayout,
     bindUnityVisibility,
     configureThreeBossesTouchControls,
     isThreeBossesAvailableInCurrentBrowser,
     isThreeBossesMobileBrowser,
     shouldEnableThreeBossesTouchControls,
+    shouldUseThreeBossesPortraitLayout,
     THREE_BOSSES_RUN_SESSION_OBJECT,
 } from './unityVisibility.ts';
 
@@ -116,6 +118,91 @@ test('sends the resolved mobile-touch permission to the persistent Unity service
             userAgent: 'Mozilla/5.0 (Linux; Android 10; K)',
         }),
         /missing the required touch-controls API/,
+    );
+});
+
+test('uses portrait layout only for a touch-capable mobile browser in portrait', () => {
+    const android = {
+        maxTouchPoints: 5,
+        userAgent: 'Mozilla/5.0 (Linux; Android 15)',
+        userAgentDataMobile: true,
+    };
+    const desktop = {
+        maxTouchPoints: 0,
+        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
+        userAgentDataMobile: false,
+    };
+
+    assert.equal(shouldUseThreeBossesPortraitLayout(android, {
+        innerWidth: 390,
+        innerHeight: 844,
+    }), true);
+    assert.equal(shouldUseThreeBossesPortraitLayout(android, {
+        innerWidth: 844,
+        innerHeight: 390,
+    }), false);
+    assert.equal(shouldUseThreeBossesPortraitLayout(desktop, {
+        innerWidth: 390,
+        innerHeight: 844,
+    }), false);
+});
+
+class FakeResponsiveWindow {
+    constructor(innerWidth, innerHeight) {
+        this.innerWidth = innerWidth;
+        this.innerHeight = innerHeight;
+        this.listeners = {
+            resize: new Set(),
+            orientationchange: new Set(),
+        };
+    }
+
+    addEventListener(type, listener) {
+        this.listeners[type].add(listener);
+    }
+
+    removeEventListener(type, listener) {
+        this.listeners[type].delete(listener);
+    }
+
+    resizeTo(innerWidth, innerHeight, eventType = 'resize') {
+        this.innerWidth = innerWidth;
+        this.innerHeight = innerHeight;
+        for (const listener of this.listeners[eventType]) listener(new Event(eventType));
+    }
+}
+
+test('synchronizes portrait layout on rotation and releases both listeners', () => {
+    const messages = [];
+    const instance = {
+        SendMessage: (...message) => messages.push(message),
+    };
+    const android = {
+        maxTouchPoints: 5,
+        userAgent: 'Mozilla/5.0 (Linux; Android 15)',
+        userAgentDataMobile: true,
+    };
+    const viewport = new FakeResponsiveWindow(390, 844);
+
+    const release = bindThreeBossesPortraitLayout(instance, android, viewport);
+    viewport.resizeTo(400, 820);
+    viewport.resizeTo(844, 390, 'orientationchange');
+    viewport.resizeTo(390, 844);
+    release();
+    release();
+    viewport.resizeTo(844, 390);
+
+    assert.deepEqual(messages, [
+        [receiver, 'ConfigurePortraitUiLayout', '1'],
+        [receiver, 'ConfigurePortraitUiLayout', '0'],
+        [receiver, 'ConfigurePortraitUiLayout', '1'],
+    ]);
+    assert.equal(viewport.listeners.resize.size, 0);
+    assert.equal(viewport.listeners.orientationchange.size, 0);
+
+    assert.throws(
+        () => bindThreeBossesPortraitLayout({}, android, viewport),
+        /missing the required portrait-layout API/,
     );
 });
 

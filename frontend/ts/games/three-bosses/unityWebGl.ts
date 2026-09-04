@@ -3,6 +3,7 @@ import {
     THREE_BOSSES_BUILD_BASE_PATH,
 } from '@/config/featureFlags';
 import {
+    bindThreeBossesPortraitLayout,
     bindUnityVisibility,
     configureThreeBossesTouchControls,
     type UnityVisibilityBridgeInstance,
@@ -238,6 +239,7 @@ const startNewHandle = async ({
         }, onProgress);
 
         let releaseVisibility: (() => void) | null = null;
+        let releasePortraitLayout: (() => void) | null = null;
         let releaseSubmissionBridge: (() => void) | null = null;
         let browserBindingsReleased = false;
 
@@ -246,6 +248,7 @@ const startNewHandle = async ({
             // behind the later main-menu readiness signal.
             await handOffThreeBossesCanvas(gameReady, onCanvasOwned);
             configureThreeBossesTouchControls(instance);
+            releasePortraitLayout = bindThreeBossesPortraitLayout(instance);
             releaseVisibility = bindUnityVisibility(instance);
             releaseSubmissionBridge = bindThreeBossesSubmissionBridge(
                 instance,
@@ -258,6 +261,11 @@ const startNewHandle = async ({
                 releaseSubmissionBridge?.();
             } catch {
                 // Continue tearing down the partially initialized player.
+            }
+            try {
+                releasePortraitLayout?.();
+            } catch {
+                // Quit remains authoritative if responsive-layout cleanup fails.
             }
             try {
                 releaseVisibility?.();
@@ -281,6 +289,11 @@ const startNewHandle = async ({
                 releaseSubmissionBridge?.();
             } catch {
                 // Quit remains authoritative if a browser-global cleanup fails.
+            }
+            try {
+                releasePortraitLayout?.();
+            } catch {
+                // Quit remains authoritative if responsive-layout cleanup fails.
             }
             try {
                 releaseVisibility?.();
