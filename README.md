@@ -138,7 +138,8 @@ copied into Git.
    boundaries. The tracked terminal layout then starts four terminals whenever
    the repository opens:
 
-   - `front`, running the frontend Vite server with a cyan browser icon;
+   - `front`, running the frontend Vite server and local Three Bosses WebGL
+     asset server with a cyan browser icon;
    - `back`, starting the pinned Cloud SQL Auth Proxy, backend compiler/watch,
      and nodemon server together with prefixed logs and a red server icon;
    - `docs`, running the TypeDoc development server with a green book icon; and
@@ -166,7 +167,8 @@ Default local ports are:
 - Backend: `http://localhost:8080`
 - Cloud SQL Proxy: `127.0.0.1:3306`
 - TypeDoc server: `http://localhost:8081`
-- Three Bosses WebGL assets (when enabled): `http://127.0.0.1:4174`
+- Three Bosses WebGL assets (started with frontend development):
+  `http://127.0.0.1:4174`
 
 If port 8080 is occupied, identify its owning process before stopping it. The
 backend start command deliberately does not kill unrelated processes.
@@ -198,14 +200,18 @@ Three Bosses leaderboard remains available.
    VITE_ENABLE_THREE_BOSSES_LOCAL=1
    ```
 
-3. Start the external asset server in a separate terminal:
+3. Start the frontend development stack:
 
    ```powershell
-   npm run three-bosses:webgl:serve
+   npm --prefix frontend run dev
    ```
 
-4. Start or restart the frontend, then open
-   `http://localhost:5173/games/three-bosses`.
+   This command supervises Vite and the loopback WebGL asset server together,
+   so stopping either process stops the pair. The standalone
+   `npm run three-bosses:webgl:serve` command remains available for focused
+   server recovery and debugging.
+
+4. Open `http://localhost:5173/games/three-bosses`.
 
 In development, the frontend proxies generated assets through
 `/__local/three-bosses/`; the local build remains outside the repository and

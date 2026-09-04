@@ -7,7 +7,8 @@
         "npm": ">=11.0.0 <12.0.0"
     },
     "scripts": {
-        "dev": "vite",
+        "dev": "npm --prefix .. run frontend:dev:local --",
+        "dev:vite": "vite",
         "test": "tsc -p tsconfig.json --noEmit && node --experimental-strip-types --test ts/components/fullscreenMode.test.mjs ts/games/three-bosses/unityGameReady.test.mjs ts/games/three-bosses/unitySubmissionBridge.test.mjs ts/games/three-bosses/unityVisibility.test.mjs ts/pages/games/threeBossesAvailability.test.mjs ts/pages/leaderboards/leaderboardRoutes.test.mjs ts/services/leaderboardApi.test.mjs",
         "build": "vite build",
         "preview": "vite preview",

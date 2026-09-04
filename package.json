@@ -10,6 +10,7 @@
 		"infra:up": "docker compose -f compose.yaml up -d cloud-sql-proxy",
 		"infra:down": "docker compose -f compose.yaml down",
 		"backend:dev:local": "npm run infra:up && concurrently --kill-others-on-fail --names proxy,watch,server --prefix-colors yellow,magenta,red \"docker compose -f compose.yaml logs --tail=20 -f cloud-sql-proxy\" \"npm --prefix backend run watch\" \"node scripts/wait-for-port.mjs 127.0.0.1 3306 60000 && npm --prefix backend run dev\"",
+		"frontend:dev:local": "concurrently --kill-others --passthrough-arguments --names webgl,front --prefix-colors blue,cyan \"npm run three-bosses:webgl:serve\" \"node scripts/wait-for-port.mjs 127.0.0.1 4174 10000 && npm --prefix frontend run dev:vite -- {@}\" --",
 		"three-bosses:webgl:build": "node scripts/build-three-bosses-webgl.mjs",
 		"three-bosses:webgl:release:build": "node scripts/build-three-bosses-webgl.mjs --release",
 		"three-bosses:webgl:package": "node scripts/package-three-bosses-webgl-release.mjs",

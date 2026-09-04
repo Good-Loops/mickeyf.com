@@ -87,10 +87,12 @@ The guarded wrapper confirms that the Editor is ready and stopped, waits for
 the asynchronous build to finish, restores the exact pre-build bytes of the
 three known Unity/URP settings files, reloads those files in the Editor, and
 fails if any other Unity source changes. It preserves legitimate existing
-working-tree bytes rather than restoring from Git. Serve the output with
-`npm run three-bosses:webgl:serve`; do not open or publish Unity's generated
-HTML directly. Set `THREE_BOSSES_WEBGL_DIR` to override the default external
-output directory. The stable local website URL is
+working-tree bytes rather than restoring from Git. The normal
+`npm --prefix frontend run dev` command serves the output alongside Vite;
+`npm run three-bosses:webgl:serve` remains available for standalone recovery.
+Do not open or publish Unity's generated HTML directly. Set
+`THREE_BOSSES_WEBGL_DIR` to override the default external output directory.
+The stable local website URL is
 `http://localhost:5173/games/three-bosses`.
 
 ### Production release
