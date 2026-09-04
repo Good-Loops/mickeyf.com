@@ -4,6 +4,12 @@ This tracked roadmap records the active continuation of the broader migration
 and game plan. Detailed implementation decisions remain subject to review at
 each phase boundary.
 
+Status snapshot (2026-09-04): Alpha 0.6.0 and the site redesign are published
+from `main`. Active work continues on `feature/three-bosses-polish`, with mobile
+gameplay still gated from production until its physical-device acceptance pass
+is complete. Dated deployment and migration passages below are retained as
+historical evidence; current operational state must be verified directly.
+
 ## Phase 12 — Three Bosses local game flow
 
 - Steps 12.1–12.9: implemented on the phase branch and undergoing gameplay and
@@ -13,9 +19,9 @@ each phase boundary.
   `01:00` is S; `01:00.000` through `01:20.000` is A; `01:20.001` through
   `01:40.000` is B; `01:40.001` through `02:00.000` is C; and anything slower
   is D. The reported `01:22` warm-up is B and remains excluded from the ten
-  measured calibration runs. These bands may be refined before public write
-  activation; changing them after activation requires an explicit historical
-  reclassification or rules-version decision.
+  measured calibration runs. These bands remain provisional; changing them
+  after write activation requires an explicit historical reclassification or
+  rules-version decision.
 - Step 12.11 — edge cases and presentation polish:
   - Step 12.11A — rename permanent Unity Editor utilities: **completed** in
     commit `46c3c775`.
@@ -44,23 +50,23 @@ each phase boundary.
     countdown regression coverage passed 19 EditMode and 20 PlayMode tests in
     commits `7da148d7` and `5062c6b5`. Mike confirmed audible mute/unmute
     behavior on 2026-08-24. His continuous hands-on combat-feel, weapon,
-    pickup, and full normal-route check remains before release.
+    pickup, and full normal-route check remains before the next Three Bosses
+    release.
 
 Phase 12 release acceptance still requires the remaining hands-on gameplay
 check, passing Unity compilation and automated tests, clean asset/meta integrity,
 and a verified complete normal route. The provisional rank implementation is
-complete. The Alpha score-submission candidate is now implemented behind the
-fail-closed release gate; live production remains disabled until the packaged
-player and authenticated production preview are explicitly approved.
+complete. Production currently advertises p4-Vega through its legacy submission
+path and Three Bosses as enabled, but each new release candidate still requires
+the local/live flag and signed-in end-to-end verification recorded under Phase
+13.
 
 ## Phase 13 — Website and leaderboard integration
 
 The local Three Bosses result flow is stable enough for integration work.
-Phase 13 completed on `feature/new-leaderboard` on 2026-08-26. This does not
-authorize a merge or push to `main`: rotate from its final commit into the next
-broad feature branch and retire the old branch instead. Keep `main` deferred
-until the Phase 14 site-wide responsive, information-architecture, and
-literal-dark redesign is complete and separately approved.
+Phase 13 completed on `feature/new-leaderboard` on 2026-08-26 and was later
+released through Alpha 0.6.0. Current Three Bosses polish remains isolated on
+`feature/three-bosses-polish` until its next reviewed release checkpoint.
 
 ### Step 13.1 — multi-game contract and migration design
 
@@ -385,21 +391,22 @@ are removed; migration history and post-drop API checks passed. The multi-game
 frontend is recorded below.
 
 The additive backend catalog and per-game routes were implemented and verified
-on 2026-08-26. The catalog is projected from server-owned definitions;
-the generic p4-Vega response adds only version metadata and one-based positions
-to existing rows. Three Bosses reads now query real current-rule personal bests
-in deterministic completion-time order even while writes are disabled. Its
-authenticated run endpoint is complete behind the exact fail-closed
+on 2026-08-26. At that checkpoint, the catalog was projected from server-owned
+definitions; the generic p4-Vega response added only version metadata and
+one-based positions to existing rows. Three Bosses reads queried real
+current-rule personal bests in deterministic completion-time order while writes
+were disabled. Its authenticated run endpoint was complete behind the exact
+fail-closed
 `THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=true` opt-in: strict JSON/version/UUID/time
 validation, explicit cookie-origin protection, server-derived score, immutable
 idempotent run history, transactional strict personal bests, and per-user and
 per-IP limits are covered by unit, security, rollback, concurrency, and
-isolated-MySQL tests. The server now derives the provisional S–D rank and
-arcade-scale score from the same canonical integer millisecond result. These routes have not been
-enabled for Three Bosses production writes: the routes are present in the
-serving p4-enabled generic-only revision, but
-`THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=false` remains enforced. They do not
-replace the remaining submission-enablement gate.
+isolated-MySQL tests. The server derived the provisional S–D rank and
+arcade-scale score from the same canonical integer millisecond result. At that
+checkpoint, these routes had not been enabled for Three Bosses production
+writes: the routes were present in the serving p4-enabled generic-only revision,
+but `THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=false` was enforced. Later activation
+and current verification are recorded in the status section below.
 
 The credential-safe browser submission client and Unity host bridge were
 committed at `c4349f7c`; the Unity caller, receiver, canonical millisecond
@@ -536,25 +543,27 @@ passed its historical two-hour source-freshness gate before
 
 ### Step 13.2 — Three Bosses WebGL integration and production preparation
 
-Status: In progress. The development-only Games card, route, external asset
-server, Unity loader, and first live browser launch/re-entry/fullscreen checks
-were implemented on 2026-08-25. The production path now uses a same-origin,
+Status: Desktop Alpha released; mobile polish and acceptance in progress. The
+Games card, route, external development asset server, Unity loader, and first
+live browser launch/re-entry/fullscreen checks were implemented on 2026-08-25.
+The production path now uses a same-origin,
 content-addressed Firebase Hosting release plus a no-store stable manifest,
 Firebase-managed transport compression, exact MIME/cache headers, a
 source-bound release certificate, and
 offline plus hosted-byte validation. A fresh production candidate was built,
 packaged, validated through the Firebase Hosting emulator, and started in a
-real Chrome canvas on 2026-08-29. The full three-level hands-on browser matrix
-below remains a release gate; no WebGL build or route has been published. On
+real Chrome canvas on 2026-08-29, and the desktop WebGL route was subsequently
+published with Alpha 0.6.0. The full three-level hands-on browser matrix below
+remains a gate for the next Three Bosses release. On
 2026-08-31, the Alpha score path gained a server-issued, user/run/version-bound
 30-minute ticket, a 10-second minimum completion bound, exact-replay safety,
 and one authenticated HTTP/MySQL integration covering ticket issuance,
 submission, replay, personal best, and leaderboard readback.
 
-Three Bosses is present on the feature branch and locally playable at
-`/games/three-bosses`. Before public release, complete the remaining hands-on
-gameplay matrix and a signed-in canonical submission check. Do not merge to
-`main` or publish until Mike separately approves release.
+Three Bosses is published for desktop and locally playable at
+`/games/three-bosses`. Before the next release, complete the remaining hands-on
+gameplay matrix, mobile-device acceptance, and a signed-in canonical submission
+check. Merge and publish only after Mike separately approves that release.
 
 Keep `/games/three-bosses` as the stable browser-facing local URL. Updating the
 game replaces the build at the same external location, so it normally does not
@@ -583,8 +592,9 @@ must:
   second running instance during development remounts;
 - provide an appropriately sized game frame plus clear focus and fullscreen
   controls without trapping normal website navigation;
-- display the provisional S–D ranks and arcade-scale score while keeping
-  server writes fail-closed until the independent runtime opt-in is approved;
+- display the provisional S–D ranks and arcade-scale score while keeping the
+  server's default fail-closed and verifying the separately deployed runtime
+  opt-ins before every release;
 - keep development WebGL output outside the repository; create production
   output only with `three-bosses:webgl:release:build`, then package the
   certified bytes into one content-addressed release plus the stable manifest
@@ -604,11 +614,13 @@ message is not an acceptable clean-console result. Use the local browser to
 inspect the new Games entry and game page at desktop, narrow/mobile, and
 ultrawide sizes. Narrow/mobile acceptance covers the responsive website shell;
 the 2026-08-29 shell audit added gesture isolation to the canvas and removed
-page-only glass framing from fullscreen. True mobile gameplay is a separate
-Unity Input System slice: retain the fixed 1280 × 720 internal world, route
-movement, jump, dash, aim, and fire through shared actions, and reuse one native
-touch HUD across all three boss scenes. Until that slice passes real Android
-multitouch, rotation, safe-area, and scene-transition checks, gameplay
+page-only glass framing from fullscreen. The current internal world remains
+1280 × 720; audit the proposed 1920 × 1080 migration before changing it so a
+render-resolution improvement is not confused with a gameplay-world rewrite.
+Movement, jump, dash, aim, and fire now route through shared actions, and one
+native touch HUD is reused across all three boss scenes on the polish branch.
+Until that slice passes real Android and iOS multitouch, rotation, safe-area,
+fullscreen, performance, and scene-transition checks, production gameplay
 acceptance remains desktop.
 Verify direct navigation and refresh, loading and error states,
 canvas scaling, focus recovery, keyboard controls, fullscreen enter/exit,
@@ -622,22 +634,23 @@ The Alpha 0.6.0 pre-release pause slice is implemented in all three battle
 scenes: a compact pause-icon button opens a simple Resume/Main Menu overlay. User
 pause and browser-visibility pause compose safely, gameplay input is gated,
 and gameplay, active-combat timing, and audio restore only after every active
-pause reason is released. Further visual polish remains part of the later
-Three Bosses polish phase.
+pause reason is released. The pause button, panel, and actions received the same
+procedural translucent-glass design as the mobile HUD in commit `c7b9973f`.
 
 Three Bosses desktop onboarding now includes a concise glass keybindings strip
 below the game on desktop-sized layouts only. It documents the primary movement,
 aiming, jump, dash, fire, and pause bindings without obstructing the canvas, and
 its regression test checks those labels against the Unity Input System asset so
-the guide cannot silently drift from the game. Mobile instructions will come
-from the touch HUD when mobile gameplay is released.
+the guide cannot silently drift from the game. The polish branch now supplies
+mobile guidance through its icon-based touch HUD.
 
 For Alpha 0.6.0, playable Three Bosses is desktop-only. Recognized Android and
 iOS browsers do not receive the Games card, and direct mobile navigation shows
 an explicit desktop-only message without instantiating Unity. The Three Bosses
 leaderboard remains available on mobile. Narrow desktop windows and Windows
-touch laptops remain supported; full mobile gameplay waits for the later
-physical-device polish and acceptance pass.
+touch laptops remain supported. The local preview now has verified Android
+joystick, action-button, and pause interactions, but public mobile gameplay still
+waits for the complete Android/iOS, all-scenes physical-device acceptance pass.
 
 The battle-scene spawn correction was completed in commit `c0bd6d35`: all
 three scenes now begin at the grounded position, and `PlayerMotor` baselines its
@@ -665,23 +678,38 @@ Redesign `/leaderboards` as a multi-game experience rather than extending the
 current p4-Vega-only list in place.
 
 Frontend hub, generic reads, and the fail-closed submission transport:
-**implemented locally on 2026-08-26 and connected to Unity on 2026-08-29**. The plural route contains catalog-driven
+**implemented on 2026-08-26, connected to Unity on 2026-08-29, and published
+with Alpha 0.6.0**. The plural route contains catalog-driven
 leaderboard cards, each linking to its own direct detail route. These are
 leaderboard destinations, not playable game cards; game launching remains
 under `/games`. The p4-Vega detail now uses the generic GET API, while Three
-Bosses reads typed real rows and derives S–D ranks while submissions remain
-disabled by default. The browser transport, lifecycle-safe Unity bridge,
+Bosses reads typed real rows and derives S–D ranks while the backend retains a
+fail-closed default. The browser transport, lifecycle-safe Unity bridge,
 Unity caller/receiver, and end-screen submission state machine are connected.
 The 2026-08-31 release candidate adds a server-signed run-start ticket kept only
 in browser memory, binds it to the authenticated run, and rejects impossible or
 expired completion claims before persistence.
-Transport tests, production
-build, and desktop plus narrow browser checks pass. A disposable loopback API
-verified the populated p4-Vega table without applying approval-gated database
-migrations. Production storage, generic backend reads, and the frozen writer are
-now migrated and verified. Public frontend release remains deferred with the
-feature branch; the site-wide responsive/mobile pass and Unity submission
-activation remain separate pending work.
+Transport tests, production build, and desktop plus narrow browser checks pass.
+Production storage, generic backend reads, and both submission paths are
+deployed. A 2026-09-04 read-only live check found Three Bosses advertised as
+enabled, authenticated boundaries reachable for both games, and database-backed
+rows on both leaderboards. A fresh signed-in write/replay/readback check remains
+required for each release candidate.
+
+#### Leaderboard submission status verification
+
+Before declaring either game submission path healthy for a release, verify one
+fresh matrix rather than inferring deployed state from source configuration:
+
+- record the local `P4_VEGA_SCORE_SUBMISSIONS_ENABLED` and
+  `THREE_BOSSES_RUN_SUBMISSIONS_ENABLED` values and confirm the matching catalog
+  and endpoint behavior;
+- inspect the traffic-serving Cloud Run revision and its actual runtime values;
+- verify signed-out rejection, then perform signed-in p4-Vega submission and
+  Three Bosses ticket, submission, exact replay, personal-best, and leaderboard
+  readback checks; and
+- reconcile the observed state with `cloudbuild.deploy.yaml`. A tracked `true`
+  value is a deployment intention, not proof of the currently serving revision.
 
 The design must include:
 
@@ -701,11 +729,12 @@ ranked together.
 
 ## Phase 14 — Site information architecture, feedback, responsiveness, and literal-dark redesign
 
-**Active on `feature/site-redesign`.** Preserve the existing Sass architecture,
-sparse compositions, generous whitespace, Space Mono/Space Grotesk typography,
-and quiet outlined interactions. Use deep navy/black as the new foundation and
-retain the existing light blue, green, and cyan palette as restrained stars,
-nebulas, borders, and interaction highlights.
+**Core redesign completed and published with Alpha 0.6.0.** Preserve the
+existing Sass architecture, sparse compositions, generous whitespace, Space
+Mono/Space Grotesk typography, and quiet outlined interactions. Use deep
+navy/black as the foundation and retain the existing light blue, green, and
+cyan palette as restrained stars, nebulas, borders, and interaction highlights.
+Broader physical-device acceptance and the deferred enhancements below remain.
 
 Work in this order:
 
@@ -740,8 +769,9 @@ The header's information architecture must:
 - replace **Social** with one **Connect** destination that combines the existing
   external-profile links with a clearly separated user-feedback form; handle
   the existing route deliberately when that page is redesigned;
-- give the Connect feedback form server-side validation, abuse/rate limiting,
-  and an explicit privacy and retention policy; and
+- keep the current provider-neutral email composer unless direct server-side
+  submission is later approved; that replacement would require validation,
+  abuse/rate limiting, and an explicit privacy and retention policy; and
 - after the navigation and content structure are settled, redesign the full
   website with a more professional, responsive, literally dark visual theme.
   "Dark" here means a deliberate dark color palette with readable contrast,
@@ -797,6 +827,42 @@ sessions may use a server-controlled thirty-day JWT and signed HTTP-only cookie
 without storing passwords or preferences in browser-readable storage. The
 stateless token's lack of per-session revocation must be tested and recorded as
 an accepted risk before this item is closed.
+
+## Phase 15 — p4-Vega improvement and mobile polish
+
+Begin this phase after the current Three Bosses polish milestone is stable.
+Preserve p4-Vega's existing score rules and keyboard behavior while improving
+the game incrementally:
+
+- add a real pause button and a simple pause menu with explicit, testable pause
+  state transitions;
+- stop the canvas from swallowing ordinary vertical touch-scroll gestures, so a
+  visitor can scroll the page even when the gesture begins over the canvas,
+  while preserving deliberate interactions with actual game controls;
+- audit and prioritize further upgrades to game feel, onboarding, controls,
+  visual and audio feedback, performance, responsive/fullscreen behavior, and
+  score/leaderboard UX rather than committing to speculative rewrites; and
+- verify keyboard behavior plus real Android and iOS touch, orientation,
+  scrolling, and fullscreen behavior before release.
+
+## Phase 16 — Whole-project Clean Code sweep
+
+After Three Bosses and the p4-Vega improvement phase are stable, inspect every
+tracked first-party source, test, configuration, and documentation area using
+Robert C. Martin's *Clean Code: A Handbook of Agile Software Craftsmanship* as
+a review reference. The user-provided local copy is
+`C:\Users\User\Desktop\Pastas\Books\CleanCode.pdf`. Inventory generated,
+vendored, and third-party files, but do not refactor them as if they were owned
+source.
+
+This is an evidence-led, subsystem-by-subsystem cleanup, not a blanket rewrite.
+Preserve behavior, public APIs, database schemas, migration history, and release
+contracts; identify dead, duplicated, over-specific, or misplaced code; improve
+names, function and class responsibilities, dependency boundaries, error
+handling, comments, formatting, and tests where the evidence supports it. Keep
+each subsystem change reviewable and run its complete relevant checks before
+moving to the next one. The user-provided PDF is a local reference only and must
+not be copied into the repository.
 
 ## Deferred tooling follow-up
 
