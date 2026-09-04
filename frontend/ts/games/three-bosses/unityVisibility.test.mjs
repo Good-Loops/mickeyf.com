@@ -121,29 +121,18 @@ test('sends the resolved mobile-touch permission to the persistent Unity service
     );
 });
 
-test('uses portrait layout only for a touch-capable mobile browser in portrait', () => {
-    const android = {
-        maxTouchPoints: 5,
-        userAgent: 'Mozilla/5.0 (Linux; Android 15)',
-        userAgentDataMobile: true,
-    };
-    const desktop = {
-        maxTouchPoints: 0,
-        userAgent: 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)',
-        userAgentDataMobile: false,
-    };
-
-    assert.equal(shouldUseThreeBossesPortraitLayout(android, {
+test('uses portrait layout whenever the outer browser viewport is portrait', () => {
+    assert.equal(shouldUseThreeBossesPortraitLayout({
         innerWidth: 390,
         innerHeight: 844,
     }), true);
-    assert.equal(shouldUseThreeBossesPortraitLayout(android, {
+    assert.equal(shouldUseThreeBossesPortraitLayout({
         innerWidth: 844,
         innerHeight: 390,
     }), false);
-    assert.equal(shouldUseThreeBossesPortraitLayout(desktop, {
-        innerWidth: 390,
-        innerHeight: 844,
+    assert.equal(shouldUseThreeBossesPortraitLayout({
+        innerWidth: 720,
+        innerHeight: 720,
     }), false);
 });
 
@@ -177,14 +166,9 @@ test('synchronizes portrait layout on rotation and releases both listeners', () 
     const instance = {
         SendMessage: (...message) => messages.push(message),
     };
-    const android = {
-        maxTouchPoints: 5,
-        userAgent: 'Mozilla/5.0 (Linux; Android 15)',
-        userAgentDataMobile: true,
-    };
     const viewport = new FakeResponsiveWindow(390, 844);
 
-    const release = bindThreeBossesPortraitLayout(instance, android, viewport);
+    const release = bindThreeBossesPortraitLayout(instance, viewport);
     viewport.resizeTo(400, 820);
     viewport.resizeTo(844, 390, 'orientationchange');
     viewport.resizeTo(390, 844);
@@ -201,7 +185,7 @@ test('synchronizes portrait layout on rotation and releases both listeners', () 
     assert.equal(viewport.listeners.orientationchange.size, 0);
 
     assert.throws(
-        () => bindThreeBossesPortraitLayout({}, android, viewport),
+        () => bindThreeBossesPortraitLayout({}, viewport),
         /missing the required portrait-layout API/,
     );
 });

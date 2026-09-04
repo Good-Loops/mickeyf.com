@@ -73,12 +73,8 @@ export const shouldEnableThreeBossesTouchControls = (
 );
 
 export const shouldUseThreeBossesPortraitLayout = (
-    environment: BrowserDeviceEnvironment,
     viewport: Pick<ResponsiveWindow, 'innerWidth' | 'innerHeight'>,
-): boolean => (
-    shouldEnableThreeBossesTouchControls(environment)
-    && viewport.innerHeight > viewport.innerWidth
-);
+): boolean => viewport.innerHeight > viewport.innerWidth;
 
 const readBrowserDeviceEnvironment = (
     browserNavigator: NavigatorWithUserAgentData = navigator as NavigatorWithUserAgentData,
@@ -126,7 +122,6 @@ export const configureThreeBossesTouchControls = (
  */
 export const bindThreeBossesPortraitLayout = (
     instance: UnityVisibilityBridgeInstance,
-    environment: BrowserDeviceEnvironment = readBrowserDeviceEnvironment(),
     viewportWindow: ResponsiveWindow = window,
 ): (() => void) => {
     if (typeof instance.SendMessage !== 'function') {
@@ -135,7 +130,7 @@ export const bindThreeBossesPortraitLayout = (
 
     let lastEnabled: boolean | null = null;
     const synchronize = (): void => {
-        const enabled = shouldUseThreeBossesPortraitLayout(environment, viewportWindow);
+        const enabled = shouldUseThreeBossesPortraitLayout(viewportWindow);
         if (enabled === lastEnabled) return;
 
         instance.SendMessage?.(
