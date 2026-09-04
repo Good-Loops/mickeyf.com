@@ -170,6 +170,53 @@ namespace ThreeBosses.Tests
             Assert.That(FormatTime(elapsedSeconds), Is.EqualTo(expected));
         }
 
+        [UnityTest]
+        public IEnumerator TransitionScenesShowTheJustDefeatedBossSplit()
+        {
+            Type serviceType = RequireRuntimeType("RunSessionService");
+            object service = serviceType.GetProperty(
+                    "Instance",
+                    BindingFlags.Public | BindingFlags.Static)
+                ?.GetValue(null);
+            object session = serviceType.GetProperty(
+                    "Session",
+                    BindingFlags.Public | BindingFlags.Instance)
+                ?.GetValue(service);
+            Assert.That(session, Is.Not.Null);
+
+            Type bossIdType = session.GetType().Assembly.GetType("ThreeBosses.Run.BossId");
+            Assert.That(bossIdType, Is.Not.Null);
+
+            object bee = Enum.Parse(bossIdType, "Bee");
+            RequireMethod(session.GetType(), "BeginNewRun").Invoke(session, null);
+            Assert.That((bool)RequireMethod(session.GetType(), "StartRun").Invoke(session, null), Is.True);
+            yield return new WaitForSecondsRealtime(0.02f);
+            Assert.That(
+                RequireMethod(session.GetType(), "RecordBossDefeat").Invoke(session, new[] { bee })?.ToString(),
+                Is.EqualTo("AdvanceToNextBoss"));
+
+            double beeSplit = (double)RequireMethod(session.GetType(), "GetBossSplitSeconds")
+                .Invoke(session, new[] { bee });
+            SceneManager.LoadScene("Transition_BeeToCyborg");
+            yield return null;
+            AssertTransitionSplit("Transition_BeeToCyborg", FormatTime(beeSplit));
+
+            object cyborg = Enum.Parse(bossIdType, "Cyborg");
+            Assert.That(
+                (bool)RequireMethod(session.GetType(), "EnterNextBoss").Invoke(session, new[] { cyborg }),
+                Is.True);
+            yield return new WaitForSecondsRealtime(0.02f);
+            Assert.That(
+                RequireMethod(session.GetType(), "RecordBossDefeat").Invoke(session, new[] { cyborg })?.ToString(),
+                Is.EqualTo("AdvanceToNextBoss"));
+
+            double cyborgSplit = (double)RequireMethod(session.GetType(), "GetBossSplitSeconds")
+                .Invoke(session, new[] { cyborg });
+            SceneManager.LoadScene("Transition_CyborgToKraken");
+            yield return null;
+            AssertTransitionSplit("Transition_CyborgToKraken", FormatTime(cyborgSplit));
+        }
+
         [Test]
         public void FormatterAlwaysUsesInvariantDecimalPoint()
         {
@@ -220,6 +267,35 @@ namespace ThreeBosses.Tests
             Type formatterType = RequireRuntimeType("RunUiFormatter");
             MethodInfo formatMethod = RequireMethod(formatterType, "FormatTime");
             return (string)formatMethod.Invoke(null, new object[] { elapsedSeconds });
+        }
+
+        private static void AssertTransitionSplit(string sceneName, string expectedTime)
+        {
+            Type textType = RequireType("TMPro.TextMeshProUGUI, Unity.TextMeshPro");
+            GameObject captionObject = GameObject.Find("Boss Split Caption");
+            GameObject valueObject = GameObject.Find("Boss Split Value");
+            Assert.That(captionObject, Is.Not.Null, sceneName);
+            Assert.That(valueObject, Is.Not.Null, sceneName);
+
+            Component caption = captionObject.GetComponent(textType);
+            Component value = valueObject.GetComponent(textType);
+            Assert.That(GetProperty<string>(caption, "text"), Is.EqualTo("SPLIT"), sceneName);
+            Assert.That(GetProperty<string>(value, "text"), Is.EqualTo(expectedTime), sceneName);
+            Assert.That(GetProperty<bool>(caption, "raycastTarget"), Is.False, sceneName);
+            Assert.That(GetProperty<bool>(value, "raycastTarget"), Is.False, sceneName);
+
+            UnityEngine.Object font = GetProperty<UnityEngine.Object>(value, "font");
+            Assert.That(font, Is.Not.Null, sceneName);
+            Assert.That(font.name, Is.EqualTo("Oxanium-Bold Timer SDF"), sceneName);
+
+            Type controllerType = RequireRuntimeType("BossTransitionScreenController");
+            Component controller = UnityEngine.Object.FindFirstObjectByType(controllerType) as Component;
+            FieldInfo splitField = controllerType.GetField(
+                "splitTimeLabel",
+                BindingFlags.Instance | BindingFlags.NonPublic);
+            Assert.That(controller, Is.Not.Null, sceneName);
+            Assert.That(splitField, Is.Not.Null, sceneName);
+            Assert.That(splitField.GetValue(controller), Is.SameAs(value), sceneName);
         }
 
         private static Type RequireRuntimeType(string name)

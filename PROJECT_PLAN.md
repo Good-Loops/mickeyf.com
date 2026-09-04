@@ -614,9 +614,11 @@ message is not an acceptable clean-console result. Use the local browser to
 inspect the new Games entry and game page at desktop, narrow/mobile, and
 ultrawide sizes. Narrow/mobile acceptance covers the responsive website shell;
 the 2026-08-29 shell audit added gesture isolation to the canvas and removed
-page-only glass framing from fullscreen. The current internal world remains
-1280 × 720; audit the proposed 1920 × 1080 migration before changing it so a
-render-resolution improvement is not confused with a gameplay-world rewrite.
+page-only glass framing from fullscreen. The internal gameplay reference remains
+intentionally fixed at 1280 × 720 after the 2026-09-04 resolution audit. A
+1920 × 1080 Pixel Perfect reference would expose 50% more world at the existing
+32 pixels per unit and change gameplay; future sharpness work must stay
+render-only unless a world-framing redesign is explicitly approved.
 Movement, jump, dash, aim, and fire now route through shared actions, and one
 native touch HUD is reused across all three boss scenes on the polish branch.
 Until that slice passes real Android and iOS multitouch, rotation, safe-area,
@@ -643,6 +645,13 @@ aiming, jump, dash, fire, and pause bindings without obstructing the canvas, and
 its regression test checks those labels against the Unity Input System asset so
 the guide cannot silently drift from the game. The polish branch now supplies
 mobile guidance through its icon-based touch HUD.
+
+Inter-boss split presentation was completed on 2026-09-04. The Bee and Cyborg
+transition screens now show the cumulative active-combat time recorded at that
+boss defeat, using the same canonical timer formatting and each scene's accent
+color. The completion screen's existing total time remains the final Kraken
+split, so this presentation change does not alter timing, scoring, ranks, or
+submission behavior.
 
 For Alpha 0.6.0, playable Three Bosses is desktop-only. Recognized Android and
 iOS browsers do not receive the Games card, and direct mobile navigation shows

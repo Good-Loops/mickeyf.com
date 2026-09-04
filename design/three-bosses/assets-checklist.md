@@ -103,7 +103,7 @@ _For each weapon: sprite + projectile + impact_
 
 - [✅] HP bar
 - [✅] Timer (speedrun)
-- [ ] Split time display
+- [✅] Split time display
 - [✅] Boss health bar
 
 ---

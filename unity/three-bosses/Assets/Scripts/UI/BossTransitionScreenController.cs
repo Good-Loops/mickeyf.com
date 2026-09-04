@@ -1,4 +1,5 @@
 using System.Collections;
+using TMPro;
 using ThreeBosses.Run;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -13,6 +14,7 @@ public sealed class BossTransitionScreenController : MonoBehaviour
     [SerializeField] private string destinationSceneName = "Level2_CyborgBoss";
     [SerializeField, Min(0f)] private float displaySeconds = 4f;
     [SerializeField, Min(0f)] private float fadeDurationSeconds = 0.35f;
+    [SerializeField] private TMP_Text splitTimeLabel;
     [SerializeField] private ScreenFade screenFade;
 
     private void Start()
@@ -25,6 +27,16 @@ public sealed class BossTransitionScreenController : MonoBehaviour
                 this);
             SceneManager.LoadScene("MainMenu");
             return;
+        }
+
+        if (splitTimeLabel == null)
+        {
+            Debug.LogError("Transition split-time label is not assigned.", this);
+        }
+        else
+        {
+            splitTimeLabel.text = RunUiFormatter.FormatTime(
+                session.GetBossSplitSeconds(session.CurrentBoss));
         }
 
         screenFade?.FadeOut(fadeDurationSeconds);

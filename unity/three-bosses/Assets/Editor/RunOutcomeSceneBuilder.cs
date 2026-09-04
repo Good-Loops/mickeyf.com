@@ -29,6 +29,7 @@ public static class RunOutcomeSceneBuilder
     private const string BossLoaderObjectName = "Phase12_BossOutcome";
     private const string PlayerLoaderObjectName = "Phase12_PlayerOutcome";
     private const string LevelEntryObjectName = "Phase12_LevelEntry";
+    private const string TimerFontAssetPath = "Assets/Art/UI/Fonts/Oxanium-Bold Timer SDF.asset";
     private const float TransitionDisplaySeconds = 4f;
     private const float TransitionFadeDurationSeconds = 0.35f;
 
@@ -52,12 +53,14 @@ public static class RunOutcomeSceneBuilder
                 BeeTransitionPath,
                 $"{ScreenRoot}/Boss1Defeated.png",
                 BossId.Cyborg,
-                "Level2_CyborgBoss");
+                "Level2_CyborgBoss",
+                new Color(0.58f, 0.86f, 0f, 1f));
             BuildTransitionScene(
                 CyborgTransitionPath,
                 $"{ScreenRoot}/Boss2Defeated.png",
                 BossId.Kraken,
-                "Level3_Kraken");
+                "Level3_Kraken",
+                new Color(1f, 0.12f, 0.08f, 1f));
 
             BuildDefeatScene(
                 BeeDefeatPath,
@@ -130,9 +133,30 @@ public static class RunOutcomeSceneBuilder
         string scenePath,
         string spritePath,
         BossId expectedPendingBoss,
-        string destinationSceneName)
+        string destinationSceneName,
+        Color accent)
     {
-        Scene scene = CreateArtworkScene(spritePath, false, out _, out ScreenFade screenFade);
+        Scene scene = CreateArtworkScene(
+            spritePath,
+            false,
+            out RectTransform artRoot,
+            out ScreenFade screenFade);
+
+        TMP_Text splitCaption = CreateText(
+            "Boss Split Caption",
+            artRoot,
+            "SPLIT",
+            22f);
+        SetTopLeftRect(splitCaption.rectTransform, new Rect(74f, 58f, 300f, 30f));
+        ConfigureSplitCaption(splitCaption);
+
+        TMP_Text splitTimeLabel = CreateText(
+            "Boss Split Value",
+            artRoot,
+            RunUiFormatter.FormatTime(0d),
+            32f);
+        SetTopLeftRect(splitTimeLabel.rectTransform, new Rect(74f, 88f, 300f, 44f));
+        ConfigureSplitTimeText(splitTimeLabel, accent);
 
         GameObject controllerObject = new("Transition Controller");
         BossTransitionScreenController controller = controllerObject.AddComponent<BossTransitionScreenController>();
@@ -140,6 +164,7 @@ public static class RunOutcomeSceneBuilder
         SetString(controller, "destinationSceneName", destinationSceneName);
         SetFloat(controller, "displaySeconds", TransitionDisplaySeconds);
         SetFloat(controller, "fadeDurationSeconds", TransitionFadeDurationSeconds);
+        SetObjectReference(controller, "splitTimeLabel", splitTimeLabel);
         SetObjectReference(controller, "screenFade", screenFade);
 
         SaveScene(scene, scenePath);
@@ -495,6 +520,46 @@ public static class RunOutcomeSceneBuilder
         text.enableAutoSizing = true;
         text.fontSizeMin = 22f;
         text.fontSizeMax = text.fontSize;
+    }
+
+    private static void ConfigureSplitCaption(TMP_Text text)
+    {
+        text.color = new Color(0.88f, 0.93f, 0.96f, 0.8f);
+        text.fontStyle = FontStyles.Bold;
+        text.alignment = TextAlignmentOptions.Left;
+        text.textWrappingMode = TextWrappingModes.NoWrap;
+        text.enableAutoSizing = false;
+        text.characterSpacing = 4f;
+        text.extraPadding = true;
+        text.outlineColor = new Color32(4, 6, 10, 235);
+        text.outlineWidth = 0.08f;
+    }
+
+    private static void ConfigureSplitTimeText(TMP_Text text, Color accent)
+    {
+        TMP_FontAsset font = AssetDatabase.LoadAssetAtPath<TMP_FontAsset>(TimerFontAssetPath);
+        if (font == null)
+            throw new InvalidOperationException(
+                $"The timer font is missing at {TimerFontAssetPath}.");
+
+        string requiredCharacters = RunUiFormatter.FormatTime(0d);
+        if (!font.HasCharacters(requiredCharacters))
+            throw new InvalidOperationException(
+                $"The timer font is missing characters required by {requiredCharacters}.");
+
+        text.font = font;
+        text.fontSharedMaterial = font.material;
+        text.color = accent;
+        text.fontStyle = FontStyles.Normal;
+        text.alignment = TextAlignmentOptions.Left;
+        text.textWrappingMode = TextWrappingModes.NoWrap;
+        text.enableAutoSizing = true;
+        text.fontSizeMin = 20f;
+        text.fontSizeMax = text.fontSize;
+        text.characterSpacing = 2f;
+        text.extraPadding = true;
+        text.outlineColor = new Color32(4, 6, 10, 235);
+        text.outlineWidth = 0.08f;
     }
 
     private static Image CreateImage(string name, Transform parent, Color color)
