@@ -220,7 +220,12 @@ namespace ThreeBosses.Tests
             Assert.That(pauseButton.gameObject.activeSelf, Is.True);
             Assert.That(
                 pauseButton.GetComponent<RectTransform>().sizeDelta,
-                Is.EqualTo(new Vector2(48f, 40f)));
+                Is.EqualTo(new Vector2(48f, 48f)));
+            MaskableGraphic pauseVisual = AssertPauseGlassVisual(
+                pauseButton.transform,
+                "PauseButton",
+                new Vector2(3f, 3f));
+            AssertGlassButtonHitArea(pauseButton, pauseVisual);
             Assert.That(
                 pauseButton.transform.Find("Label")?.GetComponent("TextMeshProUGUI"),
                 Is.Not.Null);
@@ -229,20 +234,58 @@ namespace ThreeBosses.Tests
             Assert.That(
                 pauseLabel?.GetType().GetProperty("text")?.GetValue(pauseLabel),
                 Is.EqualTo(string.Empty));
-            Image leftPauseBar = pauseButton.transform.Find("Pause Icon Left")
-                ?.GetComponent<Image>();
-            Image rightPauseBar = pauseButton.transform.Find("Pause Icon Right")
-                ?.GetComponent<Image>();
-            Assert.That(leftPauseBar, Is.Not.Null);
-            Assert.That(rightPauseBar, Is.Not.Null);
-            Assert.That(leftPauseBar.rectTransform.sizeDelta, Is.EqualTo(new Vector2(4f, 16f)));
-            Assert.That(rightPauseBar.rectTransform.sizeDelta, Is.EqualTo(new Vector2(4f, 16f)));
-            Assert.That(leftPauseBar.rectTransform.anchoredPosition, Is.EqualTo(new Vector2(-4.5f, 0f)));
-            Assert.That(rightPauseBar.rectTransform.anchoredPosition, Is.EqualTo(new Vector2(4.5f, 0f)));
-            Assert.That(leftPauseBar.raycastTarget, Is.False);
-            Assert.That(rightPauseBar.raycastTarget, Is.False);
-            Assert.That(leftPauseBar.color, Is.EqualTo(rightPauseBar.color));
             Assert.That(pauseMenu, Is.Not.Null);
+            Image dimmer = pauseMenu.transform.Find("Dimmer")?.GetComponent<Image>();
+            Assert.That(dimmer, Is.Not.Null);
+            Assert.That(dimmer.color.a, Is.EqualTo(0.34f).Within(0.01f));
+
+            Image panel = pauseMenu.transform.Find("Glass Panel")?.GetComponent<Image>();
+            Assert.That(panel, Is.Not.Null);
+            Assert.That(panel.rectTransform.sizeDelta, Is.EqualTo(new Vector2(360f, 238f)));
+            Assert.That(panel.color.a, Is.Zero);
+            Assert.That(panel.GetComponent<Outline>(), Is.Null);
+            AssertPauseGlassVisual(panel.transform, "MenuPanel");
+
+            Assert.That(
+                resumeButton.GetComponent<RectTransform>().sizeDelta,
+                Is.EqualTo(new Vector2(240f, 50f)));
+            MaskableGraphic resumeVisual = AssertPauseGlassVisual(
+                resumeButton.transform,
+                "ActionButton",
+                new Vector2(10f, 3f));
+            AssertGlassButtonHitArea(resumeButton, resumeVisual);
+            Component resumeLabel = resumeButton.transform.Find("Label")
+                ?.GetComponent("TextMeshProUGUI");
+            Assert.That(resumeLabel, Is.Not.Null);
+            Assert.That(
+                GetProperty<string>(resumeLabel, "text"),
+                Is.EqualTo("RESUME"));
+
+            Assert.That(
+                mainMenuButton.GetComponent<RectTransform>().sizeDelta,
+                Is.EqualTo(new Vector2(240f, 50f)));
+            MaskableGraphic mainMenuVisual = AssertPauseGlassVisual(
+                mainMenuButton.transform,
+                "ActionButton",
+                new Vector2(10f, 3f));
+            AssertGlassButtonHitArea(mainMenuButton, mainMenuVisual);
+            Component mainMenuLabel = mainMenuButton.transform.Find("Label")
+                ?.GetComponent("TextMeshProUGUI");
+            Assert.That(mainMenuLabel, Is.Not.Null);
+            Assert.That(
+                GetProperty<string>(mainMenuLabel, "text"),
+                Is.EqualTo("MAIN MENU"));
+
+            Type pauseGlassType = RequireType("PauseGlassGraphic, Assembly-CSharp");
+            Graphic[] pauseGlassVisuals = pauseButton.transform.parent
+                .GetComponentsInChildren(pauseGlassType, true)
+                .Cast<Graphic>()
+                .ToArray();
+            Assert.That(pauseGlassVisuals, Has.Length.EqualTo(4));
+            Assert.That(
+                pauseGlassVisuals.All(graphic => !graphic.raycastTarget),
+                Is.True,
+                "Decorative pause glass must not intercept pointer input.");
             Assert.That(playerInput, Is.Not.Null);
             Assert.That(playerInput.enabled, Is.True);
             Assert.That(pauseMenu.alpha, Is.EqualTo(0f));
@@ -289,6 +332,68 @@ namespace ThreeBosses.Tests
             Assert.That(SceneManager.GetActiveScene().name, Is.EqualTo("MainMenu"));
             Assert.That(Time.timeScale, Is.EqualTo(1f));
             Assert.That(GetProperty<bool>(service, "IsPausedByUser"), Is.False);
+        }
+
+        [UnityTest]
+        public IEnumerator PauseGlassPresentationIsConsistentAcrossBattleScenes()
+        {
+            string[] battleScenes =
+            {
+                "Level1_BeeBoss",
+                "Level2_CyborgBoss",
+                "Level3_Kraken",
+            };
+
+            Type pauseGlassType = RequireType("PauseGlassGraphic, Assembly-CSharp");
+
+            foreach (string sceneName in battleScenes)
+            {
+                Time.timeScale = 1f;
+                DisarmActiveCountdownRestore();
+                SceneManager.LoadScene(sceneName);
+                yield return null;
+
+                Button[] buttons = UnityEngine.Object.FindObjectsByType<Button>(
+                    FindObjectsInactive.Include,
+                    FindObjectsSortMode.None);
+                Button pauseButton = buttons.Single(
+                    button => button.gameObject.name == "Pause Button");
+                Button resumeButton = buttons.Single(
+                    button => button.gameObject.name == "Resume Button");
+                Button mainMenuButton = buttons.Single(
+                    button => button.gameObject.name == "Main Menu Button");
+
+                AssertGlassButtonHitArea(
+                    pauseButton,
+                    AssertPauseGlassVisual(
+                        pauseButton.transform,
+                        "PauseButton",
+                        new Vector2(3f, 3f)));
+                AssertGlassButtonHitArea(
+                    resumeButton,
+                    AssertPauseGlassVisual(
+                        resumeButton.transform,
+                        "ActionButton",
+                        new Vector2(10f, 3f)));
+                AssertGlassButtonHitArea(
+                    mainMenuButton,
+                    AssertPauseGlassVisual(
+                        mainMenuButton.transform,
+                        "ActionButton",
+                        new Vector2(10f, 3f)));
+
+                Transform panel = GameObject.Find("Pause Menu")
+                    ?.transform.Find("Glass Panel");
+                Assert.That(panel, Is.Not.Null, $"{sceneName} is missing its glass panel.");
+                AssertPauseGlassVisual(panel, "MenuPanel");
+
+                Component[] visuals = pauseButton.transform.parent
+                    .GetComponentsInChildren(pauseGlassType, true);
+                Assert.That(
+                    visuals,
+                    Has.Length.EqualTo(4),
+                    $"{sceneName} must contain exactly four pause glass visuals.");
+            }
         }
 
         [UnityTest]
@@ -675,6 +780,46 @@ namespace ThreeBosses.Tests
                 BindingFlags.Instance | BindingFlags.Public);
             Assert.That(property, Is.Not.Null, $"Property {target.GetType().FullName}.{name} was not found.");
             return (T)property.GetValue(target);
+        }
+
+        private static MaskableGraphic AssertPauseGlassVisual(
+            Transform owner,
+            string expectedStyle,
+            Vector2 expectedInset = default)
+        {
+            Type graphicType = RequireType("PauseGlassGraphic, Assembly-CSharp");
+            Transform visual = owner.Find("Visual");
+            Assert.That(visual, Is.Not.Null, owner.name);
+            Component[] glassGraphics = visual.GetComponents(graphicType);
+            Assert.That(glassGraphics, Has.Length.EqualTo(1), owner.name);
+
+            MaskableGraphic graphic = glassGraphics[0] as MaskableGraphic;
+            Assert.That(graphic, Is.Not.Null, owner.name);
+            Assert.That(graphic.gameObject.name, Is.EqualTo("Visual"), owner.name);
+            Assert.That(graphic.raycastTarget, Is.False, owner.name);
+            Assert.That(
+                GetProperty<object>(graphic, "ControlStyle").ToString(),
+                Is.EqualTo(expectedStyle),
+                owner.name);
+
+            RectTransform visualRect = graphic.rectTransform;
+            Assert.That(visualRect.anchorMin, Is.EqualTo(Vector2.zero), owner.name);
+            Assert.That(visualRect.anchorMax, Is.EqualTo(Vector2.one), owner.name);
+            Assert.That(visualRect.offsetMin, Is.EqualTo(expectedInset), owner.name);
+            Assert.That(visualRect.offsetMax, Is.EqualTo(-expectedInset), owner.name);
+            return graphic;
+        }
+
+        private static void AssertGlassButtonHitArea(
+            Button button,
+            MaskableGraphic visual)
+        {
+            Image hitArea = button.GetComponent<Image>();
+            Assert.That(hitArea, Is.Not.Null, button.name);
+            Assert.That(hitArea.color.a, Is.Zero, button.name);
+            Assert.That(hitArea.raycastTarget, Is.True, button.name);
+            Assert.That(button.GetComponent<Outline>(), Is.Null, button.name);
+            Assert.That(button.targetGraphic, Is.SameAs(visual), button.name);
         }
 
         private static void AssertColorApproximately(Color actual, Color expected)

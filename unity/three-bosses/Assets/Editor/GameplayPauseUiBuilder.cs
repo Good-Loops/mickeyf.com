@@ -23,8 +23,6 @@ public static class GameplayPauseUiBuilder
         LevelThreePath,
     };
 
-    private static readonly Color GlassColor = new(0.006f, 0.018f, 0.026f, 0.64f);
-    private static readonly Color GlassBorderColor = new(0.32f, 0.76f, 0.9f, 0.42f);
     private static readonly Color TextColor = new(0.9f, 0.96f, 1f, 1f);
 
     [MenuItem("Three Bosses/UI/Build Gameplay Pause Menus")]
@@ -92,13 +90,14 @@ public static class GameplayPauseUiBuilder
             root.transform,
             new Vector2(1f, 1f),
             new Vector2(1f, 1f),
-            new Vector2(-24f, -54f),
-            new Vector2(48f, 40f),
+            new Vector2(-22f, -55f),
+            new Vector2(48f, 48f),
             string.Empty,
             16f,
             font,
-            new Color(0.006f, 0.018f, 0.026f, 0.48f));
-        CreatePauseIcon(pauseButton.transform);
+            PauseGlassGraphic.Style.PauseButton);
+        RemoveChild(pauseButton.transform, "Pause Icon Left");
+        RemoveChild(pauseButton.transform, "Pause Icon Right");
 
         GameObject overlayObject = CreateUiObject("Pause Menu", root.transform);
         RectTransform overlayRect = overlayObject.GetComponent<RectTransform>();
@@ -111,51 +110,53 @@ public static class GameplayPauseUiBuilder
         Image dimmer = CreateImage(
             "Dimmer",
             overlayRect,
-            new Color(0.005f, 0.012f, 0.02f, 0.52f));
+            new Color(0.005f, 0.012f, 0.02f, 0.34f));
         Stretch(dimmer.rectTransform);
 
-        Image panel = CreateImage("Glass Panel", overlayRect, GlassColor);
+        Image panel = CreateImage("Glass Panel", overlayRect, Color.clear);
+        panel.raycastTarget = false;
+        RemoveComponent<Outline>(panel.gameObject);
         RectTransform panelRect = panel.rectTransform;
         SetAnchoredRect(
             panelRect,
             new Vector2(0.5f, 0.5f),
             new Vector2(0.5f, 0.5f),
             Vector2.zero,
-            new Vector2(390f, 270f));
-        AddOutline(panel.gameObject, GlassBorderColor, 2f);
+            new Vector2(360f, 238f));
+        CreateGlassVisual(panel.transform, PauseGlassGraphic.Style.MenuPanel);
 
         TMP_Text title = CreateText("Paused Label", panelRect, "PAUSED", 38f, font);
         SetAnchoredRect(
             title.rectTransform,
             new Vector2(0.5f, 0.5f),
             new Vector2(0.5f, 0.5f),
-            new Vector2(0f, 78f),
+            new Vector2(0f, 67f),
             new Vector2(300f, 56f));
-        title.characterSpacing = 7f;
+        title.characterSpacing = 6f;
 
         Button resumeButton = CreateGlassButton(
             "Resume Button",
             panelRect,
             new Vector2(0.5f, 0.5f),
             new Vector2(0.5f, 0.5f),
-            new Vector2(0f, 10f),
+            new Vector2(0f, 5f),
             new Vector2(240f, 50f),
             "RESUME",
             22f,
             font,
-            GlassColor);
+            PauseGlassGraphic.Style.ActionButton);
 
         Button mainMenuButton = CreateGlassButton(
             "Main Menu Button",
             panelRect,
             new Vector2(0.5f, 0.5f),
             new Vector2(0.5f, 0.5f),
-            new Vector2(0f, -60f),
+            new Vector2(0f, -54f),
             new Vector2(240f, 50f),
             "MAIN MENU",
             19f,
             font,
-            GlassColor);
+            PauseGlassGraphic.Style.ActionButton);
 
         GameplayPauseController controller = GetOrAddComponent<GameplayPauseController>(root);
         SetObjectReference(controller, "pauseButton", pauseButton);
@@ -254,14 +255,21 @@ public static class GameplayPauseUiBuilder
         string labelText,
         float fontSize,
         TMP_FontAsset font,
-        Color backgroundColor)
+        PauseGlassGraphic.Style glassStyle)
     {
-        Image background = CreateImage(name, parent, backgroundColor);
+        Image background = CreateImage(name, parent, Color.clear);
         SetAnchoredRect(background.rectTransform, anchor, pivot, position, size);
-        AddOutline(background.gameObject, GlassBorderColor, 1f);
+        RemoveComponent<Outline>(background.gameObject);
+        Vector2 visualInset = glassStyle == PauseGlassGraphic.Style.PauseButton
+            ? new Vector2(3f, 3f)
+            : new Vector2(10f, 3f);
+        PauseGlassGraphic glass = CreateGlassVisual(
+            background.transform,
+            glassStyle,
+            visualInset);
 
         Button button = GetOrAddComponent<Button>(background.gameObject);
-        button.targetGraphic = background;
+        button.targetGraphic = glass;
         button.transition = Selectable.Transition.ColorTint;
         ColorBlock colors = button.colors;
         colors.normalColor = Color.white;
@@ -279,33 +287,31 @@ public static class GameplayPauseUiBuilder
         return button;
     }
 
-    private static void CreatePauseIcon(Transform parent)
+    private static PauseGlassGraphic CreateGlassVisual(
+        Transform parent,
+        PauseGlassGraphic.Style style,
+        Vector2 inset = default)
     {
-        Image leftBar = CreateImage("Pause Icon Left", parent, TextColor);
-        SetAnchoredRect(
-            leftBar.rectTransform,
-            new Vector2(0.5f, 0.5f),
-            new Vector2(0.5f, 0.5f),
-            new Vector2(-4.5f, 0f),
-            new Vector2(4f, 16f));
-        leftBar.raycastTarget = false;
-
-        Image rightBar = CreateImage("Pause Icon Right", parent, TextColor);
-        SetAnchoredRect(
-            rightBar.rectTransform,
-            new Vector2(0.5f, 0.5f),
-            new Vector2(0.5f, 0.5f),
-            new Vector2(4.5f, 0f),
-            new Vector2(4f, 16f));
-        rightBar.raycastTarget = false;
+        GameObject visualObject = CreateUiObject("Visual", parent);
+        PauseGlassGraphic visual = GetOrAddComponent<PauseGlassGraphic>(visualObject);
+        Stretch(visual.rectTransform, inset);
+        visual.Configure(style);
+        visualObject.transform.SetAsFirstSibling();
+        return visual;
     }
 
-    private static void AddOutline(GameObject target, Color color, float distance)
+    private static void RemoveChild(Transform parent, string name)
     {
-        Outline outline = GetOrAddComponent<Outline>(target);
-        outline.effectColor = color;
-        outline.effectDistance = new Vector2(distance, -distance);
-        outline.useGraphicAlpha = true;
+        Transform child = parent.Find(name);
+        if (child != null)
+            UnityEngine.Object.DestroyImmediate(child.gameObject);
+    }
+
+    private static void RemoveComponent<T>(GameObject gameObject) where T : Component
+    {
+        T component = gameObject.GetComponent<T>();
+        if (component != null)
+            UnityEngine.Object.DestroyImmediate(component);
     }
 
     private static T GetOrAddComponent<T>(GameObject gameObject) where T : Component
@@ -318,13 +324,13 @@ public static class GameplayPauseUiBuilder
         return components.Length == 1 ? components[0] : gameObject.AddComponent<T>();
     }
 
-    private static void Stretch(RectTransform rectTransform)
+    private static void Stretch(RectTransform rectTransform, Vector2 inset = default)
     {
         rectTransform.anchorMin = Vector2.zero;
         rectTransform.anchorMax = Vector2.one;
         rectTransform.pivot = new Vector2(0.5f, 0.5f);
-        rectTransform.offsetMin = Vector2.zero;
-        rectTransform.offsetMax = Vector2.zero;
+        rectTransform.offsetMin = inset;
+        rectTransform.offsetMax = -inset;
         rectTransform.localScale = Vector3.one;
     }
 
