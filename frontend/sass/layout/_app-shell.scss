@@ -7,6 +7,27 @@
     min-height: 100svh;
 }
 
+@include viewport-at-most($bp-m) {
+    // Mobile browser chrome can change the large viewport while the visible
+    // viewport stays smaller. Intrinsic outer rows keep short pages in-frame.
+    .app-shell {
+        display: grid;
+        grid-template-rows: auto minmax(0, 1fr) auto;
+
+        > .header {
+            height: auto;
+        }
+
+        > .main {
+            min-height: 0;
+        }
+
+        > .footer {
+            min-height: 0;
+        }
+    }
+}
+
 .space-background {
     position: fixed;
     inset: 0;

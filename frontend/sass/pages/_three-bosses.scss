@@ -486,23 +486,6 @@ $three-bosses-violet: hsl(274, 88%, 68%);
 }
 
 @include portrait-at-most($bp-s) {
-    .app-shell:has(.three-bosses) {
-        display: grid;
-        grid-template-rows: auto minmax(0, 1fr) auto;
-
-        > .header {
-            height: auto;
-        }
-
-        > .main {
-            min-height: 0;
-        }
-
-        > .footer {
-            min-height: 0;
-        }
-    }
-
     .three-bosses {
         gap: .8rem;
 
