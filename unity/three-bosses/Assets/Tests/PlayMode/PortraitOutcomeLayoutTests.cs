@@ -84,6 +84,12 @@ namespace ThreeBosses.Tests
                     "Center")),
         };
 
+        private static readonly ButtonLabelContract[] DefeatButtonContracts =
+        {
+            new("Try Again Button", "TRY AGAIN"),
+            new("Back To Menu Button", "BACK TO MENU"),
+        };
+
         [UnityTest]
         public IEnumerator OutcomeScenesCenterConfiguredTextOnlyForPortraitUi()
         {
@@ -130,6 +136,9 @@ namespace ThreeBosses.Tests
                     Is.EqualTo(contract.TextTargets.Select(target => target.Name)),
                     contract.SceneName);
 
+                if (!contract.IsTransition)
+                    AssertDefeatButtonLabelsCentered(contract.SceneName);
+
                 for (int index = 0; index < targets.Length; index++)
                 {
                     Component target = targets[index];
@@ -163,6 +172,9 @@ namespace ThreeBosses.Tests
                         contract.SceneName);
                 }
 
+                if (!contract.IsTransition)
+                    AssertDefeatButtonLabelsCentered(contract.SceneName);
+
                 configurePortraitLayout.Invoke(service, new object[] { "0" });
                 for (int index = 0; index < targets.Length; index++)
                 {
@@ -179,6 +191,9 @@ namespace ThreeBosses.Tests
                         Is.EqualTo(expected.DesktopAlignment),
                         contract.SceneName);
                 }
+
+                if (!contract.IsTransition)
+                    AssertDefeatButtonLabelsCentered(contract.SceneName);
             }
         }
 
@@ -228,6 +243,48 @@ namespace ThreeBosses.Tests
             Assert.That(outcome, Is.Not.Null, $"{outcomeMethod} did not return a result.");
         }
 
+        private static void AssertDefeatButtonLabelsCentered(string sceneName)
+        {
+            RectTransform[] sceneRects = SceneManager.GetActiveScene()
+                .GetRootGameObjects()
+                .SelectMany(root => root.GetComponentsInChildren<RectTransform>(true))
+                .ToArray();
+            Type textType = Type.GetType("TMPro.TextMeshProUGUI, Unity.TextMeshPro");
+            Assert.That(textType, Is.Not.Null, "TextMeshProUGUI was not found.");
+
+            foreach (ButtonLabelContract contract in DefeatButtonContracts)
+            {
+                RectTransform buttonRect = sceneRects.Single(
+                    candidate => candidate.name == contract.ButtonName);
+                RectTransform labelRect = buttonRect.Find("Label") as RectTransform;
+                Assert.That(labelRect, Is.Not.Null, $"{sceneName} {contract.ButtonName}");
+
+                Component label = labelRect.GetComponent(textType);
+                Assert.That(label, Is.Not.Null, $"{sceneName} {contract.ButtonName}");
+                Assert.That(
+                    textType.GetProperty("text")?.GetValue(label),
+                    Is.EqualTo(contract.Text),
+                    $"{sceneName} {contract.ButtonName}");
+                Assert.That(
+                    textType.GetProperty("alignment")?.GetValue(label)?.ToString(),
+                    Is.EqualTo("Center"),
+                    $"{sceneName} {contract.ButtonName}");
+
+                Assert.That(labelRect.anchorMin, Is.EqualTo(Vector2.zero), sceneName);
+                Assert.That(labelRect.anchorMax, Is.EqualTo(Vector2.one), sceneName);
+                Assert.That(labelRect.pivot, Is.EqualTo(new Vector2(0.5f, 0.5f)), sceneName);
+                Assert.That(labelRect.anchoredPosition, Is.EqualTo(Vector2.zero), sceneName);
+                Assert.That(labelRect.sizeDelta, Is.EqualTo(Vector2.zero), sceneName);
+
+                Vector3 buttonCenter = buttonRect.TransformPoint(buttonRect.rect.center);
+                Vector3 labelCenter = labelRect.TransformPoint(labelRect.rect.center);
+                Assert.That(
+                    Vector3.Distance(buttonCenter, labelCenter),
+                    Is.LessThan(0.001f),
+                    $"{sceneName} {contract.ButtonName} label must stay centered in its button.");
+            }
+        }
+
         private sealed class OutcomeSceneContract
         {
             public OutcomeSceneContract(
@@ -272,6 +329,18 @@ namespace ThreeBosses.Tests
             public Vector2 PortraitPosition { get; }
             public Vector2 PortraitSize { get; }
             public string DesktopAlignment { get; }
+        }
+
+        private readonly struct ButtonLabelContract
+        {
+            public ButtonLabelContract(string buttonName, string text)
+            {
+                ButtonName = buttonName;
+                Text = text;
+            }
+
+            public string ButtonName { get; }
+            public string Text { get; }
         }
     }
 }
