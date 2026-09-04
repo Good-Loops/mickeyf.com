@@ -653,6 +653,12 @@ color. The completion screen's existing total time remains the final Kraken
 split, so this presentation change does not alter timing, scoring, ranks, or
 submission behavior.
 
+Deferred Three Bosses mobile UI polish: center the text groups in
+`Transition_BeeToCyborg`, `Transition_CyborgToKraken`, `Defeat_Bee`,
+`Defeat_Cyborg`, and `Defeat_Kraken` at portrait aspect ratios without changing
+their desktop composition. Verify every affected screen on Android and iOS
+before enabling public mobile gameplay.
+
 For Alpha 0.6.0, playable Three Bosses is desktop-only. Recognized Android and
 iOS browsers do not receive the Games card, and direct mobile navigation shows
 an explicit desktop-only message without instantiating Unity. The Three Bosses
