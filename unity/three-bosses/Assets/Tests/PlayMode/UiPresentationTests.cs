@@ -121,6 +121,12 @@ namespace ThreeBosses.Tests
                     FindObjectsSortMode.None)
                 .Single(button => button.gameObject.name == "Audio Button");
             Assert.That(audioButton, Is.Not.Null);
+            RectTransform audioButtonRect = audioButton.GetComponent<RectTransform>();
+            Assert.That(audioButtonRect.anchorMin, Is.EqualTo(new Vector2(0f, 1f)));
+            Assert.That(audioButtonRect.anchorMax, Is.EqualTo(new Vector2(0f, 1f)));
+            Assert.That(audioButtonRect.pivot, Is.EqualTo(new Vector2(0f, 1f)));
+            Assert.That(audioButtonRect.anchoredPosition, Is.EqualTo(new Vector2(1472f, -76f)));
+            Assert.That(audioButtonRect.sizeDelta, Is.EqualTo(new Vector2(142f, 78f)));
 
             Type textType = RequireType("TMPro.TextMeshProUGUI, Unity.TextMeshPro");
             Assert.That(audioButton.GetComponentsInChildren(textType, true), Is.Empty);
@@ -128,11 +134,30 @@ namespace ThreeBosses.Tests
             Type iconType = RequireType("AudioToggleIcon, Assembly-CSharp");
             Component icon = audioButton.GetComponentInChildren(iconType, true);
             Assert.That(icon, Is.Not.Null);
+            RectTransform iconRect = icon.transform as RectTransform;
+            Assert.That(iconRect, Is.Not.Null);
+            Assert.That(iconRect.anchorMin, Is.EqualTo(Vector2.one * 0.5f));
+            Assert.That(iconRect.anchorMax, Is.EqualTo(Vector2.one * 0.5f));
+            Assert.That(iconRect.pivot, Is.EqualTo(Vector2.one * 0.5f));
+            Assert.That(iconRect.anchoredPosition, Is.EqualTo(Vector2.zero));
+            Assert.That(iconRect.sizeDelta, Is.EqualTo(new Vector2(64f, 44f)));
             Assert.That(audioButton.targetGraphic, Is.SameAs(icon));
             Assert.That(audioButton.targetGraphic.raycastTarget, Is.False);
             Assert.That(audioButton.GetComponent<Image>().raycastTarget, Is.True);
             Assert.That(audioButton.GetComponent<Image>().color, Is.EqualTo(Color.clear));
             Assert.That(audioButton.colors.selectedColor, Is.EqualTo(audioButton.colors.normalColor));
+
+            Type serviceType = RequireType("RunSessionService, Assembly-CSharp");
+            object service = serviceType.GetProperty(
+                    "Instance",
+                    BindingFlags.Public | BindingFlags.Static)
+                ?.GetValue(null);
+            Assert.That(service, Is.Not.Null);
+            MethodInfo configurePortraitLayout = serviceType.GetMethod(
+                "ConfigurePortraitUiLayout",
+                BindingFlags.Public | BindingFlags.Instance);
+            Assert.That(configurePortraitLayout, Is.Not.Null);
+            bool originalPortraitLayout = GetProperty<bool>(service, "UsePortraitUiLayout");
 
             Type controllerType = RequireType("MainMenuController, Assembly-CSharp");
             Component controller = UnityEngine.Object.FindFirstObjectByType(controllerType) as Component;
@@ -159,6 +184,18 @@ namespace ThreeBosses.Tests
 
             try
             {
+                configurePortraitLayout.Invoke(service, new object[] { "0" });
+                yield return null;
+                Assert.That(GetProperty<bool>(icon, "UsesCompactLayout"), Is.False);
+
+                configurePortraitLayout.Invoke(service, new object[] { "1" });
+                yield return null;
+                Assert.That(GetProperty<bool>(icon, "UsesCompactLayout"), Is.True);
+
+                configurePortraitLayout.Invoke(service, new object[] { "0" });
+                yield return null;
+                Assert.That(GetProperty<bool>(icon, "UsesCompactLayout"), Is.False);
+
                 Assert.That(GetProperty<bool>(icon, "IsAudioEnabled"), Is.EqualTo(originalPreference));
 
                 audioButton.onClick.Invoke();
@@ -173,8 +210,47 @@ namespace ThreeBosses.Tests
             }
             finally
             {
+                configurePortraitLayout.Invoke(
+                    service,
+                    new object[] { originalPortraitLayout ? "1" : "0" });
                 setEnabledMethod.Invoke(null, new object[] { originalPreference });
             }
+        }
+
+        [Test]
+        public void AudioIconUsesSeparateDesktopAndCompactWebGlCorrections()
+        {
+            Type iconType = RequireType("AudioToggleIcon, Assembly-CSharp");
+            MethodInfo calculateOffset = iconType.GetMethod(
+                "CalculateHorizontalCenterOffset",
+                BindingFlags.NonPublic | BindingFlags.Static);
+            Assert.That(calculateOffset, Is.Not.Null);
+
+            float desktopEnabled = (float)calculateOffset.Invoke(
+                null,
+                new object[] { true, false, true });
+            float compactEnabled = (float)calculateOffset.Invoke(
+                null,
+                new object[] { true, true, true });
+            float editorEnabled = (float)calculateOffset.Invoke(
+                null,
+                new object[] { true, false, false });
+            float desktopMuted = (float)calculateOffset.Invoke(
+                null,
+                new object[] { false, false, true });
+            float compactMuted = (float)calculateOffset.Invoke(
+                null,
+                new object[] { false, true, true });
+            float editorMuted = (float)calculateOffset.Invoke(
+                null,
+                new object[] { false, false, false });
+
+            Assert.That(desktopEnabled, Is.EqualTo(-0.165f).Within(0.0001f));
+            Assert.That(compactEnabled, Is.EqualTo(-0.03f).Within(0.0001f));
+            Assert.That(editorEnabled, Is.EqualTo(-0.03f).Within(0.0001f));
+            Assert.That(desktopMuted, Is.EqualTo(-0.15f).Within(0.0001f));
+            Assert.That(compactMuted, Is.EqualTo(-0.015f).Within(0.0001f));
+            Assert.That(editorMuted, Is.EqualTo(-0.015f).Within(0.0001f));
         }
 
         [UnityTest]

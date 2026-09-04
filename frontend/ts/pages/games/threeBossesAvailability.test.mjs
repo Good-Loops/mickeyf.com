@@ -116,6 +116,48 @@ test('the branded loading surface exposes real, normalized progress without a he
     assert.doesNotMatch(html, /<img/);
 });
 
+test('the glass frame preserves the Unity artwork ratio in its content box', async () => {
+    const stylesheet = await readFile(
+        fileURLToPath(new URL('../../../sass/pages/_three-bosses.scss', import.meta.url)),
+        'utf8',
+    );
+    const ruleStart = stylesheet.indexOf('&__canvas-wrapper {');
+    const ruleEnd = stylesheet.indexOf('&__canvas {', ruleStart);
+    const canvasWrapperRule = stylesheet.slice(ruleStart, ruleEnd);
+
+    assert.notEqual(ruleStart, -1);
+    assert.notEqual(ruleEnd, -1);
+    assert.match(canvasWrapperRule, /box-sizing: content-box;/u);
+    assert.match(canvasWrapperRule, /aspect-ratio: 1672 \/ 941;/u);
+    assert.match(
+        canvasWrapperRule,
+        /width: calc\(100% - #\{2 \* \$three-bosses-frame-inset\}\);/u,
+    );
+    assert.match(canvasWrapperRule, /> \* \{ box-sizing: border-box; \}/u);
+});
+
+test('the fullscreen control is compact only in the narrow portrait layout', async () => {
+    const stylesheet = await readFile(
+        fileURLToPath(new URL('../../../sass/pages/_three-bosses.scss', import.meta.url)),
+        'utf8',
+    );
+    const baseRuleStart = stylesheet.indexOf('& &__fullscreen-btn {');
+    const baseRuleEnd = stylesheet.indexOf(
+        '& &__canvas-wrapper:fullscreen &__fullscreen-btn',
+        baseRuleStart,
+    );
+    const portraitRuleStart = stylesheet.indexOf('@include portrait-at-most($bp-s) {');
+    const nextResponsiveRule = stylesheet.indexOf('@include viewport-at-most($bp-m) {');
+    const baseRule = stylesheet.slice(baseRuleStart, baseRuleEnd);
+    const portraitRule = stylesheet.slice(portraitRuleStart, nextResponsiveRule);
+
+    assert.match(baseRule, /width: 3\.4rem;/u);
+    assert.match(baseRule, /height: 3\.4rem;/u);
+    assert.match(portraitRule, /& &__fullscreen-btn \{/u);
+    assert.match(portraitRule, /width: 2\.75rem;/u);
+    assert.match(portraitRule, /height: 2\.75rem;/u);
+});
+
 test('the desktop keyboard guide stays aligned with the live Unity bindings', async () => {
     const html = renderToStaticMarkup(
         React.createElement(ThreeBossesControlsGuide),

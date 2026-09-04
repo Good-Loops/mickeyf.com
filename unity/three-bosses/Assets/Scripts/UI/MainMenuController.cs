@@ -20,6 +20,7 @@ public sealed class MainMenuController : MonoBehaviour
     [SerializeField, Min(0f)] private float fadeDurationSeconds = 0.35f;
 
     private bool isLoading;
+    private RunSessionService runSessionService;
 
     private void Awake()
     {
@@ -36,6 +37,9 @@ public sealed class MainMenuController : MonoBehaviour
             audioButton.onClick.AddListener(ToggleAudio);
 
         GameAudioSettings.Changed += OnAudioChanged;
+        runSessionService = RunSessionService.Instance;
+        runSessionService.PortraitUiLayoutChanged += OnPortraitUiLayoutChanged;
+        RefreshAudioIconLayout();
     }
 
     private void Start()
@@ -73,6 +77,11 @@ public sealed class MainMenuController : MonoBehaviour
             audioButton.onClick.RemoveListener(ToggleAudio);
 
         GameAudioSettings.Changed -= OnAudioChanged;
+
+        if (runSessionService != null)
+            runSessionService.PortraitUiLayoutChanged -= OnPortraitUiLayoutChanged;
+
+        runSessionService = null;
     }
 
     private void StartNewRun()
@@ -114,9 +123,20 @@ public sealed class MainMenuController : MonoBehaviour
         RefreshAudioIcon();
     }
 
+    private void OnPortraitUiLayoutChanged()
+    {
+        RefreshAudioIconLayout();
+    }
+
     private void RefreshAudioIcon()
     {
         if (audioButtonIcon != null)
             audioButtonIcon.SetAudioEnabled(GameAudioSettings.IsEnabled);
+    }
+
+    private void RefreshAudioIconLayout()
+    {
+        if (audioButtonIcon != null && runSessionService != null)
+            audioButtonIcon.SetCompactLayout(runSessionService.UsePortraitUiLayout);
     }
 }

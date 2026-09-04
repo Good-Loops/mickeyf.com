@@ -2,6 +2,9 @@
 
 $three-bosses-red: hsl(4, 84%, 58%);
 $three-bosses-violet: hsl(274, 88%, 68%);
+$three-bosses-frame-padding: .45rem;
+$three-bosses-frame-border: .1rem;
+$three-bosses-frame-inset: $three-bosses-frame-padding + $three-bosses-frame-border;
 
 .three-bosses {
     display: grid;
@@ -45,17 +48,26 @@ $three-bosses-violet: hsl(274, 88%, 68%);
 
     &__canvas-wrapper {
         position: relative;
-        width: 100%;
-        aspect-ratio: 16 / 9;
-        padding: .45rem;
+        // Keep the glass inset outside Unity's 1672x941 content box. If the
+        // ratio is applied to the border box, fixed padding distorts the
+        // inner canvas increasingly as the viewport narrows.
+        box-sizing: content-box;
+        width: calc(100% - #{2 * $three-bosses-frame-inset});
+        aspect-ratio: 1672 / 941;
+        padding: $three-bosses-frame-padding;
         overflow: hidden;
-        border: .1rem solid rgba($white, .17);
+        border: $three-bosses-frame-border solid rgba($white, .17);
         border-radius: 1.15rem;
         background: linear-gradient(145deg, rgba($white, .13), rgba($primary, .07));
         box-shadow:
             inset 0 0 1.2rem rgba($white, .06),
             0 1.2rem 3.2rem rgba(black, .3);
         backdrop-filter: blur(1.2rem);
+
+        // The global box-sizing rule is inherited. Keep content-box limited
+        // to this frame so its canvas and overlay controls retain their
+        // intended border-box dimensions.
+        > * { box-sizing: border-box; }
     }
 
     &__canvas {
@@ -74,7 +86,7 @@ $three-bosses-violet: hsl(274, 88%, 68%);
 
     &__status {
         position: absolute;
-        inset: .45rem;
+        inset: $three-bosses-frame-padding;
         display: grid;
         place-items: center;
         isolation: isolate;
