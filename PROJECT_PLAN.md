@@ -663,6 +663,13 @@ screen is verified on a physical Android device and all five scenes have
 automated portrait/desktop restoration coverage. Complete the remaining
 hands-on scene pass on Android and iOS before enabling public mobile gameplay.
 
+A 2026-09-04 local WebGL browser review confirmed both inter-boss transitions
+and the completion screen at 396 x 1216, plus completion-screen resizing to
+1440 x 900 and back without displacement or page overflow. The existing layout
+fix already covers these screens; no additional positioning changes were needed.
+This was a controlled UI-only run with score writes blocked, not gameplay,
+ranking calibration, or physical-device acceptance.
+
 For Alpha 0.6.0, playable Three Bosses is desktop-only. Recognized Android and
 iOS browsers do not receive the Games card, and direct mobile navigation shows
 an explicit desktop-only message without instantiating Unity. The Three Bosses
