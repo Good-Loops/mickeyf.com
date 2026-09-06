@@ -678,6 +678,14 @@ touch laptops remain supported. The local preview now has verified Android
 joystick, action-button, and pause interactions, but public mobile gameplay still
 waits for the complete Android/iOS, all-scenes physical-device acceptance pass.
 
+On 2026-09-06, Mike reported that the requested Android simultaneous-control
+gameplay checks passed and confirmed the corrected menu audio icon is centered
+on the physical phone. Record this as owner-reported acceptance, not as a new
+automated all-scenes run. An iPhone is available for the remaining Safari
+gameplay checks; those checks remain pending, not waived for lack of a Mac.
+Basic browser gameplay testing does not require macOS. Public mobile gates stay
+unchanged until the remaining acceptance and release decisions are complete.
+
 The battle-scene spawn correction was completed in commit `c0bd6d35`: all
 three scenes now begin at the grounded position, and `PlayerMotor` baselines its
 grounded state before evaluating landing feedback. The fresh external WebGL
@@ -736,6 +744,26 @@ fresh matrix rather than inferring deployed state from source configuration:
   readback checks; and
 - reconcile the observed state with `cloudbuild.deploy.yaml`. A tracked `true`
   value is a deployment intention, not proof of the currently serving revision.
+
+Verification snapshot (2026-09-06): the local backend returned
+`SUBMISSIONS_FROZEN` (503) for p4-Vega and `SUBMISSION_DISABLED` (403) for both
+Three Bosses mutation endpoints; the two opt-in variables are absent from the
+local root `.env`. This is distinct from production: the traffic-serving
+`mickeyf-org-build-3db9219129ee44e88daba01bcdcf9c3d` revision had both flags set
+to `true` and served 100% of traffic. Its Three Bosses catalog advertised
+submissions enabled. Signed-out requests to all three mutation endpoints
+returned 401 with `no-store`, no new cookie, and no redirect; both leaderboard
+reads returned 200 (five p4-Vega entries and one Three Bosses entry).
+
+Backend type-checking, 141 unit/security tests, frontend type-checking and 76
+tests, and the complete isolated MySQL integration suite passed. The isolated
+Three Bosses HTTP test covered ticket issuance, submission, identical replay,
+and leaderboard readback without duplicate persistence; its disposable
+container and network were removed afterward. No live score was written, and
+no local or production submission flag was changed. The remaining end-to-end
+check is a real browser-cookie-authenticated run: sign in before starting a new
+normal run, complete it, submit, and confirm the result and leaderboard readback.
+The isolated test's test-only bearer token does not replace that check.
 
 The design must include:
 
@@ -889,6 +917,14 @@ handling, comments, formatting, and tests where the evidence supports it. Keep
 each subsystem change reviewable and run its complete relevant checks before
 moving to the next one. The user-provided PDF is a local reference only and must
 not be copied into the repository.
+
+Include a focused script audit of every first-party `package.json` (requested
+2026-09-06). Identify obsolete, redundant, or unnecessary scripts, and trace
+their use in developer workflows, CI, Git hooks, documentation, and other
+scripts before proposing removal. Distinguish retained operational or migration
+utilities from genuinely unused commands; update affected callers and docs,
+and verify the remaining commands after any cleanup. Do not remove scripts
+merely because they are infrequently used.
 
 ## Deferred tooling follow-up
 
