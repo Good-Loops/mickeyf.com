@@ -23,7 +23,8 @@ import {
 } from "node:path";
 import { fileURLToPath } from "node:url";
 import { pipeline } from "node:stream/promises";
-import { createGzip } from "node:zlib";
+import { promisify } from "node:util";
+import { gzip } from "node:zlib";
 import { normalizeUnityBuildProvenance } from "./three-bosses-unity-provenance.mjs";
 
 export const LOOPBACK_HOST = "127.0.0.1";
@@ -334,8 +335,45 @@ const matchesEtag = (ifNoneMatch, etag) => typeof ifNoneMatch === "string"
     return value === "*" || value.replace(/^W\//u, "") === etag.replace(/^W\//u, "");
   });
 
-export const createThreeBossesWebGlServer = ({ rootPath = defaultRoot() } = {}) => {
+const gzipBuffer = promisify(gzip);
+
+export const createThreeBossesWebGlServer = ({
+  rootPath = defaultRoot(),
+  compressBuffer = gzipBuffer,
+} = {}) => {
   const configuredRootPath = normalizeConfiguredRootPath(rootPath);
+  let compressedBuildId;
+  const compressedFiles = new Map();
+  const resetCompressedBuild = (buildId) => {
+    if (compressedBuildId === buildId) return;
+    compressedBuildId = buildId;
+    compressedFiles.clear();
+  };
+  const getCompressedFile = (fileName, fileHandle, expectedStats) => {
+    let pending = compressedFiles.get(fileName);
+    if (!pending) {
+      // One promise per build asset coalesces concurrent phone requests.
+      // Keep only this build's four payloads, and obtain bytes from the guarded handle.
+      pending = (async () => {
+        const bytes = await fileHandle.readFile();
+        const currentStats = await fileHandle.stat();
+        if (
+          bytes.length !== expectedStats.size
+          || currentStats.size !== expectedStats.size
+          || currentStats.mtimeMs !== expectedStats.mtimeMs
+        ) {
+          throw Object.assign(new Error("Build changed while reading."), { code: "STALE_BUILD" });
+        }
+        return compressBuffer(bytes, { level: 1 });
+      })();
+      compressedFiles.set(fileName, pending);
+      void pending.catch(() => {
+        if (compressedFiles.get(fileName) === pending) compressedFiles.delete(fileName);
+      });
+    }
+    return pending;
+  };
+
   return createHttpServer(async (request, response) => {
     const method = request.method ?? "GET";
     if (!isAllowedHost(request.headers.host)) {
@@ -389,9 +427,11 @@ export const createThreeBossesWebGlServer = ({ rootPath = defaultRoot() } = {}) 
       if (requestUrl.pathname.startsWith("/Build/")) {
         const marker = await readCompletionMarker(configuredRootPath);
         if (!marker.exists || ![1, 2].includes(marker.value?.version)) {
+          resetCompressedBuild(undefined);
           sendJson(response, 503, { error: "BUILD_UNAVAILABLE" }, method);
           return;
         }
+        resetCompressedBuild(marker.value.buildId);
         if (requestUrl.searchParams.get("buildId") !== marker.value.buildId) {
           sendJson(response, 409, { error: "STALE_BUILD" }, method);
           return;
@@ -433,19 +473,20 @@ export const createThreeBossesWebGlServer = ({ rootPath = defaultRoot() } = {}) 
           return;
         }
       }
-      if (!compress) response.setHeader("Content-Length", fileStats.size);
-      if (method === "HEAD") {
+      if (compress) {
+        const bytes = await getCompressedFile(markerFile.fileName, fileHandle, fileStats);
+        response.setHeader("Content-Length", bytes.length);
+        response.end(method === "HEAD" ? undefined : bytes);
+      } else if (method === "HEAD") {
+        response.setHeader("Content-Length", fileStats.size);
         response.end();
       } else {
+        response.setHeader("Content-Length", fileStats.size);
         const file = fileHandle.createReadStream();
         fileHandle = undefined; // The stream owns and closes the file descriptor.
-        if (compress) {
-          await pipeline(file, createGzip({ level: 1 }), response);
-        } else {
-          await pipeline(file, response);
-        }
+        await pipeline(file, response);
       }
-    } catch {
+    } catch (error) {
       if (response.destroyed) return;
       if (response.headersSent) {
         response.destroy();
@@ -453,7 +494,9 @@ export const createThreeBossesWebGlServer = ({ rootPath = defaultRoot() } = {}) 
       }
       response.removeHeader("Content-Encoding");
       response.removeHeader("ETag");
-      sendJson(response, 404, { error: "NOT_FOUND" }, method);
+      const status = error.code === "STALE_BUILD" ? 409 : fileHandle ? 500 : 404;
+      const code = status === 409 ? "STALE_BUILD" : status === 500 ? "READ_FAILED" : "NOT_FOUND";
+      sendJson(response, status, { error: code }, method);
     } finally {
       await fileHandle?.close().catch(() => undefined);
     }

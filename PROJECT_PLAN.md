@@ -713,16 +713,31 @@ space inside the page. A root-gradient/mobile absolute-background experiment
 made no visible improvement in the owner's physical-phone check and was removed.
 Do not mark browser-edge coverage as fixed from Windows WebKit simulation alone.
 
-The local WebGL server now streams gzip for validated uncompressed build files,
+The local WebGL server now serves gzip for validated uncompressed build files,
 reducing the measured current-build transfer from 94,332,664 to 46,812,192 bytes
 through the LAN preview. Existing compressed files are not compressed again.
-Conditional HTTP caching revalidates only after the build-identity/file guards;
-manifests and errors remain uncached. The 24 server tests and 76 frontend tests
+Compressed payloads are prepared once per current build in memory and sent with
+an exact Content-Length; without that header, the generated Unity loader falsely
+jumps to 90% before downloading is complete. Conditional HTTP caching revalidates
+only after the build-identity/file guards; manifests and errors remain uncached.
+The 27 server tests and 76 frontend tests
 pass, and the frontend production build succeeds. Windows WebKit cold/warm loads
 both reached the main menu without page errors; only the small JavaScript files
 were reused on the observed warm reload, while data/Wasm downloaded again.
-The owner reported no noticeable loading-time improvement after this change;
-capture the stalled progress stage and timing before choosing another fix.
+The owner initially reported roughly five-minute loads and a 90% stall, then
+confirmed that the game loads fast. Temporary local phone diagnostics recorded
+a 19.7-second warm load: about 15 seconds before the development page started
+Unity, cached transfers for all four Unity assets, then normal startup. This
+confirms real Safari cache reuse; it does not establish a fresh-install/cold-load
+timing. A subsequent direct/proxy A/B reproduced a concrete local transfer stall:
+forced-close connections stopped with 58,636 compressed data bytes still missing,
+while the identical keep-alive request completed in 0.23 seconds. The Vite local
+Unity proxy now uses a keep-alive agent. All six repeated data/Wasm transfers
+completed in 0.30-0.39 seconds, and a fresh Windows WebKit context reached the menu
+in 7.7 seconds. These are PC measurements, not physical iPhone cold-load timings.
+The regression suite checks concurrent, multi-megabyte gzip transfers through
+completion. Temporary phone instrumentation has been removed. Keep uncached
+Safari timing in the remaining physical-device acceptance checks.
 This changes local preview delivery, not the deployed production package or
 Unity gameplay, and public mobile availability remains unchanged.
 

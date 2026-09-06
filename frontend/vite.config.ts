@@ -1,6 +1,7 @@
 import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
+import { Agent } from "node:http";
 
 export default defineConfig(({ command, mode, isPreview }) => {
   const env = loadEnv(mode, process.cwd(), "VITE_");
@@ -31,6 +32,9 @@ export default defineConfig(({ command, mode, isPreview }) => {
               "/__local/three-bosses/": {
                 target: "http://127.0.0.1:4174",
                 changeOrigin: true,
+                // Forced-close upstream transfers can lose their final chunk
+                // on the local Windows stack, leaving Unity waiting indefinitely.
+                agent: new Agent({ keepAlive: true }),
                 rewrite: (requestPath: string) =>
                   requestPath.replace(/^\/__local\/three-bosses\//, "/"),
               },
