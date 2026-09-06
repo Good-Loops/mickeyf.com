@@ -696,14 +696,35 @@ WebKit and Chromium geometry checks pass, including fullscreen restoration.
 Windows WebKit also renders blank after viewport resizing with both the old
 and corrected CSS; this remains a test-engine finding to check on the physical
 iPhone, not a confirmed iOS regression or a completed gameplay acceptance pass.
+The owner subsequently confirmed that PLAY and the audio icon are centered in
+ordinary Safari on an iPhone 14 Pro running iOS 26.6.1. Preserve that accepted
+alignment while addressing the separate loading and browser-edge concerns.
 
 The site now requests edge-to-edge viewport coverage, keeps interactive content
 inside safe-area insets, and matches browser/installed-app background colors to
 the space theme. Home, Games, and Login passed simulated landscape-inset checks;
 actual iPhone edge coverage still requires owner confirmation. Native fullscreen
 remains preferred where supported. An ordinary iPhone Safari tab uses the
-viewport fallback and cannot have its address bar hidden by that CSS mode;
-opening from Add to Home Screen as a web app is the browser-chrome-free option.
+viewport fallback and cannot have its address bar hidden by that CSS mode.
+Ordinary Safari is the acceptance target: Home Screen installation is not an
+acceptable workaround for this site's visitors. The owner's screenshot shows
+solid bands behind Safari's status and address controls, rather than uncovered
+space inside the page. A root-gradient/mobile absolute-background experiment
+made no visible improvement in the owner's physical-phone check and was removed.
+Do not mark browser-edge coverage as fixed from Windows WebKit simulation alone.
+
+The local WebGL server now streams gzip for validated uncompressed build files,
+reducing the measured current-build transfer from 94,332,664 to 46,812,192 bytes
+through the LAN preview. Existing compressed files are not compressed again.
+Conditional HTTP caching revalidates only after the build-identity/file guards;
+manifests and errors remain uncached. The 24 server tests and 76 frontend tests
+pass, and the frontend production build succeeds. Windows WebKit cold/warm loads
+both reached the main menu without page errors; only the small JavaScript files
+were reused on the observed warm reload, while data/Wasm downloaded again.
+The owner reported no noticeable loading-time improvement after this change;
+capture the stalled progress stage and timing before choosing another fix.
+This changes local preview delivery, not the deployed production package or
+Unity gameplay, and public mobile availability remains unchanged.
 
 The battle-scene spawn correction was completed in commit `c0bd6d35`: all
 three scenes now begin at the grounded position, and `PlayerMotor` baselines its

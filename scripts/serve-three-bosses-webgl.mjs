@@ -22,6 +22,8 @@ import {
   sep,
 } from "node:path";
 import { fileURLToPath } from "node:url";
+import { pipeline } from "node:stream/promises";
+import { createGzip } from "node:zlib";
 import { normalizeUnityBuildProvenance } from "./three-bosses-unity-provenance.mjs";
 
 export const LOOPBACK_HOST = "127.0.0.1";
@@ -304,7 +306,7 @@ const getContentMetadata = (filePath) => {
   const compressionExtension = extname(sourcePath).toLowerCase();
 
   if (compressionExtension === ".br" || compressionExtension === ".gz") {
-    contentEncoding = compressionExtension.slice(1);
+    contentEncoding = compressionExtension === ".gz" ? "gzip" : "br";
     sourcePath = sourcePath.slice(0, -compressionExtension.length);
   }
 
@@ -313,6 +315,24 @@ const getContentMetadata = (filePath) => {
     contentType: contentTypes.get(extname(sourcePath).toLowerCase()) ?? "application/octet-stream",
   };
 };
+
+const acceptsGzip = (acceptEncoding) => {
+  if (typeof acceptEncoding !== "string") return false;
+
+  const qualities = new Map(acceptEncoding.toLowerCase().split(",").map((entry) => {
+    const [encoding, ...parameters] = entry.trim().split(";");
+    const qualityParameter = parameters.find((parameter) => /^\s*q\s*=/u.test(parameter));
+    const quality = qualityParameter === undefined ? 1 : Number(qualityParameter.split("=")[1]);
+    return [encoding.trim(), quality >= 0 && quality <= 1 ? quality : 0];
+  }));
+  return (qualities.get("gzip") ?? qualities.get("*") ?? 0) > 0;
+};
+
+const matchesEtag = (ifNoneMatch, etag) => typeof ifNoneMatch === "string"
+  && ifNoneMatch.split(",").some((candidate) => {
+    const value = candidate.trim();
+    return value === "*" || value.replace(/^W\//u, "") === etag.replace(/^W\//u, "");
+  });
 
 export const createThreeBossesWebGlServer = ({ rootPath = defaultRoot() } = {}) => {
   const configuredRootPath = normalizeConfiguredRootPath(rootPath);
@@ -357,6 +377,7 @@ export const createThreeBossesWebGlServer = ({ rootPath = defaultRoot() } = {}) 
       return;
     }
 
+    let fileHandle;
     try {
       const filePath = await resolveRequestFile(configuredRootPath, requestUrl.pathname);
       if (!filePath) {
@@ -383,38 +404,58 @@ export const createThreeBossesWebGlServer = ({ rootPath = defaultRoot() } = {}) 
       }
 
       const { contentEncoding, contentType } = getContentMetadata(filePath);
-      const fileHandle = await open(filePath, "r");
+      fileHandle = await open(filePath, "r");
       const fileStats = await fileHandle.stat();
       if (
         markerFile
         && (markerFile.size !== fileStats.size || markerFile.mtimeMs !== fileStats.mtimeMs)
       ) {
-        await fileHandle.close();
         sendJson(response, 409, { error: "STALE_BUILD" }, method);
         return;
       }
+      const compress = Boolean(markerFile)
+        && !contentEncoding
+        && acceptsGzip(request.headers["accept-encoding"]);
+      const responseEncoding = compress ? "gzip" : contentEncoding;
       response.statusCode = 200;
       setCommonHeaders(response);
       response.setHeader("Content-Type", contentType);
-      response.setHeader("Content-Length", fileStats.size);
-      if (contentEncoding) response.setHeader("Content-Encoding", contentEncoding);
+      if (responseEncoding) response.setHeader("Content-Encoding", responseEncoding);
+      if (markerFile) {
+        // Revalidate cached bytes after all build guards, including during rebuilds.
+        const etag = `W/"${markerFile.hash}-${responseEncoding ?? "identity"}"`;
+        response.setHeader("Cache-Control", "private, no-cache");
+        response.setHeader("Vary", "Accept-Encoding");
+        response.setHeader("ETag", etag);
+        if (matchesEtag(request.headers["if-none-match"], etag)) {
+          response.statusCode = 304;
+          response.end();
+          return;
+        }
+      }
+      if (!compress) response.setHeader("Content-Length", fileStats.size);
       if (method === "HEAD") {
-        await fileHandle.close();
         response.end();
       } else {
         const file = fileHandle.createReadStream();
-        file.on("error", () => {
-          if (!response.headersSent) {
-            sendJson(response, 500, { error: "READ_FAILED" }, method);
-          } else {
-            response.destroy();
-          }
-        });
-        response.on("close", () => file.destroy());
-        file.pipe(response);
+        fileHandle = undefined; // The stream owns and closes the file descriptor.
+        if (compress) {
+          await pipeline(file, createGzip({ level: 1 }), response);
+        } else {
+          await pipeline(file, response);
+        }
       }
     } catch {
+      if (response.destroyed) return;
+      if (response.headersSent) {
+        response.destroy();
+        return;
+      }
+      response.removeHeader("Content-Encoding");
+      response.removeHeader("ETag");
       sendJson(response, 404, { error: "NOT_FOUND" }, method);
+    } finally {
+      await fileHandle?.close().catch(() => undefined);
     }
   });
 };

@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, rm, symlink, utimes, writeFile } from "node:f
 import { tmpdir } from "node:os";
 import { join, parse } from "node:path";
 import { after, before, test } from "node:test";
-import { brotliCompressSync } from "node:zlib";
+import { brotliCompressSync, brotliDecompressSync, gzipSync, gunzipSync } from "node:zlib";
 import {
   BUILD_COMPLETION_MARKER,
   invalidateBuildCompletionMarker,
@@ -19,6 +19,7 @@ let baseUrl;
 let server;
 let serverPort;
 let buildId;
+const loaderPayload = `${"loader".repeat(20000)}tail`;
 
 const releaseProvenance = Object.freeze({
   sourceCommit: "a".repeat(40),
@@ -40,6 +41,7 @@ const rawRequest = (requestPath, { headers = {}, method = "GET", port = serverPo
       response.on("data", (chunk) => chunks.push(chunk));
       response.on("end", () => resolvePromise({
         body: Buffer.concat(chunks).toString("utf8"),
+        bytes: Buffer.concat(chunks),
         headers: response.headers,
         status: response.statusCode,
       }));
@@ -54,8 +56,8 @@ before(async () => {
   await mkdir(join(rootPath, "Build"));
   await writeFile(join(rootPath, "Build", "test.data.br"), brotliCompressSync("data"));
   await writeFile(join(rootPath, "Build", "test.wasm.br"), brotliCompressSync("wasm"));
-  await writeFile(join(rootPath, "Build", "test.framework.js.br"), brotliCompressSync("framework"));
-  await writeFile(join(rootPath, "Build", "test.loader.js"), "loader");
+  await writeFile(join(rootPath, "Build", "test.framework.js.gz"), gzipSync("framework"));
+  await writeFile(join(rootPath, "Build", "test.loader.js"), loaderPayload);
   await writeFile(join(outsidePath, "secret.txt"), "secret");
   await symlink(
     outsidePath,
@@ -122,6 +124,154 @@ test("supports HEAD without sending an asset body", async () => {
   assert.equal(response.headers["content-type"], "application/wasm");
   assert.equal(response.headers["content-encoding"], "br");
   assert.equal(response.body, "");
+});
+
+test("streams gzip for raw Build assets without an incorrect content length", async () => {
+  const response = await rawRequest(`/Build/test.loader.js?buildId=${buildId}`, {
+    headers: { "Accept-Encoding": "gzip" },
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers["content-type"], "text/javascript; charset=utf-8");
+  assert.equal(response.headers["content-encoding"], "gzip");
+  assert.equal(response.headers["content-length"], undefined);
+  assert.equal(response.headers.vary, "Accept-Encoding");
+  assert.equal(response.headers["cache-control"], "private, no-cache");
+  assert.equal(gunzipSync(response.bytes).toString("utf8"), loaderPayload);
+  assert.ok(response.bytes.length < Buffer.byteLength(loaderPayload));
+});
+
+test("streams every identity byte including the final partial chunk", async () => {
+  const response = await rawRequest(`/Build/test.loader.js?buildId=${buildId}`);
+  assert.equal(response.status, 200);
+  assert.equal(response.bytes.length, Buffer.byteLength(loaderPayload));
+  assert.equal(response.body, loaderPayload);
+  assert.equal(response.headers["content-length"], String(response.bytes.length));
+});
+
+test("honors gzip exclusions and wildcard fallback", async () => {
+  for (const [acceptEncoding, compressed] of [
+    ["gzip;q=0", false],
+    ["gzip;q=0, *;q=1", false],
+    ["*;q=0", false],
+    ["br", false],
+    ["*;q=0.5", true],
+    ["GZip; q=0.5", true],
+    ["gzip;q=1, *;q=0", true],
+  ]) {
+    const response = await rawRequest(`/Build/test.loader.js?buildId=${buildId}`, {
+      headers: { "Accept-Encoding": acceptEncoding },
+    });
+    assert.equal(response.status, 200, acceptEncoding);
+    assert.equal(response.headers["content-encoding"], compressed ? "gzip" : undefined, acceptEncoding);
+    assert.equal(
+      compressed ? gunzipSync(response.bytes).toString("utf8") : response.body,
+      loaderPayload,
+      acceptEncoding,
+    );
+  }
+});
+
+test("keeps HEAD metadata consistent with identity and gzip representations", async () => {
+  for (const acceptEncoding of ["identity", "gzip"]) {
+    const path = `/Build/test.loader.js?buildId=${buildId}`;
+    const headers = { "Accept-Encoding": acceptEncoding };
+    const get = await rawRequest(path, { headers });
+    const head = await rawRequest(path, { headers, method: "HEAD" });
+    assert.equal(head.status, 200);
+    assert.equal(head.body, "");
+    for (const name of ["content-type", "content-encoding", "content-length", "etag", "vary", "cache-control"]) {
+      assert.equal(head.headers[name], get.headers[name], `${acceptEncoding}: ${name}`);
+    }
+    assert.equal(
+      head.headers["content-length"],
+      acceptEncoding === "identity" ? String(Buffer.byteLength(loaderPayload)) : undefined,
+    );
+  }
+});
+
+test("revalidates build assets using representation-specific ETags", async () => {
+  const path = `/Build/test.loader.js?buildId=${buildId}`;
+  const identity = await rawRequest(path);
+  const gzip = await rawRequest(path, { headers: { "Accept-Encoding": "gzip" } });
+  assert.ok(identity.headers.etag);
+  assert.notEqual(identity.headers.etag, gzip.headers.etag);
+
+  const cached = await rawRequest(path, {
+    headers: { "Accept-Encoding": "gzip", "If-None-Match": `"other", ${gzip.headers.etag}` },
+  });
+  assert.equal(cached.status, 304);
+  assert.equal(cached.body, "");
+  assert.equal(cached.headers.etag, gzip.headers.etag);
+  assert.equal(cached.headers.vary, "Accept-Encoding");
+  assert.equal(cached.headers["cache-control"], "private, no-cache");
+
+  const differentRepresentation = await rawRequest(path, {
+    headers: { "If-None-Match": gzip.headers.etag },
+  });
+  assert.equal(differentRepresentation.status, 200);
+  assert.equal(differentRepresentation.body, loaderPayload);
+
+  const cachedHead = await rawRequest(path, {
+    headers: { "If-None-Match": identity.headers.etag },
+    method: "HEAD",
+  });
+  assert.equal(cachedHead.status, 304);
+  assert.equal(cachedHead.body, "");
+});
+
+test("serves precompressed files once with the correct encoding", async () => {
+  for (const [name, encoding, decompress, expected] of [
+    ["test.wasm.br", "br", brotliDecompressSync, "wasm"],
+    ["test.framework.js.gz", "gzip", gunzipSync, "framework"],
+  ]) {
+    const response = await rawRequest(`/Build/${name}?buildId=${buildId}`, {
+      headers: { "Accept-Encoding": "gzip, br" },
+    });
+    assert.equal(response.status, 200);
+    assert.equal(response.headers["content-encoding"], encoding);
+    assert.equal(response.headers["content-length"], String(response.bytes.length));
+    assert.equal(decompress(response.bytes).toString("utf8"), expected);
+    assert.deepEqual(response.bytes, await readFile(join(rootPath, "Build", name)));
+  }
+});
+
+test("keeps unversioned streaming assets uncached and uncompressed", async () => {
+  await mkdir(join(rootPath, "StreamingAssets"));
+  await writeFile(join(rootPath, "StreamingAssets", "settings.json"), "{}");
+  const response = await rawRequest("/StreamingAssets/settings.json", {
+    headers: { "Accept-Encoding": "gzip", "If-None-Match": "*" },
+  });
+  assert.equal(response.status, 200);
+  assert.equal(response.headers["cache-control"], "no-store");
+  assert.equal(response.headers.etag, undefined);
+  assert.equal(response.headers["content-encoding"], undefined);
+  assert.equal(response.body, "{}");
+});
+
+test("continues serving after a client aborts a streamed response", { timeout: 5000 }, async () => {
+  await writeFile(join(rootPath, "StreamingAssets", "large.data"), Buffer.alloc(4 * 1024 * 1024, 42));
+  await new Promise((resolvePromise, reject) => {
+    const clientRequest = request({
+      host: "127.0.0.1",
+      port: serverPort,
+      path: "/StreamingAssets/large.data",
+    }, (response) => {
+      response.once("data", () => {
+        response.destroy();
+        clientRequest.destroy();
+        resolvePromise();
+      });
+      response.on("error", reject);
+    });
+    clientRequest.on("error", reject);
+    clientRequest.end();
+  });
+
+  const response = await rawRequest(`/Build/test.loader.js?buildId=${buildId}`, {
+    headers: { "Accept-Encoding": "gzip" },
+  });
+  assert.equal(response.status, 200);
+  assert.equal(gunzipSync(response.bytes).toString("utf8"), loaderPayload);
 });
 
 test("rejects traversal and symlink escapes", async () => {
@@ -282,18 +432,31 @@ test("rejects Brotli assets when writing a release completion marker", async () 
 test("rejects old asset URLs while a build is invalidated and after marker rollover", async () => {
   const oldManifest = await (await fetch(`${baseUrl}/build-manifest.json`)).json();
   const oldAssetPath = `/${oldManifest.codeUrl}`;
+  const cachedAsset = await rawRequest(oldAssetPath);
+  const conditionalHeaders = { "If-None-Match": cachedAsset.headers.etag };
+
+  const oldWasmPath = join(rootPath, "Build", "test.wasm.br");
+  await writeFile(oldWasmPath, brotliCompressSync("replacement wasm"));
+  let response = await rawRequest(oldAssetPath, { headers: conditionalHeaders });
+  assert.equal(response.status, 409);
+  assert.equal(response.headers["cache-control"], "no-store");
+  assert.equal(response.headers.etag, undefined);
 
   await invalidateBuildCompletionMarker(rootPath);
-  let response = await rawRequest(oldAssetPath);
+  response = await rawRequest(oldAssetPath, { headers: conditionalHeaders });
   assert.equal(response.status, 503);
+  assert.equal(response.headers["cache-control"], "no-store");
+  assert.equal(response.headers.etag, undefined);
 
   await writeFile(join(rootPath, "Build", "test.data.br"), brotliCompressSync("replacement data"));
   await writeBuildCompletionMarker(rootPath);
   const newManifest = await readBuildManifest(rootPath);
   assert.notEqual(newManifest.buildId, oldManifest.buildId);
 
-  response = await rawRequest(oldAssetPath);
+  response = await rawRequest(oldAssetPath, { headers: conditionalHeaders });
   assert.equal(response.status, 409);
+  assert.equal(response.headers["cache-control"], "no-store");
+  assert.equal(response.headers.etag, undefined);
   assert.match(response.body, /STALE_BUILD/u);
 });
 
