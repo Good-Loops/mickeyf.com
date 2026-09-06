@@ -149,7 +149,7 @@ public static class MainMenuAndCountdownBuilder
         Button audioButton = CreateButton(
             "Audio Button",
             artRoot,
-            new Rect(1472f, 76f, 142f, 78f),
+            new Rect(1472f, 74f, 142f, 78f),
             string.Empty,
             18f);
 

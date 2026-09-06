@@ -9,13 +9,9 @@ using UnityEngine.UI;
 public sealed class AudioToggleIcon : MaskableGraphic
 {
     private const int ArcSegments = 8;
-    private const float DesktopWebGlHorizontalCorrection = 0.135f;
-
     [SerializeField] private bool audioEnabled = true;
-    private bool compactLayout;
 
     public bool IsAudioEnabled => audioEnabled;
-    public bool UsesCompactLayout => compactLayout;
 
     public void SetAudioEnabled(bool enabled)
     {
@@ -23,15 +19,6 @@ public sealed class AudioToggleIcon : MaskableGraphic
             return;
 
         audioEnabled = enabled;
-        SetVerticesDirty();
-    }
-
-    public void SetCompactLayout(bool enabled)
-    {
-        if (compactLayout == enabled)
-            return;
-
-        compactLayout = enabled;
         SetVerticesDirty();
     }
 
@@ -44,21 +31,7 @@ public sealed class AudioToggleIcon : MaskableGraphic
         if (size <= 0f)
             return;
 
-        // Center the complete silhouette rather than only its drawing origin.
-        // A small upward optical correction keeps the downscaled WebGL icon
-        // from landing a full pixel below the button's visual center.
-        bool applyWebGlOpticalCorrection = false;
-#if UNITY_WEBGL && !UNITY_EDITOR
-        applyWebGlOpticalCorrection = true;
-#endif
-        float horizontalCenterOffset = CalculateHorizontalCenterOffset(
-            audioEnabled,
-            compactLayout,
-            applyWebGlOpticalCorrection);
-        const float verticalCenterOffset = 0.055f;
-        Vector2 center = pixelRect.center + new Vector2(
-            horizontalCenterOffset * size,
-            verticalCenterOffset * size);
+        Vector2 center = pixelRect.center;
         float stroke = Mathf.Max(1.5f, size * 0.075f);
         Color32 vertexColor = color;
 
@@ -95,23 +68,32 @@ public sealed class AudioToggleIcon : MaskableGraphic
                 stroke * 1.15f,
                 vertexColor);
         }
+
+        CenterSilhouette(vertexHelper, center);
     }
 
-    private static float CalculateHorizontalCenterOffset(
-        bool enabled,
-        bool usesCompactLayout,
-        bool applyWebGlOpticalCorrection)
+    private static void CenterSilhouette(VertexHelper vertexHelper, Vector2 center)
     {
-        float offset = enabled ? -0.03f : -0.015f;
+        UIVertex vertex = default;
+        vertexHelper.PopulateUIVertex(ref vertex, 0);
+        Vector2 min = vertex.position;
+        Vector2 max = vertex.position;
+        for (int index = 1; index < vertexHelper.currentVertCount; index++)
+        {
+            vertexHelper.PopulateUIVertex(ref vertex, index);
+            min = Vector2.Min(min, vertex.position);
+            max = Vector2.Max(max, vertex.position);
+        }
 
-        // At full WebGL resolution Chrome gives the right-hand waves more
-        // visual weight than the native Editor render. In the browser's
-        // compact portrait layout those strokes merge during downsampling, so
-        // the desktop correction would move the glyph one CSS pixel left.
-        if (applyWebGlOpticalCorrection && !usesCompactLayout)
-            offset -= DesktopWebGlHorizontalCorrection;
-
-        return offset;
+        // Include stroke edges, which differ between waves and the mute cross.
+        // One geometry-based center stays stable through scaling and rotation.
+        Vector3 correction = center - (min + max) * 0.5f;
+        for (int index = 0; index < vertexHelper.currentVertCount; index++)
+        {
+            vertexHelper.PopulateUIVertex(ref vertex, index);
+            vertex.position += correction;
+            vertexHelper.SetUIVertex(vertex, index);
+        }
     }
 
     private static void AddArc(

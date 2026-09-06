@@ -125,7 +125,8 @@ namespace ThreeBosses.Tests
             Assert.That(audioButtonRect.anchorMin, Is.EqualTo(new Vector2(0f, 1f)));
             Assert.That(audioButtonRect.anchorMax, Is.EqualTo(new Vector2(0f, 1f)));
             Assert.That(audioButtonRect.pivot, Is.EqualTo(new Vector2(0f, 1f)));
-            Assert.That(audioButtonRect.anchoredPosition, Is.EqualTo(new Vector2(1472f, -76f)));
+            // The painted red frame in Menu.png is centered at (1543, 113).
+            Assert.That(audioButtonRect.anchoredPosition, Is.EqualTo(new Vector2(1472f, -74f)));
             Assert.That(audioButtonRect.sizeDelta, Is.EqualTo(new Vector2(142f, 78f)));
 
             Type textType = RequireType("TMPro.TextMeshProUGUI, Unity.TextMeshPro");
@@ -186,15 +187,15 @@ namespace ThreeBosses.Tests
             {
                 configurePortraitLayout.Invoke(service, new object[] { "0" });
                 yield return null;
-                Assert.That(GetProperty<bool>(icon, "UsesCompactLayout"), Is.False);
+                AssertAudioIconCentered(icon, audioButtonRect);
 
                 configurePortraitLayout.Invoke(service, new object[] { "1" });
                 yield return null;
-                Assert.That(GetProperty<bool>(icon, "UsesCompactLayout"), Is.True);
+                AssertAudioIconCentered(icon, audioButtonRect);
 
                 configurePortraitLayout.Invoke(service, new object[] { "0" });
                 yield return null;
-                Assert.That(GetProperty<bool>(icon, "UsesCompactLayout"), Is.False);
+                AssertAudioIconCentered(icon, audioButtonRect);
 
                 Assert.That(GetProperty<bool>(icon, "IsAudioEnabled"), Is.EqualTo(originalPreference));
 
@@ -202,11 +203,15 @@ namespace ThreeBosses.Tests
                 yield return null;
                 Assert.That((bool)isEnabledProperty.GetValue(null), Is.EqualTo(!originalPreference));
                 Assert.That(GetProperty<bool>(icon, "IsAudioEnabled"), Is.EqualTo(!originalPreference));
+                AssertAudioIconCentered(icon, audioButtonRect);
 
                 audioButton.onClick.Invoke();
                 yield return null;
                 Assert.That((bool)isEnabledProperty.GetValue(null), Is.EqualTo(originalPreference));
                 Assert.That(GetProperty<bool>(icon, "IsAudioEnabled"), Is.EqualTo(originalPreference));
+                AssertAudioIconCentered(icon, audioButtonRect);
+                Assert.That(audioButtonRect.sizeDelta, Is.EqualTo(new Vector2(142f, 78f)));
+                Assert.That(iconRect.sizeDelta, Is.EqualTo(new Vector2(64f, 44f)));
             }
             finally
             {
@@ -217,40 +222,44 @@ namespace ThreeBosses.Tests
             }
         }
 
-        [Test]
-        public void AudioIconUsesSeparateDesktopAndCompactWebGlCorrections()
+        [TestCase(true, 64f, 44f, 0.5f, 0.5f)]
+        [TestCase(false, 64f, 44f, 0.5f, 0.5f)]
+        [TestCase(true, 16f, 12f, 0f, 0f)]
+        [TestCase(false, 16f, 12f, 0f, 0f)]
+        [TestCase(true, 24f, 96f, 1f, 1f)]
+        [TestCase(false, 24f, 96f, 1f, 1f)]
+        [TestCase(true, 128f, 88f, 0.25f, 0.75f)]
+        [TestCase(false, 128f, 88f, 0.25f, 0.75f)]
+        public void AudioIconCentersItsCompleteMeshForDifferentSizesAndPivots(
+            bool audioEnabled,
+            float width,
+            float height,
+            float pivotX,
+            float pivotY)
         {
             Type iconType = RequireType("AudioToggleIcon, Assembly-CSharp");
-            MethodInfo calculateOffset = iconType.GetMethod(
-                "CalculateHorizontalCenterOffset",
-                BindingFlags.NonPublic | BindingFlags.Static);
-            Assert.That(calculateOffset, Is.Not.Null);
+            GameObject iconObject = new(
+                "Test Audio Icon",
+                typeof(RectTransform),
+                typeof(CanvasRenderer));
 
-            float desktopEnabled = (float)calculateOffset.Invoke(
-                null,
-                new object[] { true, false, true });
-            float compactEnabled = (float)calculateOffset.Invoke(
-                null,
-                new object[] { true, true, true });
-            float editorEnabled = (float)calculateOffset.Invoke(
-                null,
-                new object[] { true, false, false });
-            float desktopMuted = (float)calculateOffset.Invoke(
-                null,
-                new object[] { false, false, true });
-            float compactMuted = (float)calculateOffset.Invoke(
-                null,
-                new object[] { false, true, true });
-            float editorMuted = (float)calculateOffset.Invoke(
-                null,
-                new object[] { false, false, false });
+            try
+            {
+                RectTransform iconRect = iconObject.GetComponent<RectTransform>();
+                iconRect.sizeDelta = new Vector2(width, height);
+                iconRect.pivot = new Vector2(pivotX, pivotY);
+                Component icon = iconObject.AddComponent(iconType);
+                RequireMethod(iconType, "SetAudioEnabled").Invoke(
+                    icon,
+                    new object[] { audioEnabled });
 
-            Assert.That(desktopEnabled, Is.EqualTo(-0.165f).Within(0.0001f));
-            Assert.That(compactEnabled, Is.EqualTo(-0.03f).Within(0.0001f));
-            Assert.That(editorEnabled, Is.EqualTo(-0.03f).Within(0.0001f));
-            Assert.That(desktopMuted, Is.EqualTo(-0.15f).Within(0.0001f));
-            Assert.That(compactMuted, Is.EqualTo(-0.015f).Within(0.0001f));
-            Assert.That(editorMuted, Is.EqualTo(-0.015f).Within(0.0001f));
+                AssertAudioIconCentered(icon);
+                Assert.That(iconRect.sizeDelta, Is.EqualTo(new Vector2(width, height)));
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(iconObject);
+            }
         }
 
         [UnityTest]
@@ -856,6 +865,51 @@ namespace ThreeBosses.Tests
                 BindingFlags.Instance | BindingFlags.Public);
             Assert.That(property, Is.Not.Null, $"Property {target.GetType().FullName}.{name} was not found.");
             return (T)property.GetValue(target);
+        }
+
+        private static void AssertAudioIconCentered(Component icon, RectTransform buttonRect = null)
+        {
+            Graphic graphic = icon as Graphic;
+            Assert.That(graphic, Is.Not.Null);
+            Bounds bounds = GetGraphicMeshBounds(graphic);
+            Vector2 expectedCenter = graphic.GetPixelAdjustedRect().center;
+            Assert.That(bounds.size.x, Is.GreaterThan(0f));
+            Assert.That(bounds.size.y, Is.GreaterThan(0f));
+            Assert.That(bounds.center.x, Is.EqualTo(expectedCenter.x).Within(0.001f));
+            Assert.That(bounds.center.y, Is.EqualTo(expectedCenter.y).Within(0.001f));
+
+            if (buttonRect == null)
+                return;
+
+            Vector3 buttonLocalCenter = buttonRect.InverseTransformPoint(
+                graphic.rectTransform.TransformPoint(bounds.center));
+            Assert.That(buttonLocalCenter.x, Is.EqualTo(buttonRect.rect.center.x).Within(0.001f));
+            Assert.That(buttonLocalCenter.y, Is.EqualTo(buttonRect.rect.center.y).Within(0.001f));
+        }
+
+        private static Bounds GetGraphicMeshBounds(Graphic graphic)
+        {
+            MethodInfo populateMesh = graphic.GetType().GetMethod(
+                "OnPopulateMesh",
+                BindingFlags.Instance | BindingFlags.NonPublic,
+                null,
+                new[] { typeof(VertexHelper) },
+                null);
+            Assert.That(populateMesh, Is.Not.Null);
+            using VertexHelper vertices = new();
+            Mesh mesh = new();
+
+            try
+            {
+                populateMesh.Invoke(graphic, new object[] { vertices });
+                vertices.FillMesh(mesh);
+                mesh.RecalculateBounds();
+                return mesh.bounds;
+            }
+            finally
+            {
+                UnityEngine.Object.DestroyImmediate(mesh);
+            }
         }
 
         private static MaskableGraphic AssertPauseGlassVisual(
