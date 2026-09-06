@@ -686,6 +686,25 @@ gameplay checks; those checks remain pending, not waived for lack of a Mac.
 Basic browser gameplay testing does not require macOS. Public mobile gates stay
 unchanged until the remaining acceptance and release decisions are complete.
 
+The 2026-09-06 iPhone review exposed a WebKit canvas-sizing discrepancy: at
+390 x 844 / DPR 3, the embedded canvas was 355.59 x 211.13 CSS pixels instead
+of 355.59 x 200.13. Its percentage height included the glass frame inset,
+changing Unity's menu coordinate scaling and shifting PLAY/audio against the
+artwork. The canvas now owns its 1672:941 CSS aspect ratio with automatic height;
+no Unity offsets, control sizes, gameplay code, or build assets changed.
+WebKit and Chromium geometry checks pass, including fullscreen restoration.
+Windows WebKit also renders blank after viewport resizing with both the old
+and corrected CSS; this remains a test-engine finding to check on the physical
+iPhone, not a confirmed iOS regression or a completed gameplay acceptance pass.
+
+The site now requests edge-to-edge viewport coverage, keeps interactive content
+inside safe-area insets, and matches browser/installed-app background colors to
+the space theme. Home, Games, and Login passed simulated landscape-inset checks;
+actual iPhone edge coverage still requires owner confirmation. Native fullscreen
+remains preferred where supported. An ordinary iPhone Safari tab uses the
+viewport fallback and cannot have its address bar hidden by that CSS mode;
+opening from Add to Home Screen as a web app is the browser-chrome-free option.
+
 The battle-scene spawn correction was completed in commit `c0bd6d35`: all
 three scenes now begin at the grounded position, and `PlayerMotor` baselines its
 grounded state before evaluating landing feedback. The fresh external WebGL

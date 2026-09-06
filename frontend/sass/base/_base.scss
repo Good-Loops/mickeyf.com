@@ -24,6 +24,7 @@ body {
 html {
     font-size: 62.5%;
     box-sizing: border-box;
+    background-color: $space-background;
     user-select: none;
     scrollbar-color: rgba($primary-light, .42) rgba($space-background, .18);
     scrollbar-width: thin;

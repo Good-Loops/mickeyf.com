@@ -5,6 +5,17 @@
     isolation: isolate;
 
     min-height: 100svh;
+    // Let the fixed sky reach the display edges, while keeping interactive
+    // content clear of the notch and home indicator in either orientation.
+    padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
+        env(safe-area-inset-bottom, 0px) env(safe-area-inset-left, 0px);
+
+    > .main {
+        min-width: 0;
+        min-height: calc(90svh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+
+        > * { max-width: 100%; }
+    }
 }
 
 @include viewport-at-most($bp-m) {
