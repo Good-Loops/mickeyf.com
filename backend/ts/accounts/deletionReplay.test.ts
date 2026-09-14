@@ -23,6 +23,8 @@ type FakeOptions = {
     unsafeSchema?: boolean;
     providerTable?: 'absent' | 'malformed';
     providerMigrationRecorded?: boolean;
+    attemptTable?: 'absent' | 'malformed';
+    attemptMigrationRecorded?: boolean;
     wrongTarget?: boolean;
     changeIdentityUnderLock?: boolean;
     failAt?: string;
@@ -50,11 +52,18 @@ function fakeReplay(options: FakeOptions = {}) {
             }], []];
             if (sql.includes('DATE_FORMAT(applied_at')) return [[{ epoch: options.wrongEpoch ? 'old' : SETTINGS.expectedIdentityEpoch }], []];
             if (sql.startsWith('SELECT version FROM schema_migrations')) {
-                return [options.providerMigrationRecorded ? [{ version: '0009_create_account_provider_identities' }] : [], []];
+                const recorded = values?.[0] === '0010_create_provider_auth_attempts'
+                    ? options.attemptMigrationRecorded : options.providerMigrationRecorded;
+                return [recorded ? [{ version: values?.[0] }] : [], []];
             }
             if (values?.[0] === 'account_provider_identities') {
                 return [sql.includes('COUNT(*)')
                     ? [{ tableCount: options.providerTable === 'malformed' ? 1 : 0 }]
+                    : [{ engine: 'MyISAM', collation: 'utf8mb4_unicode_ci', tableType: 'BASE TABLE' }], []];
+            }
+            if (values?.[0] === 'provider_auth_attempts') {
+                return [sql.includes('COUNT(*)')
+                    ? [{ tableCount: options.attemptTable === 'malformed' ? 1 : 0 }]
                     : [{ engine: 'MyISAM', collation: 'utf8mb4_unicode_ci', tableType: 'BASE TABLE' }], []];
             }
             if (sql.includes('information_schema.COLUMNS')) return [options.missingIdentity ? [] : [{
@@ -175,6 +184,34 @@ test('replay supports pre-provider backups but refuses missing recorded or malfo
         assert.ok(fake.events.includes('destroy'));
         assert.equal(fake.accounts.get(42), FIRST_ID);
     }
+});
+
+test('replay supports pre-0010 backups and refuses unsafe attempt storage before planning or deleting', async () => {
+    const legacy = fakeReplay({ attemptTable: 'absent' });
+    const plan = await planDeletionReplay(legacy.database, legacy.reader, SETTINGS);
+    assert.ok(legacy.queries.some(({ sql, values }) => sql.startsWith('SELECT version FROM schema_migrations')
+        && values?.[0] === '0010_create_provider_auth_attempts'));
+    assert.equal((await applyDeletionReplay(legacy.database, legacy.reader, SETTINGS, plan.sha256)).deletedAccounts, 1);
+    for (const options of [
+        { attemptMigrationRecorded: true }, { attemptTable: 'malformed' as const },
+    ]) {
+        const fake = fakeReplay(options);
+        await assert.rejects(planDeletionReplay(fake.database, fake.reader, SETTINGS), /[Pp]rovider attempt/u);
+        await assert.rejects(applyDeletionReplay(fake.database, fake.reader, SETTINGS, plan.sha256), /[Pp]rovider attempt/u);
+        assert.equal(fake.events.some(sql => sql.startsWith('DELETE') || sql === 'START TRANSACTION'), false);
+        assert.ok(fake.events.includes('destroy'));
+        assert.equal(fake.accounts.get(42), FIRST_ID);
+    }
+});
+
+test('attempt schema changes after plan approval are rechecked before replay writes', async () => {
+    const options: FakeOptions = {};
+    const fake = fakeReplay(options);
+    const plan = await planDeletionReplay(fake.database, fake.reader, SETTINGS);
+    options.attemptMigrationRecorded = true;
+    await assert.rejects(applyDeletionReplay(fake.database, fake.reader, SETTINGS, plan.sha256), /missing its table/u);
+    assert.equal(fake.events.some(sql => sql.startsWith('DELETE') || sql === 'START TRANSACTION'), false);
+    assert.equal(fake.accounts.get(42), FIRST_ID);
 });
 
 test('stale approval and changed pre-apply journal prevent every deletion', async () => {

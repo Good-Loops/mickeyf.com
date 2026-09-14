@@ -192,6 +192,7 @@ test('plan is read-only, configures short waits, and releases its advisory lock'
             '0007_backfill_account_identity',
             '0008_finalize_account_identity',
             '0009_create_account_provider_identities',
+            '0010_create_provider_auth_attempts',
         ],
         recoverable: [],
     });
@@ -336,7 +337,7 @@ test('drop-column effects remain pending without explicit apply authorization', 
 
 test('provider identities remain pending until their own effect is explicitly selected', async () => {
     const connection = new FakeConnection(migrationResults(legacySourceState()));
-    const migration = loadMigrationManifest().at(-1)!;
+    const migration = loadMigrationManifest().find(({ effect }) => effect === 'add-provider-identities')!;
     assert.equal(migration.effect, 'add-provider-identities');
     const plan = await applyMigrations(connection, [migration], settings);
     assert.deepEqual(plan.pending, [migration.version]);
@@ -344,7 +345,7 @@ test('provider identities remain pending until their own effect is explicitly se
 });
 
 test('provider identity DDL and recovery reject missing historical migration records', async () => {
-    const migration = loadMigrationManifest().at(-1)!;
+    const migration = loadMigrationManifest().find(({ effect }) => effect === 'add-provider-identities')!;
     const incomplete = new FakeConnection(migrationResults(legacySourceState()));
     await assert.rejects(applyMigrations(incomplete, [migration], settings, {
         allowedEffectKinds: ['add-provider-identities'],
@@ -361,7 +362,7 @@ test('provider identity DDL and recovery reject missing historical migration rec
 });
 
 test('a truncated 0008–0009 manifest cannot bypass provider identity prerequisites', async () => {
-    const migrations = loadMigrationManifest().slice(-2);
+    const migrations = loadMigrationManifest().slice(7, 9);
     const state = legacySourceState();
     state.historyExists = true;
     state.appliedRows.push({ version: migrations[0].version, checksum: migrations[0].checksum });
@@ -383,6 +384,42 @@ test('a truncated 0008–0009 manifest cannot bypass provider identity prerequis
     }), /all earlier migrations/u);
     assert.equal(connection.calls.some(({ sql }) => /CREATE|INSERT|ALTER/u.test(sql)), false);
     assert.deepEqual(state.appliedRows.map(({ version }) => version), ['0008_finalize_account_identity']);
+});
+
+test('provider attempts remain pending until their own effect is explicitly selected', async () => {
+    const connection = new FakeConnection(migrationResults(legacySourceState()));
+    const migration = loadMigrationManifest().find(({ effect }) => effect === 'add-provider-attempts')!;
+    const plan = await applyMigrations(connection, [migration], settings);
+    assert.deepEqual(plan.pending, [migration.version]);
+    assert.equal(connection.calls.some(({ sql }) => sql === migration.sql
+        || sql.includes('INSERT INTO schema_migrations')), false);
+});
+
+test('provider attempt DDL and recovery reject missing historical migration records', async () => {
+    const migration = loadMigrationManifest().find(({ effect }) => effect === 'add-provider-attempts')!;
+    const incomplete = new FakeConnection(migrationResults(legacySourceState()));
+    await assert.rejects(applyMigrations(incomplete, [migration], settings, {
+        allowedEffectKinds: ['add-provider-attempts'],
+    }), /Provider attempts require all earlier migrations/u);
+    assert.equal(incomplete.calls.some(({ sql }) => sql === migration.sql), false);
+    const original = migrationResults(legacySourceState());
+    const recoverable = new FakeConnection((sql, values) => {
+        if (sql.includes('COUNT(*)') && sql.includes('information_schema.TABLES')
+            && values[0] === migration.tableName) return [{ tableCount: 1 }];
+        return original(sql, values);
+    });
+    await assert.rejects(planMigrations(recoverable, [migration], settings), /all earlier migrations/u);
+    assert.equal(recoverable.calls.some(({ sql }) => /CREATE|INSERT|ALTER/u.test(sql)), false);
+});
+
+test('recorded provider attempts cannot bypass their prerequisites', async () => {
+    const migration = loadMigrationManifest().find(({ effect }) => effect === 'add-provider-attempts')!;
+    const state = legacySourceState();
+    state.historyExists = true;
+    state.appliedRows.push({ version: migration.version, checksum: migration.checksum });
+    const connection = new FakeConnection(migrationResults(state));
+    await assert.rejects(planMigrations(connection, [migration], settings), /all earlier migrations/u);
+    assert.equal(connection.calls.some(({ sql }) => /CREATE|INSERT|ALTER/u.test(sql)), false);
 });
 
 test('authorized drop rechecks its source and verifies absence before history', async () => {

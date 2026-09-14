@@ -5,7 +5,8 @@ import {
     verifyAccountIdentityPrecondition,
     verifyAccountIdentitySchema,
 } from './accountIdentitySchema';
-import { verifyProviderIdentitySchema } from './providerIdentitySchema';
+import { PROVIDER_IDENTITY_MIGRATION_VERSION, verifyProviderIdentitySchema } from './providerIdentitySchema';
+import { verifyProviderAttemptSchema } from './providerAttemptSchema';
 import type { MigrationConfig } from '../config/migrationConfig';
 import {
     legacyP4ScoreColumnExists,
@@ -62,6 +63,9 @@ const LEGACY_VERSIONS = [
 const PROVIDER_IDENTITY_PREREQUISITES = [
     ...LEGACY_VERSIONS, DETACH_VERSION, RECEIPTS_VERSION,
     '0006_add_account_identity', '0007_backfill_account_identity', '0008_finalize_account_identity',
+];
+const PROVIDER_ATTEMPT_PREREQUISITES = [
+    ...PROVIDER_IDENTITY_PREREQUISITES, PROVIDER_IDENTITY_MIGRATION_VERSION,
 ];
 
 async function inspectLeaderboardStage(
@@ -227,8 +231,8 @@ async function inspectMigrationState(
 
     for (const migration of migrations) {
         if (appliedByVersion.has(migration.version)) {
-            if (migration.effect === 'add-provider-identities') {
-                assertProviderIdentityHistory(migrations, migration, appliedByVersion);
+            if (migration.effect === 'add-provider-identities' || migration.effect === 'add-provider-attempts') {
+                assertProviderMigrationHistory(migrations, migration, appliedByVersion);
             }
             await verifyMigrationPostcondition(connection, migration, stage);
             applied.push(migration.version);
@@ -236,9 +240,9 @@ async function inspectMigrationState(
         }
 
         pending.push(migration.version);
-        if (migration.effect === 'add-provider-identities') {
+        if (migration.effect === 'add-provider-identities' || migration.effect === 'add-provider-attempts') {
             if (await tableExists(connection, migration.tableName)) {
-                assertProviderIdentityHistory(migrations, migration, appliedByVersion);
+                assertProviderMigrationHistory(migrations, migration, appliedByVersion);
                 await verifyMigrationPostcondition(connection, migration);
                 recoverable.push(migration.version);
             }
@@ -294,6 +298,14 @@ async function verifyMigrationPrecondition(
     connection: MigrationConnection,
     migration: MigrationDefinition
 ): Promise<void> {
+    if (migration.effect === 'add-provider-attempts') {
+        await verifyAccountIdentitySchema(connection);
+        await verifyProviderIdentitySchema(connection);
+        if (await tableExists(connection, migration.tableName)) {
+            throw new Error('Provider attempt migration requires its table to be absent');
+        }
+        return;
+    }
     if (migration.effect === 'add-provider-identities') {
         await verifyAccountIdentitySchema(connection);
         if (await tableExists(connection, migration.tableName)) {
@@ -341,6 +353,12 @@ async function verifyMigrationPostcondition(
     migration: MigrationDefinition,
     stage: LeaderboardSchemaStage = 'original'
 ): Promise<void> {
+    if (migration.effect === 'add-provider-attempts') {
+        await verifyAccountIdentitySchema(connection);
+        await verifyProviderIdentitySchema(connection);
+        await verifyProviderAttemptSchema(connection);
+        return;
+    }
     if (migration.effect === 'add-provider-identities') {
         await verifyAccountIdentitySchema(connection);
         await verifyProviderIdentitySchema(connection);
@@ -390,13 +408,15 @@ export async function planMigrations(
     });
 }
 
-function assertProviderIdentityHistory(
+function assertProviderMigrationHistory(
     migrations: readonly MigrationDefinition[], migration: MigrationDefinition,
     applied: ReadonlyMap<string, unknown> | ReadonlySet<string>
 ): void {
-    if (!PROVIDER_IDENTITY_PREREQUISITES.every(version => applied.has(version))
+    const attempts = migration.effect === 'add-provider-attempts';
+    const prerequisites = attempts ? PROVIDER_ATTEMPT_PREREQUISITES : PROVIDER_IDENTITY_PREREQUISITES;
+    if (!prerequisites.every(version => applied.has(version))
         || migrations.some(({ version }) => version < migration.version && !applied.has(version))) {
-        throw new Error('Provider identities require all earlier migrations to be recorded first');
+        throw new Error(`Provider ${attempts ? 'attempts' : 'identities'} require all earlier migrations to be recorded first`);
     }
 }
 
@@ -426,8 +446,8 @@ export async function applyMigrations(
         for (const migration of migrations) {
             if (applied.includes(migration.version)) continue;
             if (!allowedEffectKinds.has(migration.effect)) continue;
-            if (migration.effect === 'add-provider-identities') {
-                assertProviderIdentityHistory(migrations, migration, new Set(applied));
+            if (migration.effect === 'add-provider-identities' || migration.effect === 'add-provider-attempts') {
+                assertProviderMigrationHistory(migrations, migration, new Set(applied));
             }
             if (migration.effect === 'retain-receipts' && !applied.includes(DETACH_VERSION)) {
                 throw new Error('Receipt rename requires recorded personal-best detachment before DDL');

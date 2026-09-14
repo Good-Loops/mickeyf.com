@@ -59,24 +59,73 @@ cooldown. Concurrent requests share one fetch. Expired keys are not reused;
 new keys or an unavailable provider can temporarily require a retry. Tokens and
 provider payloads must not be logged.
 
-**Signature verification alone does not prevent replay or login CSRF.** Before
-exposing these functions, implement server-held, short-lived, one-use attempts
-bound to the initiating session, intended action/provider/client and nonce.
-Do not accept an `expectedNonce`, account UUID or audience from a request as proof.
+**Signature verification alone does not prevent replay or login CSRF.** The
+internal flow now supplies the expected nonce from a consumed server-held attempt,
+never from a completion request. Account UUID and audience are not accepted from
+request bodies either.
+
+## One-use attempts and internal orchestration
+
+`auth/providerAuthContext.ts` requires JSON POST, an exact approved Origin, and
+a cookie-parser-verified `provider_auth_binding` cookie. It rejects bearer headers,
+unsigned session cookies and invalid signed sessions. For linking, it verifies the
+existing session and resolves the current account UUID from the database. The
+binding hash includes origin, random cookie, current session and resolved account.
+There is no HTTP adapter or binding-cookie issuer yet.
+
+`auth/providerAuthFlow.ts` is disabled by default. It creates separate random
+state and nonce values, pins the action/client to server configuration, then
+consumes the matching attempt **before** token verification or account operations.
+Invalid proof, incorrect linking password, provider failure and cancellation need
+a new attempt. Only the explicit linking flow requires the current password;
+already-linked login resolves the verified provider subject without it. It never
+creates accounts or matches users by email. `account-verified` is an internal
+result, not an issued session or a proof to send through a browser and trust later.
+
+`auth/providerAttemptRepository.ts` uses the existing database across instances.
+The stored state is hashed; raw ID tokens, session cookies and passwords are not
+stored. Consumption locks the row, checks expiry using database time after the
+lock is obtained, and commits its removal before returning the nonce. A failed or
+uncertain commit cannot authorize a caller. A new attempt replaces a pending one
+with the same binding, including one started in another tab sharing that binding.
+
+Attempts expire after five minutes. This is **validity**, not a promise of physical
+deletion at five minutes: each creation removes up to 100 expired rows; consumption
+also removes its matched expired row. Expired rows can remain while there is no
+activity. A database-scoped creation lock enforces a 10,000-row cap. No scheduler,
+cloud service or background worker is added. Linked attempts reference account
+UUIDs and cascade on deletion, including deletion replay after restoring a backup.
+
+Before routing this flow, issue a random signed HttpOnly/Secure binding cookie and
+rotate/clear it on every login/logout transition. The current-context hash alone
+does not detect anonymous → login → logout returning to the original state.
+Provide dedicated rate limits: existing login limiters recognize a different
+request shape. Native transport also needs explicit route allowlisting and a
+body limit aligned with the token size; its current 16 KiB total JSON limit is
+smaller than the verifier's maximum token plus JSON wrapper.
+
+Session issuance remains the next integration boundary. Existing shared session
+readers use numeric user IDs; adding a UUID claim without updating those readers
+would not bind authorization to the immutable identity. Update the common session
+path coherently before issuing provider sessions, including stale/deleted accounts.
 
 ## Migration and activation boundary
 
-The usual `migrations:apply` deliberately does not apply 0009. After reviewing an
+The usual `migrations:apply` deliberately applies neither 0009 nor 0010. After reviewing an
 approved target and the existing explicit migration-account/write confirmations:
 
 ```text
 npm --prefix backend run migrations:plan
 npm --prefix backend run migrations:providers:apply
+npm --prefix backend run migrations:provider-attempts:apply
 npm --prefix backend run migrations:plan
 ```
 
-The provider command selects only the new effect, requires recorded migrations
-0001–0008, and validates the exact resulting schema before recording history.
+The provider-identity command selects only 0009 and requires recorded 0001–0008.
+The separate attempt command selects only 0010 and requires recorded 0001–0009.
+Both validate the exact resulting schema before recording history. Readiness and
+deletion replay allow pre-0010 backups without the attempt table, but reject a
+missing recorded table or malformed cascade. Historical SQL remains unchanged.
 These commands are **not** a local-safety guarantee: a loopback proxy may target
 production. No production migration was executed in this checkpoint.
 
@@ -87,8 +136,9 @@ compatibility and the enabled application revision.
 
 Remaining work, in order:
 
-1. Implement one-use attempts, callback/code exchange, CSRF/rate limits and
-   UUID-bound session issuance for already-linked users and explicit linking.
+1. Integrate UUID-bound shared session issuance/consumers, HTTP cookie lifecycle,
+   dedicated rate limits, and provider-specific callback/code exchange where
+   required. Keep the completed one-use flow internal until those pieces agree.
 2. Configure approved Google web/native clients and Apple native capability;
    integrate native platform sign-in, not Google OAuth inside the embedded WebView.
    Treat Apple's web Services ID activation separately.
@@ -105,19 +155,29 @@ includes signed-token/JWKS, linking, migration/schema and recovery tests.
 `npm --prefix backend run test:migrations` uses the existing pinned disposable
 MySQL harness with scrubbed database environment and a random loopback port.
 It includes real signed-token-to-repository linking, unique-constraint races,
-case-sensitive subjects, UUID reuse, account deletion and restored-link replay.
+case-sensitive subjects, UUID reuse, account deletion and restored-link/attempt
+replay; plus attempt consumption/replacement/capacity races, expiry after lock
+waits, uncertain commits and the composed link → login → replay-rejection flow.
 No real Google/Apple account or production database is used by these tests.
 For changes confined to provider identities and their deletion compatibility,
 `npm --prefix backend run test:migrations -- --provider-identities` selects
-only those two integration fixtures inside the same isolated harness.
+only those three integration fixtures inside the same isolated harness.
 
-Checkpoint results: backend typecheck and the 318-test unit suite passed. The
+Initial identity-checkpoint results: backend typecheck and the 318-test unit suite passed. The
 initial MySQL run passed its 57 preceding cases, then exposed MySQL 8.0.31's
 canonical CAST/LENGTH and escaped CHECK-metadata representation. A narrowly
 matched normalization fix plus its four focused schema tests passed; the
 provider-only rerun passed all seven provider/deletion cases. All disposable
 containers and networks were removed. Historical SQL and dependencies were
 unchanged; no live login, provider, database or cloud operation was exercised.
+
+One-use checkpoint results: typecheck and the 361-test unit suite passed. The
+first isolated database run rejected a non-boolean CHECK expression in the new
+0010 migration; changing it to an explicit `CASE ... END = 1` comparison fixed
+that without editing historical SQL. The 29-test schema/manifest/runner follow-up
+and all 17 focused MySQL cases passed, including composed authentication and
+restored-attempt deletion. Both disposable test containers and networks were
+removed. No production migration, provider configuration or session was issued.
 
 Primary references: [Google token verification](https://developers.google.com/identity/gsi/web/guides/verify-google-id-token),
 [Google OpenID Connect claims](https://developers.google.com/identity/openid-connect/openid-connect),

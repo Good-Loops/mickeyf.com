@@ -2493,9 +2493,14 @@ itself activate, implement or defer both providers.
   identity lookup/storage and migration 0009 are implemented offline. Deletion
   readiness and restored-backup replay validate and remove provider links.
   No provider routes/buttons, session changes, production schema/grant changes
-  or deployment are included. Next: server-held one-use authentication attempts
-  and UUID-bound session/callback integration, then approved provider/native
-  configuration. Provider-only signup remains subject to the age/consent backlog.
+  or deployment are included. **One-use flow checkpoint (2026-09-14):** migration
+  0010 and bounded five-minute attempt storage, trusted session/origin context,
+  consume-before-verify orchestration, and deletion/replay compatibility are
+  implemented offline. No scheduled cleanup service is introduced. The internal
+  account-verification result does not issue a session. Next: update shared
+  session readers and issuance together for immutable UUID binding; add the HTTP
+  cookie lifecycle/rate limits, then approved provider/native configuration.
+  Provider-only signup remains subject to the age/consent backlog.
   See [scope, migration boundary and remaining steps](backend/PROVIDER_SIGN_IN.md).
   The owner approved the CORS-only backend deployment for exactly
   `capacitor://localhost`, and renewed the same temporary Node/OpenSSL exception

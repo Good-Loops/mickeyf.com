@@ -29,17 +29,25 @@ test('migration manifest preserves lexical order and hashes exact LF bytes', () 
             '0007_backfill_account_identity',
             '0008_finalize_account_identity',
             '0009_create_account_provider_identities',
+            '0010_create_provider_auth_attempts',
         ]
     );
     assert.deepEqual(
         migrations.map(({ effect }) => effect),
         ['create-table', 'create-table', 'drop-column', 'detach-best-source', 'retain-receipts',
-            'add-account-identity', 'add-account-identity', 'add-account-identity', 'add-provider-identities']
+            'add-account-identity', 'add-account-identity', 'add-account-identity', 'add-provider-identities',
+            'add-provider-attempts']
     );
-    assert.deepEqual(migrations.slice(0, 3).map(({ checksum }) => checksum.toString('hex')), [
+    assert.deepEqual(migrations.slice(0, 9).map(({ checksum }) => checksum.toString('hex')), [
         '9a797edd514dfc946783cf66cf80ee8dfa774210a0d100946c3a9a822596ca00',
         '01eade4cfc8e1131be79df43881a9bc7a538aaf0e1e1d3f470deb6c21eaaed3a',
         'bc4c89691d9d2f729977446e1bde8f168c5ee83c95349e80c3a6deec598a2951',
+        '88cc121f6410f6c324cff0d6bb57691062a64a10722c0c35deb826ce4cc0f9a6',
+        'f91a3f5aa52f14e43c652282ca9cc1a9e6dc5e9294c8c7c330c8142cbd33becc',
+        'aecdd543c2b3b5f9779b1ff607f2dacefe547a3d578c91806f65d4c73652d6bb',
+        '59b3b59b87ecf4b7f78b1f2632935546493f0ff826370fd43efef2b21b9cc55c',
+        'f92d599dfd8586022bfcbd60e9de382643a0fb89ff644ad664cd61d817701883',
+        'e340eef416c5b837a37b40b10b5c435b7519536596f6d477b69addbb3314a57f',
     ], 'historical migration bytes must remain immutable');
     for (const migration of migrations) {
         const rawSql = readFileSync(path.join(migrationDirectory, migration.fileName));

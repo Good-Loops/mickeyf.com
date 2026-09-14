@@ -7,20 +7,28 @@ const EPOCH = '2026-09-11 19:00:00.123456';
 
 function fakeDatabase(options: { epoch?: string; badColumn?: boolean; invalidCount?: number;
     providerTable?: 'absent' | 'malformed'; providerMigrationRecorded?: boolean;
+    attemptTable?: 'absent' | 'malformed'; attemptMigrationRecorded?: boolean;
     queryError?: Error; queryPending?: boolean } = {}) {
-    const queries: Array<{ sql: string; timeout: number }> = [];
+    const queries: Array<{ sql: string; timeout: number; values?: unknown[] }> = [];
     const cleanup: string[] = [];
     const connection = {
         async query(query: { sql: string; timeout: number }, values?: unknown[]) {
-            queries.push(query);
+            queries.push({ ...query, values });
             if (options.queryError) throw options.queryError;
             if (options.queryPending) return new Promise(() => {});
             if (query.sql.startsWith('SELECT version FROM schema_migrations')) {
-                return [options.providerMigrationRecorded ? [{ version: '0009_create_account_provider_identities' }] : [], []];
+                const recorded = values?.[0] === '0010_create_provider_auth_attempts'
+                    ? options.attemptMigrationRecorded : options.providerMigrationRecorded;
+                return [recorded ? [{ version: values?.[0] }] : [], []];
             }
             if (values?.[0] === 'account_provider_identities') {
                 return [query.sql.includes('COUNT(*)')
                     ? [{ tableCount: options.providerTable === 'malformed' ? 1 : 0 }]
+                    : [{ engine: 'MyISAM', collation: 'utf8mb4_unicode_ci', tableType: 'BASE TABLE' }], []];
+            }
+            if (values?.[0] === 'provider_auth_attempts') {
+                return [query.sql.includes('COUNT(*)')
+                    ? [{ tableCount: options.attemptTable === 'malformed' ? 1 : 0 }]
                     : [{ engine: 'MyISAM', collation: 'utf8mb4_unicode_ci', tableType: 'BASE TABLE' }], []];
             }
             if (query.sql.includes('schema_migrations')) return [[{ epoch: options.epoch ?? EPOCH }], []];
@@ -47,7 +55,7 @@ function fakeDatabase(options: { epoch?: string; badColumn?: boolean; invalidCou
 test('readiness verifies the independently pinned epoch and identity schema using read-only timed queries', async () => {
     const { database, queries, cleanup } = fakeDatabase();
     await verifyAccountDeletionReadiness(database, EPOCH);
-    assert.equal(queries.length, 7);
+    assert.equal(queries.length, 9);
     assert.ok(queries[0].sql.includes('schema_migrations'));
     assert.ok(queries.some(query => query.sql.startsWith('SELECT version FROM schema_migrations')));
     for (const query of queries) {
@@ -63,6 +71,22 @@ test('deletion readiness rejects missing recorded provider storage and malformed
     ]) {
         const { database, cleanup } = fakeDatabase(options);
         await assert.rejects(verifyAccountDeletionReadiness(database, EPOCH), AccountDeletionReadinessError);
+        assert.deepEqual(cleanup, ['release']);
+    }
+});
+
+test('deletion readiness allows pre-0010 backups but fails closed on missing recorded or malformed attempts', async () => {
+    const legacy = fakeDatabase({ attemptTable: 'absent' });
+    await verifyAccountDeletionReadiness(legacy.database, EPOCH);
+    assert.ok(legacy.queries.some(({ sql, values }) => sql.startsWith('SELECT version FROM schema_migrations')
+        && values?.[0] === '0010_create_provider_auth_attempts'));
+    assert.deepEqual(legacy.cleanup, ['release']);
+    for (const options of [
+        { attemptMigrationRecorded: true }, { attemptTable: 'malformed' as const },
+    ]) {
+        const { database, queries, cleanup } = fakeDatabase(options);
+        await assert.rejects(verifyAccountDeletionReadiness(database, EPOCH), AccountDeletionReadinessError);
+        assert.ok(queries.every(({ sql }) => /^SELECT/u.test(sql.trim())));
         assert.deepEqual(cleanup, ['release']);
     }
 });

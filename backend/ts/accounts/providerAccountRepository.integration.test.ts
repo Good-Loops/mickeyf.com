@@ -56,7 +56,7 @@ before(async () => {
     // This suite runs last and replaces only the already verified disposable fixtures.
     await administrator.query('SET FOREIGN_KEY_CHECKS = 0');
     try {
-        await administrator.query(`DROP TABLE IF EXISTS account_provider_identities,
+        await administrator.query(`DROP TABLE IF EXISTS provider_auth_attempts, account_provider_identities,
             game_personal_bests, game_runs, game_submission_receipts, schema_migrations, users`);
     } finally { await administrator.query('SET FOREIGN_KEY_CHECKS = 1'); }
     await administrator.query(`CREATE TABLE users (

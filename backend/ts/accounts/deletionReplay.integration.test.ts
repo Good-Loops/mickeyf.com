@@ -18,7 +18,7 @@ import { applyDeletionReplay, planDeletionReplay } from './deletionReplay';
 const config = loadMigrationConfig();
 const testPort = Number(process.env.MIGRATION_TEST_PORT);
 const TEST_PASSWORD = 'replay-isolated-test-only';
-const TABLES = ['users', 'game_personal_bests', 'game_submission_receipts', 'account_provider_identities'] as const;
+const TABLES = ['users', 'game_personal_bests', 'game_submission_receipts', 'account_provider_identities', 'provider_auth_attempts'] as const;
 let administrator: Connection;
 let database: Pool;
 let settings: DeletionReplaySettings;
@@ -49,7 +49,7 @@ before(async () => {
     assert.doesNotMatch(identity[0].versionComment, /Google/iu);
     await administrator.query('SET FOREIGN_KEY_CHECKS = 0');
     try {
-        await administrator.query('DROP TABLE IF EXISTS account_provider_identities, game_personal_bests, game_runs, game_submission_receipts, schema_migrations, users');
+        await administrator.query('DROP TABLE IF EXISTS provider_auth_attempts, account_provider_identities, game_personal_bests, game_runs, game_submission_receipts, schema_migrations, users');
     } finally { await administrator.query('SET FOREIGN_KEY_CHECKS = 1'); }
     await administrator.query(`CREATE TABLE users (
         user_id INT NOT NULL AUTO_INCREMENT, user_name VARCHAR(255) NOT NULL,
@@ -63,6 +63,7 @@ before(async () => {
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['detach-best-source', 'retain-receipts'] });
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-account-identity'] });
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-provider-identities'] });
+    await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-provider-attempts'] });
     await administrator.query("SET SESSION time_zone = '+00:00'");
     const [epoch] = await administrator.query<RowDataPacket[]>(
         "SELECT DATE_FORMAT(applied_at, '%Y-%m-%d %H:%i:%s.%f') AS epoch FROM schema_migrations WHERE version = ?",
@@ -100,6 +101,14 @@ async function insertProviderLink(userId: number, provider: 'google' | 'apple', 
     [provider, Buffer.from(subject, 'utf8'), userId]);
 }
 
+async function insertPendingAttempt(userId: number): Promise<void> {
+    await administrator.query(`INSERT INTO provider_auth_attempts
+        (state_hash, binding_hash, nonce, client_key, action, user_id, account_uuid, expires_at)
+        SELECT ?, ?, ?, 'google_native', 'link', user_id, account_uuid,
+            UTC_TIMESTAMP(6) + INTERVAL 5 MINUTE FROM users WHERE user_id = ?`,
+    [Buffer.alloc(32, userId), Buffer.alloc(32, userId + 10), Buffer.alloc(32, userId).toString('base64url'), userId]);
+}
+
 test('reconciles a restored deleted identity, preserves others, and never targets a reused numeric ID', async () => {
     const passwordHash = await bcrypt.hash(TEST_PASSWORD, 4);
     await administrator.query(`INSERT INTO users (user_id,user_name,email,user_password) VALUES
@@ -110,6 +119,7 @@ test('reconciles a restored deleted identity, preserves others, and never target
         await submitThreeBossesRun(database, userId, randomUUID(), userId === 1 ? 60000 : 70000);
         await insertProviderLink(userId, 'google', `google-subject-${userId}`);
         await insertProviderLink(userId, 'apple', `apple-subject-${userId}`);
+        await insertPendingAttempt(userId);
     }
     const beforeDeletion = await snapshotRows();
     const original = beforeDeletion.users.find(row => row.user_id === 1)!;
@@ -129,6 +139,8 @@ test('reconciles a restored deleted identity, preserves others, and never target
     assert.equal(intents[0].accountId, original.account_uuid);
     assert.deepEqual((await snapshotRows()).account_provider_identities, unrelatedRows('account_provider_identities'),
         'ordinary account deletion cascades both provider links and preserves unrelated links');
+    assert.deepEqual((await snapshotRows()).provider_auth_attempts, unrelatedRows('provider_auth_attempts'),
+        'ordinary deletion also removes pending linked attempts, but no unrelated attempt');
 
     // Restore fixture rows with their original UUID, as a post-migration backup would.
     await administrator.query('INSERT INTO users (user_id,account_uuid,user_name,email,user_password) VALUES (?,?,?,?,?)',
@@ -139,6 +151,11 @@ test('reconciles a restored deleted identity, preserves others, and never target
     }
     assert.deepEqual((await snapshotRows()).account_provider_identities, beforeDeletion.account_provider_identities,
         'the restored fixture includes the original provider links');
+    const attempt = beforeDeletion.provider_auth_attempts.find(row => row.user_id === 1)!;
+    await administrator.query(`INSERT INTO provider_auth_attempts
+        (state_hash, binding_hash, nonce, client_key, action, user_id, account_uuid, expires_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [attempt.state_hash, attempt.binding_hash, attempt.nonce,
+        attempt.client_key, attempt.action, attempt.user_id, attempt.account_uuid, attempt.expires_at]);
     await submitP4VegaScore(database, 1, 900);
     await submitThreeBossesRun(database, 1, randomUUID(), 60000);
     const plan = await planDeletionReplay(database, journal, settings);
@@ -156,6 +173,7 @@ test('reconciles a restored deleted identity, preserves others, and never target
     await submitP4VegaScore(database, 1, 300);
     await insertProviderLink(1, 'google', 'replacement-google-subject');
     await insertProviderLink(1, 'apple', 'replacement-apple-subject');
+    await insertPendingAttempt(1);
     const reused = await snapshotRows();
     assert.notEqual(reused.users.find(row => row.user_id === 1)!.account_uuid, original.account_uuid);
     assert.equal(reused.account_provider_identities.length, 4);

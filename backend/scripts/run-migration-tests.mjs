@@ -89,6 +89,13 @@ const INTEGRATION_TEST_COMMANDS = Object.freeze([
       "ts/accounts/providerAccountRepository.integration.test.ts",
     ]),
   }),
+  Object.freeze({
+    executable: process.execPath,
+    args: Object.freeze([
+      "--test", "-r", "ts-node/register",
+      "ts/auth/providerAttemptRepository.integration.test.ts",
+    ]),
+  }),
 ]);
 
 const MYSQL_SERVICE = "mysql";
@@ -305,7 +312,8 @@ export const runMigrationTests = async ({ providerIdentitiesOnly = false } = {})
     const commands = providerIdentitiesOnly
       ? INTEGRATION_TEST_COMMANDS.filter(command => command.args.some(argument =>
         argument === "ts/accounts/deletionReplay.integration.test.ts"
-        || argument === "ts/accounts/providerAccountRepository.integration.test.ts"))
+        || argument === "ts/accounts/providerAccountRepository.integration.test.ts"
+        || argument === "ts/auth/providerAttemptRepository.integration.test.ts"))
       : INTEGRATION_TEST_COMMANDS;
     for (const command of commands) {
       await runProcess(
