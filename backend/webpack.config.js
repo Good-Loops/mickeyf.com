@@ -4,6 +4,7 @@ module.exports = {
     entry: {
         server: ['./ts/app.ts'],
         'submission-receipt-cleanup': ['./ts/leaderboards/runSubmissionReceiptCleanup.ts'],
+        'account-deletion-audit': ['./ts/accounts/runDeletionAudit.ts'],
     },
     target: 'node',
     module: {

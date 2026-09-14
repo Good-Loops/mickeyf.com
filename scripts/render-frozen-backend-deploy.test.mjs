@@ -40,10 +40,16 @@ test('renderer preserves main-only canonical policy and rejects any unreviewed i
     assert.deepEqual(renderFrozenBackendDeployConfig({ ...input, canonical: input.canonical.replace(/\r?\n/gu, '\r\n') }), config);
 });
 
-test('only exact reviewed feature pins render; main triggers and shell injection are rejected', () => {
+test('only exact reviewed work-branch pins render; main triggers and shell injection are rejected', () => {
+    for (const prefix of ['feature', 'improvement', 'fix']) {
+        const sourceRef = `refs/heads/${prefix}/reviewed-backend-change`;
+        assert.equal(validateFrozenPins({ ...pins, sourceRef }).sourceRef, sourceRef);
+    }
     for (const change of [
         { sourceCommit: 'main' }, { imageDigest: 'latest' }, { sourceBuildId: 'INVALID' },
         { sourceTriggerName: "x'; echo y" }, { sourceRef: 'refs/heads/main' }, { sourceRef: 'refs/heads/feature/../main' },
+        { sourceRef: 'refs/heads/improvement/../main' }, { sourceRef: 'refs/heads/fix/' },
+        { sourceRef: 'refs/heads/unknown/change' }, { sourceRef: 'refs/heads/fix/change;echo' },
         { sourceTriggerId: 'ef5a2981-95be-4f4d-af91-f997fde73356' }, { sourceTriggerId: 'd71109da-8350-4f2f-a3be-2053bb6ccd45' },
         { deploymentTriggerName: 'main-push-mickeyf-com' }, { unexpected: 'value' },
     ]) assert.throws(() => validateFrozenPins({ ...pins, ...change }));
