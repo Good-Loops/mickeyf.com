@@ -161,9 +161,22 @@ separately from the single-page queue.
   (2026-09-14):** saved and read back exactly `http://localhost:5173`,
   `https://mickeyf.com` and `https://www.mickeyf.com` on the existing `MickeyFOrg Client`.
   Its name/client ID and credentials are unchanged; redirect URIs remain empty.
-  The console warns that propagation may be delayed. Google web sign-in remains
-  disabled; current Ludolume branding and the narrowly required Hosting CSP/COOP
-  adjustments still need approval. Existing Hosting CSP currently blocks GIS.
+  The console warns that propagation may be delayed. **Branding/header checkpoint
+  (2026-09-14):** Google confirmed saving app name `Ludolume` and homepage
+  `https://mickeyf.com`. Existing support/developer contacts, authorized domain
+  and Testing status are unchanged. Privacy/terms URLs and logo remain unset;
+  the private privacy-policy draft is not a published URL.
+  Local `firebase.json` now permits only Google's documented GIS paths for
+  script/style/frame/connect requests and uses `same-origin-allow-popups` for
+  popup communication. The global rule is necessary because Home-to-Login SPA
+  navigation retains the original document headers. Seven focused policy/API-base
+  tests pass; other security headers remain unchanged. See
+  [Google's setup guidance](https://developers.google.com/identity/gsi/web/guides/get-google-api-clientid).
+  This is not deployed or live-tested. Deployment needs approval for trusting
+  those Google resources and retaining popup opener relationships; provider
+  sign-in remains disabled. Google's localhost instructions also list bare
+  `http://localhost` alongside the port-specific origin; that fourth origin has
+  not been approved or added and should be reviewed with the local test setup.
 - `APPLE_IOS_BUNDLE_ID` configures exact audience/key `apple-ios`. Native iOS
   uses AuthenticationServices, not a web OAuth view. The native bridge reports
   unavailable while `LudolumeAppleSignInEnabled` is false (the committed default).

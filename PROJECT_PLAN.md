@@ -2541,9 +2541,16 @@ itself activate, implement or defer both providers.
   **Authorized-origin checkpoint (2026-09-14):** saved and read back exactly
   `http://localhost:5173`, `https://mickeyf.com` and `https://www.mickeyf.com` on the
   existing `MickeyFOrg Client`. Its name/client ID and credentials are unchanged;
-  redirect URIs remain empty. No provider activation, branding/Hosting header,
-  database or deployment change occurred. Next: approved
-  Google web branding/Hosting headers and native Apple capability/profile,
+  redirect URIs remain empty. **Branding/header checkpoint (2026-09-14):** Google
+  confirmed saving `Ludolume` and `https://mickeyf.com`; existing contacts/domain
+  and Testing status remain unchanged. Privacy/terms URLs and logo remain unset.
+  The privacy-policy draft is private, not a published link. Local Hosting CSP
+  now allows only the documented GIS resource paths, with popup-compatible COOP;
+  the seven focused policy/API-base tests pass. No provider activation, database
+  or deployment change occurred. Live headers require separate approval for the
+  Google resource trust and popup opener change. Next: isolated Google web
+  setup/acceptance, a published privacy policy before public activation,
+  approved native Apple capability/profile,
   focused real-provider acceptance and native Google SDK/client configuration.
   Provider-only signup remains subject to the age/consent backlog.
   See [scope, migration boundary and remaining steps](backend/PROVIDER_SIGN_IN.md).

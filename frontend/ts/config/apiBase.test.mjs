@@ -55,3 +55,54 @@ test('API no-store headers override the global cache policy without changing ass
     assert.ok(hosting.headers.some((rule) => rule.regex?.includes('assets')
         && rule.headers.some((header) => header.value === 'public, max-age=31536000, immutable')));
 });
+
+test('one global document policy permits only the required Google GIS resources across SPA navigation', async () => {
+    const { hosting } = JSON.parse(await readFile(new URL('../../../firebase.json', import.meta.url), 'utf8'));
+    const policyRules = hosting.headers.filter(rule => rule.headers.some(header =>
+        ['Content-Security-Policy', 'Cross-Origin-Opener-Policy'].includes(header.key)));
+    // Home -> Login keeps the original document and its response headers.
+    // A Login-only exception would therefore leave the provider button blocked.
+    assert.equal(policyRules.length, 1);
+    assert.equal(policyRules[0].regex, '.*');
+    const policies = policyRules[0].headers.filter(header => header.key === 'Content-Security-Policy');
+    assert.equal(policies.length, 1);
+    const entries = policies[0].value.split(';').map(directive => directive.trim().split(/\s+/));
+    assert.equal(new Set(entries.map(([name]) => name)).size, entries.length, 'directives must not be duplicated');
+    // Google's setup guide requires the GIS parent path for evolving connect/frame endpoints,
+    // while scripts and styles remain restricted to the exact documented resources.
+    assert.deepEqual(Object.fromEntries(entries.map(([name, ...sources]) => [name, sources])), {
+        'default-src': ["'self'"],
+        'base-uri': ["'self'"],
+        'connect-src': ["'self'", 'data:', 'https://mickeyf-org-j7yuum4tiq-uc.a.run.app', 'https://accounts.google.com/gsi/'],
+        'font-src': ["'self'", 'data:', 'https://fonts.gstatic.com'],
+        'form-action': ["'self'"],
+        'frame-ancestors': ["'none'"],
+        'frame-src': ['https://accounts.google.com/gsi/'],
+        'img-src': ["'self'", 'data:', 'blob:'],
+        'manifest-src': ["'self'"],
+        'media-src': ["'self'", 'blob:'],
+        'object-src': ["'none'"],
+        'script-src': ["'self'", "'wasm-unsafe-eval'", 'https://accounts.google.com/gsi/client'],
+        'script-src-attr': ["'none'"],
+        'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://accounts.google.com/gsi/style'],
+        'worker-src': ["'self'", 'blob:'],
+        'upgrade-insecure-requests': [],
+    });
+});
+
+test('GIS popup compatibility changes only opener isolation and preserves the other global security headers', async () => {
+    const { hosting } = JSON.parse(await readFile(new URL('../../../firebase.json', import.meta.url), 'utf8'));
+    const headers = hosting.headers.find(rule => rule.regex === '.*').headers;
+    assert.equal(new Set(headers.map(header => header.key)).size, headers.length);
+    assert.deepEqual(Object.fromEntries(headers.filter(header => header.key !== 'Content-Security-Policy')
+        .map(header => [header.key, header.value])), {
+        'Strict-Transport-Security': 'max-age=31536000; includeSubDomains; preload',
+        'Cross-Origin-Opener-Policy': 'same-origin-allow-popups',
+        'Cross-Origin-Resource-Policy': 'same-origin',
+        'Permissions-Policy': 'accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(self), payment=(), usb=()',
+        'Referrer-Policy': 'strict-origin-when-cross-origin',
+        'X-Content-Type-Options': 'nosniff',
+        'X-Frame-Options': 'DENY',
+        'Cache-Control': 'no-cache, max-age=0, must-revalidate',
+    });
+});
