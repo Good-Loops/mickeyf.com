@@ -176,8 +176,9 @@ separately from the single-page queue.
   This is not deployed or live-tested. Deployment needs approval for trusting
   those Google resources and retaining popup opener relationships; provider
   production sign-in remains disabled. Google's localhost instructions also list bare
-  `http://localhost` alongside the port-specific origin; that fourth origin has
-  not been approved or added and should be reviewed with the local test setup.
+  `http://localhost` alongside the port-specific origin. The owner approved that
+  fourth origin on 2026-09-14; it is now saved and read back on the same client,
+  with the original three origins and empty redirect list preserved.
 - `APPLE_IOS_BUNDLE_ID` configures exact audience/key `apple-ios`. Native iOS
   uses AuthenticationServices, not a web OAuth view. The native bridge reports
   unavailable while `LudolumeAppleSignInEnabled` is false (the committed default).
@@ -192,7 +193,7 @@ separately from the single-page queue.
   still need their official native SDK/client configuration; Apple web remains
   a separate Services ID/callback milestone.
 - Controls appear only for server-configured and platform-capable clients.
-  The neutral Google account / Apple account selectors open the official Google
+  The neutral `google` / `Apple account` selectors open the official Google
   button or native Apple sheet; they are not presented as official branded buttons.
   Existing users link from Manage account using their current password, then
   log in with that provider and the same Stay signed in preference. Unlinked
@@ -229,8 +230,9 @@ insert/locking read/delete, and denial of identity reassignment/deletion; all
 probe rows were rolled back. Local discovery advertises only `google-web`.
 The real GIS button rendered and cancellation returned to the login form.
 No Google account was chosen and no real identity was linked or logged in.
-The extra bare-localhost origin still awaits owner approval; production and
-native providers remain disabled and no deployment occurred.
+The extra bare-localhost origin is now owner-approved, saved and read back;
+credentials/scopes/publication were not changed. Production and native
+providers remain disabled and no deployment occurred.
 
 Real-account acceptance must use a local website account: link Google from
 Manage account using that account's password, then log out and sign in through
