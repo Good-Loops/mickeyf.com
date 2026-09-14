@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { createNativeApiFetch } from './nativeApiFetch.ts';
 import { createAuthApi } from './authApi.ts';
 
@@ -134,4 +135,66 @@ test('native deletion and logout clear local credentials only after confirmed se
     assert.match(native, /result == \["deleted": true\]/);
     assert.match(native, /result == \["loggedOut": true\]/);
     assert.match(native, /LudolumeApiPolicy\.clearSessionCookie\(completion: finish\)/);
+});
+
+test('native provider transport admits only the three explicit provider routes within the backend body limit', async () => {
+    const native = await readFile(new URL('../../ios/App/App/LudolumeApiPlugin.swift', import.meta.url), 'utf8');
+    const providerRoutes = [...native.matchAll(/"((?:GET|POST) \/auth\/providers\/[^"\n]+)"/g)]
+        .map((match) => match[1]);
+    assert.deepEqual(providerRoutes, [
+        'GET /auth/providers/config', 'POST /auth/providers/begin', 'POST /auth/providers/complete',
+    ]);
+    assert.match(native, /maximumRequestBytes = 32 \* 1024/);
+    assert.match(native, /bodyData\?\.count \?\? 0\) <= maximumRequestBytes/);
+    assert.match(native, /components\.query == nil, components\.fragment == nil/);
+});
+
+test('native bridge diagnostics cannot log provider credentials in debug builds', async () => {
+    const config = await readFile(new URL('../../capacitor.config.ts', import.meta.url), 'utf8');
+    assert.match(config, /loggingBehavior:\s*'none'/);
+});
+
+test('Apple identity bridge is registered in the App target but remains explicitly disabled', async () => {
+    const [native, identity, info] = await Promise.all([
+        '../../ios/App/App/LudolumeApiPlugin.swift',
+        '../../ios/App/App/LudolumeIdentityPlugin.swift',
+        '../../ios/App/App/Info.plist',
+    ].map((path) => readFile(new URL(path, import.meta.url), 'utf8')));
+    assert.match(native, /registerPluginInstance\(LudolumeIdentityPlugin\(\)\)/);
+    assert.match(info, /<key>LudolumeAppleSignInEnabled<\/key>\s*<false\/>/);
+    assert.match(identity, /forInfoDictionaryKey: "LudolumeAppleSignInEnabled"\) as\? Bool == true/);
+    assert.match(identity, /call\.resolve\(\["apple": appleSignInEnabled, "google": false\]\)/);
+    for (const method of ['getCapabilities', 'signIn', 'cancel']) {
+        assert.ok(identity.includes(`CAPPluginMethod(name: "${method}", returnType: CAPPluginReturnPromise)`));
+    }
+    const { default: xcode } = await import('xcode');
+    const project = xcode.project(fileURLToPath(new URL('../../ios/App/App.xcodeproj/project.pbxproj', import.meta.url)));
+    project.parseSync();
+    const target = Object.entries(project.pbxNativeTargetSection()).find(([, value]) => value?.name === 'App');
+    assert.ok(target);
+    const sources = project.pbxSourcesBuildPhaseObj(target[0]).files;
+    assert.ok(sources.some(({ comment }) => comment === 'LudolumeIdentityPlugin.swift in Sources'));
+});
+
+test('Apple native contract preserves the server challenge and discards cancelled or invalid credentials', async () => {
+    // Structural guards only; AuthenticationServices still needs macOS compilation and device validation.
+    const identity = await readFile(new URL('../../ios/App/App/LudolumeIdentityPlugin.swift', import.meta.url), 'utf8');
+    assert.match(identity, /clientId == Bundle\.main\.bundleIdentifier/);
+    assert.match(identity, /Self\.isChallengeValue\(nonce\)/);
+    assert.match(identity, /Self\.isChallengeValue\(state\)/);
+    assert.match(identity, /value\.utf8\.count == 43/);
+    assert.match(identity, /bytes\.count == 32/);
+    assert.match(identity, /bytes\.base64EncodedString\(\)/);
+    assert.match(identity, /request\.nonce = nonce/);
+    assert.match(identity, /request\.state = state/);
+    assert.match(identity, /credential\.state == self\.state/);
+    assert.match(identity, /guard self\.pendingRequest == nil/);
+    assert.match(identity, /controller\.delegate = self/);
+    assert.match(identity, /controller\.presentationContextProvider = self/);
+    assert.match(identity, /if #available\(iOS 16\.0, \*\) \{\s*controller\.cancel\(\)/);
+    assert.match(identity, /call\?\.reject\("Native sign-in was cancelled\.", "CANCELLED"\)\s*call = nil/);
+    assert.match(identity, /guard !self\.finished, let call = self\.call else \{ return \}/);
+    assert.match(identity, /tokenData\.count <= 16_384/);
+    assert.match(identity, /call\.resolve\(\["identityToken": identityToken\]\)/);
+    assert.doesNotMatch(identity, /NSLog|print\(|localizedDescription|SHA256|WKWebView|UserDefaults|Keychain/);
 });

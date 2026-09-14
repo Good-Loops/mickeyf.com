@@ -5,6 +5,7 @@ import WebKit
 class LudolumeBridgeViewController: CAPBridgeViewController {
     override func capacitorDidLoad() {
         bridge?.registerPluginInstance(LudolumeApiPlugin())
+        bridge?.registerPluginInstance(LudolumeIdentityPlugin())
     }
 }
 
@@ -59,7 +60,7 @@ public class LudolumeApiPlugin: CAPPlugin, CAPBridgedPlugin {
 private enum LudolumeApiPolicy {
     static let host = "mickeyf-org-j7yuum4tiq-uc.a.run.app"
     static let origin = "https://\(host)"
-    static let maximumRequestBytes = 16 * 1024
+    static let maximumRequestBytes = 32 * 1024
     static let maximumResponseBytes = 1024 * 1024
     static let routes: Set<String> = [
         "POST /api/users",
@@ -67,6 +68,9 @@ private enum LudolumeApiPolicy {
         "POST /auth/logout",
         "POST /auth/renew",
         "POST /auth/delete-account",
+        "GET /auth/providers/config",
+        "POST /auth/providers/begin",
+        "POST /auth/providers/complete",
         "GET /api/leaderboards",
         "GET /api/leaderboards/p4-vega",
         "GET /api/leaderboards/three-bosses",

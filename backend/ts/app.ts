@@ -74,7 +74,8 @@ app.use('/api', createMainRouter({
 }));
 app.use('/auth', createAuthRouter(
     pool, runtimeConfig.sessionSecret, runtimeConfig.isProduction, runtimeConfig.corsOrigins,
-    { accountDeletionEnabled: runtimeConfig.accountDeletionEnabled, deletionJournal }
+    { accountDeletionEnabled: runtimeConfig.accountDeletionEnabled, deletionJournal,
+        providerAuth: runtimeConfig.providerAuth }
 ));
 
 app.use(notFoundHandler);
@@ -98,6 +99,7 @@ async function startServer(): Promise<void> {
                         ? 'enabled'
                         : 'disabled',
                 accountDeletion: runtimeConfig.accountDeletionEnabled ? 'enabled' : 'disabled',
+                providerAuth: runtimeConfig.providerAuth.enabled ? 'enabled' : 'disabled',
             });
         });
     } catch (error: unknown) {

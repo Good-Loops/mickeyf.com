@@ -1,0 +1,47 @@
+@use '../abstracts' as *;
+
+.provider-sign-in {
+    margin-block: 2.4rem;
+    padding-top: 2rem;
+    border-top: 1px solid rgba($white, .16);
+    color: rgba($white, .9);
+    font-size: 1.4rem;
+    line-height: 1.5;
+
+    &__heading {
+        margin-bottom: 1.2rem;
+        color: rgba($white, .8);
+        font-size: 1.5rem;
+        font-weight: 500;
+    }
+
+    &__buttons {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+    }
+
+    &__button {
+        flex: 1 1 15rem;
+        min-height: 44px;
+        padding: 1rem 1.6rem;
+        border: 1px solid rgba($primary-light, .45);
+        border-radius: 2.4rem;
+        background: rgba($white, .08);
+        color: $white;
+        font: inherit;
+        line-height: 1.4;
+        cursor: pointer;
+
+        &:hover:not(:disabled) { background: rgba($white, .16); }
+        &:focus-visible { outline: 2px solid $primary-light; outline-offset: 3px; }
+        &:disabled { opacity: .55; cursor: wait; }
+    }
+
+    &__feedback {
+        margin-top: 1.2rem;
+        overflow-wrap: anywhere;
+
+        &--error { color: #ffd5db; }
+    }
+}

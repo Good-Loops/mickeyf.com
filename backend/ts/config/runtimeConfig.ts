@@ -1,4 +1,5 @@
 import { DELETION_JOURNAL_BUCKET } from '../accounts/gcsDeletionJournal';
+import { loadProviderAuthConfig, type ProviderAuthConfig } from './providerAuthConfig';
 
 export type RuntimeEnvironment = 'development' | 'test' | 'production';
 
@@ -15,6 +16,7 @@ export type RuntimeConfig = {
     accountDeletionEnabled: boolean;
     accountIdentityEpoch: string | undefined;
     journalBucket: string | undefined;
+    providerAuth: ProviderAuthConfig;
 };
 
 export type DatabaseConfig = {
@@ -115,6 +117,7 @@ export function loadRuntimeConfig(env: Environment = process.env): RuntimeConfig
         accountDeletionEnabled,
         accountIdentityEpoch,
         journalBucket,
+        providerAuth: loadProviderAuthConfig(env),
     });
 }
 

@@ -1,6 +1,7 @@
 import { useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { RouteHeading } from '@/components/RouteHeading';
+import ProviderSignInControls from '@/components/ProviderSignInControls';
 import Swal from '@/components/siteAlert';
 import { useAuth } from '@/context/AuthContext';
 
@@ -9,6 +10,8 @@ export default function ManageAccount() {
     const [password, setPassword] = useState('');
     const [confirmation, setConfirmation] = useState('');
     const [busy, setBusy] = useState(false);
+    const [providerBusy, setProviderBusy] = useState(false);
+    const controlsBusy = busy || providerBusy;
     const [error, setError] = useState('');
     const submitting = useRef(false);
     const navigate = useNavigate();
@@ -83,13 +86,15 @@ export default function ManageAccount() {
                 ) : (
                     <>
                         <p className="manage-account__identity">Signed in as <strong>{userName}</strong></p>
+                        <ProviderSignInControls action="link" disabled={busy}
+                            operationLock={submitting} onBusyChange={setProviderBusy} />
                         <h2 className="manage-account__subtitle">Delete account</h2>
                         <p id="deletion-consequences">
                             Permanently remove your username, account details, personal bests,
                             public leaderboard entries and remaining score-submission receipts.
                             This cannot be undone. Guest play remains available.
                         </p>
-                        <form className="manage-account__form" onSubmit={handleDelete} aria-busy={busy} aria-describedby="deletion-consequences">
+                        <form className="manage-account__form" onSubmit={handleDelete} aria-busy={controlsBusy} aria-describedby="deletion-consequences">
                             <label className="manage-account__field" htmlFor="delete-account-password">
                                 <span className="manage-account__label">Current password</span>
                                 <input
@@ -99,7 +104,7 @@ export default function ManageAccount() {
                                     name="current-password"
                                     autoComplete="current-password"
                                     required
-                                    disabled={busy}
+                                    disabled={controlsBusy}
                                     value={password}
                                     onChange={(event) => setPassword(event.target.value)}
                                 />
@@ -115,13 +120,13 @@ export default function ManageAccount() {
                                     spellCheck={false}
                                     pattern="DELETE"
                                     required
-                                    disabled={busy}
+                                    disabled={controlsBusy}
                                     value={confirmation}
                                     onChange={(event) => setConfirmation(event.target.value)}
                                 />
                             </label>
                             {error && <p className="manage-account__error" role="alert">{error}</p>}
-                            <button className="manage-account__submit" type="submit" disabled={busy || !password || confirmation !== 'DELETE'}>
+                            <button className="manage-account__submit" type="submit" disabled={controlsBusy || !password || confirmation !== 'DELETE'}>
                                 {busy ? 'Please wait…' : 'Delete account'}
                             </button>
                         </form>

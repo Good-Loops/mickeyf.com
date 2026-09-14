@@ -437,3 +437,352 @@ test('account deletion propagates uncertain network failure without retrying', a
     await assert.rejects(api.deleteAccountRequest('test-only'), (error) => error === failure);
     assert.equal(calls, 1);
 });
+
+const providerInput = { action: 'login', clientKey: 'google-web', rememberMe: true };
+const providerChallenge = { state: Buffer.alloc(32, 1).toString('base64url'),
+    nonce: Buffer.alloc(32, 2).toString('base64url'), expiresInSeconds: 300 };
+const providerToken = 'synthetic.header.signature';
+const nextTurn = () => new Promise(resolve => setImmediate(resolve));
+
+test('provider login owns begin, credential acquisition, complete and saved-cookie verification', async () => {
+    const calls = [];
+    const api = createAuthApi(apiBase, async (url, init) => {
+        calls.push(url);
+        assert.equal(init.credentials, 'include');
+        assert.equal(init.signal, undefined, 'an already-sent cookie mutation must finish before releasing the queue');
+        if (url.endsWith('/auth/verify-token')) {
+            assert.equal(init.method, 'GET');
+            return Response.json({ loggedIn: true, user_name: 'Player' });
+        }
+        assert.equal(init.method, 'POST');
+        assert.deepEqual(init.headers, { 'Content-Type': 'application/json' });
+        if (url.endsWith('/begin')) {
+            assert.deepEqual(JSON.parse(init.body), { action: 'login', clientKey: 'google-web' });
+            return Response.json(providerChallenge);
+        }
+        assert.deepEqual(JSON.parse(init.body), { ...providerInput, state: providerChallenge.state, idToken: providerToken });
+        return Response.json({ success: true, user_name: 'Player' });
+    });
+    assert.deepEqual(await api.runProviderAuthentication(providerInput, async (challenge, signal) => {
+        calls.push('acquire');
+        assert.deepEqual(challenge, providerChallenge);
+        assert.equal(Object.isFrozen(challenge), true);
+        assert.equal(signal.aborted, false);
+        return providerToken;
+    }), { success: true, user_name: 'Player' });
+    assert.deepEqual(calls, [`${apiBase}/auth/providers/begin`, 'acquire',
+        `${apiBase}/auth/providers/complete`, `${apiBase}/auth/verify-token`]);
+});
+
+test('provider linking sends the unchanged password only on complete and never requests a new login session', async () => {
+    const password = ' correct horse é ';
+    const calls = [];
+    const api = createAuthApi(apiBase, async (url, init) => {
+        calls.push(url);
+        if (url.endsWith('/begin')) {
+            assert.deepEqual(JSON.parse(init.body), { action: 'link', clientKey: 'apple-native' });
+            return Response.json(providerChallenge);
+        }
+        assert.equal(url, `${apiBase}/auth/providers/complete`);
+        assert.deepEqual(JSON.parse(init.body), { action: 'link', clientKey: 'apple-native',
+            password, state: providerChallenge.state, idToken: providerToken });
+        return Response.json({ success: true, linked: true });
+    });
+    assert.deepEqual(await api.runProviderAuthentication({ action: 'link', clientKey: 'apple-native', password },
+        async () => providerToken), { success: true, linked: true });
+    assert.equal(calls.length, 2);
+});
+
+test('provider transport rejects malformed input, extra account proof and unsafe password bounds before any request', async () => {
+    const invalidInputs = [null, [], {}, { action: 'signup', clientKey: 'google-web' },
+        { ...providerInput, clientKey: '' }, { ...providerInput, clientKey: 'A'.repeat(65) },
+        { ...providerInput, clientKey: '../google' }, { ...providerInput, rememberMe: 'true' },
+        { ...providerInput, password: 'unexpected' }, { ...providerInput, accountId: 'caller-account' },
+        { ...providerInput, nonce: providerChallenge.nonce }, { ...providerInput, state: providerChallenge.state },
+        { action: 'link', clientKey: 'google-web' }, { action: 'link', clientKey: 'google-web', password: '' },
+        { action: 'link', clientKey: 'google-web', password: 'é'.repeat(37) },
+        { action: 'link', clientKey: 'google-web', password: 'a\u0000b' },
+        { action: 'link', clientKey: 'google-web', password: 'secret', rememberMe: false }];
+    const api = createAuthApi(apiBase, async () => { assert.fail('invalid input must not call fetch'); });
+    const acquire = async () => { assert.fail('invalid input must not open the provider'); };
+    for (const input of invalidInputs) {
+        assert.deepEqual(await api.runProviderAuthentication(input, acquire), { error: 'INVALID_REQUEST' });
+    }
+    assert.deepEqual(await api.runProviderAuthentication(providerInput, null), { error: 'INVALID_REQUEST' });
+    for (const options of [null, [], { signal: false }, { signal: {} }, { accountId: 'unexpected' }]) {
+        assert.deepEqual(await api.runProviderAuthentication(providerInput, acquire, options), { error: 'INVALID_REQUEST' });
+    }
+});
+
+test('provider begin rejects malformed challenge shape, entropy encoding and lifetime before acquiring a credential', async () => {
+    for (const challenge of [null, [], {}, { ...providerChallenge, token: 'private' },
+        { ...providerChallenge, state: 'a'.repeat(43) }, { ...providerChallenge, nonce: 'a'.repeat(44) },
+        ...[0, -1, 301, 1.5, '300', null].map(expiresInSeconds => ({ ...providerChallenge, expiresInSeconds }))]) {
+        const calls = [];
+        const api = createAuthApi(apiBase, async url => { calls.push(url); return Response.json(challenge); });
+        assert.deepEqual(await api.runProviderAuthentication(providerInput, async () => {
+            assert.fail('an invalid challenge must not reach the provider');
+        }), { error: 'INVALID_RESPONSE' });
+        assert.deepEqual(calls, [`${apiBase}/auth/providers/begin`]);
+    }
+});
+
+test('provider transport returns only recognized HTTP failures and never exposes provider response details', async () => {
+    for (const path of ['begin', 'complete']) {
+        for (const [status, body, expected] of [
+            [400, { error: 'INVALID_ATTEMPT' }, 'INVALID_ATTEMPT'],
+            [401, { error: 'INVALID_PROVIDER_TOKEN' }, 'INVALID_PROVIDER_TOKEN'],
+            [403, { error: 'NOT_LINKED' }, 'NOT_LINKED'],
+            [409, { error: 'LINK_CONFLICT' }, 'LINK_CONFLICT'],
+            [429, { error: 'RATE_LIMITED' }, 'RATE_LIMITED'],
+            [503, { error: 'UNAVAILABLE' }, 'UNAVAILABLE'],
+            [500, { error: 'private credential' }, 'UNAVAILABLE'],
+            [403, { error: 'INVALID_PASSWORD', detail: 'private credential' }, 'UNAVAILABLE'],
+            [500, { error: 'NOT_LINKED' }, 'UNAVAILABLE'],
+            [503, { success: true, user_name: 'Player' }, 'UNAVAILABLE'],
+        ]) {
+            let acquisitions = 0;
+            const api = createAuthApi(apiBase, async url => url.endsWith('/' + path)
+                ? Response.json(body, { status }) : Response.json(providerChallenge));
+            assert.deepEqual(await api.runProviderAuthentication(providerInput, async () => {
+                acquisitions++;
+                return providerToken;
+            }), { error: expected });
+            assert.equal(acquisitions, path === 'begin' ? 0 : 1);
+        }
+    }
+});
+
+test('provider credential rejection, cancellation and invalid token values skip completion and leave the queue usable', async () => {
+    for (const [acquire, expected] of [
+        [async () => { throw new DOMException('private provider details', 'AbortError'); }, 'CANCELLED'],
+        [async () => { throw { code: 'CANCELLED', message: 'private provider details' }; }, 'CANCELLED'],
+        [async () => { throw new Error('private token and credentials'); }, 'UNAVAILABLE'],
+        ...[null, '', 123, 'not a jwt', 'a.b.', 'a.b.Ü', 'a.b.' + 'c'.repeat(16_384)]
+            .map(value => [async () => value, 'INVALID_PROVIDER_TOKEN']),
+    ]) {
+        const calls = [];
+        const api = createAuthApi(apiBase, async url => {
+            calls.push(url);
+            return Response.json(url.endsWith('/begin') ? providerChallenge : { loggedOut: true });
+        });
+        assert.deepEqual(await api.runProviderAuthentication(providerInput, acquire), { error: expected });
+        await api.logoutRequest();
+        assert.deepEqual(calls, [`${apiBase}/auth/providers/begin`, `${apiBase}/auth/logout`]);
+    }
+});
+
+test('provider completion requires the exact success shape for the requested action', async () => {
+    for (const action of ['login', 'link']) {
+        const input = action === 'login' ? providerInput : { action, clientKey: 'apple-web', password: 'existing-password' };
+        for (const body of [null, [], {}, { success: false }, { success: 1, user_name: 'Player' },
+            { success: true }, { success: true, user_name: '' }, { success: true, user_name: 'a'.repeat(256) },
+            { success: true, user_name: 'Player\n' }, { success: true, linked: true, user_name: 'Player' },
+            { success: true, user_name: 'Player', idToken: 'private' }, { success: true, linked: true, error: 'FAILED' },
+            action === 'login' ? { success: true, linked: true } : { success: true, user_name: 'Player' }]) {
+            let calls = 0;
+            const api = createAuthApi(apiBase, async url => {
+                calls++;
+                return Response.json(url.endsWith('/begin') ? providerChallenge : body);
+            });
+            assert.deepEqual(await api.runProviderAuthentication(input, async () => providerToken), { error: 'INVALID_RESPONSE' });
+            assert.equal(calls, 2);
+        }
+    }
+});
+
+test('provider login never succeeds without an exact matching saved-cookie verification', async () => {
+    for (const session of [null, {}, [], { loggedIn: false }, { loggedIn: true, user_name: 'Other' },
+        { loggedIn: true, user_name: 'Player', token: 'private' }]) {
+        const api = createAuthApi(apiBase, async url => Response.json(url.endsWith('/begin') ? providerChallenge
+            : url.endsWith('/complete') ? { success: true, user_name: 'Player' } : session));
+        assert.deepEqual(await api.runProviderAuthentication(providerInput, async () => providerToken),
+            { error: 'SESSION_NOT_ESTABLISHED' });
+    }
+    for (const failureAt of ['/begin', '/complete', '/auth/verify-token']) {
+        for (const malformedJson of [false, true]) {
+            const api = createAuthApi(apiBase, async url => {
+                if (url.endsWith(failureAt)) {
+                    if (malformedJson) return new Response('private malformed token details');
+                    throw new Error('private connection and token details');
+                }
+                return Response.json(url.endsWith('/begin') ? providerChallenge : { success: true, user_name: 'Player' });
+            });
+            assert.deepEqual(await api.runProviderAuthentication(providerInput, async () => providerToken), { error: 'UNAVAILABLE' });
+        }
+    }
+});
+
+test('provider dialog and cookie verification block later mutations while ordinary verification remains available', async () => {
+    let releaseProvider;
+    let releaseVerification;
+    const provider = new Promise(resolve => { releaseProvider = resolve; });
+    const verification = new Promise(resolve => { releaseVerification = resolve; });
+    const calls = [];
+    let completed = false;
+    const api = createAuthApi(apiBase, async (url, init) => {
+        if (url.endsWith('/begin')) { calls.push('begin'); return Response.json(providerChallenge); }
+        if (url.endsWith('/complete')) {
+            calls.push('complete'); completed = true;
+            return Response.json({ success: true, user_name: 'Player' });
+        }
+        if (url.endsWith('/auth/verify-token')) {
+            calls.push('verify');
+            if (!completed) return Response.json({ loggedIn: false });
+            await verification;
+            return Response.json({ loggedIn: true, user_name: 'Player' });
+        }
+        if (url.endsWith('/auth/renew')) { calls.push('renew'); return Response.json({ loggedIn: true, user_name: 'Player' }); }
+        if (url.endsWith('/api/users')) { calls.push(JSON.parse(init.body).type); return Response.json({ success: true, user_name: 'Player' }); }
+        calls.push('logout'); return Response.json({ loggedOut: true });
+    });
+    const login = api.runProviderAuthentication(providerInput, async () => { calls.push('acquire'); return provider; });
+    const renewal = api.renewRequest();
+    const passwordLogin = api.loginRequest(credentials);
+    const logout = api.logoutRequest();
+    await nextTurn();
+    assert.deepEqual(calls, ['begin', 'acquire']);
+    assert.deepEqual(await api.verifyRequest(), { loggedIn: false });
+    releaseProvider(providerToken);
+    await nextTurn();
+    assert.deepEqual(calls, ['begin', 'acquire', 'verify', 'complete', 'verify']);
+    releaseVerification();
+    assert.deepEqual(await login, { success: true, user_name: 'Player' });
+    await Promise.all([renewal, passwordLogin, logout]);
+    assert.deepEqual(calls, ['begin', 'acquire', 'verify', 'complete', 'verify', 'renew', 'login', 'verify', 'logout']);
+});
+
+test('aborting provider acquisition cleans up its signal, skips late credentials and unblocks logout', async () => {
+    const controller = new AbortController();
+    let releaseProvider;
+    let providerSignal;
+    const provider = new Promise(resolve => { releaseProvider = resolve; });
+    const calls = [];
+    const api = createAuthApi(apiBase, async url => {
+        calls.push(url);
+        return Response.json(url.endsWith('/begin') ? providerChallenge : { loggedOut: true });
+    });
+    const login = api.runProviderAuthentication(providerInput, async (_challenge, signal) => {
+        providerSignal = signal;
+        return provider;
+    }, { signal: controller.signal });
+    const logout = api.logoutRequest();
+    await nextTurn();
+    controller.abort('private caller reason');
+    assert.deepEqual(await login, { error: 'CANCELLED' });
+    assert.equal(providerSignal.aborted, true);
+    await logout;
+    releaseProvider(providerToken);
+    await nextTurn();
+    assert.deepEqual(calls, [`${apiBase}/auth/providers/begin`, `${apiBase}/auth/logout`]);
+});
+
+test('an expired provider dialog aborts acquisition and releases the queue without accepting a late credential', async t => {
+    t.mock.timers.enable({ apis: ['Date', 'setTimeout'], now: Date.now() });
+    let releaseProvider;
+    let providerSignal;
+    const provider = new Promise(resolve => { releaseProvider = resolve; });
+    const calls = [];
+    const api = createAuthApi(apiBase, async url => {
+        calls.push(url);
+        return Response.json(url.endsWith('/begin') ? { ...providerChallenge, expiresInSeconds: 1 } : { loggedOut: true });
+    });
+    const login = api.runProviderAuthentication(providerInput, async (_challenge, signal) => {
+        providerSignal = signal;
+        return provider;
+    });
+    const logout = api.logoutRequest();
+    await nextTurn();
+    t.mock.timers.tick(1000);
+    assert.deepEqual(await login, { error: 'INVALID_ATTEMPT' });
+    assert.equal(providerSignal.aborted, true);
+    await logout;
+    releaseProvider(providerToken);
+    await nextTurn();
+    assert.deepEqual(calls, [`${apiBase}/auth/providers/begin`, `${apiBase}/auth/logout`]);
+});
+
+test('pre-cancelled provider input sends nothing and cancellation during begin awaits the already-sent cookie response', async () => {
+    const cancelled = new AbortController();
+    cancelled.abort();
+    const noFetch = createAuthApi(apiBase, async () => { assert.fail('pre-cancelled operation cannot send begin'); });
+    assert.deepEqual(await noFetch.runProviderAuthentication(providerInput, async () => providerToken,
+        { signal: cancelled.signal }), { error: 'CANCELLED' });
+    const controller = new AbortController();
+    let releaseBegin;
+    const begin = new Promise(resolve => { releaseBegin = resolve; });
+    const calls = [];
+    const api = createAuthApi(apiBase, async url => {
+        calls.push(url);
+        if (url.endsWith('/begin')) { await begin; return Response.json(providerChallenge); }
+        return Response.json({ loggedOut: true });
+    });
+    const login = api.runProviderAuthentication(providerInput, async () => { assert.fail('cancelled begin cannot open provider'); },
+        { signal: controller.signal });
+    const logout = api.logoutRequest();
+    await nextTurn();
+    controller.abort();
+    await nextTurn();
+    assert.deepEqual(calls, [`${apiBase}/auth/providers/begin`]);
+    releaseBegin();
+    assert.deepEqual(await login, { error: 'CANCELLED' });
+    await logout;
+    assert.deepEqual(calls, [`${apiBase}/auth/providers/begin`, `${apiBase}/auth/logout`]);
+});
+
+test('cancellation after complete is sent waits for the real cookie outcome and verification before logout', async () => {
+    const controller = new AbortController();
+    let releaseComplete;
+    const completion = new Promise(resolve => { releaseComplete = resolve; });
+    const calls = [];
+    let signedIn = false;
+    const api = createAuthApi(apiBase, async url => {
+        if (url.endsWith('/begin')) { calls.push('begin'); return Response.json(providerChallenge); }
+        if (url.endsWith('/complete')) {
+            calls.push('complete'); await completion; signedIn = true;
+            return Response.json({ success: true, user_name: 'Player' });
+        }
+        if (url.endsWith('/auth/verify-token')) {
+            calls.push('verify');
+            assert.equal(signedIn, true);
+            return Response.json({ loggedIn: true, user_name: 'Player' });
+        }
+        calls.push('logout'); signedIn = false; return Response.json({ loggedOut: true });
+    });
+    const login = api.runProviderAuthentication(providerInput, async () => providerToken, { signal: controller.signal });
+    const logout = api.logoutRequest();
+    await nextTurn();
+    controller.abort();
+    await nextTurn();
+    assert.deepEqual(calls, ['begin', 'complete']);
+    releaseComplete();
+    assert.deepEqual(await login, { success: true, user_name: 'Player' });
+    await logout;
+    assert.deepEqual(calls, ['begin', 'complete', 'verify', 'logout']);
+    assert.equal(signedIn, false);
+});
+
+test('provider inputs are captured before queueing and omitted rememberMe stays false', async () => {
+    let releaseLogout;
+    const pendingLogout = new Promise(resolve => { releaseLogout = resolve; });
+    const input = { action: 'login', clientKey: 'google-web' };
+    const api = createAuthApi(apiBase, async (url, init) => {
+        if (url.endsWith('/auth/logout')) { await pendingLogout; return Response.json({ loggedOut: true }); }
+        if (url.endsWith('/begin')) {
+            assert.deepEqual(JSON.parse(init.body), { action: 'login', clientKey: 'google-web' });
+            return Response.json(providerChallenge);
+        }
+        if (url.endsWith('/complete')) {
+            assert.deepEqual(JSON.parse(init.body), { action: 'login', clientKey: 'google-web', rememberMe: false,
+                state: providerChallenge.state, idToken: providerToken });
+            return Response.json({ success: true, user_name: 'Player' });
+        }
+        return Response.json({ loggedIn: true, user_name: 'Player' });
+    });
+    const logout = api.logoutRequest();
+    const login = api.runProviderAuthentication(input, async () => providerToken);
+    input.action = 'link'; input.clientKey = 'changed'; input.password = 'changed'; input.rememberMe = true;
+    releaseLogout();
+    await logout;
+    assert.deepEqual(await login, { success: true, user_name: 'Player' });
+});

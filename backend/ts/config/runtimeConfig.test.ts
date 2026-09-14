@@ -21,6 +21,7 @@ test('production runtime configuration allows only the website and packaged iOS 
     assert.equal(config.p4VegaScoreSubmissionsEnabled, false);
     assert.equal(config.threeBossesRunSubmissionsEnabled, false);
     assert.equal(config.accountDeletionEnabled, false);
+    assert.deepEqual(config.providerAuth, { enabled: false, clients: {}, publicClients: [] });
     assert.deepEqual(config.corsOrigins, [
         'https://mickeyf.com',
         'https://www.mickeyf.com',
@@ -37,6 +38,31 @@ test('production runtime configuration allows only the website and packaged iOS 
     ]) {
         assert.equal(config.corsOrigins.includes(origin), false, origin);
     }
+});
+
+test('provider runtime configuration stays disabled without exact opt-in in every environment', () => {
+    for (const nodeEnv of ['development', 'test', 'production']) {
+        for (const enabled of [undefined, '', 'false', 'TRUE', '1', ' true ']) {
+            const config = loadRuntimeConfig({ ...productionEnvironment, NODE_ENV: nodeEnv,
+                PROVIDER_AUTH_ENABLED: enabled, GOOGLE_WEB_CLIENT_ID: 'ignored-while-disabled' });
+            assert.equal(config.providerAuth.enabled, false);
+            assert.deepEqual(config.providerAuth.publicClients, []);
+        }
+    }
+});
+
+test('enabled provider runtime configuration requires exact server-owned client IDs', () => {
+    assert.throws(() => loadRuntimeConfig({ ...productionEnvironment, PROVIDER_AUTH_ENABLED: 'true' }),
+        /GOOGLE_WEB_CLIENT_ID or APPLE_IOS_BUNDLE_ID/);
+    const clientId = '1234567890-synthetic.apps.googleusercontent.com';
+    const config = loadRuntimeConfig({ ...productionEnvironment, PROVIDER_AUTH_ENABLED: 'true', GOOGLE_WEB_CLIENT_ID: clientId });
+    assert.equal(config.providerAuth.enabled, true);
+    assert.deepEqual(Object.keys(config.providerAuth.clients), ['google-web']);
+    assert.deepEqual(config.providerAuth.publicClients, [
+        { clientKey: 'google-web', provider: 'google', platform: 'web', clientId },
+    ]);
+    assert.throws(() => loadRuntimeConfig({ ...productionEnvironment, PROVIDER_AUTH_ENABLED: 'true',
+        GOOGLE_WEB_CLIENT_ID: ` ${clientId}` }), /GOOGLE_WEB_CLIENT_ID/);
 });
 
 test('account deletion defaults off in every environment and requires exact opt-in', () => {

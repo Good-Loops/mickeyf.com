@@ -10,4 +10,5 @@ export const {
     renewRequest,
     logoutRequest,
     deleteAccountRequest,
+    runProviderAuthentication,
 } = createAuthApi(API_BASE, apiFetch);

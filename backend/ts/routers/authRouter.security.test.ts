@@ -14,6 +14,7 @@ import { createAuthRouter } from './authRouter';
 import { createLeaderboardRouter } from './leaderboardRouter';
 import { issueSessionToken, PERSISTENT_SESSION_SECONDS } from '../security/sessionPolicy';
 import { verifyRequestToken } from '../security/requestAuthentication';
+import { loadProviderAuthConfig } from '../config/providerAuthConfig';
 
 const secret = 'account-deletion-test-secret-not-a-credential';
 const password = 'unit-test-password';
@@ -41,7 +42,8 @@ type TestState = {
 
 async function withServer(
     run: (base: string, state: TestState) => Promise<void>,
-    options: { accountDeletionEnabled?: boolean; withoutJournal?: boolean } = { accountDeletionEnabled: true }
+    options: { accountDeletionEnabled?: boolean; withoutJournal?: boolean;
+        providerAuth?: ReturnType<typeof loadProviderAuthConfig> } = { accountDeletionEnabled: true }
 ) {
     const passwordHash = await bcrypt.hash(password, 4);
     const state: TestState = { exists: true, unavailable: false, writes: [], databaseCalls: 0,
@@ -186,6 +188,7 @@ async function withServer(
     app.use(cookieParser(secret), express.json());
     app.use('/auth', createAuthRouter(database, secret, true, origins, {
         accountDeletionEnabled: options.accountDeletionEnabled,
+        providerAuth: options.providerAuth,
         deletionJournal: options.withoutJournal ? undefined : {
             async recordAccountDeletion() {
                 state.journalCalls++;
@@ -214,6 +217,31 @@ function post(base: string, body: unknown, headers: Record<string, string> = {},
         body: JSON.stringify(body),
     });
 }
+
+test('provider discovery is empty by default and has no database or cookie side effects', async () => {
+    await withServer(async (base, state) => {
+        const response = await fetch(base + '/auth/providers/config');
+        assert.equal(response.status, 200);
+        assert.deepEqual(await response.json(), { clients: [] });
+        assert.equal(response.headers.get('set-cookie'), null);
+        assert.equal(response.headers.get('cache-control'), 'no-store');
+        assert.equal(state.databaseCalls, 0);
+    });
+});
+
+test('enabled provider discovery returns public identifiers only, without invoking verifiers', async () => {
+    const google = { clientKey: 'google-web', provider: 'google', platform: 'web', clientId: 'synthetic.apps.googleusercontent.com' };
+    const apple = { clientKey: 'apple-ios', provider: 'apple', platform: 'ios', clientId: 'com.example.test' };
+    const providerAuth = loadProviderAuthConfig({ PROVIDER_AUTH_ENABLED: 'true',
+        GOOGLE_WEB_CLIENT_ID: google.clientId, APPLE_IOS_BUNDLE_ID: apple.clientId });
+    await withServer(async (base, state) => {
+        const response = await fetch(base + '/auth/providers/config');
+        assert.equal(response.status, 200);
+        assert.deepEqual(await response.json(), { clients: [google, apple] });
+        assert.equal(response.headers.get('set-cookie'), null);
+        assert.equal(state.databaseCalls, 0);
+    }, { providerAuth });
+});
 
 test('renewal requires a trusted explicit Origin, JSON, an empty body and signed-cookie-only transport', async () => {
     await withServer(async (base, state) => {

@@ -24,6 +24,7 @@ import { createAccountDeletionRateLimiters, createSessionRenewalRateLimiter } fr
 import { createLogoutHandler } from './authRouter.handlers';
 import { createProviderAuthRouter } from './providerAuthRouter';
 import type { ProviderAuthClient } from '../auth/providerAuthFlow';
+import type { PublicProviderAuthClient } from '../config/providerAuthConfig';
 
 export { authRoutesContract } from './authRouter.contract';
 
@@ -35,7 +36,11 @@ export function createAuthRouter(
     { accountDeletionEnabled = false, deletionJournal, providerAuth }: {
         accountDeletionEnabled?: boolean;
         deletionJournal?: AccountDeletionJournal;
-        providerAuth?: { enabled: boolean; clients: Readonly<Record<string, ProviderAuthClient>> };
+        providerAuth?: {
+            enabled: boolean;
+            clients: Readonly<Record<string, ProviderAuthClient>>;
+            publicClients?: readonly PublicProviderAuthClient[];
+        };
     } = {}
 ): Router {
     /**
@@ -48,6 +53,12 @@ export function createAuthRouter(
      * - None beyond Express route registration.
      */
     const router: Router = Router();
+
+    // Only public identifiers are exposed, never verifier configuration or credentials.
+    router.get('/providers/config', (_request, response) => {
+        response.setHeader('Cache-Control', 'no-store');
+        response.json({ clients: providerAuth?.enabled ? providerAuth.publicClients ?? [] : [] });
+    });
 
     if (providerAuth?.enabled) router.use('/providers', createProviderAuthRouter({
         database, sessionSecret, isProduction, allowedOrigins: allowedMutationOrigins,

@@ -19,6 +19,102 @@ type UserOperation =
     | ({ type: 'login' } & LoginPayload)
     | ({ type: 'signup' } & SignupPayload);
 
+export type ProviderAuthenticationInput = Readonly<{
+    action: 'login' | 'link'; clientKey: string; rememberMe?: boolean; password?: string;
+}>;
+export type ProviderAuthenticationChallenge = Readonly<{ state: string; nonce: string; expiresInSeconds: number }>;
+export type ProviderAuthenticationResult =
+    | { success: true; user_name: string }
+    | { success: true; linked: true }
+    | { error: string };
+export type AcquireProviderCredential = (challenge: ProviderAuthenticationChallenge, signal: AbortSignal) => Promise<string>;
+export type ProviderAuthenticationOptions = Readonly<{ signal?: AbortSignal }>;
+
+const PROVIDER_TOKEN_MAX_LENGTH = 16_384;
+const PROVIDER_RANDOM_VALUE = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
+const CONTROL_CHARACTERS = /[\u0000-\u001f\u007f]/u;
+const PROVIDER_FAILURE_STATUSES: Readonly<Record<string, number>> = {
+    UNAVAILABLE: 503, INVALID_REQUEST: 400, INVALID_CONTEXT: 403, BUSY: 503,
+    INVALID_ATTEMPT: 400, INVALID_PROVIDER_TOKEN: 401, NOT_LINKED: 403,
+    INVALID_PASSWORD: 403, LINK_CONFLICT: 409, ACCOUNT_GONE: 401, RATE_LIMITED: 429,
+};
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+    return value !== null && typeof value === 'object' && !Array.isArray(value);
+}
+
+function hasKeys(value: Record<string, unknown>, keys: string): boolean {
+    return Object.keys(value).sort().join(',') === keys;
+}
+
+function validProviderInput(input: unknown): input is ProviderAuthenticationInput {
+    if (!isRecord(input) || Object.keys(input).some(key => !['action', 'clientKey', 'rememberMe', 'password'].includes(key))
+        || typeof input.clientKey !== 'string' || !/^[a-z0-9_-]{1,64}$/.test(input.clientKey)) return false;
+    if (input.action === 'login') {
+        return input.password === undefined && (input.rememberMe === undefined || typeof input.rememberMe === 'boolean');
+    }
+    return input.action === 'link' && input.rememberMe === undefined
+        && typeof input.password === 'string' && input.password.length > 0 && input.password.length <= 72
+        && new TextEncoder().encode(input.password).length <= 72 && !CONTROL_CHARACTERS.test(input.password);
+}
+
+function validProviderOptions(options: unknown): options is ProviderAuthenticationOptions {
+    if (!isRecord(options) || Object.keys(options).some(key => key !== 'signal')) return false;
+    const signal = options.signal;
+    return signal === undefined || (isRecord(signal) && typeof signal.aborted === 'boolean'
+        && typeof signal.addEventListener === 'function' && typeof signal.removeEventListener === 'function');
+}
+
+function readProviderChallenge(value: unknown): ProviderAuthenticationChallenge | null {
+    if (!isRecord(value) || !hasKeys(value, 'expiresInSeconds,nonce,state')
+        || typeof value.state !== 'string' || !PROVIDER_RANDOM_VALUE.test(value.state)
+        || typeof value.nonce !== 'string' || !PROVIDER_RANDOM_VALUE.test(value.nonce)
+        || !Number.isInteger(value.expiresInSeconds) || Number(value.expiresInSeconds) < 1
+        || Number(value.expiresInSeconds) > 300) return null;
+    return Object.freeze({ state: value.state, nonce: value.nonce, expiresInSeconds: Number(value.expiresInSeconds) });
+}
+
+function credentialFailure(error: unknown): { error: string } {
+    return { error: isRecord(error) && (error.name === 'AbortError' || error.code === 'CANCELLED')
+        ? 'CANCELLED' : 'UNAVAILABLE' };
+}
+
+async function acquireProviderToken(challenge: ProviderAuthenticationChallenge, acquireCredential: AcquireProviderCredential,
+    deadline: number, signal?: AbortSignal): Promise<{ idToken: string } | { error: string }> {
+    const controller = new AbortController();
+    let cancellation: string | null = null;
+    let cancel!: (reason: string) => void;
+    const cancelled = new Promise<{ error: string }>(resolve => {
+        cancel = reason => {
+            if (cancellation !== null) return;
+            cancellation = reason;
+            resolve({ error: reason });
+            controller.abort();
+        };
+    });
+    const abort = () => cancel('CANCELLED');
+    signal?.addEventListener('abort', abort, { once: true });
+    const timeout = setTimeout(() => cancel('INVALID_ATTEMPT'), Math.max(0, deadline - Date.now()));
+    try {
+        if (signal?.aborted) abort();
+        const credential = Promise.resolve().then(async () => {
+            if (cancellation !== null) return { error: cancellation };
+            try {
+                const idToken = await acquireCredential(challenge, controller.signal);
+                if (typeof idToken !== 'string' || idToken.length > PROVIDER_TOKEN_MAX_LENGTH
+                    || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(idToken)) {
+                    return { error: 'INVALID_PROVIDER_TOKEN' };
+                }
+                return { idToken };
+            } catch (error) { return credentialFailure(error); }
+        });
+        return await Promise.race([credential, cancelled]);
+    } finally {
+        clearTimeout(timeout);
+        signal?.removeEventListener('abort', abort);
+    }
+}
+
 export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetch) {
     let pendingMutation: Promise<void> = Promise.resolve();
 
@@ -152,6 +248,64 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
         throw new Error('Could not confirm account deletion.');
     }
 
+    async function postProviderOperation(path: 'begin' | 'complete', body: Record<string, unknown>):
+        Promise<{ ok: true; body: unknown } | { ok: false; error: string }> {
+        try {
+            const response = await fetchRequest(`${apiBase}/auth/providers/${path}`, {
+                method: 'POST', headers: { 'Content-Type': 'application/json' },
+                credentials: 'include', body: JSON.stringify(body),
+            });
+            const result: unknown = await response.json();
+            if (response.ok) return { ok: true, body: result };
+            if (isRecord(result) && hasKeys(result, 'error') && typeof result.error === 'string'
+                && Object.prototype.hasOwnProperty.call(PROVIDER_FAILURE_STATUSES, result.error)
+                && PROVIDER_FAILURE_STATUSES[result.error] === response.status) {
+                return { ok: false, error: result.error };
+            }
+        } catch { /* Provider payloads and raw transport errors must not escape to UI or logs. */ }
+        return { ok: false, error: 'UNAVAILABLE' };
+    }
+
+    async function runProviderAuthentication(input: ProviderAuthenticationInput, acquireCredential: AcquireProviderCredential,
+        signal?: AbortSignal): Promise<ProviderAuthenticationResult> {
+        if (signal?.aborted) return { error: 'CANCELLED' };
+        const beginning = await postProviderOperation('begin', { action: input.action, clientKey: input.clientKey });
+        if (signal?.aborted) return { error: 'CANCELLED' };
+        if (!beginning.ok) return { error: beginning.error };
+        const challenge = readProviderChallenge(beginning.body);
+        if (!challenge) return { error: 'INVALID_RESPONSE' };
+        const deadline = Date.now() + challenge.expiresInSeconds * 1000;
+        const credential = await acquireProviderToken(challenge, acquireCredential, deadline, signal);
+        if (signal?.aborted) return { error: 'CANCELLED' };
+        if ('error' in credential) return credential;
+        if (Date.now() >= deadline) return { error: 'INVALID_ATTEMPT' };
+        // Once complete is sent, await its cookie mutation and verification even
+        // if UI cancellation arrives. Cancelling cannot undo a server-side login.
+        const completion = await postProviderOperation('complete', {
+            action: input.action, clientKey: input.clientKey, state: challenge.state, idToken: credential.idToken,
+            ...(input.action === 'login' ? { rememberMe: input.rememberMe === true } : { password: input.password }),
+        });
+        if (!completion.ok) return { error: completion.error };
+        const result = completion.body;
+        if (!isRecord(result) || result.success !== true) return { error: 'INVALID_RESPONSE' };
+        if (input.action === 'link') {
+            return hasKeys(result, 'linked,success') && result.linked === true
+                ? { success: true, linked: true } : { error: 'INVALID_RESPONSE' };
+        }
+        if (!hasKeys(result, 'success,user_name') || typeof result.user_name !== 'string'
+            || result.user_name.length < 1 || result.user_name.length > 255 || CONTROL_CHARACTERS.test(result.user_name)) {
+            return { error: 'INVALID_RESPONSE' };
+        }
+        try {
+            const session: unknown = await verifyRequest();
+            if (!isRecord(session) || !hasKeys(session, 'loggedIn,user_name')
+                || session.loggedIn !== true || session.user_name !== result.user_name) {
+                return { error: 'SESSION_NOT_ESTABLISHED' };
+            }
+        } catch { return { error: 'UNAVAILABLE' }; }
+        return { success: true, user_name: result.user_name };
+    }
+
     return {
         loginRequest: (payload: LoginPayload) => {
             const request = { ...payload };
@@ -165,5 +319,16 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
         renewRequest: () => enqueueMutation(renewRequest),
         logoutRequest: () => enqueueMutation(logoutRequest),
         deleteAccountRequest: (password: string) => enqueueMutation(() => deleteAccountRequest(password)),
+        runProviderAuthentication: (input: ProviderAuthenticationInput, acquireCredential: AcquireProviderCredential,
+            options: ProviderAuthenticationOptions = {}): Promise<ProviderAuthenticationResult> => {
+            if (!validProviderInput(input) || typeof acquireCredential !== 'function' || !validProviderOptions(options)) {
+                return Promise.resolve({ error: 'INVALID_REQUEST' });
+            }
+            const request = { ...input };
+            const signal = options.signal;
+            // Keep the provider dialog in the queue too: another auth mutation
+            // would replace or clear the cookie binding the pending challenge.
+            return enqueueMutation(() => runProviderAuthentication(request, acquireCredential, signal));
+        },
     };
 }

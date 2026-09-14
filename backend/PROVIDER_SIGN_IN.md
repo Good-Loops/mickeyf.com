@@ -4,11 +4,11 @@
 
 Implemented backend identity verification, one-use attempts and an opt-in HTTP
 adapter connected to shared sessions; **not an enabled sign-in feature**.
-Application bootstrap supplies no provider configuration, so routes and buttons
-remain disabled. Username/password and provider issuance reuse UUID-bound,
+Application bootstrap now reads explicit opt-in configuration; production remains
+unchanged and disabled. Username/password and provider issuance reuse UUID-bound,
 revocable device sessions; see [session behavior and rollout](SESSION_AUTHENTICATION.md).
-No production configuration, provider credentials, HTTP callbacks or provider
-native plugins have been activated.
+No production configuration, provider credentials, HTTP callbacks or native
+capabilities have been activated.
 
 Native iOS sign-in can be developed and tested before publication. Apple's
 documented web/other-platform setup requires an existing App Store app using
@@ -118,9 +118,12 @@ UUIDs and cascade on deletion, including deletion replay after restoring a backu
 ## Opt-in HTTP session adapter
 
 `routers/providerAuthRouter.ts` is mounted at `/auth/providers` only when
-`createAuthRouter` receives explicit enablement and configured clients. Current
-`app.ts` does not supply either. The request shapes are:
+`createAuthRouter` receives explicit enablement and configured clients. The
+runtime configuration remains disabled unless `PROVIDER_AUTH_ENABLED=true`.
+The request shapes are:
 
+- `GET /config`: `{ clients: [{ clientKey, provider, platform, clientId }] }`, public identifiers only;
+  always mounted, empty when disabled, no database/cookie effects and `Cache-Control: no-store`.
 - `POST /begin`: `{ action: "login" | "link", clientKey }` → `{ state, nonce, expiresInSeconds }`.
 - `POST /complete`, login: `{ action: "login", clientKey, state, idToken, rememberMe?: boolean }`.
 - `POST /complete`, link: `{ action: "link", clientKey, state, idToken, password }`.
@@ -139,13 +142,46 @@ These supplement the general API limit; they are not a distributed global quota.
 Failures are sanitized and do not clear newer authentication cookies. The total
 JSON budget stays 32 KiB and ID tokens remain bounded to 16,384 characters.
 
-Client integration must serialize provider begin/complete with other auth mutations
-through the existing auth queue. Native transport already serializes POSTs, but
-still needs explicit provider route allowlisting and a body limit increased from
-16 KiB to accommodate a maximum token plus its JSON wrapper. Session renewal can
-change the binding during a link attempt, requiring a fresh challenge. Arbitrary
-cross-tab/in-flight responses are not canceled by canonical-cookie replacement:
-late Set-Cookie ordering needs client acceptance work before activation.
+The frontend serializes begin, the provider dialog and complete with password
+login, renewal and logout through one auth queue. The five-minute challenge
+deadline releases an abandoned dialog; unmount/cancel aborts acquisition.
+An already-dispatched completion is awaited, including saved-cookie verification,
+before releasing the queue: cancel cannot undo an accepted server request.
+Native transport explicitly allows only these three provider routes and uses
+the same 32 KiB JSON budget as the server. Arbitrary cross-tab/in-flight responses
+are not canceled by canonical-cookie replacement; acceptance must cover those
+separately from the single-page queue.
+
+## Client configuration and controls
+
+- `GOOGLE_WEB_CLIENT_ID` configures exact audience/key `google-web` for ordinary
+  browsers. Google's official GIS button is rendered inside the site's dialog
+  only after a user chooses Google; its own click opens the provider prompt.
+  The SDK is not preloaded on ordinary page visits. The Google client inspected
+  on 2026-09-14 (`MickeyFOrg Client`) has no authorized JavaScript origins or
+  redirect URIs; no console settings were changed. Before enabling it, approve
+  the exact local/public origins, current Ludolume branding and the narrowly
+  required Hosting CSP/COOP adjustments. Existing Hosting CSP currently blocks GIS.
+- `APPLE_IOS_BUNDLE_ID` configures exact audience/key `apple-ios`. Native iOS
+  uses AuthenticationServices, not a web OAuth view. The native bridge reports
+  unavailable while `LudolumeAppleSignInEnabled` is false (the committed default).
+  Enable it only together with the App ID capability, entitlement and matching
+  provisioning profile. The build/signed-device acceptance is still pending.
+- Each client receives the server challenge nonce unchanged. Native Apple also
+  checks the returned state and requires its client ID to match the app bundle.
+  Tokens are transient: no provider token/profile is persisted or logged.
+  Capacitor bridge payload logging is disabled, including debug builds.
+- Unsupported native Google and web Apple IDs are rejected when opt-in is enabled,
+  rather than accidentally advertising unusable clients. Android and iOS Google
+  still need their official native SDK/client configuration; Apple web remains
+  a separate Services ID/callback milestone.
+- Controls appear only for server-configured and platform-capable clients.
+  The neutral Google account / Apple account selectors open the official Google
+  button or native Apple sheet; they are not presented as official branded buttons.
+  Existing users link from Manage account using their current password, then
+  log in with that provider and the same Stay signed in preference. Unlinked
+  identities do not create accounts or match by email. Provider-only signup and
+  disconnect/revocation remain unimplemented.
 
 ## Migration and activation boundary
 
@@ -175,10 +211,12 @@ compatibility and the enabled application revision.
 
 Remaining work, in order:
 
-1. Configure approved Google web/native clients and Apple native capability;
-   integrate native platform sign-in, not Google OAuth inside the embedded WebView.
-   Connect the UI/auth queue and native transport, and add provider-specific
-   callback/code exchange where required. Treat Apple's web Services ID separately.
+1. Activate the approved Google web client/origins and native Apple capability,
+   update scoped runtime grants and schema, and perform one focused real-provider
+   login/link/cancel/session acceptance per implemented platform. Compile the
+   new Swift bridge on macOS before any signed rollout. Complete native Google
+   SDK/client setup separately, never Google OAuth inside the embedded WebView.
+   Treat Apple's web Services ID separately.
 2. Design provider-only signup around the approved age/consent requirements;
    retain username/password access and existing score ownership.
 3. Complete provider disconnect/revocation and account-deletion coordination,
@@ -223,9 +261,18 @@ paused, then rejected linking without changing profiles, scores or provider link
 The disposable container and network were removed. Tests used synthetic provider
 proofs and isolated accounts only; no production migration or activation occurred.
 
+Client checkpoint results (2026-09-14): frontend typecheck and all 303 tests,
+the production web build, backend typecheck and 38 focused configuration/auth
+HTTP tests passed. The final modal-close handoff also passed TypeScript. The
+native suite includes source/target membership and logging guards, not a Swift
+compile. Google/Apple dialogs have not been exercised with real accounts and
+native iOS has not been compiled or tested on a device for this checkpoint.
+The unchanged SQL integration suite was not repeated.
+
 Primary references: [Firebase cookie forwarding](https://firebase.google.com/docs/hosting/manage-cache),
 [Google token verification](https://developers.google.com/identity/gsi/web/guides/verify-google-id-token),
 [Google OpenID Connect claims](https://developers.google.com/identity/openid-connect/openid-connect),
+[Google official button, nonce and state](https://developers.google.com/identity/gsi/web/reference/js-reference),
 [Apple user verification](https://developer.apple.com/documentation/signinwithapple/verifying-a-user),
 [Apple discovery metadata](https://appleid.apple.com/.well-known/openid-configuration),
 [Apple native development sample](https://developer.apple.com/documentation/authenticationservices/implementing-user-authentication-with-sign-in-with-apple),

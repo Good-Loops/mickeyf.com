@@ -12,8 +12,9 @@
  * - The service layer (`services/authService.ts`) owns network/provider calls.
  */
 import { createContext, useContext, useState, ReactNode, useEffect, useRef } from 'react';
-import { loginRequest, logoutRequest, verifyRequest, renewRequest, deleteAccountRequest } from '@/services/authService';
-import type { DeleteAccountResponse } from '@/services/authApi';
+import { loginRequest, logoutRequest, verifyRequest, renewRequest, deleteAccountRequest, runProviderAuthentication } from '@/services/authService';
+import type { DeleteAccountResponse, ProviderAuthenticationInput, AcquireProviderCredential,
+    ProviderAuthenticationOptions, ProviderAuthenticationResult } from '@/services/authApi';
 import { watchSessionRenewalActivity } from '@/services/sessionRenewalActivity';
 import Swal from '@/components/siteAlert';
 
@@ -27,6 +28,8 @@ type AuthContextType = {
     login: (user: string, pass: string, options?: LoginOptions) => Promise<boolean>;
     logout: () => Promise<void>;
     deleteAccount: (password: string) => Promise<DeleteAccountResponse>;
+    authenticateWithProvider: (input: ProviderAuthenticationInput, acquireCredential: AcquireProviderCredential,
+        options?: ProviderAuthenticationOptions) => Promise<ProviderAuthenticationResult>;
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -146,6 +149,22 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         }
     };
 
+    const authenticateWithProvider: AuthContextType['authenticateWithProvider'] = async (input, acquireCredential, options) => {
+        const actionVersion = ++authActionVersion.current;
+        setLoading(false);
+        const result = await runProviderAuthentication(input, acquireCredential, options);
+        // A canceled dialog cannot undo a completed server request; a newer
+        // logout still owns the UI and runs after completion in the same queue.
+        if (actionVersion !== authActionVersion.current) return { error: 'CANCELLED' };
+        if ('user_name' in result) {
+            setIsAuthenticated(true);
+            setUserName(result.user_name);
+            sessionMayExist.current = true;
+            renewalActivity.current?.resetCooldown();
+        }
+        return result;
+    };
+
     /**
      * Clears local auth state only after the backend confirms sign-out.
      *
@@ -205,7 +224,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     return (
         <AuthContext.Provider
-            value={{ userName, isAuthenticated, loading, login, logout, deleteAccount }}
+            value={{ userName, isAuthenticated, loading, login, logout, deleteAccount, authenticateWithProvider }}
         >
             {children}
         </AuthContext.Provider>

@@ -2532,9 +2532,15 @@ itself activate, implement or defer both providers.
   (2026-09-14):** shared issuance/consumers now require v2 UUID-bound, revocable
   device sessions, including score/ticket/deletion authorization and the internal
   provider context. Username/password login supports an optional 30-day session.
-  No production activation or provider buttons are included. Next: connect the
-  internal verified-provider result to shared issuance, complete provider HTTP
-  binding/rate limits and final link-session guards, then approved native configuration.
+  **HTTP/session checkpoint:** shared provider issuance, exact-origin/signed-cookie
+  binding, rate limits and final locked link-session checks are implemented;
+  the 444-test backend suite and 31 isolated MySQL cases passed. **Client checkpoint:**
+  opt-in configuration/discovery, serialized frontend provider authentication,
+  login/link controls, and a disabled-by-default native Apple bridge are implemented.
+  The brief route loader is reduced to dots and Loading…; 404/error recovery remains.
+  No production activation or cloud/provider setting has changed. Next: approved
+  Google web origins/branding/Hosting headers and native Apple capability/profile,
+  focused real-provider acceptance and native Google SDK/client configuration.
   Provider-only signup remains subject to the age/consent backlog.
   See [scope, migration boundary and remaining steps](backend/PROVIDER_SIGN_IN.md).
   The owner approved the CORS-only backend deployment for exactly
