@@ -13,6 +13,8 @@ import { isValidP4VegaScore } from '../security/p4VegaScorePolicy';
 import { getGameDefinition } from './gameCatalog';
 import { LEADERBOARD_PAGE_SIZE } from './leaderboardContract';
 import { withUserSubmissionLock } from './userSubmissionLock';
+import { readLiveSession } from '../auth/accountSessionRepository';
+import type { SessionProof } from '../security/sessionPolicy';
 
 type P4VegaScoreDatabase = Pick<Pool, 'getConnection'>;
 type P4VegaLeaderboardDatabase = Pick<Pool, 'query'>;
@@ -77,11 +79,14 @@ export async function readP4VegaLeaderboard(
  * An application-scoped user lock serializes submissions before the current
  * generic best is compared. A deleted account returns null rather than an
  * accepted non-improvement, so its old session cannot report a successful write.
+ * HTTP callers supply the authenticated session; omission is only for trusted
+ * internal operations against historical, pre-identity migration fixtures.
  */
 export async function submitP4VegaScore(
     database: P4VegaScoreDatabase,
     userId: number,
-    score: number
+    score: number,
+    expectedSession?: SessionProof,
 ): Promise<boolean | null> {
     if (!Number.isSafeInteger(userId) || userId <= 0) {
         throw new TypeError('p4-Vega score writes require a valid user ID.');
@@ -98,6 +103,14 @@ export async function submitP4VegaScore(
             try {
                 await connection.beginTransaction();
                 transactionStarted = true;
+
+                if (expectedSession !== undefined && !await readLiveSession(
+                    connection, userId, expectedSession.accountId, expectedSession.sessionId
+                )) {
+                    await connection.commit();
+                    transactionStarted = false;
+                    return null;
+                }
 
                 const [bestRows] = await connection.query<P4VegaBestRow[]>(
                     {

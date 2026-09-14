@@ -1,10 +1,11 @@
 import { createHash } from 'node:crypto';
 import type { Request } from 'express';
-import type { Pool, RowDataPacket } from 'mysql2/promise';
-import { isAccountId } from '../accounts/deletionJournal';
+import type { Pool } from 'mysql2/promise';
 import { ProviderAccountUnavailableError, type AccountLinkTarget } from '../accounts/providerAccountRepository';
 import { isJsonMutationRequest } from '../security/mutationRequest';
-import { verifyRequestToken } from '../security/requestAuthentication';
+import { getRequestToken, verifyRequestToken } from '../security/requestAuthentication';
+import { SESSION_COOKIE_NAMES } from '../security/sessionCookie';
+import { readLiveSession } from './accountSessionRepository';
 
 export const PROVIDER_BINDING_COOKIE = 'provider_auth_binding';
 declare const trustedProviderContext: unique symbol;
@@ -31,26 +32,21 @@ export function createProviderAuthContextReader({ database, sessionSecret, allow
         // prove its initiating Origin. Native transport supplies capacitor://localhost.
         if (req.method !== 'POST' || typeof origin !== 'string' || origin === 'null'
             || !origins.has(origin) || !isJsonMutationRequest(req)
-            || req.headers.authorization !== undefined || req.cookies?.session !== undefined) return null;
+            || req.headers.authorization !== undefined
+            || SESSION_COOKIE_NAMES.some(name => req.cookies?.[name] !== undefined)) return null;
         const binding: unknown = req.signedCookies?.[PROVIDER_BINDING_COOKIE];
         if (typeof binding !== 'string' || !/^[A-Za-z0-9_-]{43}$/.test(binding)) return null;
-        const token: unknown = req.signedCookies?.session;
+        const token = getRequestToken(req);
         let account: AccountLinkTarget | null = null;
-        if (token !== undefined) {
+        if (SESSION_COOKIE_NAMES.some(name => req.signedCookies?.[name] !== undefined)) {
             if (typeof token !== 'string' || token.length === 0 || token.length > 8192) return null;
             const authentication = verifyRequestToken(token, sessionSecret);
             if (!authentication.authenticated) return null;
             try {
-                const [rows] = await database.query<RowDataPacket[]>({
-                    sql: `SELECT user_id AS userId, user_name AS userName, account_uuid AS accountId
-                        FROM users WHERE user_id = ? LIMIT 1`, timeout: 10_000,
-                }, [authentication.identity.userId]);
-                if (!Array.isArray(rows) || rows.length > 1) throw new ProviderAccountUnavailableError();
-                if (rows.length === 0 || rows[0].userName !== authentication.identity.userName) return null;
-                if (rows[0].userId !== authentication.identity.userId || !isAccountId(rows[0].accountId)) {
-                    throw new ProviderAccountUnavailableError();
-                }
-                account = Object.freeze({ userId: rows[0].userId, accountId: rows[0].accountId });
+                const { userId, accountId, sessionId, userName } = authentication.identity;
+                const current = await readLiveSession(database, userId, accountId, sessionId);
+                if (!current || current.userName !== userName) return null;
+                account = Object.freeze({ userId, accountId });
             } catch { throw new ProviderAccountUnavailableError(); }
         }
         // Length-framed fields avoid ambiguity and bind the CURRENT session and account.

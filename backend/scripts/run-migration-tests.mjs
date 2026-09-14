@@ -96,6 +96,13 @@ const INTEGRATION_TEST_COMMANDS = Object.freeze([
       "ts/auth/providerAttemptRepository.integration.test.ts",
     ]),
   }),
+  Object.freeze({
+    executable: process.execPath,
+    args: Object.freeze([
+      "--test", "-r", "ts-node/register",
+      "ts/auth/accountSessionRepository.integration.test.ts",
+    ]),
+  }),
 ]);
 
 const MYSQL_SERVICE = "mysql";
@@ -292,7 +299,10 @@ const cleanup = () => {
   return cleanupPromise;
 };
 
-export const runMigrationTests = async ({ providerIdentitiesOnly = false } = {}) => {
+export const runMigrationTests = async ({ providerIdentitiesOnly = false, runtimeGrantsOnly = false } = {}) => {
+  if (providerIdentitiesOnly && runtimeGrantsOnly) {
+    throw new Error("Select only one focused migration-test group.");
+  }
   let failure;
 
   try {
@@ -309,11 +319,14 @@ export const runMigrationTests = async ({ providerIdentitiesOnly = false } = {})
       MYSQL_SERVICE,
     ]);
     const mysqlPort = await inspectMigrationContainer();
-    const commands = providerIdentitiesOnly
+    const commands = runtimeGrantsOnly
+      ? [RUNTIME_GRANT_INTEGRATION_TEST_COMMAND, RUNTIME_GRANT_OPERATIONS_INTEGRATION_TEST_COMMAND]
+      : providerIdentitiesOnly
       ? INTEGRATION_TEST_COMMANDS.filter(command => command.args.some(argument =>
         argument === "ts/accounts/deletionReplay.integration.test.ts"
         || argument === "ts/accounts/providerAccountRepository.integration.test.ts"
-        || argument === "ts/auth/providerAttemptRepository.integration.test.ts"))
+        || argument === "ts/auth/providerAttemptRepository.integration.test.ts"
+        || argument === "ts/auth/accountSessionRepository.integration.test.ts"))
       : INTEGRATION_TEST_COMMANDS;
     for (const command of commands) {
       await runProcess(
@@ -347,8 +360,8 @@ const isMainModule = process.argv[1]
 
 if (isMainModule) {
   const arguments_ = process.argv.slice(2);
-  if (arguments_.length > 1 || arguments_.some(argument => argument !== "--provider-identities")) {
-    throw new Error("Usage: run-migration-tests.mjs [--provider-identities]");
+  if (arguments_.length > 1 || arguments_.some(argument => !["--provider-identities", "--runtime-grants"].includes(argument))) {
+    throw new Error("Usage: run-migration-tests.mjs [--provider-identities|--runtime-grants]");
   }
   let shuttingDown = false;
   const handleSignal = async (exitCode) => {
@@ -370,7 +383,8 @@ if (isMainModule) {
   process.once("SIGINT", handleInterrupt);
   process.once("SIGTERM", handleTermination);
 
-  runMigrationTests({ providerIdentitiesOnly: arguments_.includes("--provider-identities") })
+  runMigrationTests({ providerIdentitiesOnly: arguments_.includes("--provider-identities"),
+    runtimeGrantsOnly: arguments_.includes("--runtime-grants") })
     .catch((error) => {
       console.error(error.message);
       process.exitCode = 1;

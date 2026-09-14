@@ -33,9 +33,38 @@ for (const [method, type, payload, result] of [
         assert.equal(observed.init.method, 'POST');
         assert.equal(observed.init.credentials, 'include');
         assert.deepEqual(observed.init.headers, { 'Content-Type': 'application/json' });
-        assert.deepEqual(JSON.parse(observed.init.body), { type, ...payload });
+        assert.deepEqual(JSON.parse(observed.init.body), {
+            type,
+            ...payload,
+            ...(type === 'login' ? { remember_me: false } : {}),
+        });
     });
 }
+
+test('login sends the explicit stay-signed-in choice without extending omitted or malformed choices', async () => {
+    for (const [rememberMe, expected] of [[undefined, false], [false, false], [true, true], ['true', false]]) {
+        let sentBody;
+        const api = createAuthApi(apiBase, async (url, init) => {
+            if (url.endsWith('/auth/verify-token')) {
+                return Response.json({ loggedIn: true, user_name: 'Player' });
+            }
+            sentBody = JSON.parse(init.body);
+            return Response.json({ success: true, user_name: 'Player' });
+        });
+
+        await api.loginRequest({ ...credentials, remember_me: rememberMe });
+        assert.deepEqual(sentBody, { type: 'login', ...credentials, remember_me: expected });
+    }
+});
+
+test('signup never forwards a stay-signed-in choice to account creation', async () => {
+    const api = createAuthApi(apiBase, async (_url, init) => {
+        assert.deepEqual(JSON.parse(init.body), { type: 'signup', ...registration });
+        return Response.json({ success: true });
+    });
+
+    await api.signupRequest({ ...registration, remember_me: true });
+});
 
 for (const result of [{ loggedIn: false }, { loggedIn: true, user_name: 'Player' }]) {
     test(`verifyRequest preserves the ${result.loggedIn ? 'authenticated' : 'anonymous'} session result`, async () => {
@@ -144,24 +173,160 @@ test('JSON parsing failures propagate unchanged for operations that read a respo
     }
 });
 
-test('logout posts with credentials and preserves its existing ignore-status-and-body behavior', async () => {
-    for (const status of [200, 500]) {
+test('logout posts with credentials and requires a confirmed sign-out response', async () => {
+    const api = createAuthApi(apiBase, async (url, init) => {
+        assert.equal(url, `${apiBase}/auth/logout`);
+        assert.equal(init.method, 'POST');
+        assert.equal(init.credentials, 'include');
+        assert.equal(init.body, undefined);
+        return Response.json({ loggedOut: true });
+    });
+
+    assert.equal(await api.logoutRequest(), undefined);
+});
+
+test('logout rejects HTTP failures before reading their bodies', async () => {
+    for (const status of [401, 429, 500, 503]) {
         let bodyRead = false;
-        const api = createAuthApi(apiBase, async (url, init) => {
-            assert.equal(url, `${apiBase}/auth/logout`);
-            assert.equal(init.method, 'POST');
-            assert.equal(init.credentials, 'include');
-            assert.equal(init.body, undefined);
+        const api = createAuthApi(apiBase, async () => {
             return {
-                ok: status === 200,
+                ok: false,
                 status,
                 json: async () => { bodyRead = true; },
             };
         });
 
-        await api.logoutRequest();
+        await assert.rejects(api.logoutRequest(), { message: 'Could not confirm sign-out.' });
         assert.equal(bodyRead, false);
     }
+});
+
+test('logout never confirms an empty, malformed or contradictory response', async () => {
+    for (const body of [{}, null, [], { loggedOut: false }, { loggedOut: 1 }, { loggedOut: true, error: 'FAILED' }]) {
+        const api = createAuthApi(apiBase, async () => Response.json(body));
+        await assert.rejects(api.logoutRequest(), { message: 'Could not confirm sign-out.' });
+    }
+    for (const response of [new Response(null, { status: 204 }), new Response('not JSON')]) {
+        const api = createAuthApi(apiBase, async () => response);
+        await assert.rejects(api.logoutRequest(), SyntaxError);
+    }
+});
+
+test('logout waits for delayed login and its complete verification before revoking the resulting session', async () => {
+    let releaseLogin;
+    let releaseVerification;
+    const loginResponse = new Promise((resolve) => { releaseLogin = resolve; });
+    const verificationResponse = new Promise((resolve) => { releaseVerification = resolve; });
+    const calls = [];
+    let session = false;
+    const api = createAuthApi(apiBase, async (url) => {
+        if (url.endsWith('/api/users')) {
+            calls.push('login');
+            await loginResponse;
+            session = true;
+            return Response.json({ success: true, user_name: 'Player' });
+        }
+        if (url.endsWith('/auth/verify-token')) {
+            calls.push('verify');
+            await verificationResponse;
+            return Response.json({ loggedIn: session, user_name: 'Player' });
+        }
+        calls.push('logout');
+        assert.equal(session, true, 'logout receives the session established by the earlier login');
+        session = false;
+        return Response.json({ loggedOut: true });
+    });
+
+    const login = api.loginRequest(credentials);
+    const logout = api.logoutRequest();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(calls, ['login']);
+    releaseLogin();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(calls, ['login', 'verify']);
+    releaseVerification();
+    assert.deepEqual(await login, { success: true, user_name: 'Player' });
+    await logout;
+    assert.deepEqual(calls, ['login', 'verify', 'logout']);
+    assert.equal(session, false);
+});
+
+test('signup, deletion, login and logout share one ordered mutation queue', async () => {
+    const calls = [];
+    let activeRequests = 0;
+    const api = createAuthApi(apiBase, async (url, init) => {
+        assert.equal(++activeRequests, 1, 'auth mutation transports cannot overlap');
+        await Promise.resolve();
+        activeRequests--;
+        if (url.endsWith('/api/users')) {
+            const { type } = JSON.parse(init.body);
+            calls.push(type);
+            return Response.json(type === 'signup' ? { success: true } : { success: true, user_name: 'Player' });
+        }
+        if (url.endsWith('/auth/delete-account')) {
+            calls.push('delete');
+            return Response.json({ deleted: true });
+        }
+        if (url.endsWith('/auth/verify-token')) {
+            calls.push('verify');
+            return Response.json({ loggedIn: true, user_name: 'Player' });
+        }
+        calls.push('logout');
+        return Response.json({ loggedOut: true });
+    });
+
+    await Promise.all([
+        api.signupRequest(registration),
+        api.deleteAccountRequest('test-only'),
+        api.loginRequest(credentials),
+        api.logoutRequest(),
+    ]);
+    assert.deepEqual(calls, ['signup', 'delete', 'login', 'verify', 'logout']);
+});
+
+test('a failed mutation does not poison the queue or retry its network operation', async () => {
+    const failure = new TypeError('Network unavailable');
+    const calls = [];
+    const api = createAuthApi(apiBase, async (url) => {
+        calls.push(url);
+        if (url.endsWith('/api/users')) throw failure;
+        return Response.json({ loggedOut: true });
+    });
+    const login = api.loginRequest(credentials);
+    const logout = api.logoutRequest();
+    await assert.rejects(login, (error) => error === failure);
+    await logout;
+    assert.deepEqual(calls, [`${apiBase}/api/users`, `${apiBase}/auth/logout`]);
+});
+
+test('a pending read-only startup verification does not block an auth mutation', async () => {
+    let releaseVerification;
+    const response = new Promise((resolve) => { releaseVerification = resolve; });
+    const api = createAuthApi(apiBase, async (url) => {
+        if (url.endsWith('/auth/verify-token')) return response;
+        return Response.json({ loggedOut: true });
+    });
+    const verification = api.verifyRequest();
+    await api.logoutRequest();
+    releaseVerification(Response.json({ loggedIn: false }));
+    assert.deepEqual(await verification, { loggedIn: false });
+});
+
+test('a failed logout after login can reconcile the still-authenticated session with a read-only check', async () => {
+    let signedIn = false;
+    const api = createAuthApi(apiBase, async (url) => {
+        if (url.endsWith('/api/users')) {
+            signedIn = true;
+            return Response.json({ success: true, user_name: 'Player' });
+        }
+        if (url.endsWith('/auth/logout')) return Response.json({ error: 'LOGOUT_UNAVAILABLE' }, { status: 503 });
+        return Response.json(signedIn ? { loggedIn: true, user_name: 'Player' } : { loggedIn: false });
+    });
+    const login = api.loginRequest(credentials);
+    const logout = api.logoutRequest();
+    assert.equal((await login).success, true);
+    await assert.rejects(logout, { message: 'Could not confirm sign-out.' });
+    assert.deepEqual(await api.verifyRequest(), { loggedIn: true, user_name: 'Player' });
 });
 
 test('account deletion sends the current password and explicit confirmation through the session transport', async () => {

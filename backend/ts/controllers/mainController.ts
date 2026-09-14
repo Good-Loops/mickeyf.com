@@ -5,7 +5,6 @@
  */
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
-import jwt from 'jsonwebtoken';
 import { Pool, RowDataPacket } from 'mysql2/promise';
 import {
     readP4VegaLeaderboard,
@@ -13,7 +12,11 @@ import {
 } from '../leaderboards/p4VegaScoreRepository';
 import { User } from '../types/customTypes';
 import { authorizeScoreSubmission } from '../security/scoreSubmissionAuthorization';
-import { sessionCookieOptions } from '../security/sessionCookie';
+import { clearAuthenticationCookies, NATIVE_SESSION_COOKIE, WEB_SESSION_COOKIE, sessionCookieOptions } from '../security/sessionCookie';
+import { issueSessionToken } from '../security/sessionPolicy';
+import { createAccountSession, revokeAccountSession } from '../auth/accountSessionRepository';
+import { authenticateRequest } from '../security/requestAuthentication';
+import { hasAllowedMutationOrigin, isJsonMutationRequest } from '../security/mutationRequest';
 import {
     operationType,
     validateLoginRequest,
@@ -25,15 +28,15 @@ type ControllerDependencies = {
     sessionSecret: string;
     isProduction: boolean;
     p4VegaScoreSubmissionsEnabled: boolean;
+    allowedMutationOrigins: readonly string[];
 };
 
-type LoginUserRow = RowDataPacket & Pick<User, 'user_id' | 'user_name' | 'user_password'>;
+type LoginUserRow = RowDataPacket & Pick<User, 'user_id' | 'user_name' | 'user_password'> & { account_uuid: string };
 
 // A fixed, valid bcrypt hash keeps nonexistent-account checks on the same
 // expensive comparison path without representing any usable credential.
 const DUMMY_PASSWORD_HASH = '$2a$10$b3R9u5f4ObGVED5kC8jxp.xvN3FnQzuhcXzAa9iSYcQBkgL4Nv/ee';
 const PASSWORD_HASH_COST = 10;
-const SESSION_MAX_AGE_MS = 4 * 60 * 60 * 1000;
 const DATABASE_QUERY_TIMEOUT_MS = 10_000;
 
 export function createMainController({
@@ -41,6 +44,7 @@ export function createMainController({
     sessionSecret,
     isProduction,
     p4VegaScoreSubmissionsEnabled,
+    allowedMutationOrigins,
 }: ControllerDependencies) {
     async function addUser(req: Request, res: Response) {
         const validation = validateSignupRequest(req.body);
@@ -75,15 +79,19 @@ export function createMainController({
     }
 
     async function loginUser(req: Request, res: Response) {
+        if (!isJsonMutationRequest(req) || typeof req.headers.origin !== 'string'
+            || !allowedMutationOrigins.includes(req.headers.origin)) {
+            return res.status(403).json({ error: 'AUTH_FAILED' });
+        }
         const validation = validateLoginRequest(req.body);
         if (!validation.valid) {
             return res.json({ error: 'AUTH_FAILED' });
         }
 
-        const { userName, password } = validation.input;
+        const { userName, password, rememberMe } = validation.input;
         const [rows] = await database.query<LoginUserRow[]>(
             {
-                sql: `SELECT user_id, user_name, user_password
+                sql: `SELECT user_id, account_uuid, user_name, user_password
                     FROM users
                     WHERE user_name = ?
                     LIMIT 1`,
@@ -101,15 +109,25 @@ export function createMainController({
             return res.json({ error: 'AUTH_FAILED' });
         }
 
-        const token = jwt.sign(
-            { user_id: user.user_id, user_name: user.user_name },
-            sessionSecret,
-            { algorithm: 'HS256', expiresIn: '4h' }
-        );
+        // Replacing this browser's cookie must not leave its previous credential usable.
+        // Revoke only after password proof; a failed replacement requires another login.
+        const previous = authenticateRequest(req, sessionSecret);
+        if (previous.authenticated) {
+            const { userId, accountId, sessionId } = previous.identity;
+            await revokeAccountSession(database, userId, accountId, sessionId);
+        }
 
-        res.cookie('session', token, {
-            ...sessionCookieOptions(isProduction),
-            maxAge: SESSION_MAX_AGE_MS,
+        const session = issueSessionToken({ userId: user.user_id, userName: user.user_name,
+            accountId: user.account_uuid }, sessionSecret, rememberMe);
+        if (!await createAccountSession(database, { userId: user.user_id, accountId: user.account_uuid },
+            session.sessionId, session.expiresAt, user.user_password)) {
+            return res.json({ error: 'AUTH_FAILED' });
+        }
+        const cookieName = req.headers.origin === 'capacitor://localhost' ? NATIVE_SESSION_COOKIE : WEB_SESSION_COOKIE;
+        clearAuthenticationCookies(res, isProduction);
+        res.cookie(cookieName, session.token, {
+            ...sessionCookieOptions(isProduction, cookieName),
+            maxAge: session.maxAge,
         });
         return res.json({ success: true, user_name: user.user_name });
     }
@@ -120,6 +138,9 @@ export function createMainController({
             // frozen revision without allowing it to acquire a DB connection.
             return res.status(503).json({ error: 'SUBMISSIONS_FROZEN' });
         }
+        if (!isJsonMutationRequest(req) || !hasAllowedMutationOrigin(req, allowedMutationOrigins)) {
+            return res.status(403).json({ error: 'UNAUTHORIZED' });
+        }
 
         const authorization = authorizeScoreSubmission(req, sessionSecret);
         if (!authorization.authorized) {
@@ -129,7 +150,8 @@ export function createMainController({
         const personalBest = await submitP4VegaScore(
             database,
             authorization.identity.userId,
-            authorization.score
+            authorization.score,
+            authorization.identity
         );
 
         if (personalBest === null) {

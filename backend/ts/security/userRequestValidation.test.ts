@@ -59,3 +59,15 @@ test('login validation returns one generic invalid result for unsafe credentials
     assert.deepEqual(validateLoginRequest({ user_name: 'player', user_password: 'é'.repeat(37) }), { valid: false });
     assert.equal(validateLoginRequest({ user_name: ' player ', user_password: 'valid' }).valid, true);
 });
+
+test('stay signed in is optional, defaults off and only accepts a JSON boolean', () => {
+    const credentials = { user_name: 'player', user_password: 'valid' };
+    for (const choice of [undefined, false, true]) {
+        assert.deepEqual(validateLoginRequest({ ...credentials, remember_me: choice }), {
+            valid: true, input: { userName: 'player', password: 'valid', rememberMe: choice === true },
+        });
+    }
+    for (const choice of ['true', 1, null, [], {}]) {
+        assert.deepEqual(validateLoginRequest({ ...credentials, remember_me: choice }), { valid: false });
+    }
+});

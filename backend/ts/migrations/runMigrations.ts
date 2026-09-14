@@ -38,6 +38,7 @@ type MigrationCommand =
     | 'apply'
     | 'provider-identities-apply'
     | 'provider-attempts-apply'
+    | 'account-sessions-apply'
     | 'account-identity-plan'
     | 'account-identity-apply'
     | 'account-identity-verify'
@@ -75,7 +76,7 @@ function parseCommand(args: readonly string[]): MigrationCommand {
     if (args.length !== 1) {
         throw new Error(
             'Usage: runMigrations.ts '
-            + '<plan|apply|provider-identities-apply|provider-attempts-apply|'
+            + '<plan|apply|provider-identities-apply|provider-attempts-apply|account-sessions-apply|'
             + 'account-identity-plan|account-identity-apply|account-identity-verify|'
             + 'receipts-plan|receipts-apply|receipts-verify|'
             + 'p4-score-drop-plan|p4-score-drop-apply|p4-score-drop-verify>'
@@ -87,6 +88,7 @@ function parseCommand(args: readonly string[]): MigrationCommand {
         && command !== 'apply'
         && command !== 'provider-identities-apply'
         && command !== 'provider-attempts-apply'
+        && command !== 'account-sessions-apply'
         && command !== 'account-identity-plan'
         && command !== 'account-identity-apply'
         && command !== 'account-identity-verify'
@@ -339,11 +341,13 @@ async function executeCommand(
         return;
     }
 
-    if (command === 'provider-identities-apply' || command === 'provider-attempts-apply') {
-        // Separate selection keeps the ordinary legacy-table command from enabling OAuth storage.
+    if (command === 'provider-identities-apply' || command === 'provider-attempts-apply'
+        || command === 'account-sessions-apply') {
+        // Separate selection keeps ordinary legacy-table commands from enabling new auth storage.
         printPlan(await applyMigrations(migrationConnection, migrations, config, {
             allowedEffectKinds: [command === 'provider-identities-apply'
-                ? 'add-provider-identities' : 'add-provider-attempts'],
+                ? 'add-provider-identities' : command === 'provider-attempts-apply'
+                    ? 'add-provider-attempts' : 'add-account-sessions'],
         }));
         return;
     }
@@ -432,7 +436,8 @@ async function main(): Promise<void> {
     const config = loadMigrationConfig();
     const confirmedAccount = loadMigrationAccountConfirmation();
     let confirmation: RuntimeGrantConfirmation = Object.freeze({});
-    if (command === 'apply' || command === 'provider-identities-apply' || command === 'provider-attempts-apply') {
+    if (command === 'apply' || command === 'provider-identities-apply' || command === 'provider-attempts-apply'
+        || command === 'account-sessions-apply') {
         // Refuse before opening a socket, not merely before the first DDL.
         assertMutationAuthorized(config);
     } else if (command.startsWith('account-identity-')) {

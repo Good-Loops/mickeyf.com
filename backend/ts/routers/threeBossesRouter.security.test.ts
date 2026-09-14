@@ -1,18 +1,21 @@
 import assert from 'node:assert/strict';
-import { createHmac } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import { once } from 'node:events';
 import { AddressInfo } from 'node:net';
 import test from 'node:test';
 import cookieParser from 'cookie-parser';
 import express from 'express';
-import jwt from 'jsonwebtoken';
 import { Pool, PoolConnection } from 'mysql2/promise';
 import { notFoundHandler } from '../middleware/errorHandling';
 import { createThreeBossesPayloadFingerprint } from '../leaderboards/threeBossesRunRepository';
 import { issueThreeBossesRunTicket } from '../leaderboards/threeBossesRunTicket';
 import { createLeaderboardRouter } from './leaderboardRouter';
+import { issueSessionToken } from '../security/sessionPolicy';
 
 const sessionSecret = 'three-bosses-router-security-test-secret';
+const account = { userId: 42, userName: 'player', accountId: '123e4567-e89b-42d3-a456-426614174000' };
+const session = issueSessionToken(account, sessionSecret);
+const sessionHash = createHash('sha256').update(session.sessionId, 'ascii').digest();
 const allowedOrigins = Object.freeze([
     'https://mickeyf.com',
     'http://localhost:5173',
@@ -25,7 +28,7 @@ const validTicketRequest = Object.freeze({
 });
 const validRunTicket = issueThreeBossesRunTicket(
     sessionSecret,
-    42,
+    account,
     validTicketRequest,
     Date.now() - 50_000
 ).runTicket;
@@ -48,7 +51,7 @@ function signedSessionCookie(token: string): string {
         .update(token)
         .digest('base64')
         .replace(/=+$/, '');
-    return `session=${encodeURIComponent(`s:${token}.${signature}`)}`;
+    return `__session=${encodeURIComponent(`s:${token}.${signature}`)}`;
 }
 
 function createReplayDatabase() {
@@ -56,8 +59,9 @@ function createReplayDatabase() {
     const events: string[] = [];
     const database = {
         async query(options: { sql: string }, values: unknown[]) {
-            assert.match(options.sql, /SELECT user_name AS userName FROM users WHERE user_id = \?/);
-            assert.deepEqual(values, [42]);
+            assert.match(options.sql, /FROM account_sessions AS s/);
+            assert.match(options.sql, /s.expires_at > UTC_TIMESTAMP\(6\)/);
+            assert.deepEqual(values, [42, account.accountId, sessionHash]);
             return [[{ userName: 'player' }], []];
         },
         async getConnection() {
@@ -66,11 +70,15 @@ function createReplayDatabase() {
                 async beginTransaction() {
                     events.push('begin');
                 },
-                async query(options: { sql: string }) {
+                async query(options: { sql: string }, values?: unknown[]) {
                     const sql = options.sql.replace(/\s+/g, ' ').trim();
                     events.push(sql);
                     if (sql.includes('GET_LOCK') || sql.includes('RELEASE_LOCK')) {
                         return [[{ lockResult: 1 }], []];
+                    }
+                    if (sql.includes('FROM account_sessions AS s')) {
+                        assert.deepEqual(values, [42, account.accountId, sessionHash]);
+                        return [[{ userName: account.userName }], []];
                     }
                     if (sql.includes('FROM users')) {
                         return [[{ user_id: 42 }], []];
@@ -179,10 +187,7 @@ async function requestJson(
 
 test('disabled submissions always fail closed before auth, the IP limiter, or database', async () => {
     const fake = createReplayDatabase();
-    const token = jwt.sign({ user_id: 42, user_name: 'player' }, sessionSecret, {
-        algorithm: 'HS256',
-        expiresIn: '5m',
-    });
+    const token = session.token;
 
     await withServer(fake.database, false, async (baseUrl) => {
         for (const path of [
@@ -224,10 +229,7 @@ test('disabled submissions always fail closed before auth, the IP limiter, or da
 
 test('run-ticket issuance enforces auth, Origin, JSON, and exact run identity', async () => {
     const fake = createReplayDatabase();
-    const token = jwt.sign({ user_id: 42, user_name: 'player' }, sessionSecret, {
-        algorithm: 'HS256',
-        expiresIn: '5m',
-    });
+    const token = session.token;
     const cookie = signedSessionCookie(token);
 
     await withServer(fake.database, true, async (baseUrl) => {
@@ -347,19 +349,16 @@ test('run-ticket issuance enforces auth, Origin, JSON, and exact run identity', 
 
 test('enabled submissions enforce auth, Origin, JSON, and exact payload before database', async () => {
     const fake = createReplayDatabase();
-    const token = jwt.sign({ user_id: 42, user_name: 'player' }, sessionSecret, {
-        algorithm: 'HS256',
-        expiresIn: '5m',
-    });
+    const token = session.token;
     const cookie = signedSessionCookie(token);
     const freshRunTicket = issueThreeBossesRunTicket(
         sessionSecret,
-        42,
+        account,
         validTicketRequest
     ).runTicket;
     const otherUserRunTicket = issueThreeBossesRunTicket(
         sessionSecret,
-        43,
+        { ...account, userId: 43 },
         validTicketRequest,
         Date.now() - 50_000
     ).runTicket;

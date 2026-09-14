@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Pool, PoolConnection } from 'mysql2/promise';
-import { AccountDeletionReadinessError, verifyAccountDeletionReadiness } from './accountDeletionReadiness';
+import { AccountDeletionReadinessError, AccountSessionReadinessError, verifyAccountDeletionReadiness, verifyAccountSessionReadiness } from './accountDeletionReadiness';
 
 const EPOCH = '2026-09-11 19:00:00.123456';
 
 function fakeDatabase(options: { epoch?: string; badColumn?: boolean; invalidCount?: number;
     providerTable?: 'absent' | 'malformed'; providerMigrationRecorded?: boolean;
     attemptTable?: 'absent' | 'malformed'; attemptMigrationRecorded?: boolean;
+    sessionTable?: 'absent' | 'malformed'; sessionMigrationRecorded?: boolean;
     queryError?: Error; queryPending?: boolean } = {}) {
     const queries: Array<{ sql: string; timeout: number; values?: unknown[] }> = [];
     const cleanup: string[] = [];
@@ -17,8 +18,9 @@ function fakeDatabase(options: { epoch?: string; badColumn?: boolean; invalidCou
             if (options.queryError) throw options.queryError;
             if (options.queryPending) return new Promise(() => {});
             if (query.sql.startsWith('SELECT version FROM schema_migrations')) {
-                const recorded = values?.[0] === '0010_create_provider_auth_attempts'
-                    ? options.attemptMigrationRecorded : options.providerMigrationRecorded;
+                const recorded = values?.[0] === '0011_create_account_sessions' ? options.sessionMigrationRecorded
+                    : values?.[0] === '0010_create_provider_auth_attempts'
+                        ? options.attemptMigrationRecorded : options.providerMigrationRecorded;
                 return [recorded ? [{ version: values?.[0] }] : [], []];
             }
             if (values?.[0] === 'account_provider_identities') {
@@ -29,6 +31,11 @@ function fakeDatabase(options: { epoch?: string; badColumn?: boolean; invalidCou
             if (values?.[0] === 'provider_auth_attempts') {
                 return [query.sql.includes('COUNT(*)')
                     ? [{ tableCount: options.attemptTable === 'malformed' ? 1 : 0 }]
+                    : [{ engine: 'MyISAM', collation: 'utf8mb4_unicode_ci', tableType: 'BASE TABLE' }], []];
+            }
+            if (values?.[0] === 'account_sessions') {
+                return [query.sql.includes('COUNT(*)')
+                    ? [{ tableCount: options.sessionTable === 'malformed' ? 1 : 0 }]
                     : [{ engine: 'MyISAM', collation: 'utf8mb4_unicode_ci', tableType: 'BASE TABLE' }], []];
             }
             if (query.sql.includes('schema_migrations')) return [[{ epoch: options.epoch ?? EPOCH }], []];
@@ -55,7 +62,7 @@ function fakeDatabase(options: { epoch?: string; badColumn?: boolean; invalidCou
 test('readiness verifies the independently pinned epoch and identity schema using read-only timed queries', async () => {
     const { database, queries, cleanup } = fakeDatabase();
     await verifyAccountDeletionReadiness(database, EPOCH);
-    assert.equal(queries.length, 9);
+    assert.equal(queries.length, 11);
     assert.ok(queries[0].sql.includes('schema_migrations'));
     assert.ok(queries.some(query => query.sql.startsWith('SELECT version FROM schema_migrations')));
     for (const query of queries) {
@@ -103,6 +110,38 @@ test('invalid or different epoch and malformed identities cannot enable deletion
     await assert.rejects(verifyAccountDeletionReadiness(database, 'invalid epoch'), AccountDeletionReadinessError);
     assert.equal(queries.length, 0);
     assert.deepEqual(cleanup, ['release']);
+});
+
+test('pre-0011 deletion readiness accepts absent sessions but rejects unsafe recorded storage', async () => {
+    const legacy = fakeDatabase();
+    await verifyAccountDeletionReadiness(legacy.database, EPOCH);
+    assert.ok(legacy.queries.some(({ values }) => values?.[0] === '0011_create_account_sessions'));
+    for (const options of [{ sessionMigrationRecorded: true }, { sessionTable: 'malformed' as const }]) {
+        const fake = fakeDatabase(options);
+        await assert.rejects(verifyAccountDeletionReadiness(fake.database, EPOCH), AccountDeletionReadinessError);
+        assert.deepEqual(fake.cleanup, ['release']);
+    }
+});
+
+test('session startup requires recorded migration 0011 and rejects unsafe storage', async () => {
+    for (const options of [{}, { sessionTable: 'malformed' as const },
+        { sessionMigrationRecorded: true, sessionTable: 'malformed' as const }]) {
+        const fake = fakeDatabase(options);
+        await assert.rejects(verifyAccountSessionReadiness(fake.database), AccountSessionReadinessError);
+        assert.deepEqual(fake.queries[0].values, ['0011_create_account_sessions']);
+        assert.ok(fake.queries.every(({ sql, timeout }) => /^SELECT/u.test(sql.trim()) && timeout === 10_000));
+        assert.deepEqual(fake.cleanup, ['release']);
+    }
+});
+
+test('session startup failures are sanitized and destroy a failed query connection', async () => {
+    const fake = fakeDatabase({ queryError: new Error('driver secret') });
+    await assert.rejects(verifyAccountSessionReadiness(fake.database), error => {
+        assert.ok(error instanceof AccountSessionReadinessError);
+        assert.doesNotMatch(String(error), /secret/);
+        return true;
+    });
+    assert.deepEqual(fake.cleanup, ['destroy']);
 });
 
 test('query failures destroy the connection and do not leak the driver error', async () => {

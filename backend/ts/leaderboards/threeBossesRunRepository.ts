@@ -13,6 +13,8 @@ import {
     LEADERBOARD_PAGE_SIZE,
 } from './leaderboardContract';
 import { withUserSubmissionLock } from './userSubmissionLock';
+import { readLiveSession } from '../auth/accountSessionRepository';
+import type { SessionProof } from '../security/sessionPolicy';
 
 type ThreeBossesReadDatabase = Pick<Pool, 'query'>;
 type ThreeBossesWriteDatabase = Pick<Pool, 'getConnection'>;
@@ -155,12 +157,15 @@ function replayResult(
  * Retained receipts preserve the original outcome, even after a later best.
  * Cleanup uses the same user lock; it cannot remove a receipt mid-submission.
  * Replays are resolved before rate admission and never consume another slot.
+ * HTTP callers supply the authenticated session; omission is only for trusted
+ * internal operations against historical, pre-identity migration fixtures.
  */
 export async function submitThreeBossesRun(
     database: ThreeBossesWriteDatabase,
     userId: number,
     runId: string,
-    completionTimeMs: number
+    completionTimeMs: number,
+    expectedSession?: SessionProof,
 ): Promise<ThreeBossesRunResult> {
     const fingerprint = createThreeBossesPayloadFingerprint(
         userId,
@@ -177,6 +182,14 @@ export async function submitThreeBossesRun(
             try {
                 await connection.beginTransaction();
                 transactionStarted = true;
+
+                if (expectedSession !== undefined && !await readLiveSession(
+                    connection, userId, expectedSession.accountId, expectedSession.sessionId
+                )) {
+                    await connection.commit();
+                    transactionStarted = false;
+                    return { kind: 'user-not-found' };
+                }
 
                 // The shared application lock serializes replay checks, rate
                 // admission, receipt inserts/cleanup, and bests for this user.

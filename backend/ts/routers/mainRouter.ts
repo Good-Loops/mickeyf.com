@@ -26,12 +26,14 @@ type MainRouterDependencies = {
     sessionSecret: string;
     isProduction: boolean;
     p4VegaScoreSubmissionsEnabled: boolean;
+    allowedMutationOrigins: readonly string[];
 };
 
 export function createMainRouter({
     sessionSecret,
     isProduction,
     p4VegaScoreSubmissionsEnabled,
+    allowedMutationOrigins,
 }: MainRouterDependencies): Router {
     /**
      * Configured Express router for core API routes.
@@ -45,6 +47,7 @@ export function createMainRouter({
         sessionSecret,
         isProduction,
         p4VegaScoreSubmissionsEnabled,
+        allowedMutationOrigins,
     });
 
     /** POST /users — core API request multiplexer (mutating/command-style). */

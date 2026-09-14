@@ -1,11 +1,17 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createHash } from 'node:crypto';
 import { Pool, PoolConnection } from 'mysql2/promise';
 import {
     P4VegaScoreRollbackError,
     readP4VegaLeaderboard,
     submitP4VegaScore,
 } from './p4VegaScoreRepository';
+
+const ACCOUNT_ID = '4bbaec47-5516-47fe-b13e-366bc6ec9814';
+const SESSION_ID = Buffer.alloc(32, 1).toString('base64url');
+const SESSION_HASH = createHash('sha256').update(SESSION_ID, 'ascii').digest();
+const SESSION = { accountId: ACCOUNT_ID, sessionId: SESSION_ID };
 
 type QueryCall = Readonly<{
     sql: string;
@@ -21,6 +27,7 @@ type FakeDatabaseOptions = Readonly<{
     rollbackError?: Error;
     storedScore?: number | null;
     userExists?: boolean;
+    sessionExists?: boolean;
     writeAffectedRows?: number;
 }>;
 
@@ -48,6 +55,12 @@ function createFakeDatabase(options: FakeDatabaseOptions = {}) {
             }
             if (sql.includes('GET_LOCK') || sql.includes('RELEASE_LOCK')) {
                 return [[{ lockResult: 1 }], []];
+            }
+            if (sql.includes('FROM account_sessions AS s')) {
+                const matches = options.sessionExists !== false && values?.[0] === 42
+                    && values?.[1] === ACCOUNT_ID && Buffer.isBuffer(values?.[2])
+                    && values[2].equals(SESSION_HASH);
+                return [matches ? [{ userName: 'player' }] : [], []];
             }
             if (sql.startsWith('SELECT users.user_id AS userId')) {
                 return [options.userExists === false
@@ -232,6 +245,33 @@ test('distinguishes a deleted account from a non-improvement without inserting a
         'release',
     ]);
     assert.equal(fake.queries.length, 3);
+});
+
+test('checks the live session inside the user lock before reading or writing a score', async () => {
+    for (const expectedSession of [SESSION,
+        { ...SESSION, accountId: '4bbaec47-5516-47fe-b13e-366bc6ec9815' },
+        { ...SESSION, sessionId: Buffer.alloc(32, 2).toString('base64url') }]) {
+        const fake = createFakeDatabase({ storedScore: 900 });
+        const matches = expectedSession === SESSION;
+        assert.equal(await submitP4VegaScore(fake.database, 42, 990, expectedSession), matches ? true : null);
+        assert.match(fake.queries[0].sql, /GET_LOCK/);
+        assert.match(fake.queries[1].sql, /FROM account_sessions AS s/);
+        assert.deepEqual(fake.queries[1].values, [42, expectedSession.accountId,
+            createHash('sha256').update(expectedSession.sessionId, 'ascii').digest()]);
+        assert.equal(fake.queries.some(({ sql }) => sql.startsWith('INSERT')), matches);
+        assert.equal(fake.queries.some(({ sql }) => sql.startsWith('SELECT users.user_id AS userId')), matches);
+        assert.deepEqual(fake.events.slice(0, 3), ['query:1', 'begin', 'query:2']);
+    }
+});
+
+test('revoked or expired sessions cannot submit, and malformed session proofs fail closed', async () => {
+    const missing = createFakeDatabase({ sessionExists: false });
+    assert.equal(await submitP4VegaScore(missing.database, 42, 990, SESSION), null);
+    assert.equal(missing.queries.some(({ sql }) => sql.startsWith('INSERT')), false);
+    const invalid = createFakeDatabase();
+    await assert.rejects(() => submitP4VegaScore(invalid.database, 42, 990,
+        { ...SESSION, accountId: 'invalid-uuid' }), TypeError);
+    assert.equal(invalid.queries.some(({ sql }) => sql.includes('account_sessions') || sql.startsWith('INSERT')), false);
 });
 
 test('rolls back when the generic write fails', async () => {

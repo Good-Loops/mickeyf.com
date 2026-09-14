@@ -2,6 +2,8 @@ import bcrypt from 'bcryptjs';
 import { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { withUserSubmissionLock } from '../leaderboards/userSubmissionLock';
 import { assertAccountId, type AccountDeletionJournal } from './deletionJournal';
+import { readLiveSession } from '../auth/accountSessionRepository';
+import type { SessionProof } from '../security/sessionPolicy';
 
 type AccountPasswordRow = RowDataPacket & { passwordHash: string; accountId: string };
 
@@ -77,12 +79,17 @@ export async function deleteOwnedAccountRows(connection: PoolConnection, userId:
     }
 }
 
-/** Serializes deletion with score submissions, retries, and receipt cleanup. */
+/**
+ * Serializes deletion with score submissions, retries, and receipt cleanup.
+ * HTTP callers must supply the authenticated session; trusted internal/recovery
+ * callers may omit it when they already own account-incarnation verification.
+ */
 export async function deleteAccount(
     database: Pick<Pool, 'getConnection'>,
     userId: number,
     password: string,
-    journal: AccountDeletionJournal
+    journal: AccountDeletionJournal,
+    expectedSession?: SessionProof,
 ): Promise<AccountDeletionResult> {
     if (typeof password !== 'string') {
         throw new TypeError('Account deletion requires a password string.');
@@ -100,6 +107,15 @@ export async function deleteAccount(
                 try {
                     await connection.beginTransaction();
                     phase = 'active';
+
+                    if (expectedSession !== undefined && !await readLiveSession(
+                        connection, userId, expectedSession.accountId, expectedSession.sessionId
+                    )) {
+                        phase = 'commit';
+                        await connection.commit();
+                        return 'not-found';
+                    }
+
                     const result = await deleteAuthenticatedAccount(connection, userId, password, async accountId => {
                         await journal.recordAccountDeletion(accountId);
                         recorded = true;

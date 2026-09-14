@@ -1,10 +1,11 @@
 /** Auth HTTP transport, independent of React and environment configuration. */
-type LoginPayload = {
+type AccountCredentials = {
     user_name: string;
     user_password: string;
 };
 
-export type SignupPayload = LoginPayload & { email: string };
+type LoginPayload = AccountCredentials & { remember_me?: boolean };
+export type SignupPayload = AccountCredentials & { email: string };
 type AccountError = { error: string; message?: string; status?: number };
 type LoginResponse = { success: true; user_name: string } | AccountError;
 export type SignupResponse = { success: true; error?: never } | AccountError;
@@ -19,6 +20,16 @@ type UserOperation =
     | ({ type: 'signup' } & SignupPayload);
 
 export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetch) {
+    let pendingMutation: Promise<void> = Promise.resolve();
+
+    function enqueueMutation<Result>(operation: () => Promise<Result>): Promise<Result> {
+        // Set-Cookie takes effect before React sees a response. Serialize the
+        // transport itself so a late login cannot recreate a logged-out session.
+        const result = pendingMutation.then(operation);
+        pendingMutation = result.then(() => undefined, () => undefined);
+        return result;
+    }
+
     async function postUserOperation(body: UserOperation): Promise<Response> {
         const response = await fetchRequest(`${apiBase}/api/users`, {
             method: 'POST',
@@ -41,6 +52,7 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
             type: 'login',
             user_name: payload.user_name,
             user_password: payload.user_password,
+            remember_me: payload.remember_me === true,
         });
         const result: LoginResponse = await response.json();
         if ('error' in result) return result;
@@ -79,12 +91,18 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
     }
 
     async function logoutRequest(): Promise<void> {
-        // Preserve best-effort logout: the caller clears local state even when
-        // the server returns a non-2xx status, and handles network rejection.
-        await fetchRequest(`${apiBase}/auth/logout`, {
+        const response = await fetchRequest(`${apiBase}/auth/logout`, {
             method: 'POST',
             credentials: 'include',
         });
+        if (!response.ok) throw new Error('Could not confirm sign-out.');
+
+        const result: unknown = await response.json();
+        if (!result || typeof result !== 'object'
+            || !('loggedOut' in result) || result.loggedOut !== true
+            || Object.keys(result).length !== 1) {
+            throw new Error('Could not confirm sign-out.');
+        }
     }
 
     async function deleteAccountRequest(password: string): Promise<DeleteAccountResponse> {
@@ -113,5 +131,17 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
         throw new Error('Could not confirm account deletion.');
     }
 
-    return { loginRequest, signupRequest, verifyRequest, logoutRequest, deleteAccountRequest };
+    return {
+        loginRequest: (payload: LoginPayload) => {
+            const request = { ...payload };
+            return enqueueMutation(() => loginRequest(request));
+        },
+        signupRequest: (payload: SignupPayload) => {
+            const request = { ...payload };
+            return enqueueMutation(() => signupRequest(request));
+        },
+        verifyRequest,
+        logoutRequest: () => enqueueMutation(logoutRequest),
+        deleteAccountRequest: (password: string) => enqueueMutation(() => deleteAccountRequest(password)),
+    };
 }

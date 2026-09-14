@@ -24,7 +24,7 @@ import { authenticateRequest } from '../security/requestAuthentication';
  * Auth verification handler.
  *
  * Request contract:
- * - Reads: `req.signedCookies.session` (preferred) and `req.headers.authorization` (Bearer fallback).
+ * - Reads: signed web/native cookies (preferred), then Bearer credentials; verifies live session storage.
  *
  * Response contract:
  * - Status: implicit 200 (no explicit status set in this handler).
@@ -45,7 +45,7 @@ export function createAuthController(
             return res.json({ loggedIn: false });
         }
 
-        const account = await readActiveAccount(database, authentication.identity.userId);
+        const account = await readActiveAccount(database, authentication.identity);
         if (!account) {
             // A delayed GET must not clear a newer login's cookie. Deletion/logout
             // own cookie changes; a stale token is still rejected on every use.

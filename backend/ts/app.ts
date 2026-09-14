@@ -17,7 +17,7 @@ import { createLeaderboardRouter } from './routers/leaderboardRouter';
 import { createMainRouter } from './routers/mainRouter';
 import { createGeneralApiRateLimiter } from './security/requestRateLimits';
 import { createGcsDeletionJournal } from './accounts/gcsDeletionJournal';
-import { verifyAccountDeletionReadiness } from './accounts/accountDeletionReadiness';
+import { verifyAccountDeletionReadiness, verifyAccountSessionReadiness } from './accounts/accountDeletionReadiness';
 
 const runtimeConfig = loadRuntimeConfig();
 const deletionJournal = runtimeConfig.accountDeletionEnabled
@@ -70,6 +70,7 @@ app.use('/api', createMainRouter({
     sessionSecret: runtimeConfig.sessionSecret,
     isProduction: runtimeConfig.isProduction,
     p4VegaScoreSubmissionsEnabled: runtimeConfig.p4VegaScoreSubmissionsEnabled,
+    allowedMutationOrigins: runtimeConfig.corsOrigins,
 }));
 app.use('/auth', createAuthRouter(
     pool, runtimeConfig.sessionSecret, runtimeConfig.isProduction, runtimeConfig.corsOrigins,
@@ -82,6 +83,7 @@ app.use(requestErrorHandler);
 async function startServer(): Promise<void> {
     try {
         await verifyDatabaseConnection();
+        await verifyAccountSessionReadiness(pool);
         if (runtimeConfig.accountDeletionEnabled) {
             await verifyAccountDeletionReadiness(pool, runtimeConfig.accountIdentityEpoch!);
         }

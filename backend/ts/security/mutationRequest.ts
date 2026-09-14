@@ -1,4 +1,5 @@
 import { Request } from 'express';
+import { SESSION_COOKIE_NAMES } from './sessionCookie';
 
 /** Cookie mutations require an exact trusted Origin; bearer-only clients may omit it. */
 export function hasAllowedMutationOrigin(
@@ -9,8 +10,7 @@ export function hasAllowedMutationOrigin(
     if (origin !== undefined) {
         return typeof origin === 'string' && allowedOrigins.includes(origin);
     }
-    const signedSession = req.signedCookies?.session;
-    return !(typeof signedSession === 'string' && signedSession.length > 0);
+    return !SESSION_COOKIE_NAMES.some(name => req.signedCookies?.[name] !== undefined);
 }
 
 export function isJsonMutationRequest(req: Pick<Request, 'headers'>): boolean {

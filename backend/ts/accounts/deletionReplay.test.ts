@@ -25,6 +25,8 @@ type FakeOptions = {
     providerMigrationRecorded?: boolean;
     attemptTable?: 'absent' | 'malformed';
     attemptMigrationRecorded?: boolean;
+    sessionTable?: 'absent' | 'malformed';
+    sessionMigrationRecorded?: boolean;
     wrongTarget?: boolean;
     changeIdentityUnderLock?: boolean;
     failAt?: string;
@@ -52,8 +54,9 @@ function fakeReplay(options: FakeOptions = {}) {
             }], []];
             if (sql.includes('DATE_FORMAT(applied_at')) return [[{ epoch: options.wrongEpoch ? 'old' : SETTINGS.expectedIdentityEpoch }], []];
             if (sql.startsWith('SELECT version FROM schema_migrations')) {
-                const recorded = values?.[0] === '0010_create_provider_auth_attempts'
-                    ? options.attemptMigrationRecorded : options.providerMigrationRecorded;
+                const recorded = values?.[0] === '0011_create_account_sessions' ? options.sessionMigrationRecorded
+                    : values?.[0] === '0010_create_provider_auth_attempts'
+                        ? options.attemptMigrationRecorded : options.providerMigrationRecorded;
                 return [recorded ? [{ version: values?.[0] }] : [], []];
             }
             if (values?.[0] === 'account_provider_identities') {
@@ -64,6 +67,11 @@ function fakeReplay(options: FakeOptions = {}) {
             if (values?.[0] === 'provider_auth_attempts') {
                 return [sql.includes('COUNT(*)')
                     ? [{ tableCount: options.attemptTable === 'malformed' ? 1 : 0 }]
+                    : [{ engine: 'MyISAM', collation: 'utf8mb4_unicode_ci', tableType: 'BASE TABLE' }], []];
+            }
+            if (values?.[0] === 'account_sessions') {
+                return [sql.includes('COUNT(*)')
+                    ? [{ tableCount: options.sessionTable === 'malformed' ? 1 : 0 }]
                     : [{ engine: 'MyISAM', collation: 'utf8mb4_unicode_ci', tableType: 'BASE TABLE' }], []];
             }
             if (sql.includes('information_schema.COLUMNS')) return [options.missingIdentity ? [] : [{
@@ -212,6 +220,25 @@ test('attempt schema changes after plan approval are rechecked before replay wri
     await assert.rejects(applyDeletionReplay(fake.database, fake.reader, SETTINGS, plan.sha256), /missing its table/u);
     assert.equal(fake.events.some(sql => sql.startsWith('DELETE') || sql === 'START TRANSACTION'), false);
     assert.equal(fake.accounts.get(42), FIRST_ID);
+});
+
+test('replay permits pre-0011 backups but rejects missing recorded or malformed sessions', async () => {
+    const legacy = fakeReplay();
+    const plan = await planDeletionReplay(legacy.database, legacy.reader, SETTINGS);
+    assert.ok(legacy.queries.some(({ values }) => values?.[0] === '0011_create_account_sessions'));
+    for (const options of [{ sessionMigrationRecorded: true }, { sessionTable: 'malformed' as const }]) {
+        const fake = fakeReplay(options);
+        await assert.rejects(planDeletionReplay(fake.database, fake.reader, SETTINGS), /[Aa]ccount session/u);
+        await assert.rejects(applyDeletionReplay(fake.database, fake.reader, SETTINGS, plan.sha256), /[Aa]ccount session/u);
+        assert.equal(fake.events.some(sql => sql.startsWith('DELETE') || sql === 'START TRANSACTION'), false);
+        assert.equal(fake.accounts.get(42), FIRST_ID);
+    }
+    const changed: FakeOptions = {};
+    const fake = fakeReplay(changed);
+    const approved = await planDeletionReplay(fake.database, fake.reader, SETTINGS);
+    changed.sessionMigrationRecorded = true;
+    await assert.rejects(applyDeletionReplay(fake.database, fake.reader, SETTINGS, approved.sha256), /missing its table/u);
+    assert.equal(fake.events.some(sql => sql.startsWith('DELETE') || sql === 'START TRANSACTION'), false);
 });
 
 test('stale approval and changed pre-apply journal prevent every deletion', async () => {

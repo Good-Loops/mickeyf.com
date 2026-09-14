@@ -3,6 +3,8 @@ import { createHash, generateKeyPairSync, randomBytes, randomUUID } from 'node:c
 import { after, before, beforeEach, test } from 'node:test';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
+import { issueSessionToken } from '../security/sessionPolicy';
+import { createAccountSession } from './accountSessionRepository';
 import mysql, { type Connection, type Pool, type PoolConnection, type QueryOptions, type ResultSetHeader, type RowDataPacket } from 'mysql2/promise';
 import { deleteAccount } from '../accounts/accountDeletionRepository';
 import { findProviderAccount, linkProviderAccount } from '../accounts/providerAccountRepository';
@@ -58,7 +60,7 @@ before(async () => {
     assert.doesNotMatch(identity[0].versionComment, /Google/iu);
     await administrator.query('SET FOREIGN_KEY_CHECKS = 0');
     try {
-        await administrator.query(`DROP TABLE IF EXISTS provider_auth_attempts, account_provider_identities,
+        await administrator.query(`DROP TABLE IF EXISTS account_sessions, provider_auth_attempts, account_provider_identities,
             game_personal_bests, game_runs, game_submission_receipts, schema_migrations, users`);
     } finally { await administrator.query('SET FOREIGN_KEY_CHECKS = 1'); }
     await administrator.query(`CREATE TABLE users (
@@ -74,6 +76,7 @@ before(async () => {
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-account-identity'] });
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-provider-identities'] });
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-provider-attempts'] });
+    await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-account-sessions'] });
     database = mysql.createPool({
         host: config.host, port: config.port, database: config.database, user: config.user, password: config.password,
         connectTimeout: 10000, multipleStatements: false, connectionLimit: 2, dateStrings: true, timezone: 'Z',
@@ -361,9 +364,9 @@ test('complete flow links a locally verified provider proof, verifies anonymous 
     const sessionSecret = randomBytes(32).toString('base64url');
     const origin = 'https://provider-flow.example.test';
     const readContext = createProviderAuthContextReader({ database, sessionSecret, allowedOrigins: [origin] });
-    const session = jwt.sign({ user_id: account.userId, user_name: userName }, sessionSecret, {
-        algorithm: 'HS256', expiresIn: '5m',
-    });
+    const issued = issueSessionToken({ ...account, userName }, sessionSecret);
+    assert.equal(await createAccountSession(database, account, issued.sessionId, issued.expiresAt), true);
+    const session = issued.token;
     // The context reader receives the cookie-parser boundary; the session JWT is genuinely signed and verified.
     const linkingRequest = {
         method: 'POST', headers: { origin, 'content-type': 'application/json' },

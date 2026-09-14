@@ -51,11 +51,8 @@ public class LudolumeApiPlugin: CAPPlugin, CAPBridgedPlugin {
 
     private func startRequest(_ call: CAPPluginCall, request: URLRequest, onComplete: @escaping () -> Void) {
         let operation = LudolumeApiRequest(call: call, request: request, onComplete: onComplete)
-        if request.url?.path == "/auth/logout" {
-            LudolumeApiPolicy.clearSessionCookie(completion: operation.start)
-        } else {
-            operation.start()
-        }
+        // The server needs the cookie to revoke this device's session.
+        operation.start()
     }
 }
 
@@ -110,7 +107,7 @@ private enum LudolumeApiPolicy {
     }
 
     static func clearSessionCookie(completion: @escaping () -> Void) {
-        // Logout is local-first so an offline attempt cannot silently sign back in on restart.
+        // Called only after confirmed logout or account deletion.
         HTTPCookieStorage.shared.cookies?.filter(isSessionCookie)
             .forEach { HTTPCookieStorage.shared.deleteCookie($0) }
         DispatchQueue.main.async {
@@ -215,11 +212,11 @@ private final class LudolumeApiRequest: NSObject, URLSessionDataDelegate, @unche
             self.call.resolve(["status": response.statusCode, "body": text])
             self.onComplete()
         }
-        // Deletion differs from local-first logout: retain the cookie until the
-        // server confirms durable deletion, then also remove stale WebView copies.
-        if request.url?.path == "/auth/delete-account", response.statusCode == 200,
+        // Preserve credentials on network/server failure so the user can retry revocation.
+        if response.statusCode == 200,
            let result = try? JSONDecoder().decode([String: Bool].self, from: body),
-           result == ["deleted": true] {
+           (request.url?.path == "/auth/delete-account" && result == ["deleted": true])
+            || (request.url?.path == "/auth/logout" && result == ["loggedOut": true]) {
             LudolumeApiPolicy.clearSessionCookie(completion: finish)
         } else {
             finish()

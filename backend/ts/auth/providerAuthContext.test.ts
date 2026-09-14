@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import jwt from 'jsonwebtoken';
+import { createHash } from 'node:crypto';
+import { issueSessionToken } from '../security/sessionPolicy';
 import type { Pool } from 'mysql2/promise';
 import { createProviderAuthContextReader, PROVIDER_BINDING_COOKIE, type ProviderAuthContext } from './providerAuthContext';
 
@@ -9,7 +11,8 @@ const accountId = '11111111-2222-4333-8444-555555555555';
 const otherAccountId = 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee';
 const origin = 'https://example.test';
 const row = { userId: 7, userName: 'context-fixture', accountId };
-const session = jwt.sign({ user_id: row.userId, user_name: row.userName }, secret, { expiresIn: '1h' });
+const issued = issueSessionToken(row, secret);
+const session = issued.token;
 
 function request() {
     return {
@@ -19,7 +22,7 @@ function request() {
     };
 }
 
-function fixture(rows: unknown = [row], fail = false) {
+function fixture(rows: unknown = [{ userName: row.userName }], fail = false) {
     const calls: unknown[][] = [];
     const database = { async query(...args: unknown[]) {
         calls.push(args);
@@ -57,7 +60,7 @@ test('anonymous context requires an explicit allowed Origin, JSON POST and a ver
     assert.deepEqual(calls, []);
 });
 
-test('valid signed session resolves the account UUID from storage, not caller-supplied metadata', async () => {
+test('valid signed session verifies its UUID and device identifier in storage, not caller-supplied metadata', async () => {
     const { read, calls } = fixture();
     const req = request();
     req.signedCookies.session = session;
@@ -65,7 +68,7 @@ test('valid signed session resolves the account UUID from storage, not caller-su
     assert.ok(context);
     assert.deepEqual(context.account, { userId: row.userId, accountId });
     assert.equal(Object.isFrozen(context.account), true);
-    assert.deepEqual(calls[0][1], [row.userId]);
+    assert.deepEqual(calls[0][1], [row.userId, accountId, createHash('sha256').update(issued.sessionId).digest()]);
     assert.equal((calls[0][0] as { timeout: number }).timeout, 10_000);
 });
 
@@ -88,7 +91,7 @@ test('unknown/renamed accounts fail authentication; corrupt metadata and storage
     for (const rows of [[], [{ ...row, userName: 'renamed' }]]) {
         assert.equal(await fixture(rows).read(req), null);
     }
-    for (const rows of [null, [row, row], [{ ...row, userId: 999 }], [{ ...row, accountId: 'invalid' }]]) {
+    for (const rows of [null, [row, row], [{ userName: 999 }], [{ userName: '' }]]) {
         await assert.rejects(fixture(rows).read(req), { message: 'The provider account operation could not be confirmed.' });
     }
     await assert.rejects(fixture([row], true).read(req), { message: 'The provider account operation could not be confirmed.' });
@@ -108,8 +111,10 @@ test('binding changes with the current origin, cookie, session or immutable acco
     for (const req of [otherOrigin, otherCookie, authenticated]) {
         assert.notDeepEqual((await read(req))?.bindingHash, anonymous.bindingHash);
     }
-    assert.notDeepEqual((await read(authenticated))?.bindingHash,
-        (await fixture([{ ...row, accountId: otherAccountId }]).read(authenticated))?.bindingHash);
+    const anotherDevice = request();
+    anotherDevice.signedCookies.session = issueSessionToken(row, secret).token;
+    assert.notDeepEqual((await read(authenticated))?.bindingHash, (await read(anotherDevice))?.bindingHash);
+    assert.equal(await fixture([]).read(authenticated), null, 'revoked or UUID-mismatched session fails closed');
 });
 
 test('missing signing configuration is rejected before reading any requests', () => {

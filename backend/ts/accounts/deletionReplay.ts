@@ -7,6 +7,7 @@ import { assertAccountIdentityEpoch, verifyAccountIdentitySchema } from '../migr
 import type { MigrationConnection } from '../migrations/leaderboardSchema';
 import { verifyOptionalProviderIdentitySchema } from '../migrations/providerIdentitySchema';
 import { verifyOptionalProviderAttemptSchema } from '../migrations/providerAttemptSchema';
+import { verifyOptionalAccountSessionSchema } from '../migrations/accountSessionSchema';
 import { AccountDeletionRollbackError, deleteOwnedAccountRows } from './accountDeletionRepository';
 import { type DeletionJournalReader, parseDeletionIntent } from './deletionJournal';
 
@@ -78,6 +79,7 @@ async function verifyTargetSchema(
         await verifyAccountIdentitySchema(timed);
         await verifyOptionalProviderIdentitySchema(timed);
         await verifyOptionalProviderAttemptSchema(timed);
+        await verifyOptionalAccountSessionSchema(timed);
         const [rows] = await timed.query(`SELECT TABLE_NAME AS tableName, ENGINE AS engine
             FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()
             AND TABLE_NAME IN ('users', 'game_personal_bests', 'game_submission_receipts', 'game_runs')`);

@@ -3,9 +3,11 @@
 ## Status — 2026-09-14
 
 Implemented offline backend primitives; **not an enabled sign-in feature**.
-Existing username/password routes, sessions, score ownership and production
-configuration are unchanged. No provider credentials, token storage, HTTP
-callbacks, native plugins or sign-in buttons are added in this checkpoint.
+Provider routes and buttons remain disabled. The subsequent shared-session
+checkpoint changes username/password issuance and consumers to UUID-bound,
+revocable device sessions; see [session behavior and rollout](SESSION_AUTHENTICATION.md).
+No production configuration, provider credentials, HTTP callbacks or provider
+native plugins have been activated.
 
 Native iOS sign-in can be developed and tested before publication. Apple's
 documented web/other-platform setup requires an existing App Store app using
@@ -96,18 +98,23 @@ activity. A database-scoped creation lock enforces a 10,000-row cap. No schedule
 cloud service or background worker is added. Linked attempts reference account
 UUIDs and cascade on deletion, including deletion replay after restoring a backup.
 
-Before routing this flow, issue a random signed HttpOnly/Secure binding cookie and
-rotate/clear it on every login/logout transition. The current-context hash alone
+Before routing this flow, supply a server-verified random browser binding and
+rotate/clear it on every login/logout transition. Firebase Hosting forwards only
+`__session`, so its new website gateway will not forward the dormant flow's
+separate `provider_auth_binding` cookie. Resolve that transport contract before
+mounting provider routes; do not weaken the binding check. The current-context hash alone
 does not detect anonymous → login → logout returning to the original state.
 Provide dedicated rate limits: existing login limiters recognize a different
 request shape. Native transport also needs explicit route allowlisting and a
 body limit aligned with the token size; its current 16 KiB total JSON limit is
 smaller than the verifier's maximum token plus JSON wrapper.
 
-Session issuance remains the next integration boundary. Existing shared session
-readers use numeric user IDs; adding a UUID claim without updating those readers
-would not bind authorization to the immutable identity. Update the common session
-path coherently before issuing provider sessions, including stale/deleted accounts.
+Shared issuance and readers now require a UUID and live device session. Connect
+the internal verified-account result to that issuer only on the server. For
+linking, carry SessionProof into the final repository lock as well: the context
+reader's live-session check can precede asynchronous provider verification, and
+logout/expiry in between must prevent a later link. Current password/UUID proof
+remains enforced; no linking HTTP endpoint is mounted.
 
 ## Migration and activation boundary
 
@@ -129,14 +136,15 @@ missing recorded table or malformed cascade. Historical SQL remains unchanged.
 These commands are **not** a local-safety guarantee: a loopback proxy may target
 production. No production migration was executed in this checkpoint.
 
-Runtime grants are deliberately unchanged. Before activation, update and test the
+Runtime grants now include only the session table access needed by shared login.
+Before provider activation, update and test the
 reviewed grant manifest for the required provider-table access; do not grant
 blanket database privileges. Coordinate that change with schema, recovery
 compatibility and the enabled application revision.
 
 Remaining work, in order:
 
-1. Integrate UUID-bound shared session issuance/consumers, HTTP cookie lifecycle,
+1. Connect the internal provider result to shared session issuance, HTTP binding lifecycle,
    dedicated rate limits, and provider-specific callback/code exchange where
    required. Keep the completed one-use flow internal until those pieces agree.
 2. Configure approved Google web/native clients and Apple native capability;
@@ -161,7 +169,7 @@ waits, uncertain commits and the composed link → login → replay-rejection fl
 No real Google/Apple account or production database is used by these tests.
 For changes confined to provider identities and their deletion compatibility,
 `npm --prefix backend run test:migrations -- --provider-identities` selects
-only those three integration fixtures inside the same isolated harness.
+the provider, session and deletion/replay integration fixtures inside the same isolated harness.
 
 Initial identity-checkpoint results: backend typecheck and the 318-test unit suite passed. The
 initial MySQL run passed its 57 preceding cases, then exposed MySQL 8.0.31's

@@ -9,6 +9,8 @@ import mysql, {
 } from 'mysql2/promise';
 import { loadMigrationConfig } from '../config/migrationConfig';
 import { deleteAccount } from '../accounts/accountDeletionRepository';
+import { createAccountSession, readLiveSession, revokeAccountSession } from '../auth/accountSessionRepository';
+import { verifyAccountSessionReadiness } from '../accounts/accountDeletionReadiness';
 import {
     readP4VegaLeaderboard,
     submitP4VegaScore,
@@ -109,6 +111,9 @@ async function createSchema(): Promise<void> {
     try {
         await administrator.query(`
             DROP TABLE IF EXISTS
+                account_sessions,
+                provider_auth_attempts,
+                account_provider_identities,
                 game_personal_bests,
                 game_runs,
                 game_submission_receipts,
@@ -141,11 +146,17 @@ async function createSchema(): Promise<void> {
     await applyMigrations(asMigrationConnection(administrator), migrations, config, {
         allowedEffectKinds: ['add-account-identity'],
     });
+    await applyMigrations(asMigrationConnection(administrator), migrations, config, {
+        allowedEffectKinds: ['add-provider-identities', 'add-provider-attempts', 'add-account-sessions'],
+    });
 }
 
 async function resetData(): Promise<void> {
     await administrator.query('SET FOREIGN_KEY_CHECKS = 0');
     try {
+        await administrator.query('TRUNCATE TABLE account_sessions');
+        await administrator.query('TRUNCATE TABLE provider_auth_attempts');
+        await administrator.query('TRUNCATE TABLE account_provider_identities');
         await administrator.query('TRUNCATE TABLE game_personal_bests');
         await administrator.query('TRUNCATE TABLE game_submission_receipts');
         await administrator.query('TRUNCATE TABLE users');
@@ -248,6 +259,20 @@ after(async () => {
         await root.end();
     }
     if (administrator) await administrator.end();
+});
+
+test('limited runtime session grants support readiness, issuance, verification and revocation without UPDATE', async () => {
+    await verifyAccountSessionReadiness(runtimePool);
+    const [accounts] = await runtimePool.query<RowDataPacket[]>(
+        'SELECT account_uuid AS accountId FROM users WHERE user_id = 1');
+    const accountId = accounts[0].accountId as string;
+    const sessionId = Buffer.alloc(32, 3).toString('base64url');
+    assert.equal(await createAccountSession(runtimePool, { userId: 1, accountId }, sessionId,
+        Math.floor(Date.now() / 1000) + 4 * 60 * 60), true);
+    assert.deepEqual(await readLiveSession(runtimePool, 1, accountId, sessionId), { userName: 'player-1' });
+    await assertPrivilegeDenied(() => runtimePool.query('UPDATE account_sessions SET expires_at = expires_at WHERE 1 = 0'));
+    await revokeAccountSession(runtimePool, 1, accountId, sessionId);
+    assert.equal(await readLiveSession(runtimePool, 1, accountId, sessionId), null);
 });
 
 test('installs exact column grants and account-deletion table grants with no active role', async () => {

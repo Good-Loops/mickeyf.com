@@ -4,7 +4,7 @@ import { AccountDeletionPendingError, deleteAccount } from '../accounts/accountD
 import type { AccountDeletionJournal } from '../accounts/deletionJournal';
 import { hasAllowedMutationOrigin, isJsonMutationRequest } from '../security/mutationRequest';
 import { authenticateRequest } from '../security/requestAuthentication';
-import { sessionCookieOptions } from '../security/sessionCookie';
+import { clearAuthenticationCookies } from '../security/sessionCookie';
 import { isRecord, validateLoginRequest } from '../security/userRequestValidation';
 
 type AccountDeletionDependencies = {
@@ -51,12 +51,12 @@ export function createAccountDeletionController({
         try {
             // Ownership comes exclusively from the verified token, never the request body.
             const result = await deleteAccount(
-                database, authentication.identity.userId, validation.input.password, deletionJournal
+                database, authentication.identity.userId, validation.input.password, deletionJournal, authentication.identity
             );
             if (result === 'invalid-password') {
                 return res.status(403).json({ error: 'INVALID_PASSWORD' });
             }
-            res.clearCookie('session', sessionCookieOptions(isProduction));
+            clearAuthenticationCookies(res, isProduction);
             if (result === 'not-found') {
                 return res.status(401).json({ error: 'UNAUTHENTICATED' });
             }

@@ -123,13 +123,14 @@ test('account deletion uses the native JSON transport without clearing the sessi
     }]);
 });
 
-test('native deletion is allowlisted and post-success cleanup remains distinct from local-first logout', async () => {
+test('native deletion and logout clear local credentials only after confirmed server success', async () => {
     // Structural safeguard only: compiled/device cookie behavior is checked on iOS.
     const native = await readFile(new URL('../../ios/App/App/LudolumeApiPlugin.swift', import.meta.url), 'utf8');
     assert.match(native, /"POST \/auth\/delete-account"/);
-    assert.match(native, /if request\.url\?\.path == "\/auth\/logout" \{\s*LudolumeApiPolicy\.clearSessionCookie\(completion: operation\.start\)/);
-    assert.match(native, /request\.url\?\.path == "\/auth\/delete-account", response\.statusCode == 200/);
+    assert.doesNotMatch(native, /clearSessionCookie\(completion: operation\.start\)/);
+    assert.match(native, /response\.statusCode == 200/);
     assert.match(native, /JSONDecoder\(\)\.decode\(\[String: Bool\]\.self, from: body\)/);
     assert.match(native, /result == \["deleted": true\]/);
+    assert.match(native, /result == \["loggedOut": true\]/);
     assert.match(native, /LudolumeApiPolicy\.clearSessionCookie\(completion: finish\)/);
 });

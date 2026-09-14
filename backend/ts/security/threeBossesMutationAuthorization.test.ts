@@ -1,11 +1,14 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Request } from 'express';
-import jwt from 'jsonwebtoken';
 import { loadRuntimeConfig } from '../config/runtimeConfig';
 import { authorizeThreeBossesMutation } from './threeBossesMutationAuthorization';
+import { issueSessionToken } from './sessionPolicy';
 
 const secret = 'unit-test-secret-that-is-not-a-runtime-credential';
+const account = { userId: 42, userName: 'verified-user', accountId: '123e4567-e89b-42d3-a456-426614174000' };
+const session = issueSessionToken(account, secret);
+const identity = { ...account, sessionId: session.sessionId };
 const allowedOrigin = 'https://mickeyf.example';
 const options = {
     submissionsEnabled: true,
@@ -15,15 +18,12 @@ const options = {
 const unauthorized = { authorized: false, status: 401, error: 'UNAUTHORIZED' };
 
 function validToken(): string {
-    return jwt.sign({ user_id: 42, user_name: 'verified-user', extra: 'not-an-identity-claim' }, secret, {
-        algorithm: 'HS256',
-        expiresIn: '5m',
-    });
+    return session.token;
 }
 
 function mutationRequest(
     headers: Request['headers'] = {},
-    signedCookies: Request['signedCookies'] = { session: validToken() }
+    signedCookies: Request['signedCookies'] = { __session: validToken() }
 ): Pick<Request, 'headers' | 'signedCookies'> {
     return {
         headers: { origin: allowedOrigin, 'content-type': 'application/json', ...headers },
@@ -108,7 +108,7 @@ test('authenticated requests with an allowed origin still require JSON', () => {
 test('signed-cookie requests return only the verified identity', () => {
     assert.deepEqual(authorizeThreeBossesMutation(mutationRequest(), options), {
         authorized: true,
-        identity: { userId: 42, userName: 'verified-user' },
+        identity,
     });
 });
 
@@ -117,6 +117,6 @@ test('Bearer-only clients can omit origin and receive the verified identity', ()
 
     assert.deepEqual(authorizeThreeBossesMutation(request, options), {
         authorized: true,
-        identity: { userId: 42, userName: 'verified-user' },
+        identity,
     });
 });

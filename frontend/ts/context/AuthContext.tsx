@@ -16,7 +16,7 @@ import { loginRequest, logoutRequest, verifyRequest, deleteAccountRequest } from
 import type { DeleteAccountResponse } from '@/services/authApi';
 import Swal from '@/components/siteAlert';
 
-type LoginOptions = { showFeedback?: boolean };
+type LoginOptions = { showFeedback?: boolean; rememberMe?: boolean };
 
 /** UI-facing auth context value owned by `AuthProvider`. */
 type AuthContextType = {
@@ -24,7 +24,7 @@ type AuthContextType = {
     isAuthenticated: boolean;
     loading: boolean;
     login: (user: string, pass: string, options?: LoginOptions) => Promise<boolean>;
-    logout: () => void;
+    logout: () => Promise<void>;
     deleteAccount: (password: string) => Promise<DeleteAccountResponse>;
 };
 
@@ -74,13 +74,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
      * Non-obvious behavior: normalizes common failure modes into user-facing alerts and resolves to a boolean success
      * result rather than throwing.
      */
-    const login = async (user: string, pass: string, { showFeedback = true }: LoginOptions = {}) => {
+    const login = async (user: string, pass: string, { showFeedback = true, rememberMe = false }: LoginOptions = {}) => {
         const actionVersion = ++authActionVersion.current;
         setLoading(false);
         try {
             const res = await loginRequest({
                 user_name: user,
                 user_password: pass,
+                remember_me: rememberMe,
             });
             // A completed older login must not undo a more recent logout.
             if (actionVersion !== authActionVersion.current) return false;
@@ -129,7 +130,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     };
 
     /**
-     * Logs out via the backend and clears local auth state.
+     * Clears local auth state only after the backend confirms sign-out.
      *
      * Side effect: performs a cookie-bearing request (`credentials: 'include'`) so the server can clear the session.
      */
@@ -140,6 +141,26 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             await logoutRequest();
         } catch (err) {
             console.error('logout failed', err);
+            // A queued login may have succeeded while its older UI result was
+            // discarded. Reconcile that session without guessing that logout worked.
+            if (actionVersion !== authActionVersion.current) return;
+            try {
+                const session = await verifyRequest();
+                if (actionVersion !== authActionVersion.current) return;
+                setIsAuthenticated(session.loggedIn);
+                setUserName(session.loggedIn ? session.user_name : null);
+            } catch (verificationError) {
+                // If the network is still unavailable, preserve the last known UI state.
+                console.error('session check after failed logout failed', verificationError);
+            }
+            if (actionVersion === authActionVersion.current) {
+                await Swal.fire({
+                    title: 'Sign-out could not be confirmed',
+                    text: 'You may still be signed in. Please try signing out again.',
+                    icon: 'error',
+                });
+            }
+            return;
         }
         if (actionVersion === authActionVersion.current) {
             setIsAuthenticated(false);
@@ -150,7 +171,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const deleteAccount = async (password: string): Promise<DeleteAccountResponse> => {
         const actionVersion = ++authActionVersion.current;
         const result = await deleteAccountRequest(password);
-        // Unlike logout, deletion is server-first: a rejected/uncertain request
+        // Like logout, deletion is server-first: a rejected/uncertain request
         // must not hide the account or imply that its data has been removed.
         if (actionVersion === authActionVersion.current
             && ('deleted' in result || result.error === 'UNAUTHENTICATED')) {

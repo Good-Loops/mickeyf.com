@@ -195,7 +195,7 @@ export function createLeaderboardController({
 
         if (!verifyThreeBossesRunTicket(
             sessionSecret,
-            authorization.identity.userId,
+            authorization.identity,
             validation.input
         )) {
             return res.status(400).json({
@@ -209,7 +209,8 @@ export function createLeaderboardController({
             database,
             authorization.identity.userId,
             validation.input.runId,
-            validation.input.completionTimeMs
+            validation.input.completionTimeMs,
+            authorization.identity
         );
         if (result.kind === 'user-not-found') {
             return res.status(401).json({
@@ -271,7 +272,7 @@ export function createLeaderboardController({
             });
         }
 
-        if (!await readActiveAccount(database, authorization.identity.userId)) {
+        if (!await readActiveAccount(database, authorization.identity)) {
             return res.status(401).json({
                 success: false,
                 contractVersion: LEADERBOARD_CONTRACT_VERSION,
@@ -280,7 +281,7 @@ export function createLeaderboardController({
         }
         const ticket = issueThreeBossesRunTicket(
             sessionSecret,
-            authorization.identity.userId,
+            authorization.identity,
             validation.input
         );
         return res.status(201).json({

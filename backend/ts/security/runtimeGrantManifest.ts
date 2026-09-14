@@ -11,7 +11,7 @@ export type RuntimeColumnGrant = Readonly<{
 }>;
 
 export type RuntimeTableGrant = Readonly<{
-    table: 'users' | 'game_submission_receipts' | 'game_personal_bests' | 'schema_migrations';
+    table: 'users' | 'game_submission_receipts' | 'game_personal_bests' | 'schema_migrations' | 'account_sessions';
     grants: readonly RuntimeColumnGrant[];
     tablePrivileges: readonly 'DELETE'[];
 }>;
@@ -44,6 +44,16 @@ export const PRODUCTION_RUNTIME_DATABASE_ROLE: RuntimeDatabaseAccount =
  * verification. Migration writes and schema changes remain maintenance-only.
  */
 export const RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freeze([
+    Object.freeze({
+        table: 'account_sessions' as const,
+        tablePrivileges: Object.freeze(['DELETE' as const]),
+        grants: Object.freeze([
+            Object.freeze({ privilege: 'SELECT' as const,
+                columns: Object.freeze(['session_hash', 'account_uuid', 'created_at', 'expires_at']) }),
+            Object.freeze({ privilege: 'INSERT' as const,
+                columns: Object.freeze(['session_hash', 'account_uuid', 'created_at', 'expires_at']) }),
+        ]),
+    }),
     Object.freeze({
         table: 'schema_migrations' as const,
         tablePrivileges: Object.freeze([]),
@@ -192,8 +202,8 @@ export function runtimeColumnPrivilegeInventory(): readonly RuntimeColumnPrivile
 }
 
 export function runtimeTablePrivilegeInventory(): readonly RuntimeTablePrivilege[] {
-    // MySQL cannot restrict DELETE by column. Only the account and its two
-    // dependent data tables need this privilege for transactional self-deletion.
+    // MySQL cannot restrict DELETE by column. Sessions need scoped revocation;
+    // the account and its dependent data tables need transactional self-deletion.
     return Object.freeze(RUNTIME_GRANT_MANIFEST.flatMap(({ table, tablePrivileges }) =>
         tablePrivileges.map((privilegeType) => Object.freeze({
             tableName: table,

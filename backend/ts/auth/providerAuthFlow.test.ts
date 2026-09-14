@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash, generateKeyPairSync } from 'node:crypto';
 import test from 'node:test';
 import jwt from 'jsonwebtoken';
+import { issueSessionToken } from '../security/sessionPolicy';
 import type { Pool } from 'mysql2/promise';
 import type { ProviderAccount, ProviderLinkResult } from '../accounts/providerAccountRepository';
 import { createProviderAuthContextReader, PROVIDER_BINDING_COOKIE, type ProviderAuthContext } from './providerAuthContext';
@@ -37,9 +38,7 @@ async function trustedContext(currentAccount?: ProviderAccount, bindingByte = 1)
         method: 'POST', headers: { origin, 'content-type': 'application/json' }, cookies: {},
         signedCookies: {
             [PROVIDER_BINDING_COOKIE]: Buffer.alloc(32, bindingByte).toString('base64url'),
-            ...(currentAccount ? { session: jwt.sign({
-                user_id: currentAccount.userId, user_name: currentAccount.userName,
-            }, secret, { algorithm: 'HS256', expiresIn: '5m' }) } : {}),
+            ...(currentAccount ? { session: issueSessionToken(currentAccount, secret).token } : {}),
         },
     };
     const context = await createProviderAuthContextReader({ database, sessionSecret: secret, allowedOrigins: [origin] })(request);

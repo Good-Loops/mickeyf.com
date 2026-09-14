@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import bcrypt from 'bcryptjs';
+import { createHash } from 'node:crypto';
 import { Pool, PoolConnection } from 'mysql2/promise';
 import { AccountDeletionPendingError, AccountDeletionRollbackError, deleteAccount } from './accountDeletionRepository';
 import type { AccountDeletionJournal } from './deletionJournal';
@@ -8,6 +9,9 @@ import type { AccountDeletionJournal } from './deletionJournal';
 const PASSWORD = 'correct-test-password';
 const PASSWORD_HASH = bcrypt.hashSync(PASSWORD, 4);
 const ACCOUNT_ID = '123e4567-e89b-42d3-a456-426614174000';
+const SESSION_ID = Buffer.alloc(32, 1).toString('base64url');
+const SESSION_HASH = createHash('sha256').update(SESSION_ID, 'ascii').digest();
+const SESSION = { accountId: ACCOUNT_ID, sessionId: SESSION_ID };
 
 type FakeOptions = {
     userExists?: boolean;
@@ -18,6 +22,7 @@ type FakeOptions = {
     commit?: () => Promise<void>;
     journal?: () => Promise<void>;
     accountId?: string;
+    sessionExists?: boolean;
 };
 
 function fakeDatabase(options: FakeOptions = {}) {
@@ -43,9 +48,18 @@ function fakeDatabase(options: FakeOptions = {}) {
                 record('unlock');
                 return [[{ lockResult: 1 }], []];
             }
+            if (sql.includes('FROM account_sessions AS s')) {
+                record('read-session');
+                const matches = options.sessionExists !== false && values?.[0] === 42
+                    && values?.[1] === ACCOUNT_ID && Buffer.isBuffer(values?.[2])
+                    && values[2].equals(SESSION_HASH);
+                return [matches ? [{ userName: 'player' }] : [], []];
+            }
             if (sql.startsWith('SELECT user_password')) {
                 record('read-password');
-                return [options.userExists === false ? [] : [{ passwordHash: PASSWORD_HASH, accountId: options.accountId ?? ACCOUNT_ID }], []];
+                const accountId = options.accountId ?? ACCOUNT_ID;
+                return [options.userExists === false
+                    ? [] : [{ passwordHash: PASSWORD_HASH, accountId }], []];
             }
             record(sql);
             return [{ affectedRows: sql === 'DELETE FROM users WHERE user_id = ?'
@@ -104,6 +118,38 @@ test('missing users and incorrect passwords never issue a deletion', async () =>
         assert.equal(await deleteAccount(fake.database, 42, password, fake.journal), expected);
         assert.deepEqual(fake.events, ['connect', 'acquire', 'begin', 'read-password', 'commit', 'unlock', 'release']);
     }
+});
+
+test('a stale UUID or session rejects before password checking, journaling or deletion', async () => {
+    for (const expectedSession of [SESSION,
+        { ...SESSION, accountId: '123e4567-e89b-42d3-a456-426614174001' },
+        { ...SESSION, sessionId: Buffer.alloc(32, 2).toString('base64url') }]) {
+        const fake = fakeDatabase();
+        const matches = expectedSession === SESSION;
+        // A wrong password would return invalid-password if the stale proof reached reauthentication.
+        const result = await deleteAccount(fake.database, 42,
+            matches ? PASSWORD : 'wrong-password', fake.journal, expectedSession);
+        assert.equal(result, matches ? 'deleted' : 'not-found');
+        assert.match(fake.queries[1].sql, /FROM account_sessions AS s/);
+        assert.deepEqual(fake.queries[1].values, [42, expectedSession.accountId,
+            createHash('sha256').update(expectedSession.sessionId, 'ascii').digest()]);
+        assert.equal(fake.events.includes('read-password'), matches);
+        assert.equal(fake.events.includes('journal'), matches);
+        assert.equal(fake.queries.some(({ sql }) => sql.startsWith('DELETE')), matches);
+        assert.deepEqual(fake.events.slice(0, 4), ['connect', 'acquire', 'begin', 'read-session']);
+    }
+});
+
+test('a revoked or expired session cannot delete, and malformed proofs fail closed', async () => {
+    const missing = fakeDatabase({ sessionExists: false });
+    assert.equal(await deleteAccount(missing.database, 42, PASSWORD, missing.journal, SESSION), 'not-found');
+    assert.equal(missing.events.includes('read-password'), false);
+    assert.equal(missing.events.includes('journal'), false);
+    const invalid = fakeDatabase();
+    await assert.rejects(deleteAccount(invalid.database, 42, PASSWORD, invalid.journal,
+        { ...SESSION, sessionId: 'invalid' }), TypeError);
+    assert.equal(invalid.events.includes('read-password'), false);
+    assert.equal(invalid.events.includes('journal'), false);
 });
 
 test('does not start until it owns the user lock or resolve before commit completes', async () => {

@@ -4,7 +4,7 @@ import path from 'node:path';
 
 export type LeaderboardTableName = 'game_runs' | 'game_personal_bests';
 
-export type MigrationEffectKind = 'create-table' | 'drop-column' | 'detach-best-source' | 'retain-receipts' | 'add-account-identity' | 'add-provider-identities' | 'add-provider-attempts';
+export type MigrationEffectKind = 'create-table' | 'drop-column' | 'detach-best-source' | 'retain-receipts' | 'add-account-identity' | 'add-provider-identities' | 'add-provider-attempts' | 'add-account-sessions';
 
 type MigrationMetadata = Readonly<{
     version: string;
@@ -28,6 +28,7 @@ export type MigrationDefinition = MigrationMetadata & Readonly<
     | { effect: 'add-account-identity'; tableName: 'users'; stage: 'column' | 'backfill' | 'finalize' }
     | { effect: 'add-provider-identities'; tableName: 'account_provider_identities' }
     | { effect: 'add-provider-attempts'; tableName: 'provider_auth_attempts' }
+    | { effect: 'add-account-sessions'; tableName: 'account_sessions' }
 >;
 
 const MIGRATION_SPECS = Object.freeze([
@@ -84,6 +85,11 @@ const MIGRATION_SPECS = Object.freeze([
         fileName: '0010_create_provider_auth_attempts.sql',
         effect: 'add-provider-attempts' as const,
         tableName: 'provider_auth_attempts' as const,
+    }),
+    Object.freeze({
+        fileName: '0011_create_account_sessions.sql',
+        effect: 'add-account-sessions' as const,
+        tableName: 'account_sessions' as const,
     }),
 ]);
 

@@ -55,8 +55,8 @@ export function createAuthRouter(
             deletionJournal,
         })));
 
-    /** POST /logout — clears the session cookie, ending the authenticated session. */
-    router.post('/logout', createLogoutHandler(isProduction));
+    /** POST /logout — revokes this device's session before clearing its cookies. */
+    router.post('/logout', asyncHandler(createLogoutHandler(database, sessionSecret, isProduction, allowedMutationOrigins)));
 
     return router;
 }

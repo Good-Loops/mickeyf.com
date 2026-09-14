@@ -2047,15 +2047,19 @@ signed HTTP-only session cookie; the successful login JSON now returns only
 `success` and `user_name`. Existing cookie authentication and the backend's
 Bearer-token compatibility path remain unchanged.
 
-An optional **Stay signed in for 30 days** Login control is approved but still
-open. Unchecked sessions must retain the current four-hour lifetime; checked
-sessions may use a server-controlled thirty-day JWT and signed HTTP-only cookie
-without storing passwords or preferences in browser-readable storage. The
-stateless token's lack of per-session revocation must be tested and recorded as
-an accepted risk before this item is closed.
-That optional session-lifetime decision does not waive account-deletion
-invalidation: Phase 17's approved privacy backlog requires deleted identities
-to stop authorizing requests regardless of an old token's remaining lifetime.
+**Stay signed in checkpoint (2026-09-14):** implemented the optional, unchecked
+30-day Login control; ordinary sign-in remains four hours. The owner chose
+revocable per-device sessions instead of accepting stateless-token replay risk.
+Migration 0011 stores only hashed random session identifiers, immutable account
+UUIDs and UTC timestamps, capped at ten sessions per account. Logout and cookie
+replacement revoke the old session; deletion cascades all sessions. Protected
+writes recheck the session inside the existing per-user transaction lock.
+No password, token or preference is stored in browser-readable storage.
+Production website API calls now use Firebase same-origin rewrites and its
+forwarded `__session` cookie; native transport keeps the OS cookie store and
+waits for server-confirmed logout. Implementation is not a production activation:
+schema/grants, coordinated backend/Hosting deployment, one expected re-login,
+and browser/native acceptance remain pending. See [session behavior and rollout](backend/SESSION_AUTHENTICATION.md).
 
 ## Phase 15 — p4-Vega improvement and mobile polish
 
@@ -2497,9 +2501,13 @@ itself activate, implement or defer both providers.
   0010 and bounded five-minute attempt storage, trusted session/origin context,
   consume-before-verify orchestration, and deletion/replay compatibility are
   implemented offline. No scheduled cleanup service is introduced. The internal
-  account-verification result does not issue a session. Next: update shared
-  session readers and issuance together for immutable UUID binding; add the HTTP
-  cookie lifecycle/rate limits, then approved provider/native configuration.
+  account-verification result does not issue a session. **Session checkpoint
+  (2026-09-14):** shared issuance/consumers now require v2 UUID-bound, revocable
+  device sessions, including score/ticket/deletion authorization and the internal
+  provider context. Username/password login supports an optional 30-day session.
+  No production activation or provider buttons are included. Next: connect the
+  internal verified-provider result to shared issuance, complete provider HTTP
+  binding/rate limits and final link-session guards, then approved native configuration.
   Provider-only signup remains subject to the age/consent backlog.
   See [scope, migration boundary and remaining steps](backend/PROVIDER_SIGN_IN.md).
   The owner approved the CORS-only backend deployment for exactly

@@ -193,6 +193,7 @@ test('plan is read-only, configures short waits, and releases its advisory lock'
             '0008_finalize_account_identity',
             '0009_create_account_provider_identities',
             '0010_create_provider_auth_attempts',
+            '0011_create_account_sessions',
         ],
         recoverable: [],
     });
@@ -420,6 +421,30 @@ test('recorded provider attempts cannot bypass their prerequisites', async () =>
     const connection = new FakeConnection(migrationResults(state));
     await assert.rejects(planMigrations(connection, [migration], settings), /all earlier migrations/u);
     assert.equal(connection.calls.some(({ sql }) => /CREATE|INSERT|ALTER/u.test(sql)), false);
+});
+
+test('sessions require explicit selection and complete earlier history for DDL, recovery and recorded state', async () => {
+    const migration = loadMigrationManifest().find(({ effect }) => effect === 'add-account-sessions')!;
+    const skipped = new FakeConnection(migrationResults(legacySourceState()));
+    assert.deepEqual((await applyMigrations(skipped, [migration], settings)).pending, [migration.version]);
+    assert.equal(skipped.calls.some(({ sql }) => sql === migration.sql), false);
+    const incomplete = new FakeConnection(migrationResults(legacySourceState()));
+    await assert.rejects(applyMigrations(incomplete, [migration], settings, {
+        allowedEffectKinds: ['add-account-sessions'],
+    }), /Account sessions require all earlier migrations/u);
+    assert.equal(incomplete.calls.some(({ sql }) => sql === migration.sql), false);
+    const original = migrationResults(legacySourceState());
+    const recoverable = new FakeConnection((sql, values) => {
+        if (sql.includes('COUNT(*)') && sql.includes('information_schema.TABLES')
+            && values[0] === migration.tableName) return [{ tableCount: 1 }];
+        return original(sql, values);
+    });
+    await assert.rejects(planMigrations(recoverable, [migration], settings), /all earlier migrations/u);
+    const state = legacySourceState();
+    state.historyExists = true;
+    state.appliedRows.push({ version: migration.version, checksum: migration.checksum });
+    await assert.rejects(planMigrations(new FakeConnection(migrationResults(state)), [migration], settings),
+        /all earlier migrations/u);
 });
 
 test('authorized drop rechecks its source and verifies absence before history', async () => {
