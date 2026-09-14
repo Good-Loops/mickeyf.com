@@ -14,8 +14,10 @@ import type { MigrationConnection } from '../migrations/leaderboardSchema';
 import { loadMigrationManifest } from '../migrations/migrationManifest';
 import { applyMigrations } from '../migrations/migrationRunner';
 import type { SessionProof } from '../security/sessionPolicy';
+import { deleteAccount, deleteProviderAccount } from './accountDeletionRepository';
 import {
-    findProviderAccount, linkProviderAccount, ProviderAccountUnavailableError, type ProviderAccount,
+    createProviderAccount, findProviderAccount, linkProviderAccount, readProviderAccountMethods,
+    ProviderAccountUnavailableError, type ProviderAccount,
 } from './providerAccountRepository';
 
 const config = loadMigrationConfig();
@@ -76,6 +78,9 @@ before(async () => {
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-provider-attempts'] });
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-account-sessions'] });
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-session-renewal'] });
+    await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-unique-user-names'] });
+    await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['allow-passwordless-accounts'] });
+    await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['extend-provider-attempt-actions'] });
     database = mysql.createPool({
         host: config.host, port: config.port, database: config.database, user: config.user, password: config.password,
         connectTimeout: 10000, multipleStatements: false, connectionLimit: 2, dateStrings: true, timezone: 'Z',
@@ -236,7 +241,8 @@ test('provider subjects remain case-sensitive in storage and lookup', async () =
 
 test('two concurrent accounts racing for one subject leave exactly one durable owner', async () => {
     const accounts = [await createAccount('first-race-fixture'), await createAccount('second-race-fixture')];
-    const sessions = await Promise.all(accounts.map(createSession));
+    // Session creation is setup, not this test's race; keep the two concurrent link operations below isolated.
+    const sessions = [await createSession(accounts[0]), await createSession(accounts[1])];
     await preservesUsersAndScores(async () => {
         for (const provider of ['google', 'apple'] as const) {
             const identity = verifiedFixture(provider, 'ContendedProviderSubject');
@@ -330,4 +336,141 @@ test('a valid session for another account cannot authorize the target account li
         assert.deepEqual(await providerRows(), original);
         assert.equal(await findProviderAccount(database, identity), null);
     });
+});
+
+function signupIdentity(subject: string, email = `${subject}@example.test`): VerifiedProviderIdentity {
+    return { provider: 'google', subject, email } as VerifiedProviderIdentity;
+}
+
+async function createPasswordlessFixture(name: string): Promise<{ account: ProviderAccount; identity: VerifiedProviderIdentity }> {
+    const identity = signupIdentity(name);
+    const result = await createProviderAccount(database, identity, name);
+    assert.equal(result.created, true);
+    if (!result.created) throw new Error('Passwordless fixture was not created');
+    return { account: result.account, identity };
+}
+
+async function createPasswordlessSession(account: ProviderAccount): Promise<SessionProof> {
+    const sessionId = randomBytes(32).toString('base64url');
+    assert.equal(await createAccountSession(database, account, sessionId, Math.floor(Date.now() / 1000) + 3600), true);
+    return { accountId: account.accountId, sessionId };
+}
+
+test('passwordless signup stores NULL, links only the verified subject and creates no session before the caller issues one', async () => {
+    const { account, identity } = await createPasswordlessFixture('passwordless-created');
+    const [users] = await administrator.query<RowDataPacket[]>(
+        'SELECT user_password, email FROM users WHERE account_uuid = ?', [account.accountId]);
+    assert.deepEqual(users.map(row => ({ ...row })), [{ user_password: null, email: 'passwordless-created@example.test' }]);
+    assert.deepEqual(await findProviderAccount(database, identity), account);
+    assert.deepEqual(await readProviderAccountMethods(database, account.accountId), { hasPassword: false, googleLinked: true });
+    const [sessions] = await administrator.query<RowDataPacket[]>(
+        'SELECT session_hash FROM account_sessions WHERE account_uuid = ?', [account.accountId]);
+    assert.equal(sessions.length, 0);
+    const session = await createPasswordlessSession(account);
+    const intents: string[] = [];
+    const journal = { async recordAccountDeletion(accountId: string) { intents.push(accountId); } };
+    assert.equal(await deleteAccount(database, account.userId, TEST_PASSWORD, journal, session), 'invalid-password');
+    assert.deepEqual(intents, []);
+    assert.equal(await linkProviderAccount(database, account, TEST_PASSWORD, signupIdentity('another-google'), session), 'invalid-password');
+});
+
+test('username/email collisions and repeated signup never attach to or modify an existing account', async () => {
+    const existing = await createAccount('signup-collision-existing', { scores: false });
+    await preservesUsersAndScores(async () => {
+        const before = await providerRows();
+        assert.deepEqual(await createProviderAccount(database, signupIdentity('unique-google-for-name'), existing.userName.toUpperCase()),
+            { created: false, reason: 'DUPLICATE_USER' });
+        assert.deepEqual(await createProviderAccount(database,
+            signupIdentity('unique-google-for-email', 'SIGNUP-COLLISION-EXISTING@example.test'), 'signup-unique-name'),
+        { created: false, reason: 'DUPLICATE_USER' });
+        assert.deepEqual(await providerRows(), before);
+        assert.deepEqual(await readProviderAccountMethods(database, existing.accountId), { hasPassword: true, googleLinked: false });
+    });
+    const created = await createPasswordlessFixture('signup-repeated-subject');
+    await preservesUsersAndScores(async () => {
+        const before = await providerRows();
+        assert.deepEqual(await createProviderAccount(database, created.identity, 'signup-repeated-new-name'),
+            { created: false, reason: 'ALREADY_LINKED' });
+        assert.deepEqual(await providerRows(), before);
+    });
+});
+
+test('concurrent signup collisions leave exactly one account and identity, never an orphan or reassignment', async () => {
+    for (const collision of ['username', 'subject'] as const) {
+        const names = [0, 1].map(index => `signup-race-${collision}-${collision === 'username' ? 0 : index}`);
+        const identities = [0, 1].map(index => signupIdentity(`Race-${collision}-${collision === 'subject' ? 0 : index}`,
+            `signup-race-${collision}-${index}@example.test`));
+        const connections = await Promise.all([database.getConnection(), database.getConnection()]);
+        const outcomes = await Promise.allSettled(connections.map((connection, index) =>
+            createProviderAccount({ getConnection: async () => connection }, identities[index], names[index])));
+        const created = outcomes.flatMap(outcome => outcome.status === 'fulfilled' && outcome.value.created ? [outcome.value.account] : []);
+        assert.equal(created.length, 1);
+        const [users] = await administrator.query<RowDataPacket[]>(
+            'SELECT account_uuid FROM users WHERE user_name IN (?, ?)', names);
+        assert.equal(users.length, 1, 'The losing transaction must roll back its user insert');
+        const links = (await providerRows()).filter(row => identities.some(identity => row.provider === 'google'
+            && row.subject.equals(Buffer.from(identity.subject))));
+        assert.equal(links.length, 1);
+        assert.equal(links[0].account_uuid, created[0].accountId);
+        for (const outcome of outcomes) {
+            if (outcome.status === 'rejected') assert.ok(outcome.reason instanceof ProviderAccountUnavailableError);
+            else if (!outcome.value.created) assert.equal(outcome.value.reason, collision === 'username' ? 'DUPLICATE_USER' : 'ALREADY_LINKED');
+        }
+    }
+});
+
+test('lost signup commit acknowledgement remains unavailable even when the account durably exists', async () => {
+    const identity = signupIdentity('signup-uncertain-commit');
+    const connection = await database.getConnection();
+    const originalCommit = connection.commit.bind(connection);
+    connection.commit = async () => { await originalCommit(); throw new Error('synthetic lost acknowledgement'); };
+    await assert.rejects(createProviderAccount({ getConnection: async () => connection }, identity, 'signup-uncertain-commit'),
+        ProviderAccountUnavailableError);
+    assert.ok(await findProviderAccount(database, identity));
+    assert.deepEqual(await createProviderAccount(database, identity, 'signup-uncertain-retry'), { created: false, reason: 'ALREADY_LINKED' });
+});
+
+test('fresh Google deletion rejects another subject and removes the exact passwordless account plus dependent rows', async () => {
+    const { account, identity } = await createPasswordlessFixture('provider-delete-passwordless');
+    const session = await createPasswordlessSession(account);
+    await submitP4VegaScore(database, account.userId, 750);
+    await submitThreeBossesRun(database, account.userId, randomUUID(), 60_000);
+    const intents: string[] = [];
+    const journal = { async recordAccountDeletion(accountId: string) { intents.push(accountId); } };
+    await preservesUsersAndScores(async () => {
+        assert.equal(await deleteProviderAccount(database, account.userId,
+            signupIdentity(identity.subject.toUpperCase()), journal, session), 'invalid-password');
+        assert.deepEqual(intents, []);
+    });
+    assert.equal(await deleteProviderAccount(database, account.userId, identity, journal, session), 'deleted');
+    assert.deepEqual(intents, [account.accountId]);
+    assert.equal(await findProviderAccount(database, identity), null);
+    assert.equal(await readProviderAccountMethods(database, account.accountId), null);
+    assert.equal(await readLiveSession(database, account.userId, account.accountId, session.sessionId), null);
+    for (const table of ['game_personal_bests', 'game_submission_receipts']) {
+        const [rows] = await administrator.query<RowDataPacket[]>(`SELECT user_id FROM ${table} WHERE user_id = ?`, [account.userId]);
+        assert.equal(rows.length, 0);
+    }
+});
+
+test('logout, expiry and account-incarnation replacement prevent provider deletion before journaling', async () => {
+    for (const invalidation of ['logout', 'expiry', 'replacement'] as const) {
+        const { account, identity } = await createPasswordlessFixture(`provider-delete-${invalidation}`);
+        const session = await createPasswordlessSession(account);
+        assert.ok(await readLiveSession(database, account.userId, account.accountId, session.sessionId));
+        if (invalidation === 'logout') await revokeAccountSession(database, account.userId, account.accountId, session.sessionId);
+        else if (invalidation === 'expiry') {
+            await administrator.query('UPDATE account_sessions SET expires_at = UTC_TIMESTAMP(6) WHERE session_hash = ?',
+                [createHash('sha256').update(session.sessionId, 'ascii').digest()]);
+        } else {
+            await administrator.query('DELETE FROM users WHERE user_id = ?', [account.userId]);
+            await createAccount('provider-delete-replacement-current', { userId: account.userId, scores: false });
+        }
+        const intents: string[] = [];
+        await preservesUsersAndScores(async () => {
+            assert.equal(await deleteProviderAccount(database, account.userId, identity,
+                { async recordAccountDeletion(accountId) { intents.push(accountId); } }, session), 'not-found');
+            assert.deepEqual(intents, []);
+        });
+    }
 });

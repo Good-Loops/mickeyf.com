@@ -1,7 +1,7 @@
 import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { isAccountId } from '../accounts/deletionJournal';
 
-export type ProviderAttemptAction = 'login' | 'link';
+export type ProviderAttemptAction = 'login' | 'link' | 'signup' | 'delete';
 export type ProviderAttempt = Readonly<{
     stateHash: Buffer;
     bindingHash: Buffer;
@@ -38,7 +38,7 @@ function validNonce(nonce: unknown): nonce is string {
 }
 
 function validTarget(action: ProviderAttemptAction, target: { userId: unknown; accountId: unknown }): boolean {
-    return action === 'login' ? target.userId === null && target.accountId === null
+    return action === 'login' || action === 'signup' ? target.userId === null && target.accountId === null
         : Number.isSafeInteger(target.userId) && Number(target.userId) > 0
             && Number(target.userId) <= 2_147_483_647 && isAccountId(target.accountId);
 }
@@ -47,7 +47,7 @@ function assertBinding(stateHash: Buffer, bindingHash: Buffer, clientKey: string
     if (!Buffer.isBuffer(stateHash) || stateHash.length !== 32
         || !Buffer.isBuffer(bindingHash) || bindingHash.length !== 32
         || typeof clientKey !== 'string' || !/^[\x21-\x7e]{1,64}$/.test(clientKey)
-        || (action !== 'login' && action !== 'link')) {
+        || !['login', 'link', 'signup', 'delete'].includes(action)) {
         throw new TypeError('A valid provider attempt binding is required.');
     }
 }

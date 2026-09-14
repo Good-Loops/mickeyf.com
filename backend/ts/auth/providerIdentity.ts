@@ -10,5 +10,7 @@ declare const verifiedProviderIdentity: unique symbol;
 export type VerifiedProviderIdentity = Readonly<{
     provider: IdentityProvider;
     subject: string;
+    /** Optional Google-signed verified contact email; never an identity/link key. */
+    email?: string;
     [verifiedProviderIdentity]: true;
 }>;

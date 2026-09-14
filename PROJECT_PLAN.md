@@ -2562,7 +2562,20 @@ itself activate, implement or defer both providers.
   real-account acceptance, a published privacy policy before public activation,
   approved native Apple capability/profile,
   focused real-provider acceptance and native Google SDK/client configuration.
-  Provider-only signup remains subject to the age/consent backlog.
+  **Passwordless signup checkpoint (2026-09-14):** owner-approved Google-web
+  signup now has a direct official button, username onboarding, atomic NULL-password
+  user/Google-link creation and the shared renewable session. Fresh Google proof
+  also authorizes deletion of that account under its live-session/deletion-journal
+  safeguards; password accounts keep their existing flow. Opt-in migrations
+  0013–0015 enforce username uniqueness, nullable passwords and purpose-bound
+  signup/delete challenges. Public signup remains disabled and subject to the
+  age/consent backlog; production requires available deletion, reviewed grants,
+  migration and explicit deployment approval. No native Google or cloud rollout.
+  **Bounded follow-up:** one isolated fixture reported `AccountSessionUnavailableError`
+  while creating sessions concurrently for different accounts. Cause is unproven;
+  serialized setup preserves the provider-link race being tested, but does not
+  prove parallel session creation fixed. Reproduce with sanitized SQL error codes
+  during the session reliability pass; production session code is unchanged here.
   See [scope, migration boundary and remaining steps](backend/PROVIDER_SIGN_IN.md).
   The owner approved the CORS-only backend deployment for exactly
   `capacitor://localhost`, and renewed the same temporary Node/OpenSSL exception

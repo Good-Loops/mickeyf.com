@@ -68,13 +68,21 @@ export function createMainController({
         }
 
         const hashedPassword = await bcrypt.hash(password, PASSWORD_HASH_COST);
-        await database.query(
-            {
-                sql: 'INSERT INTO users (user_name, email, user_password) VALUES (?, ?, ?)',
-                timeout: DATABASE_QUERY_TIMEOUT_MS,
-            },
-            [userName, email, hashedPassword]
-        );
+        try {
+            await database.query(
+                {
+                    sql: 'INSERT INTO users (user_name, email, user_password) VALUES (?, ?, ?)',
+                    timeout: DATABASE_QUERY_TIMEOUT_MS,
+                },
+                [userName, email, hashedPassword]
+            );
+        } catch (error) {
+            // Unique keys also protect the race between preflight and INSERT.
+            if (error && typeof error === 'object' && 'errno' in error && error.errno === 1062) {
+                return res.json({ error: 'DUPLICATE_USER', status: 409 });
+            }
+            throw error;
+        }
         return res.json({ success: true });
     }
 
@@ -105,7 +113,7 @@ export function createMainController({
             user?.user_password ?? DUMMY_PASSWORD_HASH
         );
 
-        if (!user || !passwordMatches) {
+        if (!user || user.user_password === null || !passwordMatches) {
             return res.json({ error: 'AUTH_FAILED' });
         }
 

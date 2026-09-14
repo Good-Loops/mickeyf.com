@@ -32,7 +32,7 @@ type AuthContextType = {
     deleteAccount: (password: string) => Promise<DeleteAccountResponse>;
     authenticateWithProvider: (input: ProviderAuthenticationInput, acquireCredential: AcquireProviderCredential,
         options?: ProviderAuthenticationOptions) => Promise<ProviderAuthenticationResult>;
-    prepareProviderLogin: (clientKey: string, options?: ProviderAuthenticationOptions) => Promise<PrepareProviderLoginResult>;
+    prepareProviderLogin: (clientKey: string, options?: ProviderAuthenticationOptions, action?: 'login' | 'signup') => Promise<PrepareProviderLoginResult>;
     completeProviderLogin: (handle: PreparedProviderLogin, idToken: string,
         options?: CompleteProviderLoginOptions) => Promise<ProviderAuthenticationResult>;
 };
@@ -168,12 +168,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             sessionMayExist.current = true;
             renewalActivity.current?.resetCooldown();
         }
+        if ('deleted' in result) {
+            setIsAuthenticated(false);
+            setUserName(null);
+            sessionMayExist.current = false;
+        }
         return result;
     };
 
-    const prepareProviderLogin: AuthContextType['prepareProviderLogin'] = async (clientKey, options) => {
+    const prepareProviderLogin: AuthContextType['prepareProviderLogin'] = async (clientKey, options, action) => {
         const actionVersion = authActionVersion.current;
-        const result = await prepareProviderLoginRequest(clientKey, options);
+        const result = await prepareProviderLoginRequest(clientKey, options, action);
         if (actionVersion !== authActionVersion.current) return { error: 'CANCELLED' };
         if ('handle' in result) preparedLoginVersions.current.set(result.handle, actionVersion);
         return result;

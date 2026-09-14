@@ -39,7 +39,7 @@ test('provider configuration requires exact opt-in and ignores unused identifier
     for (const value of [undefined, '', 'false', 'TRUE', '1', 'yes', ' true ']) {
         const config = loadProviderAuthConfig({ PROVIDER_AUTH_ENABLED: value,
             GOOGLE_WEB_CLIENT_ID: 'malformed unused value', APPLE_IOS_BUNDLE_ID: '', GOOGLE_IOS_CLIENT_ID: 'unused' });
-        assert.deepEqual(config, { enabled: false, clients: {}, publicClients: [] });
+        assert.deepEqual(config, { enabled: false, signupEnabled: false, clients: {}, publicClients: [] });
         assert.equal(Object.isFrozen(config), true);
         assert.equal(Object.isFrozen(config.clients), true);
         assert.equal(Object.isFrozen(config.publicClients), true);
@@ -56,6 +56,20 @@ test('enabled configuration requires a supported client and rejects premature na
     assert.deepEqual(Object.keys(googleOnly.clients), ['google-web']);
     const appleOnly = loadProviderAuthConfig({ PROVIDER_AUTH_ENABLED: 'true', APPLE_IOS_BUNDLE_ID: appleIosId });
     assert.deepEqual(Object.keys(appleOnly.clients), ['apple-ios']);
+});
+
+test('Google signup requires its own exact opt-in and is advertised only for configured web Google', () => {
+    const enabled = loadProviderAuthConfig({ ...enabledEnvironment, PROVIDER_GOOGLE_SIGNUP_ENABLED: 'true' });
+    assert.equal(enabled.signupEnabled, true);
+    assert.ok('signup' in enabled.publicClients[0] && enabled.publicClients[0].signup === true);
+    assert.equal('signup' in enabled.publicClients[1], false);
+    for (const value of [undefined, 'false', 'TRUE', '1']) {
+        const config = loadProviderAuthConfig({ ...enabledEnvironment, PROVIDER_GOOGLE_SIGNUP_ENABLED: value });
+        assert.equal(config.signupEnabled, false);
+        assert.equal('signup' in config.publicClients[0], false);
+    }
+    assert.throws(() => loadProviderAuthConfig({ PROVIDER_AUTH_ENABLED: 'true', APPLE_IOS_BUNDLE_ID: appleIosId,
+        PROVIDER_GOOGLE_SIGNUP_ENABLED: 'true' }), /requires GOOGLE_WEB_CLIENT_ID/);
 });
 
 test('Google client configuration rejects empty, whitespace, multiple, URL and malformed audiences without echoing input', () => {

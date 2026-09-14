@@ -20,12 +20,14 @@ type UserOperation =
     | ({ type: 'signup' } & SignupPayload);
 
 export type ProviderAuthenticationInput = Readonly<{
-    action: 'login' | 'link'; clientKey: string; rememberMe?: boolean; password?: string;
+    action: 'login' | 'link' | 'signup' | 'delete'; clientKey: string; rememberMe?: boolean; password?: string;
+    userName?: string; confirmation?: 'DELETE';
 }>;
 export type ProviderAuthenticationChallenge = Readonly<{ state: string; nonce: string; expiresInSeconds: number }>;
 export type ProviderAuthenticationResult =
     | { success: true; user_name: string }
     | { success: true; linked: true }
+    | { success: true; deleted: true }
     | { error: string };
 export type AcquireProviderCredential = (challenge: ProviderAuthenticationChallenge, signal: AbortSignal) => Promise<string>;
 export type ProviderAuthenticationOptions = Readonly<{ signal?: AbortSignal }>;
@@ -35,7 +37,8 @@ export type PreparedProviderLogin = Readonly<{ [preparedProviderLogin]: true }>;
 export type PrepareProviderLoginResult =
     | { challenge: ProviderAuthenticationChallenge; handle: PreparedProviderLogin }
     | { error: string };
-export type CompleteProviderLoginOptions = ProviderAuthenticationOptions & Readonly<{ rememberMe?: boolean }>;
+export type CompleteProviderLoginOptions = ProviderAuthenticationOptions & Readonly<{ rememberMe?: boolean; userName?: string }>;
+export type ProviderAccountMethods = Readonly<{ hasPassword: boolean; googleLinked: boolean; googleDeletionEnabled: boolean }>;
 
 const PROVIDER_TOKEN_MAX_LENGTH = 16_384;
 const PROVIDER_RANDOM_VALUE = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
@@ -44,6 +47,8 @@ const PROVIDER_FAILURE_STATUSES: Readonly<Record<string, number>> = {
     UNAVAILABLE: 503, INVALID_REQUEST: 400, INVALID_CONTEXT: 403, BUSY: 503,
     INVALID_ATTEMPT: 400, INVALID_PROVIDER_TOKEN: 401, NOT_LINKED: 403,
     INVALID_PASSWORD: 403, LINK_CONFLICT: 409, ACCOUNT_GONE: 401, RATE_LIMITED: 429,
+    ALREADY_LINKED: 409, DUPLICATE_USER: 409, INVALID_USERNAME: 400, INVALID_EMAIL: 400,
+    ACCOUNT_DELETION_UNAVAILABLE: 503, ACCOUNT_DELETION_PENDING: 503,
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -55,14 +60,25 @@ function hasKeys(value: Record<string, unknown>, keys: string): boolean {
 }
 
 function validProviderInput(input: unknown): input is ProviderAuthenticationInput {
-    if (!isRecord(input) || Object.keys(input).some(key => !['action', 'clientKey', 'rememberMe', 'password'].includes(key))
+    if (!isRecord(input) || Object.keys(input).some(key => !['action', 'clientKey', 'rememberMe', 'password', 'userName', 'confirmation'].includes(key))
         || typeof input.clientKey !== 'string' || !/^[a-z0-9_-]{1,64}$/.test(input.clientKey)) return false;
+    if (input.action === 'delete') return input.clientKey === 'google-web' && input.confirmation === 'DELETE'
+        && input.password === undefined && input.rememberMe === undefined && input.userName === undefined;
+    if (input.confirmation !== undefined) return false;
+    if (input.action === 'signup') return input.clientKey === 'google-web' && validProviderUserName(input.userName)
+        && input.password === undefined && (input.rememberMe === undefined || typeof input.rememberMe === 'boolean');
+    if (input.userName !== undefined) return false;
     if (input.action === 'login') {
         return input.password === undefined && (input.rememberMe === undefined || typeof input.rememberMe === 'boolean');
     }
     return input.action === 'link' && input.rememberMe === undefined
         && typeof input.password === 'string' && input.password.length > 0 && input.password.length <= 72
         && new TextEncoder().encode(input.password).length <= 72 && !CONTROL_CHARACTERS.test(input.password);
+}
+
+function validProviderUserName(value: unknown): value is string {
+    return typeof value === 'string' && value.trim().length > 0 && value.trim().length <= 64
+        && !CONTROL_CHARACTERS.test(value);
 }
 
 function validProviderOptions(options: unknown): options is ProviderAuthenticationOptions {
@@ -73,8 +89,9 @@ function validProviderOptions(options: unknown): options is ProviderAuthenticati
 }
 
 function validCompletionOptions(options: unknown): options is CompleteProviderLoginOptions {
-    return isRecord(options) && Object.keys(options).every(key => key === 'signal' || key === 'rememberMe')
+    return isRecord(options) && Object.keys(options).every(key => key === 'signal' || key === 'rememberMe' || key === 'userName')
         && (options.rememberMe === undefined || typeof options.rememberMe === 'boolean')
+        && (options.userName === undefined || validProviderUserName(options.userName))
         && validProviderOptions({ signal: options.signal });
 }
 
@@ -137,6 +154,7 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
     let providerLoginGeneration = 0;
     type PreparedLogin = {
         clientKey: string; state: string; deadline: number;
+        action: 'login' | 'signup';
         generation: number; signal?: AbortSignal; used: boolean;
     };
     const preparedLogins = new WeakMap<PreparedProviderLogin, PreparedLogin>();
@@ -216,6 +234,17 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
             throw new Error(`HTTP error ${response.status}`);
         }
         return response.json();
+    }
+
+    async function providerAccountMethodsRequest(): Promise<ProviderAccountMethods | null> {
+        try {
+            const response = await fetchRequest(`${apiBase}/auth/providers/account`, { method: 'GET', credentials: 'include' });
+            if (!response.ok) return null;
+            const result: unknown = await response.json();
+            return isRecord(result) && hasKeys(result, 'googleDeletionEnabled,googleLinked,hasPassword')
+                && typeof result.hasPassword === 'boolean' && typeof result.googleLinked === 'boolean'
+                && typeof result.googleDeletionEnabled === 'boolean' ? result as ProviderAccountMethods : null;
+        } catch { return null; }
     }
 
     async function renewRequest(): Promise<VerificationResponse> {
@@ -320,7 +349,9 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
         // if UI cancellation arrives. Cancelling cannot undo a server-side login.
         const completion = await postProviderOperation('complete', {
             action: input.action, clientKey: input.clientKey, state, idToken,
-            ...(input.action === 'login' ? { rememberMe: input.rememberMe === true } : { password: input.password }),
+            ...(input.action === 'login' || input.action === 'signup' ? { rememberMe: input.rememberMe === true }
+                : input.action === 'link' ? { password: input.password } : { confirmation: 'DELETE' }),
+            ...(input.action === 'signup' ? { userName: input.userName } : {}),
         });
         if (!completion.ok) return { error: completion.error };
         const result = completion.body;
@@ -329,6 +360,8 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
             return hasKeys(result, 'linked,success') && result.linked === true
                 ? { success: true, linked: true } : { error: 'INVALID_RESPONSE' };
         }
+        if (input.action === 'delete') return hasKeys(result, 'deleted,success') && result.deleted === true
+            ? { success: true, deleted: true } : { error: 'INVALID_RESPONSE' };
         if (!hasKeys(result, 'success,user_name') || typeof result.user_name !== 'string'
             || result.user_name.length < 1 || result.user_name.length > 255 || CONTROL_CHARACTERS.test(result.user_name)) {
             return { error: 'INVALID_RESPONSE' };
@@ -343,8 +376,10 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
         return { success: true, user_name: result.user_name };
     }
 
-    function prepareProviderLogin(clientKey: string, options: ProviderAuthenticationOptions = {}): Promise<PrepareProviderLoginResult> {
-        if (!validProviderInput({ action: 'login', clientKey }) || !validProviderOptions(options)) {
+    function prepareProviderLogin(clientKey: string, options: ProviderAuthenticationOptions = {},
+        action: 'login' | 'signup' = 'login'): Promise<PrepareProviderLoginResult> {
+        if (!validProviderInput({ action: 'login', clientKey }) || !validProviderOptions(options)
+            || (action !== 'login' && (action !== 'signup' || clientKey !== 'google-web'))) {
             return Promise.resolve({ error: 'INVALID_REQUEST' });
         }
         const signal = options.signal;
@@ -355,7 +390,7 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
             const startedAt = Date.now();
             // Begin changes the cookie too. Even an abandoned render must wait
             // for this response before a password login can use the queue.
-            const beginning = await postProviderOperation('begin', { action: 'login', clientKey });
+            const beginning = await postProviderOperation('begin', { action, clientKey });
             if (signal?.aborted || generation !== providerLoginGeneration) return { error: 'CANCELLED' };
             if (!beginning.ok) return { error: beginning.error };
             const challenge = readProviderChallenge(beginning.body);
@@ -363,7 +398,7 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
             const deadline = startedAt + challenge.expiresInSeconds * 1000;
             if (Date.now() >= deadline) return { error: 'INVALID_ATTEMPT' };
             const handle = Object.freeze({}) as PreparedProviderLogin;
-            preparedLogins.set(handle, { clientKey, state: challenge.state, deadline, generation, signal, used: false });
+            preparedLogins.set(handle, { clientKey, action, state: challenge.state, deadline, generation, signal, used: false });
             return { challenge, handle };
         });
     }
@@ -373,16 +408,21 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
         if (!validCompletionOptions(options)) return Promise.resolve({ error: 'INVALID_REQUEST' });
         const login = isRecord(handle) ? preparedLogins.get(handle) : undefined;
         if (!login || login.used) return Promise.resolve({ error: 'INVALID_ATTEMPT' });
+        if (login.action === 'signup' ? !validProviderUserName(options.userName) : options.userName !== undefined) {
+            return Promise.resolve({ error: 'INVALID_REQUEST' });
+        }
         login.used = true;
         const signal = options.signal;
         const error = preparedLoginError(login, signal);
         if (error) return Promise.resolve({ error });
         if (!validProviderToken(idToken)) return Promise.resolve({ error: 'INVALID_PROVIDER_TOKEN' });
         const rememberMe = options.rememberMe === true;
+        const userName = options.userName?.trim();
         return enqueueMutation(async () => {
             const queuedError = preparedLoginError(login, signal);
             if (queuedError) return { error: queuedError };
-            return completeProviderAuthentication({ action: 'login', clientKey: login.clientKey, rememberMe },
+            return completeProviderAuthentication({ action: login.action, clientKey: login.clientKey, rememberMe,
+                ...(login.action === 'signup' ? { userName } : {}) },
                 login.state, idToken);
         });
     }
@@ -399,6 +439,7 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
             return enqueueMutation(() => signupRequest(request));
         },
         verifyRequest,
+        providerAccountMethodsRequest,
         renewRequest: () => enqueueMutation(async () => {
             try {
                 const result = await renewRequest();

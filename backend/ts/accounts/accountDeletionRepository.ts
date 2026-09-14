@@ -3,9 +3,12 @@ import { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/pro
 import { withUserSubmissionLock } from '../leaderboards/userSubmissionLock';
 import { assertAccountId, type AccountDeletionJournal } from './deletionJournal';
 import { readLiveSession } from '../auth/accountSessionRepository';
-import type { SessionProof } from '../security/sessionPolicy';
+import type { VerifiedProviderIdentity } from '../auth/providerIdentity';
+import { isSessionId, type SessionProof } from '../security/sessionPolicy';
 
-type AccountPasswordRow = RowDataPacket & { passwordHash: string; accountId: string };
+type AccountPasswordRow = RowDataPacket & { passwordHash: string | null; accountId: string };
+type AccountReauthentication = (connection: PoolConnection, account: AccountPasswordRow)
+    => Promise<'authenticated' | 'not-found' | 'invalid-password'>;
 
 export type AccountDeletionResult = 'deleted' | 'not-found' | 'invalid-password';
 
@@ -31,7 +34,7 @@ export class AccountDeletionRollbackError extends Error {
 async function deleteAuthenticatedAccount(
     connection: PoolConnection,
     userId: number,
-    password: string,
+    reauthenticate: AccountReauthentication,
     recordDeletion: (accountId: string) => Promise<void>
 ): Promise<AccountDeletionResult> {
     const [accounts] = await connection.query<AccountPasswordRow[]>(
@@ -43,10 +46,9 @@ async function deleteAuthenticatedAccount(
         [userId]
     );
     if (!accounts[0]) return 'not-found';
-    if (!await bcrypt.compare(password, accounts[0].passwordHash)) {
-        return 'invalid-password';
-    }
     assertAccountId(accounts[0].accountId);
+    const authentication = await reauthenticate(connection, accounts[0]);
+    if (authentication !== 'authenticated') return authentication;
     // This intent must survive SQL rollback. Never delete if persistence of
     // the independently stored intent has not been acknowledged.
     await recordDeletion(accounts[0].accountId);
@@ -94,6 +96,48 @@ export async function deleteAccount(
     if (typeof password !== 'string') {
         throw new TypeError('Account deletion requires a password string.');
     }
+    return deleteReauthenticatedAccount(database, userId, journal, expectedSession, async (_connection, account) =>
+        typeof account.passwordHash === 'string' && await bcrypt.compare(password, account.passwordHash)
+            ? 'authenticated' : 'invalid-password');
+}
+
+/** Fresh provider verification is bound to the exact linked subject, incarnation and live device session. */
+export async function deleteProviderAccount(
+    database: Pick<Pool, 'getConnection'>,
+    userId: number,
+    identity: VerifiedProviderIdentity,
+    journal: AccountDeletionJournal,
+    expectedSession: SessionProof,
+): Promise<AccountDeletionResult> {
+    if (!expectedSession || !isSessionId(expectedSession.sessionId)) {
+        throw new TypeError('Provider account deletion requires an authenticated session proof.');
+    }
+    assertAccountId(expectedSession.accountId);
+    if (!identity || identity.provider !== 'google' || typeof identity.subject !== 'string'
+        || !/^[\x21-\x7e]{1,255}$/.test(identity.subject)) return 'invalid-password';
+    const subject = Buffer.from(identity.subject, 'ascii');
+    const proof = { ...expectedSession };
+    return deleteReauthenticatedAccount(database, userId, journal, proof, async (connection, account) => {
+        if (account.accountId !== proof.accountId) return 'not-found';
+        const [links] = await connection.query<RowDataPacket[]>({
+            sql: `SELECT subject FROM account_provider_identities
+                WHERE account_uuid = ? AND provider = 'google' LIMIT 2 FOR SHARE`,
+            timeout: DATABASE_QUERY_TIMEOUT_MS,
+        }, [proof.accountId]);
+        if (!Array.isArray(links) || links.length > 1) throw new Error('Provider account linkage could not be verified.');
+        if (!links[0] || !Buffer.isBuffer(links[0].subject) || !links[0].subject.equals(subject)) return 'invalid-password';
+        // Verification or the row-lock wait may outlive expiry. Check again immediately before journaling.
+        return await readLiveSession(connection, userId, proof.accountId, proof.sessionId) ? 'authenticated' : 'not-found';
+    });
+}
+
+async function deleteReauthenticatedAccount(
+    database: Pick<Pool, 'getConnection'>,
+    userId: number,
+    journal: AccountDeletionJournal,
+    expectedSession: SessionProof | undefined,
+    reauthenticate: AccountReauthentication,
+): Promise<AccountDeletionResult> {
     if (!journal || typeof journal.recordAccountDeletion !== 'function') {
         throw new TypeError('Account deletion requires an independent journal.');
     }
@@ -116,7 +160,7 @@ export async function deleteAccount(
                         return 'not-found';
                     }
 
-                    const result = await deleteAuthenticatedAccount(connection, userId, password, async accountId => {
+                    const result = await deleteAuthenticatedAccount(connection, userId, reauthenticate, async accountId => {
                         await journal.recordAccountDeletion(accountId);
                         recorded = true;
                     });

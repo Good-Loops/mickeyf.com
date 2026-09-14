@@ -6,6 +6,7 @@ import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Swal from "@/components/siteAlert";
 import StaySignedInCheckbox from "@/components/StaySignedInCheckbox";
+import ProviderSignInControls from "@/components/ProviderSignInControls";
 import { signupRequest } from "@/services/authService";
 import { useAuth } from "@/context/AuthContext";
 import { signupAndLogin } from "./signupFlow.ts";
@@ -16,9 +17,17 @@ const SignUp: React.FC = () => {
     const [userPassword, setUserPassword] = useState("");
     const [rememberMe, setRememberMe] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [providerBusy, setProviderBusy] = useState(false);
+    const busy = loading || providerBusy;
     const submitting = useRef(false);
     const { login } = useAuth();
     const navigate = useNavigate();
+    const showSignupSuccess = async () => {
+        await Swal.fire({ title: "You're all set!",
+            text: "Your account is ready and you're logged in. Go break some records!",
+            icon: "success", confirmButtonText: "Let's go" });
+        navigate("/");
+    };
 
     const handleSubmit = async (event: React.FormEvent) => {
         event.preventDefault();
@@ -68,13 +77,7 @@ const SignUp: React.FC = () => {
                 setUserPassword("");
 
                 if (result.status === "authenticated") {
-                    await Swal.fire({
-                        title: "You're all set!",
-                        text: "Your account is ready and you're logged in. Go break some records!",
-                        icon: "success",
-                        confirmButtonText: "Let's go",
-                    });
-                    navigate("/");
+                    await showSignupSuccess();
                 } else {
                     // Registration succeeded: never ask the user to create it again.
                     await Swal.fire({
@@ -103,11 +106,12 @@ const SignUp: React.FC = () => {
         <section className="signup" aria-labelledby="signup-title">
             <h1 id="signup-title" className="u-visually-hidden">Sign up</h1>
             <div className="signup__form-wrapper">
-                <form className="signup__form" onSubmit={handleSubmit} aria-busy={loading}>
+                <form className="signup__form" onSubmit={handleSubmit} aria-busy={busy}>
                     <label className="signup__field" htmlFor="signup-username">
                         <span className="signup__label">Username</span>
                         <input
                             id="signup-username"
+                            disabled={busy}
                             className="signup__input"
                             type="text"
                             name="user_name"
@@ -123,6 +127,7 @@ const SignUp: React.FC = () => {
                         <span className="signup__label">Email</span>
                         <input
                             id="signup-email"
+                            disabled={busy}
                             className="signup__input"
                             type="text"
                             name="email"
@@ -139,6 +144,7 @@ const SignUp: React.FC = () => {
                         <span className="signup__label">Password</span>
                         <input
                             id="signup-password"
+                            disabled={busy}
                             className="signup__input"
                             type="password"
                             name="user_password"
@@ -148,11 +154,14 @@ const SignUp: React.FC = () => {
                             onChange={(inputEvent) => setUserPassword(inputEvent.target.value)}
                         />
                     </label>
-                    <StaySignedInCheckbox checked={rememberMe} onChange={setRememberMe} disabled={loading} />
-                    <button className="signup__submit" type="submit" disabled={loading}>
+                    <StaySignedInCheckbox checked={rememberMe} onChange={setRememberMe} disabled={busy} />
+                    <button className="signup__submit" type="submit" disabled={busy}>
                         {loading ? "Signing up…" : "Sign up"}
                     </button>
                 </form>
+                <ProviderSignInControls action="signup" userName={userName} rememberMe={rememberMe}
+                    disabled={loading} operationLock={submitting} onBusyChange={setProviderBusy}
+                    onSuccess={() => { void showSignupSuccess(); }} />
             </div>
         </section>
     );

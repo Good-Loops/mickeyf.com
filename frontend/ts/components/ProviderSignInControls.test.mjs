@@ -70,11 +70,12 @@ test('provider activity announces progress and disables all other choices', () =
     assert.equal((rendered.match(/ disabled=""/g) ?? []).length, 2);
 });
 
-test('unlinked identity guidance names the password and Manage account recovery path', () => {
+test('unlinked identity guidance names signup and the existing password/Manage account recovery path', () => {
     const message = providerSignInErrorMessage('NOT_LINKED', 'login');
-    assert.match(message, /username and password/);
+    assert.match(message, /Sign up/);
+    assert.match(message, /password/);
     assert.match(message, /Manage account/);
-    assert.doesNotMatch(message, /automatically|sign up|email/i);
+    assert.doesNotMatch(message, /automatically|email/i);
 });
 
 test('cancellation is quiet and unknown errors cannot inject provider details or claim an unconfirmed result', () => {

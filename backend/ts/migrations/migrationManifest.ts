@@ -4,7 +4,7 @@ import path from 'node:path';
 
 export type LeaderboardTableName = 'game_runs' | 'game_personal_bests';
 
-export type MigrationEffectKind = 'create-table' | 'drop-column' | 'detach-best-source' | 'retain-receipts' | 'add-account-identity' | 'add-provider-identities' | 'add-provider-attempts' | 'add-account-sessions' | 'add-session-renewal';
+export type MigrationEffectKind = 'create-table' | 'drop-column' | 'detach-best-source' | 'retain-receipts' | 'add-account-identity' | 'add-provider-identities' | 'add-provider-attempts' | 'add-account-sessions' | 'add-session-renewal' | 'add-unique-user-names' | 'allow-passwordless-accounts' | 'extend-provider-attempt-actions';
 
 type MigrationMetadata = Readonly<{
     version: string;
@@ -30,6 +30,8 @@ export type MigrationDefinition = MigrationMetadata & Readonly<
     | { effect: 'add-provider-attempts'; tableName: 'provider_auth_attempts' }
     | { effect: 'add-account-sessions'; tableName: 'account_sessions' }
     | { effect: 'add-session-renewal'; tableName: 'account_sessions' }
+    | { effect: 'add-unique-user-names' | 'allow-passwordless-accounts'; tableName: 'users' }
+    | { effect: 'extend-provider-attempt-actions'; tableName: 'provider_auth_attempts' }
 >;
 
 const MIGRATION_SPECS = Object.freeze([
@@ -96,6 +98,21 @@ const MIGRATION_SPECS = Object.freeze([
         fileName: '0012_add_session_renewal.sql',
         effect: 'add-session-renewal' as const,
         tableName: 'account_sessions' as const,
+    }),
+    Object.freeze({
+        fileName: '0013_add_unique_user_names.sql',
+        effect: 'add-unique-user-names' as const,
+        tableName: 'users' as const,
+    }),
+    Object.freeze({
+        fileName: '0014_allow_passwordless_accounts.sql',
+        effect: 'allow-passwordless-accounts' as const,
+        tableName: 'users' as const,
+    }),
+    Object.freeze({
+        fileName: '0015_extend_provider_attempt_actions.sql',
+        effect: 'extend-provider-attempt-actions' as const,
+        tableName: 'provider_auth_attempts' as const,
     }),
 ]);
 

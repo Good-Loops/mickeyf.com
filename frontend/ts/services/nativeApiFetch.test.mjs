@@ -137,12 +137,12 @@ test('native deletion and logout clear local credentials only after confirmed se
     assert.match(native, /LudolumeApiPolicy\.clearSessionCookie\(completion: finish\)/);
 });
 
-test('native provider transport admits only the three explicit provider routes within the backend body limit', async () => {
+test('native provider transport admits only explicit provider routes within the backend body limit', async () => {
     const native = await readFile(new URL('../../ios/App/App/LudolumeApiPlugin.swift', import.meta.url), 'utf8');
     const providerRoutes = [...native.matchAll(/"((?:GET|POST) \/auth\/providers\/[^"\n]+)"/g)]
         .map((match) => match[1]);
     assert.deepEqual(providerRoutes, [
-        'GET /auth/providers/config', 'POST /auth/providers/begin', 'POST /auth/providers/complete',
+        'GET /auth/providers/config', 'GET /auth/providers/account', 'POST /auth/providers/begin', 'POST /auth/providers/complete',
     ]);
     assert.match(native, /maximumRequestBytes = 32 \* 1024/);
     assert.match(native, /bodyData\?\.count \?\? 0\) <= maximumRequestBytes/);

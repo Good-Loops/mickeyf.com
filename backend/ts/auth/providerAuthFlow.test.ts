@@ -4,7 +4,8 @@ import test from 'node:test';
 import jwt from 'jsonwebtoken';
 import { issueSessionToken } from '../security/sessionPolicy';
 import type { Pool } from 'mysql2/promise';
-import type { ProviderAccount, ProviderLinkResult } from '../accounts/providerAccountRepository';
+import type { ProviderAccount, ProviderLinkResult, ProviderAccountCreationResult } from '../accounts/providerAccountRepository';
+import { AccountDeletionPendingError } from '../accounts/accountDeletionRepository';
 import { createProviderAuthContextReader, type ProviderAuthContext } from './providerAuthContext';
 import { createProviderAuthFlow, type ProviderAuthClient, type ProviderAuthFlowDependencies } from './providerAuthFlow';
 import type { ProviderAttempt, ProviderAttemptAction } from './providerAttemptRepository';
@@ -20,10 +21,10 @@ const now = 1_800_000_000;
 const password = ' correct horse ';
 const hash = (value: string) => createHash('sha256').update(value).digest();
 
-function signedToken(nonce: string, provider: IdentityProvider = 'google'): string {
+function signedToken(nonce: string, provider: IdentityProvider = 'google', extra: Record<string, unknown> = {}): string {
     return jwt.sign({
         iss: provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com',
-        aud: `${provider}-audience`, sub: 'opaque-provider-subject', nonce, iat: now - 10, exp: now + 300,
+        aud: `${provider}-audience`, sub: 'opaque-provider-subject', nonce, iat: now - 10, exp: now + 300, ...extra,
     }, key.privateKey, { algorithm: 'RS256', keyid: 'test-key' });
 }
 
@@ -44,7 +45,7 @@ async function trustedContext(currentAccount?: ProviderAccount, bindingByte = 1)
     return context;
 }
 
-async function fixture(currentAccount?: ProviderAccount) {
+async function fixture(currentAccount?: ProviderAccount, newActions = false) {
     const context = await trustedContext(currentAccount);
     const events: string[] = [];
     const pending = new Map<string, ProviderAttempt>();
@@ -57,7 +58,9 @@ async function fixture(currentAccount?: ProviderAccount) {
         verification?: ProviderTokenVerificationResult;
         foundAccount: ProviderAccount | null;
         linkResult: ProviderLinkResult;
-    } = { foundAccount: account, linkResult: 'linked' };
+        creation: ProviderAccountCreationResult;
+        deletion: 'deleted' | 'invalid-password' | 'not-found' | 'pending';
+    } = { foundAccount: account, linkResult: 'linked', creation: { created: true, account }, deletion: 'deleted' };
     function step(name: string) {
         events.push(name);
         if (controls.failAt === name) throw new Error('sensitive token, password, SQL and connection details');
@@ -70,6 +73,8 @@ async function fixture(currentAccount?: ProviderAccount) {
     });
     const verifiedNonces: string[] = [];
     const linkedTargets: unknown[][] = [];
+    const createdAccounts: unknown[][] = [];
+    const deletedAccounts: unknown[][] = [];
     const verifier = {
         async verify(provider: IdentityProvider, token: unknown, nonce: string) {
             step('verify');
@@ -80,6 +85,7 @@ async function fixture(currentAccount?: ProviderAccount) {
     };
     const clients: Record<string, ProviderAuthClient> = {
         'google-native': { provider: 'google', verifier }, 'apple-native': { provider: 'apple', verifier },
+        'google-web': { provider: 'google', verifier },
     };
     Object.setPrototypeOf(clients, { inherited: clients['google-native'] });
     const dependencies: ProviderAuthFlowDependencies = {
@@ -118,18 +124,31 @@ async function fixture(currentAccount?: ProviderAccount) {
                 linkedTargets.push([target, suppliedPassword, identity, session]);
                 return controls.linkResult;
             },
+            async create(identity, userName) {
+                step('signup'); createdAccounts.push([identity, userName]);
+                return controls.creation;
+            },
+            async delete(target, identity, session) {
+                step('delete'); deletedAccounts.push([target, identity, session]);
+                if (controls.deletion === 'pending') throw new AccountDeletionPendingError(new Error('private failure'));
+                return controls.deletion;
+            },
         },
     };
-    const flow = createProviderAuthFlow({ ...dependencies, enabled: true });
+    const flow = createProviderAuthFlow({ ...dependencies, enabled: true, signupEnabled: newActions, deletionEnabled: newActions });
     async function challenge(action: ProviderAttemptAction = currentAccount ? 'link' : 'login') {
-        const result = await flow.begin(context, { clientKey: 'google-native', action });
+        const clientKey = action === 'signup' || action === 'delete' ? 'google-web' : 'google-native';
+        const result = await flow.begin(context, { clientKey, action });
         assert(result.ok);
-        const input = { clientKey: 'google-native', action, state: result.state, idToken: signedToken(result.nonce),
-            ...(action === 'link' ? { password } : {}) };
+        const input = { clientKey, action, state: result.state, idToken: signedToken(result.nonce, 'google',
+            action === 'signup' ? { email: 'new-player@gmail.com', email_verified: true } : {}),
+            ...(action === 'link' ? { password } : {}), ...(action === 'signup' ? { userName: ' new-player ' } : {}),
+            ...(action === 'delete' ? { confirmation: 'DELETE' } : {}) };
         events.length = 0;
         return { result, input };
     }
-    return { flow, context, events, pending, created, controls, dependencies, clients, actualVerifier, verifiedNonces, linkedTargets, challenge };
+    return { flow, context, events, pending, created, controls, dependencies, clients, actualVerifier, verifiedNonces,
+        linkedTargets, createdAccounts, deletedAccounts, challenge };
 }
 
 test('plain request data cannot satisfy the trusted context type', () => {
@@ -363,4 +382,114 @@ test('client configuration captures own keys and is unaffected by later entry re
     const { input } = await f.challenge();
     assert.deepEqual(await f.flow.complete(f.context, input), { ok: true, type: 'account-verified', account });
     assert.throws(() => createProviderAuthFlow({ ...f.dependencies, clients: { 'Bad.Client': replacement } }), /Invalid provider client configuration/);
+});
+
+test('signup and deletion require their separate opt-ins and exact Google web client before attempt work', async () => {
+    const anonymous = await fixture();
+    const authenticated = await fixture(account);
+    assert.deepEqual(await anonymous.flow.begin(anonymous.context, { clientKey: 'google-web', action: 'signup' }),
+        { ok: false, reason: 'UNAVAILABLE' });
+    assert.deepEqual(await authenticated.flow.begin(authenticated.context, { clientKey: 'google-web', action: 'delete' }),
+        { ok: false, reason: 'ACCOUNT_DELETION_UNAVAILABLE' });
+    assert.deepEqual(anonymous.events, []);
+    assert.deepEqual(authenticated.events, []);
+    const enabled = await fixture(undefined, true);
+    for (const action of ['signup', 'delete']) {
+        for (const clientKey of ['google-native', 'apple-native']) {
+            assert.deepEqual(await enabled.flow.begin(enabled.context, { clientKey, action }),
+                { ok: false, reason: 'INVALID_REQUEST' });
+        }
+    }
+    assert.deepEqual(await enabled.flow.begin(enabled.context, { clientKey: 'google-web', action: 'delete' }),
+        { ok: false, reason: 'INVALID_CONTEXT' });
+    assert.deepEqual(await enabled.flow.begin(await trustedContext(account), { clientKey: 'google-web', action: 'signup' }),
+        { ok: false, reason: 'INVALID_CONTEXT' });
+});
+
+test('explicit signup creates only after purpose-bound consumption and verified authoritative email', async () => {
+    const f = await fixture(undefined, true);
+    const { result, input } = await f.challenge('signup');
+    assert.deepEqual(await f.flow.complete(f.context, input), { ok: true, type: 'account-verified', account });
+    assert.deepEqual(f.events, ['consume', 'committed', 'verify', 'signup']);
+    assert.deepEqual(f.createdAccounts, [[{ provider: 'google', subject: 'opaque-provider-subject',
+        email: 'new-player@gmail.com' }, 'new-player']]);
+    assert.equal(f.created[0].action, 'signup');
+    assert.equal(f.created[0].accountId, null);
+    assert.deepEqual(f.verifiedNonces, [result.nonce]);
+    assert.deepEqual(await f.flow.complete(f.context, input), { ok: false, reason: 'INVALID_ATTEMPT' });
+});
+
+test('signup rejects malformed metadata and never accepts email, password or account proof from the client', async () => {
+    const f = await fixture(undefined, true);
+    const { input } = await f.challenge('signup');
+    for (const userName of [undefined, null, '', ' ', 'a'.repeat(65), 'bad\u0000name']) {
+        assert.deepEqual(await f.flow.complete(f.context, { ...input, userName }), { ok: false, reason: 'INVALID_USERNAME' });
+    }
+    for (const extra of [{ email: 'attacker@gmail.com' }, { password: 'not-needed' }, { accountId: account.accountId }, { rememberMe: true }]) {
+        assert.deepEqual(await f.flow.complete(f.context, { ...input, ...extra }), { ok: false, reason: 'INVALID_REQUEST' });
+    }
+    assert.deepEqual(f.events, []);
+    input.idToken = signedToken(f.created[0].nonce, 'google', { email: 'external@example.com', email_verified: true });
+    assert.deepEqual(await f.flow.complete(f.context, input), { ok: false, reason: 'INVALID_EMAIL' });
+    assert.deepEqual(f.events, ['consume', 'committed', 'verify']);
+});
+
+test('signup conflicts never become implicit login or email matching and keep failures sanitized', async () => {
+    for (const reason of ['DUPLICATE_USER', 'ALREADY_LINKED', 'INVALID_USERNAME', 'INVALID_EMAIL'] as const) {
+        const f = await fixture(undefined, true);
+        f.controls.creation = { created: false, reason };
+        const { input } = await f.challenge('signup');
+        assert.deepEqual(await f.flow.complete(f.context, input), { ok: false, reason });
+        assert.deepEqual(f.events, ['consume', 'committed', 'verify', 'signup']);
+        assert.equal(f.linkedTargets.length, 0);
+    }
+    const f = await fixture(undefined, true);
+    const { input } = await f.challenge('signup');
+    f.controls.failAt = 'signup';
+    assert.deepEqual(await f.flow.complete(f.context, input), { ok: false, reason: 'UNAVAILABLE' });
+});
+
+test('login and signup purposes cannot be swapped to authorize account creation', async () => {
+    const f = await fixture(undefined, true);
+    const result = await f.flow.begin(f.context, { clientKey: 'google-web', action: 'login' });
+    assert.ok(result.ok);
+    f.events.length = 0;
+    const input = { action: 'signup', clientKey: 'google-web', state: result.state, userName: 'new-player',
+        idToken: signedToken(result.nonce, 'google', { email: 'new-player@gmail.com', email_verified: true }) };
+    assert.deepEqual(await f.flow.complete(f.context, input), { ok: false, reason: 'INVALID_ATTEMPT' });
+    assert.deepEqual(f.events, ['consume']);
+    assert.equal(f.pending.size, 1);
+});
+
+test('Google deletion requires exact confirmation, fresh purpose-bound token and the current live session proof', async () => {
+    const f = await fixture(account, true);
+    const { input, result } = await f.challenge('delete');
+    assert.deepEqual(await f.flow.complete(f.context, { ...input, confirmation: 'delete' }), { ok: false, reason: 'INVALID_REQUEST' });
+    assert.deepEqual(await f.flow.complete({ ...f.context, session: null }, input), { ok: false, reason: 'INVALID_CONTEXT' });
+    assert.deepEqual(f.events, []);
+    assert.deepEqual(await f.flow.complete(f.context, input), { ok: true, type: 'deleted' });
+    assert.deepEqual(f.events, ['consume', 'committed', 'verify', 'delete']);
+    assert.deepEqual(f.deletedAccounts, [[{ userId: account.userId, accountId: account.accountId },
+        { provider: 'google', subject: 'opaque-provider-subject' }, f.context.session]]);
+    assert.deepEqual(f.verifiedNonces, [result.nonce]);
+    assert.equal(f.created[0].action, 'delete');
+    assert.deepEqual(await f.flow.complete(f.context, input), { ok: false, reason: 'INVALID_ATTEMPT' });
+});
+
+test('Google deletion rejects an old token, mismatched identity, removed account and uncertain journal outcome', async () => {
+    for (const [deletion, reason] of [['invalid-password', 'INVALID_PROVIDER_TOKEN'], ['not-found', 'ACCOUNT_GONE'],
+        ['pending', 'ACCOUNT_DELETION_PENDING']] as const) {
+        const f = await fixture(account, true);
+        f.controls.deletion = deletion;
+        const { input } = await f.challenge('delete');
+        assert.deepEqual(await f.flow.complete(f.context, input), { ok: false, reason });
+    }
+    const f = await fixture(account, true);
+    const { input } = await f.challenge('delete');
+    input.idToken = signedToken('a'.repeat(43));
+    assert.deepEqual(await f.flow.complete(f.context, input), { ok: false, reason: 'INVALID_PROVIDER_TOKEN' });
+    assert.deepEqual(f.deletedAccounts, []);
+    const fresh = await f.challenge('delete');
+    f.controls.failAt = 'delete';
+    assert.deepEqual(await f.flow.complete(f.context, fresh.input), { ok: false, reason: 'ACCOUNT_DELETION_UNAVAILABLE' });
 });

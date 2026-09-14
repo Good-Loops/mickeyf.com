@@ -3,11 +3,13 @@ import { useAuth } from '@/context/AuthContext';
 import { acquireGoogleCredentialInline, acquireProviderCredential, getAvailableProviderClients,
     type PublicProviderClient } from '@/services/providerClient';
 import Swal from './siteAlert';
+import { requestProviderUsername } from './providerSignupPrompt';
 
-type ProviderAction = 'login' | 'link';
+type ProviderAction = 'login' | 'link' | 'signup';
 type ProviderSignInControlsProps = {
     action: ProviderAction;
     rememberMe?: boolean;
+    userName?: string;
     disabled?: boolean;
     /** Shared with the surrounding form to guard clicks before React renders disabled controls. */
     operationLock?: { current: boolean };
@@ -15,19 +17,27 @@ type ProviderSignInControlsProps = {
     onSuccess?: () => void;
 };
 
-export function providerSignInErrorMessage(error: string, action: ProviderAction): string | null {
+export function providerSignInErrorMessage(error: string, action: ProviderAction | 'delete'): string | null {
     switch (error) {
         case 'CANCELLED': return null;
-        case 'NOT_LINKED': return 'This provider account is not linked yet. Log in with your username and password, then link it in Manage account.';
+        case 'NOT_LINKED': return 'This Google account is not linked yet. Create an account on Sign up, or log in with your password and link it in Manage account.';
+        case 'ALREADY_LINKED': return 'This Google account already has a Ludolume account. Go to Log in and continue with Google.';
+        case 'DUPLICATE_USER': return 'That username or email is already in use. Choose another username, or log in to your existing account to link Google.';
+        case 'INVALID_USERNAME': return 'Choose a username with 1–64 characters and no control characters.';
+        case 'INVALID_EMAIL': return 'Google could not verify current ownership of this email. Use a Gmail or Google Workspace account, or sign up with a password.';
+        case 'ACCOUNT_DELETION_UNAVAILABLE': return 'Google account deletion is not available on this server yet.';
+        case 'ACCOUNT_DELETION_PENDING': return 'Your deletion request was recorded, but completion has not been confirmed. Retrying will not cancel it. Contact mickeyf.plays@gmail.com if it remains pending.';
         case 'INVALID_PASSWORD': return 'That password did not match. Enter your current password and try again.';
         case 'LINK_CONFLICT': return 'This provider account cannot be linked here. It may already be linked to another account.';
-        case 'INVALID_CONTEXT': case 'ACCOUNT_GONE': return 'Your session has changed. Log in with your username and password, then try again.';
+        case 'INVALID_CONTEXT': case 'ACCOUNT_GONE': return 'Your session has changed. Log in again, then try again.';
         case 'INVALID_ATTEMPT': return 'This sign-in attempt expired or was already used. Please start again.';
         case 'INVALID_PROVIDER_TOKEN': return 'The provider could not confirm this sign-in. Please try again.';
         case 'RATE_LIMITED': return 'Too many attempts. Please wait 15 minutes before trying again.';
         case 'BUSY': return 'Sign-in is busy. Please try again in a moment.';
         case 'SESSION_NOT_ESTABLISHED': return 'We could not confirm your login session. Please try logging in again.';
-        default: return action === 'link'
+        default: return action === 'delete'
+            ? 'We could not confirm account deletion. A request may already be recorded; retrying later will not cancel it.'
+            : action === 'link'
             ? 'We could not confirm the link. Check your connection and try again.'
             : 'We could not confirm sign-in. Check your connection and try again.';
     }
@@ -42,7 +52,7 @@ export function ProviderSignInButtons({ clients, action, busyClient, disabled, o
     onSelect: (client: PublicProviderClient) => void;
 }) {
     const headingId = useId();
-    const choices = action === 'link' ? clients : clients.filter(client => client.clientKey !== 'google-web');
+    const choices = action === 'signup' ? [] : action === 'link' ? clients : clients.filter(client => client.clientKey !== 'google-web');
     if (choices.length === 0) return null;
     return (
         <div className="provider-sign-in__choices" role="group" aria-labelledby={action === 'link' ? headingId : undefined}
@@ -62,15 +72,16 @@ export function ProviderSignInButtons({ clients, action, busyClient, disabled, o
 }
 
 /** Preparation does not lock the password form; only a returned credential claims it. */
-export function InlineGoogleSignIn({ client, rememberMe = false, disabled = false,
+export function InlineGoogleSignIn({ client, action = 'login', userName = '', rememberMe = false, disabled = false,
     operationLock, onBusyChange, onSuccess }: Omit<ProviderSignInControlsProps, 'action'> & {
         client: PublicProviderClient;
+        action?: 'login' | 'signup';
     }) {
     const { prepareProviderLogin, completeProviderLogin, loading, isAuthenticated } = useAuth();
     const host = useRef<HTMLDivElement>(null);
-    const latest = useRef({ prepareProviderLogin, completeProviderLogin, rememberMe, disabled,
+    const latest = useRef({ prepareProviderLogin, completeProviderLogin, userName, rememberMe, disabled,
         isAuthenticated, operationLock, onBusyChange, onSuccess });
-    latest.current = { prepareProviderLogin, completeProviderLogin, rememberMe, disabled,
+    latest.current = { prepareProviderLogin, completeProviderLogin, userName, rememberMe, disabled,
         isAuthenticated, operationLock, onBusyChange, onSuccess };
     const [retry, setRetry] = useState(0);
     const [phase, setPhase] = useState<'preparing' | 'ready' | 'completing' | 'retry'>('preparing');
@@ -88,13 +99,13 @@ export function InlineGoogleSignIn({ client, rememberMe = false, disabled = fals
             setPhase('retry');
             setFeedback(code === 'CANCELLED'
                 ? 'Google sign-in expired or changed. Please try again.'
-                : providerSignInErrorMessage(code, 'login'));
+                : providerSignInErrorMessage(code, action));
         };
         setPhase('preparing');
         setFeedback(null);
         void (async () => {
             try {
-                const prepared = await latest.current.prepareProviderLogin(client.clientKey, { signal: controller.signal });
+                const prepared = await latest.current.prepareProviderLogin(client.clientKey, { signal: controller.signal }, action);
                 if (!active()) return;
                 if ('error' in prepared) { fail(prepared.error); return; }
                 const idToken = await acquireGoogleCredentialInline(client, prepared.challenge, element,
@@ -109,8 +120,13 @@ export function InlineGoogleSignIn({ client, rememberMe = false, disabled = fals
                 ownsOperation = true;
                 setPhase('completing');
                 latest.current.onBusyChange?.(true);
+                const chosenName = action === 'signup'
+                    ? await requestProviderUsername(latest.current.userName, controller.signal) : undefined;
+                if (!active()) return;
+                if (chosenName === null) { fail('CANCELLED'); return; }
                 const result = await latest.current.completeProviderLogin(prepared.handle, idToken,
-                    { rememberMe: latest.current.rememberMe, signal: controller.signal });
+                    { rememberMe: latest.current.rememberMe, signal: controller.signal,
+                        ...(chosenName === undefined ? {} : { userName: chosenName }) });
                 if (!active()) return;
                 if ('error' in result) { fail(result.error); return; }
                 latest.current.onSuccess?.();
@@ -129,8 +145,9 @@ export function InlineGoogleSignIn({ client, rememberMe = false, disabled = fals
             controller.abort();
         };
         // Callback identities, typing and remember-me changes must not create new attempts.
-    }, [client, disabled, loading, retry]);
+    }, [client, action, disabled, loading, retry]);
 
+    if (isAuthenticated) return null;
     return (
         <div className="provider-sign-in__google" aria-busy={phase === 'preparing' || phase === 'completing'}>
             <div ref={host} className="provider-sign-in__google-host" role="group" aria-label="Continue with Google"
@@ -148,7 +165,7 @@ export function InlineGoogleSignIn({ client, rememberMe = false, disabled = fals
     );
 }
 
-export default function ProviderSignInControls({ action, rememberMe = false, disabled = false,
+export default function ProviderSignInControls({ action, userName = '', rememberMe = false, disabled = false,
     operationLock, onBusyChange, onSuccess }: ProviderSignInControlsProps) {
     const { authenticateWithProvider } = useAuth();
     const [clients, setClients] = useState<PublicProviderClient[]>([]);
@@ -183,6 +200,7 @@ export default function ProviderSignInControls({ action, rememberMe = false, dis
     }, []);
 
     const selectProvider = async (client: PublicProviderClient) => {
+        if (action === 'signup') return;
         if (disabled || operation.current || operationLock?.current) return;
         if (operationLock) operationLock.current = true;
         const controller = new AbortController();
@@ -252,10 +270,12 @@ export default function ProviderSignInControls({ action, rememberMe = false, dis
     };
 
     if (clients.length === 0) return null;
-    const inlineGoogle = action === 'login' ? clients.find(client => client.clientKey === 'google-web') : undefined;
+    const inlineGoogle = action !== 'link' ? clients.find(client => client.clientKey === 'google-web'
+        && (action === 'login' || client.signup === true)) : undefined;
     return (
         <div className="provider-sign-in">
-            {inlineGoogle && <InlineGoogleSignIn client={inlineGoogle} rememberMe={rememberMe}
+            {inlineGoogle && <InlineGoogleSignIn client={inlineGoogle} action={action === 'signup' ? 'signup' : 'login'}
+                userName={userName} rememberMe={rememberMe}
                 disabled={disabled || busyClient !== null} operationLock={operationLock}
                 onBusyChange={onBusyChange} onSuccess={onSuccess} />}
             <ProviderSignInButtons clients={clients} action={action} busyClient={busyClient}

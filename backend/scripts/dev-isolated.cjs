@@ -43,14 +43,14 @@ function loadCredentials(containerExists) {
 
 function parseArguments(args) {
     if (args.length === 0) return Object.freeze({});
-    requireLocal(args.length === 2 && args[0] === '--google-web-client-id',
-        'Usage: npm run backend:dev:isolated -- [--google-web-client-id <client-id>]');
+    requireLocal((args.length === 2 || (args.length === 3 && args[2] === '--google-signup')) && args[0] === '--google-web-client-id',
+        'Usage: npm run backend:dev:isolated -- [--google-web-client-id <client-id> [--google-signup]]');
     const googleWebClientId = args[1];
     requireLocal(typeof googleWebClientId === 'string' && googleWebClientId.length <= 255
         && googleWebClientId === googleWebClientId.trim()
         && /^[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/.test(googleWebClientId),
     'The Google web client ID must be one exact apps.googleusercontent.com identifier without whitespace.');
-    return Object.freeze({ googleWebClientId });
+    return Object.freeze({ googleWebClientId, ...(args.length === 3 ? { googleSignup: true } : {}) });
 }
 
 function runtimeEnvironment(credentials, inherited = process.env, options = {}) {
@@ -61,6 +61,7 @@ function runtimeEnvironment(credentials, inherited = process.env, options = {}) 
         DB_NAME: databaseName, DB_USER: runtimeUser, DB_PASS: credentials.runtimePassword,
         SESSION_SECRET: credentials.sessionSecret, ACCOUNT_DELETION_ENABLED: 'false',
         PROVIDER_AUTH_ENABLED: options.googleWebClientId === undefined ? 'false' : 'true',
+        PROVIDER_GOOGLE_SIGNUP_ENABLED: options.googleWebClientId !== undefined && options.googleSignup === true ? 'true' : 'false',
         ...(options.googleWebClientId === undefined ? {} : { GOOGLE_WEB_CLIENT_ID: options.googleWebClientId }),
         P4_VEGA_SCORE_SUBMISSIONS_ENABLED: 'true', THREE_BOSSES_RUN_SUBMISSIONS_ENABLED: 'true' };
 }
@@ -150,8 +151,8 @@ async function prepareDatabase({ credentials, context, containerId }, options) {
     const { applyMigrations, planMigrations } = require('../ts/migrations/migrationRunner');
     const { renderRuntimeGrantStatements } = require('../ts/security/runtimeGrantManifest');
     const migrations = loadMigrationManifest(path.join(backend, 'migrations'));
-    requireLocal(migrations.length === 12 && migrations.at(-1).version === '0012_add_session_renewal',
-        'The local bootstrap must be reviewed before applying migrations beyond 0012.');
+    requireLocal(migrations.length === 15 && migrations.at(-1).version === '0015_extend_provider_attempt_actions',
+        'The local bootstrap must be reviewed before applying migrations beyond 0015.');
     const connectionOptions = { host, port, user: 'root', password: credentials.rootPassword, database: databaseName,
         connectTimeout: 2000, multipleStatements: false, dateStrings: true, timezone: 'Z' };
     let connection;
@@ -176,14 +177,15 @@ async function prepareDatabase({ credentials, context, containerId }, options) {
         ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
         const settings = { database: databaseName, advisoryLockTimeoutSeconds: 5, lockWaitTimeoutSeconds: 10 };
         for (const allowedEffectKinds of [['create-table'], ['drop-column'], ['detach-best-source', 'retain-receipts'],
-            ['add-account-identity'], ['add-provider-identities'], ['add-provider-attempts'], ['add-account-sessions'], ['add-session-renewal']]) {
+            ['add-account-identity'], ['add-provider-identities'], ['add-provider-attempts'], ['add-account-sessions'], ['add-session-renewal'],
+            ['add-unique-user-names'], ['allow-passwordless-accounts'], ['extend-provider-attempt-actions']]) {
             await applyMigrations(connection, migrations, settings, { allowedEffectKinds });
         }
         requireLocal((await planMigrations(connection, migrations, settings)).pending.length === 0, 'Local schema setup is incomplete.');
         await connection.query(`CREATE USER IF NOT EXISTS '${runtimeUser}'@'%' IDENTIFIED BY ?`, [credentials.runtimePassword]);
         for (const sql of renderRuntimeGrantStatements(databaseName, { user: runtimeUser, host: '%' })) await connection.query(sql);
         for (const sql of localProviderGrantStatements(options)) await connection.query(sql);
-        console.log(`Verified local database ${databaseName}; migrations 0001–0012 and restricted runtime grants are ready.`);
+        console.log(`Verified local database ${databaseName}; migrations 0001–0015 and restricted runtime grants are ready.`);
     } finally { await connection.end(); }
 }
 

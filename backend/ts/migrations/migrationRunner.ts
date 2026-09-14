@@ -6,9 +6,14 @@ import {
     verifyAccountIdentitySchema,
 } from './accountIdentitySchema';
 import { PROVIDER_IDENTITY_MIGRATION_VERSION, verifyProviderIdentitySchema } from './providerIdentitySchema';
-import { PROVIDER_ATTEMPT_MIGRATION_VERSION, verifyProviderAttemptSchema } from './providerAttemptSchema';
+import { PROVIDER_ATTEMPT_MIGRATION_VERSION, PROVIDER_ATTEMPT_ACTIONS_MIGRATION_VERSION,
+    inspectProviderAttemptStage, verifyProviderAttemptSchema, type ProviderAttemptSchemaStage } from './providerAttemptSchema';
 import { ACCOUNT_SESSION_MIGRATION_VERSION, inspectAccountSessionRenewal,
-    verifyAccountSessionSchema, verifyRenewableAccountSessionSchema } from './accountSessionSchema';
+    ACCOUNT_SESSION_RENEWAL_MIGRATION_VERSION, verifyAccountSessionSchema, verifyRenewableAccountSessionSchema } from './accountSessionSchema';
+import { UNIQUE_USER_NAME_MIGRATION_VERSION, PASSWORDLESS_ACCOUNT_MIGRATION_VERSION,
+    inspectUniqueUserNames, inspectPasswordlessAccounts, verifyUniqueUserNamesPrecondition,
+    verifyUniqueUserNamesSchema, verifyPasswordlessAccountsPrecondition,
+    verifyPasswordlessAccountSchema } from './passwordlessAccountSchema';
 import type { MigrationConfig } from '../config/migrationConfig';
 import {
     legacyP4ScoreColumnExists,
@@ -71,10 +76,19 @@ const PROVIDER_ATTEMPT_PREREQUISITES = [
 ];
 const ACCOUNT_SESSION_PREREQUISITES = [...PROVIDER_ATTEMPT_PREREQUISITES, PROVIDER_ATTEMPT_MIGRATION_VERSION];
 const SESSION_RENEWAL_PREREQUISITES = [...ACCOUNT_SESSION_PREREQUISITES, ACCOUNT_SESSION_MIGRATION_VERSION];
+const UNIQUE_USER_NAME_PREREQUISITES = [...SESSION_RENEWAL_PREREQUISITES, ACCOUNT_SESSION_RENEWAL_MIGRATION_VERSION];
+const PASSWORDLESS_ACCOUNT_PREREQUISITES = [...UNIQUE_USER_NAME_PREREQUISITES, UNIQUE_USER_NAME_MIGRATION_VERSION];
+const PROVIDER_ATTEMPT_ACTIONS_PREREQUISITES = [...PASSWORDLESS_ACCOUNT_PREREQUISITES, PASSWORDLESS_ACCOUNT_MIGRATION_VERSION];
+
+function isPasswordlessMigration(migration: MigrationDefinition): boolean {
+    return migration.effect === 'add-unique-user-names' || migration.effect === 'allow-passwordless-accounts'
+        || migration.effect === 'extend-provider-attempt-actions';
+}
 
 function requiresCompleteEarlierHistory(migration: MigrationDefinition): boolean {
     return migration.effect === 'add-provider-identities' || migration.effect === 'add-provider-attempts'
-        || migration.effect === 'add-account-sessions' || migration.effect === 'add-session-renewal';
+        || migration.effect === 'add-account-sessions' || migration.effect === 'add-session-renewal'
+        || isPasswordlessMigration(migration);
 }
 
 async function inspectLeaderboardStage(
@@ -234,6 +248,13 @@ async function inspectMigrationState(
     const appliedRows = historyExists ? await readAppliedMigrations(connection) : [];
     const appliedByVersion = validateHistory(migrations, appliedRows);
     const stage = await inspectLeaderboardStage(connection, migrations, appliedByVersion);
+    const attemptStage = migrations.some(({ version }) => version === PROVIDER_ATTEMPT_ACTIONS_MIGRATION_VERSION)
+        && await tableExists(connection, 'provider_auth_attempts')
+        ? await inspectProviderAttemptStage(connection) : 'legacy';
+    if (attemptStage === 'extended') {
+        const actionsMigration = migrations.find(({ version }) => version === PROVIDER_ATTEMPT_ACTIONS_MIGRATION_VERSION)!;
+        assertProviderMigrationHistory(migrations, actionsMigration, appliedByVersion);
+    }
     const applied: string[] = [];
     const pending: string[] = [];
     const recoverable: string[] = [];
@@ -243,12 +264,26 @@ async function inspectMigrationState(
             if (requiresCompleteEarlierHistory(migration)) {
                 assertProviderMigrationHistory(migrations, migration, appliedByVersion);
             }
-            await verifyMigrationPostcondition(connection, migration, stage);
+            await verifyMigrationPostcondition(connection, migration, stage, attemptStage);
             applied.push(migration.version);
             continue;
         }
 
         pending.push(migration.version);
+        if (isPasswordlessMigration(migration)) {
+            if (await tableExists(connection, migration.tableName)) {
+                const completed = migration.effect === 'add-unique-user-names'
+                    ? await inspectUniqueUserNames(connection)
+                    : migration.effect === 'allow-passwordless-accounts'
+                        ? await inspectPasswordlessAccounts(connection) : attemptStage === 'extended';
+                if (completed) {
+                    assertProviderMigrationHistory(migrations, migration, appliedByVersion);
+                    await verifyMigrationPostcondition(connection, migration, stage, attemptStage);
+                    recoverable.push(migration.version);
+                }
+            }
+            continue;
+        }
         if (migration.effect === 'add-session-renewal') {
             if (await tableExists(connection, migration.tableName)) {
                 if (await inspectAccountSessionRenewal(connection)) {
@@ -317,6 +352,19 @@ async function verifyMigrationPrecondition(
     connection: MigrationConnection,
     migration: MigrationDefinition
 ): Promise<void> {
+    if (migration.effect === 'add-unique-user-names') {
+        await verifyUniqueUserNamesPrecondition(connection);
+        return;
+    }
+    if (migration.effect === 'allow-passwordless-accounts') {
+        await verifyPasswordlessAccountsPrecondition(connection);
+        return;
+    }
+    if (migration.effect === 'extend-provider-attempt-actions') {
+        await verifyPasswordlessAccountSchema(connection);
+        await verifyProviderAttemptSchema(connection);
+        return;
+    }
     if (migration.effect === 'add-session-renewal') {
         await verifyAccountSessionSchema(connection);
         return;
@@ -383,8 +431,22 @@ async function verifyMigrationPrecondition(
 async function verifyMigrationPostcondition(
     connection: MigrationConnection,
     migration: MigrationDefinition,
-    stage: LeaderboardSchemaStage = 'original'
+    stage: LeaderboardSchemaStage = 'original',
+    attemptStage: ProviderAttemptSchemaStage = 'legacy'
 ): Promise<void> {
+    if (migration.effect === 'add-unique-user-names') {
+        await verifyUniqueUserNamesSchema(connection);
+        return;
+    }
+    if (migration.effect === 'allow-passwordless-accounts') {
+        await verifyPasswordlessAccountSchema(connection);
+        return;
+    }
+    if (migration.effect === 'extend-provider-attempt-actions') {
+        await verifyPasswordlessAccountSchema(connection);
+        await verifyProviderAttemptSchema(connection, 'extended');
+        return;
+    }
     if (migration.effect === 'add-session-renewal') {
         await verifyRenewableAccountSessionSchema(connection);
         return;
@@ -392,14 +454,14 @@ async function verifyMigrationPostcondition(
     if (migration.effect === 'add-account-sessions') {
         await verifyAccountIdentitySchema(connection);
         await verifyProviderIdentitySchema(connection);
-        await verifyProviderAttemptSchema(connection);
+        await verifyProviderAttemptSchema(connection, attemptStage);
         await verifyAccountSessionSchema(connection, await inspectAccountSessionRenewal(connection));
         return;
     }
     if (migration.effect === 'add-provider-attempts') {
         await verifyAccountIdentitySchema(connection);
         await verifyProviderIdentitySchema(connection);
-        await verifyProviderAttemptSchema(connection);
+        await verifyProviderAttemptSchema(connection, attemptStage);
         return;
     }
     if (migration.effect === 'add-provider-identities') {
@@ -458,11 +520,15 @@ function assertProviderMigrationHistory(
     const attempts = migration.effect === 'add-provider-attempts';
     const sessions = migration.effect === 'add-account-sessions';
     const renewal = migration.effect === 'add-session-renewal';
-    const prerequisites = renewal ? SESSION_RENEWAL_PREREQUISITES : sessions ? ACCOUNT_SESSION_PREREQUISITES
-        : attempts ? PROVIDER_ATTEMPT_PREREQUISITES : PROVIDER_IDENTITY_PREREQUISITES;
+    const passwordlessPrerequisites = migration.effect === 'add-unique-user-names' ? UNIQUE_USER_NAME_PREREQUISITES
+        : migration.effect === 'allow-passwordless-accounts' ? PASSWORDLESS_ACCOUNT_PREREQUISITES
+            : migration.effect === 'extend-provider-attempt-actions' ? PROVIDER_ATTEMPT_ACTIONS_PREREQUISITES : undefined;
+    const prerequisites = passwordlessPrerequisites ?? (renewal ? SESSION_RENEWAL_PREREQUISITES : sessions ? ACCOUNT_SESSION_PREREQUISITES
+        : attempts ? PROVIDER_ATTEMPT_PREREQUISITES : PROVIDER_IDENTITY_PREREQUISITES);
     if (!prerequisites.every(version => applied.has(version))
         || migrations.some(({ version }) => version < migration.version && !applied.has(version))) {
-        const label = renewal ? 'Session renewal' : sessions ? 'Account sessions' : `Provider ${attempts ? 'attempts' : 'identities'}`;
+        const label = passwordlessPrerequisites ? 'Passwordless account migrations' : renewal ? 'Session renewal'
+            : sessions ? 'Account sessions' : `Provider ${attempts ? 'attempts' : 'identities'}`;
         throw new Error(`${label} require all earlier migrations to be recorded first`);
     }
 }

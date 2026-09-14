@@ -38,6 +38,7 @@ export function createAuthRouter(
         deletionJournal?: AccountDeletionJournal;
         providerAuth?: {
             enabled: boolean;
+            signupEnabled?: boolean;
             clients: Readonly<Record<string, ProviderAuthClient>>;
             publicClients?: readonly PublicProviderAuthClient[];
         };
@@ -60,9 +61,10 @@ export function createAuthRouter(
         response.json({ clients: providerAuth?.enabled ? providerAuth.publicClients ?? [] : [] });
     });
 
-    if (providerAuth?.enabled) router.use('/providers', createProviderAuthRouter({
+    router.use('/providers', createProviderAuthRouter({
         database, sessionSecret, isProduction, allowedOrigins: allowedMutationOrigins,
-        clients: providerAuth.clients, enabled: true,
+        clients: providerAuth?.clients ?? {}, enabled: providerAuth?.enabled === true,
+        signupEnabled: providerAuth?.signupEnabled, accountDeletionEnabled, deletionJournal,
     }));
 
     /** GET /verify-token — validates auth context for the current request. */

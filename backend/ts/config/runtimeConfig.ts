@@ -98,6 +98,11 @@ export function loadRuntimeConfig(env: Environment = process.env): RuntimeConfig
         throw new Error('ACCOUNT_IDENTITY_EPOCH must be the original identity migration UTC timestamp');
     }
 
+    const providerAuth = loadProviderAuthConfig(env);
+    if (nodeEnv === 'production' && providerAuth.signupEnabled && !accountDeletionEnabled) {
+        throw new Error('Google signup requires account deletion to be enabled in production');
+    }
+
     return Object.freeze({
         nodeEnv,
         isProduction: nodeEnv === 'production',
@@ -117,7 +122,7 @@ export function loadRuntimeConfig(env: Environment = process.env): RuntimeConfig
         accountDeletionEnabled,
         accountIdentityEpoch,
         journalBucket,
-        providerAuth: loadProviderAuthConfig(env),
+        providerAuth,
     });
 }
 

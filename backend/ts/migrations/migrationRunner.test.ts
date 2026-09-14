@@ -1,5 +1,10 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
+import * as leaderboardSchema from './leaderboardSchema';
+import * as identitySchema from './accountIdentitySchema';
+import * as providerIdentitySchema from './providerIdentitySchema';
+import * as attemptSchema from './providerAttemptSchema';
+import * as sessionSchema from './accountSessionSchema';
 import type { MigrationConnection } from './leaderboardSchema';
 import { loadMigrationManifest } from './migrationManifest';
 import {
@@ -195,6 +200,9 @@ test('plan is read-only, configures short waits, and releases its advisory lock'
             '0010_create_provider_auth_attempts',
             '0011_create_account_sessions',
             '0012_add_session_renewal',
+            '0013_add_unique_user_names',
+            '0014_allow_passwordless_accounts',
+            '0015_extend_provider_attempt_actions',
         ],
         recoverable: [],
     });
@@ -511,4 +519,128 @@ test('authorized drop rechecks its source and verifies absence before history', 
     assert.ok(postconditionIndex > ddlCallIndex);
     assert.ok(historyInsertIndex > postconditionIndex);
     assert.equal(state.p4ScoreColumn, null);
+});
+
+test('passwordless migration effects require explicit selection and complete earlier history', async () => {
+    for (const migration of loadMigrationManifest().slice(12)) {
+        const skipped = new FakeConnection(migrationResults(legacySourceState()));
+        assert.deepEqual((await applyMigrations(skipped, [migration], settings)).pending, [migration.version]);
+        assert.equal(skipped.calls.some(({ sql }) => sql === migration.sql), false);
+        const incomplete = new FakeConnection(migrationResults(legacySourceState()));
+        await assert.rejects(applyMigrations(incomplete, [migration], settings, {
+            allowedEffectKinds: [migration.effect],
+        }), /all earlier migrations/u);
+        assert.equal(incomplete.calls.some(({ sql }) => sql === migration.sql), false);
+        const recordedState = legacySourceState(); recordedState.historyExists = true;
+        recordedState.appliedRows.push({ version: migration.version, checksum: migration.checksum });
+        await assert.rejects(planMigrations(new FakeConnection(migrationResults(recordedState)), [migration], settings),
+            /all earlier migrations/u);
+    }
+});
+
+/** Historical schema validators have separate exact-metadata suites; isolate runner stage coordination here. */
+function passwordlessRunnerFixture(t: TestContext, options: {
+    recordedCount?: number; unique?: boolean; passwordless?: boolean; extended?: boolean; duplicates?: boolean;
+} = {}) {
+    const migrations = loadMigrationManifest();
+    const state = { unique: options.unique ?? false, passwordless: options.passwordless ?? false,
+        extended: options.extended ?? false,
+        applied: migrations.slice(0, options.recordedCount ?? 12).map(({ version, checksum }) => ({ version, checksum })) };
+    t.mock.method(leaderboardSchema, 'verifyHistoryTable', async () => {});
+    t.mock.method(leaderboardSchema, 'verifyLeaderboardStage', async () => {});
+    t.mock.method(leaderboardSchema, 'verifyLegacyP4ScoreColumnAbsent', async () => {});
+    t.mock.method(leaderboardSchema, 'personalBestSourceExists', async () => false);
+    t.mock.method(identitySchema, 'verifyAccountIdentitySchema', async () => {});
+    t.mock.method(identitySchema, 'inspectAccountIdentityStage', async () => 'complete');
+    t.mock.method(identitySchema, 'accountIdentityBackfillComplete', async () => true);
+    t.mock.method(providerIdentitySchema, 'verifyProviderIdentitySchema', async () => {});
+    t.mock.method(attemptSchema, 'inspectProviderAttemptStage', async () => state.extended ? 'extended' : 'legacy');
+    t.mock.method(attemptSchema, 'verifyProviderAttemptSchema', async (_connection: MigrationConnection,
+        stage: attemptSchema.ProviderAttemptSchemaStage = 'legacy') => {
+        assert.equal(stage, state.extended ? 'extended' : 'legacy', 'each recorded postcondition must use the current exact attempt stage');
+    });
+    t.mock.method(sessionSchema, 'verifyAccountSessionSchema', async () => {});
+    t.mock.method(sessionSchema, 'verifyRenewableAccountSessionSchema', async () => {});
+    t.mock.method(sessionSchema, 'inspectAccountSessionRenewal', async () => true);
+    const connection = new FakeConnection((sql, values) => {
+        if (sql.includes('GET_LOCK')) return [{ acquired: 1 }];
+        if (sql.includes('RELEASE_LOCK')) return [{ released: 1 }];
+        if (sql.includes('COUNT(*)') && sql.includes('information_schema.TABLES')) {
+            return [{ tableCount: values[0] === 'game_runs' ? 0 : 1 }];
+        }
+        if (sql.includes('FROM schema_migrations')) return state.applied;
+        if (sql.includes('INSERT INTO schema_migrations')) {
+            state.applied.push({ version: String(values[0]), checksum: values[1] as Buffer }); return {};
+        }
+        if (sql.includes('information_schema.TABLES')) return [{ engine: 'InnoDB', tableType: 'BASE TABLE' }];
+        if (sql.includes('information_schema.COLUMNS')) return [{ type: 'varchar(255)',
+            nullable: values[0] === 'user_password' && state.passwordless ? 'YES' : 'NO',
+            characterSet: 'utf8mb4', collation: 'utf8mb4_unicode_ci', defaultValue: null,
+            extra: '', comment: '', generationExpression: '' }];
+        if (sql.includes('information_schema.STATISTICS')) return state.unique ? [{
+            columnName: 'user_name', nonUnique: 0, sequence: 1, indexOrder: 'A', subPart: null,
+            visible: 'YES', indexType: 'BTREE',
+        }] : [];
+        if (sql.includes('GROUP BY user_name')) return options.duplicates ? [{ duplicateFound: 1 }] : [];
+        if (sql === migrations[12].sql) { state.unique = true; return {}; }
+        if (sql === migrations[13].sql) { state.passwordless = true; return {}; }
+        if (sql === migrations[14].sql) { state.extended = true; return {}; }
+        if (sql.trim().startsWith('SET SESSION')) return {};
+        throw new Error('Unexpected passwordless runner query');
+    });
+    return { connection, migrations, state };
+}
+
+test('passwordless DDL is ordered, verifies each outcome before history, and plans cleanly at 0015', async t => {
+    const { connection, migrations } = passwordlessRunnerFixture(t);
+    const plan = await applyMigrations(connection, migrations, settings, {
+        allowedEffectKinds: ['add-unique-user-names', 'allow-passwordless-accounts', 'extend-provider-attempt-actions'],
+    });
+    assert.deepEqual(plan.pending, []);
+    assert.deepEqual(plan.applied, migrations.map(({ version }) => version));
+    assert.deepEqual(connection.calls.filter(({ sql }) => sql.startsWith('ALTER TABLE')).map(({ sql }) => sql),
+        migrations.slice(12).map(({ sql }) => sql));
+    assert.ok(connection.calls.findIndex(({ sql }) => sql.includes('GROUP BY user_name'))
+        < connection.calls.findIndex(({ sql }) => sql === migrations[12].sql));
+    for (const migration of migrations.slice(12)) {
+        const ddl = connection.calls.findIndex(({ sql }) => sql === migration.sql);
+        const history = connection.calls.findIndex(({ sql, values }) => sql.includes('INSERT INTO schema_migrations')
+            && values[0] === migration.version);
+        assert.ok(history > ddl + 1, 'postcondition metadata must precede the history write');
+    }
+});
+
+test('duplicate username preflight stops before any new DDL or history', async t => {
+    const { connection, migrations, state } = passwordlessRunnerFixture(t, { duplicates: true });
+    await assert.rejects(applyMigrations(connection, migrations, settings, {
+        allowedEffectKinds: ['add-unique-user-names'],
+    }), /duplicate user names require explicit resolution/u);
+    assert.equal(state.applied.length, 12);
+    assert.equal(connection.calls.some(({ sql }) => /^(?:ALTER TABLE|INSERT INTO schema_migrations)/u.test(sql)), false);
+});
+
+test('each completed passwordless DDL can recover missing history without repeating the ALTER', async t => {
+    for (const index of [12, 13, 14]) {
+        const fixture = passwordlessRunnerFixture(t, { recordedCount: index,
+            unique: true, passwordless: index >= 13, extended: index >= 14 });
+        const migration = fixture.migrations[index];
+        const before = await planMigrations(fixture.connection, fixture.migrations, settings);
+        assert.deepEqual(before.recoverable, [migration.version]);
+        const after = await applyMigrations(fixture.connection, fixture.migrations, settings, {
+            allowedEffectKinds: [migration.effect],
+        });
+        assert.ok(after.applied.includes(migration.version));
+        assert.equal(fixture.connection.calls.some(({ sql }) => sql.startsWith('ALTER TABLE')), false);
+        t.mock.restoreAll();
+    }
+});
+
+test('recorded 0015 rejects legacy checks, while extended checks reject missing prerequisite history', async t => {
+    const missingOutcome = passwordlessRunnerFixture(t, { recordedCount: 15, unique: true, passwordless: true });
+    await assert.rejects(planMigrations(missingOutcome.connection, missingOutcome.migrations, settings),
+        /current exact attempt stage/u);
+    t.mock.restoreAll();
+    const missingHistory = passwordlessRunnerFixture(t, { recordedCount: 13, unique: true, passwordless: true, extended: true });
+    await assert.rejects(planMigrations(missingHistory.connection, missingHistory.migrations, settings), /all earlier migrations/u);
+    assert.equal(missingHistory.connection.calls.some(({ sql }) => /^(?:ALTER TABLE|INSERT INTO schema_migrations)/u.test(sql)), false);
 });

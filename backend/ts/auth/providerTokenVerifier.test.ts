@@ -69,6 +69,34 @@ test('plain decoded claims cannot be passed as a verified identity', () => {
     assert.equal(verifiedIdentity, plainIdentity);
 });
 
+test('only authoritative Google-signed verified email is exposed, normalized and bounded for signup', async () => {
+    const { verifier } = fixture();
+    for (const [extra, expected] of [
+        [{ email: ' Player@GMAIL.COM ', email_verified: true }, 'player@gmail.com'],
+        [{ email: ' Player@Example.COM ', email_verified: true, hd: 'example.com' }, 'player@example.com'],
+        [{ email: 'player@gmail.com', email_verified: false }, undefined],
+        [{ email: 'player@gmail.com', email_verified: 'true' }, undefined],
+        [{ email: 'player@gmail.com' }, undefined],
+        [{ email: 'player@example.com', email_verified: true }, undefined],
+        [{ email: 'player@example.com', email_verified: true, hd: 'https://example.com' }, undefined],
+        [{ email: 'player@example.com', email_verified: true, hd: '-bad.example' }, undefined],
+        [{ email: 'player@example.com', email_verified: true, hd: 'a'.repeat(64) + '.com' }, undefined],
+        [{ email: 'player@example.com', email_verified: true, hd: '127.0.0.1' }, undefined],
+        [{ email: 'player@gmail.com.attacker.example', email_verified: true }, undefined],
+        [{ email: 'player\u0000@gmail.com', email_verified: true }, undefined],
+        [{ email: 'a'.repeat(245) + '@gmail.com', email_verified: true }, undefined],
+        [{ email: 'not-an-email', email_verified: true, hd: 'example.com' }, undefined],
+    ] as const) {
+        const result = await verifier.verify('google', signedToken({ ...claims(), ...extra }), nonce);
+        assert.equal(result.verified, true, 'bad contact metadata does not reject existing linked logins');
+        if (result.verified) assert.deepEqual(result.identity, { provider: 'google', subject: claims().sub,
+            ...(expected === undefined ? {} : { email: expected }) });
+    }
+    const apple = await verifier.verify('apple', signedToken({ ...claims('apple'), email: 'player@gmail.com',
+        email_verified: true, hd: 'example.com' }), nonce);
+    assert.equal(apple.verified && apple.identity.email, undefined);
+});
+
 for (const provider of ['google', 'apple'] as const) {
     test(`${provider}: locally signed RSA token returns only a frozen opaque identity`, async () => {
         const { verifier, calls } = fixture();

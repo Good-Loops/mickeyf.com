@@ -2,9 +2,14 @@ import { isDeepStrictEqual } from 'node:util';
 import { tableExists, type MigrationConnection } from './leaderboardSchema';
 
 export const PROVIDER_ATTEMPT_MIGRATION_VERSION = '0010_create_provider_auth_attempts';
+export const PROVIDER_ATTEMPT_ACTIONS_MIGRATION_VERSION = '0015_extend_provider_attempt_actions';
+export type ProviderAttemptSchemaStage = 'legacy' | 'extended';
 const TABLE_NAME = 'provider_auth_attempts';
 const ACTION_CHECK = "castactionasbinaryincast'login'asbinary,cast'link'asbinary";
 const USER_CHECK = "casewhencastactionasbinary=cast'login'asbinarythenuser_idisnull"
+    + 'elsecoalesceuser_id>0,0end=1';
+const EXTENDED_ACTION_CHECK = ACTION_CHECK + ",cast'signup'asbinary,cast'delete'asbinary";
+const EXTENDED_USER_CHECK = "casewhencastactionasbinaryincast'login'asbinary,cast'signup'asbinarythenuser_idisnull"
     + 'elsecoalesceuser_id>0,0end=1';
 
 async function rows<T>(connection: MigrationConnection, sql: string, values: unknown[] = [TABLE_NAME]): Promise<T[]> {
@@ -24,12 +29,12 @@ function normalizedCheck(clause: string): string {
     const normalized = (clause.match(/'(?:''|[^'])*'|[^']+/gu) ?? []).map(part => part.startsWith("'")
         ? part : part.toLowerCase().replace(/\bas\s+char\s+charset\s+binary\b/gu, 'as binary')
             .replace(/_(?:utf8mb4|ascii|binary)$/u, '').replace(/[`()\s]/gu, '')).join('');
-    for (const expected of [ACTION_CHECK, USER_CHECK]) {
+    for (const expected of [ACTION_CHECK, USER_CHECK, EXTENDED_ACTION_CHECK, EXTENDED_USER_CHECK]) {
         if (normalized === expected) return expected;
         // JSON-derived MySQL 8.0.31 metadata can escape literal delimiters.
         // Accept only complete reviewed expressions, never arbitrary unescaping.
         for (const escape of ['\\', '\\\\']) {
-            const escaped = expected.replace(/'(login|link)'/gu,
+            const escaped = expected.replace(/'(login|link|signup|delete)'/gu,
                 (_match, value: string) => `_utf8mb4${escape}'${value}${escape}'`);
             if (normalized === escaped) return expected;
         }
@@ -38,7 +43,9 @@ function normalizedCheck(clause: string): string {
 }
 
 /** Exact keys, InnoDB, and UUID cascade protect single-use consumption and deletion. */
-export async function verifyProviderAttemptSchema(connection: MigrationConnection): Promise<void> {
+export async function verifyProviderAttemptSchema(
+    connection: MigrationConnection, stage: ProviderAttemptSchemaStage = 'legacy'
+): Promise<void> {
     assertExact('table', await rows(connection, `
         SELECT ENGINE AS engine, TABLE_COLLATION AS collation, TABLE_TYPE AS tableType
         FROM information_schema.TABLES
@@ -119,6 +126,24 @@ export async function verifyProviderAttemptSchema(connection: MigrationConnectio
         deleteRule: 'CASCADE', updateRule: 'RESTRICT',
     }]);
 
+    assertExact('checks', await readChecks(connection), expectedChecks(stage));
+
+    assertExact('triggers', await rows(connection, `
+        SELECT TRIGGER_NAME AS name FROM information_schema.TRIGGERS
+        WHERE TRIGGER_SCHEMA = DATABASE() AND EVENT_OBJECT_TABLE = ? ORDER BY TRIGGER_NAME
+    `), []);
+}
+
+function expectedChecks(stage: ProviderAttemptSchemaStage): Record<string, string>[] {
+    return [
+        { name: 'chk_provider_auth_attempt_action',
+            clause: stage === 'extended' ? EXTENDED_ACTION_CHECK : ACTION_CHECK, enforced: 'YES' },
+        { name: 'chk_provider_auth_attempt_user',
+            clause: stage === 'extended' ? EXTENDED_USER_CHECK : USER_CHECK, enforced: 'YES' },
+    ];
+}
+
+async function readChecks(connection: MigrationConnection): Promise<Record<string, string>[]> {
     const checks = await rows<{ name: string; clause: string; enforced: string }>(connection, `
         SELECT constraints.CONSTRAINT_NAME AS name, checks.CHECK_CLAUSE AS clause,
             constraints.ENFORCED AS enforced
@@ -129,26 +154,37 @@ export async function verifyProviderAttemptSchema(connection: MigrationConnectio
         WHERE constraints.TABLE_SCHEMA = DATABASE() AND constraints.TABLE_NAME = ?
             AND constraints.CONSTRAINT_TYPE = 'CHECK' ORDER BY constraints.CONSTRAINT_NAME
     `);
-    assertExact('checks', checks.map(({ name, clause, enforced }) => ({
-        name, clause: normalizedCheck(clause), enforced,
-    })), [
-        { name: 'chk_provider_auth_attempt_action', clause: ACTION_CHECK, enforced: 'YES' },
-        { name: 'chk_provider_auth_attempt_user', clause: USER_CHECK, enforced: 'YES' },
-    ]);
+    return checks.map(check => {
+        if (!check || typeof check.name !== 'string' || typeof check.clause !== 'string'
+            || typeof check.enforced !== 'string') {
+            throw new Error('Provider attempt checks metadata is unavailable');
+        }
+        return { name: check.name, clause: normalizedCheck(check.clause), enforced: check.enforced };
+    });
+}
 
-    assertExact('triggers', await rows(connection, `
-        SELECT TRIGGER_NAME AS name FROM information_schema.TRIGGERS
-        WHERE TRIGGER_SCHEMA = DATABASE() AND EVENT_OBJECT_TABLE = ? ORDER BY TRIGGER_NAME
-    `), []);
+/** Both constraints must belong to the same exact reviewed stage; mixed/partial upgrades fail closed. */
+export async function inspectProviderAttemptStage(connection: MigrationConnection): Promise<ProviderAttemptSchemaStage> {
+    const checks = await readChecks(connection);
+    if (isDeepStrictEqual(checks, expectedChecks('legacy'))) return 'legacy';
+    assertExact('checks', checks, expectedChecks('extended'));
+    return 'extended';
 }
 
 /** Backups predating 0010 may omit attempts; recorded migrations may not lose their table. */
 export async function verifyOptionalProviderAttemptSchema(connection: MigrationConnection): Promise<void> {
     if (await tableExists(connection, TABLE_NAME)) {
-        await verifyProviderAttemptSchema(connection);
+        const stage = await inspectProviderAttemptStage(connection);
+        if (stage === 'legacy' && (await rows(connection,
+            'SELECT version FROM schema_migrations WHERE version = ?',
+            [PROVIDER_ATTEMPT_ACTIONS_MIGRATION_VERSION])).length !== 0) {
+            throw new Error('Recorded provider attempt actions migration is missing its checks');
+        }
+        await verifyProviderAttemptSchema(connection, stage);
         return;
     }
     const recorded = await rows(connection,
-        'SELECT version FROM schema_migrations WHERE version = ?', [PROVIDER_ATTEMPT_MIGRATION_VERSION]);
+        'SELECT version FROM schema_migrations WHERE version IN (?, ?)',
+        [PROVIDER_ATTEMPT_MIGRATION_VERSION, PROVIDER_ATTEMPT_ACTIONS_MIGRATION_VERSION]);
     if (recorded.length !== 0) throw new Error('Recorded provider attempt migration is missing its table');
 }

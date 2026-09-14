@@ -76,6 +76,33 @@ test('invalid signup input is rejected before any database or bcrypt work', asyn
     assert.deepEqual(state.body, { error: 'EMPTY_FIELDS' });
 });
 
+test('a Google-only NULL-password account cannot enter through password login', async () => {
+    let queryCount = 0;
+    const database = { async query() {
+        queryCount++;
+        return [[{ user_id: account.userId, account_uuid: account.accountId,
+            user_name: account.userName, user_password: null }]];
+    }, async getConnection() { throw new Error('No session should be created'); } } as unknown as Pool;
+    const { response, state } = responseRecorder();
+    await createTestController(database)(request({ type: 'login', user_name: 'player', user_password: 'anything' }), response);
+    assert.equal(queryCount, 1);
+    assert.deepEqual(state.body, { error: 'AUTH_FAILED' });
+    assert.equal(state.cookie, undefined);
+});
+
+test('a concurrent signup unique-key collision retains the existing duplicate response', async () => {
+    let queryCount = 0;
+    const database = { async query() {
+        if (++queryCount === 1) return [[]];
+        throw Object.assign(new Error('synthetic duplicate'), { errno: 1062 });
+    } } as unknown as Pool;
+    const { response, state } = responseRecorder();
+    await createTestController(database)(request({ type: 'signup', user_name: 'player',
+        email: 'player@example.test', user_password: 'long-password-123' }), response);
+    assert.equal(queryCount, 2);
+    assert.deepEqual(state.body, { error: 'DUPLICATE_USER', status: 409 });
+});
+
 test('invalid login input returns the generic authentication failure before persistence', async () => {
     let queryCount = 0;
     const database = {

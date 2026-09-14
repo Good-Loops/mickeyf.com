@@ -58,7 +58,8 @@ before(async () => {
         PRIMARY KEY (user_id), UNIQUE KEY uq_users_email (email)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
     const connection = administrator as unknown as MigrationConnection;
-    const migrations = loadMigrationManifest();
+    // This fixture verifies the historical 0011/0012 transition and its missing-history recovery.
+    const migrations = loadMigrationManifest().filter(({ version }) => version <= '0012_add_session_renewal');
     await applyMigrations(connection, migrations, config);
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['drop-column'] });
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['detach-best-source', 'retain-receipts'] });
@@ -292,7 +293,8 @@ test('concurrent renewal and logout never resurrect the revoked device or affect
 });
 
 test('renewal after schema DDL can recover its missing history record without rerunning ALTER', async () => {
-    const migrations = loadMigrationManifest(); const version = '0012_add_session_renewal';
+    const version = '0012_add_session_renewal';
+    const migrations = loadMigrationManifest().filter(migration => migration.version <= version);
     await administrator.query('DELETE FROM schema_migrations WHERE version = ?', [version]);
     const connection = administrator as unknown as MigrationConnection;
     assert.deepEqual((await planMigrations(connection, migrations, config)).recoverable, [version]);

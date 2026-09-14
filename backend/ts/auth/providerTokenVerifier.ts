@@ -248,6 +248,20 @@ function validClaims(
         || (claims.azp === undefined ? authorizedParty === audience : claims.azp === authorizedParty);
 }
 
+function verifiedGoogleEmail(provider: IdentityProvider, claims: unknown): string | undefined {
+    if (provider !== 'google' || !isRecord(claims) || claims.email_verified !== true
+        || typeof claims.email !== 'string') return undefined;
+    const email = claims.email.trim().toLowerCase();
+    const hostedDomain = claims.hd;
+    const managedDomain = typeof hostedDomain === 'string' && hostedDomain.length <= 253
+        && /^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z](?:[a-z0-9-]{0,61}[a-z0-9])?$/iu.test(hostedDomain);
+    // External email ownership can change independently of a Google account.
+    // Only Gmail or a signed managed-domain claim is authoritative for signup.
+    if (!email.endsWith('@gmail.com') && !managedDomain) return undefined;
+    return email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email)
+        && !/[\u0000-\u001f\u007f]/u.test(email) ? email : undefined;
+}
+
 export function createProviderTokenVerifier(
     configuration: ProviderTokenVerifierConfiguration,
     dependencies: Dependencies = {}
@@ -292,9 +306,11 @@ export function createProviderTokenVerifier(
                 if (!validClaims(claims, provider, audience, authorizedParty, expectedNonce, nowSeconds)) {
                     return { verified: false, reason: 'INVALID_PROVIDER_TOKEN' };
                 }
+                const email = verifiedGoogleEmail(provider, claims);
                 return {
                     verified: true,
-                    identity: Object.freeze({ provider, subject: claims.sub }) as VerifiedProviderIdentity,
+                    identity: Object.freeze({ provider, subject: claims.sub,
+                        ...(email === undefined ? {} : { email }) }) as VerifiedProviderIdentity,
                 };
             } catch (error) {
                 return { verified: false, reason: error instanceof ProviderKeysUnavailable

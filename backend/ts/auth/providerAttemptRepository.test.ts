@@ -11,6 +11,8 @@ const loginAttempt: ProviderAttempt = {
     clientKey: 'google-web', action: 'login', userId: null, accountId: null,
 };
 const linkAttempt: ProviderAttempt = { ...loginAttempt, action: 'link', userId: 7, accountId };
+const signupAttempt: ProviderAttempt = { ...loginAttempt, action: 'signup' };
+const deleteAttempt: ProviderAttempt = { ...linkAttempt, action: 'delete' };
 const storedLogin = { nonce: loginAttempt.nonce, userId: null, accountId: null };
 
 type FixtureOptions = {
@@ -79,7 +81,7 @@ function sanitized(error: unknown): boolean {
 }
 
 test('creates one bounded five-minute attempt and commits before releasing the database creation lock', async () => {
-    for (const attempt of [loginAttempt, linkAttempt]) {
+    for (const attempt of [loginAttempt, linkAttempt, signupAttempt, deleteAttempt]) {
         const f = fixture();
         assert.equal(await createProviderAttempt(f.database, attempt), 'created');
         assert.deepEqual(f.events, ['acquire', 'lock', 'begin', 'cleanup', 'replace', 'count', 'insert', 'commit', 'unlock', 'release']);
@@ -109,7 +111,7 @@ test('capacity and creation-lock contention fail closed without adding a row', a
 });
 
 test('consumes only an exactly bound row and returns its trusted values after commit', async () => {
-    for (const attempt of [loginAttempt, linkAttempt]) {
+    for (const attempt of [loginAttempt, linkAttempt, signupAttempt, deleteAttempt]) {
         const row = { nonce: attempt.nonce, accountId: attempt.accountId, userId: attempt.userId };
         const f = fixture({ row });
         assert.deepEqual(await consume(f.database, attempt), row);

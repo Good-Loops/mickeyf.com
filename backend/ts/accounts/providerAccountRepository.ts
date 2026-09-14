@@ -10,6 +10,10 @@ import { assertAccountId } from './deletionJournal';
 export type ProviderAccount = Readonly<{ userId: number; userName: string; accountId: string }>;
 export type AccountLinkTarget = Readonly<{ userId: number; accountId: string }>;
 export type ProviderLinkResult = 'linked' | 'already-linked' | 'link-conflict' | 'invalid-password' | 'not-found';
+export type ProviderAccountCreationResult =
+    | Readonly<{ created: true; account: ProviderAccount }>
+    | Readonly<{ created: false; reason: 'DUPLICATE_USER' | 'ALREADY_LINKED' | 'INVALID_USERNAME' | 'INVALID_EMAIL' }>;
+export type ProviderAccountMethods = Readonly<{ hasPassword: boolean; googleLinked: boolean }>;
 
 const QUERY_TIMEOUT_MS = 10_000;
 
@@ -53,6 +57,119 @@ export async function findProviderAccount(
         return Object.freeze({ userId: account.userId, userName: account.userName, accountId: account.accountId });
     } catch {
         // Driver errors can include identity subjects, statements and connection details.
+        throw new ProviderAccountUnavailableError();
+    }
+}
+
+/** Called after HTTP session authentication; never returns password hashes, emails or provider subjects. */
+export async function readProviderAccountMethods(
+    database: Pick<Pool, 'query'>, accountId: string,
+    { allowMissingProviderTable = false }: { allowMissingProviderTable?: boolean } = {},
+): Promise<ProviderAccountMethods | null> {
+    assertAccountId(accountId);
+    try {
+        const [rows] = await database.query<RowDataPacket[]>({
+            sql: `SELECT u.user_password IS NOT NULL AS hasPassword
+                FROM users AS u WHERE u.account_uuid = ? LIMIT 2`, timeout: QUERY_TIMEOUT_MS,
+        }, [accountId]);
+        if (!Array.isArray(rows) || rows.length > 1) throw new ProviderAccountUnavailableError();
+        const row = rows[0];
+        if (!row) return null;
+        if (![0, 1].includes(row.hasPassword)) throw new ProviderAccountUnavailableError();
+        const hasPassword = row.hasPassword === 1;
+        try {
+            const [providers] = await database.query<RowDataPacket[]>({
+                sql: `SELECT EXISTS(SELECT 1 FROM account_provider_identities
+                    WHERE account_uuid = ? AND provider = 'google') AS googleLinked`, timeout: QUERY_TIMEOUT_MS,
+            }, [accountId]);
+            if (!Array.isArray(providers) || providers.length !== 1 || ![0, 1].includes(providers[0].googleLinked)) {
+                throw new ProviderAccountUnavailableError();
+            }
+            return Object.freeze({ hasPassword, googleLinked: providers[0].googleLinked === 1 });
+        } catch (error) {
+            // This fixed query references only the provider table. Its exact
+            // absence is safe only for a verified password account with provider
+            // mutations disabled; permission/outage/schema errors are not absence.
+            if (allowMissingProviderTable && hasPassword && error !== null && typeof error === 'object'
+                && 'errno' in error && error.errno === 1146 && 'code' in error && error.code === 'ER_NO_SUCH_TABLE') {
+                return Object.freeze({ hasPassword: true, googleLinked: false });
+            }
+            throw error;
+        }
+    } catch { throw new ProviderAccountUnavailableError(); }
+}
+
+/** A new passwordless account and its verified identity become visible only together, after commit. */
+export async function createProviderAccount(
+    database: Pick<Pool, 'getConnection'>, identity: VerifiedProviderIdentity, userName: string,
+): Promise<ProviderAccountCreationResult> {
+    const subject = identitySubject(identity);
+    if (identity.provider !== 'google') throw new TypeError('Passwordless signup requires a verified Google identity.');
+    // Match password-signup normalization and bounds without creating a placeholder password.
+    if (typeof userName !== 'string' || userName.trim().length === 0 || userName.trim().length > 64
+        || /[\u0000-\u001f\u007f]/u.test(userName.trim())) return { created: false, reason: 'INVALID_USERNAME' };
+    if (typeof identity.email !== 'string' || identity.email.trim().length > 254
+        || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(identity.email.trim())
+        || /[\u0000-\u001f\u007f]/u.test(identity.email.trim())) return { created: false, reason: 'INVALID_EMAIL' };
+    const name = userName.trim();
+    const email = identity.email.trim().toLowerCase();
+    const verifiedIdentity = { ...identity };
+    try {
+        const connection = await database.getConnection();
+        let reusable = true;
+        let phase: 'begin' | 'active' | 'commit' = 'begin';
+        try {
+            await connection.beginTransaction();
+            phase = 'active';
+            let result: ProviderAccountCreationResult;
+            if (await findProviderAccount(connection, verifiedIdentity)) result = { created: false, reason: 'ALREADY_LINKED' };
+            else {
+                let insertingIdentity = false;
+                try {
+                    const [inserted] = await connection.query<ResultSetHeader>({
+                        sql: 'INSERT INTO users (user_name, email, user_password) VALUES (?, ?, NULL)',
+                        timeout: QUERY_TIMEOUT_MS,
+                    }, [name, email]);
+                    if (inserted.affectedRows !== 1 || !Number.isSafeInteger(inserted.insertId)
+                        || inserted.insertId <= 0) throw new ProviderAccountUnavailableError();
+                    const [accounts] = await connection.query<RowDataPacket[]>({
+                        sql: `SELECT user_id AS userId, user_name AS userName, account_uuid AS accountId
+                            FROM users WHERE user_id = ? LIMIT 2`, timeout: QUERY_TIMEOUT_MS,
+                    }, [inserted.insertId]);
+                    if (!Array.isArray(accounts) || accounts.length !== 1 || accounts[0].userId !== inserted.insertId
+                        || accounts[0].userName !== name) throw new ProviderAccountUnavailableError();
+                    assertAccountId(accounts[0].accountId);
+                    const account = Object.freeze({ userId: inserted.insertId, userName: name, accountId: accounts[0].accountId as string });
+                    insertingIdentity = true;
+                    const [linked] = await connection.query<ResultSetHeader>({
+                        sql: `INSERT INTO account_provider_identities (provider, subject, account_uuid, linked_at)
+                            VALUES (?, ?, ?, UTC_TIMESTAMP(6))`, timeout: QUERY_TIMEOUT_MS,
+                    }, ['google', subject, account.accountId]);
+                    if (linked.affectedRows !== 1) throw new ProviderAccountUnavailableError();
+                    result = { created: true, account };
+                } catch (error) {
+                    if (!error || typeof error !== 'object' || !('errno' in error) || error.errno !== 1062) throw error;
+                    result = { created: false, reason: insertingIdentity ? 'ALREADY_LINKED' : 'DUPLICATE_USER' };
+                }
+            }
+            // A losing identity insert must roll back its newly inserted user, never leave an orphan.
+            if (!result.created) {
+                try { await connection.rollback(); } catch (error) { reusable = false; throw error; }
+                return result;
+            }
+            phase = 'commit';
+            await connection.commit();
+            return result;
+        } catch (error) {
+            if (phase !== 'active') reusable = false;
+            try { await connection.rollback(); } catch { reusable = false; }
+            throw error;
+        } finally {
+            if (reusable) connection.release();
+            else connection.destroy();
+        }
+    } catch {
+        // A lost commit response may follow a durable account. Never imply success or retry it as a login.
         throw new ProviderAccountUnavailableError();
     }
 }
@@ -122,8 +239,9 @@ export async function linkProviderAccount(
                 let result: ProviderLinkResult = 'not-found';
                 const account = accounts[0];
                 if (account && account.accountId === accountTarget.accountId) {
-                    if (typeof account.passwordHash !== 'string') throw new ProviderAccountUnavailableError();
-                    if (!await bcrypt.compare(password, account.passwordHash)) result = 'invalid-password';
+                    if (account.passwordHash === null) result = 'invalid-password';
+                    else if (typeof account.passwordHash !== 'string') throw new ProviderAccountUnavailableError();
+                    else if (!await bcrypt.compare(password, account.passwordHash)) result = 'invalid-password';
                     else if (await readLiveSession(connection, accountTarget.userId, accountTarget.accountId, sessionId)) {
                         result = await insertLink(connection, accountTarget, identity, subject);
                     }

@@ -197,12 +197,48 @@ separately from the single-page queue.
   a separate Services ID/callback milestone.
 - Controls appear only for server-configured and platform-capable clients.
   Google login uses its official button without a separate selector or provider
-  heading. Manage account retains the linking dialog and current-password proof;
+  heading. Password accounts retain the linking dialog and current-password proof;
   native Apple retains its existing control and sheet.
   Existing users link from Manage account using their current password, then
   log in with that provider and the same Stay signed in preference. Unlinked
-  identities do not create accounts or match by email. Provider-only signup and
-  disconnect/revocation remain unimplemented.
+  identities on **Log in** do not create accounts or match by email. Google-only
+  signup is implemented as a separate opt-in action, described below.
+  Disconnect/provider-token revocation remain separate work.
+
+## Passwordless Google signup and deletion
+
+`PROVIDER_GOOGLE_SIGNUP_ENABLED=true` separately enables Google **web** signup;
+the default is off. Discovery advertises `signup: true` only for that Google
+client. Sign up shows the same official Continue with Google button as Log in.
+After Google verification, a small username card completes onboarding. The
+chosen Stay signed in preference uses the existing renewable, revocable session.
+
+The server verifies the Google token signature, audience, issuer, expiry and
+single-use nonce/state before creating anything. It accepts an email only when
+Google is authoritative for it (verified Gmail, or verified email with a valid
+Workspace `hd` claim). Other Google-account emails can still log in when linked,
+but cannot create a passwordless account through this path. Google authentication
+is **not** age assurance or parental consent.
+
+One transaction inserts the user with `user_password = NULL` and its exact Google
+subject link. Unique username/email/provider keys prevent collision races. It
+never invents a password, overwrites an existing link or merges accounts by email.
+An existing Google link directs users to Log in; a username/email collision asks
+them to choose another name or log in to the existing account. Signup success
+requires a durable session and the client's matching authenticated-session check.
+
+Manage account reads only authenticated boolean capabilities. Password-only
+accounts keep password deletion. Google-only accounts use typed DELETE,
+destructive confirmation and a fresh Google challenge. Under the existing
+deletion/submission lock, the server rechecks the exact linked subject, UUID and
+live session **before** recording the independent deletion journal and deleting
+data. Wrong/replayed proof never records deletion intent; uncertain completion
+does not claim success or clear the UI session.
+
+Production signup refuses to start without account deletion enabled. Public
+activation still requires the agreed age/consent and privacy work, migration and
+least-privilege grants, and explicit deployment approval. No native Google flow
+or provider-disconnect UI is added by this change.
 
 ## Isolated Google web check
 
@@ -215,7 +251,7 @@ npm run backend:dev:isolated -- --google-web-client-id <approved-client-id>
 
 It verifies the owned, pinned Docker MySQL container and server UUID before
 writes, uses only `ludolume_development` on `127.0.0.1:3307`, and retains the
-existing 0001–0012 schema. Only this opt-in adds local provider-table grants.
+existing data while applying reviewed schema 0001–0015. Only this opt-in adds local provider-table grants.
 Identity columns can be selected/inserted, not reassigned or deleted; MySQL's
 locking reads additionally need `UPDATE(linked_at)`. Attempts have the exact
 read/insert columns plus deletion. The production grant manifest is unchanged.
@@ -226,6 +262,13 @@ only for that marker **and** development mode, so removed settings cannot be
 silently reintroduced. Ordinary development and production still load `.env`.
 Running the launcher without the flag disables providers; local grants and
 local accounts remain stored and are not silently revoked/deleted.
+
+Append `--google-signup` to enable the new signup button on this isolated backend.
+The launcher applies 0013 username uniqueness (stopping on duplicates, never
+renaming users), 0014 nullable passwords, and 0015 signup/delete attempt actions.
+Startup verifies the resulting schema before advertising signup. Local account
+deletion remains disabled: deletion behavior is tested with an injected fake
+journal in the disposable MySQL/HTTP fixtures, not with production GCS access.
 
 Checkpoint (2026-09-14): seven launcher/bootstrap tests and backend typecheck
 passed. Restarted only VS Code's Back terminal in Google-only mode. A restricted
@@ -280,13 +323,45 @@ Remaining work, in order:
    new Swift bridge on macOS before any signed rollout. Complete native Google
    SDK/client setup separately, never Google OAuth inside the embedded WebView.
    Treat Apple's web Services ID separately.
-2. Design provider-only signup around the approved age/consent requirements;
-   retain username/password access and existing score ownership.
-3. Complete provider disconnect/revocation and account-deletion coordination,
-   privacy disclosures, focused end-to-end acceptance and separately approved
+2. Integrate the implemented opt-in Google signup with the approved age/consent
+   requirements before public activation; retain password access and score ownership.
+3. Complete provider disconnect/revocation and privacy disclosures,
+   focused real-provider acceptance and separately approved
    deployment. Then resume the remaining Clean Code sweep.
 
 ## Focused validation
+
+Passwordless signup checkpoint (2026-09-14): both TypeScript checks passed;
+the combined frontend auth/provider tests passed 91/91, password-signup flow
+8/8 and native transport/source contracts 14/14. The local launcher checks
+passed 8/8; focused migration/schema/replay tests passed 64/64. Config,
+legacy controller and auth-router checks passed 55/55. The direct Google
+button was visually confirmed on `/signup`; no real Google account was selected.
+Real MySQL evidence covers 38 distinct cases: replay 1/1, provider accounts
+14/14 and attempts/HTTP 12/12 in the last provider-subset run; sessions 11/11
+in a final session-only run using the same disposable harness guards. This is
+not a claim that one full run was green. Fixtures were corrected to choose the
+last issued session cookie and pin historical session-migration expectations.
+Parallel session setup also failed once with a sanitized unavailable error;
+only setup was serialized, the intended link race remains concurrent, and the
+underlying session-creation cause remains a recorded follow-up.
+
+Commands (from repository root unless noted):
+
+```text
+npm --prefix backend test
+npx --prefix frontend tsc --noEmit -p frontend/tsconfig.json
+node --test backend/scripts/dev-isolated.test.cjs
+npm --prefix backend run test:migrations -- --provider-identities
+```
+
+Frontend directory: `node --experimental-strip-types --test
+ts/services/authApi.test.mjs ts/services/authProviderSignup.test.mjs
+ts/services/providerClient.test.mjs ts/components/ProviderSignInControls.test.mjs`.
+The existing password-signup and native-transport test files were run separately.
+Native Swift allowlist changes have source-contract coverage, not a new macOS
+compile or TestFlight build. Production rollout and real-account acceptance
+are separate from these synthetic checks.
 
 `npm --prefix backend test` checks types. `npm --prefix backend run test:unit`
 includes signed-token/JWKS, linking, migration/schema and recovery tests.

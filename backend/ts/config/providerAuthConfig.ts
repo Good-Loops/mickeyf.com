@@ -5,18 +5,19 @@ type Environment = Readonly<Record<string, string | undefined>>;
 type VerifierDependencies = Parameters<typeof createProviderTokenVerifier>[1];
 
 export type PublicProviderAuthClient = Readonly<
-    | { clientKey: 'google-web'; provider: 'google'; platform: 'web'; clientId: string }
+    | { clientKey: 'google-web'; provider: 'google'; platform: 'web'; clientId: string; signup?: true }
     | { clientKey: 'apple-ios'; provider: 'apple'; platform: 'ios'; clientId: string }
 >;
 
 export type ProviderAuthConfig = Readonly<{
     enabled: boolean;
+    signupEnabled: boolean;
     clients: Readonly<Record<string, ProviderAuthClient>>;
     publicClients: readonly PublicProviderAuthClient[];
 }>;
 
 const disabledConfig: ProviderAuthConfig = Object.freeze({
-    enabled: false, clients: Object.freeze({}), publicClients: Object.freeze([]),
+    enabled: false, signupEnabled: false, clients: Object.freeze({}), publicClients: Object.freeze([]),
 });
 
 function optionalClientId(env: Environment, name: string, pattern: RegExp): string | undefined {
@@ -42,6 +43,8 @@ export function loadProviderAuthConfig(
     }
     const googleWebId = optionalClientId(env, 'GOOGLE_WEB_CLIENT_ID', /^[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/);
     const appleIosId = optionalClientId(env, 'APPLE_IOS_BUNDLE_ID', /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/);
+    const signupEnabled = env.PROVIDER_GOOGLE_SIGNUP_ENABLED === 'true';
+    if (signupEnabled && !googleWebId) throw new Error('Google signup requires GOOGLE_WEB_CLIENT_ID');
     if (googleWebId === undefined && appleIosId === undefined) {
         throw new Error('PROVIDER_AUTH_ENABLED requires GOOGLE_WEB_CLIENT_ID or APPLE_IOS_BUNDLE_ID');
     }
@@ -51,12 +54,13 @@ export function loadProviderAuthConfig(
     if (googleWebId !== undefined) {
         clients['google-web'] = Object.freeze({ provider: 'google',
             verifier: createProviderTokenVerifier({ googleAudience: googleWebId }, verifierDependencies) });
-        publicClients.push(Object.freeze({ clientKey: 'google-web', provider: 'google', platform: 'web', clientId: googleWebId }));
+        publicClients.push(Object.freeze({ clientKey: 'google-web', provider: 'google', platform: 'web', clientId: googleWebId,
+            ...(signupEnabled ? { signup: true as const } : {}) }));
     }
     if (appleIosId !== undefined) {
         clients['apple-ios'] = Object.freeze({ provider: 'apple',
             verifier: createProviderTokenVerifier({ appleAudience: appleIosId }, verifierDependencies) });
         publicClients.push(Object.freeze({ clientKey: 'apple-ios', provider: 'apple', platform: 'ios', clientId: appleIosId }));
     }
-    return Object.freeze({ enabled: true, clients: Object.freeze(clients), publicClients: Object.freeze(publicClients) });
+    return Object.freeze({ enabled: true, signupEnabled, clients: Object.freeze(clients), publicClients: Object.freeze(publicClients) });
 }

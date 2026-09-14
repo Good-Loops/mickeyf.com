@@ -3,8 +3,9 @@ import test from 'node:test';
 import bcrypt from 'bcryptjs';
 import { createHash } from 'node:crypto';
 import { Pool, PoolConnection } from 'mysql2/promise';
-import { AccountDeletionPendingError, AccountDeletionRollbackError, deleteAccount } from './accountDeletionRepository';
+import { AccountDeletionPendingError, AccountDeletionRollbackError, deleteAccount, deleteProviderAccount } from './accountDeletionRepository';
 import type { AccountDeletionJournal } from './deletionJournal';
+import type { VerifiedProviderIdentity } from '../auth/providerIdentity';
 
 const PASSWORD = 'correct-test-password';
 const PASSWORD_HASH = bcrypt.hashSync(PASSWORD, 4);
@@ -12,6 +13,7 @@ const ACCOUNT_ID = '123e4567-e89b-42d3-a456-426614174000';
 const SESSION_ID = Buffer.alloc(32, 1).toString('base64url');
 const SESSION_HASH = createHash('sha256').update(SESSION_ID, 'ascii').digest();
 const SESSION = { accountId: ACCOUNT_ID, sessionId: SESSION_ID };
+const PROVIDER_IDENTITY = { provider: 'google', subject: 'ExactGoogleSubject' } as VerifiedProviderIdentity;
 
 type FakeOptions = {
     userExists?: boolean;
@@ -23,6 +25,9 @@ type FakeOptions = {
     journal?: () => Promise<void>;
     accountId?: string;
     sessionExists?: boolean;
+    passwordHash?: string | null;
+    providerSubject?: Buffer | null;
+    sessionExpiresAfterProviderCheck?: boolean;
 };
 
 function fakeDatabase(options: FakeOptions = {}) {
@@ -50,7 +55,8 @@ function fakeDatabase(options: FakeOptions = {}) {
             }
             if (sql.includes('FROM account_sessions AS s')) {
                 record('read-session');
-                const matches = options.sessionExists !== false && values?.[0] === 42
+                const matches = options.sessionExists !== false
+                    && !(options.sessionExpiresAfterProviderCheck && events.includes('read-provider')) && values?.[0] === 42
                     && values?.[1] === ACCOUNT_ID && Buffer.isBuffer(values?.[2])
                     && values[2].equals(SESSION_HASH);
                 return [matches ? [{ userName: 'player' }] : [], []];
@@ -59,7 +65,12 @@ function fakeDatabase(options: FakeOptions = {}) {
                 record('read-password');
                 const accountId = options.accountId ?? ACCOUNT_ID;
                 return [options.userExists === false
-                    ? [] : [{ passwordHash: PASSWORD_HASH, accountId }], []];
+                    ? [] : [{ passwordHash: options.passwordHash === undefined ? PASSWORD_HASH : options.passwordHash, accountId }], []];
+            }
+            if (sql.includes('FROM account_provider_identities')) {
+                record('read-provider');
+                return [options.providerSubject === null ? []
+                    : [{ subject: options.providerSubject ?? Buffer.from(PROVIDER_IDENTITY.subject) }], []];
             }
             record(sql);
             return [{ affectedRows: sql === 'DELETE FROM users WHERE user_id = ?'
@@ -118,6 +129,13 @@ test('missing users and incorrect passwords never issue a deletion', async () =>
         assert.equal(await deleteAccount(fake.database, 42, password, fake.journal), expected);
         assert.deepEqual(fake.events, ['connect', 'acquire', 'begin', 'read-password', 'commit', 'unlock', 'release']);
     }
+});
+
+test('NULL-password accounts reject password reauthentication without invoking the deletion journal', async () => {
+    const fake = fakeDatabase({ passwordHash: null });
+    assert.equal(await deleteAccount(fake.database, 42, PASSWORD, fake.journal, SESSION), 'invalid-password');
+    assert.equal(fake.events.includes('journal'), false);
+    assert.equal(fake.queries.some(({ sql }) => sql.startsWith('DELETE')), false);
 });
 
 test('a stale UUID or session rejects before password checking, journaling or deletion', async () => {
@@ -257,6 +275,77 @@ test('SQL deletion waits for durable journal acknowledgement', async () => {
     const deletion = deleteAccount(fake.database, 42, PASSWORD, fake.journal);
     await started;
     assert.equal(fake.queries.some(({ sql }) => sql.startsWith('DELETE')), false);
+    acknowledge();
+    assert.equal(await deletion, 'deleted');
+});
+
+test('fresh Google deletion authenticates the exact linked subject and live session under the shared account lock', async () => {
+    const fake = fakeDatabase({ passwordHash: null });
+    assert.equal(await deleteProviderAccount(fake.database, 42, PROVIDER_IDENTITY, fake.journal, SESSION), 'deleted');
+    assert.deepEqual(fake.events, [
+        'connect', 'acquire', 'begin', 'read-session', 'read-password', 'read-provider', 'read-session', 'journal',
+        'DELETE FROM game_personal_bests WHERE user_id = ?',
+        'DELETE FROM game_submission_receipts WHERE user_id = ?', 'DELETE FROM users WHERE user_id = ?',
+        'commit', 'unlock', 'release',
+    ]);
+    const providerQuery = fake.queries.find(({ sql }) => sql.includes('FROM account_provider_identities'))!;
+    assert.deepEqual(providerQuery.values, [ACCOUNT_ID]);
+    assert.match(providerQuery.sql, /WHERE account_uuid = \? AND provider = 'google' LIMIT 2 FOR SHARE/);
+    assert.ok(fake.queries.every(({ values }) => !values?.includes(PROVIDER_IDENTITY.subject)
+        && !values?.includes(PASSWORD) && !values?.includes(SESSION_ID)));
+});
+
+test('provider deletion rejects wrong account, subject case, missing link, revoked session and expiry before journal', async () => {
+    for (const [options, expected] of [
+        [{ accountId: '123e4567-e89b-42d3-a456-426614174001' }, 'not-found'],
+        [{ providerSubject: Buffer.from('exactgooglesubject') }, 'invalid-password'],
+        [{ providerSubject: null }, 'invalid-password'],
+        [{ sessionExists: false }, 'not-found'],
+        [{ sessionExpiresAfterProviderCheck: true }, 'not-found'],
+    ] as const) {
+        const fake = fakeDatabase(options);
+        assert.equal(await deleteProviderAccount(fake.database, 42, PROVIDER_IDENTITY, fake.journal, SESSION), expected);
+        assert.equal(fake.events.includes('journal'), false);
+        assert.equal(fake.queries.some(({ sql }) => sql.startsWith('DELETE')), false);
+    }
+    for (const identity of [{ ...PROVIDER_IDENTITY, provider: 'apple' }, { ...PROVIDER_IDENTITY, subject: '' }]) {
+        const fake = fakeDatabase();
+        assert.equal(await deleteProviderAccount(fake.database, 42, identity as VerifiedProviderIdentity, fake.journal, SESSION), 'invalid-password');
+        assert.deepEqual(fake.events, []);
+    }
+});
+
+test('provider deletion requires a well-formed proof and does not journal after verification or journal failure', async () => {
+    for (const expectedSession of [undefined, { ...SESSION, sessionId: 'invalid' }, { ...SESSION, accountId: 'invalid' }]) {
+        const fake = fakeDatabase();
+        await assert.rejects(deleteProviderAccount(fake.database, 42, PROVIDER_IDENTITY, fake.journal, expectedSession as typeof SESSION));
+        assert.deepEqual(fake.events, []);
+    }
+    for (const failAt of ['read-provider', 'journal']) {
+        const fake = fakeDatabase({ failAt });
+        await assert.rejects(deleteProviderAccount(fake.database, 42, PROVIDER_IDENTITY, fake.journal, SESSION));
+        assert.equal(fake.queries.some(({ sql }) => sql.startsWith('DELETE')), false);
+        assert.equal(fake.events.includes('commit'), false);
+    }
+});
+
+test('provider deletion uses the same durable-intent and uncertain-commit guarantees as password deletion', async () => {
+    const fake = fakeDatabase({ failAt: 'commit' });
+    await assert.rejects(deleteProviderAccount(fake.database, 42, PROVIDER_IDENTITY, fake.journal, SESSION), error => {
+        assert.ok(error instanceof AccountDeletionPendingError);
+        return true;
+    });
+    assert.equal(fake.events.includes('journal'), true);
+    assert.equal(fake.events.includes('destroy'), true);
+    assert.equal(fake.events.includes('release'), false);
+    let acknowledge!: () => void;
+    let recording!: () => void;
+    const started = new Promise<void>(resolve => { recording = resolve; });
+    const durable = new Promise<void>(resolve => { acknowledge = resolve; });
+    const delayed = fakeDatabase({ journal: async () => { recording(); await durable; } });
+    const deletion = deleteProviderAccount(delayed.database, 42, PROVIDER_IDENTITY, delayed.journal, SESSION);
+    await started;
+    assert.equal(delayed.queries.some(({ sql }) => sql.startsWith('DELETE')), false);
     acknowledge();
     assert.equal(await deletion, 'deleted');
 });

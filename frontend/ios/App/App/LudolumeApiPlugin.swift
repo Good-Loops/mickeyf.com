@@ -69,6 +69,7 @@ private enum LudolumeApiPolicy {
         "POST /auth/renew",
         "POST /auth/delete-account",
         "GET /auth/providers/config",
+        "GET /auth/providers/account",
         "POST /auth/providers/begin",
         "POST /auth/providers/complete",
         "GET /api/leaderboards",

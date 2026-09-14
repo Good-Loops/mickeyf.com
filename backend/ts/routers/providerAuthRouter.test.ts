@@ -6,6 +6,8 @@ import test from 'node:test';
 import cookieParser from 'cookie-parser';
 import express from 'express';
 import type { Pool } from 'mysql2/promise';
+import { AccountDeletionPendingError } from '../accounts/accountDeletionRepository';
+import { readProviderAccountMethods, type ProviderAccountCreationResult } from '../accounts/providerAccountRepository';
 import { createProviderAuthContextReader } from '../auth/providerAuthContext';
 import { createProviderAuthFlow, type ProviderAuthClient, type ProviderChallengeResult, type ProviderCompletionResult } from '../auth/providerAuthFlow';
 import type { ProviderAttempt } from '../auth/providerAttemptRepository';
@@ -22,7 +24,7 @@ import {
 const secret = 'synthetic-provider-http-test-secret';
 const origin = 'https://provider.example.test';
 const account = { userId: 42, userName: 'provider-player', accountId: '11111111-2222-4333-8444-555555555555' };
-const identity = { provider: 'google', subject: 'synthetic-provider-subject' } as VerifiedProviderIdentity;
+const identity = { provider: 'google', subject: 'synthetic-provider-subject', email: 'synthetic@gmail.com' } as VerifiedProviderIdentity;
 const beginInput = { clientKey: 'google-test', action: 'login' };
 type FailureReason = Extract<ProviderCompletionResult, { ok: false }>['reason'];
 
@@ -31,17 +33,29 @@ function signedCookie(value: string, name = '__session') {
     return `${name}=${encodeURIComponent(`s:${value}.${signature}`)}`;
 }
 
-function fixture() {
+type Features = { signupEnabled?: boolean; accountDeletionEnabled?: boolean; withJournal?: boolean; missingProviderTable?: boolean };
+
+function fixture(features: Features = {}) {
     const state = {
         events: [] as string[], contextReads: 0, databaseReads: 0, verifiedNonces: [] as string[],
         rememberMe: [] as boolean[], proofs: [] as SessionProof[], linked: true, accountExists: true,
         sessionExists: true, sessionFailure: false, contextFailure: false,
         beginFailure: null as FailureReason | null, completionFailure: null as FailureReason | null,
+        creation: { created: true, account } as ProviderAccountCreationResult,
+        deletion: 'deleted' as 'deleted' | 'invalid-password' | 'not-found' | 'pending' | 'unavailable',
+        methods: { hasPassword: false, googleLinked: true } as { hasPassword: boolean; googleLinked: boolean } | null,
+        methodsFailure: false,
     };
     const attempts = new Map<string, ProviderAttempt>();
-    const database = { async query() {
+    const database = { async query(query: { sql: string }) {
         state.databaseReads++;
         if (state.contextFailure) throw new Error('private database details');
+        if (features.missingProviderTable && query.sql.includes('user_password IS NOT NULL')) {
+            return [[{ hasPassword: state.methods?.hasPassword ? 1 : 0 }], []];
+        }
+        if (features.missingProviderTable && query.sql.includes('FROM account_provider_identities')) {
+            throw { errno: 1146, code: 'ER_NO_SUCH_TABLE' };
+        }
         return [state.sessionExists ? [{ userName: account.userName }] : [], []];
     }, async getConnection() { throw new Error('No real database connection is allowed.'); } } as unknown as Pick<Pool, 'query' | 'getConnection'>;
     const clients: Record<string, ProviderAuthClient> = { 'google-test': {
@@ -52,7 +66,9 @@ function fixture() {
                 ? { verified: true, identity } : { verified: false, reason: 'INVALID_PROVIDER_TOKEN' };
         } },
     } };
-    const flow = createProviderAuthFlow({ enabled: true, clients, attempts: {
+    clients['google-web'] = clients['google-test'];
+    const flow = createProviderAuthFlow({ enabled: true, clients, signupEnabled: features.signupEnabled,
+        deletionEnabled: features.accountDeletionEnabled && features.withJournal, attempts: {
         async create(attempt) { state.events.push('create'); attempts.set(attempt.stateHash.toString('hex'), attempt); return 'created'; },
         async consume(hash, binding, client, action) {
             state.events.push('consume');
@@ -71,6 +87,21 @@ function fixture() {
             assert.ok(proof);
             state.proofs.push(proof);
             return 'linked';
+        },
+        async create(verified, userName) {
+            state.events.push('signup');
+            assert.deepEqual(verified, identity);
+            assert.equal(userName, 'new-player');
+            return state.creation;
+        },
+        async delete(target, verified, proof) {
+            state.events.push('delete');
+            assert.deepEqual(target, { userId: account.userId, accountId: account.accountId });
+            assert.deepEqual(verified, identity);
+            state.proofs.push(proof);
+            if (state.deletion === 'pending') throw new AccountDeletionPendingError(new Error('private journal details'));
+            if (state.deletion === 'unavailable') throw new Error('private deletion failure');
+            return state.deletion;
         },
     } });
     const readContext = createProviderAuthContextReader({ database, sessionSecret: secret,
@@ -95,17 +126,28 @@ function fixture() {
             res.cookie('__session', issued.token, { ...sessionCookieOptions(isProduction, '__session'), maxAge: issued.maxAge });
             return true;
         },
+        async readAccountMethods(_database, accountId, options) {
+            assert.equal(accountId, account.accountId);
+            state.events.push('methods');
+            if (state.methodsFailure) throw new Error('private account metadata');
+            if (features.missingProviderTable) return readProviderAccountMethods(database, accountId, options);
+            return state.methods;
+        },
     };
     return { database, clients, services, state };
 }
 
-async function withServer(run: (base: string, setup: ReturnType<typeof fixture>) => Promise<void>, enabled = true) {
-    const setup = fixture();
+async function withServer(run: (base: string, setup: ReturnType<typeof fixture>) => Promise<void>, enabled = true,
+    features: Features = {}) {
+    const setup = fixture(features);
     const app = express();
     app.set('trust proxy', 1);
     app.use(cookieParser(secret));
     app.use('/auth/providers', createProviderAuthRouter({ ...setup, sessionSecret: secret,
-        isProduction: true, allowedOrigins: [origin, 'capacitor://localhost'], enabled }));
+        isProduction: true, allowedOrigins: [origin, 'capacitor://localhost'], enabled,
+        signupEnabled: features.signupEnabled, accountDeletionEnabled: features.accountDeletionEnabled,
+        ...(features.withJournal ? { deletionJournal: { async recordAccountDeletion() { assert.fail('fixture flow owns deletion'); } } } : {}),
+    }));
     app.use(requestErrorHandler);
     const server = app.listen(0, '127.0.0.1');
     await once(server, 'listening');
@@ -119,7 +161,8 @@ async function post(base: string, path: string, body: unknown, headers: Record<s
 }
 
 async function challenge(base: string, action = 'login', headers: Record<string, string> = {}) {
-    const response = await post(base, 'begin', { ...beginInput, action }, headers);
+    const response = await post(base, 'begin', { ...beginInput, action,
+        ...(action === 'signup' || action === 'delete' ? { clientKey: 'google-web' } : {}) }, headers);
     assert.equal(response.status, 200);
     const body = await response.json() as { state: string; nonce: string; expiresInSeconds: number };
     assert.match(body.state, /^[A-Za-z0-9_-]{43}$/);
@@ -308,7 +351,9 @@ test('all flow failures have fixed HTTP mappings and never leak internal result 
     await withServer(async (base, { state }) => {
         const statuses: Record<FailureReason, number> = { UNAVAILABLE: 503, INVALID_REQUEST: 400, INVALID_CONTEXT: 403,
             BUSY: 503, INVALID_ATTEMPT: 400, INVALID_PROVIDER_TOKEN: 401, NOT_LINKED: 403,
-            INVALID_PASSWORD: 403, LINK_CONFLICT: 409, ACCOUNT_GONE: 401 };
+            INVALID_PASSWORD: 403, LINK_CONFLICT: 409, ACCOUNT_GONE: 401,
+            DUPLICATE_USER: 409, ALREADY_LINKED: 409, INVALID_USERNAME: 400, INVALID_EMAIL: 400,
+            ACCOUNT_DELETION_UNAVAILABLE: 503, ACCOUNT_DELETION_PENDING: 503 };
         for (const [reason, status] of Object.entries(statuses)) {
             state.completionFailure = reason as FailureReason;
             const response = await post(base, 'complete', beginInput);
@@ -349,4 +394,168 @@ test('link password attempts share an account ceiling across sessions and IPs be
         assert.equal(state.verifiedNonces.length, PROVIDER_LINK_ACCOUNT_LIMIT);
         assert.equal(state.proofs.length, 0);
     });
+});
+
+test('signup and Google deletion stay unavailable without their independent capability gates', async () => {
+    for (const features of [{}, { accountDeletionEnabled: true }, { withJournal: true }]) {
+        await withServer(async (base, { state }) => {
+            for (const [action, error] of [['signup', 'UNAVAILABLE'], ['delete', 'ACCOUNT_DELETION_UNAVAILABLE']]) {
+                for (const path of ['begin', 'complete']) {
+                    const response = await post(base, path, { clientKey: 'google-web', action });
+                    assert.equal(response.status, 503);
+                    assert.deepEqual(await response.json(), { error });
+                    assert.equal(response.headers.get('set-cookie'), null);
+                }
+            }
+            assert.deepEqual(state.events, []);
+            assert.equal(state.contextReads, 0);
+        }, true, features);
+    }
+});
+
+test('explicit Google signup establishes the normal cookie only after account creation succeeds', async () => {
+    await withServer(async (base, { state }) => {
+        const started = await challenge(base, 'signup');
+        const input = { action: 'signup', clientKey: 'google-web', state: started.state,
+            idToken: 'accepted-token', userName: ' new-player ', rememberMe: true };
+        const invalid = await post(base, 'complete', { ...input, rememberMe: 'true' }, { cookie: started.cookie });
+        assert.equal(invalid.status, 400);
+        assert.equal(invalid.headers.get('set-cookie'), null);
+        const response = await post(base, 'complete', input, { cookie: started.cookie });
+        assert.equal(response.status, 200);
+        assert.deepEqual(await response.json(), { success: true, user_name: account.userName });
+        assert.match(response.headers.get('set-cookie')!, /^__session=s%3Aey/);
+        assert.deepEqual(state.events, ['create', 'consume', 'verify', 'signup', 'session']);
+        assert.deepEqual(state.rememberMe, [true]);
+        const replay = await post(base, 'complete', input, { cookie: started.cookie });
+        assert.equal(replay.status, 400);
+        assert.equal(replay.headers.get('set-cookie'), null);
+    }, true, { signupEnabled: true });
+});
+
+test('Google signup conflicts and invalid metadata never log in an existing account or set a session cookie', async () => {
+    await withServer(async (base, { state }) => {
+        for (const [reason, status] of [['DUPLICATE_USER', 409], ['ALREADY_LINKED', 409],
+            ['INVALID_USERNAME', 400], ['INVALID_EMAIL', 400]] as const) {
+            state.creation = { created: false, reason };
+            const started = await challenge(base, 'signup');
+            const response = await post(base, 'complete', { action: 'signup', clientKey: 'google-web', state: started.state,
+                idToken: 'accepted-token', userName: 'new-player' }, { cookie: started.cookie });
+            assert.equal(response.status, status);
+            assert.deepEqual(await response.json(), { error: reason });
+            assert.equal(response.headers.get('set-cookie'), null);
+        }
+        assert.deepEqual(state.rememberMe, []);
+        assert.ok(!state.events.includes('find') && !state.events.includes('link'));
+    }, true, { signupEnabled: true });
+});
+
+test('confirmed fresh-Google deletion clears both authentication cookies and never establishes a replacement session', async () => {
+    await withServer(async (base, { state }) => {
+        const session = issueSessionToken(account, secret);
+        const cookie = signedCookie(session.token);
+        const started = await challenge(base, 'delete', { cookie });
+        assert.equal(started.response.headers.get('set-cookie'), null);
+        const input = { action: 'delete', clientKey: 'google-web', state: started.state,
+            idToken: 'accepted-token', confirmation: 'DELETE' };
+        const malformed = await post(base, 'complete', { ...input, rememberMe: false }, { cookie });
+        assert.equal(malformed.status, 400);
+        assert.equal(malformed.headers.get('set-cookie'), null);
+        const response = await post(base, 'complete', input, { cookie });
+        assert.equal(response.status, 200);
+        assert.deepEqual(await response.json(), { success: true, deleted: true });
+        const cleared = response.headers.getSetCookie();
+        assert.equal(cleared.length, 2);
+        assert.ok(cleared.some(value => value.startsWith('__session=')));
+        assert.ok(cleared.some(value => value.startsWith('session=')));
+        assert.ok(cleared.every(value => value.includes('Expires=Thu, 01 Jan 1970')));
+        assert.deepEqual(state.proofs, [{ accountId: account.accountId, sessionId: session.sessionId }]);
+        assert.deepEqual(state.events, ['create', 'consume', 'verify', 'delete']);
+        assert.deepEqual(state.rememberMe, []);
+        const replay = await post(base, 'complete', input, { cookie });
+        assert.equal(replay.status, 400);
+        assert.equal(replay.headers.get('set-cookie'), null);
+    }, true, { accountDeletionEnabled: true, withJournal: true });
+});
+
+test('wrong Google identity, removed accounts and uncertain deletion preserve cookies and return fixed failures', async () => {
+    await withServer(async (base, { state }) => {
+        const cookie = signedCookie(issueSessionToken(account, secret).token);
+        for (const [deletion, status, error] of [['invalid-password', 401, 'INVALID_PROVIDER_TOKEN'],
+            ['not-found', 401, 'ACCOUNT_GONE'], ['pending', 503, 'ACCOUNT_DELETION_PENDING'],
+            ['unavailable', 503, 'ACCOUNT_DELETION_UNAVAILABLE']] as const) {
+            state.deletion = deletion;
+            const started = await challenge(base, 'delete', { cookie });
+            const response = await post(base, 'complete', { action: 'delete', clientKey: 'google-web', state: started.state,
+                idToken: 'accepted-token', confirmation: 'DELETE' }, { cookie });
+            assert.equal(response.status, status);
+            assert.deepEqual(await response.json(), { error });
+            assert.equal(response.headers.get('set-cookie'), null);
+        }
+        assert.deepEqual(state.rememberMe, []);
+    }, true, { accountDeletionEnabled: true, withJournal: true });
+});
+
+test('account methods expose only booleans after signed-cookie and live-session verification', async () => {
+    await withServer(async (base, { state }) => {
+        const cookie = signedCookie(issueSessionToken(account, secret).token);
+        const response = await fetch(`${base}/account`, { headers: { cookie } });
+        assert.equal(response.status, 200);
+        assert.equal(response.headers.get('cache-control'), 'no-store');
+        assert.deepEqual(await response.json(), { hasPassword: false, googleLinked: true, googleDeletionEnabled: true });
+        assert.equal(response.headers.get('set-cookie'), null);
+        assert.deepEqual(state.events, ['methods']);
+        state.methods = { hasPassword: true, googleLinked: false };
+        const passwordOnly = await fetch(`${base}/account`, { headers: { cookie } });
+        assert.deepEqual(await passwordOnly.json(), { hasPassword: true, googleLinked: false, googleDeletionEnabled: false });
+        state.methods = null;
+        assert.equal((await fetch(`${base}/account`, { headers: { cookie } })).status, 401);
+        state.methodsFailure = true;
+        const failure = await fetch(`${base}/account`, { headers: { cookie } });
+        assert.equal(failure.status, 503);
+        assert.deepEqual(await failure.json(), { error: 'UNAVAILABLE' });
+    }, true, { accountDeletionEnabled: true, withJournal: true });
+});
+
+test('account methods reject unsigned, bearer, conflicting and stale sessions without returning metadata', async () => {
+    await withServer(async (base, { state }) => {
+        const session = issueSessionToken(account, secret);
+        const cookie = signedCookie(session.token);
+        const invalidHeaders: Record<string, string>[] = [{}, { cookie: '__session=unsigned' }, { authorization: `Bearer ${session.token}` },
+            { cookie, authorization: `Bearer ${session.token}` }, { cookie: `${cookie}; ${signedCookie(session.token, 'session')}` }];
+        for (const headers of invalidHeaders) {
+            const response = await fetch(`${base}/account`, { headers });
+            assert.equal(response.status, 401);
+            assert.deepEqual(await response.json(), { error: 'UNAUTHENTICATED' });
+        }
+        state.sessionExists = false;
+        assert.equal((await fetch(`${base}/account`, { headers: { cookie } })).status, 401);
+        assert.deepEqual(state.events, []);
+    });
+});
+
+test('account methods remain available for password users when provider authentication is disabled', async () => {
+    await withServer(async (base, { state }) => {
+        state.methods = { hasPassword: true, googleLinked: false };
+        const cookie = signedCookie(issueSessionToken(account, secret).token);
+        const response = await fetch(`${base}/account`, { headers: { cookie } });
+        assert.equal(response.status, 200);
+        assert.deepEqual(await response.json(), { hasPassword: true, googleLinked: false, googleDeletionEnabled: false });
+        assert.deepEqual(state.events, ['methods']);
+        assert.equal((await post(base, 'begin', beginInput)).status, 404);
+    }, false);
+});
+
+test('old-schema metadata works only for verified password users with provider authentication disabled', async () => {
+    for (const [enabled, hasPassword, status] of [[false, true, 200], [true, true, 503], [false, false, 503]] as const) {
+        await withServer(async (base, { state }) => {
+            state.methods = { hasPassword, googleLinked: false };
+            const cookie = signedCookie(issueSessionToken(account, secret).token);
+            const response = await fetch(`${base}/account`, { headers: { cookie } });
+            assert.equal(response.status, status);
+            assert.deepEqual(await response.json(), status === 200
+                ? { hasPassword: true, googleLinked: false, googleDeletionEnabled: false } : { error: 'UNAVAILABLE' });
+            assert.equal(response.headers.get('set-cookie'), null);
+        }, enabled, { missingProviderTable: true });
+    }
 });

@@ -13,4 +13,5 @@ export const {
     runProviderAuthentication,
     prepareProviderLogin,
     completeProviderLogin,
+    providerAccountMethodsRequest,
 } = createAuthApi(API_BASE, apiFetch);

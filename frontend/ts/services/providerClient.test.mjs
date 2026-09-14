@@ -122,6 +122,23 @@ test('discovery has a deadline even when the native capabilities promise never s
     assert.deepEqual(await discovery, []);
 });
 
+test('signup is an optional explicit Google-web capability and cannot leak to Apple or accept truthy substitutes', async () => {
+    const enabled = { ...google, signup: true };
+    const f = fixture({ fetchRequest: async () => Response.json({ clients: [enabled, apple] }) });
+    const clients = await f.client.getAvailableProviderClients();
+    assert.deepEqual(clients, [enabled]);
+    assert.equal(Object.isFrozen(clients[0]), true);
+    assert.equal(f.scripts.length, 0, 'signup capability discovery does not start provider authentication');
+    assert.deepEqual(await fixture().client.getAvailableProviderClients(), [google], 'old servers do not imply signup support');
+    for (const client of [{ ...google, signup: false }, { ...google, signup: 'true' },
+        { ...google, signup: 1 }, { ...google, signup: null }, { ...apple, signup: true }]) {
+        assert.deepEqual(await fixture({ fetchRequest: async () => Response.json({ clients: [client] }) })
+            .client.getAvailableProviderClients(), []);
+    }
+    assert.deepEqual(await fixture({ platform: 'ios', isNative: true,
+        fetchRequest: async () => Response.json({ clients: [enabled, apple] }) }).client.getAvailableProviderClients(), [apple]);
+});
+
 test('explicit Google acquisition loads only the official script and renders a nonce-bound official button', async () => {
     const f = fixture();
     const credential = f.client.acquireProviderCredential(google, challenge, signal());

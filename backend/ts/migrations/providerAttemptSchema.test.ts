@@ -3,6 +3,8 @@ import test from 'node:test';
 import type { MigrationConnection } from './leaderboardSchema';
 import {
     PROVIDER_ATTEMPT_MIGRATION_VERSION,
+    PROVIDER_ATTEMPT_ACTIONS_MIGRATION_VERSION,
+    inspectProviderAttemptStage,
     verifyOptionalProviderAttemptSchema,
     verifyProviderAttemptSchema,
 } from './providerAttemptSchema';
@@ -45,15 +47,19 @@ function fixture(): Metadata {
     };
 }
 
-function source(metadata = fixture(), options: { exists?: boolean; recorded?: boolean } = {}): MigrationConnection {
+function source(metadata = fixture(), options: { exists?: boolean; recorded?: boolean; extendedRecorded?: boolean } = {}): MigrationConnection {
     return { async query(sql, values) {
         if (sql.includes('COUNT(*)') && sql.includes('information_schema.TABLES')) {
             assert.deepEqual(values, ['provider_auth_attempts']);
             return [[{ tableCount: options.exists === false ? 0 : 1 }], []];
         }
         if (sql.includes('FROM schema_migrations')) {
-            assert.deepEqual(values, [PROVIDER_ATTEMPT_MIGRATION_VERSION]);
-            return [options.recorded ? [{ version: PROVIDER_ATTEMPT_MIGRATION_VERSION }] : [], []];
+            if (sql.includes('version IN')) {
+                assert.deepEqual(values, [PROVIDER_ATTEMPT_MIGRATION_VERSION, PROVIDER_ATTEMPT_ACTIONS_MIGRATION_VERSION]);
+                return [options.recorded || options.extendedRecorded ? [{ version: PROVIDER_ATTEMPT_MIGRATION_VERSION }] : [], []];
+            }
+            assert.deepEqual(values, [PROVIDER_ATTEMPT_ACTIONS_MIGRATION_VERSION]);
+            return [options.extendedRecorded ? [{ version: PROVIDER_ATTEMPT_ACTIONS_MIGRATION_VERSION }] : [], []];
         }
         const category = /FROM information_schema\.([A-Z_]+)/u.exec(sql)?.[1];
         if (!category || !metadata[category]) throw new Error('Unexpected schema metadata query');
@@ -162,4 +168,52 @@ test('backups may omit attempts only when 0010 was never recorded', async () => 
 test('attempt schema refuses unavailable metadata', async () => {
     await assert.rejects(verifyProviderAttemptSchema({ async query() { return [{}, []]; } }),
         /metadata is unavailable/u);
+});
+
+function extendedFixture(): Metadata {
+    const metadata = fixture();
+    metadata.TABLE_CONSTRAINTS[0].clause = "CAST(action AS BINARY) IN (CAST('login' AS BINARY), CAST('link' AS BINARY), "
+        + "CAST('signup' AS BINARY), CAST('delete' AS BINARY))";
+    metadata.TABLE_CONSTRAINTS[1].clause = "CASE WHEN CAST(action AS BINARY) IN (CAST('login' AS BINARY), CAST('signup' AS BINARY)) "
+        + 'THEN user_id IS NULL ELSE COALESCE(user_id > 0, 0) END = 1';
+    return metadata;
+}
+
+test('extended attempt schema accepts exactly anonymous login/signup and authenticated link/delete', async () => {
+    for (const escape of ['', '\\', '\\\\']) {
+        const metadata = extendedFixture();
+        for (const check of metadata.TABLE_CONSTRAINTS) {
+            check.clause = String(check.clause).replace(/AS BINARY/gu, 'as char charset binary')
+                .replace(/'(login|link|signup|delete)'/gu, (_match, value: string) => `_utf8mb4${escape}'${value}${escape}'`);
+        }
+        assert.equal(await inspectProviderAttemptStage(source(metadata)), 'extended');
+        await verifyProviderAttemptSchema(source(metadata), 'extended');
+        await verifyOptionalProviderAttemptSchema(source(metadata, { extendedRecorded: true }));
+        await assert.rejects(verifyProviderAttemptSchema(source(metadata)), /checks/u);
+    }
+    assert.equal(await inspectProviderAttemptStage(source()), 'legacy');
+    await assert.rejects(verifyProviderAttemptSchema(source(), 'extended'), /checks/u);
+});
+
+test('readiness and replay reject missing recorded extended checks or table', async () => {
+    await assert.rejects(verifyOptionalProviderAttemptSchema(source(fixture(), { extendedRecorded: true })), /missing its checks/u);
+    await assert.rejects(verifyOptionalProviderAttemptSchema(source(fixture(), { exists: false, extendedRecorded: true })), /missing its table/u);
+});
+
+test('attempt stage recognition rejects mixed upgrades, changed action bytes, and permissive target checks', async () => {
+    const changes: Array<(metadata: Metadata) => void> = [
+        m => { m.TABLE_CONSTRAINTS[0] = fixture().TABLE_CONSTRAINTS[0]; },
+        m => { m.TABLE_CONSTRAINTS[1] = fixture().TABLE_CONSTRAINTS[1]; },
+        m => { m.TABLE_CONSTRAINTS[1].enforced = 'NO'; },
+        m => { m.TABLE_CONSTRAINTS[0].clause = String(m.TABLE_CONSTRAINTS[0].clause).replace('signup', 'SIGNUP'); },
+        m => { m.TABLE_CONSTRAINTS[1].clause = String(m.TABLE_CONSTRAINTS[1].clause).replace('signup', 'delete'); },
+        m => { m.TABLE_CONSTRAINTS[1].clause = String(m.TABLE_CONSTRAINTS[1].clause).replace('> 0, 0', '> 0, 1'); },
+        m => { m.TABLE_CONSTRAINTS[1].clause = String(m.TABLE_CONSTRAINTS[1].clause).replace('= 1', '>= 0'); },
+        m => { m.TABLE_CONSTRAINTS[0].clause = String(m.TABLE_CONSTRAINTS[0].clause) + ' OR TRUE'; },
+    ];
+    for (const change of changes) {
+        const metadata = extendedFixture(); change(metadata);
+        await assert.rejects(inspectProviderAttemptStage(source(metadata)), /checks/u);
+        await assert.rejects(verifyOptionalProviderAttemptSchema(source(metadata)), /checks/u);
+    }
 });

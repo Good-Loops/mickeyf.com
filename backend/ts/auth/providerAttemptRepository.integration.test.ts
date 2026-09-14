@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
 import { createHash, generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
 import { after, before, beforeEach, test } from 'node:test';
+import { once } from 'node:events';
+import type { AddressInfo } from 'node:net';
+import express from 'express';
+import cookieParser from 'cookie-parser';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { issueSessionToken } from '../security/sessionPolicy';
@@ -22,6 +26,7 @@ import { createProviderAuthContextReader } from './providerAuthContext';
 import { createProviderAuthFlow } from './providerAuthFlow';
 import { createProviderTokenVerifier } from './providerTokenVerifier';
 import type { VerifiedProviderIdentity } from './providerIdentity';
+import { createProviderAuthRouter } from '../routers/providerAuthRouter';
 
 const config = loadMigrationConfig();
 const testPort = Number(process.env.MIGRATION_TEST_PORT);
@@ -80,6 +85,9 @@ before(async () => {
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-provider-attempts'] });
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-account-sessions'] });
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-session-renewal'] });
+    await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-unique-user-names'] });
+    await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['allow-passwordless-accounts'] });
+    await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['extend-provider-attempt-actions'] });
     database = mysql.createPool({
         host: config.host, port: config.port, database: config.database, user: config.user, password: config.password,
         connectTimeout: 10000, multipleStatements: false, connectionLimit: 2, dateStrings: true, timezone: 'Z',
@@ -146,7 +154,8 @@ async function concurrent<T>(operations: Array<(db: Pick<Pool, 'getConnection'>)
 test('stores hashed bindings with database-clock expiry and preserves every account and score field', async () => {
     const account = await createAccount('attempt-preserved-fixture');
     const original = await snapshotAccountData();
-    for (const value of [attempt(), attempt({ ...account, action: 'link', clientKey: 'apple-web' })]) {
+    for (const value of [attempt(), attempt({ ...account, action: 'link', clientKey: 'apple-web' }),
+        attempt({ action: 'signup' }), attempt({ ...account, action: 'delete' })]) {
         assert.equal(await createProviderAttempt(database, value), 'created');
         const [rows] = await administrator.query<RowDataPacket[]>(`SELECT *,
             TIMESTAMPDIFF(SECOND, UTC_TIMESTAMP(6), expires_at) AS remainingSeconds
@@ -160,6 +169,82 @@ test('stores hashed bindings with database-clock expiry and preserves every acco
         assert.equal(await consume(value), null);
     }
     assert.deepEqual(await snapshotAccountData(), original);
+});
+
+test('real HTTP and SQL create a passwordless Google account, establish its session, then require fresh Google proof for deletion', async () => {
+    const original = await snapshotAccountData();
+    const sessionSecret = randomBytes(32).toString('base64url');
+    const origin = 'https://synthetic-provider-http.example.test';
+    const audience = 'synthetic-google-http-client';
+    const subject = 'SyntheticGoogleSignupAndDeletionSubject';
+    const userName = 'provider-http-passwordless-fixture';
+    const key = generateKeyPairSync('rsa', { modulusLength: 2048 });
+    const nowSeconds = 1_800_000_000;
+    const journaled: string[] = [];
+    const verifier = createProviderTokenVerifier({ googleAudience: audience }, {
+        now: () => nowSeconds * 1000,
+        fetch: async input => {
+            assert.equal(String(input), 'https://www.googleapis.com/oauth2/v3/certs');
+            return Response.json({ keys: [{ ...key.publicKey.export({ format: 'jwk' }),
+                kid: 'synthetic-http-key', alg: 'RS256', use: 'sig' }] });
+        },
+    });
+    const signProof = (nonce: string, selectedSubject = subject) => jwt.sign({
+        sub: selectedSubject, nonce, iat: nowSeconds - 10, exp: nowSeconds + 300,
+        email: 'synthetic-provider-http@gmail.com', email_verified: true,
+    }, key.privateKey, { algorithm: 'RS256', keyid: 'synthetic-http-key', audience, issuer: 'https://accounts.google.com' });
+    const app = express();
+    app.use(cookieParser(sessionSecret));
+    app.use('/auth/providers', createProviderAuthRouter({ database, sessionSecret, isProduction: false,
+        allowedOrigins: [origin], clients: { 'google-web': { provider: 'google', verifier } },
+        enabled: true, signupEnabled: true, accountDeletionEnabled: true,
+        deletionJournal: { async recordAccountDeletion(accountId) { journaled.push(accountId); } },
+    }));
+    const server = app.listen(0, '127.0.0.1');
+    await once(server, 'listening');
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/auth/providers`;
+    const post = (path: string, body: unknown, cookie = '') => fetch(`${base}/${path}`, {
+        method: 'POST', headers: { origin, 'content-type': 'application/json', ...(cookie ? { cookie } : {}) },
+        body: JSON.stringify(body),
+    });
+    try {
+        const begin = await post('begin', { action: 'signup', clientKey: 'google-web' });
+        assert.equal(begin.status, 200);
+        const challenge = await begin.json() as { state: string; nonce: string };
+        const bindingCookie = begin.headers.getSetCookie()[0].split(';')[0];
+        const signup = await post('complete', { action: 'signup', clientKey: 'google-web', userName,
+            state: challenge.state, idToken: signProof(challenge.nonce), rememberMe: true }, bindingCookie);
+        assert.equal(signup.status, 200);
+        assert.deepEqual(await signup.json(), { success: true, user_name: userName });
+        // The session writer clears old cookies first; the last same-name cookie
+        // wins in a browser and contains the newly committed session.
+        const sessionCookie = signup.headers.getSetCookie().filter(value => value.startsWith('__session=')).at(-1)!.split(';')[0];
+        const methods = await fetch(`${base}/account`, { headers: { cookie: sessionCookie } });
+        assert.equal(methods.status, 200);
+        assert.deepEqual(await methods.json(), { hasPassword: false, googleLinked: true, googleDeletionEnabled: true });
+        const [users] = await administrator.query<RowDataPacket[]>('SELECT account_uuid, user_password FROM users WHERE user_name = ?', [userName]);
+        assert.equal(users.length, 1);
+        assert.equal(users[0].user_password, null);
+        assert.deepEqual(journaled, []);
+        for (const wrongSubject of [true, false]) {
+            const beginning = await post('begin', { action: 'delete', clientKey: 'google-web' }, sessionCookie);
+            assert.equal(beginning.status, 200);
+            const deletion = await beginning.json() as { state: string; nonce: string };
+            const response = await post('complete', { action: 'delete', clientKey: 'google-web', state: deletion.state,
+                idToken: signProof(deletion.nonce, wrongSubject ? 'AnotherGoogleSubject' : subject), confirmation: 'DELETE' }, sessionCookie);
+            assert.equal(response.status, wrongSubject ? 401 : 200);
+            assert.deepEqual(await response.json(), wrongSubject ? { error: 'INVALID_PROVIDER_TOKEN' } : { success: true, deleted: true });
+            if (wrongSubject) {
+                assert.equal(response.headers.get('set-cookie'), null);
+                assert.deepEqual(journaled, []);
+            } else {
+                assert.equal(response.headers.getSetCookie().length, 2);
+                assert.deepEqual(journaled, [users[0].account_uuid]);
+            }
+        }
+        assert.equal((await fetch(`${base}/account`, { headers: { cookie: sessionCookie } })).status, 401);
+        assert.deepEqual(await snapshotAccountData(), original);
+    } finally { await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); }
 });
 
 test('wrong browser binding, state, provider client, client case and action cannot consume a valid row', async () => {

@@ -69,6 +69,18 @@ test('provider CLI opt-in requires one exact bounded Google web client ID', () =
     }
 });
 
+test('Google signup is a separate local-only opt-in, never inherited from production', () => {
+    const options = parseArguments(['--google-web-client-id', googleWebClientId, '--google-signup']);
+    assert.deepEqual(options, { googleWebClientId, googleSignup: true });
+    assert.equal(runtimeEnvironment(credentials, {}, options).PROVIDER_GOOGLE_SIGNUP_ENABLED, 'true');
+    for (const local of [{}, { googleWebClientId }]) {
+        assert.equal(runtimeEnvironment(credentials, { PROVIDER_GOOGLE_SIGNUP_ENABLED: 'true' }, local)
+            .PROVIDER_GOOGLE_SIGNUP_ENABLED, 'false');
+    }
+    assert.equal(runtimeEnvironment(credentials, {}, options).ACCOUNT_DELETION_ENABLED, 'false');
+    assert.throws(() => parseArguments(['--google-signup']), /Usage/);
+});
+
 test('app bootstrap skips dotenv only for explicit isolated development, never ordinary development or production', () => {
     const appPath = path.join(__dirname, '../ts/app.ts');
     const appSource = readFileSync(appPath, 'utf8');

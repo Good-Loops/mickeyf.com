@@ -21,7 +21,7 @@ test('production runtime configuration allows only the website and packaged iOS 
     assert.equal(config.p4VegaScoreSubmissionsEnabled, false);
     assert.equal(config.threeBossesRunSubmissionsEnabled, false);
     assert.equal(config.accountDeletionEnabled, false);
-    assert.deepEqual(config.providerAuth, { enabled: false, clients: {}, publicClients: [] });
+    assert.deepEqual(config.providerAuth, { enabled: false, signupEnabled: false, clients: {}, publicClients: [] });
     assert.deepEqual(config.corsOrigins, [
         'https://mickeyf.com',
         'https://www.mickeyf.com',
@@ -84,6 +84,16 @@ test('account deletion defaults off in every environment and requires exact opt-
     });
     assert.equal(enabled.accountDeletionEnabled, true);
     assert.equal(enabled.journalBucket, DELETION_JOURNAL_BUCKET);
+});
+
+test('production Google signup cannot create passwordless users without available deletion', () => {
+    const env = { ...productionEnvironment, PROVIDER_AUTH_ENABLED: 'true',
+        PROVIDER_GOOGLE_SIGNUP_ENABLED: 'true', GOOGLE_WEB_CLIENT_ID: 'synthetic.apps.googleusercontent.com' };
+    assert.throws(() => loadRuntimeConfig(env), /Google signup requires account deletion/);
+    assert.equal(loadRuntimeConfig({ ...env, NODE_ENV: 'development' }).providerAuth.signupEnabled, true);
+    assert.equal(loadRuntimeConfig({ ...env, ACCOUNT_DELETION_ENABLED: 'true',
+        ACCOUNT_DELETION_JOURNAL_BUCKET: DELETION_JOURNAL_BUCKET,
+        ACCOUNT_IDENTITY_EPOCH: '2026-09-11 23:00:00.123456' }).providerAuth.signupEnabled, true);
 });
 
 test('enabled deletion requires an independently captured identity epoch', () => {
