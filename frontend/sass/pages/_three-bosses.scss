@@ -235,18 +235,6 @@ $three-bosses-fullscreen-button-size: 3.4rem;
         }
     }
 
-    &__loading-title {
-        color: rgba($white, .9);
-        font-family: $game-font;
-        font-size: clamp(1.1rem, 2vw, 1.4rem);
-        font-weight: 700;
-        letter-spacing: .12em;
-        // Preserve the original title row so smaller letters do not shrink the card.
-        line-height: clamp(1.55rem, 3.6vw, 2.4rem);
-        text-transform: uppercase;
-        text-shadow: 0 0 1.2rem rgba($primary-light, .14);
-    }
-
     &__loading-progress {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;

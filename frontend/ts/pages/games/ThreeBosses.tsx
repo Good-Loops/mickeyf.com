@@ -81,7 +81,6 @@ export const ThreeBossesLoadingStatus: React.FC<ThreeBossesLoadingStatusProps> =
                 <span className="three-bosses__loading-boss three-bosses__loading-boss--cyborg">II</span>
                 <span className="three-bosses__loading-boss three-bosses__loading-boss--kraken">III</span>
             </div>
-            <span className="three-bosses__loading-title">Three Bosses</span>
             <div className="three-bosses__loading-progress">
                 <div
                     aria-label="Loading Three Bosses"
