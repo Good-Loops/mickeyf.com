@@ -2767,6 +2767,14 @@ the support-message and backup-retention work below.
       all eight automatic backups. The live database and recovery settings were
       preserved. Older automatic/PITR history still precedes the identity epoch,
       so deletion remains disabled; no repeat restore or new deployment occurred.
+    - **Access review (2026-09-14 UTC):** recovery history is rotating normally,
+      but six automatic backups and the earliest PITR point still predate the
+      identity epoch. The ordinary operator lacks the MySQL metadata access
+      needed for an exact runtime-grant plan; recovery-service impersonation
+      also failed before storage access. No privileges were broadened, objects
+      written or deployment made. Authorize the narrow execution paths before
+      the live plan/service-identity checks; do not repeat the restore exercise.
+      See the [access review](backend/LEADERBOARD_DESIGN.md#activation-access-review--2026-09-14-utc).
 - [ ] **Finish and publish accurate privacy information:** resolve remaining
   retention/rights/provider/market decisions; implement the approved safeguards
   before claiming they exist. Preserve the no-sale/no-targeted-advertising

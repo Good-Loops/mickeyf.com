@@ -643,17 +643,19 @@ their own reviewed approval. The preflight made no database, configuration, or
 repository change and returned the local proxy to its original stopped state.
 
 The exact generic-only runtime manifest now lives in
-`ts/security/runtimeGrantManifest.ts`. It grants `users` only the auth columns
-required for `SELECT` and signup `INSERT`, with no `p4_score` access and no
-`UPDATE` privilege. `game_submission_receipts` and `game_personal_bests` retain
-their required narrow `SELECT`, `INSERT`, and personal-best `UPDATE` columns.
+`ts/security/runtimeGrantManifest.ts`. It grants `users` the auth columns
+required for `SELECT` and signup `INSERT`, plus read-only `account_uuid`, with
+no `p4_score` access and no `UPDATE` privilege. `game_submission_receipts` and
+`game_personal_bests` retain their required narrow `SELECT`, `INSERT`, and
+personal-best `UPDATE` columns.
 The existing-account deletion implementation additionally requires
 non-grantable table `DELETE` on exactly those three tables; MySQL has no
 column-level `DELETE`. Ownership checks and the transaction constrain deletion
 to the authenticated account, with receipts and bests removed before the user.
-There is still no access to `schema_migrations`, DDL, roles, administrative
-privileges, grant options, or schema/global DML. **These additional deletion
-grants are local preparation, not an applied production change.** A separately
+Identity-epoch verification also needs `SELECT(version, applied_at)` on
+`schema_migrations`, not checksum access or migration writes. There is still no
+DDL, role, administrative, grant-option, or schema/global DML access. **These
+additional deletion grants are local preparation, not an applied production change.** A separately
 approved grant plan/apply/verify is required before deploying self-deletion.
 
 The pinned MySQL 8.0.31 integration suite installs the manifest on a separate
@@ -661,7 +663,7 @@ disposable runtime identity and a physical `users` table without `p4_score`. It
 exercises auth, leaderboard and transactional account-deletion SQL paths and
 compares both exact column and table inventories. User-row `FOR UPDATE` is now
 permitted by `SELECT` plus `DELETE`; user-column updates, receipt updates,
-migration-history access/deletion, DDL, account creation and grant operations
+migration checksum access/deletion, DDL, account creation and grant operations
 remain denied. The deletion assertions must pass in the disposable suite before
 the new grant deployment; local tests do not themselves change live grants. The earlier
 approved production reduction used the previous transitional manifest.
@@ -1107,6 +1109,41 @@ Runtime-grant rollout, service-identity verification, old-backup transition and
 the operational response below remain pending. Keep the release switch off. Manual
 operations and older binaries can bypass an HTTP switch; the recovery runbook and deployment
 review remain necessary.
+
+#### Activation access review — 2026-09-14 UTC
+
+Read-only cloud checks found the verified manual backup `1789172213271` and
+eight successful automatic backups: two after the original identity epoch and
+six before it. The earliest PITR point was `2026-09-06T20:25:36.943Z`, still
+before the independently pinned epoch `2026-09-12 00:15:39.954172` UTC.
+Eight-backup retention, seven-day transaction logs, deletion protection and
+connector enforcement remain unchanged. No additional backup was deleted.
+
+The runtime remains `mickeyf-runtime` on the same generation-142 backend
+revision with 100% traffic. Journal bucket IAM remains create-only for that
+identity and read-only for `ludolume-deletion-recovery`, with seven-day soft
+delete. Two bounded access checks identified the outstanding execution paths:
+
+- The existing `runtime-grants:plan` failed closed with `SELECT` denied on
+  `mysql.user` for `michel_operator`. No complete plan or approved digest was
+  produced. Planning can run online, but needs an explicitly authorized
+  maintenance identity with privilege/role metadata visibility and effective
+  `PROCESS`; do not broaden the ordinary TablePlus account implicitly.
+- An all-version journal listing through the recovery service identity was
+  denied at impersonation (`iam.serviceAccounts.getAccessToken`), before
+  storage access. This is not evidence that the bucket's reader grant is wrong.
+  No impersonation permission, key, job or journal object was created.
+
+The required deletion-related privileges are three table `DELETE` grants plus read-only
+`users.account_uuid` and `schema_migrations(version, applied_at)`; only a fresh
+live plan can establish which are missing. Obtain scoped approval for the
+maintenance and service-identity execution paths before proceeding. Any live
+writer probe also needs an approved valid synthetic intent and retention
+disposition; an arbitrary test object or immediate soft deletion would make
+the strict replay reader reject the journal. Grant apply remains a separate,
+plan-bound operation with drained runtime sessions; its planner rejects a
+locked runtime account, so the identity-migration locking procedure cannot be
+copied unchanged. No runtime grant, deployment or activation occurred.
 
 #### Pending or unconfirmed deletion response
 
