@@ -9,6 +9,7 @@ const jsonMethods = [
     ['loginRequest', credentials],
     ['signupRequest', registration],
     ['verifyRequest', undefined],
+    ['renewRequest', undefined],
 ];
 
 for (const [method, type, payload, result] of [
@@ -93,6 +94,28 @@ test('HTTP 200 application errors pass through, including the legacy duplicate s
     for (const [method, payload, result] of cases) {
         const api = createAuthApi(apiBase, async () => ({ ok: true, json: async () => result }));
         assert.equal(await api[method](payload), result);
+    }
+});
+
+for (const result of [{ loggedIn: false }, { loggedIn: true, user_name: 'Player' }]) {
+    test(`renewRequest confirms the ${result.loggedIn ? 'authenticated' : 'anonymous'} session without JS credentials`, async () => {
+        const api = createAuthApi(apiBase, async (url, init) => {
+            assert.equal(url, `${apiBase}/auth/renew`);
+            assert.equal(init.method, 'POST');
+            assert.equal(init.credentials, 'include');
+            assert.deepEqual(init.headers, { 'Content-Type': 'application/json' });
+            assert.deepEqual(JSON.parse(init.body), {});
+            return Response.json(result);
+        });
+        assert.deepEqual(await api.renewRequest(), result);
+    });
+}
+
+test('renewal never converts an unexpected response into authentication or sign-out', async () => {
+    for (const result of [null, {}, [], { loggedIn: true }, { loggedIn: true, user_name: '' },
+        { loggedIn: false, error: 'UNAVAILABLE' }, { loggedIn: true, user_name: 'Player', token: 'not-allowed' }]) {
+        const api = createAuthApi(apiBase, async () => Response.json(result));
+        await assert.rejects(api.renewRequest(), { message: 'Could not confirm the renewed session.' });
     }
 });
 
@@ -251,7 +274,7 @@ test('logout waits for delayed login and its complete verification before revoki
     assert.equal(session, false);
 });
 
-test('signup, deletion, login and logout share one ordered mutation queue', async () => {
+test('signup, deletion, login, renewal and logout share one ordered mutation queue', async () => {
     const calls = [];
     let activeRequests = 0;
     const api = createAuthApi(apiBase, async (url, init) => {
@@ -271,6 +294,10 @@ test('signup, deletion, login and logout share one ordered mutation queue', asyn
             calls.push('verify');
             return Response.json({ loggedIn: true, user_name: 'Player' });
         }
+        if (url.endsWith('/auth/renew')) {
+            calls.push('renew');
+            return Response.json({ loggedIn: true, user_name: 'Player' });
+        }
         calls.push('logout');
         return Response.json({ loggedOut: true });
     });
@@ -279,9 +306,37 @@ test('signup, deletion, login and logout share one ordered mutation queue', asyn
         api.signupRequest(registration),
         api.deleteAccountRequest('test-only'),
         api.loginRequest(credentials),
+        api.renewRequest(),
         api.logoutRequest(),
     ]);
-    assert.deepEqual(calls, ['signup', 'delete', 'login', 'verify', 'logout']);
+    assert.deepEqual(calls, ['signup', 'delete', 'login', 'verify', 'renew', 'logout']);
+});
+
+test('logout waits for an in-flight cookie rotation and a later renewal cannot recreate the session', async () => {
+    let releaseRenewal;
+    const blockedRenewal = new Promise((resolve) => { releaseRenewal = resolve; });
+    const calls = [];
+    let signedIn = true;
+    const api = createAuthApi(apiBase, async (url) => {
+        if (url.endsWith('/auth/renew')) {
+            calls.push('renew');
+            await blockedRenewal;
+            return Response.json(signedIn ? { loggedIn: true, user_name: 'Player' } : { loggedIn: false });
+        }
+        calls.push('logout');
+        signedIn = false;
+        return Response.json({ loggedOut: true });
+    });
+    const renewal = api.renewRequest();
+    const logout = api.logoutRequest();
+    const laterRenewal = api.renewRequest();
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.deepEqual(calls, ['renew']);
+    releaseRenewal();
+    assert.deepEqual(await renewal, { loggedIn: true, user_name: 'Player' });
+    await logout;
+    assert.deepEqual(await laterRenewal, { loggedIn: false });
+    assert.deepEqual(calls, ['renew', 'logout', 'renew']);
 });
 
 test('a failed mutation does not poison the queue or retry its network operation', async () => {

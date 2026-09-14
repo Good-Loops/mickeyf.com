@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { after, before, beforeEach, test } from 'node:test';
 import bcrypt from 'bcryptjs';
 import mysql, { type Connection, type Pool, type PoolConnection, type QueryOptions, type ResultSetHeader, type RowDataPacket } from 'mysql2/promise';
@@ -8,8 +8,8 @@ import { loadMigrationConfig } from '../config/migrationConfig';
 import type { MigrationConnection } from '../migrations/leaderboardSchema';
 import { loadMigrationManifest } from '../migrations/migrationManifest';
 import { applyMigrations, planMigrations } from '../migrations/migrationRunner';
-import { verifyAccountSessionSchema } from '../migrations/accountSessionSchema';
-import { AccountSessionUnavailableError, createAccountSession, readLiveSession, revokeAccountSession } from './accountSessionRepository';
+import { verifyAccountSessionSchema, verifyRenewableAccountSessionSchema } from '../migrations/accountSessionSchema';
+import { AccountSessionUnavailableError, createAccountSession, readLiveSession, renewAccountSession, revokeAccountSession } from './accountSessionRepository';
 
 const config = loadMigrationConfig();
 const testPort = Number(process.env.MIGRATION_TEST_PORT);
@@ -20,6 +20,7 @@ let passwordHash: string;
 const newId = () => randomBytes(32).toString('base64url');
 const expiry = () => Math.floor(Date.now() / 1000) + 3600;
 const hash = (id: string) => createHash('sha256').update(id).digest();
+const replacement = (id: string) => createHmac('sha256', 'isolated-renewal-fixture-key').update(id).digest('base64url');
 
 before(async () => {
     assert.equal(process.env.NODE_ENV, 'test');
@@ -64,11 +65,27 @@ before(async () => {
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-account-identity'] });
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-provider-identities'] });
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-provider-attempts'] });
-    assert.deepEqual((await planMigrations(connection, migrations, config)).pending, ['0011_create_account_sessions']);
+    assert.deepEqual((await planMigrations(connection, migrations, config)).pending,
+        ['0011_create_account_sessions', '0012_add_session_renewal']);
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-account-sessions'] });
     await verifyAccountSessionSchema(connection);
+    // A pre-renewal device remains non-renewable after this additive migration.
+    const [legacyUser] = await administrator.query<ResultSetHeader>(`INSERT INTO users (user_name, email, user_password)
+        VALUES ('legacy-session', 'legacy-session@example.test', 'unused-fixture-password')`);
+    const legacyId = newId();
+    await administrator.query(`INSERT INTO account_sessions (session_hash, account_uuid, created_at, expires_at)
+        SELECT ?, account_uuid, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6) + INTERVAL 1 HOUR FROM users WHERE user_id = ?`,
+    [hash(legacyId), legacyUser.insertId]);
+    assert.deepEqual((await applyMigrations(connection, migrations, config)).pending, ['0012_add_session_renewal']);
+    await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-session-renewal'] });
+    await verifyRenewableAccountSessionSchema(connection);
+    const [legacy] = await administrator.query<RowDataPacket[]>('SELECT * FROM account_sessions WHERE session_hash = ?', [hash(legacyId)]);
+    assert.equal(legacy[0].remembered, 0); assert.equal(legacy[0].renewed_at, null);
+    assert.equal(legacy[0].previous_session_hash, null); assert.equal(legacy[0].previous_valid_until, null);
     assert.deepEqual((await planMigrations(connection, migrations, config)).pending, []);
     database = mysql.createPool({ ...options, connectionLimit: 2 });
+    assert.deepEqual(await renewAccountSession(database, legacyUser.insertId, legacy[0].account_uuid, legacyId, replacement),
+        { userName: 'legacy-session' });
     passwordHash = await bcrypt.hash(PASSWORD, 4);
 });
 
@@ -98,7 +115,8 @@ test('sessions store hashes and UTC expiry across pool time zones; logout revoke
     assert.equal(await createAccountSession({ getConnection: async () => connection }, target, first, expiresAt, passwordHash), true);
     assert.equal(await createAccountSession(database, target, second, expiresAt), true);
     const stored = await rows();
-    assert.deepEqual(Object.keys(stored[0]), ['session_hash', 'account_uuid', 'created_at', 'expires_at']);
+    assert.deepEqual(Object.keys(stored[0]), ['session_hash', 'account_uuid', 'created_at', 'expires_at',
+        'remembered', 'renewed_at', 'previous_session_hash', 'previous_valid_until']);
     assert.deepEqual(stored.map(row => row.session_hash.toString('hex')).sort(), [hash(first).toString('hex'), hash(second).toString('hex')].sort());
     const [time] = await administrator.query<RowDataPacket[]>(`SELECT TIMESTAMPDIFF(SECOND,
         '1970-01-01 00:00:00', expires_at) AS expires FROM account_sessions`);
@@ -175,4 +193,109 @@ test('lost logout commit acknowledgement is sanitized and the revoked token stay
         AccountSessionUnavailableError);
     assert.equal(destroyed, true);
     assert.equal(await readLiveSession(database, target.userId, target.accountId, id), null);
+});
+
+test('parallel renewal produces one replacement and a thirty-day idle deadline even for a years-old active session', async () => {
+    const target = await account('renewal-fixture'); const id = newId();
+    await createAccountSession(database, target, id, expiry(), passwordHash, true);
+    await administrator.query(`UPDATE account_sessions SET created_at = '2000-01-01',
+        renewed_at = UTC_TIMESTAMP(6) - INTERVAL 16 MINUTE WHERE session_hash = ?`, [hash(id)]);
+    const results = await Promise.all([0, 1].map(() => renewAccountSession(database,
+        target.userId, target.accountId, id, replacement)));
+    assert.deepEqual(results[0], results[1]);
+    assert.equal(results[0]?.renewal?.sessionId, replacement(id));
+    assert.equal(results[0]!.renewal!.expiresAt - results[0]!.renewal!.issuedAt, 30 * 86400);
+    const stored = await rows();
+    assert.equal(stored.length, 1); assert.equal(stored[0].created_at, '2000-01-01 00:00:00.000000');
+    assert.deepEqual(stored[0].session_hash, hash(replacement(id)));
+    assert.deepEqual(stored[0].previous_session_hash, hash(id));
+    assert.equal(stored[0].remembered, 1);
+    assert.deepEqual(await readLiveSession(database, target.userId, target.accountId, id), { userName: 'renewal-fixture' });
+    assert.deepEqual(await renewAccountSession(database, target.userId, target.accountId, replacement(id), replacement),
+        { userName: 'renewal-fixture' });
+    await administrator.query(`UPDATE account_sessions SET previous_valid_until = UTC_TIMESTAMP(6) - INTERVAL 1 SECOND
+        WHERE session_hash = ?`, [hash(replacement(id))]);
+    assert.equal(await readLiveSession(database, target.userId, target.accountId, id), null);
+    assert.equal(await renewAccountSession(database, target.userId, target.accountId, id, replacement), null);
+    assert.notEqual(await readLiveSession(database, target.userId, target.accountId, replacement(id)), null);
+    // An in-flight logout must still revoke the rotated device when its grace has ended.
+    await revokeAccountSession(database, target.userId, target.accountId, id);
+    assert.equal(await readLiveSession(database, target.userId, target.accountId, replacement(id)), null);
+});
+
+test('only one predecessor is retained; a second rotation does not revive an older generation', async () => {
+    const target = await account(); const first = newId();
+    await createAccountSession(database, target, first, expiry(), undefined, true);
+    const rotateDue = async (id: string) => {
+        await administrator.query('UPDATE account_sessions SET renewed_at = UTC_TIMESTAMP(6) - INTERVAL 16 MINUTE WHERE session_hash = ?', [hash(id)]);
+        return renewAccountSession(database, target.userId, target.accountId, id, replacement);
+    };
+    const second = (await rotateDue(first))!.renewal!.sessionId;
+    const third = (await rotateDue(second))!.renewal!.sessionId;
+    assert.notEqual(second, first); assert.notEqual(third, second);
+    assert.equal(await renewAccountSession(database, target.userId, target.accountId, first, replacement), null);
+    assert.equal(await readLiveSession(database, target.userId, target.accountId, first), null);
+    assert.deepEqual((await rows())[0].previous_session_hash, hash(second));
+    assert.equal((await rows()).length, 1);
+});
+
+test('expired and revoked remembered sessions cannot renew; ordinary sessions never change their deadline', async () => {
+    const target = await account('idle-fixture'); const ordinary = newId(); const remembered = newId();
+    await createAccountSession(database, target, ordinary, expiry());
+    await createAccountSession(database, target, remembered, expiry(), undefined, true);
+    await administrator.query('UPDATE account_sessions SET renewed_at = UTC_TIMESTAMP(6) - INTERVAL 1 DAY WHERE account_uuid = ?', [target.accountId]);
+    const before = (await rows()).find(row => row.session_hash.equals(hash(ordinary)))!;
+    assert.deepEqual(await renewAccountSession(database, target.userId, target.accountId, ordinary, replacement),
+        { userName: 'idle-fixture' });
+    assert.deepEqual((await rows()).find(row => row.session_hash.equals(hash(ordinary))), before);
+    await administrator.query('UPDATE account_sessions SET expires_at = UTC_TIMESTAMP(6) WHERE session_hash = ?', [hash(remembered)]);
+    assert.equal(await renewAccountSession(database, target.userId, target.accountId, remembered, replacement), null);
+    await revokeAccountSession(database, target.userId, target.accountId, ordinary);
+    assert.equal(await renewAccountSession(database, target.userId, target.accountId, ordinary, replacement), null);
+});
+
+test('a lost renewal acknowledgement is recoverable using the original credential without a second rotation', async () => {
+    const target = await account(); const id = newId();
+    await createAccountSession(database, target, id, expiry(), undefined, true);
+    await administrator.query('UPDATE account_sessions SET renewed_at = UTC_TIMESTAMP(6) - INTERVAL 16 MINUTE WHERE session_hash = ?', [hash(id)]);
+    const connection = await database.getConnection(); let destroyed = false;
+    const uncertain = {
+        async query(query: QueryOptions, values?: unknown[]) {
+            const result = await connection.query(query, values);
+            if (query.sql === 'COMMIT') throw new Error('simulated lost renewal acknowledgement');
+            return result;
+        }, release() { connection.release(); }, destroy() { destroyed = true; connection.destroy(); },
+    } as unknown as PoolConnection;
+    await assert.rejects(renewAccountSession({ getConnection: async () => uncertain }, target.userId, target.accountId, id, replacement),
+        AccountSessionUnavailableError);
+    assert.equal(destroyed, true);
+    const stored = (await rows())[0];
+    const recovered = await renewAccountSession(database, target.userId, target.accountId, id, replacement);
+    assert.equal(recovered?.renewal?.sessionId, replacement(id));
+    assert.deepEqual((await rows())[0], stored);
+});
+
+test('concurrent renewal and logout never resurrect the revoked device or affect another device', async () => {
+    const target = await account(); const revoked = newId(); const other = newId();
+    await createAccountSession(database, target, revoked, expiry(), undefined, true);
+    await createAccountSession(database, target, other, expiry(), undefined, true);
+    await administrator.query('UPDATE account_sessions SET renewed_at = UTC_TIMESTAMP(6) - INTERVAL 16 MINUTE WHERE session_hash = ?', [hash(revoked)]);
+    await Promise.all([
+        renewAccountSession(database, target.userId, target.accountId, revoked, replacement),
+        revokeAccountSession(database, target.userId, target.accountId, revoked),
+    ]);
+    assert.equal(await readLiveSession(database, target.userId, target.accountId, revoked), null);
+    assert.equal(await readLiveSession(database, target.userId, target.accountId, replacement(revoked)), null);
+    assert.equal(await renewAccountSession(database, target.userId, target.accountId, revoked, replacement), null);
+    assert.notEqual(await readLiveSession(database, target.userId, target.accountId, other), null);
+    assert.equal((await rows()).length, 1);
+});
+
+test('renewal after schema DDL can recover its missing history record without rerunning ALTER', async () => {
+    const migrations = loadMigrationManifest(); const version = '0012_add_session_renewal';
+    await administrator.query('DELETE FROM schema_migrations WHERE version = ?', [version]);
+    const connection = administrator as unknown as MigrationConnection;
+    assert.deepEqual((await planMigrations(connection, migrations, config)).recoverable, [version]);
+    assert.deepEqual((await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-session-renewal'] })).pending, []);
+    await verifyRenewableAccountSessionSchema(connection);
 });

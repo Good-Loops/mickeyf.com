@@ -120,7 +120,7 @@ export function createMainController({
         const session = issueSessionToken({ userId: user.user_id, userName: user.user_name,
             accountId: user.account_uuid }, sessionSecret, rememberMe);
         if (!await createAccountSession(database, { userId: user.user_id, accountId: user.account_uuid },
-            session.sessionId, session.expiresAt, user.user_password)) {
+            session.sessionId, session.expiresAt, user.user_password, rememberMe)) {
             return res.json({ error: 'AUTH_FAILED' });
         }
         const cookieName = req.headers.origin === 'capacitor://localhost' ? NATIVE_SESSION_COOKIE : WEB_SESSION_COOKIE;

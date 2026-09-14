@@ -194,6 +194,7 @@ test('plan is read-only, configures short waits, and releases its advisory lock'
             '0009_create_account_provider_identities',
             '0010_create_provider_auth_attempts',
             '0011_create_account_sessions',
+            '0012_add_session_renewal',
         ],
         recoverable: [],
     });
@@ -445,6 +446,32 @@ test('sessions require explicit selection and complete earlier history for DDL, 
     state.appliedRows.push({ version: migration.version, checksum: migration.checksum });
     await assert.rejects(planMigrations(new FakeConnection(migrationResults(state)), [migration], settings),
         /all earlier migrations/u);
+});
+
+test('session renewal requires explicit authorization and complete 0011 history, including DDL recovery', async () => {
+    const migration = loadMigrationManifest().find(({ effect }) => effect === 'add-session-renewal')!;
+    const skipped = new FakeConnection(migrationResults(legacySourceState()));
+    assert.deepEqual((await applyMigrations(skipped, [migration], settings)).pending, [migration.version]);
+    assert.equal(skipped.calls.some(({ sql }) => sql === migration.sql), false);
+    const incomplete = new FakeConnection(migrationResults(legacySourceState()));
+    await assert.rejects(applyMigrations(incomplete, [migration], settings, {
+        allowedEffectKinds: ['add-session-renewal'],
+    }), /Session renewal require all earlier migrations/u);
+    assert.equal(incomplete.calls.some(({ sql }) => sql === migration.sql), false);
+    const original = migrationResults(legacySourceState());
+    const recoverable = new FakeConnection((sql, values) => {
+        if (sql.includes('COUNT(*)') && sql.includes('information_schema.TABLES')
+            && values[0] === migration.tableName) return [{ tableCount: 1 }];
+        if (sql.includes('COLUMN_NAME IN')) return ['remembered', 'renewed_at',
+            'previous_session_hash', 'previous_valid_until'].map(name => ({ name }));
+        return original(sql, values);
+    });
+    await assert.rejects(planMigrations(recoverable, [migration], settings), /all earlier migrations/u);
+    const state = legacySourceState(); state.historyExists = true;
+    state.appliedRows.push({ version: migration.version, checksum: migration.checksum });
+    await assert.rejects(planMigrations(new FakeConnection(migrationResults(state)), [migration], settings),
+        /all earlier migrations/u);
+    assert.equal(recoverable.calls.some(({ sql }) => /CREATE|INSERT|ALTER/u.test(sql)), false);
 });
 
 test('authorized drop rechecks its source and verifies absence before history', async () => {

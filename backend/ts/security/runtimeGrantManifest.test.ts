@@ -47,13 +47,15 @@ test('account identity is readable but cannot be inserted or rewritten by runtim
     );
 });
 
-test('device sessions permit only scoped create/read/delete, never extending an existing expiry', () => {
+test('device sessions permit renewal without rewriting their account, creation time or remembered choice', () => {
     const privileges = runtimeColumnPrivilegeInventory().filter(({ tableName }) => tableName === 'account_sessions');
-    assert.deepEqual([...new Set(privileges.map(({ privilegeType }) => privilegeType))], ['SELECT', 'INSERT']);
-    assert.deepEqual(privileges.map(({ columnName }) => columnName), [
-        'session_hash', 'account_uuid', 'created_at', 'expires_at',
-        'session_hash', 'account_uuid', 'created_at', 'expires_at',
-    ]);
+    const columns = (privilege: string) => privileges.filter(({ privilegeType }) => privilegeType === privilege)
+        .map(({ columnName }) => columnName);
+    assert.deepEqual(columns('SELECT'), ['session_hash', 'account_uuid', 'created_at', 'expires_at',
+        'remembered', 'renewed_at', 'previous_session_hash', 'previous_valid_until']);
+    assert.deepEqual(columns('INSERT'), ['session_hash', 'account_uuid', 'created_at', 'expires_at', 'remembered', 'renewed_at']);
+    assert.deepEqual(columns('UPDATE'), ['session_hash', 'expires_at', 'renewed_at', 'previous_session_hash', 'previous_valid_until']);
+    assert.ok(['account_uuid', 'created_at', 'remembered'].every(column => !columns('UPDATE').includes(column)));
 });
 
 test('renders the exact production grant statements without applying them', () => {
@@ -63,7 +65,7 @@ test('renders the exact production grant statements without applying them', () =
             PRODUCTION_RUNTIME_DATABASE_ACCOUNT
         ),
         [
-            "GRANT SELECT (`session_hash`, `account_uuid`, `created_at`, `expires_at`), INSERT (`session_hash`, `account_uuid`, `created_at`, `expires_at`), DELETE ON `cms`.`account_sessions` TO 'cms_mickeyf'@'%';",
+            "GRANT SELECT (`session_hash`, `account_uuid`, `created_at`, `expires_at`, `remembered`, `renewed_at`, `previous_session_hash`, `previous_valid_until`), INSERT (`session_hash`, `account_uuid`, `created_at`, `expires_at`, `remembered`, `renewed_at`), UPDATE (`session_hash`, `expires_at`, `renewed_at`, `previous_session_hash`, `previous_valid_until`), DELETE ON `cms`.`account_sessions` TO 'cms_mickeyf'@'%';",
             "GRANT SELECT (`version`, `applied_at`) ON `cms`.`schema_migrations` TO 'cms_mickeyf'@'%';",
             "GRANT SELECT (`user_id`, `account_uuid`, `user_name`, `email`, `user_password`), INSERT (`user_name`, `email`, `user_password`), DELETE ON `cms`.`users` TO 'cms_mickeyf'@'%';",
             "GRANT SELECT (`game_id`, `rules_version`, `user_id`, `run_id`, `score`, `completion_time_ms`, `payload_fingerprint`, `improved_personal_best`, `submitted_at`), INSERT (`game_id`, `rules_version`, `user_id`, `run_id`, `score`, `completion_time_ms`, `payload_fingerprint`, `improved_personal_best`, `submitted_at`), DELETE ON `cms`.`game_submission_receipts` TO 'cms_mickeyf'@'%';",

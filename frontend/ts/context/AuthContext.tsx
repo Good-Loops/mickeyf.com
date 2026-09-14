@@ -12,8 +12,9 @@
  * - The service layer (`services/authService.ts`) owns network/provider calls.
  */
 import { createContext, useContext, useState, ReactNode, useEffect, useRef } from 'react';
-import { loginRequest, logoutRequest, verifyRequest, deleteAccountRequest } from '@/services/authService';
+import { loginRequest, logoutRequest, verifyRequest, renewRequest, deleteAccountRequest } from '@/services/authService';
 import type { DeleteAccountResponse } from '@/services/authApi';
+import { watchSessionRenewalActivity } from '@/services/sessionRenewalActivity';
 import Swal from '@/components/siteAlert';
 
 type LoginOptions = { showFeedback?: boolean; rememberMe?: boolean };
@@ -43,29 +44,43 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [loading, setLoading] = useState(true);
     const authActionVersion = useRef(0);
+    const sessionMayExist = useRef(true);
+    const renewalActivity = useRef<ReturnType<typeof watchSessionRenewalActivity> | null>(null);
 
     useEffect(() => {
         let active = true;
-        // A slow startup check must not overwrite a newer login or logout.
-        const canApplyVerification = () => active && authActionVersion.current === 0;
-        (async () => {
+        const renewSession = async () => {
+            const actionVersion = authActionVersion.current;
+            const canApply = () => active && actionVersion === authActionVersion.current;
             try {
-                const res = await verifyRequest();
-                if (!canApplyVerification()) return;
-                if (res.loggedIn) {
-                    setIsAuthenticated(true);
-                    setUserName(res.user_name ?? null);
-                } else {
-                    setIsAuthenticated(false);
-                    setUserName(null);
-                }
-            } catch (err) {
-                if (canApplyVerification()) console.error('verify on mount failed', err);
+                const session = await renewRequest();
+                // A late renewal must not undo a newer login, logout or deletion.
+                if (!canApply()) return true;
+                sessionMayExist.current = session.loggedIn;
+                setIsAuthenticated(session.loggedIn);
+                setUserName(session.loggedIn ? session.user_name : null);
+                return true;
+            } catch {
+                // An outage is not evidence of sign-out. Later activity can retry quietly.
+                return !canApply();
             } finally {
-                if (canApplyVerification()) setLoading(false);
+                if (canApply()) setLoading(false);
             }
-        })();
-        return () => { active = false; };
+        };
+        const activity = watchSessionRenewalActivity({
+            windowEvents: window,
+            documentEvents: document,
+            isVisible: () => document.visibilityState === 'visible',
+            canRenew: () => sessionMayExist.current,
+            renew: renewSession,
+        });
+        renewalActivity.current = activity;
+        void activity.renewNow();
+        return () => {
+            active = false;
+            activity.stop();
+            renewalActivity.current = null;
+        };
     }, []);
 
     /**
@@ -106,6 +121,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
             setIsAuthenticated(true);
             setUserName(res.user_name);
+            sessionMayExist.current = true;
+            renewalActivity.current?.resetCooldown();
 
             if (showFeedback) {
                 await Swal.fire({
@@ -149,6 +166,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 if (actionVersion !== authActionVersion.current) return;
                 setIsAuthenticated(session.loggedIn);
                 setUserName(session.loggedIn ? session.user_name : null);
+                sessionMayExist.current = session.loggedIn;
+                renewalActivity.current?.resetCooldown();
             } catch (verificationError) {
                 // If the network is still unavailable, preserve the last known UI state.
                 console.error('session check after failed logout failed', verificationError);
@@ -165,6 +184,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         if (actionVersion === authActionVersion.current) {
             setIsAuthenticated(false);
             setUserName(null);
+            sessionMayExist.current = false;
         }
     };
 
@@ -178,6 +198,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             setIsAuthenticated(false);
             setUserName(null);
             setLoading(false);
+            sessionMayExist.current = false;
         }
         return result;
     };

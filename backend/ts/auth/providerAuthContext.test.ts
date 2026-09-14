@@ -68,7 +68,8 @@ test('valid signed session verifies its UUID and device identifier in storage, n
     assert.ok(context);
     assert.deepEqual(context.account, { userId: row.userId, accountId });
     assert.equal(Object.isFrozen(context.account), true);
-    assert.deepEqual(calls[0][1], [row.userId, accountId, createHash('sha256').update(issued.sessionId).digest()]);
+    const hash = createHash('sha256').update(issued.sessionId).digest();
+    assert.deepEqual(calls[0][1], [row.userId, accountId, hash, hash]);
     assert.equal((calls[0][0] as { timeout: number }).timeout, 10_000);
 });
 

@@ -12,7 +12,8 @@ import { issueThreeBossesRunTicket } from '../leaderboards/threeBossesRunTicket'
 import { asyncHandler, requestErrorHandler } from '../middleware/errorHandling';
 import { createAuthRouter } from './authRouter';
 import { createLeaderboardRouter } from './leaderboardRouter';
-import { issueSessionToken } from '../security/sessionPolicy';
+import { issueSessionToken, PERSISTENT_SESSION_SECONDS } from '../security/sessionPolicy';
+import { verifyRequestToken } from '../security/requestAuthentication';
 
 const secret = 'account-deletion-test-secret-not-a-credential';
 const password = 'unit-test-password';
@@ -34,6 +35,8 @@ type TestState = {
     exists: boolean; unavailable: boolean; writes: string[]; databaseCalls: number;
     journalCalls: number; journalUnavailable: boolean; commitUnavailable: boolean;
     accountId: string; sessions: Map<string, number>; revokedSessions: string[];
+    sessionMetadata: Map<string, { remembered: number; renewedAt: number; previousHash: string | null; previousValidUntil: number }>;
+    rotations: number;
 };
 
 async function withServer(
@@ -43,9 +46,14 @@ async function withServer(
     const passwordHash = await bcrypt.hash(password, 4);
     const state: TestState = { exists: true, unavailable: false, writes: [], databaseCalls: 0,
         journalCalls: 0, journalUnavailable: false, commitUnavailable: false,
-        accountId: account.accountId, revokedSessions: [], sessions: new Map([
+        accountId: account.accountId, revokedSessions: [], rotations: 0, sessions: new Map([
             [sessionHash(primarySession.sessionId), primarySession.expiresAt],
             [sessionHash(otherSession.sessionId), otherSession.expiresAt],
+        ]), sessionMetadata: new Map([
+            [sessionHash(primarySession.sessionId), { remembered: 1, renewedAt: Math.floor(Date.now() / 1000) - 901,
+                previousHash: null, previousValidUntil: 0 }],
+            [sessionHash(otherSession.sessionId), { remembered: 0, renewedAt: Math.floor(Date.now() / 1000),
+                previousHash: null, previousValidUntil: 0 }],
         ]) };
     async function query(options: { sql: string; timeout?: number }, values?: unknown[]) {
         state.databaseCalls++;
@@ -66,7 +74,7 @@ async function withServer(
             assert.deepEqual(values, [state.accountId]);
             let deleted = 0;
             for (const [hash, expiresAt] of state.sessions) {
-                if (expiresAt <= Date.now() / 1000) { state.sessions.delete(hash); deleted++; }
+                if (expiresAt <= Date.now() / 1000) { state.sessions.delete(hash); state.sessionMetadata.delete(hash); deleted++; }
             }
             return [{ affectedRows: deleted }, []];
         }
@@ -74,29 +82,60 @@ async function withServer(
             assert.deepEqual(values, [state.accountId]);
             return [[...state.sessions.keys()].map(hash => ({ session_hash: Buffer.from(hash, 'hex') })), []];
         }
-        if (sql.startsWith('INSERT INTO account_sessions (session_hash, account_uuid, created_at, expires_at)')) {
-            assert.ok(values && values.length === 5 && Buffer.isBuffer(values[0]));
+        if (sql.startsWith('INSERT INTO account_sessions (session_hash, account_uuid, created_at, expires_at,')) {
+            assert.ok(values && values.length === 6 && Buffer.isBuffer(values[0]));
             assert.equal(values[1], state.accountId);
             const expiresAt = values[2] as number;
             assert.ok(expiresAt > Date.now() / 1000 && expiresAt <= Date.now() / 1000 + 30 * 24 * 60 * 60);
-            assert.deepEqual(values.slice(2), [expiresAt, expiresAt, expiresAt]);
+            assert.ok(values[3] === 0 || values[3] === 1);
+            assert.deepEqual(values.slice(4), [expiresAt, expiresAt]);
             state.sessions.set(values[0].toString('hex'), expiresAt);
+            state.sessionMetadata.set(values[0].toString('hex'), { remembered: values[3],
+                renewedAt: Math.floor(Date.now() / 1000), previousHash: null, previousValidUntil: 0 });
+            return [{ affectedRows: 1 }, []];
+        }
+        if (sql.startsWith('UPDATE account_sessions SET session_hash = ?')) {
+            assert.ok(values && values.length === 7 && Buffer.isBuffer(values[0]) && Buffer.isBuffer(values[1]));
+            const hash = values[1].toString('hex');
+            assert.equal(values[5], state.accountId);
+            assert.deepEqual(values[6], values[1]);
+            assert.equal(state.sessionMetadata.get(hash)?.remembered, 1);
+            assert.equal(values[2], Number(values[3]) + 120);
+            assert.equal(values[4], Number(values[3]) + PERSISTENT_SESSION_SECONDS);
+            state.sessions.delete(hash);
+            state.sessionMetadata.delete(hash);
+            state.sessions.set(values[0].toString('hex'), Number(values[4]));
+            state.sessionMetadata.set(values[0].toString('hex'), { remembered: 1, previousHash: hash,
+                previousValidUntil: Number(values[2]), renewedAt: Number(values[3]) });
+            state.rotations++;
             return [{ affectedRows: 1 }, []];
         }
         if (sql.includes('FROM account_sessions AS s') || sql.startsWith('DELETE s FROM account_sessions AS s')) {
-            assert.match(sql, /u.user_id = \? AND u.account_uuid = \? AND s.session_hash = \?/);
-            assert.ok(values && values.length === 3);
+            assert.match(sql, /u.user_id = \? AND u.account_uuid = \? AND \(s.session_hash = \? OR /);
+            assert.ok(values && values.length === 4);
             assert.equal(values[0], 42);
             assert.ok(Buffer.isBuffer(values[2]));
+            assert.deepEqual(values[3], values[2]);
             const hash = values[2].toString('hex');
             const ownsSession = state.exists && values[1] === state.accountId;
+            const currentHash = state.sessions.has(hash) ? hash : [...state.sessionMetadata].find(([, metadata]) =>
+                metadata.previousHash === hash && (sql.startsWith('DELETE s')
+                    || metadata.previousValidUntil > Date.now() / 1000))?.[0];
             if (sql.startsWith('DELETE s')) {
-                const deleted = ownsSession && state.sessions.delete(hash);
-                if (deleted) state.revokedSessions.push(hash);
+                const deleted = ownsSession && currentHash !== undefined && state.sessions.delete(currentHash);
+                if (deleted) { state.revokedSessions.push(currentHash!); state.sessionMetadata.delete(currentHash!); }
                 return [{ affectedRows: deleted ? 1 : 0 }, []];
             }
             assert.match(sql, /s.expires_at > UTC_TIMESTAMP\(6\)/);
-            const live = ownsSession && (state.sessions.get(hash) ?? 0) > Date.now() / 1000;
+            const live = ownsSession && currentHash !== undefined && (state.sessions.get(currentHash) ?? 0) > Date.now() / 1000;
+            if (live && sql.includes('s.session_hash AS currentHash')) {
+                const metadata = state.sessionMetadata.get(currentHash!)!;
+                assert.match(sql, /LIMIT 2 FOR UPDATE$/);
+                return [[{ userName: account.userName, currentHash: Buffer.from(currentHash!, 'hex'),
+                    previousHash: metadata.previousHash === null ? null : Buffer.from(metadata.previousHash, 'hex'),
+                    remembered: metadata.remembered, renewedAt: metadata.renewedAt,
+                    expiresAt: Math.floor(state.sessions.get(currentHash!)!), now: Math.floor(Date.now() / 1000) }], []];
+            }
             return [live ? [{ userName: account.userName }] : [], []];
         }
         if (sql.startsWith('SELECT user_password AS passwordHash, account_uuid AS accountId')) {
@@ -107,16 +146,17 @@ async function withServer(
         assert.match(sql, /^DELETE FROM (game_personal_bests|game_submission_receipts|users) WHERE user_id = \?$/);
         assert.deepEqual(values, [42]);
         state.writes.push(sql);
-        if (sql.startsWith('DELETE FROM users')) { state.exists = false; state.sessions.clear(); }
+        if (sql.startsWith('DELETE FROM users')) { state.exists = false; state.sessions.clear(); state.sessionMetadata.clear(); }
         return [{ affectedRows: 1 }, []];
     }
     const database = {
         query,
         async getConnection() {
             state.databaseCalls++;
-            let snapshot: { exists: boolean; sessions: Map<string, number>; writes: string[]; revokedSessions: string[] } | null = null;
+            let snapshot: Pick<TestState, 'exists' | 'sessions' | 'sessionMetadata' | 'rotations' | 'writes' | 'revokedSessions'> | null = null;
             const beginTransaction = async () => {
                 snapshot = { exists: state.exists, sessions: new Map(state.sessions),
+                    sessionMetadata: new Map(state.sessionMetadata), rotations: state.rotations,
                     writes: [...state.writes], revokedSessions: [...state.revokedSessions] };
             };
             const commit = async () => {
@@ -174,6 +214,149 @@ function post(base: string, body: unknown, headers: Record<string, string> = {},
         body: JSON.stringify(body),
     });
 }
+
+test('renewal requires a trusted explicit Origin, JSON, an empty body and signed-cookie-only transport', async () => {
+    await withServer(async (base, state) => {
+        for (const { headers, body, status } of [
+            { headers: { Origin: '' }, body: {}, status: 403 },
+            { headers: { Origin: 'null' }, body: {}, status: 403 },
+            { headers: { Origin: 'https://attacker.example' }, body: {}, status: 403 },
+            { headers: { 'Content-Type': 'text/plain' }, body: {}, status: 403 },
+            { headers: { Authorization: `Bearer ${token}` }, body: {}, status: 403 },
+            { headers: { Cookie: '', Authorization: `Bearer ${token}` }, body: {}, status: 403 },
+            { headers: { Cookie: `__session=${token}` }, body: {}, status: 403 },
+            { headers: { Cookie: `session=${token}` }, body: {}, status: 403 },
+            { headers: {}, body: { remember_me: true }, status: 400 },
+            { headers: {}, body: { expiresAt: Date.now() + 365 * 24 * 60 * 60 * 1000 }, status: 400 },
+            { headers: {}, body: [], status: 400 },
+        ]) {
+            const result = await post(base, body, headers as Record<string, string>, '/auth/renew');
+            assert.equal(result.status, status);
+            assert.deepEqual(await result.json(), { error: 'INVALID_REQUEST' });
+            assert.equal(result.headers.get('set-cookie'), null);
+        }
+        const withoutOrigin = await fetch(base + '/auth/renew', {
+            method: 'POST', headers: { Cookie: cookie, 'Content-Type': 'application/json' }, body: '{}',
+        });
+        assert.equal(withoutOrigin.status, 403);
+        assert.equal(withoutOrigin.headers.get('set-cookie'), null);
+        assert.equal(state.databaseCalls, 0);
+    });
+});
+
+test('remembered renewal issues only a signed secure device cookie and retries recover the same rotation', async () => {
+    for (const [name, origin, sameSite] of [['__session', origins[0], 'Lax'], ['session', origins[1], 'None']]) {
+        await withServer(async (base, state) => {
+            const headers = { Cookie: signedCookie(token, name), Origin: origin };
+            const result = await post(base, {}, headers, '/auth/renew');
+            assert.equal(result.status, 200);
+            assert.deepEqual(await result.json(), { loggedIn: true, user_name: account.userName });
+            const cookies = result.headers.getSetCookie();
+            assert.equal(cookies.length, 1, 'renewal must not erase other or newer cookie stores');
+            assert.match(cookies[0], new RegExp(`^${name}=s%3A`));
+            assert.match(cookies[0], /; Path=\//);
+            assert.match(cookies[0], /; HttpOnly; Secure;/);
+            assert.match(cookies[0], new RegExp(`; SameSite=${sameSite}`));
+            const maxAge = Number(cookies[0].match(/; Max-Age=(\d+)/)?.[1]);
+            assert.ok(maxAge > PERSISTENT_SESSION_SECONDS - 5 && maxAge <= PERSISTENT_SESSION_SECONDS);
+            const savedCookie = cookies[0].split(';')[0];
+            const renewedToken = cookieParser.signedCookie(decodeURIComponent(savedCookie.slice(name.length + 1)), secret);
+            assert.equal(typeof renewedToken, 'string');
+            const auth = verifyRequestToken(renewedToken as string, secret);
+            assert.equal(auth.authenticated, true);
+            if (!auth.authenticated) assert.fail('renewal must issue a verifiable session');
+            assert.notEqual(auth.identity.sessionId, primarySession.sessionId);
+            const hash = sessionHash(auth.identity.sessionId);
+            assert.equal(state.sessions.has(hash), true);
+            assert.equal(state.sessions.size, 2);
+            assert.equal(state.rotations, 1);
+
+            const verification = await fetch(base + '/auth/verify-token', { headers: { Cookie: savedCookie } });
+            assert.deepEqual(await verification.json(), { loggedIn: true, user_name: account.userName });
+            assert.equal(verification.headers.get('set-cookie'), null, 'verification remains read-only');
+            const fresh = await post(base, {}, { ...headers, Cookie: savedCookie }, '/auth/renew');
+            assert.equal(fresh.headers.get('set-cookie'), null, 'fresh current sessions do not rotate again');
+            const retry = await post(base, {}, headers, '/auth/renew');
+            assert.equal(retry.headers.getSetCookie()[0]?.split(';')[0], savedCookie);
+            assert.equal(state.rotations, 1, 'a delayed predecessor request recovers rather than rotates');
+
+            state.sessionMetadata.get(hash)!.previousValidUntil = Math.floor(Date.now() / 1000) - 1;
+            const stale = await post(base, {}, headers, '/auth/renew');
+            assert.deepEqual(await stale.json(), { loggedIn: false });
+            assert.equal(stale.headers.get('set-cookie'), null, 'a stale request cannot clear the newer cookie');
+            assert.equal(state.sessions.has(hash), true);
+        });
+    }
+});
+
+test('ordinary sessions verify through renewal without extending expiry or issuing cookies', async () => {
+    await withServer(async (base, state) => {
+        const hash = sessionHash(otherSession.sessionId);
+        state.sessionMetadata.get(hash)!.renewedAt -= 1800;
+        const expiresAt = state.sessions.get(hash);
+        const result = await post(base, {}, { Cookie: signedCookie(otherSession.token) }, '/auth/renew');
+        assert.equal(result.status, 200);
+        assert.deepEqual(await result.json(), { loggedIn: true, user_name: account.userName });
+        assert.equal(result.headers.get('set-cookie'), null);
+        assert.equal(state.sessions.get(hash), expiresAt);
+        assert.equal(state.rotations, 0);
+    });
+});
+
+test('missing, invalid, expired and revoked sessions cannot renew or clear newer credentials', async () => {
+    for (const scenario of ['missing', 'invalid-token', 'expired-token', 'idle-expired', 'revoked', 'replacement-account']) {
+        await withServer(async (base, state) => {
+            let presentedCookie = cookie;
+            if (scenario === 'missing') presentedCookie = '';
+            if (scenario === 'invalid-token') presentedCookie = signedCookie('invalid-jwt');
+            if (scenario === 'expired-token') presentedCookie = signedCookie(issueSessionToken(account, secret, false,
+                Date.now() - 5 * 60 * 60 * 1000).token);
+            if (scenario === 'idle-expired') state.sessions.set(sessionHash(primarySession.sessionId), Date.now() / 1000 - 1);
+            if (scenario === 'revoked') state.sessions.delete(sessionHash(primarySession.sessionId));
+            if (scenario === 'replacement-account') state.accountId = '123e4567-e89b-42d3-a456-426614174099';
+            const result = await post(base, {}, { Cookie: presentedCookie }, '/auth/renew');
+            assert.equal(result.status, 200);
+            assert.deepEqual(await result.json(), { loggedIn: false });
+            assert.equal(result.headers.get('set-cookie'), null);
+            assert.equal(state.rotations, 0);
+            if (['missing', 'invalid-token', 'expired-token'].includes(scenario)) assert.equal(state.databaseCalls, 0);
+        });
+    }
+});
+
+test('unavailable or unconfirmed renewal preserves cookies and a lost commit acknowledgement can be retried', async () => {
+    for (const failure of ['unavailable', 'commitUnavailable'] as const) {
+        await withServer(async (base, state) => {
+            state[failure] = true;
+            const failed = await post(base, {}, {}, '/auth/renew');
+            assert.equal(failed.status, 503);
+            assert.deepEqual(await failed.json(), { error: 'SESSION_RENEWAL_UNAVAILABLE' });
+            assert.equal(failed.headers.get('set-cookie'), null);
+            state[failure] = false;
+            const retry = await post(base, {}, {}, '/auth/renew');
+            assert.equal(retry.status, 200);
+            assert.deepEqual(await retry.json(), { loggedIn: true, user_name: account.userName });
+            assert.equal(retry.headers.getSetCookie().length, 1);
+            assert.equal(state.rotations, 1);
+        });
+    }
+});
+
+test('logout through a rotation predecessor revokes its successor but preserves another device', async () => {
+    await withServer(async (base, state) => {
+        const renewal = await post(base, {}, {}, '/auth/renew');
+        const successor = renewal.headers.getSetCookie()[0].split(';')[0];
+        assert.deepEqual(await (await post(base, {}, {}, '/auth/logout')).json(), { loggedOut: true });
+        for (const presentedCookie of [cookie, successor]) {
+            const result = await post(base, {}, { Cookie: presentedCookie }, '/auth/renew');
+            assert.deepEqual(await result.json(), { loggedIn: false });
+            assert.equal(result.headers.get('set-cookie'), null);
+        }
+        const other = await post(base, {}, { Cookie: signedCookie(otherSession.token) }, '/auth/renew');
+        assert.deepEqual(await other.json(), { loggedIn: true, user_name: account.userName });
+        assert.equal(state.sessions.size, 1);
+    });
+});
 
 test('disabled or unwired deletion makes no database calls and leaves other auth routes usable', async () => {
     for (const options of [{}, { accountDeletionEnabled: false }, { accountDeletionEnabled: true, withoutJournal: true }]) {

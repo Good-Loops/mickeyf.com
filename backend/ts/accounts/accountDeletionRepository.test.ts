@@ -132,6 +132,7 @@ test('a stale UUID or session rejects before password checking, journaling or de
         assert.equal(result, matches ? 'deleted' : 'not-found');
         assert.match(fake.queries[1].sql, /FROM account_sessions AS s/);
         assert.deepEqual(fake.queries[1].values, [42, expectedSession.accountId,
+            createHash('sha256').update(expectedSession.sessionId, 'ascii').digest(),
             createHash('sha256').update(expectedSession.sessionId, 'ascii').digest()]);
         assert.equal(fake.events.includes('read-password'), matches);
         assert.equal(fake.events.includes('journal'), matches);

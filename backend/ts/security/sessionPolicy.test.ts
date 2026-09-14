@@ -1,10 +1,38 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import jwt from 'jsonwebtoken';
-import { issueSessionToken, isSessionId, sessionSigningKey, STANDARD_SESSION_SECONDS, PERSISTENT_SESSION_SECONDS } from './sessionPolicy';
+import { deriveRenewedSessionId, issueRenewedSessionToken, issueSessionToken, isSessionId, sessionSigningKey, STANDARD_SESSION_SECONDS, PERSISTENT_SESSION_SECONDS } from './sessionPolicy';
 
 const account = { userId: 7, userName: 'session-test', accountId: '11111111-2222-4333-8444-555555555555' };
 const secret = 'synthetic-session-policy-secret';
+
+test('renewal retries derive the same canonical credential with a separate domain', () => {
+    const original = issueSessionToken(account, secret, true);
+    const nextId = deriveRenewedSessionId(original.sessionId, secret);
+    assert.ok(isSessionId(nextId));
+    assert.equal(nextId, deriveRenewedSessionId(original.sessionId, secret));
+    assert.notEqual(nextId, original.sessionId);
+    assert.notEqual(nextId, deriveRenewedSessionId(original.sessionId, 'different-secret'));
+    assert.notEqual(nextId, deriveRenewedSessionId(nextId, secret));
+    assert.notEqual(nextId, sessionSigningKey(secret).toString('base64url'));
+    assert.throws(() => deriveRenewedSessionId('invalid', secret), TypeError);
+});
+
+test('renewal signs committed timestamps identically and caps each credential at thirty days', () => {
+    const original = issueSessionToken(account, secret, true);
+    const issuedAt = Math.floor(Date.now() / 1000);
+    const renewal = { sessionId: deriveRenewedSessionId(original.sessionId, secret),
+        issuedAt, expiresAt: issuedAt + PERSISTENT_SESSION_SECONDS };
+    const token = issueRenewedSessionToken(account, secret, renewal);
+    assert.equal(token, issueRenewedSessionToken(account, secret, renewal));
+    const claims = jwt.verify(token, sessionSigningKey(secret)) as jwt.JwtPayload;
+    assert.equal(claims.iat, renewal.issuedAt);
+    assert.equal(claims.exp, renewal.expiresAt);
+    assert.equal(claims.jti, renewal.sessionId);
+    assert.equal(claims.version, 2);
+    assert.throws(() => issueRenewedSessionToken(account, secret, { ...renewal, expiresAt: renewal.expiresAt + 1 }), TypeError);
+    assert.throws(() => issueRenewedSessionToken(account, secret, { ...renewal, expiresAt: issuedAt }), TypeError);
+});
 
 test('server-selected lifetimes align token and cookie expiry without storing the password', () => {
     const now = Date.now();

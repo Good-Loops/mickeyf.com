@@ -160,7 +160,7 @@ test('table privileges accept only non-grantable DELETE on the four manifest tab
     }
 });
 
-test('session privileges require migrated storage and forbid UPDATE grants', () => {
+test('session privileges require migrated renewal storage and forbid immutable-column UPDATE grants', () => {
     const current = exactSnapshot();
     const withoutSessions = (column: { tableName: string }) => column.tableName !== 'account_sessions';
     const oldGrants = current.columnPrivileges.filter(withoutSessions);
@@ -173,7 +173,7 @@ test('session privileges require migrated storage and forbid UPDATE grants', () 
     assert.equal(unmigrated.state, 'blocked');
     assert.deepEqual(unmigrated.operations.ensureRequiredPrivileges, []);
     const unsafe = createRuntimeGrantPlan({ ...current, columnPrivileges: [...current.columnPrivileges, {
-        schemaName: DATABASE, tableName: 'account_sessions', columnName: 'expires_at',
+        schemaName: DATABASE, tableName: 'account_sessions', columnName: 'remembered',
         privilegeType: 'UPDATE', isGrantable: 'NO',
     }] }, SETTINGS, RUNTIME_ACCOUNT);
     assert.equal(unsafe.state, 'blocked');

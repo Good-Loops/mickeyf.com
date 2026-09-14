@@ -78,16 +78,16 @@ test('auth reconstruction and logout reuse the native store, never JS credential
             nativeSession = false;
             return { status: 200, body: '{"loggedOut":true}' };
         }
-        assert.equal(body, undefined);
+        assert.equal(body, url.endsWith('/auth/renew') ? '{}' : undefined);
         return { status: 200, body: JSON.stringify(nativeSession
             ? { loggedIn: true, user_name: 'Player' } : { loggedIn: false }) };
     });
     const api = createAuthApi(base, fetchApi);
     assert.equal((await api.loginRequest({ user_name: 'Player', user_password: 'test-only' })).success, true);
     const reopened = createAuthApi(base, fetchApi);
-    assert.equal((await reopened.verifyRequest()).loggedIn, true);
+    assert.equal((await reopened.renewRequest()).loggedIn, true);
     await reopened.logoutRequest();
-    assert.equal((await createAuthApi(base, fetchApi).verifyRequest()).loggedIn, false);
+    assert.equal((await createAuthApi(base, fetchApi).renewRequest()).loggedIn, false);
     assert.equal(urls.filter((url) => url.endsWith('/api/users')).length, 1);
 });
 
@@ -127,6 +127,7 @@ test('native deletion and logout clear local credentials only after confirmed se
     // Structural safeguard only: compiled/device cookie behavior is checked on iOS.
     const native = await readFile(new URL('../../ios/App/App/LudolumeApiPlugin.swift', import.meta.url), 'utf8');
     assert.match(native, /"POST \/auth\/delete-account"/);
+    assert.match(native, /"POST \/auth\/renew"/);
     assert.doesNotMatch(native, /clearSessionCookie\(completion: operation\.start\)/);
     assert.match(native, /response\.statusCode == 200/);
     assert.match(native, /JSONDecoder\(\)\.decode\(\[String: Bool\]\.self, from: body\)/);

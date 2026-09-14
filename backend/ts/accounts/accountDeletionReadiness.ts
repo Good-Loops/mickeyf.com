@@ -3,7 +3,8 @@ import { assertAccountIdentityEpoch, verifyAccountIdentitySchema } from '../migr
 import type { MigrationConnection } from '../migrations/leaderboardSchema';
 import { verifyOptionalProviderIdentitySchema } from '../migrations/providerIdentitySchema';
 import { verifyOptionalProviderAttemptSchema } from '../migrations/providerAttemptSchema';
-import { ACCOUNT_SESSION_MIGRATION_VERSION, verifyAccountSessionSchema, verifyOptionalAccountSessionSchema } from '../migrations/accountSessionSchema';
+import { ACCOUNT_SESSION_MIGRATION_VERSION, ACCOUNT_SESSION_RENEWAL_MIGRATION_VERSION,
+    verifyRenewableAccountSessionSchema, verifyOptionalAccountSessionSchema } from '../migrations/accountSessionSchema';
 
 const READINESS_TIMEOUT_MS = 10_000;
 
@@ -38,14 +39,15 @@ export async function verifyAccountDeletionReadiness(
 /** Session-enabled application startup requires a recorded migration, not an unrecorded lookalike table. */
 export async function verifyAccountSessionReadiness(database: Pick<Pool, 'getConnection'>): Promise<void> {
     await verifyAccountStorageReadiness(database, AccountSessionReadinessError, async metadata => {
-        const [recorded] = await metadata.query('SELECT version FROM schema_migrations WHERE version = ?',
-            [ACCOUNT_SESSION_MIGRATION_VERSION]);
-        if (!Array.isArray(recorded) || recorded.length !== 1
-            || (recorded[0] as { version?: unknown }).version !== ACCOUNT_SESSION_MIGRATION_VERSION) {
-            throw new AccountSessionReadinessError();
+        for (const version of [ACCOUNT_SESSION_MIGRATION_VERSION, ACCOUNT_SESSION_RENEWAL_MIGRATION_VERSION]) {
+            const [recorded] = await metadata.query('SELECT version FROM schema_migrations WHERE version = ?', [version]);
+            if (!Array.isArray(recorded) || recorded.length !== 1
+                || (recorded[0] as { version?: unknown }).version !== version) {
+                throw new AccountSessionReadinessError();
+            }
         }
         await verifyAccountIdentitySchema(metadata);
-        await verifyAccountSessionSchema(metadata);
+        await verifyRenewableAccountSessionSchema(metadata);
     });
 }
 

@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { MigrationConnection } from './leaderboardSchema';
-import { ACCOUNT_SESSION_MIGRATION_VERSION, verifyAccountSessionSchema, verifyOptionalAccountSessionSchema } from './accountSessionSchema';
+import { ACCOUNT_SESSION_MIGRATION_VERSION, ACCOUNT_SESSION_RENEWAL_MIGRATION_VERSION,
+    verifyAccountSessionSchema, verifyOptionalAccountSessionSchema, verifyRenewableAccountSessionSchema } from './accountSessionSchema';
 
 type Metadata = Record<string, Array<Record<string, unknown>>>;
-function fixture(): Metadata {
+function fixture(renewable = false): Metadata {
     const column = (name: string, type: string, characterSet: string | null = null,
         collation: string | null = null, datetimePrecision: number | null = null, comment = '') => ({
         name, type, nullable: 'NO', characterSet, collation, defaultValue: null, extra: '',
@@ -13,7 +14,7 @@ function fixture(): Metadata {
     const index = (name: string, columnName: string, nonUnique: number, sequence = 1) => ({
         name, sequence, columnName, nonUnique, indexOrder: 'A', subPart: null, visible: 'YES', indexType: 'BTREE',
     });
-    return {
+    const metadata: Metadata = {
         TABLES: [{ engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', tableType: 'BASE TABLE' }],
         COLUMNS: [column('session_hash', 'binary(32)'), column('account_uuid', 'char(36)', 'ascii', 'ascii_bin'),
             column('created_at', 'datetime(6)', null, null, 6, 'UTC'),
@@ -26,16 +27,31 @@ function fixture(): Metadata {
             deleteRule: 'CASCADE', updateRule: 'RESTRICT' }],
         TABLE_CONSTRAINTS: [], TRIGGERS: [],
     };
+    if (renewable) {
+        metadata.COLUMNS.push({ ...column('remembered', 'tinyint'), defaultValue: '0' },
+            { ...column('renewed_at', 'datetime(6)', null, null, 6, 'UTC'), nullable: 'YES' },
+            { ...column('previous_session_hash', 'binary(32)'), nullable: 'YES' },
+            { ...column('previous_valid_until', 'datetime(6)', null, null, 6, 'UTC'), nullable: 'YES' });
+        metadata.STATISTICS.push(index('uq_account_sessions_previous_hash', 'previous_session_hash', 0));
+    }
+    return metadata;
 }
-function source(metadata = fixture(), options: { exists?: boolean; recorded?: boolean } = {}): MigrationConnection {
+function source(metadata = fixture(), options: { exists?: boolean; recorded?: boolean; renewalRecorded?: boolean } = {}): MigrationConnection {
     return { async query(sql, values) {
         if (sql.includes('COUNT(*)') && sql.includes('information_schema.TABLES')) {
             assert.deepEqual(values, ['account_sessions']);
             return [[{ tableCount: options.exists === false ? 0 : 1 }], []];
         }
         if (sql.includes('FROM schema_migrations')) {
-            assert.deepEqual(values, [ACCOUNT_SESSION_MIGRATION_VERSION]);
-            return [options.recorded ? [{ version: ACCOUNT_SESSION_MIGRATION_VERSION }] : [], []];
+            assert(values?.every(version => [ACCOUNT_SESSION_MIGRATION_VERSION, ACCOUNT_SESSION_RENEWAL_MIGRATION_VERSION].includes(String(version))));
+            return [[...(options.recorded && values?.includes(ACCOUNT_SESSION_MIGRATION_VERSION)
+                ? [{ version: ACCOUNT_SESSION_MIGRATION_VERSION }] : []),
+            ...(options.renewalRecorded && values?.includes(ACCOUNT_SESSION_RENEWAL_MIGRATION_VERSION)
+                ? [{ version: ACCOUNT_SESSION_RENEWAL_MIGRATION_VERSION }] : [])], []];
+        }
+        if (sql.includes('COLUMN_NAME IN')) {
+            return [metadata.COLUMNS.filter(column => ['remembered', 'renewed_at',
+                'previous_session_hash', 'previous_valid_until'].includes(String(column.name))).map(({ name }) => ({ name })), []];
         }
         const category = /FROM information_schema\.([A-Z_]+)/u.exec(sql)?.[1];
         if (!category || !metadata[category]) throw new Error('Unexpected schema query');
@@ -71,4 +87,25 @@ test('pre-0011 backups may omit sessions; missing recorded sessions and unavaila
     await assert.rejects(verifyOptionalAccountSessionSchema(source(fixture(), { exists: false, recorded: true })),
         /missing its table/u);
     await assert.rejects(verifyAccountSessionSchema({ async query() { return [{}, []]; } }), /metadata is unavailable/u);
+});
+
+test('renewal schema is exact; old backups remain valid but partial or missing recorded renewal fails closed', async () => {
+    await verifyRenewableAccountSessionSchema(source(fixture(true)));
+    await verifyOptionalAccountSessionSchema(source(fixture(true), { recorded: true, renewalRecorded: true }));
+    await assert.rejects(verifyRenewableAccountSessionSchema(source()), /reviewed schema/u);
+    await assert.rejects(verifyOptionalAccountSessionSchema(source(fixture(), { renewalRecorded: true })), /missing its columns/u);
+    await assert.rejects(verifyOptionalAccountSessionSchema(source(fixture(), { exists: false, renewalRecorded: true })), /missing its table/u);
+    const incomplete = fixture(true); incomplete.COLUMNS.pop();
+    await assert.rejects(verifyOptionalAccountSessionSchema(source(incomplete)), /incomplete/u);
+    for (const mutate of [
+        (m: Metadata) => { m.COLUMNS[4].defaultValue = '1'; },
+        (m: Metadata) => { m.COLUMNS[5].extra = 'on update CURRENT_TIMESTAMP'; },
+        (m: Metadata) => { m.COLUMNS[5].comment = ''; },
+        (m: Metadata) => { m.COLUMNS[6].type = 'varchar(43)'; },
+        (m: Metadata) => { m.COLUMNS[7].nullable = 'NO'; },
+        (m: Metadata) => { m.STATISTICS.at(-1)!.nonUnique = 1; },
+    ]) {
+        const metadata = fixture(true); mutate(metadata);
+        await assert.rejects(verifyOptionalAccountSessionSchema(source(metadata)), /reviewed schema/u);
+    }
 });

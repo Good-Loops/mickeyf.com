@@ -3,22 +3,23 @@
 ## Behavior
 
 Implemented on the active branch, not deployed. The Login and Sign up checkbox is unchecked
-by default: four hours normally, thirty days when selected. These are fixed
-maximum lifetimes, not sliding inactivity timers. Closing the browser does not
-end a retained cookie; clearing cookies, private browsing and device/browser
-policies can still require signing in again. No indefinite-login promise is made.
+by default: four hours normally, renewable when selected. Remembered sessions
+expire thirty days after the last successful renewal. Regular use can keep a
+session alive without a fixed calendar cutoff; there is no 90-day forced logout.
+Closing the browser does not end a retained cookie; clearing cookies, private
+browsing and device/browser policies can still require signing in again.
 Sign up already creates the account and then logs in automatically; its checkbox
 selects the lifetime of that login, without changing the account-creation payload.
-Both forms share one round, glass-styled native checkbox with keyboard focus and
-screen-reader support. The private-device hint has been removed at the owner's request.
+Both forms share one round, glass-styled 14px native checkbox with a 44px tap row,
+keyboard focus and screen-reader support. The private-device hint has been removed.
 
 The server issues an HS256 v2 token containing the numeric user ID, immutable
 account UUID, random 256-bit session identifier and issuance/expiry timestamps.
 Its purpose-specific signing key prevents an older numeric-ID-only runtime from
 silently accepting the new long-lived token while ignoring revocation.
 
-`account_sessions` stores only SHA-256 of that random identifier, account UUID,
-and UTC creation/expiry timestamps. It stores no passwords, raw tokens, IPs or
+`account_sessions` stores only hashed current/previous identifiers, account UUID,
+remembered choice and UTC creation/renewal/expiry/grace timestamps. It stores no passwords, raw tokens, IPs or
 device fingerprints. Each account has at most ten sessions; a new login removes
 expired entries and evicts the oldest when necessary. Expired rows cannot
 authenticate but can remain until another login or account deletion. No new
@@ -36,6 +37,37 @@ database failure is not reported as successful sign-out. Signing in again first
 revokes the presented previous session after password verification, then creates
 a replacement; failure between those operations requires another login. Other
 devices remain signed in. There is no device-management screen in this change.
+
+## Activity-based renewal
+
+`GET /auth/verify-token` remains read-only. The explicit `POST /auth/renew` requires
+an approved Origin, signed cookie and empty JSON object; Bearer headers and
+unsigned session cookies are rejected. Missing, invalid, expired or revoked
+credentials cannot create a session. Invalid/delayed renewal never clears cookies,
+because another tab might already have signed in. Outages return a sanitized 503.
+
+The frontend renews at startup and on trusted foreground activity, throttled to
+one successful attempt per fifteen minutes. After a network failure, another
+foreground activity can retry after fifteen seconds, within the predecessor grace.
+There is no idle/background keep-alive timer.
+The server independently throttles rotation to fifteen minutes, and chooses
+thirty days from its database clock as the next expiry. Ordinary four-hour and
+pre-0012 sessions never become remembered sessions through renewal.
+
+Rotation uses the existing per-user transaction lock. The old hash is retained
+for 120 seconds so concurrent tabs or a lost response can recover the same
+replacement. A domain-separated HMAC derives that replacement without storing
+raw credentials. Retries return the committed timestamps: they do not rotate
+again or extend expiry. Only one predecessor is retained. Logout can revoke the
+current or retained predecessor even after grace expires; authentication cannot
+use an expired predecessor. Nothing is issued before commit is acknowledged.
+
+This is a usability/security trade-off, not a guarantee against session theft:
+someone actively using a stolen current credential could renew it until revoked.
+Sensitive account deletion still requires password reauthentication. Database
+revocation remains authoritative even if a delayed response overwrites a cookie.
+Inactivity is measured from successful renewal, with up to fifteen minutes of
+activity-throttling granularity, not from an exact last mouse movement.
 
 ## Browser and native transport
 
@@ -66,16 +98,22 @@ a reviewed Hosting preview for built-browser authentication testing.
    identity and explicit write confirmations. Migration 0011 requires recorded
    0001–0010, including the dormant provider tables; it does not enable providers.
    Ordinary `migrations:apply` cannot apply it. The explicit script is
-   `npm --prefix backend run migrations:account-sessions:apply`.
-2. Review/apply the narrow runtime grant manifest: SELECT/INSERT on the four
-   session columns and table DELETE, no UPDATE/DDL or provider-table privileges.
+   `npm --prefix backend run migrations:account-sessions:apply`. Then apply 0012
+   using `npm --prefix backend run migrations:session-renewal:apply`; it requires
+   recorded 0001–0011. Existing session rows default to non-renewable, preserving
+   their original expiry. Neither command is part of ordinary application startup.
+2. Review/apply the narrow runtime grant manifest: SELECT on all eight session
+   columns, INSERT on the six creation fields, table DELETE and UPDATE only on
+   the five rotation fields. No UPDATE to account UUID, creation time or remembered
+   choice, no DDL or provider-table privileges.
    Keep maintenance credentials out of the application. Verify grants and schema.
 3. Coordinate the backend and Hosting release. The new backend refuses to start
-   without recorded, valid session storage. Old and new session formats are not
+   without recorded 0011/0012 and valid session storage. Old and new session formats are not
    interchangeable: expect one re-login and invalidate old credentials through
    the existing secret-rotation procedure when completing the cutover. Avoid
    mixed old/new traffic or treating a rollback as session-compatible.
-4. Deliver the matching native adapter update before claiming server-revoked
+4. Deliver the matching native adapter update (including the `/auth/renew` POST
+   allowlist) before claiming renewal or server-revoked
    native logout: older installed binaries erase their cookie before sending
    logout, so the backend cannot identify that lost session to revoke it.
 5. Verify one browser close/reopen with the checkbox selected, logout rejection
@@ -87,7 +125,29 @@ fresh sign-in; do not drop session storage while any new runtime uses it. On
 database restore, keep the existing deletion replay and session-secret rotation
 requirements before reopening traffic, so restored rows cannot revive access.
 
-## Checkpoint verification — 2026-09-14
+## Renewal verification — 2026-09-14
+
+- `npm --prefix backend test`: TypeScript passed.
+- `npm --prefix backend run test:unit`: 418 tests passed.
+- `npm --prefix backend run test:migrations -- --provider-identities`: 28 isolated
+  MySQL tests passed, including concurrent renewal, lost commit acknowledgement,
+  idle expiry, predecessor grace, revocation and migration recovery.
+- `npm --prefix backend run test:migrations -- --runtime-grants`: 11 isolated
+  MySQL tests passed, including actual renewal with the restricted runtime user.
+  Both test containers/networks/volumes were removed afterward.
+- From `frontend`: `node --test ts/services/authApi.test.mjs
+  ts/services/nativeApiFetch.test.mjs ts/services/sessionRenewalActivity.test.mjs
+  ts/pages/signupFlow.test.mjs` passed 56 tests; `npx tsc --noEmit` and
+  `npm run build` passed. The existing large-chunk warning remains.
+- `npm run test:backend-isolated`: three local-launcher guard tests passed.
+  The [isolated local backend](LOCAL_DEVELOPMENT.md) is separate from production;
+  no real accounts or scores are copied into it.
+
+No production schema/grant/deployment changes or native build upload were made.
+
+## Earlier fixed-lifetime checkpoint — 2026-09-14
+
+The results below describe the earlier implementation, not the renewal changes.
 
 - `npm --prefix backend test`: TypeScript passed.
 - `npm --prefix backend run test:unit`: all 402 tests passed, including copied

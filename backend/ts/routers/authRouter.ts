@@ -14,11 +14,12 @@
  */
 import { Router } from 'express';
 import { createAuthController } from '../controllers/authController';
+import { createSessionRenewalController } from '../controllers/sessionRenewalController';
 import { Pool } from 'mysql2/promise';
 import { createAccountDeletionController } from '../controllers/accountDeletionController';
 import type { AccountDeletionJournal } from '../accounts/deletionJournal';
 import { asyncHandler } from '../middleware/errorHandling';
-import { createAccountDeletionRateLimiters } from '../security/requestRateLimits';
+import { createAccountDeletionRateLimiters, createSessionRenewalRateLimiter } from '../security/requestRateLimits';
 
 import { createLogoutHandler } from './authRouter.handlers';
 
@@ -47,6 +48,10 @@ export function createAuthRouter(
 
     /** GET /verify-token — validates auth context for the current request. */
     router.get('/verify-token', asyncHandler(createAuthController(database, sessionSecret)));
+
+    router.post('/renew', createSessionRenewalRateLimiter(), asyncHandler(createSessionRenewalController({
+        database, sessionSecret, isProduction, allowedOrigins: allowedMutationOrigins,
+    })));
 
     router.post('/delete-account', ...createAccountDeletionRateLimiters(sessionSecret),
         asyncHandler(createAccountDeletionController({

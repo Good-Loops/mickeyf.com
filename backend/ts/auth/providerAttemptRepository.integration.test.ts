@@ -77,6 +77,7 @@ before(async () => {
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-provider-identities'] });
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-provider-attempts'] });
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-account-sessions'] });
+    await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-session-renewal'] });
     database = mysql.createPool({
         host: config.host, port: config.port, database: config.database, user: config.user, password: config.password,
         connectTimeout: 10000, multipleStatements: false, connectionLimit: 2, dateStrings: true, timezone: 'Z',

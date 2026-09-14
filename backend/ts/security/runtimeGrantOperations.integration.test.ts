@@ -108,7 +108,7 @@ async function createSchema(): Promise<void> {
         allowedEffectKinds: ['add-account-identity'],
     });
     await applyMigrations(asMigrationConnection(administrator), migrations, config, {
-        allowedEffectKinds: ['add-provider-identities', 'add-provider-attempts', 'add-account-sessions'],
+        allowedEffectKinds: ['add-provider-identities', 'add-provider-attempts', 'add-account-sessions', 'add-session-renewal'],
     });
 }
 

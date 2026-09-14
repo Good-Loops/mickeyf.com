@@ -65,6 +65,7 @@ before(async () => {
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-provider-identities'] });
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-provider-attempts'] });
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-account-sessions'] });
+    await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-session-renewal'] });
     await administrator.query("SET SESSION time_zone = '+00:00'");
     const [epoch] = await administrator.query<RowDataPacket[]>(
         "SELECT DATE_FORMAT(applied_at, '%Y-%m-%d %H:%i:%s.%f') AS epoch FROM schema_migrations WHERE version = ?",
@@ -112,9 +113,12 @@ async function insertPendingAttempt(userId: number): Promise<void> {
 }
 
 async function insertSession(userId: number): Promise<void> {
-    await administrator.query(`INSERT INTO account_sessions (session_hash, account_uuid, created_at, expires_at)
-        SELECT ?, account_uuid, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6) + INTERVAL 30 DAY FROM users WHERE user_id = ?`,
-    [createHash('sha256').update(`isolated-session-${userId}`).digest(), userId]);
+    await administrator.query(`INSERT INTO account_sessions (session_hash, account_uuid, created_at, expires_at,
+        remembered, renewed_at, previous_session_hash, previous_valid_until)
+        SELECT ?, account_uuid, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6) + INTERVAL 30 DAY,
+            1, UTC_TIMESTAMP(6), ?, UTC_TIMESTAMP(6) + INTERVAL 2 MINUTE FROM users WHERE user_id = ?`,
+    [createHash('sha256').update(`isolated-session-${userId}`).digest(),
+        createHash('sha256').update(`isolated-previous-session-${userId}`).digest(), userId]);
 }
 
 test('reconciles a restored deleted identity, preserves others, and never targets a reused numeric ID', async () => {
@@ -169,8 +173,10 @@ test('reconciles a restored deleted identity, preserves others, and never target
         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [attempt.state_hash, attempt.binding_hash, attempt.nonce,
         attempt.client_key, attempt.action, attempt.user_id, attempt.account_uuid, attempt.expires_at]);
     const session = beforeDeletion.account_sessions.find(row => row.account_uuid === original.account_uuid)!;
-    await administrator.query(`INSERT INTO account_sessions (session_hash, account_uuid, created_at, expires_at)
-        VALUES (?, ?, ?, ?)`, [session.session_hash, session.account_uuid, session.created_at, session.expires_at]);
+    await administrator.query(`INSERT INTO account_sessions (session_hash, account_uuid, created_at, expires_at,
+        remembered, renewed_at, previous_session_hash, previous_valid_until)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, [session.session_hash, session.account_uuid, session.created_at, session.expires_at,
+        session.remembered, session.renewed_at, session.previous_session_hash, session.previous_valid_until]);
     await submitP4VegaScore(database, 1, 900);
     await submitThreeBossesRun(database, 1, randomUUID(), 60000);
     const plan = await planDeletionReplay(database, journal, settings);

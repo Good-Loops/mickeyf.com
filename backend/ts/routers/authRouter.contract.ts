@@ -53,6 +53,12 @@ export type LogoutResponse = {
     loggedOut: true;
 };
 
+/** Explicit same-origin cookie renewal; ordinary sessions are never upgraded. */
+export type RenewSessionRequest = Record<string, never>;
+export type RenewSessionResponse = VerifyTokenResponse | {
+    error: 'INVALID_REQUEST' | 'SESSION_RENEWAL_UNAVAILABLE' | 'RATE_LIMITED';
+};
+
 /** Password reauthentication and explicit confirmation; account identity comes from the session. */
 export type DeleteAccountRequest = { password: string; confirmation: 'DELETE' };
 export type DeleteAccountResponse = { deleted: true } | {
@@ -64,6 +70,7 @@ export type DeleteAccountResponse = { deleted: true } | {
 export type AuthRoutesContract = {
     readonly routes: readonly (
         | RouteContract<VerifyTokenRequest, VerifyTokenResponse>
+        | RouteContract<RenewSessionRequest, RenewSessionResponse>
         | RouteContract<LogoutRequest, LogoutResponse>
         | RouteContract<DeleteAccountRequest, DeleteAccountResponse>
     )[];
@@ -72,6 +79,14 @@ export type AuthRoutesContract = {
 /** @category Backend — Contracts */
 export const authRoutesContract: AuthRoutesContract = {
     routes: [
+        {
+            id: 'auth.renewSession',
+            method: 'POST',
+            path: '/renew',
+            auth: 'public',
+            request: {} as RenewSessionRequest,
+            response: { loggedIn: false } as RenewSessionResponse,
+        },
         {
             id: 'auth.deleteAccount',
             method: 'POST',

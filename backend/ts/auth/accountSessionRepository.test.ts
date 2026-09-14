@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import test from 'node:test';
 import type { Pool, PoolConnection, QueryOptions } from 'mysql2/promise';
-import { AccountSessionUnavailableError, createAccountSession, readLiveSession, revokeAccountSession } from './accountSessionRepository';
+import { AccountSessionUnavailableError, createAccountSession, readLiveSession, renewAccountSession, revokeAccountSession } from './accountSessionRepository';
 
 const target = { userId: 7, accountId: randomUUID() };
 const sessionId = randomBytes(32).toString('base64url');
@@ -39,7 +39,8 @@ test('creation hashes the secret, confirms commit, bounds expiry and locks befor
     const expiry = expiresAt();
     assert.equal(await createAccountSession(f.database, target, sessionId, expiry, 'expected-hash'), true);
     const insert = f.calls.find(call => call.sql.startsWith('INSERT INTO account_sessions'))!;
-    assert.deepEqual(insert.values, [createHash('sha256').update(sessionId).digest(), target.accountId, expiry, expiry, expiry]);
+    assert.deepEqual(insert.values, [createHash('sha256').update(sessionId).digest(), target.accountId,
+        expiry, 0, expiry, expiry]);
     assert.match(insert.sql, /UTC_TIMESTAMP\(6\)[\s\S]*TIMESTAMPADD/u);
     assert.match(insert.sql, /INTERVAL 30 DAY/u);
     assert.equal(f.calls.flatMap(call => call.values).includes(sessionId), false);
@@ -81,8 +82,10 @@ test('only a full account evicts its oldest remaining device after bounded expir
 test('live session read requires numeric ID plus immutable UUID and database-clock expiry, without writes', async () => {
     const f = fixture();
     assert.deepEqual(await readLiveSession(f.connection, target.userId, target.accountId, sessionId), { userName: 'fixture' });
-    assert.deepEqual(f.calls[0].values, [target.userId, target.accountId, createHash('sha256').update(sessionId).digest()]);
+    const hash = createHash('sha256').update(sessionId).digest();
+    assert.deepEqual(f.calls[0].values, [target.userId, target.accountId, hash, hash]);
     assert.match(f.calls[0].sql, /expires_at > UTC_TIMESTAMP\(6\)/u);
+    assert.match(f.calls[0].sql, /previous_valid_until > UTC_TIMESTAMP\(6\)/u);
     assert.equal(f.calls.length, 1);
     assert.equal(await readLiveSession(fixture({ live: [] }).connection, target.userId, target.accountId, sessionId), null);
     for (const live of [[{ userName: '' }], [{ userName: 'a' }, { userName: 'b' }]]) {
@@ -95,9 +98,91 @@ test('logout is idempotent, user-serialized and only removes matching UUID and d
     const f = fixture({ affectedRows: 0 });
     await revokeAccountSession(f.database, target.userId, target.accountId, sessionId);
     const deletion = f.calls.find(call => call.sql.startsWith('DELETE s'))!;
-    assert.deepEqual(deletion.values, [target.userId, target.accountId, createHash('sha256').update(sessionId).digest()]);
+    const hash = createHash('sha256').update(sessionId).digest();
+    assert.deepEqual(deletion.values, [target.userId, target.accountId, hash, hash]);
     assert.match(deletion.sql, /INNER JOIN users/u);
+    assert.match(deletion.sql, /previous_session_hash = \?/u);
+    assert.doesNotMatch(deletion.sql, /previous_valid_until/u);
     assert.equal(f.calls.at(-2)?.sql, 'COMMIT');
+});
+
+const hashId = (id: string) => createHash('sha256').update(id, 'ascii').digest();
+function renewableRow(overrides: Record<string, unknown> = {}) {
+    const now = Math.floor(Date.now() / 1000);
+    return { userName: 'fixture', currentHash: hashId(sessionId), previousHash: null, remembered: 1,
+        now, expiresAt: now + 86400, renewedAt: now - 900, ...overrides };
+}
+
+test('remembered creation records opt-in and renewal time, while ordinary sessions remain non-renewable', async () => {
+    const f = fixture();
+    await createAccountSession(f.database, target, sessionId, expiresAt(), undefined, true);
+    const inserted = f.calls.find(call => call.sql.startsWith('INSERT INTO account_sessions'))!;
+    assert.equal(inserted.values[3], 1);
+    assert.match(inserted.sql, /remembered, renewed_at/u);
+});
+
+test('renewal rotates only after fifteen minutes and uses a fresh database-clock idle deadline', async () => {
+    const replacement = randomBytes(32).toString('base64url');
+    const row = renewableRow(); const f = fixture({ live: [row] });
+    const result = await renewAccountSession(f.database, target.userId, target.accountId, sessionId, old => {
+        assert.equal(old, sessionId); return replacement;
+    });
+    assert.deepEqual(result, { userName: 'fixture', renewal: {
+        sessionId: replacement, issuedAt: row.now, expiresAt: row.now + 30 * 86400,
+    } });
+    const update = f.calls.find(call => call.sql.startsWith('UPDATE account_sessions'))!;
+    assert.deepEqual(update.values, [hashId(replacement), hashId(sessionId), row.now + 120, row.now,
+        row.now + 30 * 86400, target.accountId, hashId(sessionId)]);
+    assert.doesNotMatch(update.sql, /SET[\s\S]*created_at/u);
+    assert.equal(f.calls.flatMap(call => call.values).includes(sessionId), false);
+    assert.equal(f.calls.flatMap(call => call.values).includes(replacement), false);
+    assert.equal(f.calls.at(-2)?.sql, 'COMMIT');
+    assert.match(f.calls.find(call => call.sql.startsWith('SELECT u.user_name'))!.sql, /FOR UPDATE/u);
+});
+
+test('ordinary, recently renewed and absent sessions are read-only; no callback gets a non-renewable credential', async () => {
+    for (const row of [renewableRow({ remembered: 0, renewedAt: null }),
+        renewableRow({ renewedAt: Math.floor(Date.now() / 1000) - 899 })]) {
+        const f = fixture({ live: [row] });
+        assert.deepEqual(await renewAccountSession(f.database, target.userId, target.accountId, sessionId,
+            () => { throw new Error('must not derive'); }), { userName: 'fixture' });
+        assert.equal(f.calls.some(call => call.sql.startsWith('UPDATE')), false);
+    }
+    assert.equal(await renewAccountSession(fixture({ live: [] }).database,
+        target.userId, target.accountId, sessionId, () => sessionId), null);
+});
+
+test('grace retries recover the identical replacement and issuance time, without rotating again', async () => {
+    const replacement = randomBytes(32).toString('base64url');
+    const row = renewableRow({ currentHash: hashId(replacement), previousHash: hashId(sessionId),
+        renewedAt: Math.floor(Date.now() / 1000) - 15 });
+    const f = fixture({ live: [row] });
+    assert.deepEqual(await renewAccountSession(f.database, target.userId, target.accountId, sessionId, () => replacement),
+        { userName: 'fixture', renewal: { sessionId: replacement, issuedAt: row.renewedAt, expiresAt: row.expiresAt } });
+    assert.equal(f.calls.some(call => call.sql.startsWith('UPDATE')), false);
+    await assert.rejects(renewAccountSession(fixture({ live: [row] }).database,
+        target.userId, target.accountId, sessionId, () => randomBytes(32).toString('base64url')), AccountSessionUnavailableError);
+});
+
+test('invalid rotation state, replacement IDs and uncertain commits fail closed without driver data', async () => {
+    for (const overrides of [{ remembered: 2 }, { previousHash: Buffer.alloc(2) }, { renewedAt: null },
+        { expiresAt: 1 }, { now: NaN }, { renewedAt: Number.MAX_SAFE_INTEGER }]) {
+        await assert.rejects(renewAccountSession(fixture({ live: [renewableRow(overrides)] }).database,
+            target.userId, target.accountId, sessionId, () => randomBytes(32).toString('base64url')), AccountSessionUnavailableError);
+    }
+    for (const replacement of [sessionId, 'bad-id']) {
+        await assert.rejects(renewAccountSession(fixture({ live: [renewableRow()] }).database,
+            target.userId, target.accountId, sessionId, () => replacement), AccountSessionUnavailableError);
+    }
+    for (const fail of ['UPDATE account_sessions', 'COMMIT']) {
+        const f = fixture({ live: [renewableRow()], fail });
+        await assert.rejects(renewAccountSession(f.database, target.userId, target.accountId, sessionId,
+            () => randomBytes(32).toString('base64url')), error => {
+            assert(error instanceof AccountSessionUnavailableError); assert.equal('cause' in error, false);
+            assert.doesNotMatch(error.message, /private|password|token/u); return true;
+        });
+        assert.equal(f.destroyed(), fail === 'COMMIT');
+    }
 });
 
 test('invalid credentials and expiries are rejected before acquiring a connection', async () => {

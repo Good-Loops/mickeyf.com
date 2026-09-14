@@ -9,6 +9,7 @@ function fakeDatabase(options: { epoch?: string; badColumn?: boolean; invalidCou
     providerTable?: 'absent' | 'malformed'; providerMigrationRecorded?: boolean;
     attemptTable?: 'absent' | 'malformed'; attemptMigrationRecorded?: boolean;
     sessionTable?: 'absent' | 'malformed'; sessionMigrationRecorded?: boolean;
+    renewalMigrationRecorded?: boolean;
     queryError?: Error; queryPending?: boolean } = {}) {
     const queries: Array<{ sql: string; timeout: number; values?: unknown[] }> = [];
     const cleanup: string[] = [];
@@ -18,10 +19,11 @@ function fakeDatabase(options: { epoch?: string; badColumn?: boolean; invalidCou
             if (options.queryError) throw options.queryError;
             if (options.queryPending) return new Promise(() => {});
             if (query.sql.startsWith('SELECT version FROM schema_migrations')) {
-                const recorded = values?.[0] === '0011_create_account_sessions' ? options.sessionMigrationRecorded
-                    : values?.[0] === '0010_create_provider_auth_attempts'
-                        ? options.attemptMigrationRecorded : options.providerMigrationRecorded;
-                return [recorded ? [{ version: values?.[0] }] : [], []];
+                const recorded = (values ?? []).filter(version => version === '0011_create_account_sessions'
+                    ? options.sessionMigrationRecorded : version === '0012_add_session_renewal'
+                        ? options.renewalMigrationRecorded : version === '0010_create_provider_auth_attempts'
+                            ? options.attemptMigrationRecorded : options.providerMigrationRecorded);
+                return [recorded.map(version => ({ version })), []];
             }
             if (values?.[0] === 'account_provider_identities') {
                 return [query.sql.includes('COUNT(*)')
@@ -123,15 +125,26 @@ test('pre-0011 deletion readiness accepts absent sessions but rejects unsafe rec
     }
 });
 
-test('session startup requires recorded migration 0011 and rejects unsafe storage', async () => {
+test('session startup requires recorded migrations 0011 and 0012 and rejects unsafe storage', async () => {
     for (const options of [{}, { sessionTable: 'malformed' as const },
-        { sessionMigrationRecorded: true, sessionTable: 'malformed' as const }]) {
+        { sessionMigrationRecorded: true },
+        { sessionMigrationRecorded: true, renewalMigrationRecorded: true, sessionTable: 'malformed' as const }]) {
         const fake = fakeDatabase(options);
         await assert.rejects(verifyAccountSessionReadiness(fake.database), AccountSessionReadinessError);
         assert.deepEqual(fake.queries[0].values, ['0011_create_account_sessions']);
+        if (options.sessionMigrationRecorded) {
+            assert.deepEqual(fake.queries[1].values, ['0012_add_session_renewal']);
+        }
         assert.ok(fake.queries.every(({ sql, timeout }) => /^SELECT/u.test(sql.trim()) && timeout === 10_000));
         assert.deepEqual(fake.cleanup, ['release']);
     }
+});
+
+test('deletion readiness rejects a recorded renewal migration without session storage', async () => {
+    const fake = fakeDatabase({ renewalMigrationRecorded: true });
+    await assert.rejects(verifyAccountDeletionReadiness(fake.database, EPOCH), AccountDeletionReadinessError);
+    assert.ok(fake.queries.some(({ values }) => values?.includes('0012_add_session_renewal')));
+    assert.deepEqual(fake.cleanup, ['release']);
 });
 
 test('session startup failures are sanitized and destroy a failed query connection', async () => {

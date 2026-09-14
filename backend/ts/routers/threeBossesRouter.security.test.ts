@@ -61,7 +61,7 @@ function createReplayDatabase() {
         async query(options: { sql: string }, values: unknown[]) {
             assert.match(options.sql, /FROM account_sessions AS s/);
             assert.match(options.sql, /s.expires_at > UTC_TIMESTAMP\(6\)/);
-            assert.deepEqual(values, [42, account.accountId, sessionHash]);
+            assert.deepEqual(values, [42, account.accountId, sessionHash, sessionHash]);
             return [[{ userName: 'player' }], []];
         },
         async getConnection() {
@@ -77,7 +77,7 @@ function createReplayDatabase() {
                         return [[{ lockResult: 1 }], []];
                     }
                     if (sql.includes('FROM account_sessions AS s')) {
-                        assert.deepEqual(values, [42, account.accountId, sessionHash]);
+                        assert.deepEqual(values, [42, account.accountId, sessionHash, sessionHash]);
                         return [[{ userName: account.userName }], []];
                     }
                     if (sql.includes('FROM users')) {

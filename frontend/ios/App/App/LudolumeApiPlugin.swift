@@ -65,6 +65,7 @@ private enum LudolumeApiPolicy {
         "POST /api/users",
         "GET /auth/verify-token",
         "POST /auth/logout",
+        "POST /auth/renew",
         "POST /auth/delete-account",
         "GET /api/leaderboards",
         "GET /api/leaderboards/p4-vega",

@@ -257,6 +257,7 @@ test('checks the live session inside the user lock before reading or writing a s
         assert.match(fake.queries[0].sql, /GET_LOCK/);
         assert.match(fake.queries[1].sql, /FROM account_sessions AS s/);
         assert.deepEqual(fake.queries[1].values, [42, expectedSession.accountId,
+            createHash('sha256').update(expectedSession.sessionId, 'ascii').digest(),
             createHash('sha256').update(expectedSession.sessionId, 'ascii').digest()]);
         assert.equal(fake.queries.some(({ sql }) => sql.startsWith('INSERT')), matches);
         assert.equal(fake.queries.some(({ sql }) => sql.startsWith('SELECT users.user_id AS userId')), matches);

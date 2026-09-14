@@ -9,7 +9,8 @@ import mysql, {
 } from 'mysql2/promise';
 import { loadMigrationConfig } from '../config/migrationConfig';
 import { deleteAccount } from '../accounts/accountDeletionRepository';
-import { createAccountSession, readLiveSession, revokeAccountSession } from '../auth/accountSessionRepository';
+import { createAccountSession, readLiveSession, renewAccountSession, revokeAccountSession } from '../auth/accountSessionRepository';
+import { deriveRenewedSessionId } from './sessionPolicy';
 import { verifyAccountSessionReadiness } from '../accounts/accountDeletionReadiness';
 import {
     readP4VegaLeaderboard,
@@ -147,7 +148,7 @@ async function createSchema(): Promise<void> {
         allowedEffectKinds: ['add-account-identity'],
     });
     await applyMigrations(asMigrationConnection(administrator), migrations, config, {
-        allowedEffectKinds: ['add-provider-identities', 'add-provider-attempts', 'add-account-sessions'],
+        allowedEffectKinds: ['add-provider-identities', 'add-provider-attempts', 'add-account-sessions', 'add-session-renewal'],
     });
 }
 
@@ -261,18 +262,28 @@ after(async () => {
     if (administrator) await administrator.end();
 });
 
-test('limited runtime session grants support readiness, issuance, verification and revocation without UPDATE', async () => {
+test('limited runtime session grants support rotation without rewriting immutable session properties', async () => {
     await verifyAccountSessionReadiness(runtimePool);
     const [accounts] = await runtimePool.query<RowDataPacket[]>(
         'SELECT account_uuid AS accountId FROM users WHERE user_id = 1');
     const accountId = accounts[0].accountId as string;
     const sessionId = Buffer.alloc(32, 3).toString('base64url');
     assert.equal(await createAccountSession(runtimePool, { userId: 1, accountId }, sessionId,
-        Math.floor(Date.now() / 1000) + 4 * 60 * 60), true);
+        Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60, undefined, true), true);
     assert.deepEqual(await readLiveSession(runtimePool, 1, accountId, sessionId), { userName: 'player-1' });
-    await assertPrivilegeDenied(() => runtimePool.query('UPDATE account_sessions SET expires_at = expires_at WHERE 1 = 0'));
+    for (const column of ['account_uuid', 'created_at', 'remembered']) {
+        await assertPrivilegeDenied(() => runtimePool.query(`UPDATE account_sessions SET ${column} = ${column} WHERE 1 = 0`));
+    }
+    // Only the isolated fixture administrator advances eligibility; the runtime performs the actual rotation.
+    await administrator.query('UPDATE account_sessions SET renewed_at = UTC_TIMESTAMP(6) - INTERVAL 16 MINUTE WHERE account_uuid = ?',
+        [accountId]);
+    const renewed = await renewAccountSession(runtimePool, 1, accountId, sessionId,
+        oldId => deriveRenewedSessionId(oldId, 'isolated-session-renewal-secret'));
+    assert.ok(renewed?.renewal);
+    assert.deepEqual(await readLiveSession(runtimePool, 1, accountId, renewed.renewal.sessionId), { userName: 'player-1' });
     await revokeAccountSession(runtimePool, 1, accountId, sessionId);
     assert.equal(await readLiveSession(runtimePool, 1, accountId, sessionId), null);
+    assert.equal(await readLiveSession(runtimePool, 1, accountId, renewed.renewal.sessionId), null);
 });
 
 test('installs exact column grants and account-deletion table grants with no active role', async () => {

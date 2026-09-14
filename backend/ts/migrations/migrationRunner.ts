@@ -7,7 +7,8 @@ import {
 } from './accountIdentitySchema';
 import { PROVIDER_IDENTITY_MIGRATION_VERSION, verifyProviderIdentitySchema } from './providerIdentitySchema';
 import { PROVIDER_ATTEMPT_MIGRATION_VERSION, verifyProviderAttemptSchema } from './providerAttemptSchema';
-import { verifyAccountSessionSchema } from './accountSessionSchema';
+import { ACCOUNT_SESSION_MIGRATION_VERSION, inspectAccountSessionRenewal,
+    verifyAccountSessionSchema, verifyRenewableAccountSessionSchema } from './accountSessionSchema';
 import type { MigrationConfig } from '../config/migrationConfig';
 import {
     legacyP4ScoreColumnExists,
@@ -69,10 +70,11 @@ const PROVIDER_ATTEMPT_PREREQUISITES = [
     ...PROVIDER_IDENTITY_PREREQUISITES, PROVIDER_IDENTITY_MIGRATION_VERSION,
 ];
 const ACCOUNT_SESSION_PREREQUISITES = [...PROVIDER_ATTEMPT_PREREQUISITES, PROVIDER_ATTEMPT_MIGRATION_VERSION];
+const SESSION_RENEWAL_PREREQUISITES = [...ACCOUNT_SESSION_PREREQUISITES, ACCOUNT_SESSION_MIGRATION_VERSION];
 
 function requiresCompleteEarlierHistory(migration: MigrationDefinition): boolean {
     return migration.effect === 'add-provider-identities' || migration.effect === 'add-provider-attempts'
-        || migration.effect === 'add-account-sessions';
+        || migration.effect === 'add-account-sessions' || migration.effect === 'add-session-renewal';
 }
 
 async function inspectLeaderboardStage(
@@ -247,6 +249,16 @@ async function inspectMigrationState(
         }
 
         pending.push(migration.version);
+        if (migration.effect === 'add-session-renewal') {
+            if (await tableExists(connection, migration.tableName)) {
+                if (await inspectAccountSessionRenewal(connection)) {
+                    assertProviderMigrationHistory(migrations, migration, appliedByVersion);
+                    await verifyRenewableAccountSessionSchema(connection);
+                    recoverable.push(migration.version);
+                } else await verifyAccountSessionSchema(connection);
+            }
+            continue;
+        }
         if (requiresCompleteEarlierHistory(migration)) {
             if (await tableExists(connection, migration.tableName)) {
                 assertProviderMigrationHistory(migrations, migration, appliedByVersion);
@@ -305,6 +317,10 @@ async function verifyMigrationPrecondition(
     connection: MigrationConnection,
     migration: MigrationDefinition
 ): Promise<void> {
+    if (migration.effect === 'add-session-renewal') {
+        await verifyAccountSessionSchema(connection);
+        return;
+    }
     if (migration.effect === 'add-account-sessions') {
         await verifyAccountIdentitySchema(connection);
         await verifyProviderIdentitySchema(connection);
@@ -369,11 +385,15 @@ async function verifyMigrationPostcondition(
     migration: MigrationDefinition,
     stage: LeaderboardSchemaStage = 'original'
 ): Promise<void> {
+    if (migration.effect === 'add-session-renewal') {
+        await verifyRenewableAccountSessionSchema(connection);
+        return;
+    }
     if (migration.effect === 'add-account-sessions') {
         await verifyAccountIdentitySchema(connection);
         await verifyProviderIdentitySchema(connection);
         await verifyProviderAttemptSchema(connection);
-        await verifyAccountSessionSchema(connection);
+        await verifyAccountSessionSchema(connection, await inspectAccountSessionRenewal(connection));
         return;
     }
     if (migration.effect === 'add-provider-attempts') {
@@ -437,11 +457,12 @@ function assertProviderMigrationHistory(
 ): void {
     const attempts = migration.effect === 'add-provider-attempts';
     const sessions = migration.effect === 'add-account-sessions';
-    const prerequisites = sessions ? ACCOUNT_SESSION_PREREQUISITES
+    const renewal = migration.effect === 'add-session-renewal';
+    const prerequisites = renewal ? SESSION_RENEWAL_PREREQUISITES : sessions ? ACCOUNT_SESSION_PREREQUISITES
         : attempts ? PROVIDER_ATTEMPT_PREREQUISITES : PROVIDER_IDENTITY_PREREQUISITES;
     if (!prerequisites.every(version => applied.has(version))
         || migrations.some(({ version }) => version < migration.version && !applied.has(version))) {
-        const label = sessions ? 'Account sessions' : `Provider ${attempts ? 'attempts' : 'identities'}`;
+        const label = renewal ? 'Session renewal' : sessions ? 'Account sessions' : `Provider ${attempts ? 'attempts' : 'identities'}`;
         throw new Error(`${label} require all earlier migrations to be recorded first`);
     }
 }

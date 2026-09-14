@@ -62,6 +62,18 @@ export function createGeneralApiRateLimiter() {
     });
 }
 
+/** Renewal performs a locked transaction; bound abuse separately from password attempts. */
+export function createSessionRenewalRateLimiter() {
+    return rateLimit({
+        windowMs: 15 * 60 * 1000,
+        limit: 120,
+        standardHeaders: 'draft-8',
+        legacyHeaders: false,
+        message: RATE_LIMIT_MESSAGE,
+        passOnStoreError: false,
+    });
+}
+
 /** Per-instance abuse ceiling for the opt-in Three Bosses mutation route. */
 export function createThreeBossesSubmissionIpRateLimiter() {
     return rateLimit({

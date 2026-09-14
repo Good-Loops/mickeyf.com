@@ -12,7 +12,7 @@ export type SignupResponse = { success: true; error?: never } | AccountError;
 export type DeleteAccountResponse =
     | { deleted: true }
     | { error: 'INVALID_REQUEST' | 'INVALID_PASSWORD' | 'UNAUTHENTICATED' | 'ACCOUNT_DELETION_UNAVAILABLE' | 'ACCOUNT_DELETION_PENDING' | 'RATE_LIMITED' };
-type VerificationResponse =
+export type VerificationResponse =
     | { loggedIn: true; user_name: string }
     | { loggedIn: false };
 type UserOperation =
@@ -90,6 +90,27 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
         return response.json();
     }
 
+    async function renewRequest(): Promise<VerificationResponse> {
+        const response = await fetchRequest(`${apiBase}/auth/renew`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
+            body: JSON.stringify({}),
+        });
+        if (!response.ok) throw new Error(`HTTP error ${response.status}`);
+
+        const result: unknown = await response.json();
+        if (result && typeof result === 'object' && 'loggedIn' in result) {
+            if (result.loggedIn === false && Object.keys(result).length === 1) return { loggedIn: false };
+            if (result.loggedIn === true && 'user_name' in result
+                && typeof result.user_name === 'string' && result.user_name.length > 0
+                && Object.keys(result).length === 2) {
+                return { loggedIn: true, user_name: result.user_name };
+            }
+        }
+        throw new Error('Could not confirm the renewed session.');
+    }
+
     async function logoutRequest(): Promise<void> {
         const response = await fetchRequest(`${apiBase}/auth/logout`, {
             method: 'POST',
@@ -141,6 +162,7 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
             return enqueueMutation(() => signupRequest(request));
         },
         verifyRequest,
+        renewRequest: () => enqueueMutation(renewRequest),
         logoutRequest: () => enqueueMutation(logoutRequest),
         deleteAccountRequest: (password: string) => enqueueMutation(() => deleteAccountRequest(password)),
     };

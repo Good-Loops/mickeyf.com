@@ -2048,9 +2048,9 @@ signed HTTP-only session cookie; the successful login JSON now returns only
 Bearer-token compatibility path remain unchanged.
 
 **Stay signed in checkpoint (2026-09-14):** implemented the optional, unchecked
-30-day Login control; ordinary sign-in remains four hours. Sign up now exposes
+renewable Login control; ordinary sign-in remains four hours. Sign up now exposes
 the same choice for its existing automatic-login flow. Both forms share a round,
-glass-styled accessible checkbox without the private-device hint. The owner chose
+glass-styled accessible 14px checkbox without the private-device hint. The owner chose
 revocable per-device sessions instead of accepting stateless-token replay risk.
 Migration 0011 stores only hashed random session identifiers, immutable account
 UUIDs and UTC timestamps, capped at ten sessions per account. Logout and cookie
@@ -2062,6 +2062,18 @@ forwarded `__session` cookie; native transport keeps the OS cookie store and
 waits for server-confirmed logout. Implementation is not a production activation:
 schema/grants, coordinated backend/Hosting deployment, one expected re-login,
 and browser/native acceptance remain pending. See [session behavior and rollout](backend/SESSION_AUTHENTICATION.md).
+
+**Renewal extension (2026-09-14):** selected sessions expire after thirty days
+without renewal, with no fixed 90-day cutoff. Foreground activity renews via an
+explicit signed-cookie POST, with fifteen-minute throttling and a 120-second
+predecessor grace for concurrent tabs. Migration 0012 adds bounded rotation
+metadata to the same device row; no new service or cleanup job. Existing 0011
+sessions remain non-renewable. Password reauthentication remains required for
+account deletion. Production activation still requires the coordinated steps above.
+Renewal validation passed 418 backend unit tests, 39 isolated MySQL integration
+tests and 56 focused frontend tests. Added `backend:dev:isolated` so the local
+server can use the new schema without migrating production; its persistent
+loopback-only database starts empty, with no production accounts or scores.
 
 ## Phase 15 — p4-Vega improvement and mobile polish
 

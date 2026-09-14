@@ -49,9 +49,14 @@ export const RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freez
         tablePrivileges: Object.freeze(['DELETE' as const]),
         grants: Object.freeze([
             Object.freeze({ privilege: 'SELECT' as const,
-                columns: Object.freeze(['session_hash', 'account_uuid', 'created_at', 'expires_at']) }),
+                columns: Object.freeze(['session_hash', 'account_uuid', 'created_at', 'expires_at',
+                    'remembered', 'renewed_at', 'previous_session_hash', 'previous_valid_until']) }),
             Object.freeze({ privilege: 'INSERT' as const,
-                columns: Object.freeze(['session_hash', 'account_uuid', 'created_at', 'expires_at']) }),
+                columns: Object.freeze(['session_hash', 'account_uuid', 'created_at', 'expires_at',
+                    'remembered', 'renewed_at']) }),
+            Object.freeze({ privilege: 'UPDATE' as const,
+                columns: Object.freeze(['session_hash', 'expires_at', 'renewed_at',
+                    'previous_session_hash', 'previous_valid_until']) }),
         ]),
     }),
     Object.freeze({

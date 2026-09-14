@@ -7,6 +7,7 @@ export const {
     loginRequest,
     signupRequest,
     verifyRequest,
+    renewRequest,
     logoutRequest,
     deleteAccountRequest,
 } = createAuthApi(API_BASE, apiFetch);

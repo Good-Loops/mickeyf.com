@@ -2,7 +2,8 @@ import { createHash } from 'node:crypto';
 import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { isAccountId } from '../accounts/deletionJournal';
 import { withUserSubmissionLock, type UserSubmissionLockContext } from '../leaderboards/userSubmissionLock';
-import { isSessionId, PERSISTENT_SESSION_SECONDS } from '../security/sessionPolicy';
+import { isSessionId, PERSISTENT_SESSION_SECONDS,
+    SESSION_RENEWAL_GRACE_SECONDS, SESSION_RENEWAL_INTERVAL_SECONDS } from '../security/sessionPolicy';
 
 type AccountTarget = Readonly<{ userId: number; accountId: string }>;
 type SessionDatabase = Pick<Pool, 'getConnection'>;
@@ -50,10 +51,12 @@ async function transaction<T>(context: UserSubmissionLockContext, operation: () 
 export async function createAccountSession(
     database: SessionDatabase, target: AccountTarget, sessionId: string, expiresAt: number,
     expectedPasswordHash?: string,
+    rememberMe = false,
 ): Promise<boolean> {
     const hash = sessionHash(target, sessionId);
     const now = Math.floor(Date.now() / 1000);
-    if (!Number.isSafeInteger(expiresAt) || expiresAt <= now || expiresAt > now + PERSISTENT_SESSION_SECONDS
+    if (typeof rememberMe !== 'boolean' || !Number.isSafeInteger(expiresAt)
+        || expiresAt <= now || expiresAt > now + PERSISTENT_SESSION_SECONDS
         || (expectedPasswordHash !== undefined && (typeof expectedPasswordHash !== 'string'
             || expectedPasswordHash.length === 0 || expectedPasswordHash.length > 255))) {
         throw new TypeError('A session expiry within thirty days and a valid optional password hash are required.');
@@ -70,7 +73,8 @@ export async function createAccountSession(
             if (!users[0] || users[0].accountId !== account.accountId) return false;
             if (expectedPasswordHash !== undefined && users[0].passwordHash !== expectedPasswordHash) return false;
             await connection.query({
-                sql: `DELETE FROM account_sessions WHERE account_uuid = ? AND expires_at <= UTC_TIMESTAMP(6)
+                sql: `DELETE FROM account_sessions WHERE account_uuid = ?
+                    AND expires_at <= UTC_TIMESTAMP(6)
                     ORDER BY expires_at LIMIT ${SESSION_LIMIT}`, timeout: QUERY_TIMEOUT_MS,
             }, [account.accountId]);
             const [sessions] = await connection.query<RowDataPacket[]>({
@@ -89,11 +93,12 @@ export async function createAccountSession(
             }
             // UTC arithmetic avoids depending on a pooled connection's session time zone.
             const [inserted] = await connection.query<ResultSetHeader>({
-                sql: `INSERT INTO account_sessions (session_hash, account_uuid, created_at, expires_at)
-                    SELECT ?, ?, UTC_TIMESTAMP(6), ${EXPIRY_SQL}
+                sql: `INSERT INTO account_sessions (session_hash, account_uuid, created_at, expires_at,
+                    remembered, renewed_at)
+                    SELECT ?, ?, UTC_TIMESTAMP(6), ${EXPIRY_SQL}, ?, UTC_TIMESTAMP(6)
                     WHERE ${EXPIRY_SQL} > UTC_TIMESTAMP(6)
                     AND ${EXPIRY_SQL} <= UTC_TIMESTAMP(6) + INTERVAL 30 DAY`, timeout: QUERY_TIMEOUT_MS,
-            }, [hash, account.accountId, expiresAt, expiresAt, expiresAt]);
+            }, [hash, account.accountId, expiresAt, rememberMe ? 1 : 0, expiresAt, expiresAt]);
             if (inserted.affectedRows !== 1) throw new AccountSessionUnavailableError();
             return true;
         }));
@@ -112,9 +117,10 @@ export async function readLiveSession(
         const [rows] = await database.query<RowDataPacket[]>({
             sql: `SELECT u.user_name AS userName FROM account_sessions AS s
                 INNER JOIN users AS u ON u.account_uuid = s.account_uuid
-                WHERE u.user_id = ? AND u.account_uuid = ? AND s.session_hash = ?
+                WHERE u.user_id = ? AND u.account_uuid = ?
+                AND (s.session_hash = ? OR (s.previous_session_hash = ? AND s.previous_valid_until > UTC_TIMESTAMP(6)))
                 AND s.expires_at > UTC_TIMESTAMP(6) LIMIT 2`, timeout: QUERY_TIMEOUT_MS,
-        }, [userId, accountId, hash]);
+        }, [userId, accountId, hash, hash]);
         if (!Array.isArray(rows) || rows.length > 1
             || (rows[0] && (typeof rows[0].userName !== 'string' || rows[0].userName.length === 0))) {
             throw new AccountSessionUnavailableError();
@@ -132,8 +138,94 @@ export async function revokeAccountSession(
         await withUserSubmissionLock(database, userId, context => transaction(context, async () => {
             await context.connection.query({
                 sql: `DELETE s FROM account_sessions AS s INNER JOIN users AS u ON u.account_uuid = s.account_uuid
-                    WHERE u.user_id = ? AND u.account_uuid = ? AND s.session_hash = ?`, timeout: QUERY_TIMEOUT_MS,
-            }, [userId, accountId, hash]);
+                    WHERE u.user_id = ? AND u.account_uuid = ?
+                    AND (s.session_hash = ? OR s.previous_session_hash = ?)`, timeout: QUERY_TIMEOUT_MS,
+            }, [userId, accountId, hash, hash]);
+        }));
+    } catch { throw new AccountSessionUnavailableError(); }
+}
+
+type SessionRenewalResult = Readonly<{
+    userName: string;
+    renewal?: Readonly<{ sessionId: string; issuedAt: number; expiresAt: number }>;
+}>;
+
+type RenewableSession = Readonly<{
+    userName: string; currentHash: Buffer; previousHash: Buffer | null; remembered: boolean;
+    now: number; expiresAt: number; renewedAt: number | null;
+}>;
+
+function inspectRenewableSession(row: RowDataPacket): RenewableSession {
+    const validEpoch = (value: unknown): value is number => Number.isSafeInteger(value) && Number(value) > 0;
+    const now = Number(row.now); const expiresAt = Number(row.expiresAt);
+    const renewedAt = row.renewedAt === null ? null : Number(row.renewedAt);
+    if (typeof row.userName !== 'string' || !row.userName
+        || !Buffer.isBuffer(row.currentHash) || row.currentHash.length !== 32
+        || (row.previousHash !== null && (!Buffer.isBuffer(row.previousHash) || row.previousHash.length !== 32))
+        || (row.remembered !== 0 && row.remembered !== 1)
+        || !validEpoch(now) || !validEpoch(expiresAt) || expiresAt <= now
+        || (renewedAt !== null && (!validEpoch(renewedAt) || renewedAt > now))
+        || (row.remembered === 1 && renewedAt === null)) {
+        throw new AccountSessionUnavailableError();
+    }
+    return { userName: row.userName, currentHash: row.currentHash, previousHash: row.previousHash,
+        remembered: row.remembered === 1, now, expiresAt, renewedAt };
+}
+
+/** Rotate one remembered device under the same lock as logout, deletion and score submission.
+ * Deterministic replacement lets concurrent requests recover the identical cookie during a short grace period,
+ * without storing a usable credential or turning an expired/revoked session into a new login.
+ */
+export async function renewAccountSession(
+    database: SessionDatabase, userId: number, accountId: string, sessionId: string,
+    deriveReplacement: (oldId: string) => string,
+): Promise<SessionRenewalResult | null> {
+    const hash = sessionHash({ userId, accountId }, sessionId);
+    if (typeof deriveReplacement !== 'function') throw new TypeError('A session replacement function is required.');
+    try {
+        return await withUserSubmissionLock(database, userId, context => transaction(context, async () => {
+            const [rows] = await context.connection.query<RowDataPacket[]>({
+                sql: `SELECT u.user_name AS userName, s.session_hash AS currentHash,
+                    s.previous_session_hash AS previousHash, s.remembered,
+                    TIMESTAMPDIFF(SECOND, '1970-01-01', UTC_TIMESTAMP()) AS now,
+                    TIMESTAMPDIFF(SECOND, '1970-01-01', s.expires_at) AS expiresAt,
+                    TIMESTAMPDIFF(SECOND, '1970-01-01', s.renewed_at) AS renewedAt
+                    FROM account_sessions AS s INNER JOIN users AS u ON u.account_uuid = s.account_uuid
+                    WHERE u.user_id = ? AND u.account_uuid = ?
+                    AND (s.session_hash = ? OR (s.previous_session_hash = ? AND s.previous_valid_until > UTC_TIMESTAMP(6)))
+                    AND s.expires_at > UTC_TIMESTAMP(6) LIMIT 2 FOR UPDATE`,
+                timeout: QUERY_TIMEOUT_MS,
+            }, [userId, accountId, hash, hash]);
+            if (!Array.isArray(rows) || rows.length > 1) throw new AccountSessionUnavailableError();
+            if (!rows[0]) return null;
+            const session = inspectRenewableSession(rows[0]);
+            if (!session.remembered) return Object.freeze({ userName: session.userName });
+            const current = session.currentHash.equals(hash);
+            if (current && session.now - session.renewedAt! < SESSION_RENEWAL_INTERVAL_SECONDS) {
+                return Object.freeze({ userName: session.userName });
+            }
+            const replacement = deriveReplacement(sessionId);
+            const replacementHash = sessionHash({ userId, accountId }, replacement);
+            if (replacementHash.equals(hash)) throw new AccountSessionUnavailableError();
+            if (!current) {
+                if (!session.previousHash?.equals(hash) || !replacementHash.equals(session.currentHash)) {
+                    throw new AccountSessionUnavailableError();
+                }
+                return Object.freeze({ userName: session.userName, renewal: Object.freeze({
+                    sessionId: replacement, issuedAt: session.renewedAt!, expiresAt: session.expiresAt,
+                }) });
+            }
+            const expiresAt = session.now + PERSISTENT_SESSION_SECONDS;
+            // Only a single predecessor survives this rotation; the original creation time stays intact.
+            const [updated] = await context.connection.query<ResultSetHeader>({
+                sql: `UPDATE account_sessions SET session_hash = ?, previous_session_hash = ?,
+                    previous_valid_until = ${EXPIRY_SQL}, renewed_at = ${EXPIRY_SQL}, expires_at = ${EXPIRY_SQL}
+                    WHERE account_uuid = ? AND session_hash = ? AND remembered = 1`, timeout: QUERY_TIMEOUT_MS,
+            }, [replacementHash, hash, session.now + SESSION_RENEWAL_GRACE_SECONDS, session.now, expiresAt, accountId, hash]);
+            if (updated.affectedRows !== 1) throw new AccountSessionUnavailableError();
+            return Object.freeze({ userName: session.userName, renewal: Object.freeze({
+                sessionId: replacement, issuedAt: session.now, expiresAt,
+            }) });
         }));
     } catch { throw new AccountSessionUnavailableError(); }
 }

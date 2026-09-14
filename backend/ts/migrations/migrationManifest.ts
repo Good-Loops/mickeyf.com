@@ -4,7 +4,7 @@ import path from 'node:path';
 
 export type LeaderboardTableName = 'game_runs' | 'game_personal_bests';
 
-export type MigrationEffectKind = 'create-table' | 'drop-column' | 'detach-best-source' | 'retain-receipts' | 'add-account-identity' | 'add-provider-identities' | 'add-provider-attempts' | 'add-account-sessions';
+export type MigrationEffectKind = 'create-table' | 'drop-column' | 'detach-best-source' | 'retain-receipts' | 'add-account-identity' | 'add-provider-identities' | 'add-provider-attempts' | 'add-account-sessions' | 'add-session-renewal';
 
 type MigrationMetadata = Readonly<{
     version: string;
@@ -29,6 +29,7 @@ export type MigrationDefinition = MigrationMetadata & Readonly<
     | { effect: 'add-provider-identities'; tableName: 'account_provider_identities' }
     | { effect: 'add-provider-attempts'; tableName: 'provider_auth_attempts' }
     | { effect: 'add-account-sessions'; tableName: 'account_sessions' }
+    | { effect: 'add-session-renewal'; tableName: 'account_sessions' }
 >;
 
 const MIGRATION_SPECS = Object.freeze([
@@ -89,6 +90,11 @@ const MIGRATION_SPECS = Object.freeze([
     Object.freeze({
         fileName: '0011_create_account_sessions.sql',
         effect: 'add-account-sessions' as const,
+        tableName: 'account_sessions' as const,
+    }),
+    Object.freeze({
+        fileName: '0012_add_session_renewal.sql',
+        effect: 'add-session-renewal' as const,
         tableName: 'account_sessions' as const,
     }),
 ]);

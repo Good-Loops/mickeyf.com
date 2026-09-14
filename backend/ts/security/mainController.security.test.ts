@@ -204,7 +204,7 @@ test('login commits a revocable session before its signed cookie, with matching 
         assert.equal(decoded.account_uuid, account.accountId);
         assert.equal(decoded.exp! - decoded.iat!, seconds);
         assert.deepEqual(inserted, [createHash('sha256').update(decoded.jti!, 'ascii').digest(), account.accountId,
-            decoded.exp, decoded.exp, decoded.exp]);
+            decoded.exp, rememberMe === true ? 1 : 0, decoded.exp, decoded.exp]);
     }
 });
 
@@ -317,7 +317,8 @@ test('a completed 1000-point run accepts the Bearer fallback and improves the fo
                 return [[{ lockResult: 1 }], []];
             }
             if (sql.includes('FROM account_sessions AS s')) {
-                assert.deepEqual(values, [42, account.accountId, createHash('sha256').update(session.sessionId, 'ascii').digest()]);
+                const hash = createHash('sha256').update(session.sessionId, 'ascii').digest();
+                assert.deepEqual(values, [42, account.accountId, hash, hash]);
                 return [[{ userName: account.userName }], []];
             }
             if (sql.includes('SELECT') && sql.includes('users.user_id AS userId')) {
@@ -366,7 +367,8 @@ test('a completed 1000-point run accepts the Bearer fallback and improves the fo
     ]);
     assert.deepEqual(queryValues, [
         [42, 5],
-        [42, account.accountId, createHash('sha256').update(session.sessionId, 'ascii').digest()],
+        [42, account.accountId, createHash('sha256').update(session.sessionId, 'ascii').digest(),
+            createHash('sha256').update(session.sessionId, 'ascii').digest()],
         ['p4-vega', 1, 42],
         ['p4-vega', 1, 42, 1000],
         [42],
@@ -404,7 +406,8 @@ test('non-improving score preserves the exact legacy success response', async ()
                 return [[{ lockResult: 1 }], []];
             }
             if (options.sql.includes('FROM account_sessions AS s')) {
-                assert.deepEqual(values, [42, account.accountId, createHash('sha256').update(session.sessionId, 'ascii').digest()]);
+                const hash = createHash('sha256').update(session.sessionId, 'ascii').digest();
+                assert.deepEqual(values, [42, account.accountId, hash, hash]);
                 return [[{ userName: account.userName }], []];
             }
             assert.match(options.sql, /users.user_id AS userId/);

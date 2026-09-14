@@ -15,6 +15,7 @@
         "migrations:providers:apply": "ts-node ts/migrations/runMigrations.ts provider-identities-apply",
         "migrations:provider-attempts:apply": "ts-node ts/migrations/runMigrations.ts provider-attempts-apply",
         "migrations:account-sessions:apply": "ts-node ts/migrations/runMigrations.ts account-sessions-apply",
+        "migrations:session-renewal:apply": "ts-node ts/migrations/runMigrations.ts session-renewal-apply",
         "migrations:p4-drop:plan": "ts-node ts/migrations/runMigrations.ts p4-score-drop-plan",
         "migrations:p4-drop:apply": "ts-node ts/migrations/runMigrations.ts p4-score-drop-apply",
         "migrations:p4-drop:verify": "ts-node ts/migrations/runMigrations.ts p4-score-drop-verify",
