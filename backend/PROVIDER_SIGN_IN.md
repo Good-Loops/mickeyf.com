@@ -7,8 +7,9 @@ adapter connected to shared sessions; **not an enabled sign-in feature**.
 Application bootstrap now reads explicit opt-in configuration; provider sign-in
 remains disabled in production. Username/password and provider issuance reuse UUID-bound,
 revocable device sessions; see [session behavior and rollout](SESSION_AUTHENTICATION.md).
-Provider credentials, runtime flags, HTTP callbacks and native capabilities
-remain unchanged.
+Production provider credentials/runtime flags, HTTP callbacks and native
+capabilities remain unchanged. Google web can now be enabled explicitly on the
+isolated local backend as described below; full real-account acceptance is pending.
 
 Native iOS sign-in can be developed and tested before publication. Apple's
 documented web/other-platform setup requires an existing App Store app using
@@ -174,7 +175,7 @@ separately from the single-page queue.
   [Google's setup guidance](https://developers.google.com/identity/gsi/web/guides/get-google-api-clientid).
   This is not deployed or live-tested. Deployment needs approval for trusting
   those Google resources and retaining popup opener relationships; provider
-  sign-in remains disabled. Google's localhost instructions also list bare
+  production sign-in remains disabled. Google's localhost instructions also list bare
   `http://localhost` alongside the port-specific origin; that fourth origin has
   not been approved or added and should be reviewed with the local test setup.
 - `APPLE_IOS_BUNDLE_ID` configures exact audience/key `apple-ios`. Native iOS
@@ -197,6 +198,47 @@ separately from the single-page queue.
   log in with that provider and the same Stay signed in preference. Unlinked
   identities do not create accounts or match by email. Provider-only signup and
   disconnect/revocation remain unimplemented.
+
+## Isolated Google web check
+
+Use the existing local launcher, with the approved public web client ID supplied
+explicitly (not a client secret):
+
+```text
+npm run backend:dev:isolated -- --google-web-client-id <approved-client-id>
+```
+
+It verifies the owned, pinned Docker MySQL container and server UUID before
+writes, uses only `ludolume_development` on `127.0.0.1:3307`, and retains the
+existing 0001–0012 schema. Only this opt-in adds local provider-table grants.
+Identity columns can be selected/inserted, not reassigned or deleted; MySQL's
+locking reads additionally need `UPDATE(linked_at)`. Attempts have the exact
+read/insert columns plus deletion. The production grant manifest is unchanged.
+
+The launcher strips inherited Google/Apple configuration and supplies an
+explicit isolated-development marker. App bootstrap skips the root `.env`
+only for that marker **and** development mode, so removed settings cannot be
+silently reintroduced. Ordinary development and production still load `.env`.
+Running the launcher without the flag disables providers; local grants and
+local accounts remain stored and are not silently revoked/deleted.
+
+Checkpoint (2026-09-14): seven launcher/bootstrap tests and backend typecheck
+passed. Restarted only VS Code's Back terminal in Google-only mode. A restricted
+runtime-user transaction proved identity insert/locking read, attempt
+insert/locking read/delete, and denial of identity reassignment/deletion; all
+probe rows were rolled back. Local discovery advertises only `google-web`.
+The real GIS button rendered and cancellation returned to the login form.
+No Google account was chosen and no real identity was linked or logged in.
+The extra bare-localhost origin still awaits owner approval; production and
+native providers remain disabled and no deployment occurred.
+
+Real-account acceptance must use a local website account: link Google from
+Manage account using that account's password, then log out and sign in through
+Google with Stay signed in selected. A production website account is not copied
+into this database. Google basic sign-in does not require adding test users
+under [its documented Testing-status exception](https://support.google.com/cloud/answer/15549945);
+do not add Gmail/Drive scopes, publish the OAuth app, or treat button rendering
+as successful end-to-end authentication.
 
 ## Migration and activation boundary
 

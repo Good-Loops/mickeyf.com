@@ -41,13 +41,42 @@ function loadCredentials(containerExists) {
     return credentials;
 }
 
-function runtimeEnvironment(credentials, inherited = process.env) {
+function parseArguments(args) {
+    if (args.length === 0) return Object.freeze({});
+    requireLocal(args.length === 2 && args[0] === '--google-web-client-id',
+        'Usage: npm run backend:dev:isolated -- [--google-web-client-id <client-id>]');
+    const googleWebClientId = args[1];
+    requireLocal(typeof googleWebClientId === 'string' && googleWebClientId.length <= 255
+        && googleWebClientId === googleWebClientId.trim()
+        && /^[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/.test(googleWebClientId),
+    'The Google web client ID must be one exact apps.googleusercontent.com identifier without whitespace.');
+    return Object.freeze({ googleWebClientId });
+}
+
+function runtimeEnvironment(credentials, inherited = process.env, options = {}) {
     const env = Object.fromEntries(Object.entries(inherited).filter(([key]) =>
-        !/^(?:DB_|MIGRATION_|SESSION_|ACCOUNT_|PROVIDER_|GOOGLE_|GCLOUD_|CLOUD_|FIREBASE_|P4_|THREE_|NODE_OPTIONS$)/i.test(key)));
-    return { ...env, NODE_ENV: 'development', BACKEND_PORT: '8080', DB_HOST: host, DB_PORT: String(port),
+        !/^(?:DB_|MIGRATION_|SESSION_|ACCOUNT_|PROVIDER_|GOOGLE_|APPLE_|GCLOUD_|CLOUD_|FIREBASE_|P4_|THREE_|NODE_OPTIONS$)/i.test(key)));
+    return { ...env, NODE_ENV: 'development', LUDOLUME_ISOLATED_RUNTIME: 'true',
+        BACKEND_PORT: '8080', DB_HOST: host, DB_PORT: String(port),
         DB_NAME: databaseName, DB_USER: runtimeUser, DB_PASS: credentials.runtimePassword,
         SESSION_SECRET: credentials.sessionSecret, ACCOUNT_DELETION_ENABLED: 'false',
+        PROVIDER_AUTH_ENABLED: options.googleWebClientId === undefined ? 'false' : 'true',
+        ...(options.googleWebClientId === undefined ? {} : { GOOGLE_WEB_CLIENT_ID: options.googleWebClientId }),
         P4_VEGA_SCORE_SUBMISSIONS_ENABLED: 'true', THREE_BOSSES_RUN_SUBMISSIONS_ENABLED: 'true' };
+}
+
+function localProviderGrantStatements(options = {}) {
+    if (options.googleWebClientId === undefined) return Object.freeze([]);
+    // Kept local-only: production's reviewed runtime grant manifest is unchanged.
+    // FOR UPDATE needs a write privilege; only the non-identity timestamp is updatable.
+    return Object.freeze([
+        `GRANT SELECT (\`provider\`, \`subject\`, \`account_uuid\`),
+            INSERT (\`provider\`, \`subject\`, \`account_uuid\`, \`linked_at\`), UPDATE (\`linked_at\`)
+            ON \`${databaseName}\`.\`account_provider_identities\` TO '${runtimeUser}'@'%';`,
+        `GRANT SELECT (\`state_hash\`, \`binding_hash\`, \`nonce\`, \`client_key\`, \`action\`, \`user_id\`, \`account_uuid\`, \`expires_at\`),
+            INSERT (\`state_hash\`, \`binding_hash\`, \`nonce\`, \`client_key\`, \`action\`, \`user_id\`, \`account_uuid\`, \`expires_at\`), DELETE
+            ON \`${databaseName}\`.\`provider_auth_attempts\` TO '${runtimeUser}'@'%';`,
+    ]);
 }
 
 async function assertFreePort(candidate) {
@@ -114,7 +143,7 @@ async function prepareContainer() {
     return { credentials, context, containerId: container.Id };
 }
 
-async function prepareDatabase({ credentials, context, containerId }) {
+async function prepareDatabase({ credentials, context, containerId }, options) {
     require('ts-node').register({ project: path.join(backend, 'tsconfig.json') });
     const mysql = require('mysql2/promise');
     const { loadMigrationManifest } = require('../ts/migrations/migrationManifest');
@@ -153,17 +182,20 @@ async function prepareDatabase({ credentials, context, containerId }) {
         requireLocal((await planMigrations(connection, migrations, settings)).pending.length === 0, 'Local schema setup is incomplete.');
         await connection.query(`CREATE USER IF NOT EXISTS '${runtimeUser}'@'%' IDENTIFIED BY ?`, [credentials.runtimePassword]);
         for (const sql of renderRuntimeGrantStatements(databaseName, { user: runtimeUser, host: '%' })) await connection.query(sql);
+        for (const sql of localProviderGrantStatements(options)) await connection.query(sql);
         console.log(`Verified local database ${databaseName}; migrations 0001–0012 and restricted runtime grants are ready.`);
     } finally { await connection.end(); }
 }
 
 async function main() {
-    requireLocal(process.argv.length === 2, 'Usage: npm run backend:dev:isolated');
+    const options = parseArguments(process.argv.slice(2));
     await assertFreePort(8080);
     const local = await prepareContainer();
-    await prepareDatabase(local);
-    // Existing .env cannot override these explicit local runtime settings.
-    const env = runtimeEnvironment(local.credentials);
+    await prepareDatabase(local, options);
+    // The isolated marker bypasses app.ts dotenv loading; all runtime values stay local.
+    const env = runtimeEnvironment(local.credentials, process.env, options);
+    console.log(options.googleWebClientId === undefined ? 'Provider sign-in is disabled.'
+        : 'Google web sign-in is enabled only for this isolated backend; local provider grants are retained.');
     console.log('Building the initial local backend before starting its watcher/server.');
     await new Promise((resolve, reject) => {
         const build = spawn(process.execPath, [require.resolve('webpack-cli/bin/cli.js'), '--mode', 'development'],
@@ -196,4 +228,4 @@ if (require.main === module) main().catch(error => {
     process.exitCode = 1;
 });
 
-module.exports = { validateContainer, runtimeEnvironment };
+module.exports = { validateContainer, runtimeEnvironment, parseArguments, localProviderGrantStatements };

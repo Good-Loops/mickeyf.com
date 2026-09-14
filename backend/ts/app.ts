@@ -1,6 +1,10 @@
-require('dotenv').config({
-    path: require('path').resolve(__dirname, '../..', '.env'),
-});
+// The isolated launcher supplies its complete environment; loading the root
+// .env afterward could reintroduce provider or cloud settings it deliberately removed.
+if (!(process.env.NODE_ENV === 'development' && process.env.LUDOLUME_ISOLATED_RUNTIME === 'true')) {
+    require('dotenv').config({
+        path: require('path').resolve(__dirname, '../..', '.env'),
+    });
+}
 
 // Environment loading intentionally precedes imports whose modules construct
 // configuration-dependent resources such as the database pool.

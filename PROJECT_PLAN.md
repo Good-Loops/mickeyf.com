@@ -2548,8 +2548,16 @@ itself activate, implement or defer both providers.
   now allows only the documented GIS resource paths, with popup-compatible COOP;
   the seven focused policy/API-base tests pass. No provider activation, database
   or deployment change occurred. Live headers require separate approval for the
-  Google resource trust and popup opener change. Next: isolated Google web
-  setup/acceptance, a published privacy policy before public activation,
+  Google resource trust and popup opener change. **Isolated Google checkpoint
+  (2026-09-14):** the local launcher accepts an explicit Google web client ID,
+  blocks inherited provider settings/root `.env` fallback, and adds only scoped
+  local provider grants. Seven launcher/bootstrap tests and backend typecheck
+  passed. The local runtime-role probe passed and rolled back all fixture rows;
+  Google's real button and cancellation worked in Chrome. Only Back restarted;
+  Front, Docs and WebGL stayed running. Real-account link/login/session acceptance
+  and the additional bare-localhost origin approval remain pending. No production
+  schema, grants, provider flags or deployment changed. Next: focused local
+  real-account acceptance, a published privacy policy before public activation,
   approved native Apple capability/profile,
   focused real-provider acceptance and native Google SDK/client configuration.
   Provider-only signup remains subject to the age/consent backlog.
