@@ -4,11 +4,6 @@ import { Link } from 'react-router-dom';
 type PageStatusProps = { variant: 'loading' | 'not-found' | 'error' };
 
 const COPY = {
-    loading: {
-        eyebrow: 'LUDOLUME · LOADING',
-        title: 'A new world awaits',
-        description: 'Getting this page ready for you.',
-    },
     'not-found': {
         eyebrow: 'SIGNAL LOST · 404',
         title: 'A little lost in space?',
@@ -25,14 +20,19 @@ const COPY = {
 export default function PageStatus({ variant }: PageStatusProps) {
     const titleId = useId();
     const descriptionId = useId();
+    if (variant === 'loading') return (
+        <section className="page-status page-status--loading" role="status" aria-live="polite">
+            <span className="page-status__activity" aria-hidden="true"><span /><span /><span /></span>
+            <span className="page-status__caption">Loading…</span>
+        </section>
+    );
     const copy = COPY[variant];
-    const loading = variant === 'loading';
     const notFound = variant === 'not-found';
 
     return (
         <section
             className={`page-status page-status--${variant}`}
-            role={loading ? 'status' : variant === 'error' ? 'alert' : undefined}
+            role={variant === 'error' ? 'alert' : undefined}
             aria-labelledby={titleId}
             aria-describedby={descriptionId}
         >
@@ -55,26 +55,19 @@ export default function PageStatus({ variant }: PageStatusProps) {
             </div>
             <h1 className="page-status__title" id={titleId}>{copy.title}</h1>
             <p className="page-status__description" id={descriptionId}>{copy.description}</p>
-            {loading ? (
-                <div className="page-status__loading">
-                    <span className="page-status__activity" aria-hidden="true"><span /><span /><span /></span>
-                    <span className="page-status__caption">Loading page…</span>
-                </div>
-            ) : (
-                <div className="page-status__actions">
-                    {notFound ? (
-                        <>
-                            <Link className="page-status__action page-status__action--primary" to="/">Go home</Link>
-                            <Link className="page-status__action page-status__action--secondary" to="/games">Explore games</Link>
-                        </>
-                    ) : (
-                        <>
-                            <button className="page-status__action page-status__action--primary" type="button" onClick={() => window.location.reload()}>Reload page</button>
-                            <Link className="page-status__action page-status__action--secondary" to="/">Go home</Link>
-                        </>
-                    )}
-                </div>
-            )}
+            <div className="page-status__actions">
+                {notFound ? (
+                    <>
+                        <Link className="page-status__action page-status__action--primary" to="/">Go home</Link>
+                        <Link className="page-status__action page-status__action--secondary" to="/games">Explore games</Link>
+                    </>
+                ) : (
+                    <>
+                        <button className="page-status__action page-status__action--primary" type="button" onClick={() => window.location.reload()}>Reload page</button>
+                        <Link className="page-status__action page-status__action--secondary" to="/">Go home</Link>
+                    </>
+                )}
+            </div>
         </section>
     );
 }

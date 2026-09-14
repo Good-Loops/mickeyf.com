@@ -170,10 +170,6 @@
         &:focus-visible { outline: 2px solid var(--signal); outline-offset: 4px; }
     }
 
-    &--loading &__ring { animation: page-status-orbit 10s linear infinite; }
-    &--loading &__ring--outer { animation-duration: 24s; animation-direction: reverse; }
-    &--loading &__ring--inner { animation-duration: 7s; animation-direction: reverse; }
-
     @media (max-width: 480px) {
         padding: 2.8rem 2rem;
         border-radius: 2rem;
@@ -193,11 +189,22 @@
         &__activity { margin: 1.2rem auto .8rem; }
     }
 
+    &--loading {
+        display: flex;
+        align-items: center;
+        gap: 1.4rem;
+        width: fit-content;
+        padding: 1.6rem 2.4rem;
+        border-radius: 999px;
+        &::before { display: none; }
+        .page-status__activity { margin: 0; }
+        .page-status__caption { font-size: max(1.4rem, 14px); }
+    }
+
     @media (prefers-reduced-motion: reduce) {
-        &--loading &__ring, &__activity span { animation: none; }
+        &__activity span { animation: none; }
         &__action { transition: none; }
     }
 }
 
-@keyframes page-status-orbit { to { transform: rotate(360deg); } }
 @keyframes page-status-pulse { 0%, 100% { opacity: .3; } 50% { opacity: 1; } }

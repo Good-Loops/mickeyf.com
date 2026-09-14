@@ -30,9 +30,8 @@ test('a pending lazy route exposes an accessible loading status', () => {
         React.createElement(RouteContentBoundary, null, React.createElement(PendingPage)),
     );
     assert.match(markup, /class="page-status page-status--loading" role="status"/);
-    assert.match(markup, /A new world awaits/);
-    assert.match(markup, /Loading page/);
-    assert.doesNotMatch(markup, /<button|<a /);
+    assert.match(markup, /<span class="page-status__caption">Loading…<\/span>/);
+    assert.doesNotMatch(markup, /<button|<a |<h1|page-status__orb|A new world awaits/);
 });
 
 test('failure state offers recovery actions without automatically reloading', (context) => {
