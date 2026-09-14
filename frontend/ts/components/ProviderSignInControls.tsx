@@ -45,14 +45,14 @@ export function ProviderSignInButtons({ clients, action, busyClient, disabled, o
     return (
         <div className="provider-sign-in__choices" role="group" aria-labelledby={headingId} aria-busy={busyClient !== null}>
             <h2 className="provider-sign-in__heading" id={headingId}>
-                {action === 'link' ? 'Link a sign-in method' : 'Or use a linked account'}
+                {action === 'link' ? 'Link a sign-in method' : 'Or sign in with:'}
             </h2>
             <div className="provider-sign-in__buttons">
                 {clients.map(client => (
                     <button className="provider-sign-in__button" type="button" key={client.clientKey}
                         disabled={disabled || busyClient !== null} onClick={() => onSelect(client)}>
                         {busyClient === client.clientKey ? 'Please wait…'
-                            : client.provider === 'google' ? 'Google account' : 'Apple account'}
+                            : client.provider === 'google' ? 'google' : 'Apple account'}
                     </button>
                 ))}
             </div>

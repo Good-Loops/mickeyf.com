@@ -30,8 +30,8 @@ test('provider controls remain absent until capability discovery supplies a supp
 test('Google entry is a labelled ordinary button and does not imitate the official sign-in widget', () => {
     const rendered = markup();
     assert.match(rendered, /role="group" aria-labelledby="[^"]+" aria-busy="false"/);
-    assert.match(rendered, /<h2[^>]*>Or use a linked account<\/h2>/);
-    assert.match(rendered, /<button[^>]*type="button"[^>]*>Google account<\/button>/);
+    assert.match(rendered, /<h2[^>]*>Or sign in with:<\/h2>/);
+    assert.match(rendered, /<button[^>]*type="button"[^>]*>google<\/button>/);
     assert.doesNotMatch(rendered, /Apple account|<form|<iframe|<script|synthetic\.apps/);
 });
 
@@ -39,7 +39,7 @@ test('native Apple entry is a neutral account selector and link controls have a 
     const rendered = markup({ clients: [apple], action: 'link' });
     assert.match(rendered, /Link a sign-in method/);
     assert.match(rendered, />Apple account<\/button>/);
-    assert.doesNotMatch(rendered, /Sign in with Apple|Google account|Delete account|Create account|Sign up/);
+    assert.doesNotMatch(rendered, /Sign in with Apple|>google<|Delete account|Create account|Sign up/);
 });
 
 test('external form activity disables every provider choice', () => {
