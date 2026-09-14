@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
+import { access } from 'node:fs/promises';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import test from 'node:test';
-import { createServer } from 'vite';
+import { createViteTestServer } from '../testSupport/createViteTestServer.mjs';
 import { publicLeaderboardMiddleware } from '../../dev/publicLeaderboards.ts';
 
 const frontendRoot = fileURLToPath(new URL('../../', import.meta.url));
@@ -131,6 +133,8 @@ test('public middleware preserves upstream HTTP errors and sanitizes transport/b
     }
 });
 
+const testCacheDirectories = new Set();
+
 for (const development of [true, false]) {
     test(`${development ? 'DEV' : 'production'} display routing preserves the independent gameplay service`, async (t) => {
         const calls = [];
@@ -138,7 +142,7 @@ for (const development of [true, false]) {
             calls.push({ url, init });
             return Response.json(payloadFor(url));
         });
-        const server = await createServer({
+        const server = await createViteTestServer({
             root: frontendRoot,
             configFile: `${frontendRoot}/vite.config.ts`,
             mode: development ? 'development' : 'production',
@@ -151,6 +155,13 @@ for (const development of [true, false]) {
             server: { middlewareMode: true, watch: null, hmr: false },
         });
         try {
+            const cacheDirectory = path.resolve(server.config.cacheDir);
+            assert.notEqual(cacheDirectory, path.resolve(frontendRoot, 'node_modules/.vite'));
+            assert.equal(testCacheDirectories.has(cacheDirectory), false);
+            testCacheDirectories.add(cacheDirectory);
+            assert.equal(server.config.environments.client.optimizeDeps.noDiscovery, true);
+            assert.deepEqual(server.config.environments.client.optimizeDeps.include, []);
+            assert.equal(server.config.server.preTransformRequests, false);
             const display = await server.ssrLoadModule('/ts/services/leaderboardDisplayService.ts');
             assert.deepEqual(await display.getLeaderboardCatalog(), catalog);
             for (const gameId of ['p4-vega', 'three-bosses']) {
@@ -174,6 +185,7 @@ for (const development of [true, false]) {
             assert.equal(display.submitThreeBossesRun, undefined);
         } finally {
             await server.close();
+            await assert.rejects(access(server.config.cacheDir), { code: 'ENOENT' });
         }
     });
 }

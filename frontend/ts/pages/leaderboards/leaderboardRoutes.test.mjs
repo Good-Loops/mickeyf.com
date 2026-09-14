@@ -9,11 +9,11 @@ import {
     Routes,
     useParams,
 } from 'react-router-dom';
-import { createServer } from 'vite';
+import { createViteTestServer } from '../../testSupport/createViteTestServer.mjs';
 import { focusRouteHeading } from '../../components/routeHeadingFocus.ts';
 
 const frontendRoot = fileURLToPath(new URL('../../../', import.meta.url));
-const viteServer = await createServer({
+const viteServer = await createViteTestServer({
     root: frontendRoot,
     configFile: `${frontendRoot}/vite.config.ts`,
     appType: 'custom',

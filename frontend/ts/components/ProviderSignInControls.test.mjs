@@ -3,10 +3,10 @@ import test, { after } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
-import { createServer } from 'vite';
+import { createViteTestServer } from '../testSupport/createViteTestServer.mjs';
 
 const frontendRoot = fileURLToPath(new URL('../../', import.meta.url));
-const viteServer = await createServer({ root: frontendRoot, configFile: `${frontendRoot}/vite.config.ts`,
+const viteServer = await createViteTestServer({ root: frontendRoot, configFile: `${frontendRoot}/vite.config.ts`,
     appType: 'custom', logLevel: 'silent', server: { middlewareMode: true } });
 after(() => viteServer.close());
 const { default: ProviderSignInControls, ProviderSignInButtons, InlineGoogleSignIn, providerSignInErrorMessage } =
