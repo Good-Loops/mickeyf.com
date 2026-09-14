@@ -2538,8 +2538,12 @@ itself activate, implement or defer both providers.
   opt-in configuration/discovery, serialized frontend provider authentication,
   login/link controls, and a disabled-by-default native Apple bridge are implemented.
   The brief route loader is reduced to dots and Loading…; 404/error recovery remains.
-  No production activation or cloud/provider setting has changed. Next: approved
-  Google web origins/branding/Hosting headers and native Apple capability/profile,
+  **Authorized-origin checkpoint (2026-09-14):** saved and read back exactly
+  `http://localhost:5173`, `https://mickeyf.com` and `https://www.mickeyf.com` on the
+  existing `MickeyFOrg Client`. Its name/client ID and credentials are unchanged;
+  redirect URIs remain empty. No provider activation, branding/Hosting header,
+  database or deployment change occurred. Next: approved
+  Google web branding/Hosting headers and native Apple capability/profile,
   focused real-provider acceptance and native Google SDK/client configuration.
   Provider-only signup remains subject to the age/consent backlog.
   See [scope, migration boundary and remaining steps](backend/PROVIDER_SIGN_IN.md).

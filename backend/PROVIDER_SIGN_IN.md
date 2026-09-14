@@ -4,11 +4,11 @@
 
 Implemented backend identity verification, one-use attempts and an opt-in HTTP
 adapter connected to shared sessions; **not an enabled sign-in feature**.
-Application bootstrap now reads explicit opt-in configuration; production remains
-unchanged and disabled. Username/password and provider issuance reuse UUID-bound,
+Application bootstrap now reads explicit opt-in configuration; provider sign-in
+remains disabled in production. Username/password and provider issuance reuse UUID-bound,
 revocable device sessions; see [session behavior and rollout](SESSION_AUTHENTICATION.md).
-No production configuration, provider credentials, HTTP callbacks or native
-capabilities have been activated.
+Provider credentials, runtime flags, HTTP callbacks and native capabilities
+remain unchanged.
 
 Native iOS sign-in can be developed and tested before publication. Apple's
 documented web/other-platform setup requires an existing App Store app using
@@ -157,11 +157,13 @@ separately from the single-page queue.
 - `GOOGLE_WEB_CLIENT_ID` configures exact audience/key `google-web` for ordinary
   browsers. Google's official GIS button is rendered inside the site's dialog
   only after a user chooses Google; its own click opens the provider prompt.
-  The SDK is not preloaded on ordinary page visits. The Google client inspected
-  on 2026-09-14 (`MickeyFOrg Client`) has no authorized JavaScript origins or
-  redirect URIs; no console settings were changed. Before enabling it, approve
-  the exact local/public origins, current Ludolume branding and the narrowly
-  required Hosting CSP/COOP adjustments. Existing Hosting CSP currently blocks GIS.
+  The SDK is not preloaded on ordinary page visits. **Authorized-origin checkpoint
+  (2026-09-14):** saved and read back exactly `http://localhost:5173`,
+  `https://mickeyf.com` and `https://www.mickeyf.com` on the existing `MickeyFOrg Client`.
+  Its name/client ID and credentials are unchanged; redirect URIs remain empty.
+  The console warns that propagation may be delayed. Google web sign-in remains
+  disabled; current Ludolume branding and the narrowly required Hosting CSP/COOP
+  adjustments still need approval. Existing Hosting CSP currently blocks GIS.
 - `APPLE_IOS_BUNDLE_ID` configures exact audience/key `apple-ios`. Native iOS
   uses AuthenticationServices, not a web OAuth view. The native bridge reports
   unavailable while `LudolumeAppleSignInEnabled` is false (the committed default).
@@ -211,7 +213,7 @@ compatibility and the enabled application revision.
 
 Remaining work, in order:
 
-1. Activate the approved Google web client/origins and native Apple capability,
+1. Activate the approved Google web client and native Apple capability,
    update scoped runtime grants and schema, and perform one focused real-provider
    login/link/cancel/session acceptance per implemented platform. Compile the
    new Swift bridge on macOS before any signed rollout. Complete native Google
