@@ -31,7 +31,9 @@ const EXPECTED_TEST_TARGET = Object.freeze({
 });
 
 const config = loadMigrationConfig();
-const allMigrations = loadMigrationManifest();
+// This suite exercises the historical 0001–0008 transitions. Provider identities
+// have their own full-manifest integration fixture after the UUID epoch exists.
+const allMigrations = loadMigrationManifest().filter(({ version }) => version < '0009_');
 // These original tests deliberately preserve the historical recovery contract.
 const migrations = allMigrations.filter(({ effect }) =>
     effect === 'create-table' || effect === 'drop-column'

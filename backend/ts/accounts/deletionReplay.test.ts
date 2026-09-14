@@ -21,6 +21,8 @@ type FakeOptions = {
     wrongEpoch?: boolean;
     missingIdentity?: boolean;
     unsafeSchema?: boolean;
+    providerTable?: 'absent' | 'malformed';
+    providerMigrationRecorded?: boolean;
     wrongTarget?: boolean;
     changeIdentityUnderLock?: boolean;
     failAt?: string;
@@ -47,6 +49,14 @@ function fakeReplay(options: FakeOptions = {}) {
                 serverUuid: options.wrongTarget ? 'wrong' : SETTINGS.expectedServerUuid,
             }], []];
             if (sql.includes('DATE_FORMAT(applied_at')) return [[{ epoch: options.wrongEpoch ? 'old' : SETTINGS.expectedIdentityEpoch }], []];
+            if (sql.startsWith('SELECT version FROM schema_migrations')) {
+                return [options.providerMigrationRecorded ? [{ version: '0009_create_account_provider_identities' }] : [], []];
+            }
+            if (values?.[0] === 'account_provider_identities') {
+                return [sql.includes('COUNT(*)')
+                    ? [{ tableCount: options.providerTable === 'malformed' ? 1 : 0 }]
+                    : [{ engine: 'MyISAM', collation: 'utf8mb4_unicode_ci', tableType: 'BASE TABLE' }], []];
+            }
             if (sql.includes('information_schema.COLUMNS')) return [options.missingIdentity ? [] : [{
                 type: 'char(36)', nullable: 'NO', characterSet: 'ascii', collation: 'ascii_bin',
                 defaultValue: 'uuid()', extra: 'DEFAULT_GENERATED', generationExpression: '',
@@ -150,6 +160,21 @@ test('target, epoch, schema and review limits fail closed', async () => {
     const fake = fakeReplay({ initialIntents: [INTENT, INTENT] });
     await assert.rejects(planDeletionReplay(fake.database, fake.reader, { ...SETTINGS, maxIntents: 1 }), /exceeds/u);
     await assert.rejects(planDeletionReplay(fake.database, fake.reader, { ...SETTINGS, sourceServerUuid: SETTINGS.expectedServerUuid }), /distinct/u);
+});
+
+test('replay supports pre-provider backups but refuses missing recorded or malformed provider tables', async () => {
+    const legacy = fakeReplay();
+    await planDeletionReplay(legacy.database, legacy.reader, SETTINGS);
+    assert.ok(legacy.events.some(sql => sql.startsWith('SELECT version FROM schema_migrations')));
+    for (const options of [
+        { providerMigrationRecorded: true }, { providerTable: 'malformed' as const },
+    ]) {
+        const fake = fakeReplay(options);
+        await assert.rejects(planDeletionReplay(fake.database, fake.reader, SETTINGS), /provider identity|Provider identity/u);
+        assert.equal(fake.events.some(sql => sql.startsWith('DELETE') || sql === 'START TRANSACTION'), false);
+        assert.ok(fake.events.includes('destroy'));
+        assert.equal(fake.accounts.get(42), FIRST_ID);
+    }
 });
 
 test('stale approval and changed pre-apply journal prevent every deletion', async () => {

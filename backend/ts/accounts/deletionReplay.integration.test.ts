@@ -18,7 +18,7 @@ import { applyDeletionReplay, planDeletionReplay } from './deletionReplay';
 const config = loadMigrationConfig();
 const testPort = Number(process.env.MIGRATION_TEST_PORT);
 const TEST_PASSWORD = 'replay-isolated-test-only';
-const TABLES = ['users', 'game_personal_bests', 'game_submission_receipts'] as const;
+const TABLES = ['users', 'game_personal_bests', 'game_submission_receipts', 'account_provider_identities'] as const;
 let administrator: Connection;
 let database: Pool;
 let settings: DeletionReplaySettings;
@@ -49,7 +49,7 @@ before(async () => {
     assert.doesNotMatch(identity[0].versionComment, /Google/iu);
     await administrator.query('SET FOREIGN_KEY_CHECKS = 0');
     try {
-        await administrator.query('DROP TABLE IF EXISTS game_personal_bests, game_runs, game_submission_receipts, schema_migrations, users');
+        await administrator.query('DROP TABLE IF EXISTS account_provider_identities, game_personal_bests, game_runs, game_submission_receipts, schema_migrations, users');
     } finally { await administrator.query('SET FOREIGN_KEY_CHECKS = 1'); }
     await administrator.query(`CREATE TABLE users (
         user_id INT NOT NULL AUTO_INCREMENT, user_name VARCHAR(255) NOT NULL,
@@ -62,6 +62,7 @@ before(async () => {
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['drop-column'] });
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['detach-best-source', 'retain-receipts'] });
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-account-identity'] });
+    await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-provider-identities'] });
     await administrator.query("SET SESSION time_zone = '+00:00'");
     const [epoch] = await administrator.query<RowDataPacket[]>(
         "SELECT DATE_FORMAT(applied_at, '%Y-%m-%d %H:%i:%s.%f') AS epoch FROM schema_migrations WHERE version = ?",
@@ -87,9 +88,16 @@ after(async () => {
 async function snapshotRows(): Promise<Record<string, RowDataPacket[]>> {
     const result: Record<string, RowDataPacket[]> = {};
     for (const table of TABLES) {
-        [result[table]] = await administrator.query<RowDataPacket[]>(`SELECT * FROM ${table} ORDER BY user_id`);
+        const order = table === 'account_provider_identities' ? 'account_uuid, provider' : 'user_id';
+        [result[table]] = await administrator.query<RowDataPacket[]>(`SELECT * FROM ${table} ORDER BY ${order}`);
     }
     return result;
+}
+
+async function insertProviderLink(userId: number, provider: 'google' | 'apple', subject: string): Promise<void> {
+    await administrator.query(`INSERT INTO account_provider_identities (account_uuid, provider, subject, linked_at)
+        SELECT account_uuid, ?, ?, UTC_TIMESTAMP(6) FROM users WHERE user_id = ?`,
+    [provider, Buffer.from(subject, 'utf8'), userId]);
 }
 
 test('reconciles a restored deleted identity, preserves others, and never targets a reused numeric ID', async () => {
@@ -100,9 +108,14 @@ test('reconciles a restored deleted identity, preserves others, and never target
     for (const userId of [1, 2]) {
         await submitP4VegaScore(database, userId, userId === 1 ? 900 : 500);
         await submitThreeBossesRun(database, userId, randomUUID(), userId === 1 ? 60000 : 70000);
+        await insertProviderLink(userId, 'google', `google-subject-${userId}`);
+        await insertProviderLink(userId, 'apple', `apple-subject-${userId}`);
     }
     const beforeDeletion = await snapshotRows();
     const original = beforeDeletion.users.find(row => row.user_id === 1)!;
+    const unrelated = beforeDeletion.users.find(row => row.user_id === 2)!;
+    const unrelatedRows = (table: string) => beforeDeletion[table].filter(row =>
+        table === 'account_provider_identities' ? row.account_uuid === unrelated.account_uuid : row.user_id === 2);
     const intents: DeletionIntent[] = [];
     const journal: AccountDeletionJournal & DeletionJournalReader = {
         async recordAccountDeletion(accountId) {
@@ -114,17 +127,25 @@ test('reconciles a restored deleted identity, preserves others, and never target
     };
     assert.equal(await deleteAccount(database, 1, TEST_PASSWORD, journal), 'deleted');
     assert.equal(intents[0].accountId, original.account_uuid);
+    assert.deepEqual((await snapshotRows()).account_provider_identities, unrelatedRows('account_provider_identities'),
+        'ordinary account deletion cascades both provider links and preserves unrelated links');
 
     // Restore fixture rows with their original UUID, as a post-migration backup would.
     await administrator.query('INSERT INTO users (user_id,account_uuid,user_name,email,user_password) VALUES (?,?,?,?,?)',
         [1, original.account_uuid, original.user_name, original.email, original.user_password]);
+    for (const link of beforeDeletion.account_provider_identities.filter(row => row.account_uuid === original.account_uuid)) {
+        await administrator.query(`INSERT INTO account_provider_identities (account_uuid, provider, subject, linked_at)
+            VALUES (?, ?, ?, ?)`, [link.account_uuid, link.provider, link.subject, link.linked_at]);
+    }
+    assert.deepEqual((await snapshotRows()).account_provider_identities, beforeDeletion.account_provider_identities,
+        'the restored fixture includes the original provider links');
     await submitP4VegaScore(database, 1, 900);
     await submitThreeBossesRun(database, 1, randomUUID(), 60000);
     const plan = await planDeletionReplay(database, journal, settings);
     const result = await applyDeletionReplay(database, journal, settings, plan.sha256);
     assert.equal(result.deletedAccounts, 1);
     for (const [table, remaining] of Object.entries(await snapshotRows())) {
-        assert.deepEqual(remaining, beforeDeletion[table].filter(row => row.user_id === 2), `${table} preserves the unrelated account exactly`);
+        assert.deepEqual(remaining, unrelatedRows(table), `${table} preserves the unrelated account exactly`);
     }
     const repeated = await applyDeletionReplay(database, journal, settings, plan.sha256);
     assert.equal(repeated.deletedAccounts, 0);
@@ -133,8 +154,11 @@ test('reconciles a restored deleted identity, preserves others, and never target
     await administrator.query('INSERT INTO users (user_id,user_name,email,user_password) VALUES (1,?,?,?)',
         ['replacement-fixture', 'replacement@example.test', passwordHash]);
     await submitP4VegaScore(database, 1, 300);
+    await insertProviderLink(1, 'google', 'replacement-google-subject');
+    await insertProviderLink(1, 'apple', 'replacement-apple-subject');
     const reused = await snapshotRows();
     assert.notEqual(reused.users.find(row => row.user_id === 1)!.account_uuid, original.account_uuid);
+    assert.equal(reused.account_provider_identities.length, 4);
     const safe = await applyDeletionReplay(database, journal, settings, plan.sha256);
     assert.equal(safe.deletedAccounts, 0);
     assert.equal(safe.absentAccounts, 1);

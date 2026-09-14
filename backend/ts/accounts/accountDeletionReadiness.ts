@@ -1,6 +1,7 @@
 import type { Pool, PoolConnection } from 'mysql2/promise';
 import { assertAccountIdentityEpoch, verifyAccountIdentitySchema } from '../migrations/accountIdentitySchema';
 import type { MigrationConnection } from '../migrations/leaderboardSchema';
+import { verifyOptionalProviderIdentitySchema } from '../migrations/providerIdentitySchema';
 
 const READINESS_TIMEOUT_MS = 10_000;
 
@@ -44,6 +45,7 @@ export async function verifyAccountDeletionReadiness(
         };
         await assertAccountIdentityEpoch(metadata, expectedEpoch);
         await verifyAccountIdentitySchema(metadata);
+        await verifyOptionalProviderIdentitySchema(metadata);
     };
 
     try {

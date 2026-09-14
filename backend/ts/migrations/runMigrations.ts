@@ -36,6 +36,7 @@ import {
 type MigrationCommand =
     | 'plan'
     | 'apply'
+    | 'provider-identities-apply'
     | 'account-identity-plan'
     | 'account-identity-apply'
     | 'account-identity-verify'
@@ -73,7 +74,7 @@ function parseCommand(args: readonly string[]): MigrationCommand {
     if (args.length !== 1) {
         throw new Error(
             'Usage: runMigrations.ts '
-            + '<plan|apply|'
+            + '<plan|apply|provider-identities-apply|'
             + 'account-identity-plan|account-identity-apply|account-identity-verify|'
             + 'receipts-plan|receipts-apply|receipts-verify|'
             + 'p4-score-drop-plan|p4-score-drop-apply|p4-score-drop-verify>'
@@ -83,6 +84,7 @@ function parseCommand(args: readonly string[]): MigrationCommand {
     if (
         command !== 'plan'
         && command !== 'apply'
+        && command !== 'provider-identities-apply'
         && command !== 'account-identity-plan'
         && command !== 'account-identity-apply'
         && command !== 'account-identity-verify'
@@ -335,6 +337,14 @@ async function executeCommand(
         return;
     }
 
+    if (command === 'provider-identities-apply') {
+        // Separate selection keeps the ordinary legacy-table command from enabling OAuth storage.
+        printPlan(await applyMigrations(migrationConnection, migrations, config, {
+            allowedEffectKinds: ['add-provider-identities'],
+        }));
+        return;
+    }
+
     if (command.startsWith('receipts-')) {
         const plan = command === 'receipts-apply'
             ? await applyReceiptTransition(migrationConnection, migrations, config, identity, confirmation)
@@ -419,7 +429,7 @@ async function main(): Promise<void> {
     const config = loadMigrationConfig();
     const confirmedAccount = loadMigrationAccountConfirmation();
     let confirmation: RuntimeGrantConfirmation = Object.freeze({});
-    if (command === 'apply') {
+    if (command === 'apply' || command === 'provider-identities-apply') {
         // Refuse before opening a socket, not merely before the first DDL.
         assertMutationAuthorized(config);
     } else if (command.startsWith('account-identity-')) {

@@ -6,14 +6,23 @@ import { AccountDeletionReadinessError, verifyAccountDeletionReadiness } from '.
 const EPOCH = '2026-09-11 19:00:00.123456';
 
 function fakeDatabase(options: { epoch?: string; badColumn?: boolean; invalidCount?: number;
+    providerTable?: 'absent' | 'malformed'; providerMigrationRecorded?: boolean;
     queryError?: Error; queryPending?: boolean } = {}) {
     const queries: Array<{ sql: string; timeout: number }> = [];
     const cleanup: string[] = [];
     const connection = {
-        async query(query: { sql: string; timeout: number }) {
+        async query(query: { sql: string; timeout: number }, values?: unknown[]) {
             queries.push(query);
             if (options.queryError) throw options.queryError;
             if (options.queryPending) return new Promise(() => {});
+            if (query.sql.startsWith('SELECT version FROM schema_migrations')) {
+                return [options.providerMigrationRecorded ? [{ version: '0009_create_account_provider_identities' }] : [], []];
+            }
+            if (values?.[0] === 'account_provider_identities') {
+                return [query.sql.includes('COUNT(*)')
+                    ? [{ tableCount: options.providerTable === 'malformed' ? 1 : 0 }]
+                    : [{ engine: 'MyISAM', collation: 'utf8mb4_unicode_ci', tableType: 'BASE TABLE' }], []];
+            }
             if (query.sql.includes('schema_migrations')) return [[{ epoch: options.epoch ?? EPOCH }], []];
             if (query.sql.includes('information_schema.TABLES')) return [[{ engine: 'InnoDB' }], []];
             if (query.sql.includes('information_schema.COLUMNS')) return [[{
@@ -38,13 +47,24 @@ function fakeDatabase(options: { epoch?: string; badColumn?: boolean; invalidCou
 test('readiness verifies the independently pinned epoch and identity schema using read-only timed queries', async () => {
     const { database, queries, cleanup } = fakeDatabase();
     await verifyAccountDeletionReadiness(database, EPOCH);
-    assert.equal(queries.length, 5);
+    assert.equal(queries.length, 7);
     assert.ok(queries[0].sql.includes('schema_migrations'));
+    assert.ok(queries.some(query => query.sql.startsWith('SELECT version FROM schema_migrations')));
     for (const query of queries) {
         assert.match(query.sql.trim(), /^SELECT/);
         assert.equal(query.timeout, 10_000);
     }
     assert.deepEqual(cleanup, ['release']);
+});
+
+test('deletion readiness rejects missing recorded provider storage and malformed present storage', async () => {
+    for (const options of [
+        { providerMigrationRecorded: true }, { providerTable: 'malformed' as const },
+    ]) {
+        const { database, cleanup } = fakeDatabase(options);
+        await assert.rejects(verifyAccountDeletionReadiness(database, EPOCH), AccountDeletionReadinessError);
+        assert.deepEqual(cleanup, ['release']);
+    }
 });
 
 test('invalid or different epoch and malformed identities cannot enable deletion', async () => {

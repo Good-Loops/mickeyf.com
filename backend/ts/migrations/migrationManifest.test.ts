@@ -28,12 +28,13 @@ test('migration manifest preserves lexical order and hashes exact LF bytes', () 
             '0006_add_account_identity',
             '0007_backfill_account_identity',
             '0008_finalize_account_identity',
+            '0009_create_account_provider_identities',
         ]
     );
     assert.deepEqual(
         migrations.map(({ effect }) => effect),
         ['create-table', 'create-table', 'drop-column', 'detach-best-source', 'retain-receipts',
-            'add-account-identity', 'add-account-identity', 'add-account-identity']
+            'add-account-identity', 'add-account-identity', 'add-account-identity', 'add-provider-identities']
     );
     assert.deepEqual(migrations.slice(0, 3).map(({ checksum }) => checksum.toString('hex')), [
         '9a797edd514dfc946783cf66cf80ee8dfa774210a0d100946c3a9a822596ca00',

@@ -82,6 +82,13 @@ const INTEGRATION_TEST_COMMANDS = Object.freeze([
       "ts/accounts/deletionReplay.integration.test.ts",
     ]),
   }),
+  Object.freeze({
+    executable: process.execPath,
+    args: Object.freeze([
+      "--test", "-r", "ts-node/register",
+      "ts/accounts/providerAccountRepository.integration.test.ts",
+    ]),
+  }),
 ]);
 
 const MYSQL_SERVICE = "mysql";
@@ -278,7 +285,7 @@ const cleanup = () => {
   return cleanupPromise;
 };
 
-export const runMigrationTests = async () => {
+export const runMigrationTests = async ({ providerIdentitiesOnly = false } = {}) => {
   let failure;
 
   try {
@@ -295,7 +302,12 @@ export const runMigrationTests = async () => {
       MYSQL_SERVICE,
     ]);
     const mysqlPort = await inspectMigrationContainer();
-    for (const command of INTEGRATION_TEST_COMMANDS) {
+    const commands = providerIdentitiesOnly
+      ? INTEGRATION_TEST_COMMANDS.filter(command => command.args.some(argument =>
+        argument === "ts/accounts/deletionReplay.integration.test.ts"
+        || argument === "ts/accounts/providerAccountRepository.integration.test.ts"))
+      : INTEGRATION_TEST_COMMANDS;
+    for (const command of commands) {
       await runProcess(
         command.executable,
         command.args,
@@ -326,6 +338,10 @@ const isMainModule = process.argv[1]
   && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
 if (isMainModule) {
+  const arguments_ = process.argv.slice(2);
+  if (arguments_.length > 1 || arguments_.some(argument => argument !== "--provider-identities")) {
+    throw new Error("Usage: run-migration-tests.mjs [--provider-identities]");
+  }
   let shuttingDown = false;
   const handleSignal = async (exitCode) => {
     if (shuttingDown) return;
@@ -346,7 +362,7 @@ if (isMainModule) {
   process.once("SIGINT", handleInterrupt);
   process.once("SIGTERM", handleTermination);
 
-  runMigrationTests()
+  runMigrationTests({ providerIdentitiesOnly: arguments_.includes("--provider-identities") })
     .catch((error) => {
       console.error(error.message);
       process.exitCode = 1;

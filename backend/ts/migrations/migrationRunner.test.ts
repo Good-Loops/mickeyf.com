@@ -191,6 +191,7 @@ test('plan is read-only, configures short waits, and releases its advisory lock'
             '0006_add_account_identity',
             '0007_backfill_account_identity',
             '0008_finalize_account_identity',
+            '0009_create_account_provider_identities',
         ],
         recoverable: [],
     });
@@ -331,6 +332,57 @@ test('drop-column effects remain pending without explicit apply authorization', 
         ),
         false
     );
+});
+
+test('provider identities remain pending until their own effect is explicitly selected', async () => {
+    const connection = new FakeConnection(migrationResults(legacySourceState()));
+    const migration = loadMigrationManifest().at(-1)!;
+    assert.equal(migration.effect, 'add-provider-identities');
+    const plan = await applyMigrations(connection, [migration], settings);
+    assert.deepEqual(plan.pending, [migration.version]);
+    assert.equal(connection.calls.some(({ sql }) => sql === migration.sql), false);
+});
+
+test('provider identity DDL and recovery reject missing historical migration records', async () => {
+    const migration = loadMigrationManifest().at(-1)!;
+    const incomplete = new FakeConnection(migrationResults(legacySourceState()));
+    await assert.rejects(applyMigrations(incomplete, [migration], settings, {
+        allowedEffectKinds: ['add-provider-identities'],
+    }), /all earlier migrations/u);
+    assert.equal(incomplete.calls.some(({ sql }) => sql === migration.sql), false);
+    const original = migrationResults(legacySourceState());
+    const recoverable = new FakeConnection((sql, values) => {
+        if (sql.includes('COUNT(*)') && sql.includes('information_schema.TABLES')
+            && values[0] === migration.tableName) return [{ tableCount: 1 }];
+        return original(sql, values);
+    });
+    await assert.rejects(planMigrations(recoverable, [migration], settings), /all earlier migrations/u);
+    assert.equal(recoverable.calls.some(({ sql }) => /CREATE|INSERT|ALTER/u.test(sql)), false);
+});
+
+test('a truncated 0008–0009 manifest cannot bypass provider identity prerequisites', async () => {
+    const migrations = loadMigrationManifest().slice(-2);
+    const state = legacySourceState();
+    state.historyExists = true;
+    state.appliedRows.push({ version: migrations[0].version, checksum: migrations[0].checksum });
+    const original = migrationResults(state);
+    const connection = new FakeConnection((sql, values) => {
+        if (sql.includes("COLUMN_NAME = 'account_uuid'")) return [{
+            type: 'char(36)', nullable: 'NO', characterSet: 'ascii', collation: 'ascii_bin',
+            defaultValue: 'uuid()', extra: 'DEFAULT_GENERATED', generationExpression: '',
+        }];
+        if (sql.includes("INDEX_NAME = 'uq_users_account_uuid'")) return [{
+            columnName: 'account_uuid', nonUnique: 0, sequence: 1, subPart: null,
+            visible: 'YES', indexType: 'BTREE',
+        }];
+        if (sql.includes('COUNT(*) AS invalidCount')) return [{ invalidCount: 0 }];
+        return original(sql, values);
+    });
+    await assert.rejects(applyMigrations(connection, migrations, settings, {
+        allowedEffectKinds: ['add-provider-identities'],
+    }), /all earlier migrations/u);
+    assert.equal(connection.calls.some(({ sql }) => /CREATE|INSERT|ALTER/u.test(sql)), false);
+    assert.deepEqual(state.appliedRows.map(({ version }) => version), ['0008_finalize_account_identity']);
 });
 
 test('authorized drop rechecks its source and verifies absence before history', async () => {

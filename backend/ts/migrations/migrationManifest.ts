@@ -4,7 +4,7 @@ import path from 'node:path';
 
 export type LeaderboardTableName = 'game_runs' | 'game_personal_bests';
 
-export type MigrationEffectKind = 'create-table' | 'drop-column' | 'detach-best-source' | 'retain-receipts' | 'add-account-identity';
+export type MigrationEffectKind = 'create-table' | 'drop-column' | 'detach-best-source' | 'retain-receipts' | 'add-account-identity' | 'add-provider-identities';
 
 type MigrationMetadata = Readonly<{
     version: string;
@@ -26,6 +26,7 @@ export type MigrationDefinition = MigrationMetadata & Readonly<
     | { effect: 'detach-best-source'; tableName: 'game_personal_bests' }
     | { effect: 'retain-receipts'; tableName: 'game_runs' }
     | { effect: 'add-account-identity'; tableName: 'users'; stage: 'column' | 'backfill' | 'finalize' }
+    | { effect: 'add-provider-identities'; tableName: 'account_provider_identities' }
 >;
 
 const MIGRATION_SPECS = Object.freeze([
@@ -72,6 +73,11 @@ const MIGRATION_SPECS = Object.freeze([
         effect: 'add-account-identity' as const,
         tableName: 'users' as const,
         stage: 'finalize' as const,
+    }),
+    Object.freeze({
+        fileName: '0009_create_account_provider_identities.sql',
+        effect: 'add-provider-identities' as const,
+        tableName: 'account_provider_identities' as const,
     }),
 ]);
 

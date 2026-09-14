@@ -2488,6 +2488,15 @@ itself activate, implement or defer both providers.
   before linking an existing account, never match solely on an email string.
   Web and native clients need their own provider configuration and approved
   sign-in flows; do not load Google OAuth inside Capacitor's embedded WebView.
+  **Backend foundation checkpoint (2026-09-14):** signed Google/Apple ID-token
+  verification, password-proven linking to immutable account UUIDs, conflict-safe
+  identity lookup/storage and migration 0009 are implemented offline. Deletion
+  readiness and restored-backup replay validate and remove provider links.
+  No provider routes/buttons, session changes, production schema/grant changes
+  or deployment are included. Next: server-held one-use authentication attempts
+  and UUID-bound session/callback integration, then approved provider/native
+  configuration. Provider-only signup remains subject to the age/consent backlog.
+  See [scope, migration boundary and remaining steps](backend/PROVIDER_SIGN_IN.md).
   The owner approved the CORS-only backend deployment for exactly
   `capacitor://localhost`, and renewed the same temporary Node/OpenSSL exception
   through 2026-10-07 only for the matching unchanged-runtime/base/dependency
