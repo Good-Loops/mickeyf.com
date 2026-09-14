@@ -4,8 +4,8 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 // Changing either pin requires reviewing the canonical policy diff, not just
-// refreshing hashes. Stage A/B themselves remain main-only and untouched.
-export const CANONICAL_SHA256 = '0cad4ab7730c6eef3f6365b365095964385bb942bafa8a883e09c75df3414c41';
+// refreshing hashes. Canonical source policy remains main-only.
+export const CANONICAL_SHA256 = '4aac15b2a72d3f4129aba82eeded801e792434697aba025c07825561586f741a';
 export const CANDIDATE_SHA256 = 'dccd0bcf976c77abb3e9fa6d39c1ae855ff127fbf4ec67efd3480e20a4afcda4';
 export const DEPLOY_IMAGE = 'gcr.io/google.com/cloudsdktool/cloud-sdk:alpine@sha256:de1a989b158694a614852e7b53673097da3bdb394b8186d6102386b7a10d73c7';
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -14,12 +14,38 @@ const deployIdentity = `projects/${project}/serviceAccounts/mickeyf-backend-depl
 const normalize = (text) => text.replace(/\r\n?/gu, '\n');
 const sha256 = (text) => createHash('sha256').update(text).digest('hex');
 
+export const ACCOUNT_DELETION_JOURNAL_BUCKET = 'ludolume-deletion-journal-1012884798546';
+export const ORIGINAL_ACCOUNT_IDENTITY_EPOCH = '2026-09-12 00:15:39.954172';
+
+// Omission is default-off; an explicit false requests a reviewed disable/rollback.
+export function accountDeletionEnvironment(settings) {
+    if (settings === undefined) return { ACCOUNT_DELETION_ENABLED: 'false' };
+    const keys = settings?.enabled === true ? ['enabled', 'journalBucket', 'identityEpoch'] : ['enabled'];
+    if (!settings || Array.isArray(settings) || typeof settings.enabled !== 'boolean'
+        || Object.keys(settings).sort().join() !== keys.sort().join()
+        || settings.enabled && (settings.journalBucket !== ACCOUNT_DELETION_JOURNAL_BUCKET
+            || settings.identityEpoch !== ORIGINAL_ACCOUNT_IDENTITY_EPOCH)) {
+        throw new Error('Deletion configuration requires an explicit boolean and exactly the approved journal/identity pins when enabled.');
+    }
+    return settings.enabled ? {
+        ACCOUNT_DELETION_ENABLED: 'true',
+        ACCOUNT_DELETION_JOURNAL_BUCKET: settings.journalBucket,
+        ACCOUNT_IDENTITY_EPOCH: settings.identityEpoch,
+    } : { ACCOUNT_DELETION_ENABLED: 'false' };
+}
+
+function accountDeletionApproval(pins) {
+    if (pins.accountDeletion === undefined) return 'DISABLED';
+    return `${pins.accountDeletion.enabled ? 'enable' : 'disable'}-account-deletion:${pins.sourceCommit}:${pins.sourceBuildId}:${pins.imageDigest}`;
+}
+
 export function validateFrozenPins(value) {
     const keys = ['sourceBuildId', 'sourceCommit', 'imageDigest', 'sourceTriggerId', 'sourceTriggerName', 'sourceRef', 'deploymentTriggerName'];
-    if (!value || Object.keys(value).sort().join() !== keys.sort().join()
+    if (!value || Object.keys(value).filter(key => key !== 'accountDeletion').sort().join() !== keys.sort().join()
         || keys.some((key) => typeof value[key] !== 'string')) {
-        throw new Error('Supply exactly the seven reviewed source/deployment pins.');
+        throw new Error('Supply the seven reviewed source/deployment pins and optional accountDeletion configuration only.');
     }
+    accountDeletionEnvironment(value.accountDeletion);
     if (!uuid.test(value.sourceBuildId) || !uuid.test(value.sourceTriggerId)
         || !/^[0-9a-f]{40}$/u.test(value.sourceCommit) || !/^sha256:[0-9a-f]{64}$/u.test(value.imageDigest)
         || !/^[a-z][a-z0-9-]{0,62}$/u.test(value.sourceTriggerName)
@@ -83,8 +109,10 @@ function parseReviewedSteps(text) {
         if (step) { current = { id: scalar(step[1]) }; steps.push(current); continue; }
         const field = line.match(/^    (name|entrypoint|timeout): (.+)$/u);
         if (field && current) { current[field[1]] = scalar(field[2]); continue; }
+        if (line === '    env:' && current && !current.env) { current.env = []; continue; }
         if (line === '    args:' && current && !current.args) { current.args = []; continue; }
         const argument = line.match(/^      - (.+)$/u);
+        if (argument && current?.env && !current.args) { current.env.push(scalar(argument[1])); continue; }
         if (argument && current?.args) {
             if (['|', '|2'].includes(argument[1])) {
                 const content = [];
@@ -151,6 +179,14 @@ export function renderFrozenBackendDeployConfig({ canonical, candidate, prefligh
 
     const discovery = frozenState(stepBlock(canonical, 'Require successful Artifact Analysis scan'));
     const severity = frozenState(stepBlock(canonical, 'Enforce Artifact Analysis severity policy'));
+    let deletion = stepBlock(canonical, 'Validate account-deletion deployment contract');
+    const deletionEnvironment = accountDeletionEnvironment(pins.accountDeletion);
+    for (const [name, value] of Object.entries({
+        _ACCOUNT_DELETION_ENABLED: deletionEnvironment.ACCOUNT_DELETION_ENABLED,
+        _ACCOUNT_DELETION_JOURNAL_BUCKET: deletionEnvironment.ACCOUNT_DELETION_JOURNAL_BUCKET ?? '',
+        _ACCOUNT_IDENTITY_EPOCH: deletionEnvironment.ACCOUNT_IDENTITY_EPOCH ?? '',
+        _ACCOUNT_DELETION_APPROVAL: accountDeletionApproval(pins),
+    })) deletion = replaceExactly(deletion, `\${${name}}`, value);
     let deploy = frozenState(stepBlock(canonical, 'Deploy deterministic zero-traffic candidate'));
     deploy = replaceExactly(deploy, "readonly TRIGGER_ID='ef5a2981-95be-4f4d-af91-f997fde73356'", `readonly TRIGGER_ID='${pins.sourceTriggerId}'`);
     deploy = replaceExactly(deploy, 'P4_VEGA_SCORE_SUBMISSIONS_ENABLED=true,THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=true',
@@ -179,7 +215,7 @@ export function renderFrozenBackendDeployConfig({ canonical, candidate, prefligh
     smoke = replaceExactly(smoke, '{"error": "UNAUTHORIZED"}', '{"error": "SUBMISSIONS_FROZEN"}');
     smoke = smoke.replaceAll('enabled Three Bosses', 'frozen Three Bosses').replaceAll('enabled p4-Vega', 'frozen p4-Vega');
 
-    const steps = parseReviewedSteps(initial + discovery + severity + deploy + verify + smoke);
+    const steps = parseReviewedSteps(initial + discovery + severity + deletion + deploy + verify + smoke);
     if (steps.some((step) => step.args.some((argument) => argument.length > 10_000))) throw new Error('Rendered Cloud Build argument exceeds 10,000 characters.');
     return { steps, serviceAccount: deployIdentity,
         substitutions: { _DEPLOY_TRIGGER_ID: 'INVALID', _APPROVAL: 'INVALID' },

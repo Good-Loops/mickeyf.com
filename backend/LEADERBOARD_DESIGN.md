@@ -1025,11 +1025,12 @@ only serialization mechanism.
 
 ### Deleted-account recovery
 
-**2026-09-11 local / 2026-09-12 UTC status: identity migrations 0006–0008 are
-applied in production, with all existing account/score data and grants preserved.
-The release switch, journal integration and replay tooling remain unreleased;
-approved storage/IAM was provisioned earlier. No live journal write, replay,
-new runtime grants or application deployment occurred. Deletion remains disabled.**
+**2026-09-14 UTC status: identity migrations 0006–0008 and the reviewed runtime
+grants are applied. The independent journal identities are verified and the
+read-only deletion audit is provisioned. Existing account/score rows are
+unchanged. The website deletion/replay release remains disabled: older
+automatic backups/PITR still predate the original identity epoch. See the
+dated rollout evidence below; do not repeat the completed restore exercise.**
 `ACCOUNT_DELETION_ENABLED` defaults to false in every environment; only the
 exact value `true`, production mode, explicit approved journal bucket, and an
 independently captured original identity epoch permit runtime activation.
@@ -1104,9 +1105,10 @@ Focused local acceptance covers storage failures and uncertain
 acknowledgements, SQL rollback/commit uncertainty after recorded intent,
 repeated replay, numeric-ID reuse, pre-identity backup rejection, unavailable or
 partial journals, and an isolated restore that removes only marked accounts.
-The identity schema and isolated backup/SQL replay exercise are now verified.
-Runtime-grant rollout, service-identity verification, old-backup transition and
-the operational response below remain pending. Keep the release switch off. Manual
+The identity schema, isolated backup/SQL replay exercise, runtime-grant rollout
+and journal identity permissions are verified. Actual writer-upload acceptance,
+the old-backup transition and the eventual website rollout remain outstanding.
+Keep the release switch off. Manual
 operations and older binaries can bypass an HTTP switch; the recovery runbook and deployment
 review remain necessary.
 
@@ -1145,16 +1147,98 @@ plan-bound operation with drained runtime sessions; its planner rejects a
 locked runtime account, so the identity-migration locking procedure cannot be
 copied unchanged. No runtime grant, deployment or activation occurred.
 
+#### Approved access and audit rollout — 2026-09-14 UTC
+
+The owner approved the maintenance execution paths and completing the backend
+preparation. This supersedes the access failures above without broadening the
+ordinary TablePlus operator. Temporary SQL maintenance accounts and temporary,
+service-account-scoped impersonation bindings were removed after use.
+
+- Actual writer credentials passed `buckets.testIamPermissions` for create only;
+  recovery-reader credentials passed get/list only. The strict reader verified
+  an empty journal across live/versioned/soft-deleted views. No journal object
+  was written; permission checks are not an upload acceptance test.
+- The existing grant planner produced reviewed digest
+  `e161a22a9ebd4e6d8f6de2adb6e1d259092ed0e9b4b6e8a6c5f7cbfe099cd579`, with
+  no blockers, role changes or unrelated privileges. During apply, the local
+  backend and receipt Scheduler were paused, the untagged Cloud Run service
+  was scaled to zero, and zero runtime/cleanup SQL sessions were verified.
+  The runtime account stayed unlocked, as required by the planner.
+- Applied only DELETE on `users`, `game_personal_bests` and
+  `game_submission_receipts`, SELECT on `users.account_uuid`, and SELECT on
+  `schema_migrations(version, applied_at)`. Fresh connections passed permitted
+  zero-row probes and rejected UUID updates, migration deletion and checksum
+  reads. Verification digest
+  `ecfddd0ec1670919b026cb1d0b1f99b552b0ea39388620183730150e3968ede5`
+  confirmed the reduced compliant grant set. No application rows changed.
+- Restored automatic service scaling, the same 100% serving revision
+  `mickeyf-org-ios-origin-a1f3ea43-0910`, the receipt schedule and local backend.
+  Service generation advanced from 142 to 144 solely for scaling; the CLI made
+  automatic/default service scaling explicit while preserving the revision's
+  ten-instance cap. Anonymous leaderboard HTTP readback returned 200.
+  Frontend and WebGL development servers were not stopped.
+- Created `deletion_audit@cloudsqlproxy~%` directly with no administrator role:
+  only UUID and migration-epoch column reads. Fresh probes rejected email,
+  score and DELETE access. Its version-pinned Secret Manager password is
+  accessible to the recovery reader; that identity also received Cloud SQL
+  Client for the job socket. It retains read-only bucket access. No key file
+  or secret value was stored in Git, logs or the evidence reports.
+- Built reviewed source `64e274e1c72855df0c6c770921d6e680e13f7073` in approved
+  image-only build `0c99adb9-028c-461e-bb0a-798618788e7b`. Image digest
+  `sha256:23d5cd840582c53bad36855e2e37e92ffd203d20821334480a51d36e4d8779c1`
+  passed completed image analysis with no vulnerability occurrences. The
+  separate read-only Job uses that digest, not the website's default command.
+  Its configuration, schedule and operational outcome are maintained in
+  [DELETION_AUDIT.md](DELETION_AUDIT.md).
+
+Non-secret, restricted local evidence is retained under
+`%LOCALAPPDATA%\Ludolume\Recovery\identity-20260911`: the September 14
+`journal-access`, `runtime-grants`, `grant-drain-before` and `deletion-audit-*`
+reports. Keep this recovery evidence; it is not disposable preview output.
+The six older automatic backups and pre-epoch PITR range found earlier today
+remain a genuine activation gate. Retention, backup protection and existing
+deployment-trigger states were not relaxed to bypass it.
+
+#### Deployment contract (prepared; website rollout not performed)
+
+The canonical deployment and frozen renderer now carry an exact deletion
+environment contract rather than dropping these settings through `--set-env-vars`.
+Omitting deletion pins remains default-off. Enabling requires the literal
+approved bucket, original epoch and an enable approval bound to the verified
+source commit, source build and image digest. An intentional disable/rollback
+requires an equally explicit decision if any current template, serving revision
+or tagged revision has deletion enabled; a routine default-off deployment must
+not silently disable it. Canonical substitutions are `_ACCOUNT_DELETION_ENABLED`,
+`_ACCOUNT_DELETION_JOURNAL_BUCKET`, `_ACCOUNT_IDENTITY_EPOCH` and
+`_ACCOUNT_DELETION_APPROVAL`.
+
+Frozen deployment/traffic pins use optional `accountDeletion`: omit for the
+safe default, `{ "enabled": false }` for reviewed disabling, or
+`{ "enabled": true, "journalBucket": "ludolume-deletion-journal-1012884798546",
+"identityEpoch": "2026-09-12 00:15:39.954172" }` for reviewed enabling. The
+renderer binds the enable/disable approval to the existing source/image pins;
+the environment and step digests are checked again before traffic changes.
+Arbitrary extra variables, wrong pins and missing/duplicate settings are rejected.
+These checks do not inspect backup age or replace the final operational gate.
+No trigger was enabled and no website candidate was deployed for this change.
+The service UID/generation is rechecked before deployment, but this is not an
+atomic lock against an unrelated console deployment: retain the existing
+single-writer release discipline. Old eight-variable frozen candidates no
+longer satisfy the exact nine-/eleven-variable contract; use a fresh reviewed
+immutable revision, including for an intentional disable. The renderer/traffic
+suites passed all 64 tests, including Bash/Python syntax and argument-size checks.
+
 #### Pending or unconfirmed deletion response
 
-Before activation, designate the owner or an explicitly delegated operator and
-agree how they are notified and how routine journal reconciliation is reviewed.
-No notification route, cadence or automatic reconciler is established by this
-document. Existing controller logs are `Account deletion pending reconciliation`
+The owner, Michel, investigates the read-only audit's notifications through the
+approved `mickeyf.plays@gmail.com` channel; job/schedule/policy evidence and pause
+instructions are in [DELETION_AUDIT.md](DELETION_AUDIT.md). This is detection, not
+an automatic reconciler or permission to skip a fresh reviewed replay plan.
+Existing controller logs are `Account deletion pending reconciliation`
 and `Account deletion unavailable`. Both need attention: an unavailable upload
 may already have persisted. A process crash can precede either message, so
-error-only alerts cannot guarantee eventual completion. Keep activation blocked
-until the owner accepts a reliable response/reconciliation arrangement.
+error-only alerts cannot guarantee eventual completion. The independent audit
+also compares durable intents with remaining accounts to detect that case.
 
 For a reported or discovered unresolved request:
 

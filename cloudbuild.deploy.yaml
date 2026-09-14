@@ -530,6 +530,111 @@ steps:
         PY
     timeout: '960s'
 
+  - id: 'Validate account-deletion deployment contract'
+    name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:alpine@sha256:de1a989b158694a614852e7b53673097da3bdb394b8186d6102386b7a10d73c7'
+    entrypoint: 'python3'
+    env:
+      - 'ACCOUNT_DELETION_ENABLED=${_ACCOUNT_DELETION_ENABLED}'
+      - 'ACCOUNT_DELETION_JOURNAL_BUCKET=${_ACCOUNT_DELETION_JOURNAL_BUCKET}'
+      - 'ACCOUNT_IDENTITY_EPOCH=${_ACCOUNT_IDENTITY_EPOCH}'
+      - 'ACCOUNT_DELETION_APPROVAL=${_ACCOUNT_DELETION_APPROVAL}'
+    args:
+      - '-c'
+      - |
+        import json
+        import os
+        import subprocess
+
+        # An explicit enable/disable binds the exact verified source and image;
+        # default-off must not silently disable an active feature.
+        BUCKET = "ludolume-deletion-journal-1012884798546"
+        EPOCH = "2026-09-12 00:15:39.954172"
+        DELETION_KEYS = {"ACCOUNT_DELETION_ENABLED", "ACCOUNT_DELETION_JOURNAL_BUCKET", "ACCOUNT_IDENTITY_EPOCH"}
+
+        def reject(message):
+            raise SystemExit(f"Deletion deployment contract rejected: {message}")
+
+        def deployment_environment(values, state):
+            enabled = values.get("ACCOUNT_DELETION_ENABLED")
+            action = "enable" if enabled == "true" else "disable"
+            approval = f"{action}-account-deletion:{state['commit']}:{state['build_id']}:{state['digest']}"
+            supplied = values.get("ACCOUNT_DELETION_APPROVAL")
+            if enabled not in ("false", "true"):
+                reject("enabled must be the literal true or false")
+            if enabled == "true":
+                if (values.get("ACCOUNT_DELETION_JOURNAL_BUCKET") != BUCKET
+                        or values.get("ACCOUNT_IDENTITY_EPOCH") != EPOCH or supplied != approval):
+                    reject("enable requires the original identity epoch, approved bucket and exact-image approval")
+                return {key: values[key] for key in DELETION_KEYS}, False
+            if (values.get("ACCOUNT_DELETION_JOURNAL_BUCKET") != ""
+                    or values.get("ACCOUNT_IDENTITY_EPOCH") != "" or supplied not in ("DISABLED", approval)):
+                reject("disable requires empty inactive pins and default-off or exact-image disable approval")
+            return {"ACCOUNT_DELETION_ENABLED": "false"}, supplied == approval
+
+        def check_container(spec, environment, explicit_disable):
+            containers = spec.get("containers") or []
+            if len(containers) != 1:
+                reject("active service/revision must have exactly one container")
+            entries = [item for item in containers[0].get("env", []) if item.get("name") in DELETION_KEYS]
+            if len({item["name"] for item in entries}) != len(entries):
+                reject("duplicate active deletion settings")
+            if any(set(item) != {"name", "value"} for item in entries):
+                reject("active deletion settings must be literal values")
+            previous = {item["name"]: item["value"] for item in entries}
+            if previous.get("ACCOUNT_DELETION_ENABLED", "false") not in ("false", "true"):
+                reject("unrecognized active deletion state")
+            if previous.get("ACCOUNT_DELETION_ENABLED") == "true":
+                if (previous.get("ACCOUNT_DELETION_JOURNAL_BUCKET") != BUCKET
+                        or previous.get("ACCOUNT_IDENTITY_EPOCH") != EPOCH):
+                    reject("active identity/journal pins differ; investigate before replacing them")
+                if environment["ACCOUNT_DELETION_ENABLED"] != "true" and not explicit_disable:
+                    reject("default-off would disable an active feature; explicit exact-image disable approval required")
+
+        def check_previous_state(service, revisions, environment, explicit_disable):
+            metadata, status = service.get("metadata", {}), service.get("status", {})
+            if (not metadata.get("uid") or not metadata.get("generation")
+                    or str(status.get("observedGeneration")) != str(metadata["generation"])
+                    or not any(c.get("type") == "Ready" and c.get("status") == "True" for c in status.get("conditions", []))):
+                reject("service must be stable before reviewing deletion settings")
+            check_container(service.get("spec", {}).get("template", {}).get("spec", {}), environment, explicit_disable)
+            active = set()
+            for traffic in (service.get("spec", {}).get("traffic", []), status.get("traffic", [])):
+                for target in traffic:
+                    if not (target.get("tag") or int(target.get("percent") or 0) > 0):
+                        continue
+                    name = target.get("revisionName")
+                    if not name and target.get("latestRevision") is True:
+                        name = status.get("latestReadyRevisionName")
+                    if not name:
+                        reject("active revision is unresolved")
+                    active.add(name)
+            if not isinstance(revisions, list):
+                reject("revision inventory is malformed")
+            by_name = {item.get("metadata", {}).get("name"): item for item in revisions}
+            if len(by_name) != len(revisions) or not active or not active <= set(by_name):
+                reject("active revision inventory is incomplete")
+            for name in active:
+                check_container(by_name[name].get("spec", {}), environment, explicit_disable)
+            return {"uid": metadata["uid"], "generation": str(metadata["generation"])}
+
+        def read_cloud(arguments):
+            result = subprocess.run(["gcloud", "run", *arguments, "--project=noted-reef-387021",
+                                     "--region=us-central1", "--platform=managed", "--format=json"],
+                                    check=True, capture_output=True, text=True, timeout=45)
+            return json.loads(result.stdout)
+
+        if __name__ == "__main__":
+            with open("/workspace/verified-stage-a.json", encoding="utf-8") as handle:
+                state = json.load(handle)
+            environment, explicit_disable = deployment_environment(os.environ, state)
+            service = read_cloud(["services", "describe", "mickeyf-org"])
+            revisions = read_cloud(["revisions", "list", "--service=mickeyf-org"])
+            before = check_previous_state(service, revisions, environment, explicit_disable)
+            os.umask(0o077)
+            with open("/workspace/account-deletion-contract.json", "x", encoding="utf-8") as handle:
+                json.dump({"environment": environment, "before": before}, handle, sort_keys=True)
+    timeout: '120s'
+
   - id: 'Deploy deterministic zero-traffic candidate'
     name: 'gcr.io/google.com/cloudsdktool/cloud-sdk:alpine@sha256:de1a989b158694a614852e7b53673097da3bdb394b8186d6102386b7a10d73c7'
     entrypoint: 'bash'
@@ -641,6 +746,18 @@ steps:
         gcloud run services describe "$$SERVICE_NAME" --project="$$PROJECT_ID" \
           --region="$$RUN_REGION" --platform=managed --format=json > "$$SERVICE_BEFORE_JSON"
 
+        DELETION_ENV="$$(python3 - "$$SERVICE_BEFORE_JSON" <<'PY'
+        import json, sys
+        with open("/workspace/account-deletion-contract.json", encoding="utf-8") as handle:
+            contract = json.load(handle)
+        with open(sys.argv[1], encoding="utf-8") as handle:
+            metadata = json.load(handle)["metadata"]
+        if contract["before"] != {"uid": metadata["uid"], "generation": str(metadata["generation"])}:
+            raise SystemExit("Service changed after deletion settings were reviewed")
+        print(",".join(f"{key}={value}" for key, value in sorted(contract["environment"].items())))
+        PY
+        )"
+
         revision_preexisted=false
         deployed_here=false
         if gcloud run revisions describe "$$REVISION_NAME" --project="$$PROJECT_ID" \
@@ -659,7 +776,7 @@ steps:
             --concurrency=80 --timeout=300s --max-instances=10 --cpu-boost --ingress=all \
             --startup-probe='timeoutSeconds=240,periodSeconds=240,failureThreshold=1,tcpSocket.port=8080' \
             --liveness-probe='' --set-cloudsql-instances="$$CLOUD_SQL" \
-            --set-env-vars="NODE_ENV=production,CLOUD_SQL_CONNECTION_NAME=$$CLOUD_SQL,DB_USER=cms_mickeyf,DB_NAME=cms,P4_VEGA_SCORE_SUBMISSIONS_ENABLED=true,THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=true" \
+            --set-env-vars="NODE_ENV=production,CLOUD_SQL_CONNECTION_NAME=$$CLOUD_SQL,DB_USER=cms_mickeyf,DB_NAME=cms,P4_VEGA_SCORE_SUBMISSIONS_ENABLED=true,THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=true,$$DELETION_ENV" \
             --set-secrets='DB_PASS=DB_PASS:1,SESSION_SECRET=SESSION_SECRET:2' \
             --update-labels="source-build-id=$$SOURCE_BUILD_ID,source-commit=$$COMMIT_SHA" \
             --no-traffic --tag="$$CANDIDATE_TAG" --quiet; then
@@ -848,8 +965,6 @@ steps:
             reject("service ingress does not match")
 
         env_items = container.get("env") or []
-        if len(env_items) != 8 or len({item.get("name") for item in env_items}) != 8:
-            reject("environment is not the exact eight-variable configuration")
         env = {item.get("name"): item for item in env_items}
         plain = {
             "NODE_ENV": "production",
@@ -859,6 +974,10 @@ steps:
             "P4_VEGA_SCORE_SUBMISSIONS_ENABLED": "true",
             "THREE_BOSSES_RUN_SUBMISSIONS_ENABLED": "true",
         }
+        with open("/workspace/account-deletion-contract.json", encoding="utf-8") as handle:
+            plain.update(json.load(handle)["environment"])
+        if len(env_items) != len(plain) + 2 or len(env) != len(plain) + 2:
+            reject("environment is not the exact reviewed configuration")
         for name, value in plain.items():
             if env.get(name) != {"name": name, "value": value}:
                 reject(f"environment value {name} does not match")
@@ -1981,6 +2100,10 @@ availableSecrets:
 substitutions:
   _SOURCE_BUILD_ID: 'INVALID'
   _SOURCE_STATUS: 'INVALID'
+  _ACCOUNT_DELETION_ENABLED: 'false'
+  _ACCOUNT_DELETION_JOURNAL_BUCKET: ''
+  _ACCOUNT_IDENTITY_EPOCH: ''
+  _ACCOUNT_DELETION_APPROVAL: 'DISABLED'
 
 timeout: '1800s'
 

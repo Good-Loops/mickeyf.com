@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
+import { accountDeletionEnvironment, ACCOUNT_DELETION_JOURNAL_BUCKET, ORIGINAL_ACCOUNT_IDENTITY_EPOCH } from './render-frozen-backend-deploy.mjs';
 import {
     PROJECT, REGION, SERVICE, IMAGE, REVISION_TYPE, fingerprint, revisionName,
     deploymentStepsFingerprint, validatePins, validateDeployment, validateFrozenRevision,
@@ -35,13 +36,15 @@ function fixture() {
             resources: { limits: { cpu: '1', memory: '512Mi' }, startupCpuBoost: true },
             startupProbe: { timeoutSeconds: 240, periodSeconds: 240, failureThreshold: 1, tcpSocket: { port: 8080 } },
             env: Object.entries({ NODE_ENV: 'production', CLOUD_SQL_CONNECTION_NAME: `${PROJECT}:${REGION}:cms-mickeyf`,
-                DB_USER: 'cms_mickeyf', DB_NAME: 'cms', P4_VEGA_SCORE_SUBMISSIONS_ENABLED: 'false', THREE_BOSSES_RUN_SUBMISSIONS_ENABLED: 'false' })
+                DB_USER: 'cms_mickeyf', DB_NAME: 'cms', P4_VEGA_SCORE_SUBMISSIONS_ENABLED: 'false', THREE_BOSSES_RUN_SUBMISSIONS_ENABLED: 'false',
+                ACCOUNT_DELETION_ENABLED: 'false' })
                 .map(([name, value]) => ({ name, value }))
                 .concat(['DB_PASS', 'SESSION_SECRET'].map((name, index) => ({ name, valueSource: { secretKeyRef: { secret: name, version: String(index + 1) } } }))),
             volumeMounts: [{ name: 'cloudsql', mountPath: '/cloudsql' }],
         }],
         volumes: [{ name: 'cloudsql', cloudSqlInstance: { instances: [`${PROJECT}:${REGION}:cms-mickeyf`] } }],
     };
+    const previousRevision = copy(revision);
     const traffic = [
         { type: REVISION_TYPE, revision: 'mickeyf-org-old-enabled', percent: 100 },
         { type: REVISION_TYPE, revision: revisionName(pins), tag: 'frozen-candidate' },
@@ -65,7 +68,10 @@ function fixture() {
     };
     let patches = 0;
     const provider = {
-        getService: async () => copy(service), getRevision: async () => copy(revision), getDeployment: async () => copy(build),
+        getService: async () => copy(service),
+        getRevision: async name => name === revisionName(pins) ? copy(revision)
+            : { ...copy(previousRevision), name: `${SERVICE}/revisions/${name}` },
+        getDeployment: async () => copy(build),
         assertAutomationPaused: async () => {},
         patchTraffic: async body => {
             patches++;
@@ -79,7 +85,7 @@ function fixture() {
         },
         waitForService: async () => copy(service),
     };
-    return { revision, service, build, provider, patches: () => patches };
+    return { revision, previousRevision, service, build, provider, patches: () => patches };
 }
 
 test('read-only plan includes every tag; one explicit etag PATCH freezes all traffic', async () => {
@@ -103,6 +109,62 @@ test('fresh plan supports frozen service rollback, not an old enabled revision',
     await assert.rejects(planFrozenTraffic(f.provider, pins, now), /Frozen environment differs/);
 });
 
+const enabledDeletion = {
+    enabled: true, journalBucket: ACCOUNT_DELETION_JOURNAL_BUCKET, identityEpoch: ORIGINAL_ACCOUNT_IDENTITY_EPOCH,
+};
+function setDeletion(containers, settings) {
+    containers[0].env = containers[0].env.filter(item => !['ACCOUNT_DELETION_ENABLED', 'ACCOUNT_DELETION_JOURNAL_BUCKET', 'ACCOUNT_IDENTITY_EPOCH'].includes(item.name))
+        .concat(Object.entries(accountDeletionEnvironment(settings)).map(([name, value]) => ({ name, value })));
+}
+
+test('enabled deletion revision requires exact reviewed pins and exact environment; disabled revision requires literal false', () => {
+    const f = fixture();
+    setDeletion(f.revision.containers, enabledDeletion);
+    const enabledPins = { ...pins, accountDeletion: enabledDeletion };
+    validatePins(enabledPins);
+    validateFrozenRevision(f.revision, enabledPins);
+    assert.throws(() => validateFrozenRevision(f.revision, pins), /environment/iu);
+    for (const changed of [{ ...enabledDeletion, identityEpoch: '2026-09-13 00:15:39.954172' },
+        { ...enabledDeletion, journalBucket: 'other' }, { ...enabledDeletion, arbitrary: 'value' }]) {
+        assert.throws(() => validatePins({ ...pins, accountDeletion: changed }));
+    }
+    f.revision.containers[0].env.find(item => item.name === 'ACCOUNT_IDENTITY_EPOCH').value = '2026-09-13 00:15:39.954172';
+    assert.throws(() => validateFrozenRevision(f.revision, enabledPins), /environment/iu);
+    const missing = fixture().revision;
+    missing.containers[0].env = missing.containers[0].env.filter(item => item.name !== 'ACCOUNT_DELETION_ENABLED');
+    assert.throws(() => validateFrozenRevision(missing, pins), /environment/iu);
+});
+
+for (const location of ['template', 'live', 'tagged']) test(`default-off traffic plan refuses silently disabling ${location} deletion`, async () => {
+    const f = fixture();
+    if (location === 'template') setDeletion(f.service.template.containers, enabledDeletion);
+    else setDeletion(f.previousRevision.containers, enabledDeletion);
+    if (location === 'tagged') {
+        f.service.traffic = [
+            { type: REVISION_TYPE, revision: revisionName(pins), percent: 100 },
+            { type: REVISION_TYPE, revision: 'mickeyf-org-old-enabled', tag: 'old-enabled-tag' },
+        ];
+        f.service.trafficStatuses = copy(f.service.traffic);
+    }
+    await assert.rejects(planFrozenTraffic(f.provider, pins, now), /explicitly review/iu);
+    assert.equal(f.patches(), 0);
+    const explicitDisable = { ...pins, accountDeletion: { enabled: false } };
+    const plan = await planFrozenTraffic(f.provider, explicitDisable, now);
+    assert.deepEqual(plan.pins.accountDeletion, { enabled: false });
+    await applyFrozenTraffic(f.provider, plan, fingerprint(plan), now);
+    assert.equal(f.patches(), 1);
+});
+
+test('explicit activation plan permits matching enabled target and refuses a missing active revision', async () => {
+    const f = fixture();
+    setDeletion(f.revision.containers, enabledDeletion);
+    const plan = await planFrozenTraffic(f.provider, { ...pins, accountDeletion: enabledDeletion }, now);
+    assert.deepEqual(plan.pins.accountDeletion, enabledDeletion);
+    f.provider.getRevision = async () => { throw new Error('revision read unavailable'); };
+    await assert.rejects(planFrozenTraffic(f.provider, pins, now), /unavailable/u);
+    assert.equal(f.patches(), 0);
+});
+
 for (const [label, mutate] of Object.entries({
     'p4 writes enabled': r => { r.containers[0].env.find(e => e.name === 'P4_VEGA_SCORE_SUBMISSIONS_ENABLED').value = 'true'; },
     'Three Bosses writes enabled': r => { r.containers[0].env.find(e => e.name === 'THREE_BOSSES_RUN_SUBMISSIONS_ENABLED').value = 'true'; },
@@ -114,7 +176,7 @@ for (const [label, mutate] of Object.entries({
     'wrong runtime identity': r => { r.serviceAccount = 'owner@example.com'; },
     'command override': r => { r.containers[0].command = ['sh']; },
     'args override': r => { r.containers[0].args = ['--enable']; },
-    'secret latest': r => { r.containers[0].env[6].valueSource.secretKeyRef.version = 'latest'; },
+    'secret latest': r => { r.containers[0].env.find(e => e.name === 'DB_PASS').valueSource.secretKeyRef.version = 'latest'; },
     'different database': r => { r.volumes[0].cloudSqlInstance.instances = ['other']; },
     'not Ready': r => { r.conditions[0].state = 'CONDITION_FAILED'; },
     'sidecar': r => r.containers.push(copy(r.containers[0])),

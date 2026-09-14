@@ -2703,11 +2703,12 @@ the support-message and backup-retention work below.
     reads, never identity writes. The tool also finishes pending requests on an
     explicitly frozen active database. No production migration, grant change,
     journal object, replay or deployment was performed in this implementation.
-  - [ ] **Recovery activation and evidence:** the identity schema is applied;
-    review and apply fresh runtime grants under separate approval, verify the
-    authorized journal writer/reader, and resolve all
-    pre-identity backups by approved retirement or independently verified
-    mapping. Establish the pending-request response procedure. The isolated
+  - [ ] **Recovery activation and evidence:** the identity schema, runtime SQL
+    grants and journal identity permissions are verified; the independent
+    read-only pending-request audit is provisioned. Resolve the remaining
+    pre-identity automatic/PITR history without shortening retention, then
+    finish actual writer-upload acceptance and the reviewed website rollout.
+    The isolated
     backup/SQL replay exercise is verified below; any actual recovery cutover
     still requires a final drained-writer checkpoint and session-secret rotation.
     The exercise does not replace those cutover safeguards.
@@ -2775,6 +2776,43 @@ the support-message and backup-retention work below.
       written or deployment made. Authorize the narrow execution paths before
       the live plan/service-identity checks; do not repeat the restore exercise.
       See the [access review](backend/LEADERBOARD_DESIGN.md#activation-access-review--2026-09-14-utc).
+    - **Approved access rollout (2026-09-14 UTC):** applied the existing
+      planner's exact additive runtime grant plan under a verified writer drain;
+      fresh allowed/denied zero-row probes and grant verification passed.
+      Actual writer and reader credentials verified create-only versus get/list
+      bucket permissions; strict reader authentication/listing passed. No real
+      account/score rows or journal objects changed. Restored the same backend
+      revision, receipt schedule and local backend; removed temporary SQL and
+      impersonation access. Created a separate audit SQL account that cannot
+      read passwords, emails or scores and cannot delete anything. See the
+      [rollout evidence](backend/LEADERBOARD_DESIGN.md#approved-access-and-audit-rollout--2026-09-14-utc).
+    - **Read-only audit implementation (2026-09-14 UTC):** added bounded
+      journal-to-account comparison, earliest-request retry handling, strict
+      target/identity validation and aggregate-only logging. Eleven focused
+      tests and backend typechecking passed. The reviewed image-only cloud
+      build succeeded and completed vulnerability analysis found no
+      occurrences. Job, schedule and alert acceptance are tracked in
+      [DELETION_AUDIT.md](backend/DELETION_AUDIT.md). This detector is not an
+      automatic deletion/replay service and does not enable self-deletion.
+    - **Audit operational acceptance (2026-09-14 UTC):** enabled the hourly
+      minute-20 UTC schedule and forced one dispatch through Scheduler's actual
+      identity. Execution `ludolume-account-deletion-audit-pcmdg` succeeded with
+      a correlated clear/zero-pending log. Read back all three enabled policies
+      on the existing approved email channel; missing-success monitoring was
+      armed after that success. Removed the temporary image-build trigger and
+      verified all four old deployment triggers still disabled. No duplicate
+      restore/login/score testing or natural-tick claim is added.
+      Local removal of today's five non-secret external helper scripts was
+      refused by the filesystem tool and remains explicitly outstanding;
+      [the audit runbook](backend/DELETION_AUDIT.md) records the exact folder.
+    - **Deployment contract preparation (2026-09-14 UTC):** canonical/frozen
+      deployments and traffic validation now carry exact optional deletion
+      pins, default off. Explicit enable/disable decisions are tied to reviewed
+      source/image inputs; active template/serving/tagged revision checks prevent
+      a normal default-off deployment from silently disabling the feature.
+      Intentional disable/rollback remains supported. No website deployment,
+      trigger activation or backup-gate bypass was performed. See the
+      [deployment contract](backend/LEADERBOARD_DESIGN.md#deployment-contract-prepared-website-rollout-not-performed).
 - [ ] **Finish and publish accurate privacy information:** resolve remaining
   retention/rights/provider/market decisions; implement the approved safeguards
   before claiming they exist. Preserve the no-sale/no-targeted-advertising
