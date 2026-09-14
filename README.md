@@ -75,6 +75,13 @@ Copy-Item frontend\.env.example frontend\.env
 Fill in the required local values. Never commit `.env`, `frontend/.env`,
 database credentials, session secrets, Firebase credentials, or ADC files.
 
+In browser development, the leaderboard pages display live public rankings
+through Vite's read-only `/__public-leaderboards` endpoint. Only the public
+catalog and the two game leaderboards are allowed; no credentials are forwarded.
+Authentication, submission eligibility and score writes still use `VITE_DEV_API_URL`
+and the isolated local database. Local test scores do not appear on these public
+boards. Production builds and installed apps retain their normal API routing.
+
 The tracked `compose.yaml` expects the Cloud SQL connection name in the root
 `.env`:
 

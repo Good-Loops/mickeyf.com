@@ -17,6 +17,14 @@
     background-image: $sidebar-bg-gradient;
     box-shadow: $dark-box-shadow;
 
+    &__source {
+        margin: 0;
+        font-size: 1.2rem;
+        line-height: 1.5;
+        text-align: center;
+        opacity: .8;
+    }
+
     &__header {
         display: grid;
         justify-items: center;

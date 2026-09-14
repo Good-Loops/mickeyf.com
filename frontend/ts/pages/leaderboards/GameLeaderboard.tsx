@@ -5,9 +5,10 @@ import { RouteHeading } from '@/components/RouteHeading';
 import {
     getGameLeaderboard,
     getLeaderboardCatalog,
+    leaderboardSourceNotice,
     type GameLeaderboardResponse,
     type LeaderboardCatalogGame,
-} from '@/services/leaderboardService';
+} from '@/services/leaderboardDisplayService';
 import {
     isAbortError,
     loadGameLeaderboardState,
@@ -241,6 +242,8 @@ export function GameLeaderboardView({
                     {state.game.displayName}
                 </RouteHeading>
             </header>
+
+            {leaderboardSourceNotice && <p className="leaderboard__source">{leaderboardSourceNotice}</p>}
 
             <LeaderboardTable game={state.game} leaderboard={state.leaderboard} />
         </section>

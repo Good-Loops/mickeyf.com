@@ -8,9 +8,10 @@ import { Link } from 'react-router-dom';
 import { RouteHeading } from '@/components/RouteHeading';
 import {
     getLeaderboardCatalog,
+    leaderboardSourceNotice,
     type LeaderboardCatalogGame,
     type LeaderboardCatalogResponse,
-} from '@/services/leaderboardService';
+} from '@/services/leaderboardDisplayService';
 
 type LeaderboardCatalogReader = (
     signal?: AbortSignal
@@ -51,6 +52,8 @@ export function LeaderboardView({
             <RouteHeading id="leaderboards-title" className="u-visually-hidden">
                 Leaderboards
             </RouteHeading>
+
+            {leaderboardSourceNotice && <p className="leaderboard__source">{leaderboardSourceNotice}</p>}
 
             {isLoading && games.length === 0 && (
                 <div className="leaderboard__state" role="status" aria-live="polite">
