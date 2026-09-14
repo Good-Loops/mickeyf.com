@@ -2048,7 +2048,9 @@ signed HTTP-only session cookie; the successful login JSON now returns only
 Bearer-token compatibility path remain unchanged.
 
 **Stay signed in checkpoint (2026-09-14):** implemented the optional, unchecked
-30-day Login control; ordinary sign-in remains four hours. The owner chose
+30-day Login control; ordinary sign-in remains four hours. Sign up now exposes
+the same choice for its existing automatic-login flow. Both forms share a round,
+glass-styled accessible checkbox without the private-device hint. The owner chose
 revocable per-device sessions instead of accepting stateless-token replay risk.
 Migration 0011 stores only hashed random session identifiers, immutable account
 UUIDs and UTC timestamps, capped at ten sessions per account. Logout and cookie

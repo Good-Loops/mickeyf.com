@@ -2,11 +2,15 @@
 
 ## Behavior
 
-Implemented on the active branch, not deployed. The Login checkbox is unchecked
+Implemented on the active branch, not deployed. The Login and Sign up checkbox is unchecked
 by default: four hours normally, thirty days when selected. These are fixed
 maximum lifetimes, not sliding inactivity timers. Closing the browser does not
 end a retained cookie; clearing cookies, private browsing and device/browser
 policies can still require signing in again. No indefinite-login promise is made.
+Sign up already creates the account and then logs in automatically; its checkbox
+selects the lifetime of that login, without changing the account-creation payload.
+Both forms share one round, glass-styled native checkbox with keyboard focus and
+screen-reader support. The private-device hint has been removed at the owner's request.
 
 The server issues an HS256 v2 token containing the numeric user ID, immutable
 account UUID, random 256-bit session identifier and issuance/expiry timestamps.

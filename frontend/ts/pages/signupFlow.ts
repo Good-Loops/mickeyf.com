@@ -2,7 +2,7 @@ import type { SignupPayload, SignupResponse } from '../services/authApi.ts';
 
 type SignupDependencies = {
     signup: (payload: SignupPayload) => Promise<SignupResponse>;
-    login: (userName: string, password: string) => Promise<boolean>;
+    login: (userName: string, password: string, options: { rememberMe: boolean }) => Promise<boolean>;
 };
 
 type SignupResult =
@@ -13,6 +13,7 @@ type SignupResult =
 export async function signupAndLogin(
     payload: SignupPayload,
     { signup, login }: SignupDependencies,
+    { rememberMe = false }: { rememberMe?: boolean } = {},
 ): Promise<SignupResult> {
     const response = await signup(payload);
     if (response && typeof response === 'object' && 'error' in response && response.error) {
@@ -24,7 +25,7 @@ export async function signupAndLogin(
 
     // The account already exists: a failed login must not invite another signup.
     try {
-        const authenticated = await login(payload.user_name, payload.user_password);
+        const authenticated = await login(payload.user_name, payload.user_password, { rememberMe });
         return { status: authenticated ? 'authenticated' : 'login-required' };
     } catch {
         return { status: 'login-required' };

@@ -2,44 +2,4 @@
 
 .login {
     @include account-form;
-
-    &__remember-option {
-        min-width: 0;
-    }
-
-    &__remember {
-        display: flex;
-        align-items: center;
-        gap: 1rem;
-        min-height: 44px;
-        padding: .7rem 1rem;
-        border: .1rem solid rgba($white, .14);
-        border-radius: .7rem;
-        color: rgba($white, .88);
-        background: rgba($space-background, .16);
-        font-size: 1.35rem;
-        line-height: 1.5;
-        cursor: pointer;
-    }
-
-    &__checkbox {
-        flex: 0 0 auto;
-        width: 1.8rem;
-        height: 1.8rem;
-        margin: 0;
-        accent-color: $primary-light;
-        cursor: inherit;
-
-        &:focus-visible {
-            outline: .2rem solid $primary-light;
-            outline-offset: .3rem;
-        }
-    }
-
-    &__remember-hint {
-        margin: .6rem 0 0;
-        color: rgba($primary-light, .72);
-        font-size: 1.15rem;
-        line-height: 1.5;
-    }
 }

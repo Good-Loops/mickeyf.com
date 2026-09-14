@@ -25,8 +25,8 @@ test('waits for account creation, then login, preserving the exact credentials',
             calls.push('signup');
             return registration.promise;
         },
-        login: (userName, password) => {
-            calls.push(['login', userName, password]);
+        login: (userName, password, options) => {
+            calls.push(['login', userName, password, options]);
             return authentication.promise;
         },
     }).then((result) => {
@@ -38,13 +38,35 @@ test('waits for account creation, then login, preserving the exact credentials',
     assert.equal(settled, false);
     registration.resolve({ success: true });
     await Promise.resolve();
-    assert.deepEqual(calls, ['signup', ['login', payload.user_name, payload.user_password]]);
+    assert.deepEqual(calls, ['signup', ['login', payload.user_name, payload.user_password, { rememberMe: false }]]);
     assert.equal(settled, false);
 
     authentication.resolve(true);
     assert.deepEqual(await resultPromise, { status: 'authenticated' });
     assert.equal(calls.length, 2);
 });
+
+for (const rememberMe of [false, true]) {
+    test(`passes stay-signed-in ${rememberMe} only to automatic login, not account creation`, async () => {
+        let loginCalls = 0;
+        const result = await signupAndLogin(payload, {
+            signup: async (received) => {
+                assert.equal(received, payload);
+                assert.deepEqual(Object.keys(received).sort(), ['email', 'user_name', 'user_password']);
+                return { success: true };
+            },
+            login: async (userName, password, options) => {
+                loginCalls += 1;
+                assert.equal(userName, payload.user_name);
+                assert.equal(password, payload.user_password);
+                assert.deepEqual(options, { rememberMe });
+                return true;
+            },
+        }, { rememberMe });
+        assert.deepEqual(result, { status: 'authenticated' });
+        assert.equal(loginCalls, 1);
+    });
+}
 
 test('returns registration errors and their messages without attempting login', async () => {
     const result = await signupAndLogin(payload, {
@@ -84,12 +106,13 @@ for (const loginFailsBy of ['returning false', 'rejecting']) {
                 signupCalls += 1;
                 return { success: true };
             },
-            login: async () => {
+            login: async (_userName, _password, options) => {
                 loginCalls += 1;
+                assert.deepEqual(options, { rememberMe: true });
                 if (loginFailsBy === 'rejecting') throw new Error('Login network failure');
                 return false;
             },
-        });
+        }, { rememberMe: true });
         assert.deepEqual(result, { status: 'login-required' });
         assert.equal(signupCalls, 1);
         assert.equal(loginCalls, 1);

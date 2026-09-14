@@ -5,6 +5,7 @@
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Swal from "@/components/siteAlert";
+import StaySignedInCheckbox from "@/components/StaySignedInCheckbox";
 import { signupRequest } from "@/services/authService";
 import { useAuth } from "@/context/AuthContext";
 import { signupAndLogin } from "./signupFlow.ts";
@@ -13,6 +14,7 @@ const SignUp: React.FC = () => {
     const [userName, setUserName] = useState("");
     const [email, setEmail] = useState("");
     const [userPassword, setUserPassword] = useState("");
+    const [rememberMe, setRememberMe] = useState(false);
     const [loading, setLoading] = useState(false);
     const submitting = useRef(false);
     const { login } = useAuth();
@@ -31,8 +33,8 @@ const SignUp: React.FC = () => {
                 user_password: userPassword,
             }, {
                 signup: signupRequest,
-                login: (user, password) => login(user, password, { showFeedback: false }),
-            });
+                login: (user, password, options) => login(user, password, { ...options, showFeedback: false }),
+            }, { rememberMe });
 
             if (result.status === "rejected") {
                 switch (result.error) {
@@ -146,6 +148,7 @@ const SignUp: React.FC = () => {
                             onChange={(inputEvent) => setUserPassword(inputEvent.target.value)}
                         />
                     </label>
+                    <StaySignedInCheckbox checked={rememberMe} onChange={setRememberMe} disabled={loading} />
                     <button className="signup__submit" type="submit" disabled={loading}>
                         {loading ? "Signing up…" : "Sign up"}
                     </button>

@@ -5,6 +5,7 @@
 import React, { useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
 import { useNavigate } from 'react-router-dom';
+import StaySignedInCheckbox from '@/components/StaySignedInCheckbox';
 
 const Login: React.FC = () => {
     const [userName, setUserName] = useState('');
@@ -61,24 +62,7 @@ const Login: React.FC = () => {
                             onChange={(event) => setUserPassword(event.target.value)}
                         />
                     </label>
-                    <div className="login__remember-option">
-                        <label className="login__remember" htmlFor="login-remember-me">
-                            <input
-                                id="login-remember-me"
-                                className="login__checkbox"
-                                type="checkbox"
-                                name="remember_me"
-                                checked={rememberMe}
-                                disabled={loading}
-                                aria-describedby="login-remember-hint"
-                                onChange={(event) => setRememberMe(event.target.checked)}
-                            />
-                            <span>Stay signed in for 30 days</span>
-                        </label>
-                        <p id="login-remember-hint" className="login__remember-hint">
-                            Use only on a private device.
-                        </p>
-                    </div>
+                    <StaySignedInCheckbox checked={rememberMe} onChange={setRememberMe} disabled={loading} />
                     <button className="login__submit" type="submit" disabled={loading}>
                         {loading ? 'Logging in…' : 'Log in'}
                     </button>

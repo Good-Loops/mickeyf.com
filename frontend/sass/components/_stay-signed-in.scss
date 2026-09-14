@@ -1,0 +1,84 @@
+@use '../abstracts' as *;
+
+.stay-signed-in {
+    position: relative;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    min-height: 44px;
+    padding: .8rem 1.2rem;
+    border: .1rem solid rgba($white, .15);
+    border-radius: 2.4rem;
+    color: rgba($white, .9);
+    background: linear-gradient(135deg, rgba($white, .065), rgba($space-background, .14));
+    box-shadow: 0 .1rem 0 rgba($white, .07) inset;
+    font-size: 1.35rem;
+    line-height: 1.5;
+    cursor: pointer;
+
+    &__input {
+        // Keep native keyboard/screen-reader behavior beneath the glass treatment.
+        position: absolute;
+        width: 1px;
+        height: 1px;
+        overflow: hidden;
+        clip-path: inset(50%);
+    }
+
+    &__indicator {
+        display: grid;
+        place-items: center;
+        flex: 0 0 1.8rem;
+        width: 1.8rem;
+        height: 1.8rem;
+        border: .1rem solid rgba($primary-light, .45);
+        border-radius: 50%;
+        background: radial-gradient(circle at 32% 22%, rgba($white, .2), rgba($primary-light, .04) 65%);
+        box-shadow: 0 .1rem .25rem rgba($white, .13) inset, 0 .2rem .5rem rgba(black, .2);
+        transition: background-color .18s ease, border-color .18s ease, box-shadow .18s ease;
+
+        svg {
+            width: 1.3rem;
+            height: 1.3rem;
+            fill: none;
+            stroke: currentColor;
+            stroke-width: 2.5;
+            stroke-linecap: round;
+            stroke-linejoin: round;
+            opacity: 0;
+        }
+    }
+
+    &__input:checked + &__indicator {
+        border-color: rgba($primary-light, .9);
+        background-color: rgba($primary-light, .25);
+        box-shadow: 0 0 1rem rgba($primary-light, .18), 0 .1rem .3rem rgba($white, .25) inset;
+
+        svg { opacity: 1; }
+    }
+
+    &__input:focus-visible + &__indicator {
+        outline: .2rem solid $primary-light;
+        outline-offset: .3rem;
+    }
+
+    &:has(&__input:disabled) {
+        opacity: .6;
+        cursor: default;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+        &__indicator { transition: none; }
+    }
+
+    @media (forced-colors: active) {
+        &__indicator { border-color: ButtonText; }
+        &__input:checked + &__indicator {
+            forced-color-adjust: none;
+            color: HighlightText;
+            background: Highlight;
+            border-color: Highlight;
+        }
+        &__input:focus-visible + &__indicator { outline-color: Highlight; }
+    }
+}
