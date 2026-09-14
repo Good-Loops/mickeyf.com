@@ -149,6 +149,86 @@ test('explicit Google acquisition loads only the official script and renders a n
     assert.equal(f.scripts[0].removed, false, 'a loaded SDK can be reused without another request');
 });
 
+function inlineHost() {
+    return { clears: 0, replaceChildren() { this.clears++; } };
+}
+
+test('inline Google renders the official button directly, with no selector dialog or automatic login', async () => {
+    const f = fixture();
+    const host = inlineHost();
+    let ready = 0;
+    let received = false;
+    const credential = f.client.acquireGoogleCredentialInline(google, challenge, host, signal(), () => { ready++; });
+    void credential.then(() => { received = true; });
+    await nextTurn();
+    assert.equal(f.controls.popup, null);
+    assert.equal(f.controls.alertOptions, null);
+    assert.equal(f.scripts[0].src, 'https://accounts.google.com/gsi/client');
+    f.loadGoogle();
+    await nextTurn();
+    assert.equal(ready, 1);
+    assert.equal(received, false, 'rendering must not authenticate');
+    assert.equal(f.controls.initialization.nonce, challenge.nonce);
+    assert.equal(f.controls.initialization.auto_select, false);
+    assert.equal(f.controls.rendered.host, host);
+    assert.deepEqual(f.controls.rendered.options, { type: 'standard', theme: 'outline', size: 'large',
+        text: 'continue_with', state: challenge.state });
+    f.completeGoogle();
+    assert.equal(await credential, token);
+    assert.equal(host.clears, 2, 'remove the used button as soon as its credential is delivered');
+    assert.equal(f.controls.closeCount, 0);
+});
+
+test('inline cleanup ignores late Google callbacks and permits a fresh nonce-bound render', async () => {
+    const f = fixture();
+    f.controls.sdk = f.sdk;
+    const host = inlineHost();
+    const controller = new AbortController();
+    const credential = f.client.acquireGoogleCredentialInline(google, challenge, host, controller.signal);
+    const rejected = rejectsCode(credential, 'CANCELLED');
+    await nextTurn();
+    const lateCallback = f.controls.initialization.callback;
+    await rejectsCode(f.client.acquireProviderCredential(google, challenge, signal()), 'UNAVAILABLE');
+    controller.abort();
+    await rejected;
+    assert.equal(host.clears, 2);
+    lateCallback({ credential: token, state: challenge.state });
+    const next = { ...challenge, state: Buffer.alloc(32, 3).toString('base64url'), nonce: Buffer.alloc(32, 4).toString('base64url') };
+    const fresh = f.client.acquireGoogleCredentialInline(google, next, host, signal());
+    await nextTurn();
+    assert.equal(f.controls.initialization.nonce, next.nonce);
+    lateCallback({ credential: token, state: challenge.state });
+    f.completeGoogle({ credential: token, state: next.state });
+    assert.equal(await fresh, token);
+});
+
+test('inline Google rejects a mismatched response without exposing a token or opening an alert', async () => {
+    const f = fixture();
+    f.controls.sdk = f.sdk;
+    const host = inlineHost();
+    const credential = f.client.acquireGoogleCredentialInline(google, challenge, host, signal());
+    const rejected = rejectsCode(credential, 'UNAVAILABLE');
+    await nextTurn();
+    f.completeGoogle({ credential: token, state: 'wrong' });
+    await rejected;
+    assert.equal(host.clears, 2);
+    assert.equal(f.controls.popup, null);
+});
+
+test('inline Google expires without leaving an actionable stale button', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const f = fixture();
+    f.controls.sdk = f.sdk;
+    const host = inlineHost();
+    const credential = f.client.acquireGoogleCredentialInline(google, { ...challenge, expiresInSeconds: 1 }, host, signal());
+    const rejected = rejectsCode(credential, 'CANCELLED');
+    await nextTurn();
+    t.mock.timers.tick(1000);
+    await rejected;
+    assert.equal(host.clears, 2);
+    assert.equal(f.controls.closeCount, 0);
+});
+
 test('Google cancellation during loading removes its script, settles promptly and permits a fresh attempt', async () => {
     const f = fixture();
     const credential = f.client.acquireProviderCredential(google, challenge, signal());

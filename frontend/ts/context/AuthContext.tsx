@@ -12,9 +12,11 @@
  * - The service layer (`services/authService.ts`) owns network/provider calls.
  */
 import { createContext, useContext, useState, ReactNode, useEffect, useRef } from 'react';
-import { loginRequest, logoutRequest, verifyRequest, renewRequest, deleteAccountRequest, runProviderAuthentication } from '@/services/authService';
+import { loginRequest, logoutRequest, verifyRequest, renewRequest, deleteAccountRequest, runProviderAuthentication,
+    prepareProviderLogin as prepareProviderLoginRequest, completeProviderLogin as completeProviderLoginRequest } from '@/services/authService';
 import type { DeleteAccountResponse, ProviderAuthenticationInput, AcquireProviderCredential,
-    ProviderAuthenticationOptions, ProviderAuthenticationResult } from '@/services/authApi';
+    ProviderAuthenticationOptions, ProviderAuthenticationResult, PreparedProviderLogin, PrepareProviderLoginResult,
+    CompleteProviderLoginOptions } from '@/services/authApi';
 import { watchSessionRenewalActivity } from '@/services/sessionRenewalActivity';
 import Swal from '@/components/siteAlert';
 
@@ -30,6 +32,9 @@ type AuthContextType = {
     deleteAccount: (password: string) => Promise<DeleteAccountResponse>;
     authenticateWithProvider: (input: ProviderAuthenticationInput, acquireCredential: AcquireProviderCredential,
         options?: ProviderAuthenticationOptions) => Promise<ProviderAuthenticationResult>;
+    prepareProviderLogin: (clientKey: string, options?: ProviderAuthenticationOptions) => Promise<PrepareProviderLoginResult>;
+    completeProviderLogin: (handle: PreparedProviderLogin, idToken: string,
+        options?: CompleteProviderLoginOptions) => Promise<ProviderAuthenticationResult>;
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -47,6 +52,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [loading, setLoading] = useState(true);
     const authActionVersion = useRef(0);
+    const preparedLoginVersions = useRef(new WeakMap<PreparedProviderLogin, number>());
     const sessionMayExist = useRef(true);
     const renewalActivity = useRef<ReturnType<typeof watchSessionRenewalActivity> | null>(null);
 
@@ -165,6 +171,33 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         return result;
     };
 
+    const prepareProviderLogin: AuthContextType['prepareProviderLogin'] = async (clientKey, options) => {
+        const actionVersion = authActionVersion.current;
+        const result = await prepareProviderLoginRequest(clientKey, options);
+        if (actionVersion !== authActionVersion.current) return { error: 'CANCELLED' };
+        if ('handle' in result) preparedLoginVersions.current.set(result.handle, actionVersion);
+        return result;
+    };
+
+    const completeProviderLogin: AuthContextType['completeProviderLogin'] = async (handle, idToken, options) => {
+        const actionVersion = preparedLoginVersions.current.get(handle);
+        preparedLoginVersions.current.delete(handle);
+        if (actionVersion === undefined || actionVersion !== authActionVersion.current) return { error: 'CANCELLED' };
+        const result = await completeProviderLoginRequest(handle, idToken, options);
+        if (actionVersion !== authActionVersion.current) return { error: 'CANCELLED' };
+        if ('user_name' in result) {
+            // An idle button or rejected late callback must never supersede a
+            // password login. Claim the action only after verified completion.
+            authActionVersion.current++;
+            setLoading(false);
+            setIsAuthenticated(true);
+            setUserName(result.user_name);
+            sessionMayExist.current = true;
+            renewalActivity.current?.resetCooldown();
+        }
+        return result;
+    };
+
     /**
      * Clears local auth state only after the backend confirms sign-out.
      *
@@ -224,7 +257,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     return (
         <AuthContext.Provider
-            value={{ userName, isAuthenticated, loading, login, logout, deleteAccount, authenticateWithProvider }}
+            value={{ userName, isAuthenticated, loading, login, logout, deleteAccount, authenticateWithProvider,
+                prepareProviderLogin, completeProviderLogin }}
         >
             {children}
         </AuthContext.Provider>

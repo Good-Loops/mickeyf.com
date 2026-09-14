@@ -21,6 +21,14 @@
         gap: 1rem;
     }
 
+    &__google-host {
+        display: flex;
+        justify-content: center;
+        min-height: 44px;
+
+        &[inert] { opacity: .55; pointer-events: none; }
+    }
+
     &__button {
         flex: 1 1 15rem;
         min-height: 44px;

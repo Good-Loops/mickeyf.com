@@ -786,3 +786,259 @@ test('provider inputs are captured before queueing and omitted rememberMe stays 
     await logout;
     assert.deepEqual(await login, { success: true, user_name: 'Player' });
 });
+
+test('prepared provider login releases the idle queue and sends only server-owned challenge fields on completion', async () => {
+    const calls = [];
+    const api = createAuthApi(apiBase, async (url, init) => {
+        calls.push(url);
+        assert.equal(init.credentials, 'include');
+        assert.equal(init.signal, undefined);
+        if (url.endsWith('/begin')) {
+            assert.deepEqual(JSON.parse(init.body), { action: 'login', clientKey: 'google-web' });
+            return Response.json(providerChallenge);
+        }
+        if (url.endsWith('/auth/renew')) return Response.json({ loggedIn: false });
+        if (url.endsWith('/complete')) {
+            assert.deepEqual(JSON.parse(init.body), { action: 'login', clientKey: 'google-web',
+                state: providerChallenge.state, idToken: providerToken, rememberMe: true });
+            return Response.json({ success: true, user_name: 'Player' });
+        }
+        return Response.json({ loggedIn: true, user_name: 'Player' });
+    });
+    const prepared = await api.prepareProviderLogin('google-web');
+    assert.deepEqual(prepared.challenge, providerChallenge);
+    assert.equal(Object.isFrozen(prepared.challenge), true);
+    assert.throws(() => { prepared.challenge.state = 'caller-supplied-state'; }, TypeError);
+    prepared.challenge = { ...prepared.challenge, state: 'caller-supplied-state' };
+    assert.equal(Object.isFrozen(prepared.handle), true);
+    assert.deepEqual(Object.keys(prepared.handle), [], 'state, cookie proof and client selection stay private');
+    assert.deepEqual(await api.renewRequest(), { loggedIn: false }, 'idle provider cannot block anonymous renewal');
+    assert.deepEqual(await api.completeProviderLogin(prepared.handle, providerToken, { rememberMe: true }),
+        { success: true, user_name: 'Player' });
+    assert.deepEqual(calls, ['/auth/providers/begin', '/auth/renew', '/auth/providers/complete', '/auth/verify-token']
+        .map(path => apiBase + path));
+});
+
+test('prepared login does not hold up password login, and its late credential cannot follow the newer password intent', async () => {
+    const calls = [];
+    const api = createAuthApi(apiBase, async url => {
+        calls.push(url);
+        if (url.endsWith('/begin')) return Response.json(providerChallenge);
+        if (url.endsWith('/api/users')) return Response.json({ success: true, user_name: 'Player' });
+        if (url.endsWith('/auth/verify-token')) return Response.json({ loggedIn: true, user_name: 'Player' });
+        assert.fail('stale provider completion must not be sent');
+    });
+    const prepared = await api.prepareProviderLogin('google-web');
+    const passwordLogin = api.loginRequest(credentials);
+    assert.deepEqual(await api.completeProviderLogin(prepared.handle, providerToken), { error: 'CANCELLED' });
+    assert.deepEqual(await passwordLogin, { success: true, user_name: 'Player' });
+    assert.equal(calls.length, 3);
+});
+
+test('a prepared handle belongs to one API instance and cannot be forged, copied or completed twice', async () => {
+    const calls = [];
+    const api = createAuthApi(apiBase, async (url, init) => {
+        calls.push(url);
+        if (url.endsWith('/begin')) return Response.json(providerChallenge);
+        if (url.endsWith('/complete')) {
+            assert.equal(JSON.parse(init.body).rememberMe, false);
+            return Response.json({ success: true, user_name: 'Player' });
+        }
+        return Response.json({ loggedIn: true, user_name: 'Player' });
+    });
+    const otherApi = createAuthApi(apiBase, async () => assert.fail('foreign handle cannot send a request'));
+    const prepared = await api.prepareProviderLogin('google-web');
+    for (const handle of [null, undefined, '', 1, {}, { ...prepared.handle }, { state: providerChallenge.state }]) {
+        assert.deepEqual(await api.completeProviderLogin(handle, providerToken), { error: 'INVALID_ATTEMPT' });
+    }
+    assert.deepEqual(await otherApi.completeProviderLogin(prepared.handle, providerToken), { error: 'INVALID_ATTEMPT' });
+    const first = api.completeProviderLogin(prepared.handle, providerToken);
+    assert.deepEqual(await api.completeProviderLogin(prepared.handle, providerToken), { error: 'INVALID_ATTEMPT' });
+    assert.deepEqual(await first, { success: true, user_name: 'Player' });
+    assert.equal(calls.length, 3);
+});
+
+test('split provider methods reject malformed options, caller challenge fields and oversized tokens', async () => {
+    const calls = [];
+    const api = createAuthApi(apiBase, async url => { calls.push(url); return Response.json(providerChallenge); });
+    for (const clientKey of [null, undefined, '', '../google', 'A'.repeat(65)]) {
+        assert.deepEqual(await api.prepareProviderLogin(clientKey), { error: 'INVALID_REQUEST' });
+    }
+    for (const options of [null, [], { signal: {} }, { nonce: providerChallenge.nonce }, { rememberMe: true }]) {
+        assert.deepEqual(await api.prepareProviderLogin('google-web', options), { error: 'INVALID_REQUEST' });
+    }
+    assert.equal(calls.length, 0);
+    const prepared = await api.prepareProviderLogin('google-web');
+    for (const options of [null, [], { signal: false }, { rememberMe: 'true' }, { password: 'private' },
+        { state: providerChallenge.state }, { clientKey: 'apple-ios' }]) {
+        assert.deepEqual(await api.completeProviderLogin(prepared.handle, providerToken, options), { error: 'INVALID_REQUEST' });
+    }
+    for (const token of [null, '', 'not.jwt', 'a.b.' + 'c'.repeat(16_384)]) {
+        const attempt = await api.prepareProviderLogin('google-web');
+        assert.deepEqual(await api.completeProviderLogin(attempt.handle, token), { error: 'INVALID_PROVIDER_TOKEN' });
+        assert.deepEqual(await api.completeProviderLogin(attempt.handle, providerToken), { error: 'INVALID_ATTEMPT' });
+    }
+    assert.ok(calls.every(url => url.endsWith('/begin')));
+});
+
+test('new provider preparation and every explicit auth mutation invalidate earlier prepared handles immediately', async () => {
+    for (const mutate of [api => api.prepareProviderLogin('apple-ios'), api => api.signupRequest(registration),
+        api => api.logoutRequest(), api => api.deleteAccountRequest('password'),
+        api => api.runProviderAuthentication(providerInput, async () => providerToken)]) {
+        const api = createAuthApi(apiBase, async url => {
+            if (url.endsWith('/begin')) return Response.json(providerChallenge);
+            if (url.endsWith('/auth/logout')) return Response.json({ loggedOut: true });
+            if (url.endsWith('/auth/delete-account')) return Response.json({ deleted: true });
+            if (url.endsWith('/auth/verify-token')) return Response.json({ loggedIn: true, user_name: 'Player' });
+            return Response.json({ success: true, user_name: 'Player' });
+        });
+        const prepared = await api.prepareProviderLogin('google-web');
+        const mutation = mutate(api);
+        assert.deepEqual(await api.completeProviderLogin(prepared.handle, providerToken), { error: 'CANCELLED' });
+        await mutation;
+    }
+});
+
+test('an authenticated or uncertain renewal invalidates a queued provider completion before its transport starts', async () => {
+    for (const response of [{ loggedIn: true, user_name: 'Player' }, { loggedIn: true }, null]) {
+        let releaseRenewal;
+        const renewalResponse = new Promise(resolve => { releaseRenewal = resolve; });
+        const calls = [];
+        const api = createAuthApi(apiBase, async url => {
+            calls.push(url);
+            if (url.endsWith('/begin')) return Response.json(providerChallenge);
+            if (url.endsWith('/auth/renew')) {
+                await renewalResponse;
+                if (response === null) throw new Error('uncertain cookie rotation');
+                return Response.json(response);
+            }
+            assert.fail('completion cannot use a possibly replaced cookie binding');
+        });
+        const prepared = await api.prepareProviderLogin('google-web');
+        const renewal = api.renewRequest().catch(() => undefined);
+        const completion = api.completeProviderLogin(prepared.handle, providerToken);
+        await nextTurn();
+        releaseRenewal();
+        await renewal;
+        assert.deepEqual(await completion, { error: 'CANCELLED' });
+        assert.equal(calls.length, 2);
+    }
+});
+
+test('prepared challenge lifetime counts begin response latency and is checked again before queued completion', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+    for (const expireDuringBegin of [true, false]) {
+        let release;
+        const blocked = new Promise(resolve => { release = resolve; });
+        const api = createAuthApi(apiBase, async url => {
+            if (url.endsWith('/begin')) {
+                if (expireDuringBegin) await blocked;
+                return Response.json({ ...providerChallenge, expiresInSeconds: 1 });
+            }
+            if (url.endsWith('/auth/renew')) { await blocked; return Response.json({ loggedIn: false }); }
+            assert.fail('expired challenge cannot send completion');
+        });
+        const preparing = api.prepareProviderLogin('google-web');
+        if (expireDuringBegin) {
+            await nextTurn();
+            t.mock.timers.tick(1000);
+            release();
+            assert.deepEqual(await preparing, { error: 'INVALID_ATTEMPT' });
+        } else {
+            const prepared = await preparing;
+            const renewal = api.renewRequest();
+            const completion = api.completeProviderLogin(prepared.handle, providerToken);
+            await nextTurn();
+            t.mock.timers.tick(1000);
+            release();
+            await renewal;
+            assert.deepEqual(await completion, { error: 'INVALID_ATTEMPT' });
+        }
+    }
+});
+
+test('cancelled preparation sends nothing if queued, but awaits an already-sent cookie mutation before releasing password login', async () => {
+    const cancelled = new AbortController();
+    cancelled.abort();
+    const noFetch = createAuthApi(apiBase, async () => assert.fail('aborted preparation cannot fetch'));
+    assert.deepEqual(await noFetch.prepareProviderLogin('google-web', { signal: cancelled.signal }), { error: 'CANCELLED' });
+    const controller = new AbortController();
+    let releaseBegin;
+    const begin = new Promise(resolve => { releaseBegin = resolve; });
+    const calls = [];
+    const api = createAuthApi(apiBase, async url => {
+        calls.push(url);
+        if (url.endsWith('/begin')) { await begin; return Response.json(providerChallenge); }
+        if (url.endsWith('/api/users')) return Response.json({ success: true, user_name: 'Player' });
+        return Response.json({ loggedIn: true, user_name: 'Player' });
+    });
+    const preparation = api.prepareProviderLogin('google-web', { signal: controller.signal });
+    await nextTurn();
+    controller.abort();
+    const passwordLogin = api.loginRequest(credentials);
+    await nextTurn();
+    assert.equal(calls.length, 1);
+    releaseBegin();
+    assert.deepEqual(await preparation, { error: 'CANCELLED' });
+    assert.deepEqual(await passwordLogin, { success: true, user_name: 'Player' });
+    assert.equal(calls.length, 3);
+});
+
+test('cancelling an idle or queued prepared completion ignores late credentials without changing cookies', async () => {
+    for (const useCompletionSignal of [false, true]) {
+        const controller = new AbortController();
+        const calls = [];
+        const api = createAuthApi(apiBase, async url => {
+            calls.push(url);
+            return Response.json(url.endsWith('/begin') ? providerChallenge : { loggedIn: false });
+        });
+        const prepared = await api.prepareProviderLogin('google-web', useCompletionSignal ? {} : { signal: controller.signal });
+        const completion = api.completeProviderLogin(prepared.handle, providerToken,
+            useCompletionSignal ? { signal: controller.signal } : {});
+        controller.abort();
+        assert.deepEqual(await completion, { error: 'CANCELLED' });
+        assert.equal(calls.length, 1);
+    }
+});
+
+test('split completion waits for accepted cookie response and verification despite cancellation before queued logout', async () => {
+    const controller = new AbortController();
+    let releaseComplete;
+    let releaseVerification;
+    const completed = new Promise(resolve => { releaseComplete = resolve; });
+    const verified = new Promise(resolve => { releaseVerification = resolve; });
+    const calls = [];
+    const api = createAuthApi(apiBase, async url => {
+        if (url.endsWith('/begin')) { calls.push('begin'); return Response.json(providerChallenge); }
+        if (url.endsWith('/complete')) {
+            calls.push('complete'); await completed;
+            return Response.json({ success: true, user_name: 'Player' });
+        }
+        if (url.endsWith('/auth/verify-token')) {
+            calls.push('verify'); await verified;
+            return Response.json({ loggedIn: true, user_name: 'Player' });
+        }
+        calls.push('logout'); return Response.json({ loggedOut: true });
+    });
+    const prepared = await api.prepareProviderLogin('google-web', { signal: controller.signal });
+    const completion = api.completeProviderLogin(prepared.handle, providerToken);
+    await nextTurn();
+    controller.abort();
+    const logout = api.logoutRequest();
+    await nextTurn();
+    assert.deepEqual(calls, ['begin', 'complete']);
+    releaseComplete();
+    await nextTurn();
+    assert.deepEqual(calls, ['begin', 'complete', 'verify']);
+    releaseVerification();
+    assert.deepEqual(await completion, { success: true, user_name: 'Player' });
+    await logout;
+    assert.deepEqual(calls, ['begin', 'complete', 'verify', 'logout']);
+});
+
+test('split completion requires the same exact saved-cookie verification as the original provider flow', async () => {
+    const api = createAuthApi(apiBase, async url => Response.json(url.endsWith('/begin') ? providerChallenge
+        : url.endsWith('/complete') ? { success: true, user_name: 'Player' } : { loggedIn: false }));
+    const prepared = await api.prepareProviderLogin('google-web');
+    assert.deepEqual(await api.completeProviderLogin(prepared.handle, providerToken), { error: 'SESSION_NOT_ESTABLISHED' });
+});

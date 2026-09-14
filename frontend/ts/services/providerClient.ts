@@ -156,6 +156,44 @@ export function createProviderClient(dependencies: ProviderClientDependencies) {
         return googleLoad;
     }
 
+    function renderGoogleCredential(client: PublicProviderClient, challenge: ProviderAuthenticationChallenge,
+        host: HTMLElement, signal: AbortSignal, onReady?: () => void): Promise<string> {
+        return new Promise((resolve, reject) => {
+            let settled = false;
+            const finish = (token?: string, error?: ProviderCredentialError) => {
+                if (settled) return;
+                settled = true;
+                signal.removeEventListener('abort', abort);
+                host.replaceChildren();
+                if (error) reject(error);
+                else resolve(token!);
+            };
+            const abort = () => finish(undefined, new ProviderCredentialError('CANCELLED'));
+            signal.addEventListener('abort', abort, { once: true });
+            if (signal.aborted) { abort(); return; }
+            void loadGoogle(signal).then(sdk => {
+                if (settled || signal.aborted) return;
+                sdk.initialize({ client_id: client.clientId, nonce: challenge.nonce,
+                    ux_mode: 'popup', auto_select: false, button_auto_select: false,
+                    callback(response) {
+                        if (settled) return;
+                        try {
+                            if (!isRecord(response) || response.state !== challenge.state) {
+                                throw new ProviderCredentialError('UNAVAILABLE');
+                            }
+                            finish(readToken(response.credential));
+                        } catch { finish(undefined, new ProviderCredentialError('UNAVAILABLE')); }
+                    },
+                });
+                host.replaceChildren();
+                // Only a real click on Google's official control opens sign-in; never One Tap or a synthetic click.
+                sdk.renderButton(host, { type: 'standard', theme: 'outline', size: 'large',
+                    text: 'continue_with', state: challenge.state });
+                onReady?.();
+            }).catch(error => finish(undefined, sanitizedError(error)));
+        });
+    }
+
     function googleCredential(client: PublicProviderClient, challenge: ProviderAuthenticationChallenge, signal: AbortSignal): Promise<string> {
         if (alert.isVisible()) return Promise.reject(new ProviderCredentialError('UNAVAILABLE'));
         return new Promise<string>((resolve, reject) => {
@@ -184,25 +222,9 @@ export function createProviderClient(dependencies: ProviderClientDependencies) {
                     showCancelButton: true, cancelButtonText: 'Cancel', allowOutsideClick: false,
                     didOpen(element) {
                         popup = element;
-                        void loadGoogle(signal).then(sdk => {
-                            if (settled || signal.aborted || alert.getPopup() !== popup) return;
-                            sdk.initialize({ client_id: client.clientId, nonce: challenge.nonce,
-                                ux_mode: 'popup', auto_select: false, button_auto_select: false,
-                                callback(response) {
-                                    if (settled) return;
-                                    try {
-                                        if (!isRecord(response) || response.state !== challenge.state) {
-                                            throw new ProviderCredentialError('UNAVAILABLE');
-                                        }
-                                        finish(readToken(response.credential));
-                                    } catch { finish(undefined, new ProviderCredentialError('UNAVAILABLE')); }
-                                },
-                            });
-                            host.replaceChildren();
-                            // The user clicks Google's official button; no One Tap or synthetic click starts sign-in.
-                            sdk.renderButton(host, { type: 'standard', theme: 'outline', size: 'large',
-                                text: 'continue_with', state: challenge.state });
-                        }).catch(error => finish(undefined, sanitizedError(error)));
+                        if (settled || signal.aborted) return;
+                        void renderGoogleCredential(client, challenge, host, signal)
+                            .then(token => finish(token)).catch(error => finish(undefined, sanitizedError(error)));
                     },
                     willClose: dismissed,
                     didDestroy: dismissed,
@@ -229,9 +251,10 @@ export function createProviderClient(dependencies: ProviderClientDependencies) {
     }
 
     async function acquireProviderCredential(client: PublicProviderClient, challenge: ProviderAuthenticationChallenge,
-        signal: AbortSignal): Promise<string> {
+        signal: AbortSignal, inline?: { host: HTMLElement; onReady?: () => void }): Promise<string> {
         const selected = readClient(client);
         if (!selected || acquiring || (selected.platform === 'web' ? !web : !ios)
+            || (inline && selected.clientKey !== 'google-web')
             || !isRecord(challenge) || Object.keys(challenge).sort().join(',') !== 'expiresInSeconds,nonce,state'
             || typeof challenge.state !== 'string' || !RANDOM_VALUE.test(challenge.state)
             || typeof challenge.nonce !== 'string' || !RANDOM_VALUE.test(challenge.nonce)
@@ -240,14 +263,22 @@ export function createProviderClient(dependencies: ProviderClientDependencies) {
         }
         acquiring = true;
         try {
-            return await cancellable(activeSignal => selected.platform === 'web'
+            return await cancellable(activeSignal => inline
+                ? renderGoogleCredential(selected, challenge, inline.host, activeSignal, inline.onReady)
+                : selected.platform === 'web'
                 ? googleCredential(selected, challenge, activeSignal) : nativeCredential(selected, challenge, activeSignal),
             challenge.expiresInSeconds * 1000, signal);
         } catch (error) { throw sanitizedError(error); }
         finally { acquiring = false; }
     }
 
-    return { getAvailableProviderClients, acquireProviderCredential };
+    return {
+        getAvailableProviderClients,
+        acquireProviderCredential,
+        acquireGoogleCredentialInline: (client: PublicProviderClient, challenge: ProviderAuthenticationChallenge,
+            host: HTMLElement, signal: AbortSignal, onReady?: () => void) =>
+            acquireProviderCredential(client, challenge, signal, { host, onReady }),
+    };
 }
 
 let configured: Promise<ReturnType<typeof createProviderClient>> | undefined;
@@ -275,5 +306,12 @@ export async function getAvailableProviderClients(): Promise<PublicProviderClien
 export async function acquireProviderCredential(client: PublicProviderClient, challenge: ProviderAuthenticationChallenge,
     signal: AbortSignal): Promise<string> {
     try { return await (await configuredClient()).acquireProviderCredential(client, challenge, signal); }
+    catch (error) { throw sanitizedError(error); }
+}
+
+/** Render the official button in the login form, without adding an intermediate dialog. */
+export async function acquireGoogleCredentialInline(client: PublicProviderClient, challenge: ProviderAuthenticationChallenge,
+    host: HTMLElement, signal: AbortSignal, onReady?: () => void): Promise<string> {
+    try { return await (await configuredClient()).acquireGoogleCredentialInline(client, challenge, host, signal, onReady); }
     catch (error) { throw sanitizedError(error); }
 }

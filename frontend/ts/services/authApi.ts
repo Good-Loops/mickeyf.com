@@ -29,6 +29,13 @@ export type ProviderAuthenticationResult =
     | { error: string };
 export type AcquireProviderCredential = (challenge: ProviderAuthenticationChallenge, signal: AbortSignal) => Promise<string>;
 export type ProviderAuthenticationOptions = Readonly<{ signal?: AbortSignal }>;
+declare const preparedProviderLogin: unique symbol;
+/** Only the auth API instance that prepared this opaque handle can complete it. */
+export type PreparedProviderLogin = Readonly<{ [preparedProviderLogin]: true }>;
+export type PrepareProviderLoginResult =
+    | { challenge: ProviderAuthenticationChallenge; handle: PreparedProviderLogin }
+    | { error: string };
+export type CompleteProviderLoginOptions = ProviderAuthenticationOptions & Readonly<{ rememberMe?: boolean }>;
 
 const PROVIDER_TOKEN_MAX_LENGTH = 16_384;
 const PROVIDER_RANDOM_VALUE = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
@@ -63,6 +70,17 @@ function validProviderOptions(options: unknown): options is ProviderAuthenticati
     const signal = options.signal;
     return signal === undefined || (isRecord(signal) && typeof signal.aborted === 'boolean'
         && typeof signal.addEventListener === 'function' && typeof signal.removeEventListener === 'function');
+}
+
+function validCompletionOptions(options: unknown): options is CompleteProviderLoginOptions {
+    return isRecord(options) && Object.keys(options).every(key => key === 'signal' || key === 'rememberMe')
+        && (options.rememberMe === undefined || typeof options.rememberMe === 'boolean')
+        && validProviderOptions({ signal: options.signal });
+}
+
+function validProviderToken(idToken: unknown): idToken is string {
+    return typeof idToken === 'string' && idToken.length <= PROVIDER_TOKEN_MAX_LENGTH
+        && /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(idToken);
 }
 
 function readProviderChallenge(value: unknown): ProviderAuthenticationChallenge | null {
@@ -101,8 +119,7 @@ async function acquireProviderToken(challenge: ProviderAuthenticationChallenge, 
             if (cancellation !== null) return { error: cancellation };
             try {
                 const idToken = await acquireCredential(challenge, controller.signal);
-                if (typeof idToken !== 'string' || idToken.length > PROVIDER_TOKEN_MAX_LENGTH
-                    || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(idToken)) {
+                if (!validProviderToken(idToken)) {
                     return { error: 'INVALID_PROVIDER_TOKEN' };
                 }
                 return { idToken };
@@ -117,6 +134,21 @@ async function acquireProviderToken(challenge: ProviderAuthenticationChallenge, 
 
 export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetch) {
     let pendingMutation: Promise<void> = Promise.resolve();
+    let providerLoginGeneration = 0;
+    type PreparedLogin = {
+        clientKey: string; state: string; deadline: number;
+        generation: number; signal?: AbortSignal; used: boolean;
+    };
+    const preparedLogins = new WeakMap<PreparedProviderLogin, PreparedLogin>();
+
+    function invalidatePreparedLogins(): void {
+        providerLoginGeneration++;
+    }
+
+    function preparedLoginError(login: PreparedLogin, signal?: AbortSignal): string | null {
+        if (login.signal?.aborted || signal?.aborted || login.generation !== providerLoginGeneration) return 'CANCELLED';
+        return Date.now() >= login.deadline ? 'INVALID_ATTEMPT' : null;
+    }
 
     function enqueueMutation<Result>(operation: () => Promise<Result>): Promise<Result> {
         // Set-Cookie takes effect before React sees a response. Serialize the
@@ -279,10 +311,15 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
         if (signal?.aborted) return { error: 'CANCELLED' };
         if ('error' in credential) return credential;
         if (Date.now() >= deadline) return { error: 'INVALID_ATTEMPT' };
+        return completeProviderAuthentication(input, challenge.state, credential.idToken);
+    }
+
+    async function completeProviderAuthentication(input: ProviderAuthenticationInput, state: string,
+        idToken: string): Promise<ProviderAuthenticationResult> {
         // Once complete is sent, await its cookie mutation and verification even
         // if UI cancellation arrives. Cancelling cannot undo a server-side login.
         const completion = await postProviderOperation('complete', {
-            action: input.action, clientKey: input.clientKey, state: challenge.state, idToken: credential.idToken,
+            action: input.action, clientKey: input.clientKey, state, idToken,
             ...(input.action === 'login' ? { rememberMe: input.rememberMe === true } : { password: input.password }),
         });
         if (!completion.ok) return { error: completion.error };
@@ -306,19 +343,84 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
         return { success: true, user_name: result.user_name };
     }
 
+    function prepareProviderLogin(clientKey: string, options: ProviderAuthenticationOptions = {}): Promise<PrepareProviderLoginResult> {
+        if (!validProviderInput({ action: 'login', clientKey }) || !validProviderOptions(options)) {
+            return Promise.resolve({ error: 'INVALID_REQUEST' });
+        }
+        const signal = options.signal;
+        if (signal?.aborted) return Promise.resolve({ error: 'CANCELLED' });
+        const generation = ++providerLoginGeneration;
+        return enqueueMutation(async () => {
+            if (signal?.aborted || generation !== providerLoginGeneration) return { error: 'CANCELLED' };
+            const startedAt = Date.now();
+            // Begin changes the cookie too. Even an abandoned render must wait
+            // for this response before a password login can use the queue.
+            const beginning = await postProviderOperation('begin', { action: 'login', clientKey });
+            if (signal?.aborted || generation !== providerLoginGeneration) return { error: 'CANCELLED' };
+            if (!beginning.ok) return { error: beginning.error };
+            const challenge = readProviderChallenge(beginning.body);
+            if (!challenge) return { error: 'INVALID_RESPONSE' };
+            const deadline = startedAt + challenge.expiresInSeconds * 1000;
+            if (Date.now() >= deadline) return { error: 'INVALID_ATTEMPT' };
+            const handle = Object.freeze({}) as PreparedProviderLogin;
+            preparedLogins.set(handle, { clientKey, state: challenge.state, deadline, generation, signal, used: false });
+            return { challenge, handle };
+        });
+    }
+
+    function completeProviderLogin(handle: PreparedProviderLogin, idToken: string,
+        options: CompleteProviderLoginOptions = {}): Promise<ProviderAuthenticationResult> {
+        if (!validCompletionOptions(options)) return Promise.resolve({ error: 'INVALID_REQUEST' });
+        const login = isRecord(handle) ? preparedLogins.get(handle) : undefined;
+        if (!login || login.used) return Promise.resolve({ error: 'INVALID_ATTEMPT' });
+        login.used = true;
+        const signal = options.signal;
+        const error = preparedLoginError(login, signal);
+        if (error) return Promise.resolve({ error });
+        if (!validProviderToken(idToken)) return Promise.resolve({ error: 'INVALID_PROVIDER_TOKEN' });
+        const rememberMe = options.rememberMe === true;
+        return enqueueMutation(async () => {
+            const queuedError = preparedLoginError(login, signal);
+            if (queuedError) return { error: queuedError };
+            return completeProviderAuthentication({ action: 'login', clientKey: login.clientKey, rememberMe },
+                login.state, idToken);
+        });
+    }
+
     return {
         loginRequest: (payload: LoginPayload) => {
+            invalidatePreparedLogins();
             const request = { ...payload };
             return enqueueMutation(() => loginRequest(request));
         },
         signupRequest: (payload: SignupPayload) => {
+            invalidatePreparedLogins();
             const request = { ...payload };
             return enqueueMutation(() => signupRequest(request));
         },
         verifyRequest,
-        renewRequest: () => enqueueMutation(renewRequest),
-        logoutRequest: () => enqueueMutation(logoutRequest),
-        deleteAccountRequest: (password: string) => enqueueMutation(() => deleteAccountRequest(password)),
+        renewRequest: () => enqueueMutation(async () => {
+            try {
+                const result = await renewRequest();
+                // Anonymous renewal leaves the provider binding untouched.
+                // Authenticated/uncertain renewal may have rotated its cookie.
+                if (result.loggedIn) invalidatePreparedLogins();
+                return result;
+            } catch (error) {
+                invalidatePreparedLogins();
+                throw error;
+            }
+        }),
+        logoutRequest: () => {
+            invalidatePreparedLogins();
+            return enqueueMutation(logoutRequest);
+        },
+        deleteAccountRequest: (password: string) => {
+            invalidatePreparedLogins();
+            return enqueueMutation(() => deleteAccountRequest(password));
+        },
+        prepareProviderLogin,
+        completeProviderLogin,
         runProviderAuthentication: (input: ProviderAuthenticationInput, acquireCredential: AcquireProviderCredential,
             options: ProviderAuthenticationOptions = {}): Promise<ProviderAuthenticationResult> => {
             if (!validProviderInput(input) || typeof acquireCredential !== 'function' || !validProviderOptions(options)) {
@@ -326,6 +428,7 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
             }
             const request = { ...input };
             const signal = options.signal;
+            invalidatePreparedLogins();
             // Keep the provider dialog in the queue too: another auth mutation
             // would replace or clear the cookie binding the pending challenge.
             return enqueueMutation(() => runProviderAuthentication(request, acquireCredential, signal));

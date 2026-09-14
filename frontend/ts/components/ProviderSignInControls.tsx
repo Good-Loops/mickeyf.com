@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
 import { useAuth } from '@/context/AuthContext';
-import { acquireProviderCredential, getAvailableProviderClients, type PublicProviderClient } from '@/services/providerClient';
+import { acquireGoogleCredentialInline, acquireProviderCredential, getAvailableProviderClients,
+    type PublicProviderClient } from '@/services/providerClient';
 import Swal from './siteAlert';
 
 type ProviderAction = 'login' | 'link';
@@ -32,7 +33,7 @@ export function providerSignInErrorMessage(error: string, action: ProviderAction
     }
 }
 
-/** Neutral account selectors; the SDK/helper presents the provider's own sign-in controls. */
+/** Linking and native flows still use the provider helper's explicit dialog. */
 export function ProviderSignInButtons({ clients, action, busyClient, disabled, onSelect }: {
     clients: readonly PublicProviderClient[];
     action: ProviderAction;
@@ -41,14 +42,14 @@ export function ProviderSignInButtons({ clients, action, busyClient, disabled, o
     onSelect: (client: PublicProviderClient) => void;
 }) {
     const headingId = useId();
-    if (clients.length === 0) return null;
+    const choices = action === 'link' ? clients : clients.filter(client => client.clientKey !== 'google-web');
+    if (choices.length === 0) return null;
     return (
-        <div className="provider-sign-in__choices" role="group" aria-labelledby={headingId} aria-busy={busyClient !== null}>
-            <h2 className="provider-sign-in__heading" id={headingId}>
-                {action === 'link' ? 'Link a sign-in method' : 'Or sign in with:'}
-            </h2>
+        <div className="provider-sign-in__choices" role="group" aria-labelledby={action === 'link' ? headingId : undefined}
+            aria-label={action === 'login' ? 'Other sign-in methods' : undefined} aria-busy={busyClient !== null}>
+            {action === 'link' && <h2 className="provider-sign-in__heading" id={headingId}>Link a sign-in method</h2>}
             <div className="provider-sign-in__buttons">
-                {clients.map(client => (
+                {choices.map(client => (
                     <button className="provider-sign-in__button" type="button" key={client.clientKey}
                         disabled={disabled || busyClient !== null} onClick={() => onSelect(client)}>
                         {busyClient === client.clientKey ? 'Please wait…'
@@ -56,6 +57,93 @@ export function ProviderSignInButtons({ clients, action, busyClient, disabled, o
                     </button>
                 ))}
             </div>
+        </div>
+    );
+}
+
+/** Preparation does not lock the password form; only a returned credential claims it. */
+export function InlineGoogleSignIn({ client, rememberMe = false, disabled = false,
+    operationLock, onBusyChange, onSuccess }: Omit<ProviderSignInControlsProps, 'action'> & {
+        client: PublicProviderClient;
+    }) {
+    const { prepareProviderLogin, completeProviderLogin, loading, isAuthenticated } = useAuth();
+    const host = useRef<HTMLDivElement>(null);
+    const latest = useRef({ prepareProviderLogin, completeProviderLogin, rememberMe, disabled,
+        isAuthenticated, operationLock, onBusyChange, onSuccess });
+    latest.current = { prepareProviderLogin, completeProviderLogin, rememberMe, disabled,
+        isAuthenticated, operationLock, onBusyChange, onSuccess };
+    const [retry, setRetry] = useState(0);
+    const [phase, setPhase] = useState<'preparing' | 'ready' | 'completing' | 'retry'>('preparing');
+    const [feedback, setFeedback] = useState<string | null>(null);
+
+    useEffect(() => {
+        if (disabled || loading || !host.current || latest.current.isAuthenticated) return;
+        const element = host.current;
+        const controller = new AbortController();
+        let current = true;
+        let ownsOperation = false;
+        let claimedLock: ProviderSignInControlsProps['operationLock'];
+        const active = () => current && !controller.signal.aborted;
+        const fail = (code: string) => {
+            setPhase('retry');
+            setFeedback(code === 'CANCELLED'
+                ? 'Google sign-in expired or changed. Please try again.'
+                : providerSignInErrorMessage(code, 'login'));
+        };
+        setPhase('preparing');
+        setFeedback(null);
+        void (async () => {
+            try {
+                const prepared = await latest.current.prepareProviderLogin(client.clientKey, { signal: controller.signal });
+                if (!active()) return;
+                if ('error' in prepared) { fail(prepared.error); return; }
+                const idToken = await acquireGoogleCredentialInline(client, prepared.challenge, element,
+                    controller.signal, () => { if (active()) setPhase('ready'); });
+                if (!active()) return;
+                if (latest.current.disabled || latest.current.isAuthenticated || latest.current.operationLock?.current) {
+                    fail('CANCELLED');
+                    return;
+                }
+                claimedLock = latest.current.operationLock;
+                if (claimedLock) claimedLock.current = true;
+                ownsOperation = true;
+                setPhase('completing');
+                latest.current.onBusyChange?.(true);
+                const result = await latest.current.completeProviderLogin(prepared.handle, idToken,
+                    { rememberMe: latest.current.rememberMe, signal: controller.signal });
+                if (!active()) return;
+                if ('error' in result) { fail(result.error); return; }
+                latest.current.onSuccess?.();
+            } catch (error) {
+                if (active()) fail(error && typeof error === 'object' && 'code' in error && error.code === 'CANCELLED'
+                    ? 'CANCELLED' : 'UNAVAILABLE');
+            } finally {
+                if (ownsOperation) {
+                    if (claimedLock) claimedLock.current = false;
+                    latest.current.onBusyChange?.(false);
+                }
+            }
+        })();
+        return () => {
+            current = false;
+            controller.abort();
+        };
+        // Callback identities, typing and remember-me changes must not create new attempts.
+    }, [client, disabled, loading, retry]);
+
+    return (
+        <div className="provider-sign-in__google" aria-busy={phase === 'preparing' || phase === 'completing'}>
+            <div ref={host} className="provider-sign-in__google-host" role="group" aria-label="Continue with Google"
+                inert={disabled || phase !== 'ready'} aria-disabled={disabled || phase !== 'ready'} />
+            {!disabled && phase === 'preparing' && <p className="provider-sign-in__feedback" role="status">Loading Google sign-in…</p>}
+            {phase === 'completing' && <p className="provider-sign-in__feedback" role="status">Signing in…</p>}
+            {phase === 'retry' && <>
+                {feedback && <p className="provider-sign-in__feedback provider-sign-in__feedback--error" role="alert">{feedback}</p>}
+                <button className="provider-sign-in__button" type="button" disabled={disabled}
+                    onClick={() => { if (!latest.current.operationLock?.current) setRetry(value => value + 1); }}>
+                    Retry Google sign-in
+                </button>
+            </>}
         </div>
     );
 }
@@ -164,8 +252,12 @@ export default function ProviderSignInControls({ action, rememberMe = false, dis
     };
 
     if (clients.length === 0) return null;
+    const inlineGoogle = action === 'login' ? clients.find(client => client.clientKey === 'google-web') : undefined;
     return (
         <div className="provider-sign-in">
+            {inlineGoogle && <InlineGoogleSignIn client={inlineGoogle} rememberMe={rememberMe}
+                disabled={disabled || busyClient !== null} operationLock={operationLock}
+                onBusyChange={onBusyChange} onSuccess={onSuccess} />}
             <ProviderSignInButtons clients={clients} action={action} busyClient={busyClient}
                 disabled={disabled} onSelect={client => { void selectProvider(client); }} />
             {feedback && <p className={`provider-sign-in__feedback${feedback.error ? ' provider-sign-in__feedback--error' : ''}`}

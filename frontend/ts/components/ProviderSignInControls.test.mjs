@@ -9,7 +9,7 @@ const frontendRoot = fileURLToPath(new URL('../../', import.meta.url));
 const viteServer = await createServer({ root: frontendRoot, configFile: `${frontendRoot}/vite.config.ts`,
     appType: 'custom', logLevel: 'silent', server: { middlewareMode: true } });
 after(() => viteServer.close());
-const { default: ProviderSignInControls, ProviderSignInButtons, providerSignInErrorMessage } =
+const { default: ProviderSignInControls, ProviderSignInButtons, InlineGoogleSignIn, providerSignInErrorMessage } =
     await viteServer.ssrLoadModule('/ts/components/ProviderSignInControls.tsx');
 const { AuthProvider } = await viteServer.ssrLoadModule('/ts/context/AuthContext.tsx');
 const google = { clientKey: 'google-web', provider: 'google', platform: 'web', clientId: 'synthetic.apps.googleusercontent.com' };
@@ -27,12 +27,27 @@ test('provider controls remain absent until capability discovery supplies a supp
         React.createElement(ProviderSignInControls, { action: 'login' }))), '');
 });
 
-test('Google entry is a labelled ordinary button and does not imitate the official sign-in widget', () => {
-    const rendered = markup();
-    assert.match(rendered, /role="group" aria-labelledby="[^"]+" aria-busy="false"/);
-    assert.match(rendered, /<h2[^>]*>Or sign in with:<\/h2>/);
-    assert.match(rendered, /<button[^>]*type="button"[^>]*>google<\/button>/);
-    assert.doesNotMatch(rendered, /Apple account|<form|<iframe|<script|synthetic\.apps/);
+test('Google login has a direct official-widget host and no extra selector, heading or popup markup', () => {
+    assert.equal(markup(), '');
+    const rendered = renderToStaticMarkup(React.createElement(AuthProvider, null,
+        React.createElement(InlineGoogleSignIn, { client: google })));
+    assert.match(rendered, /class="provider-sign-in__google-host" role="group" aria-label="Continue with Google"/);
+    assert.match(rendered, /role="status">Loading Google sign-in…/);
+    assert.doesNotMatch(rendered, /Or sign in with|<h2|<button|<form|<iframe|<script|dialog|synthetic\.apps/);
+});
+
+test('direct Google host is inert while password login is busy and does not start a replacement selector', () => {
+    const rendered = renderToStaticMarkup(React.createElement(AuthProvider, null,
+        React.createElement(InlineGoogleSignIn, { client: google, disabled: true })));
+    assert.match(rendered, /inert="" aria-disabled="true"/);
+    assert.doesNotMatch(rendered, /<button|Loading Google sign-in|Or sign in with/);
+});
+
+test('native login preserves its explicit account selector without a login heading', () => {
+    const rendered = markup({ clients: [apple] });
+    assert.match(rendered, /aria-label="Other sign-in methods"/);
+    assert.match(rendered, />Apple account<\/button>/);
+    assert.doesNotMatch(rendered, /<h2|Or sign in with|google/);
 });
 
 test('native Apple entry is a neutral account selector and link controls have a distinct heading', () => {
@@ -42,14 +57,14 @@ test('native Apple entry is a neutral account selector and link controls have a 
     assert.doesNotMatch(rendered, /Sign in with Apple|>google<|Delete account|Create account|Sign up/);
 });
 
-test('external form activity disables every provider choice', () => {
-    const rendered = markup({ clients: [google, apple], disabled: true });
+test('external form activity disables every linking choice', () => {
+    const rendered = markup({ clients: [google, apple], action: 'link', disabled: true });
     assert.equal((rendered.match(/ disabled=""/g) ?? []).length, 2);
     assert.equal((rendered.match(/<button/g) ?? []).length, 2);
 });
 
 test('provider activity announces progress and disables all other choices', () => {
-    const rendered = markup({ clients: [google, apple], busyClient: google.clientKey });
+    const rendered = markup({ clients: [google, apple], action: 'link', busyClient: google.clientKey });
     assert.match(rendered, /aria-busy="true"/);
     assert.match(rendered, />Please wait…<\/button>/);
     assert.equal((rendered.match(/ disabled=""/g) ?? []).length, 2);

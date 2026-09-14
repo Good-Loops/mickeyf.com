@@ -11,4 +11,6 @@ export const {
     logoutRequest,
     deleteAccountRequest,
     runProviderAuthentication,
+    prepareProviderLogin,
+    completeProviderLogin,
 } = createAuthApi(API_BASE, apiFetch);

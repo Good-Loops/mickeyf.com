@@ -143,9 +143,11 @@ These supplement the general API limit; they are not a distributed global quota.
 Failures are sanitized and do not clear newer authentication cookies. The total
 JSON budget stays 32 KiB and ID tokens remain bounded to 16,384 characters.
 
-The frontend serializes begin, the provider dialog and complete with password
-login, renewal and logout through one auth queue. The five-minute challenge
-deadline releases an abandoned dialog; unmount/cancel aborts acquisition.
+Provider begin and complete requests share the frontend auth queue with password
+login, renewal and logout. Waiting for the inline Google credential does not hold
+that queue or disable password login. Other authentication actions invalidate the
+prepared attempt; expiry/unmount/cancel removes the stale button. Account linking
+and native sign-in retain their queued dialog flow and five-minute deadline.
 An already-dispatched completion is awaited, including saved-cookie verification,
 before releasing the queue: cancel cannot undo an accepted server request.
 Native transport explicitly allows only these three provider routes and uses
@@ -156,9 +158,10 @@ separately from the single-page queue.
 ## Client configuration and controls
 
 - `GOOGLE_WEB_CLIENT_ID` configures exact audience/key `google-web` for ordinary
-  browsers. Google's official GIS button is rendered inside the site's dialog
-  only after a user chooses Google; its own click opens the provider prompt.
-  The SDK is not preloaded on ordinary page visits. **Authorized-origin checkpoint
+  browsers. Google's official GIS button appears directly on the login form;
+  its own click opens the provider prompt. The SDK loads when the configured
+  Google login control mounts, not globally on other pages. Account linking
+  retains the site's dialog. **Authorized-origin checkpoint
   (2026-09-14):** saved and read back exactly `http://localhost:5173`,
   `https://mickeyf.com` and `https://www.mickeyf.com` on the existing `MickeyFOrg Client`.
   Its name/client ID and credentials are unchanged; redirect URIs remain empty.
@@ -193,8 +196,9 @@ separately from the single-page queue.
   still need their official native SDK/client configuration; Apple web remains
   a separate Services ID/callback milestone.
 - Controls appear only for server-configured and platform-capable clients.
-  The neutral `google` / `Apple account` selectors open the official Google
-  button or native Apple sheet; they are not presented as official branded buttons.
+  Google login uses its official button without a separate selector or provider
+  heading. Manage account retains the linking dialog and current-password proof;
+  native Apple retains its existing control and sheet.
   Existing users link from Manage account using their current password, then
   log in with that provider and the same Stay signed in preference. Unlinked
   identities do not create accounts or match by email. Provider-only signup and
