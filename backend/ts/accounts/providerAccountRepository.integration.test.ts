@@ -1,10 +1,11 @@
 import assert from 'node:assert/strict';
-import { generateKeyPairSync, randomUUID } from 'node:crypto';
+import { createHash, generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
 import { after, before, test } from 'node:test';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import mysql, { type Connection, type Pool, type ResultSetHeader, type RowDataPacket } from 'mysql2/promise';
 import type { IdentityProvider, VerifiedProviderIdentity } from '../auth/providerIdentity';
+import { createAccountSession, readLiveSession, revokeAccountSession } from '../auth/accountSessionRepository';
 import { createProviderTokenVerifier } from '../auth/providerTokenVerifier';
 import { loadMigrationConfig } from '../config/migrationConfig';
 import { submitP4VegaScore } from '../leaderboards/p4VegaScoreRepository';
@@ -12,6 +13,7 @@ import { submitThreeBossesRun } from '../leaderboards/threeBossesRunRepository';
 import type { MigrationConnection } from '../migrations/leaderboardSchema';
 import { loadMigrationManifest } from '../migrations/migrationManifest';
 import { applyMigrations } from '../migrations/migrationRunner';
+import type { SessionProof } from '../security/sessionPolicy';
 import {
     findProviderAccount, linkProviderAccount, ProviderAccountUnavailableError, type ProviderAccount,
 } from './providerAccountRepository';
@@ -71,6 +73,9 @@ before(async () => {
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['detach-best-source', 'retain-receipts'] });
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-account-identity'] });
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-provider-identities'] });
+    await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-provider-attempts'] });
+    await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-account-sessions'] });
+    await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-session-renewal'] });
     database = mysql.createPool({
         host: config.host, port: config.port, database: config.database, user: config.user, password: config.password,
         connectTimeout: 10000, multipleStatements: false, connectionLimit: 2, dateStrings: true, timezone: 'Z',
@@ -103,6 +108,13 @@ function verifiedFixture(provider: IdentityProvider, subject: string): VerifiedP
     return { provider, subject } as VerifiedProviderIdentity;
 }
 
+async function createSession(account: ProviderAccount): Promise<SessionProof> {
+    const sessionId = randomBytes(32).toString('base64url');
+    assert.equal(await createAccountSession(database, account, sessionId,
+        Math.floor(Date.now() / 1000) + 3600, passwordHash), true);
+    return { accountId: account.accountId, sessionId };
+}
+
 async function providerRows(): Promise<RowDataPacket[]> {
     const [rows] = await administrator.query<RowDataPacket[]>(
         'SELECT * FROM account_provider_identities ORDER BY provider, subject');
@@ -128,6 +140,7 @@ async function preservesUsersAndScores(operation: () => Promise<void>): Promise<
 
 test('locally signed Google and Apple tokens link to one existing account and retry idempotently', async () => {
     const account = await createAccount('signed-provider-fixture');
+    const session = await createSession(account);
     const key = generateKeyPairSync('rsa', { modulusLength: 2048 });
     const nowSeconds = 1_800_000_000;
     const nonce = 'server-issued-isolated-provider-attempt';
@@ -152,10 +165,10 @@ test('locally signed Google and Apple tokens link to one existing account and re
             assert.equal(verified.verified, true);
             if (!verified.verified) throw new Error('The locally signed fixture must verify');
             assert.equal(await findProviderAccount(database, verified.identity), null, 'Matching email does not create a link');
-            assert.equal(await linkProviderAccount(database, account, TEST_PASSWORD, verified.identity), 'linked');
+            assert.equal(await linkProviderAccount(database, account, TEST_PASSWORD, verified.identity, session), 'linked');
             assert.deepEqual(await findProviderAccount(database, verified.identity), account);
             const linked = await providerRows();
-            assert.equal(await linkProviderAccount(database, account, TEST_PASSWORD, verified.identity), 'already-linked');
+            assert.equal(await linkProviderAccount(database, account, TEST_PASSWORD, verified.identity, session), 'already-linked');
             assert.deepEqual(await providerRows(), linked, 'A retry preserves the link and its original timestamp');
         }
     });
@@ -163,14 +176,17 @@ test('locally signed Google and Apple tokens link to one existing account and re
 
 test('wrong passwords and absent accounts create no provider links', async () => {
     const account = await createAccount('invalid-provider-fixture');
+    const session = await createSession(account);
     await preservesUsersAndScores(async () => {
         const original = await providerRows();
         for (const provider of ['google', 'apple'] as const) {
             const identity = verifiedFixture(provider, 'UnlinkedInvalidCredentials');
-            assert.equal(await linkProviderAccount(database, account, 'wrong-password', identity), 'invalid-password');
-            assert.equal(await linkProviderAccount(database, {
+            assert.equal(await linkProviderAccount(database, account, 'wrong-password', identity, session), 'invalid-password');
+            const absent = {
                 userId: account.userId + 1_000_000, accountId: randomUUID(),
-            }, TEST_PASSWORD, identity), 'not-found');
+            };
+            assert.equal(await linkProviderAccount(database, absent, TEST_PASSWORD, identity,
+                { ...session, accountId: absent.accountId }), 'not-found');
             assert.equal(await findProviderAccount(database, identity), null);
         }
         assert.deepEqual(await providerRows(), original);
@@ -180,16 +196,18 @@ test('wrong passwords and absent accounts create no provider links', async () =>
 test('unique conflicts cannot move a subject or replace an account provider link', async () => {
     const first = await createAccount('first-conflict-fixture');
     const second = await createAccount('second-conflict-fixture');
+    const firstSession = await createSession(first);
+    const secondSession = await createSession(second);
     await preservesUsersAndScores(async () => {
         for (const provider of ['google', 'apple'] as const) {
             const firstIdentity = verifiedFixture(provider, 'FirstConflictSubject');
             const secondIdentity = verifiedFixture(provider, 'SecondConflictSubject');
-            assert.equal(await linkProviderAccount(database, first, TEST_PASSWORD, firstIdentity), 'linked');
-            assert.equal(await linkProviderAccount(database, second, TEST_PASSWORD, secondIdentity), 'linked');
+            assert.equal(await linkProviderAccount(database, first, TEST_PASSWORD, firstIdentity, firstSession), 'linked');
+            assert.equal(await linkProviderAccount(database, second, TEST_PASSWORD, secondIdentity, secondSession), 'linked');
             const original = await providerRows();
-            assert.equal(await linkProviderAccount(database, second, TEST_PASSWORD, firstIdentity), 'link-conflict');
+            assert.equal(await linkProviderAccount(database, second, TEST_PASSWORD, firstIdentity, secondSession), 'link-conflict');
             assert.equal(await linkProviderAccount(database, first, TEST_PASSWORD,
-                verifiedFixture(provider, 'ReplacementConflictSubject')), 'link-conflict');
+                verifiedFixture(provider, 'ReplacementConflictSubject'), firstSession), 'link-conflict');
             assert.deepEqual(await findProviderAccount(database, firstIdentity), first);
             assert.deepEqual(await findProviderAccount(database, secondIdentity), second);
             assert.deepEqual(await providerRows(), original);
@@ -200,13 +218,15 @@ test('unique conflicts cannot move a subject or replace an account provider link
 test('provider subjects remain case-sensitive in storage and lookup', async () => {
     const upper = await createAccount('upper-subject-fixture');
     const lower = await createAccount('lower-subject-fixture');
+    const upperSession = await createSession(upper);
+    const lowerSession = await createSession(lower);
     await preservesUsersAndScores(async () => {
         for (const provider of ['google', 'apple'] as const) {
             const upperIdentity = verifiedFixture(provider, 'CaseSensitiveSubject');
             const lowerIdentity = verifiedFixture(provider, 'casesensitivesubject');
-            assert.equal(await linkProviderAccount(database, upper, TEST_PASSWORD, upperIdentity), 'linked');
+            assert.equal(await linkProviderAccount(database, upper, TEST_PASSWORD, upperIdentity, upperSession), 'linked');
             assert.equal(await findProviderAccount(database, lowerIdentity), null);
-            assert.equal(await linkProviderAccount(database, lower, TEST_PASSWORD, lowerIdentity), 'linked');
+            assert.equal(await linkProviderAccount(database, lower, TEST_PASSWORD, lowerIdentity, lowerSession), 'linked');
             assert.deepEqual(await findProviderAccount(database, upperIdentity), upper);
             assert.deepEqual(await findProviderAccount(database, lowerIdentity), lower);
             assert.equal(await findProviderAccount(database, verifiedFixture(provider, 'CASESENSITIVESUBJECT')), null);
@@ -216,6 +236,7 @@ test('provider subjects remain case-sensitive in storage and lookup', async () =
 
 test('two concurrent accounts racing for one subject leave exactly one durable owner', async () => {
     const accounts = [await createAccount('first-race-fixture'), await createAccount('second-race-fixture')];
+    const sessions = await Promise.all(accounts.map(createSession));
     await preservesUsersAndScores(async () => {
         for (const provider of ['google', 'apple'] as const) {
             const identity = verifiedFixture(provider, 'ContendedProviderSubject');
@@ -224,7 +245,7 @@ test('two concurrent accounts racing for one subject leave exactly one durable o
             const connections = await Promise.all(accounts.map(() => database.getConnection()));
             assert.notEqual(connections[0].threadId, connections[1].threadId);
             const outcomes = await Promise.allSettled(accounts.map((account, index) =>
-                linkProviderAccount({ getConnection: async () => connections[index] }, account, TEST_PASSWORD, identity)));
+                linkProviderAccount({ getConnection: async () => connections[index] }, account, TEST_PASSWORD, identity, sessions[index])));
             const winners = outcomes.flatMap((outcome, index) =>
                 outcome.status === 'fulfilled' && outcome.value === 'linked' ? [index] : []);
             assert.equal(winners.length, 1);
@@ -240,28 +261,73 @@ test('two concurrent accounts racing for one subject leave exactly one durable o
             assert.deepEqual(linked.filter(row => row.provider !== provider
                 || !row.subject.equals(Buffer.from(identity.subject))), original);
             assert.deepEqual(await findProviderAccount(database, identity), accounts[winners[0]]);
-            assert.equal(await linkProviderAccount(database, accounts[1 - winners[0]], TEST_PASSWORD, identity), 'link-conflict');
+            assert.equal(await linkProviderAccount(database, accounts[1 - winners[0]], TEST_PASSWORD,
+                identity, sessions[1 - winners[0]]), 'link-conflict');
         }
     });
 });
 
 test('a stale UUID cannot link a replacement account that reuses its numeric ID', async () => {
     const stale = await createAccount('stale-id-fixture', { scores: false });
-    // This unlinked fixture has no dependents; cascade behavior belongs to the deletion integration suite.
+    const staleSession = await createSession(stale);
+    // Deleting the old incarnation cascades its device session.
     await administrator.query('DELETE FROM users WHERE user_id = ? AND account_uuid = ?', [stale.userId, stale.accountId]);
     const replacement = await createAccount('replacement-id-fixture', { userId: stale.userId });
+    const replacementSession = await createSession(replacement);
     assert.equal(replacement.userId, stale.userId);
     assert.notEqual(replacement.accountId, stale.accountId);
     await preservesUsersAndScores(async () => {
         const original = await providerRows();
         for (const provider of ['google', 'apple'] as const) {
             const identity = verifiedFixture(provider, 'StaleAccountSubject');
-            assert.equal(await linkProviderAccount(database, stale, TEST_PASSWORD, identity), 'not-found');
+            assert.equal(await linkProviderAccount(database, stale, TEST_PASSWORD, identity, staleSession), 'not-found');
             assert.equal(await findProviderAccount(database, identity), null);
         }
         assert.deepEqual(await providerRows(), original);
         const identity = verifiedFixture('google', 'FreshReplacementSubject');
-        assert.equal(await linkProviderAccount(database, replacement, TEST_PASSWORD, identity), 'linked');
+        assert.equal(await linkProviderAccount(database, replacement, TEST_PASSWORD, identity, replacementSession), 'linked');
         assert.deepEqual(await findProviderAccount(database, identity), replacement);
+    });
+});
+
+test('logout or expiry after a live context check prevents linking while another device stays valid', async () => {
+    for (const invalidation of ['logout', 'expiry'] as const) {
+        const account = await createAccount(`session-${invalidation}-fixture`);
+        const session = await createSession(account);
+        const otherDevice = await createSession(account);
+        const identity = verifiedFixture('google', `SessionInvalidation-${invalidation}`);
+        const original = await providerRows();
+        assert.deepEqual(await readLiveSession(database, account.userId, account.accountId, session.sessionId),
+            { userName: account.userName });
+        if (invalidation === 'logout') {
+            await revokeAccountSession(database, account.userId, account.accountId, session.sessionId);
+        } else {
+            await administrator.query('UPDATE account_sessions SET expires_at = UTC_TIMESTAMP(6) WHERE session_hash = ?',
+                [createHash('sha256').update(session.sessionId, 'ascii').digest()]);
+        }
+        await preservesUsersAndScores(async () => {
+            assert.equal(await linkProviderAccount(database, account, TEST_PASSWORD, identity, session), 'not-found');
+            assert.deepEqual(await providerRows(), original);
+            assert.equal(await findProviderAccount(database, identity), null);
+            assert.deepEqual(await readLiveSession(database, account.userId, account.accountId, otherDevice.sessionId),
+                { userName: account.userName });
+            assert.equal(await linkProviderAccount(database, account, TEST_PASSWORD, identity, otherDevice), 'linked');
+            assert.equal(await linkProviderAccount(database, account, TEST_PASSWORD, identity, session), 'not-found');
+        });
+    }
+});
+
+test('a valid session for another account cannot authorize the target account link', async () => {
+    const account = await createAccount('session-target-fixture');
+    const otherAccount = await createAccount('session-other-account-fixture');
+    const otherSession = await createSession(otherAccount);
+    const identity = verifiedFixture('google', 'OtherAccountSessionSubject');
+    const original = await providerRows();
+    await preservesUsersAndScores(async () => {
+        assert.equal(await linkProviderAccount(database, account, TEST_PASSWORD, identity, otherSession), 'not-found');
+        assert.equal(await linkProviderAccount(database, account, TEST_PASSWORD, identity,
+            { ...otherSession, accountId: account.accountId }), 'not-found');
+        assert.deepEqual(await providerRows(), original);
+        assert.equal(await findProviderAccount(database, identity), null);
     });
 });

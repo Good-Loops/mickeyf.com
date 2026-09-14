@@ -1,6 +1,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import type { AccountLinkTarget, ProviderAccount, ProviderLinkResult } from '../accounts/providerAccountRepository';
 import { isRecord, validateLoginRequest } from '../security/userRequestValidation';
+import type { SessionProof } from '../security/sessionPolicy';
 import type { ProviderAuthContext } from './providerAuthContext';
 import type { ProviderAttempt, ConsumedProviderAttempt, ProviderAttemptAction, ProviderAttemptCreateResult } from './providerAttemptRepository';
 import type { IdentityProvider, VerifiedProviderIdentity } from './providerIdentity';
@@ -10,7 +11,7 @@ export type ProviderAuthClient = Readonly<{ provider: IdentityProvider; verifier
 type Failure = { ok: false; reason: 'UNAVAILABLE' | 'INVALID_REQUEST' | 'INVALID_CONTEXT'
     | 'BUSY' | 'INVALID_ATTEMPT' | 'INVALID_PROVIDER_TOKEN' | 'NOT_LINKED' | 'INVALID_PASSWORD'
     | 'LINK_CONFLICT' | 'ACCOUNT_GONE' };
-export type ProviderChallengeResult = Failure | { ok: true; state: string; nonce: string; expiresInSeconds: 300 };
+export type ProviderChallengeResult = Failure | { ok: true; state: string; nonce: string; expiresInSeconds: number };
 export type ProviderCompletionResult = Failure
     | { ok: true; type: 'account-verified'; account: ProviderAccount }
     | { ok: true; type: 'linked' };
@@ -22,7 +23,7 @@ export type ProviderAuthFlowDependencies = {
     };
     accounts: {
         find(identity: VerifiedProviderIdentity): Promise<ProviderAccount | null>;
-        link(target: AccountLinkTarget, password: string, identity: VerifiedProviderIdentity): Promise<ProviderLinkResult>;
+        link(target: AccountLinkTarget, password: string, identity: VerifiedProviderIdentity, session: SessionProof): Promise<ProviderLinkResult>;
     };
     clients: Readonly<Record<string, ProviderAuthClient>>;
     enabled?: boolean;
@@ -37,11 +38,12 @@ function inputClient(input: unknown, clients: ReadonlyMap<string, ProviderAuthCl
 
 function matchesContext(context: ProviderAuthContext | null, action: 'login' | 'link'): context is ProviderAuthContext {
     return context !== null && Buffer.isBuffer(context.bindingHash) && context.bindingHash.length === 32
-        && (action === 'login' ? context.account === null : context.account !== null);
+        && (action === 'login' ? context.account === null && context.session === null
+            : context.account !== null && context.session !== null);
 }
 
 /**
- * Native ID-token workflow, deliberately not mounted in the application.
+ * ID-token workflow; the opt-in HTTP adapter owns session issuance.
  * `account-verified` is an internal decision, NOT a login session or browser proof.
  */
 export function createProviderAuthFlow({ attempts, accounts, clients, enabled = false }: ProviderAuthFlowDependencies) {
@@ -67,7 +69,9 @@ export function createProviderAuthFlow({ attempts, accounts, clients, enabled = 
                     nonce, clientKey: selection.clientKey, action: selection.action,
                     accountId: context.account?.accountId ?? null, userId: context.account?.userId ?? null,
                 });
-                return created === 'created' ? { ok: true, state, nonce, expiresInSeconds: 300 }
+                const expiresInSeconds = context.bindingExpiresAt === null ? 300
+                    : Math.min(300, Math.floor((context.bindingExpiresAt - Date.now()) / 1000));
+                return created === 'created' && expiresInSeconds > 0 ? { ok: true, state, nonce, expiresInSeconds }
                     : { ok: false, reason: 'BUSY' };
             } catch { return { ok: false, reason: 'UNAVAILABLE' }; }
         },
@@ -103,8 +107,8 @@ export function createProviderAuthFlow({ attempts, accounts, clients, enabled = 
                     const account = await accounts.find(verified.identity);
                     return account ? { ok: true, type: 'account-verified', account } : { ok: false, reason: 'NOT_LINKED' };
                 }
-                if (!context.account || !password?.valid) return { ok: false, reason: 'INVALID_CONTEXT' };
-                const result = await accounts.link(context.account, password.input.password, verified.identity);
+                if (!context.account || !context.session || !password?.valid) return { ok: false, reason: 'INVALID_CONTEXT' };
+                const result = await accounts.link(context.account, password.input.password, verified.identity, context.session);
                 switch (result) {
                     case 'linked': case 'already-linked': return { ok: true, type: 'linked' };
                     case 'invalid-password': return { ok: false, reason: 'INVALID_PASSWORD' };

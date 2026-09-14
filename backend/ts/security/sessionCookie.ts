@@ -19,6 +19,4 @@ export function sessionCookieOptions(isProduction: boolean, name: SessionCookieN
 
 export function clearAuthenticationCookies(res: Response, isProduction: boolean): void {
     for (const name of SESSION_COOKIE_NAMES) res.clearCookie(name, sessionCookieOptions(isProduction, name));
-    // Authentication transitions must invalidate outstanding provider challenges.
-    res.clearCookie('provider_auth_binding', sessionCookieOptions(isProduction));
 }

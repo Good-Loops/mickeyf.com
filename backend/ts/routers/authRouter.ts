@@ -22,6 +22,8 @@ import { asyncHandler } from '../middleware/errorHandling';
 import { createAccountDeletionRateLimiters, createSessionRenewalRateLimiter } from '../security/requestRateLimits';
 
 import { createLogoutHandler } from './authRouter.handlers';
+import { createProviderAuthRouter } from './providerAuthRouter';
+import type { ProviderAuthClient } from '../auth/providerAuthFlow';
 
 export { authRoutesContract } from './authRouter.contract';
 
@@ -30,9 +32,10 @@ export function createAuthRouter(
     sessionSecret: string,
     isProduction: boolean,
     allowedMutationOrigins: readonly string[],
-    { accountDeletionEnabled = false, deletionJournal }: {
+    { accountDeletionEnabled = false, deletionJournal, providerAuth }: {
         accountDeletionEnabled?: boolean;
         deletionJournal?: AccountDeletionJournal;
+        providerAuth?: { enabled: boolean; clients: Readonly<Record<string, ProviderAuthClient>> };
     } = {}
 ): Router {
     /**
@@ -45,6 +48,11 @@ export function createAuthRouter(
      * - None beyond Express route registration.
      */
     const router: Router = Router();
+
+    if (providerAuth?.enabled) router.use('/providers', createProviderAuthRouter({
+        database, sessionSecret, isProduction, allowedOrigins: allowedMutationOrigins,
+        clients: providerAuth.clients, enabled: true,
+    }));
 
     /** GET /verify-token — validates auth context for the current request. */
     router.get('/verify-token', asyncHandler(createAuthController(database, sessionSecret)));

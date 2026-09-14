@@ -4,7 +4,8 @@ import { after, before, beforeEach, test } from 'node:test';
 import bcrypt from 'bcryptjs';
 import jwt from 'jsonwebtoken';
 import { issueSessionToken } from '../security/sessionPolicy';
-import { createAccountSession } from './accountSessionRepository';
+import { WEB_SESSION_COOKIE } from '../security/sessionCookie';
+import { createAccountSession, revokeAccountSession } from './accountSessionRepository';
 import mysql, { type Connection, type Pool, type PoolConnection, type QueryOptions, type ResultSetHeader, type RowDataPacket } from 'mysql2/promise';
 import { deleteAccount } from '../accounts/accountDeletionRepository';
 import { findProviderAccount, linkProviderAccount } from '../accounts/providerAccountRepository';
@@ -17,9 +18,10 @@ import { applyMigrations } from '../migrations/migrationRunner';
 import {
     consumeProviderAttempt, createProviderAttempt, ProviderAttemptUnavailableError, type ProviderAttempt,
 } from './providerAttemptRepository';
-import { createProviderAuthContextReader, PROVIDER_BINDING_COOKIE } from './providerAuthContext';
+import { createProviderAuthContextReader } from './providerAuthContext';
 import { createProviderAuthFlow } from './providerAuthFlow';
 import { createProviderTokenVerifier } from './providerTokenVerifier';
+import type { VerifiedProviderIdentity } from './providerIdentity';
 
 const config = loadMigrationConfig();
 const testPort = Number(process.env.MIGRATION_TEST_PORT);
@@ -359,7 +361,7 @@ test('complete flow links a locally verified provider proof, verifies anonymous 
         },
         accounts: {
             find: identity => findProviderAccount(database, identity),
-            link: (target, password, identity) => linkProviderAccount(database, target, password, identity),
+            link: (target, password, identity, session) => linkProviderAccount(database, target, password, identity, session),
         },
     });
     const sessionSecret = randomBytes(32).toString('base64url');
@@ -371,10 +373,11 @@ test('complete flow links a locally verified provider proof, verifies anonymous 
     // The context reader receives the cookie-parser boundary; the session JWT is genuinely signed and verified.
     const linkingRequest = {
         method: 'POST', headers: { origin, 'content-type': 'application/json' },
-        signedCookies: { session, [PROVIDER_BINDING_COOKIE]: randomBytes(32).toString('base64url') },
+        signedCookies: { [WEB_SESSION_COOKIE]: session },
     };
     const linkContext = await readContext(linkingRequest);
     assert.deepEqual(linkContext?.account, account);
+    assert.deepEqual(linkContext?.session, { accountId: account.accountId, sessionId: issued.sessionId });
     const linking = await flow.begin(linkContext, { clientKey: 'apple-web', action: 'link' });
     assert.equal(linking.ok, true);
     if (!linking.ok) throw new Error('The isolated linking challenge must be created');
@@ -387,10 +390,14 @@ test('complete flow links a locally verified provider proof, verifies anonymous 
 
     const anonymousRequest = {
         method: 'POST', headers: { origin, 'content-type': 'application/json' },
-        signedCookies: { [PROVIDER_BINDING_COOKIE]: randomBytes(32).toString('base64url') },
+        signedCookies: {} as Record<string, unknown>,
     };
-    const loginContext = await readContext(anonymousRequest);
+    assert.equal(await readContext(anonymousRequest), null, 'completion cannot bootstrap an anonymous browser');
+    const loginContext = await readContext(anonymousRequest, 'begin');
+    assert.ok(loginContext?.anonymousCookie);
+    anonymousRequest.signedCookies[loginContext.anonymousCookie.name] = loginContext.anonymousCookie.value;
     assert.equal(loginContext?.account, null);
+    assert.deepEqual((await readContext(anonymousRequest))?.bindingHash, loginContext.bindingHash);
     const login = await flow.begin(loginContext, { clientKey: 'apple-web', action: 'login' });
     assert.equal(login.ok, true);
     if (!login.ok) throw new Error('The isolated login challenge must be created');
@@ -411,4 +418,65 @@ test('complete flow links a locally verified provider proof, verifies anonymous 
     assert.equal(newLinks.length, 1);
     assert.deepEqual(newLinks[0].subject, Buffer.from(subject));
     assert.deepEqual(completed.account_provider_identities.filter(row => row !== newLinks[0]), original.account_provider_identities);
+});
+
+test('logout or expiry during provider verification prevents the composed flow from creating a link', async () => {
+    for (const invalidation of ['logout', 'expiry'] as const) {
+        const userName = `attempt-verification-${invalidation}-fixture`;
+        const account = await createAccount(userName);
+        const sessionSecret = randomBytes(32).toString('base64url');
+        const issued = issueSessionToken({ ...account, userName }, sessionSecret);
+        assert.equal(await createAccountSession(database, account, issued.sessionId, issued.expiresAt), true);
+        const origin = 'https://provider-flow.example.test';
+        const readContext = createProviderAuthContextReader({ database, sessionSecret, allowedOrigins: [origin] });
+        const request = { method: 'POST', headers: { origin, 'content-type': 'application/json' },
+            signedCookies: { [WEB_SESSION_COOKIE]: issued.token } };
+        const context = await readContext(request);
+        assert.ok(context?.session);
+        let signalVerification!: () => void;
+        let releaseVerification!: () => void;
+        const verificationStarted = new Promise<void>(resolve => { signalVerification = resolve; });
+        const verificationGate = new Promise<void>(resolve => { releaseVerification = resolve; });
+        // Signed-token cryptography is covered above; this fixture isolates session changes during that asynchronous work.
+        const identity = { provider: 'apple', subject: `VerificationSession-${invalidation}` } as VerifiedProviderIdentity;
+        const flow = createProviderAuthFlow({
+            enabled: true,
+            clients: { 'apple-web': { provider: 'apple', verifier: { async verify() {
+                signalVerification();
+                await verificationGate;
+                return { verified: true, identity };
+            } } } },
+            attempts: {
+                create: value => createProviderAttempt(database, value),
+                consume: (state, binding, client, action) => consumeProviderAttempt(database, state, binding, client, action),
+            },
+            accounts: {
+                find: verified => findProviderAccount(database, verified),
+                link: (target, password, verified, session) => linkProviderAccount(database, target, password, verified, session),
+            },
+        });
+        const challenge = await flow.begin(context, { clientKey: 'apple-web', action: 'link' });
+        assert.ok(challenge.ok);
+        const input = { clientKey: 'apple-web', action: 'link', state: challenge.state,
+            idToken: 'synthetic-verifier-input', password: TEST_PASSWORD };
+        const original = await snapshotAccountData();
+        const completing = flow.complete(context, input);
+        await Promise.race([verificationStarted, completing.then(() => {
+            throw new Error('Provider verification was not reached');
+        })]);
+        try {
+            assert.deepEqual(await attemptRows(), [], 'the one-use attempt is committed before provider verification');
+            if (invalidation === 'logout') {
+                await revokeAccountSession(database, account.userId, account.accountId, issued.sessionId);
+            } else {
+                await administrator.query('UPDATE account_sessions SET expires_at = UTC_TIMESTAMP(6) WHERE session_hash = ?',
+                    [createHash('sha256').update(issued.sessionId, 'ascii').digest()]);
+            }
+        } finally { releaseVerification(); }
+        assert.deepEqual(await completing, { ok: false, reason: 'ACCOUNT_GONE' });
+        assert.deepEqual(await flow.complete(context, input), { ok: false, reason: 'INVALID_ATTEMPT' });
+        assert.equal(await readContext(request), null);
+        assert.equal(await findProviderAccount(database, identity), null);
+        assert.deepEqual(await snapshotAccountData(), original);
+    }
 });

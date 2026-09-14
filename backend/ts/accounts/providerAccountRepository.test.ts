@@ -1,13 +1,16 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import test from 'node:test';
 import bcrypt from 'bcryptjs';
 import type { Pool, PoolConnection } from 'mysql2/promise';
 import type { VerifiedProviderIdentity } from '../auth/providerIdentity';
+import type { SessionProof } from '../security/sessionPolicy';
 import { findProviderAccount, linkProviderAccount, ProviderAccountUnavailableError } from './providerAccountRepository';
 
 const accountId = '123e4567-e89b-42d3-a456-426614174000';
 const otherId = '123e4567-e89b-42d3-a456-426614174001';
 const target = { userId: 7, accountId };
+const sessionProof: SessionProof = { accountId, sessionId: Buffer.alloc(32, 7).toString('base64url') };
 const password = 'existing-test-password';
 const passwordHash = bcrypt.hashSync(password, 4);
 // The verifier has separate signed-token tests. This fixture represents its trusted output.
@@ -15,7 +18,8 @@ const identity = { provider: 'google', subject: 'CaseSensitiveSubject' } as Veri
 
 function fixture(options: {
     accountId?: string; absent?: boolean; duplicate?: { accountId: string; subject: Buffer }[];
-    fail?: 'begin' | 'insert' | 'commit' | 'unlock'; rollbackFails?: boolean;
+    sessionMissing?: boolean;
+    fail?: 'begin' | 'session' | 'insert' | 'commit' | 'unlock'; rollbackFails?: boolean;
 } = {}) {
     const events: string[] = [];
     const queries: Array<{ sql: string; values?: unknown[]; timeout: number }> = [];
@@ -34,6 +38,9 @@ function fixture(options: {
             if (sql.startsWith('SELECT user_password')) {
                 step('password'); return [options.absent ? [] : [{ accountId: options.accountId ?? accountId, passwordHash }]];
             }
+            if (sql.includes('FROM account_sessions AS s')) {
+                step('session'); return [options.sessionMissing ? [] : [{ userName: 'existing' }]];
+            }
             if (sql.startsWith('INSERT')) {
                 step('insert'); if (options.duplicate) throw { errno: 1062, sqlMessage: 'sensitive owner details' };
                 return [{ affectedRows: 1 }];
@@ -45,11 +52,16 @@ function fixture(options: {
     return { events, queries, database: { getConnection: async () => connection } as Pick<Pool, 'getConnection'> };
 }
 
-test('links only a password-proven matching incarnation under the existing user lock and transaction', async () => {
+test('links only a password-proven matching incarnation with a live session under the existing user lock and transaction', async () => {
     const f = fixture();
-    assert.equal(await linkProviderAccount(f.database, target, password, identity), 'linked');
-    assert.deepEqual(f.events, ['lock', 'begin', 'password', 'insert', 'commit', 'unlock', 'release']);
-    assert(f.queries.every(q => q.timeout === 10000 && !q.values?.includes(password)));
+    assert.equal(await linkProviderAccount(f.database, target, password, identity, sessionProof), 'linked');
+    assert.deepEqual(f.events, ['lock', 'begin', 'password', 'session', 'insert', 'commit', 'unlock', 'release']);
+    assert(f.queries.every(q => q.timeout === 10000 && !q.values?.includes(password)
+        && !q.values?.includes(sessionProof.sessionId)));
+    const session = f.queries.find(q => q.sql.includes('FROM account_sessions AS s'))!;
+    const sessionHash = createHash('sha256').update(sessionProof.sessionId, 'ascii').digest();
+    assert.deepEqual(session.values, [target.userId, accountId, sessionHash, sessionHash]);
+    assert.match(session.sql, /s.expires_at > UTC_TIMESTAMP\(6\)/);
     const insert = f.queries.find(q => q.sql.startsWith('INSERT'))!;
     assert.deepEqual(insert.values, ['google', Buffer.from('CaseSensitiveSubject'), accountId]);
     assert(f.queries.every(q => !/email|game_personal_bests|^\s*(?:UPDATE|DELETE)\b|ON DUPLICATE/i.test(q.sql)));
@@ -62,14 +74,35 @@ test('wrong password, removed account and reused numeric ID never create links',
         [{ accountId: otherId }, password, 'not-found'],
     ] as const) {
         const f = fixture(options);
-        assert.equal(await linkProviderAccount(f.database, target, suppliedPassword, identity), expected);
+        assert.equal(await linkProviderAccount(f.database, target, suppliedPassword, identity, sessionProof), expected);
         assert(!f.events.includes('insert'));
     }
     for (const invalid of ['', 'x'.repeat(73), 'test\u0000password']) {
         const f = fixture();
-        assert.equal(await linkProviderAccount(f.database, target, invalid, identity), 'invalid-password');
+        assert.equal(await linkProviderAccount(f.database, target, invalid, identity, sessionProof), 'invalid-password');
         assert.deepEqual(f.events, []);
     }
+});
+
+test('a missing live session cannot create or confirm an idempotent provider link', async () => {
+    for (const duplicate of [undefined, [{ accountId, subject: Buffer.from(identity.subject) }]]) {
+        const f = fixture({ sessionMissing: true, duplicate });
+        assert.equal(await linkProviderAccount(f.database, target, password, identity, sessionProof), 'not-found');
+        assert.deepEqual(f.events, ['lock', 'begin', 'password', 'session', 'commit', 'unlock', 'release']);
+    }
+});
+
+test('missing, malformed and mismatched session proofs fail before database use', async () => {
+    for (const proof of [undefined, null, { accountId, sessionId: '' },
+        { accountId: 'invalid', sessionId: sessionProof.sessionId }]) {
+        const f = fixture();
+        await assert.rejects(linkProviderAccount(f.database, target, password, identity, proof as SessionProof));
+        assert.deepEqual(f.events, []);
+    }
+    const f = fixture();
+    assert.equal(await linkProviderAccount(f.database, target, password, identity,
+        { ...sessionProof, accountId: otherId }), 'not-found');
+    assert.deepEqual(f.events, []);
 });
 
 test('identical retry is idempotent; competing account or another identity is never reassigned', async () => {
@@ -79,25 +112,26 @@ test('identical retry is idempotent; competing account or another identity is ne
         [accountId, 'AnotherSubject', 'link-conflict'],
     ] as const) {
         const f = fixture({ duplicate: [{ accountId: owner, subject: Buffer.from(subject) }] });
-        assert.equal(await linkProviderAccount(f.database, target, password, identity), expected);
+        assert.equal(await linkProviderAccount(f.database, target, password, identity, sessionProof), expected);
         assert.deepEqual(f.events.slice(-4), ['existing', 'commit', 'unlock', 'release']);
         assert(f.queries.every(q => !q.sql.startsWith('UPDATE')));
     }
 });
 
 test('uncertain transaction or lock outcome is sanitized and never reported as a successful link', async () => {
-    for (const fail of ['begin', 'insert', 'commit', 'unlock'] as const) {
+    for (const fail of ['begin', 'session', 'insert', 'commit', 'unlock'] as const) {
         const f = fixture({ fail });
-        await assert.rejects(linkProviderAccount(f.database, target, password, identity), error => {
+        await assert.rejects(linkProviderAccount(f.database, target, password, identity, sessionProof), error => {
             assert(error instanceof ProviderAccountUnavailableError);
             assert.doesNotMatch(String(error), /sensitive|credentials|CaseSensitiveSubject/);
             assert.equal('cause' in error, false);
             return true;
         });
-        if (fail !== 'insert') assert(f.events.includes('destroy'));
+        if (fail !== 'insert' && fail !== 'session') assert(f.events.includes('destroy'));
+        if (fail === 'session') assert(!f.events.includes('insert'));
     }
     const rollback = fixture({ fail: 'insert', rollbackFails: true });
-    await assert.rejects(linkProviderAccount(rollback.database, target, password, identity), ProviderAccountUnavailableError);
+    await assert.rejects(linkProviderAccount(rollback.database, target, password, identity, sessionProof), ProviderAccountUnavailableError);
     assert(rollback.events.includes('destroy'));
 });
 
@@ -122,10 +156,10 @@ test('malformed identities and target UUIDs fail before database use', async () 
     for (const malformed of [{ provider: 'other', subject: 'valid' }, { provider: 'google', subject: '' },
         { provider: 'apple', subject: 'Ünicode' }, { provider: 'google', subject: 'trailing ' }]) {
         const f = fixture();
-        await assert.rejects(linkProviderAccount(f.database, target, password, malformed as VerifiedProviderIdentity));
+        await assert.rejects(linkProviderAccount(f.database, target, password, malformed as VerifiedProviderIdentity, sessionProof));
         assert.deepEqual(f.events, []);
     }
     const f = fixture();
-    await assert.rejects(linkProviderAccount(f.database, { userId: 7, accountId: 'invalid' }, password, identity));
+    await assert.rejects(linkProviderAccount(f.database, { userId: 7, accountId: 'invalid' }, password, identity, sessionProof));
     assert.deepEqual(f.events, []);
 });

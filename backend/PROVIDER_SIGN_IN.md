@@ -2,9 +2,10 @@
 
 ## Status — 2026-09-14
 
-Implemented offline backend primitives; **not an enabled sign-in feature**.
-Provider routes and buttons remain disabled. The subsequent shared-session
-checkpoint changes username/password issuance and consumers to UUID-bound,
+Implemented backend identity verification, one-use attempts and an opt-in HTTP
+adapter connected to shared sessions; **not an enabled sign-in feature**.
+Application bootstrap supplies no provider configuration, so routes and buttons
+remain disabled. Username/password and provider issuance reuse UUID-bound,
 revocable device sessions; see [session behavior and rollout](SESSION_AUTHENTICATION.md).
 No production configuration, provider credentials, HTTP callbacks or provider
 native plugins have been activated.
@@ -30,9 +31,11 @@ a runtime security boundary. Only the verifier should construct it.
 
 `accounts/providerAccountRepository.ts` maps that identity to `users.account_uuid`.
 It does **not** match email addresses or create users. To link an existing
-account, a caller supplies its authenticated numeric ID, immutable UUID and
-password. The repository rechecks UUID and password inside the same per-user
-lock used by score submission and deletion, then inserts the link transactionally.
+account, the trusted context supplies its numeric ID, immutable UUID and device
+SessionProof; the user also supplies the current password. The repository checks
+UUID and password inside the same per-user lock used by logout, score submission
+and deletion, then rechecks that device session immediately before insertion.
+Logout or expiry during provider verification therefore prevents a late link.
 
 - `(provider, subject)` is byte-exact and belongs to one account.
 - `(account_uuid, provider)` permits one identity per provider per account.
@@ -68,12 +71,23 @@ request bodies either.
 
 ## One-use attempts and internal orchestration
 
-`auth/providerAuthContext.ts` requires JSON POST, an exact approved Origin, and
-a cookie-parser-verified `provider_auth_binding` cookie. It rejects bearer headers,
-unsigned session cookies and invalid signed sessions. For linking, it verifies the
-existing session and resolves the current account UUID from the database. The
-binding hash includes origin, random cookie, current session and resolved account.
-There is no HTTP adapter or binding-cookie issuer yet.
+`auth/providerAuthContext.ts` requires JSON POST and an exact approved Origin.
+Only begin may bootstrap an anonymous binding. It uses a purpose-separated random,
+timestamped value in the canonical signed HttpOnly cookie: `__session` on the web,
+`session` for the native Origin. Cookie-parser verifies its signature; the reader
+enforces its five-minute lifetime independently of browser cookie expiry. The value
+is not a session JWT and cannot authenticate a user. Each anonymous begin rotates
+it; the challenge reports no more than its remaining lifetime after database work.
+Complete never bootstraps. Bearer headers, unsigned cookies, conflicting cookie
+names and malformed signed sessions are rejected, never treated as anonymous.
+Only begin can refresh a correctly signed, well-formed expired anonymous binding.
+
+For linking, the reader verifies the current live device session and resolves the
+account UUID from storage, carrying SessionProof to the final repository guard.
+The binding hash includes Origin, the raw canonical cookie and resolved account.
+Login replaces that cookie and logout clears it, including through Firebase
+Hosting, which forwards only `__session`. Normal sequential anonymous → login →
+logout cannot reuse the previous challenge from that browser's cookie state.
 
 `auth/providerAuthFlow.ts` is disabled by default. It creates separate random
 state and nonce values, pins the action/client to server configuration, then
@@ -89,7 +103,10 @@ The stored state is hashed; raw ID tokens, session cookies and passwords are not
 stored. Consumption locks the row, checks expiry using database time after the
 lock is obtained, and commits its removal before returning the nonce. A failed or
 uncertain commit cannot authorize a caller. A new attempt replaces a pending one
-with the same binding, including one started in another tab sharing that binding.
+with the same binding. Fresh anonymous begins have new bindings, so their abandoned
+rows instead expire and use the bounded opportunistic cleanup below. Old anonymous
+challenges no longer match the browser's replacement cookie; possession of a stolen
+old signed cookie is not server-side revocation of that cookie before its expiry.
 
 Attempts expire after five minutes. This is **validity**, not a promise of physical
 deletion at five minutes: each creation removes up to 100 expired rows; consumption
@@ -98,23 +115,37 @@ activity. A database-scoped creation lock enforces a 10,000-row cap. No schedule
 cloud service or background worker is added. Linked attempts reference account
 UUIDs and cascade on deletion, including deletion replay after restoring a backup.
 
-Before routing this flow, supply a server-verified random browser binding and
-rotate/clear it on every login/logout transition. Firebase Hosting forwards only
-`__session`, so its new website gateway will not forward the dormant flow's
-separate `provider_auth_binding` cookie. Resolve that transport contract before
-mounting provider routes; do not weaken the binding check. The current-context hash alone
-does not detect anonymous → login → logout returning to the original state.
-Provide dedicated rate limits: existing login limiters recognize a different
-request shape. Native transport also needs explicit route allowlisting and a
-body limit aligned with the token size; its current 16 KiB total JSON limit is
-smaller than the verifier's maximum token plus JSON wrapper.
+## Opt-in HTTP session adapter
 
-Shared issuance and readers now require a UUID and live device session. Connect
-the internal verified-account result to that issuer only on the server. For
-linking, carry SessionProof into the final repository lock as well: the context
-reader's live-session check can precede asynchronous provider verification, and
-logout/expiry in between must prevent a later link. Current password/UUID proof
-remains enforced; no linking HTTP endpoint is mounted.
+`routers/providerAuthRouter.ts` is mounted at `/auth/providers` only when
+`createAuthRouter` receives explicit enablement and configured clients. Current
+`app.ts` does not supply either. The request shapes are:
+
+- `POST /begin`: `{ action: "login" | "link", clientKey }` → `{ state, nonce, expiresInSeconds }`.
+- `POST /complete`, login: `{ action: "login", clientKey, state, idToken, rememberMe?: boolean }`.
+- `POST /complete`, link: `{ action: "link", clientKey, state, idToken, password }`.
+
+Unknown fields are rejected. Successful login returns `{ success: true, user_name }`;
+linking returns `{ success: true, linked: true }`. The internal verified-account
+result and session token are never returned as JSON. `auth/providerSession.ts`
+uses the same token issuer, locked session repository and cookie policy as password
+login. It sends a cookie only after the session commit is confirmed. `rememberMe`
+selects the existing renewable 30-day inactivity policy; otherwise the device
+session lasts four hours. No separate provider refresh-token store is introduced.
+
+Dedicated in-memory limits per server instance allow 30 begin requests/IP,
+50 completion requests/IP and 5 link password attempts/account per 15 minutes.
+These supplement the general API limit; they are not a distributed global quota.
+Failures are sanitized and do not clear newer authentication cookies. The total
+JSON budget stays 32 KiB and ID tokens remain bounded to 16,384 characters.
+
+Client integration must serialize provider begin/complete with other auth mutations
+through the existing auth queue. Native transport already serializes POSTs, but
+still needs explicit provider route allowlisting and a body limit increased from
+16 KiB to accommodate a maximum token plus its JSON wrapper. Session renewal can
+change the binding during a link attempt, requiring a fresh challenge. Arbitrary
+cross-tab/in-flight responses are not canceled by canonical-cookie replacement:
+late Set-Cookie ordering needs client acceptance work before activation.
 
 ## Migration and activation boundary
 
@@ -144,15 +175,13 @@ compatibility and the enabled application revision.
 
 Remaining work, in order:
 
-1. Connect the internal provider result to shared session issuance, HTTP binding lifecycle,
-   dedicated rate limits, and provider-specific callback/code exchange where
-   required. Keep the completed one-use flow internal until those pieces agree.
-2. Configure approved Google web/native clients and Apple native capability;
+1. Configure approved Google web/native clients and Apple native capability;
    integrate native platform sign-in, not Google OAuth inside the embedded WebView.
-   Treat Apple's web Services ID activation separately.
-3. Design provider-only signup around the approved age/consent requirements;
+   Connect the UI/auth queue and native transport, and add provider-specific
+   callback/code exchange where required. Treat Apple's web Services ID separately.
+2. Design provider-only signup around the approved age/consent requirements;
    retain username/password access and existing score ownership.
-4. Complete provider disconnect/revocation and account-deletion coordination,
+3. Complete provider disconnect/revocation and account-deletion coordination,
    privacy disclosures, focused end-to-end acceptance and separately approved
    deployment. Then resume the remaining Clean Code sweep.
 
@@ -187,7 +216,15 @@ and all 17 focused MySQL cases passed, including composed authentication and
 restored-attempt deletion. Both disposable test containers and networks were
 removed. No production migration, provider configuration or session was issued.
 
-Primary references: [Google token verification](https://developers.google.com/identity/gsi/web/guides/verify-google-id-token),
+HTTP/session checkpoint results (2026-09-14): backend typecheck, all 444 unit
+tests and all 31 provider/session/deletion MySQL integration cases passed. The
+integration harness verified logout and expiry while provider verification was
+paused, then rejected linking without changing profiles, scores or provider links.
+The disposable container and network were removed. Tests used synthetic provider
+proofs and isolated accounts only; no production migration or activation occurred.
+
+Primary references: [Firebase cookie forwarding](https://firebase.google.com/docs/hosting/manage-cache),
+[Google token verification](https://developers.google.com/identity/gsi/web/guides/verify-google-id-token),
 [Google OpenID Connect claims](https://developers.google.com/identity/openid-connect/openid-connect),
 [Apple user verification](https://developer.apple.com/documentation/signinwithapple/verifying-a-user),
 [Apple discovery metadata](https://appleid.apple.com/.well-known/openid-configuration),

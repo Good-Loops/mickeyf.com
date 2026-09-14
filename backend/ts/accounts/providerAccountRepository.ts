@@ -1,7 +1,9 @@
 import bcrypt from 'bcryptjs';
 import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import type { VerifiedProviderIdentity } from '../auth/providerIdentity';
+import { readLiveSession } from '../auth/accountSessionRepository';
 import { withUserSubmissionLock } from '../leaderboards/userSubmissionLock';
+import { isSessionId, type SessionProof } from '../security/sessionPolicy';
 import { validateLoginRequest } from '../security/userRequestValidation';
 import { assertAccountId } from './deletionJournal';
 
@@ -83,24 +85,32 @@ async function insertLink(
 }
 
 /**
- * The future HTTP flow supplies a session-bound UUID and a consumed provider attempt.
- * This repository still reauthenticates under the shared deletion/submission lock.
+ * Provider verification may outlive the caller's session. Recheck its proof and
+ * password under the shared deletion/submission lock before creating a link.
  */
 export async function linkProviderAccount(
     database: Pick<Pool, 'getConnection'>,
     target: AccountLinkTarget,
     password: string,
     identity: VerifiedProviderIdentity,
+    expectedSession: SessionProof,
 ): Promise<ProviderLinkResult> {
     const subject = identitySubject(identity);
     if (!target || !Number.isSafeInteger(target.userId) || target.userId <= 0) {
         throw new TypeError('An authenticated account target is required.');
     }
     assertAccountId(target.accountId);
+    if (!expectedSession || !isSessionId(expectedSession.sessionId)) {
+        throw new TypeError('An authenticated session proof is required.');
+    }
+    assertAccountId(expectedSession.accountId);
+    if (expectedSession.accountId !== target.accountId) return 'not-found';
+    const accountTarget = { ...target };
+    const sessionId = expectedSession.sessionId;
     // Reuse legacy-login password bounds without changing its normalization or accepted accounts.
     if (!validateLoginRequest({ user_name: 'link', user_password: password }).valid) return 'invalid-password';
     try {
-        return await withUserSubmissionLock(database, target.userId, async ({ connection, invalidateConnection }) => {
+        return await withUserSubmissionLock(database, accountTarget.userId, async ({ connection, invalidateConnection }) => {
             let phase: 'begin' | 'active' | 'commit' = 'begin';
             try {
                 await connection.beginTransaction();
@@ -108,13 +118,15 @@ export async function linkProviderAccount(
                 const [accounts] = await connection.query<RowDataPacket[]>({
                     sql: `SELECT user_password AS passwordHash, account_uuid AS accountId
                         FROM users WHERE user_id = ? LIMIT 1 FOR UPDATE`, timeout: QUERY_TIMEOUT_MS,
-                }, [target.userId]);
+                }, [accountTarget.userId]);
                 let result: ProviderLinkResult = 'not-found';
                 const account = accounts[0];
-                if (account && account.accountId === target.accountId) {
+                if (account && account.accountId === accountTarget.accountId) {
                     if (typeof account.passwordHash !== 'string') throw new ProviderAccountUnavailableError();
-                    result = await bcrypt.compare(password, account.passwordHash)
-                        ? await insertLink(connection, target, identity, subject) : 'invalid-password';
+                    if (!await bcrypt.compare(password, account.passwordHash)) result = 'invalid-password';
+                    else if (await readLiveSession(connection, accountTarget.userId, accountTarget.accountId, sessionId)) {
+                        result = await insertLink(connection, accountTarget, identity, subject);
+                    }
                 }
                 phase = 'commit';
                 await connection.commit();
