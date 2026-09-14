@@ -8,6 +8,8 @@
  * - Keep the per-frame ticker path allocation-light.
  * - Ensure disposal is deterministic: detach ticker, remove canvas, and destroy PIXI resources.
  */
+// Required by CSP-restricted native renderers; loaded with this experience, not Home.
+import 'pixi.js/unsafe-eval';
 import { Application, Ticker } from "pixi.js";
 import { enableCanvasPageGestures } from '@/utils/canvasPageGestures';
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from "@/utils/constants";

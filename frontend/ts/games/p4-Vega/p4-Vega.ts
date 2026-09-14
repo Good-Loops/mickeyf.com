@@ -12,6 +12,8 @@
  *   and teardown/recreation during restart.
  * - The fixed 60Hz simulation preserves the original movement speeds independently of rendering frequency.
  */
+// Register Pixi's CSP-safe generators before renderer creation in the native app.
+import 'pixi.js/unsafe-eval';
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from '@/utils/constants';
 import { enableCanvasPageGestures } from '@/utils/canvasPageGestures';
 import { getRandomInt } from '@/utils/random';

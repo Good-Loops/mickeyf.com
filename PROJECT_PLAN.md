@@ -2334,6 +2334,19 @@ example. The active branch is `improvement/clean-code-sweep`.
   frontend tests and Vite build passed (existing chunk warning); mocked browser
   success/error/fallback and desktop/portrait/landscape checks passed. No real
   accounts or backend changes; physical iPhone dialog behavior is not verified.
+- [x] Route loading/performance and owner-requested status screens (2026-09-14):
+  destinations load on demand behind one shared cosmic loading/error boundary;
+  Home, navigation and 404 recovery remain immediately available. Pixi's native
+  CSP compatibility registration moved with each graphics experience, not out of
+  the application. Initial minified JavaScript fell from 1,115,199 to 354,416
+  bytes (gzip 330,294 to 110,125); no build chunk exceeds the unchanged 500 kB
+  warning threshold. A matching custom 404 supplies Home/Games actions. Motion
+  respects reduced-motion preferences, without artificial loading delays.
+  TypeScript/all 265 frontend tests and production build passed. Built-browser
+  experience rendering, route recovery and genuine stalled/failed chunk states
+  were checked; desktop and 390x844 status screenshots inspected. This is not a
+  new physical-iPhone acceptance or production/native deployment. See the
+  [teaching checkpoint](CLEAN_CODE_INVENTORY.md#route-dependencies-and-shared-status-screens--2026-09-14).
 - [ ] Complete subsequent subsystem reviews one at a time; choose actual
   improvements from evidence, not file length or similar-looking syntax.
 

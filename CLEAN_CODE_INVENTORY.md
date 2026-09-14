@@ -450,6 +450,67 @@ needed its prefixed fullscreen API disabled too; that corrected fixture passed.
 Screenshots inspected; no real scores/accounts, physical-device claim, Unity
 rebuild, dependency change or temporary in-repository test page/script.
 
+## Route dependencies and shared status screens — 2026-09-14
+
+The build warning described a JavaScript chunk above Vite's default 500 kB
+minified, uncompressed threshold; it was not a failed build or proof of a
+gameplay frame-rate defect. Inspection found that static page imports brought
+Pixi, Tone and their dependencies into Home's initial JavaScript.
+
+Actual before/after in `frontend/ts/App.tsx`:
+
+```tsx
+// Before: the renderer and music dependencies join the initial module graph.
+import P4Vega from '@/pages/games/P4Vega';
+
+// After: load this dependency graph when the destination is rendered.
+const P4Vega = lazy(() => import('@/pages/games/P4Vega'));
+```
+
+This is a dependency-boundary improvement, not merely moving code into another
+file. All destinations now share a small `RouteContentBoundary`; Home and the
+404 recovery page stay eager. The boundary keeps the header/background/footer
+mounted, handles pending imports and rejected downloads, and resets on pathname
+navigation. Successful children gain no wrapper, preserving native direct-child
+layout selectors. Each graphics composition root retains the static
+`pixi.js/unsafe-eval` import that installs CSP-safe renderer generators.
+
+The owner also requested polished loading and 404 screens. `PageStatus.tsx`
+shares the cosmic glass card and orbiting-controller motif between loading,
+not-found and load failure. The decoration uses CSS/SVG, not Pixi or another
+package. Explicit recovery actions, accessible status/alert labels, 44px targets
+and reduced-motion rules are included. No fake progress percentage, forced
+delay, automatic reload or redirect timer was added. The trade-off is a short
+loading screen on a destination's first uncached visit; content data requests
+inside an already mounted page retain their existing loading behavior.
+
+Measured initial JavaScript, with the same production build configuration:
+
+| Measure | Before | After |
+| --- | ---: | ---: |
+| Minified bytes | 1,115,199 | 354,416 |
+| Gzip bytes | 330,294 | 110,125 |
+
+This is about 68% less initial JavaScript, not 68% faster startup or 68% smaller
+total assets. A graphics destination still downloads its own required engines.
+No manual vendor partitioning or warning-threshold increase was used.
+
+Verification: `npm --prefix frontend test` passed TypeScript and all 265 tests;
+`npm --prefix frontend run build` passed without the size warning. A Vite module
+graph inspection confirmed Pixi/Tone were removed from the eager graph. Built
+Chromium rendered all three graphics experiences, navigated back Home, and
+recovered through the shared boundary from a deliberately failed chunk. An
+in-memory, loopback-only preview middleware held a Login chunk pending to
+capture the genuine shared loading screen; it was not committed or shipped.
+Desktop and 390x844 loading/404 screenshots were inspected, with no horizontal
+overflow; 404 Games navigation and matching failure controls worked. The
+reduced-motion rules were code-reviewed, not tested on a physical device.
+
+No database/account changes, new dependency, production release or TestFlight
+upload. Temporary preview processes/tabs are closed after verification;
+requested screenshot artifacts live outside the repository. The Docs watcher
+regenerated the affected source-line link, which is included with this change.
+
 ## Learning-oriented handoff for each future change
 
 The owner requested on 2026-09-10 that improvements be taught, not merely
