@@ -682,6 +682,43 @@ actionable regressions. Generated AudioEngine source links were refreshed.
 No physical device/codec verification or deployment was performed; the Safari
 Files picker check remains deferred rather than being repeated as a blocker.
 
+## Shared hooks and dropdown interaction — 2026-09-15
+
+Reviewed `useAudioEngineState` and `useSafariBackgroundEdges` without changing
+them: subscription cleanup, the immediate current-state snapshot, stable shell
+controller and disposed-callback guards are already present. This checkpoint
+does not reopen completed audio transport or accepted Safari edge behavior.
+
+The adjacent shared `Dropdown` had a concrete interaction defect. Closed menus
+used only `opacity: 0` and `pointer-events: none`; an isolated Chrome probe
+confirmed that Tab still focused an invisible option. Visual hiding and keyboard
+interaction are different responsibilities. The existing fade CSS stays intact;
+the component now controls interactivity explicitly:
+
+The list gains `inert={!isOpen}`, where `isOpen` is `open && !disabled`.
+`inert` removes the closed
+subtree from focus and accessibility exposure, as described by
+[MDN](https://developer.mozilla.org/en-US/docs/Web/HTML/Reference/Global_attributes/inert).
+The trigger uses `aria-expanded` and a stable `aria-controls` ID following the
+[WAI disclosure pattern](https://www.w3.org/WAI/ARIA/apg/patterns/disclosure/).
+Removed the unsupported ARIA-menu claim rather than adding a full menu/listbox
+keyboard framework to these ordinary buttons.
+
+Escape and selection share `closeAndFocusButton`; Tab to another control and
+outside clicks close without stealing focus. Null blur targets do not close
+prematurely before an option click. Disabling closes the list and re-enabling
+does not reopen it. The document listener now exists only while open. This
+applies the reference's focused-function guidance (printed p. 35) locally;
+props, values, callers, styling and dependencies are unchanged.
+
+Six focused handler/markup cases failed before the fix and now pass. Real
+React StrictMode in isolated Chrome verified closed Tab order, Enter/Space,
+Escape, selection, Tab-out, outside clicks, disable/re-enable and unique IDs;
+390x844 touch emulation verified selection. Frontend TypeScript/all 413 tests,
+Vite build and `git diff --check` passed. Independent review found no remaining
+actionable issues. No real accounts, gameplay, physical-iPhone acceptance or
+deployment were involved; the deferred Safari Files check remains separate.
+
 ## Learning-oriented handoff for each future change
 
 The owner requested on 2026-09-10 that improvements be taught, not merely
