@@ -4,7 +4,12 @@ import type { Connect, Plugin } from 'vite';
 export const PUBLIC_API_PREFIX = '/__public-api';
 const PUBLIC_ORIGIN = 'https://mickeyf-org-j7yuum4tiq-uc.a.run.app';
 const LOCAL_ORIGIN = 'http://localhost:5173';
-const SESSION_COOKIE = 'ludolume_public_session';
+export type PublicAuthProtocol = 'legacy' | 'renewable';
+const SESSION_COOKIES = {
+    legacy: { local: 'ludolume_public_session', upstream: 'session' },
+    renewable: { local: 'ludolume_public_web_session', upstream: '__session' },
+} as const;
+type SessionCookies = typeof SESSION_COOKIES[PublicAuthProtocol];
 const MAX_BODY_BYTES = 32 * 1024;
 const LOOPBACK_ADDRESSES = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
 const READ_ROUTES = new Set([
@@ -19,6 +24,9 @@ const WRITE_ROUTES = new Set([
     '/api/leaderboards/three-bosses/run-tickets',
     '/api/leaderboards/three-bosses/runs',
 ]);
+const PROVIDER_READ_ROUTES = new Set(['/auth/providers/config', '/auth/providers/account']);
+const PROVIDER_WRITE_ROUTES = new Set(['/auth/providers/begin', '/auth/providers/complete']);
+const PROVIDER_ACTIONS = new Set(['login', 'signup', 'link']);
 const USER_OPERATIONS = new Set(['login', 'signup', 'submit_score']);
 // Preserve the upstream cookie encoding instead of reinterpreting its delimiters.
 const COOKIE_VALUE = /^[\x21\x23-\x2b\x2d-\x3a\x3c-\x5b\x5d-\x7e]*$/;
@@ -33,27 +41,27 @@ class GatewayError extends Error {
     }
 }
 
-function publicSessionCookie(header: string | undefined): string | undefined {
+function publicSessionCookie(header: string | undefined, names: SessionCookies): string | undefined {
     const matches = (header ?? '').split(';').map(part => part.trim())
-        .filter(part => part.startsWith(`${SESSION_COOKIE}=`));
+        .filter(part => part.startsWith(`${names.local}=`));
     if (matches.length > 1) throw new GatewayError(400, 'INVALID_SESSION_COOKIE');
     if (matches.length === 0) return undefined;
-    const value = matches[0].slice(SESSION_COOKIE.length + 1);
+    const value = matches[0].slice(names.local.length + 1);
     if (value.length > 8_192 || !COOKIE_VALUE.test(value)) {
         throw new GatewayError(400, 'INVALID_SESSION_COOKIE');
     }
-    return `session=${value}`;
+    return `${names.upstream}=${value}`;
 }
 
-function localSessionCookie(header: string): string | null {
+function localSessionCookie(header: string, names: SessionCookies): string | null {
     const [pair, ...attributes] = header.split(';').map(part => part.trim());
-    if (!pair.startsWith('session=')) return null;
-    const value = pair.slice('session='.length);
+    if (!pair.startsWith(`${names.upstream}=`)) return null;
+    const value = pair.slice(names.upstream.length + 1);
     if (!COOKIE_VALUE.test(value)) throw new GatewayError(502, 'INVALID_PUBLIC_RESPONSE');
     const lifetime = attributes.filter(attribute => /^(?:expires|max-age)=/i.test(attribute));
     // The upstream remains HTTPS. Only this loopback-only HTTP hop omits Secure;
     // its separate host-only cookie cannot leak into local-backend authentication.
-    return [`${SESSION_COOKIE}=${value}`, `Path=${PUBLIC_API_PREFIX}`, 'HttpOnly', 'SameSite=Lax', ...lifetime].join('; ');
+    return [`${names.local}=${value}`, `Path=${PUBLIC_API_PREFIX}`, 'HttpOnly', 'SameSite=Lax', ...lifetime].join('; ');
 }
 
 function readBody(request: IncomingMessage): Promise<string> {
@@ -107,14 +115,21 @@ async function mutationBody(request: IncomingMessage, route: string): Promise<st
     if (route === '/api/users' && !USER_OPERATIONS.has((body as { type: string }).type)) {
         throw new GatewayError(404, 'NOT_FOUND');
     }
-    if (route === '/auth/logout' && Object.keys(body).length > 0) {
+    if (PROVIDER_WRITE_ROUTES.has(route) && !PROVIDER_ACTIONS.has((body as { action: string }).action)) {
+        throw new GatewayError(404, 'NOT_FOUND');
+    }
+    if ((route === '/auth/logout' || route === '/auth/renew') && Object.keys(body).length > 0) {
         throw new GatewayError(400, 'INVALID_REQUEST');
     }
     return JSON.stringify(body);
 }
 
 /** Opt-in real-account gateway, never a general-purpose development proxy. */
-export function publicApiMiddleware(fetchPublic: typeof fetch = fetch): Connect.NextHandleFunction {
+export function publicApiMiddleware(
+    fetchPublic: typeof fetch = fetch, protocol: PublicAuthProtocol = 'legacy',
+): Connect.NextHandleFunction {
+    if (protocol !== 'legacy' && protocol !== 'renewable') throw new TypeError('Unknown public authentication protocol');
+    const names = SESSION_COOKIES[protocol];
     return async (request, response) => {
         response.setHeader('Content-Type', 'application/json');
         response.setHeader('Cache-Control', 'no-store');
@@ -128,13 +143,16 @@ export function publicApiMiddleware(fetchPublic: typeof fetch = fetch): Connect.
                 || (mutation && request.headers.origin !== LOCAL_ORIGIN)) {
                 throw new GatewayError(403, 'LOCAL_PREVIEW_ONLY');
             }
-            if (!(mutation ? WRITE_ROUTES.has(route) : request.method === 'GET' && READ_ROUTES.has(route))) {
+            const allowedRead = READ_ROUTES.has(route) || (protocol === 'renewable' && PROVIDER_READ_ROUTES.has(route));
+            const allowedWrite = WRITE_ROUTES.has(route) || (protocol === 'renewable'
+                && (route === '/auth/renew' || PROVIDER_WRITE_ROUTES.has(route)));
+            if (!(mutation ? allowedWrite : request.method === 'GET' && allowedRead)) {
                 throw new GatewayError(404, 'NOT_FOUND');
             }
             if (!mutation && (request.headers['transfer-encoding'] || Number(request.headers['content-length'] ?? 0) > 0)) {
                 throw new GatewayError(400, 'INVALID_REQUEST');
             }
-            const cookie = publicSessionCookie(request.headers.cookie);
+            const cookie = publicSessionCookie(request.headers.cookie, names);
             const body = mutation ? await mutationBody(request, route) : undefined;
             const headers: Record<string, string> = { Accept: 'application/json' };
             if (request.headers.origin) headers.Origin = request.headers.origin;
@@ -149,7 +167,7 @@ export function publicApiMiddleware(fetchPublic: typeof fetch = fetch): Connect.
                 throw new GatewayError(502, 'INVALID_PUBLIC_RESPONSE');
             }
             // Separate Set-Cookie values preserve Expires commas and clear-then-set order.
-            const cookies = upstream.headers.getSetCookie().map(localSessionCookie)
+            const cookies = upstream.headers.getSetCookie().map(cookie => localSessionCookie(cookie, names))
                 .filter((cookie): cookie is string => cookie !== null);
             if (cookies.length > 0) response.setHeader('Set-Cookie', cookies);
             response.statusCode = upstream.status;
@@ -161,12 +179,13 @@ export function publicApiMiddleware(fetchPublic: typeof fetch = fetch): Connect.
     };
 }
 
-export function publicApiPlugin(): Plugin {
+/** Select renewable only with the coordinated public backend/frontend cutover. */
+export function publicApiPlugin(protocol: PublicAuthProtocol = 'legacy'): Plugin {
     return {
         name: 'public-api-preview',
         apply: 'serve',
         configureServer(server) {
-            server.middlewares.use(PUBLIC_API_PREFIX, publicApiMiddleware());
+            server.middlewares.use(PUBLIC_API_PREFIX, publicApiMiddleware(fetch, protocol));
         },
     };
 }

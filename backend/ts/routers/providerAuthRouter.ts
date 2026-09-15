@@ -160,6 +160,8 @@ export function createProviderAuthRouter(options: ProviderAuthRouterOptions): Ro
                 const context = await services.readContext(req, 'complete');
                 const result = await services.flow.complete(context, input);
                 if (!result.ok) return fail(res, result.reason);
+                if (result.type === 'signup-required') return res.json({ signupRequired: true,
+                    challenge: { state: result.state, nonce: result.nonce, expiresInSeconds: result.expiresInSeconds } });
                 if (result.type === 'linked') return res.json({ success: true, linked: true });
                 if (result.type === 'deleted') {
                     clearAuthenticationCookies(res, isProduction);

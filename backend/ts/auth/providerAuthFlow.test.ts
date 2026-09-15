@@ -434,19 +434,90 @@ test('signup rejects malformed metadata and never accepts email, password or acc
     assert.deepEqual(f.events, ['consume', 'committed', 'verify']);
 });
 
-test('signup conflicts never become implicit login or email matching and keep failures sanitized', async () => {
-    for (const reason of ['DUPLICATE_USER', 'ALREADY_LINKED', 'INVALID_USERNAME', 'INVALID_EMAIL'] as const) {
+test('signup email and username conflicts never become implicit login or linking and keep failures sanitized', async () => {
+    for (const reason of ['DUPLICATE_USER', 'INVALID_USERNAME', 'INVALID_EMAIL'] as const) {
         const f = await fixture(undefined, true);
+        f.controls.foundAccount = null;
         f.controls.creation = { created: false, reason };
         const { input } = await f.challenge('signup');
         assert.deepEqual(await f.flow.complete(f.context, input), { ok: false, reason });
-        assert.deepEqual(f.events, ['consume', 'committed', 'verify', 'signup']);
+        assert.deepEqual(f.events, ['consume', 'committed', 'verify', 'signup', ...(reason === 'DUPLICATE_USER' ? ['find'] : [])]);
         assert.equal(f.linkedTargets.length, 0);
     }
     const f = await fixture(undefined, true);
     const { input } = await f.challenge('signup');
     f.controls.failAt = 'signup';
     assert.deepEqual(await f.flow.complete(f.context, input), { ok: false, reason: 'UNAVAILABLE' });
+});
+
+test('Google entry signs in a known subject without username collection or account creation', async () => {
+    const f = await fixture(undefined, true);
+    const started = await f.flow.begin(f.context, { clientKey: 'google-web', action: 'login' });
+    assert.ok(started.ok);
+    f.events.length = 0;
+    assert.deepEqual(await f.flow.complete(f.context, { clientKey: 'google-web', action: 'login',
+        state: started.state, idToken: signedToken(started.nonce) }), { ok: true, type: 'account-verified', account });
+    assert.deepEqual(f.events, ['consume', 'committed', 'verify', 'find']);
+    assert.equal(f.createdAccounts.length, 0);
+});
+
+test('new Google entry authorizes one bound signup continuation without another provider exchange', async () => {
+    const f = await fixture(undefined, true);
+    f.controls.foundAccount = null;
+    const started = await f.flow.begin(f.context, { clientKey: 'google-web', action: 'login' });
+    assert.ok(started.ok);
+    const login = { clientKey: 'google-web', action: 'login', state: started.state,
+        idToken: signedToken(started.nonce, 'google', { email: 'new-player@gmail.com', email_verified: true }) };
+    f.events.length = 0;
+    const next = await f.flow.complete(f.context, login);
+    assert.ok(next.ok && next.type === 'signup-required');
+    assert.notEqual(next.state, started.state);
+    assert.equal(next.nonce, started.nonce);
+    assert.ok(next.expiresInSeconds > 0 && next.expiresInSeconds <= started.expiresInSeconds);
+    assert.deepEqual(f.events, ['consume', 'committed', 'verify', 'find', 'create']);
+    assert.equal(f.createdAccounts.length, 0);
+    const signup = { ...login, action: 'signup', state: next.state, userName: 'new-player' };
+    assert.deepEqual(await f.flow.complete(await trustedContext(undefined, 2), signup),
+        { ok: false, reason: 'INVALID_ATTEMPT' });
+    assert.deepEqual(await f.flow.complete(f.context, { ...login, state: next.state }),
+        { ok: false, reason: 'INVALID_ATTEMPT' });
+    assert.deepEqual(await f.flow.complete(f.context, signup), { ok: true, type: 'account-verified', account });
+    assert.deepEqual(f.verifiedNonces, [started.nonce, started.nonce]);
+    assert.equal(f.createdAccounts.length, 1);
+    assert.deepEqual(await f.flow.complete(f.context, signup), { ok: false, reason: 'INVALID_ATTEMPT' });
+    assert.deepEqual(await f.flow.complete(f.context, login), { ok: false, reason: 'INVALID_ATTEMPT' });
+});
+
+test('Google continuation fails closed for disabled signup, missing email, exhausted cookie lifetime and storage failure', async () => {
+    for (const failure of ['disabled', 'email', 'expired', 'busy', 'invalid-token'] as const) {
+        const f = await fixture(undefined, failure !== 'disabled');
+        f.controls.foundAccount = null;
+        const started = await f.flow.begin(f.context, { clientKey: 'google-web', action: 'login' });
+        assert.ok(started.ok);
+        if (failure === 'busy') f.controls.busy = true;
+        const context = failure === 'expired' ? { ...f.context, bindingExpiresAt: Date.now() } : f.context;
+        const result = await f.flow.complete(context, { clientKey: 'google-web', action: 'login', state: started.state,
+            idToken: failure === 'invalid-token' ? 'invalid-token' : signedToken(started.nonce, 'google',
+                failure === 'email' ? {} : { email: 'new-player@gmail.com', email_verified: true }) });
+        assert.deepEqual(result, { ok: false, reason: { disabled: 'NOT_LINKED', email: 'INVALID_EMAIL',
+            expired: 'INVALID_ATTEMPT', busy: 'BUSY', 'invalid-token': 'INVALID_PROVIDER_TOKEN' }[failure] });
+        assert.equal(f.createdAccounts.length, 0);
+        assert.equal(f.linkedTargets.length, 0);
+    }
+});
+
+test('concurrent signup resolves only the already-created verified subject, never an email match', async () => {
+    for (const reason of ['ALREADY_LINKED', 'DUPLICATE_USER'] as const) {
+        const f = await fixture(undefined, true);
+        f.controls.creation = { created: false, reason };
+        const { input } = await f.challenge('signup');
+        assert.deepEqual(await f.flow.complete(f.context, input), { ok: true, type: 'account-verified', account });
+        assert.deepEqual(f.events, ['consume', 'committed', 'verify', 'signup', 'find']);
+        assert.equal(f.linkedTargets.length, 0);
+        const missing = await f.challenge('signup');
+        f.controls.foundAccount = null;
+        assert.deepEqual(await f.flow.complete(f.context, missing.input), { ok: false, reason });
+    }
 });
 
 test('login and signup purposes cannot be swapped to authorize account creation', async () => {

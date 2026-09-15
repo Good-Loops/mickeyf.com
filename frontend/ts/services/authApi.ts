@@ -38,6 +38,10 @@ export type PrepareProviderLoginResult =
     | { challenge: ProviderAuthenticationChallenge; handle: PreparedProviderLogin }
     | { error: string };
 export type CompleteProviderLoginOptions = ProviderAuthenticationOptions & Readonly<{ rememberMe?: boolean; userName?: string }>;
+export type CompleteProviderLoginResult = ProviderAuthenticationResult
+    | { signupRequired: true; handle: PreparedProviderLogin };
+type ProviderCompletionResponse = ProviderAuthenticationResult
+    | { signupRequired: true; challenge: ProviderAuthenticationChallenge };
 export type ProviderAccountMethods = Readonly<{ hasPassword: boolean; googleLinked: boolean; googleDeletionEnabled: boolean }>;
 
 const PROVIDER_TOKEN_MAX_LENGTH = 16_384;
@@ -153,7 +157,7 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
     let pendingMutation: Promise<void> = Promise.resolve();
     let providerLoginGeneration = 0;
     type PreparedLogin = {
-        clientKey: string; state: string; deadline: number;
+        clientKey: string; state: string; nonce: string; deadline: number;
         action: 'login' | 'signup';
         generation: number; signal?: AbortSignal; used: boolean;
     };
@@ -340,11 +344,12 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
         if (signal?.aborted) return { error: 'CANCELLED' };
         if ('error' in credential) return credential;
         if (Date.now() >= deadline) return { error: 'INVALID_ATTEMPT' };
-        return completeProviderAuthentication(input, challenge.state, credential.idToken);
+        const result = await completeProviderAuthentication(input, challenge.state, credential.idToken);
+        return 'signupRequired' in result ? { error: 'UNAVAILABLE' } : result;
     }
 
     async function completeProviderAuthentication(input: ProviderAuthenticationInput, state: string,
-        idToken: string): Promise<ProviderAuthenticationResult> {
+        idToken: string): Promise<ProviderCompletionResponse> {
         // Once complete is sent, await its cookie mutation and verification even
         // if UI cancellation arrives. Cancelling cannot undo a server-side login.
         const completion = await postProviderOperation('complete', {
@@ -355,6 +360,11 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
         });
         if (!completion.ok) return { error: completion.error };
         const result = completion.body;
+        if (input.action === 'login' && input.clientKey === 'google-web' && isRecord(result)
+            && hasKeys(result, 'challenge,signupRequired') && result.signupRequired === true) {
+            const challenge = readProviderChallenge(result.challenge);
+            return challenge ? { signupRequired: true, challenge } : { error: 'INVALID_RESPONSE' };
+        }
         if (!isRecord(result) || result.success !== true) return { error: 'INVALID_RESPONSE' };
         if (input.action === 'link') {
             return hasKeys(result, 'linked,success') && result.linked === true
@@ -398,13 +408,14 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
             const deadline = startedAt + challenge.expiresInSeconds * 1000;
             if (Date.now() >= deadline) return { error: 'INVALID_ATTEMPT' };
             const handle = Object.freeze({}) as PreparedProviderLogin;
-            preparedLogins.set(handle, { clientKey, action, state: challenge.state, deadline, generation, signal, used: false });
+            preparedLogins.set(handle, { clientKey, action, state: challenge.state, nonce: challenge.nonce,
+                deadline, generation, signal, used: false });
             return { challenge, handle };
         });
     }
 
     function completeProviderLogin(handle: PreparedProviderLogin, idToken: string,
-        options: CompleteProviderLoginOptions = {}): Promise<ProviderAuthenticationResult> {
+        options: CompleteProviderLoginOptions = {}): Promise<CompleteProviderLoginResult> {
         if (!validCompletionOptions(options)) return Promise.resolve({ error: 'INVALID_REQUEST' });
         const login = isRecord(handle) ? preparedLogins.get(handle) : undefined;
         if (!login || login.used) return Promise.resolve({ error: 'INVALID_ATTEMPT' });
@@ -421,9 +432,22 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
         return enqueueMutation(async () => {
             const queuedError = preparedLoginError(login, signal);
             if (queuedError) return { error: queuedError };
-            return completeProviderAuthentication({ action: login.action, clientKey: login.clientKey, rememberMe,
+            const startedAt = Date.now();
+            const result = await completeProviderAuthentication({ action: login.action, clientKey: login.clientKey, rememberMe,
                 ...(login.action === 'signup' ? { userName } : {}) },
                 login.state, idToken);
+            if (!('signupRequired' in result)) return result;
+            const continuationError = preparedLoginError(login, signal);
+            if (continuationError) return { error: continuationError };
+            if (result.challenge.nonce !== login.nonce || result.challenge.state === login.state) {
+                return { error: 'INVALID_RESPONSE' };
+            }
+            const deadline = Math.min(login.deadline, startedAt + result.challenge.expiresInSeconds * 1000);
+            if (Date.now() >= deadline) return { error: 'INVALID_ATTEMPT' };
+            const continuation = Object.freeze({}) as PreparedProviderLogin;
+            preparedLogins.set(continuation, { ...login, action: 'signup', state: result.challenge.state, deadline,
+                signal: signal ?? login.signal, used: false });
+            return { signupRequired: true, handle: continuation };
         });
     }
 

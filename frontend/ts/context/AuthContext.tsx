@@ -16,7 +16,7 @@ import { loginRequest, logoutRequest, verifyRequest, renewRequest, deleteAccount
     prepareProviderLogin as prepareProviderLoginRequest, completeProviderLogin as completeProviderLoginRequest } from '@/services/authService';
 import type { DeleteAccountResponse, ProviderAuthenticationInput, AcquireProviderCredential,
     ProviderAuthenticationOptions, ProviderAuthenticationResult, PreparedProviderLogin, PrepareProviderLoginResult,
-    CompleteProviderLoginOptions } from '@/services/authApi';
+    CompleteProviderLoginOptions, CompleteProviderLoginResult } from '@/services/authApi';
 import { watchSessionRenewalActivity } from '@/services/sessionRenewalActivity';
 import Swal from '@/components/siteAlert';
 
@@ -34,7 +34,7 @@ type AuthContextType = {
         options?: ProviderAuthenticationOptions) => Promise<ProviderAuthenticationResult>;
     prepareProviderLogin: (clientKey: string, options?: ProviderAuthenticationOptions, action?: 'login' | 'signup') => Promise<PrepareProviderLoginResult>;
     completeProviderLogin: (handle: PreparedProviderLogin, idToken: string,
-        options?: CompleteProviderLoginOptions) => Promise<ProviderAuthenticationResult>;
+        options?: CompleteProviderLoginOptions) => Promise<CompleteProviderLoginResult>;
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -190,6 +190,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         if (actionVersion === undefined || actionVersion !== authActionVersion.current) return { error: 'CANCELLED' };
         const result = await completeProviderLoginRequest(handle, idToken, options);
         if (actionVersion !== authActionVersion.current) return { error: 'CANCELLED' };
+        if ('signupRequired' in result) preparedLoginVersions.current.set(result.handle, actionVersion);
         if ('user_name' in result) {
             // An idle button or rejected late callback must never supersede a
             // password login. Claim the action only after verified completion.

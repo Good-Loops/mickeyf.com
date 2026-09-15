@@ -174,3 +174,86 @@ test('upstream errors retain their status without private headers, while transpo
     const html = publicApiMiddleware(async () => new Response('<html>not API</html>'));
     assert.equal((await invoke(html)).statusCode, 502);
 });
+
+test('renewable public transport explicitly allows provider entry and renewal without opening admin routes', async () => {
+    const calls = [];
+    const middleware = publicApiMiddleware(async (url, init) => {
+        calls.push({ url, init });
+        return Response.json({ success: true });
+    }, 'renewable');
+    for (const url of ['/auth/providers/config', '/auth/providers/account']) {
+        assert.equal((await invoke(middleware, { url })).statusCode, 200);
+    }
+    for (const url of ['/auth/providers/begin', '/auth/providers/complete']) {
+        for (const action of ['login', 'signup', 'link']) {
+            assert.equal((await invoke(middleware, mutation(url, { action, clientKey: 'google-web' }))).statusCode, 200);
+        }
+    }
+    assert.equal((await invoke(middleware, mutation('/auth/renew', {}))).statusCode, 200);
+    assert.equal(calls.length, 9);
+    for (const request of [
+        mutation('/auth/providers/complete', { action: 'delete' }),
+        mutation('/auth/providers/begin', { action: 'unknown' }),
+        mutation('/auth/account'), { url: '/auth/providers/config?enable=true' },
+        { url: '/auth/providers/complete' }, mutation('/auth/renew', { session: 'injected' }),
+    ]) assert.ok((await invoke(middleware, request)).statusCode >= 400);
+    assert.equal(calls.length, 9, 'Rejected operations never reach the public backend');
+    for (const { url, init } of calls) {
+        assert.equal(new URL(url).origin, publicOrigin);
+        if (init.method === 'POST') assert.equal(init.headers.Origin, localOrigin);
+    }
+});
+
+test('renewable transport keeps anonymous Google binding and signed session in a separate public namespace', async () => {
+    const calls = [];
+    const middleware = publicApiMiddleware(async (_url, init) => {
+        calls.push(init);
+        const headers = new Headers({ 'Content-Type': 'application/json' });
+        // Both anonymous challenge binding and authenticated sessions use the canonical web cookie.
+        headers.append('Set-Cookie', '__session=s%3Abinding.signature; Max-Age=300; Path=/; Secure; HttpOnly');
+        headers.append('Set-Cookie', 'session=do-not-map-native; Path=/');
+        return new Response('{"state":"synthetic-state"}', { headers });
+    }, 'renewable');
+    const begin = mutation('/auth/providers/begin', { action: 'login', clientKey: 'google-web' });
+    begin.headers.cookie = 'session=local; __session=local-web; ludolume_public_session=old-public';
+    const response = await invoke(middleware, begin);
+    assert.equal(calls[0].headers.Cookie, undefined, 'Neither local credentials nor old public sessions are reused');
+    assert.deepEqual(response.headers['set-cookie'], [
+        `ludolume_public_web_session=s%3Abinding.signature; Path=${PUBLIC_API_PREFIX}; HttpOnly; SameSite=Lax; Max-Age=300`,
+    ]);
+    const complete = mutation('/auth/providers/complete', { action: 'login', clientKey: 'google-web', state: 'synthetic-state', idToken: 'synthetic-token' });
+    complete.headers.cookie = `${begin.headers.cookie}; ludolume_public_web_session=s%3Abinding.signature`;
+    complete.headers.authorization = 'Bearer do-not-forward';
+    await invoke(middleware, complete);
+    assert.equal(calls[1].headers.Cookie, '__session=s%3Abinding.signature');
+    assert.equal(calls[1].headers.Authorization, undefined);
+    assert.equal(calls[1].headers.Origin, localOrigin);
+    assert.equal(calls[1].body, complete.body);
+});
+
+test('renewable cookie clearing preserves clear-then-set order without relaying native cookies', async () => {
+    const headers = new Headers({ 'Content-Type': 'application/json' });
+    headers.append('Set-Cookie', 'session=; Max-Age=0; Path=/');
+    headers.append('Set-Cookie', '__session=; Max-Age=0; Path=/');
+    headers.append('Set-Cookie', '__session=s%3Arenewed.signature; Max-Age=2592000; Secure; HttpOnly; Path=/');
+    const middleware = publicApiMiddleware(async () => new Response('{"loggedIn":true}', { headers }), 'renewable');
+    const result = await invoke(middleware, mutation('/auth/renew', {}));
+    assert.deepEqual(result.headers['set-cookie'], [
+        `ludolume_public_web_session=; Path=${PUBLIC_API_PREFIX}; HttpOnly; SameSite=Lax; Max-Age=0`,
+        `ludolume_public_web_session=s%3Arenewed.signature; Path=${PUBLIC_API_PREFIX}; HttpOnly; SameSite=Lax; Max-Age=2592000`,
+    ]);
+});
+
+test('renewable requests retain exact Origin, loopback and unambiguous cookie requirements', async () => {
+    const middleware = publicApiMiddleware(async () => assert.fail('Unsafe provider request reached production'), 'renewable');
+    const request = mutation('/auth/providers/begin', { action: 'login', clientKey: 'google-web' });
+    for (const headers of [{ host: 'localhost:5176' }, { origin: 'https://mickeyf.com' }, { origin: undefined }]) {
+        assert.equal((await invoke(middleware, { ...request, headers: { ...request.headers, ...headers } })).statusCode, 403);
+    }
+    assert.equal((await invoke(middleware, { ...request, remoteAddress: '192.168.0.2' })).statusCode, 403);
+    for (const cookie of ['ludolume_public_web_session=one; ludolume_public_web_session=two',
+        'ludolume_public_web_session=bad value']) {
+        assert.equal((await invoke(middleware, { ...request, headers: { ...request.headers, cookie } })).statusCode, 400);
+    }
+    assert.throws(() => publicApiMiddleware(fetch, 'automatic'), /Unknown public authentication protocol/);
+});

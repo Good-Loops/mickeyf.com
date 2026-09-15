@@ -2562,6 +2562,13 @@ itself activate, implement or defer both providers.
   real-account acceptance, a published privacy policy before public activation,
   approved native Apple capability/profile,
   focused real-provider acceptance and native Google SDK/client configuration.
+  **Owner clarification (2026-09-14):** Continue with Google on both Login and
+  Sign up must sign in returning Google users directly and onboard new Google
+  users without requiring password-account creation or linking. Linking an
+  existing password account is optional, not the primary entry flow. Localhost
+  public preview and the public site must use the same real accounts/scores.
+  A link-only rollout is not completion; retain the existing privacy/age/deletion
+  requirements for production account creation rather than silently bypassing them.
   **Passwordless signup checkpoint (2026-09-14):** owner-approved Google-web
   signup now has a direct official button, username onboarding, atomic NULL-password
   user/Google-link creation and the shared renewable session. Fresh Google proof

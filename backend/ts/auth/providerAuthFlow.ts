@@ -16,6 +16,7 @@ type Failure = { ok: false; reason: 'UNAVAILABLE' | 'INVALID_REQUEST' | 'INVALID
 export type ProviderChallengeResult = Failure | { ok: true; state: string; nonce: string; expiresInSeconds: number };
 export type ProviderCompletionResult = Failure
     | { ok: true; type: 'account-verified'; account: ProviderAccount }
+    | { ok: true; type: 'signup-required'; state: string; nonce: string; expiresInSeconds: number }
     | { ok: true; type: 'linked' }
     | { ok: true; type: 'deleted' };
 
@@ -131,11 +132,36 @@ export function createProviderAuthFlow({ attempts, accounts, clients, enabled = 
                 if (verified.identity.provider !== selection.client.provider) return { ok: false, reason: 'INVALID_PROVIDER_TOKEN' };
                 if (selection.action === 'login') {
                     const account = await accounts.find(verified.identity);
-                    return account ? { ok: true, type: 'account-verified', account } : { ok: false, reason: 'NOT_LINKED' };
+                    if (account) return { ok: true, type: 'account-verified', account };
+                    if (selection.clientKey !== 'google-web' || !signupEnabled || !accounts.create) {
+                        return { ok: false, reason: 'NOT_LINKED' };
+                    }
+                    if (verified.identity.email === undefined) return { ok: false, reason: 'INVALID_EMAIL' };
+                    // This is an explicit server-authorized transition, not reuse of
+                    // the consumed login state. The original cookie still expires
+                    // after five minutes; completion re-verifies this same nonce.
+                    const expiresInSeconds = context.bindingExpiresAt === null ? 0
+                        : Math.min(300, Math.floor((context.bindingExpiresAt - Date.now()) / 1000));
+                    if (expiresInSeconds <= 0) return { ok: false, reason: 'INVALID_ATTEMPT' };
+                    const state = randomBytes(32).toString('base64url');
+                    const created = await attempts.create({
+                        stateHash: createHash('sha256').update(state).digest(), bindingHash: context.bindingHash,
+                        nonce: attempt.nonce, clientKey: selection.clientKey, action: 'signup', accountId: null, userId: null,
+                    });
+                    return created === 'created'
+                        ? { ok: true, type: 'signup-required', state, nonce: attempt.nonce, expiresInSeconds }
+                        : { ok: false, reason: 'BUSY' };
                 }
                 if (selection.action === 'signup') {
                     if (verified.identity.email === undefined) return { ok: false, reason: 'INVALID_EMAIL' };
                     const result = await accounts.create!(verified.identity, (input.userName as string).trim());
+                    if (!result.created && (result.reason === 'ALREADY_LINKED' || result.reason === 'DUPLICATE_USER')) {
+                        // Another tab may have finished registration meanwhile.
+                        // Only this verified provider subject, never its email,
+                        // can resolve that race to the existing account.
+                        const account = await accounts.find(verified.identity);
+                        return account ? { ok: true, type: 'account-verified', account } : { ok: false, reason: result.reason };
+                    }
                     return result.created ? { ok: true, type: 'account-verified', account: result.account }
                         : { ok: false, reason: result.reason };
                 }

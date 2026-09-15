@@ -26,12 +26,14 @@ Google's authorized presenter (`azp`) must also match configuration when present
 a separately configured native presenter must be present in the token.
 Configuration belongs to the server, never to submitted request fields.
 
-The successful result contains only `{ provider, subject }`. Its nominal
+The successful result identifies `{ provider, subject }` and can include a
+Google-authoritative verified email for separately enabled account creation. Its nominal
 TypeScript type prevents accidental use of decoded/request claims, but is not
 a runtime security boundary. Only the verifier should construct it.
 
 `accounts/providerAccountRepository.ts` maps that identity to `users.account_uuid`.
-It does **not** match email addresses or create users. To link an existing
+Login lookup does **not** match email addresses. Separately enabled signup can
+create a passwordless account; it never merges with an account by email. To link an existing
 account, the trusted context supplies its numeric ID, immutable UUID and device
 SessionProof; the user also supplies the current password. The repository checks
 UUID and password inside the same per-user lock used by logout, score submission
@@ -43,7 +45,8 @@ Logout or expiry during provider verification therefore prevents a late link.
 - Retrying the same link is idempotent; a conflict never moves or overwrites it.
 - A deleted/recreated numeric user ID cannot inherit the original UUID's links.
 - Only subject, provider, account UUID and UTC linking time are stored—no
-  provider email/name, access token, refresh token or raw ID token.
+  provider email/name, access token, refresh token or raw ID token in the identity
+  table. Signup stores its verified email in the ordinary user record.
 - Driver errors are sanitized; ambiguous commits must not be reported as success.
 
 Migration `0009_create_account_provider_identities.sql` adds this table with an
@@ -95,8 +98,13 @@ state and nonce values, pins the action/client to server configuration, then
 consumes the matching attempt **before** token verification or account operations.
 Invalid proof, incorrect linking password, provider failure and cancellation need
 a new attempt. Only the explicit linking flow requires the current password;
-already-linked login resolves the verified provider subject without it. It never
-creates accounts or matches users by email. `account-verified` is an internal
+already-linked login resolves the verified provider subject without it. With
+Google signup enabled, an unknown verified Google subject receives a fresh
+single-use signup continuation instead of a NOT_LINKED error. The continuation
+uses the original nonce and signed browser binding; it cannot extend that
+binding's original five-minute lifetime. Completing it re-verifies the Google
+credential and creates the account only after a username is provided. No raw
+credential is stored server-side. `account-verified` is an internal
 result, not an issued session or a proof to send through a browser and trust later.
 
 `auth/providerAttemptRepository.ts` uses the existing database across instances.
@@ -129,7 +137,10 @@ The request shapes are:
 - `POST /complete`, login: `{ action: "login", clientKey, state, idToken, rememberMe?: boolean }`.
 - `POST /complete`, link: `{ action: "link", clientKey, state, idToken, password }`.
 
-Unknown fields are rejected. Successful login returns `{ success: true, user_name }`;
+Unknown fields are rejected. Login can return
+`{ signupRequired: true, challenge: { state, nonce, expiresInSeconds } }` for
+enabled Google onboarding; this is not a session or an authenticated account.
+Successful login returns `{ success: true, user_name }`;
 linking returns `{ success: true, linked: true }`. The internal verified-account
 result and session token are never returned as JSON. `auth/providerSession.ts`
 uses the same token issuer, locked session repository and cookie policy as password
@@ -200,17 +211,20 @@ separately from the single-page queue.
   heading. Password accounts retain the linking dialog and current-password proof;
   native Apple retains its existing control and sheet.
   Existing users link from Manage account using their current password, then
-  log in with that provider and the same Stay signed in preference. Unlinked
-  identities on **Log in** do not create accounts or match by email. Google-only
-  signup is implemented as a separate opt-in action, described below.
+  log in with that provider and the same Stay signed in preference. Linking is
+  optional: new Google users can use the separately enabled onboarding flow
+  from either entry form, without first creating a password account.
   Disconnect/provider-token revocation remain separate work.
 
 ## Passwordless Google signup and deletion
 
 `PROVIDER_GOOGLE_SIGNUP_ENABLED=true` separately enables Google **web** signup;
 the default is off. Discovery advertises `signup: true` only for that Google
-client. Sign up shows the same official Continue with Google button as Log in.
-After Google verification, a small username card completes onboarding. The
+client. Sign up and Log in start the same official Continue with Google flow.
+A known Google subject signs in immediately on either form. Only a new subject
+sees the small username card, using a fresh bound continuation without another
+Google popup. Signup being disabled never prevents an existing Google user
+from signing in through either form. The
 chosen Stay signed in preference uses the existing renewable, revocable session.
 
 The server verifies the Google token signature, audience, issuer, expiry and
@@ -223,8 +237,8 @@ is **not** age assurance or parental consent.
 One transaction inserts the user with `user_password = NULL` and its exact Google
 subject link. Unique username/email/provider keys prevent collision races. It
 never invents a password, overwrites an existing link or merges accounts by email.
-An existing Google link directs users to Log in; a username/email collision asks
-them to choose another name or log in to the existing account. Signup success
+An already registered Google subject signs in directly; a username/email collision
+with an unrelated subject remains a conflict, never an email-based merge. Signup success
 requires a durable session and the client's matching authenticated-session check.
 
 Manage account reads only authenticated boolean capabilities. Password-only
@@ -332,11 +346,26 @@ grant unit tests, 13 disposable MySQL grant integration tests (including actual
 provider startup, linking and single-use attempts), and the backend typecheck.
 No production schema, privilege, traffic, OAuth setting or account was changed.
 
-The release choice remains explicit: existing-account Google linking/login can
-keep Google signup disabled; new Google-only accounts still require the approved
-age/consent and available-deletion work. Neither path skips the published privacy
-disclosures or coordinated backend/Hosting/session cutover. Do not silently turn
-the existing-account option into approval for unrestricted new-account signup.
+The owner clarified that the release must include both first-time Google signup
+and returning-user login, on both forms and the same public backend from localhost.
+An existing-account/link-only rollout is not the requested completion. Linking
+password accounts remains optional. New Google accounts still require the approved
+age/consent, available-deletion and published-privacy work; keep those gates while
+preparing the coordinated backend/Hosting/session cutover.
+
+The localhost gateway now has a tested `renewable` protocol option for provider
+discovery, begin/complete and renewal. It maps only `ludolume_public_web_session`
+to the backend's canonical `__session`, including anonymous challenge bindings.
+Local test credentials, native cookies and legacy public cookies are not mixed.
+The Vite plugin still selects legacy mode: switch it and retire the corresponding
+UI/renewal compatibility guards only with the real public backend deployment.
+Provider deletion/admin routes remain outside this gateway's current allowlist.
+
+Unified-entry verification: 52 backend provider-flow/router tests, 67 frontend
+auth-transport/UI tests, 14 direct gateway tests and four public-preview
+compatibility tests passed. Both TypeScript checks and the production frontend
+build passed. These use synthetic provider responses and do not establish live
+Google/public-session acceptance. No production activation occurred.
 
 Remaining work, in order:
 

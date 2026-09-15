@@ -37,6 +37,13 @@ test('Google login has a direct official-widget host and no extra selector, head
     assert.doesNotMatch(rendered, /Or sign in with|<h2|<button|<form|<iframe|<script|dialog|synthetic\.apps/);
 });
 
+test('both entry pages render the same direct Google control without an upfront username prompt', () => {
+    const render = action => renderToStaticMarkup(React.createElement(AuthProvider, null,
+        React.createElement(InlineGoogleSignIn, { client: google, action })));
+    assert.equal(render('signup'), render('login'));
+    assert.doesNotMatch(render('signup'), /Choose your username|Create account|Link a sign-in method/);
+});
+
 test('direct Google host is inert while password login is busy and does not start a replacement selector', () => {
     const rendered = renderToStaticMarkup(React.createElement(AuthProvider, null,
         React.createElement(InlineGoogleSignIn, { client: google, disabled: true })));
@@ -71,11 +78,12 @@ test('provider activity announces progress and disables all other choices', () =
     assert.equal((rendered.match(/ disabled=""/g) ?? []).length, 2);
 });
 
-test('unlinked identity guidance names signup and the existing password/Manage account recovery path', () => {
+test('signup-disabled guidance keeps password login and linking explicitly optional', () => {
     const message = providerSignInErrorMessage('NOT_LINKED', 'login');
-    assert.match(message, /Sign up/);
+    assert.match(message, /not available/);
     assert.match(message, /password/);
     assert.match(message, /Manage account/);
+    assert.match(message, /optional/);
     assert.doesNotMatch(message, /automatically|email/i);
 });
 

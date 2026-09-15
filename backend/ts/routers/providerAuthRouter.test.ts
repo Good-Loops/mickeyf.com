@@ -433,9 +433,10 @@ test('explicit Google signup establishes the normal cookie only after account cr
     }, true, { signupEnabled: true });
 });
 
-test('Google signup conflicts and invalid metadata never log in an existing account or set a session cookie', async () => {
+test('Google signup email and username conflicts never log in an existing account or set a session cookie', async () => {
     await withServer(async (base, { state }) => {
-        for (const [reason, status] of [['DUPLICATE_USER', 409], ['ALREADY_LINKED', 409],
+        state.linked = false;
+        for (const [reason, status] of [['DUPLICATE_USER', 409],
             ['INVALID_USERNAME', 400], ['INVALID_EMAIL', 400]] as const) {
             state.creation = { created: false, reason };
             const started = await challenge(base, 'signup');
@@ -446,7 +447,33 @@ test('Google signup conflicts and invalid metadata never log in an existing acco
             assert.equal(response.headers.get('set-cookie'), null);
         }
         assert.deepEqual(state.rememberMe, []);
-        assert.ok(!state.events.includes('find') && !state.events.includes('link'));
+        assert.ok(!state.events.includes('link'));
+    }, true, { signupEnabled: true });
+});
+
+test('Google login continues new-user signup using the same cookie and nonce, and issues a session only afterward', async () => {
+    await withServer(async (base, { state }) => {
+        state.linked = false;
+        const begun = await post(base, 'begin', { clientKey: 'google-web', action: 'login' });
+        const started = await begun.json() as { state: string; nonce: string; expiresInSeconds: number };
+        const cookie = begun.headers.getSetCookie()[0].split(';')[0];
+        const response = await post(base, 'complete', { clientKey: 'google-web', action: 'login',
+            state: started.state, idToken: 'accepted-token', rememberMe: true }, { cookie });
+        assert.equal(response.status, 200);
+        const next = await response.json() as { signupRequired: boolean; challenge: typeof started };
+        assert.equal(next.signupRequired, true);
+        assert.equal(next.challenge.nonce, started.nonce);
+        assert.notEqual(next.challenge.state, started.state);
+        assert.ok(next.challenge.expiresInSeconds <= started.expiresInSeconds);
+        assert.equal(response.headers.get('set-cookie'), null);
+        assert.deepEqual(state.rememberMe, []);
+        const registered = await post(base, 'complete', { clientKey: 'google-web', action: 'signup',
+            state: next.challenge.state, idToken: 'accepted-token', userName: 'new-player', rememberMe: true }, { cookie });
+        assert.equal(registered.status, 200);
+        assert.deepEqual(await registered.json(), { success: true, user_name: account.userName });
+        assert.match(registered.headers.get('set-cookie')!, /^__session=s%3Aey/);
+        assert.deepEqual(state.rememberMe, [true]);
+        assert.deepEqual(state.verifiedNonces, [started.nonce, started.nonce]);
     }, true, { signupEnabled: true });
 });
 

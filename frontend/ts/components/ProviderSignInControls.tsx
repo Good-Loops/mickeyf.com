@@ -21,7 +21,7 @@ type ProviderSignInControlsProps = {
 export function providerSignInErrorMessage(error: string, action: ProviderAction | 'delete'): string | null {
     switch (error) {
         case 'CANCELLED': return null;
-        case 'NOT_LINKED': return 'This Google account is not linked yet. Create an account on Sign up, or log in with your password and link it in Manage account.';
+        case 'NOT_LINKED': return 'New Google accounts are not available on this server yet. Existing password accounts can sign in normally; linking Google in Manage account is optional.';
         case 'ALREADY_LINKED': return 'This Google account already has a Ludolume account. Go to Log in and continue with Google.';
         case 'DUPLICATE_USER': return 'That username or email is already in use. Choose another username, or log in to your existing account to link Google.';
         case 'INVALID_USERNAME': return 'Choose a username with 1–64 characters and no control characters.';
@@ -106,7 +106,9 @@ export function InlineGoogleSignIn({ client, action = 'login', userName = '', re
         setFeedback(null);
         void (async () => {
             try {
-                const prepared = await latest.current.prepareProviderLogin(client.clientKey, { signal: controller.signal }, action);
+                // Login and Sign up are the same Google entry: first identify
+                // the account, then ask a username only for a new registration.
+                const prepared = await latest.current.prepareProviderLogin(client.clientKey, { signal: controller.signal });
                 if (!active()) return;
                 if ('error' in prepared) { fail(prepared.error); return; }
                 const idToken = await acquireGoogleCredentialInline(client, prepared.challenge, element,
@@ -121,15 +123,19 @@ export function InlineGoogleSignIn({ client, action = 'login', userName = '', re
                 ownsOperation = true;
                 setPhase('completing');
                 latest.current.onBusyChange?.(true);
-                const chosenName = action === 'signup'
-                    ? await requestProviderUsername(latest.current.userName, controller.signal) : undefined;
+                let result = await latest.current.completeProviderLogin(prepared.handle, idToken,
+                    { rememberMe: latest.current.rememberMe, signal: controller.signal });
                 if (!active()) return;
-                if (chosenName === null) { fail('CANCELLED'); return; }
-                const result = await latest.current.completeProviderLogin(prepared.handle, idToken,
-                    { rememberMe: latest.current.rememberMe, signal: controller.signal,
-                        ...(chosenName === undefined ? {} : { userName: chosenName }) });
+                if ('signupRequired' in result) {
+                    const chosenName = await requestProviderUsername(latest.current.userName, controller.signal);
+                    if (!active()) return;
+                    if (chosenName === null) { fail('CANCELLED'); controller.abort(); return; }
+                    result = await latest.current.completeProviderLogin(result.handle, idToken,
+                        { rememberMe: latest.current.rememberMe, signal: controller.signal, userName: chosenName });
+                }
                 if (!active()) return;
                 if ('error' in result) { fail(result.error); return; }
+                if (!('user_name' in result)) { fail('UNAVAILABLE'); return; }
                 latest.current.onSuccess?.();
             } catch (error) {
                 if (active()) fail(error && typeof error === 'object' && 'code' in error && error.code === 'CANCELLED'
@@ -272,8 +278,7 @@ export default function ProviderSignInControls({ action, userName = '', remember
     };
 
     if (PUBLIC_API_PREVIEW || clients.length === 0) return null;
-    const inlineGoogle = action !== 'link' ? clients.find(client => client.clientKey === 'google-web'
-        && (action === 'login' || client.signup === true)) : undefined;
+    const inlineGoogle = action !== 'link' ? clients.find(client => client.clientKey === 'google-web') : undefined;
     return (
         <div className="provider-sign-in">
             {inlineGoogle && <InlineGoogleSignIn client={inlineGoogle} action={action === 'signup' ? 'signup' : 'login'}

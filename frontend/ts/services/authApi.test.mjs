@@ -1042,3 +1042,67 @@ test('split completion requires the same exact saved-cookie verification as the 
     const prepared = await api.prepareProviderLogin('google-web');
     assert.deepEqual(await api.completeProviderLogin(prepared.handle, providerToken), { error: 'SESSION_NOT_ESTABLISHED' });
 });
+
+test('new Google entry returns an opaque username continuation and completes without a second begin or credential exchange', async () => {
+    const calls = [];
+    const signupChallenge = { ...providerChallenge, state: Buffer.alloc(32, 3).toString('base64url'), expiresInSeconds: 200 };
+    const api = createAuthApi(apiBase, async (url, init) => {
+        const body = init?.body ? JSON.parse(init.body) : undefined;
+        calls.push({ url, body });
+        if (url.endsWith('/begin')) return Response.json(providerChallenge);
+        if (url.endsWith('/auth/verify-token')) return Response.json({ loggedIn: true, user_name: 'new-player' });
+        return Response.json(body.action === 'login' ? { signupRequired: true, challenge: signupChallenge }
+            : { success: true, user_name: 'new-player' });
+    });
+    const prepared = await api.prepareProviderLogin('google-web');
+    const next = await api.completeProviderLogin(prepared.handle, providerToken, { rememberMe: true });
+    assert.equal(next.signupRequired, true);
+    assert.deepEqual(Object.keys(next).sort(), ['handle', 'signupRequired']);
+    assert.deepEqual(Object.keys(next.handle), []);
+    assert.equal(calls.length, 2, 'no session verification or account creation before username consent');
+    assert.deepEqual(await api.completeProviderLogin(next.handle, providerToken, { rememberMe: true, userName: ' new-player ' }),
+        { success: true, user_name: 'new-player' });
+    assert.deepEqual(calls[2].body, { clientKey: 'google-web', action: 'signup', state: signupChallenge.state,
+        idToken: providerToken, rememberMe: true, userName: 'new-player' });
+    assert.equal(calls.filter(call => call.url.endsWith('/begin')).length, 1);
+    assert.deepEqual(await api.completeProviderLogin(next.handle, providerToken, { userName: 'again' }),
+        { error: 'INVALID_ATTEMPT' });
+});
+
+test('Google signup continuation rejects changed nonce, reused state and extra response fields', async () => {
+    for (const response of [
+        { signupRequired: true, challenge: providerChallenge },
+        { signupRequired: true, challenge: { ...providerChallenge, state: Buffer.alloc(32, 3).toString('base64url'),
+            nonce: Buffer.alloc(32, 4).toString('base64url') } },
+        { signupRequired: true, challenge: providerChallenge, email: 'private@example.test' },
+    ]) {
+        const api = createAuthApi(apiBase, async url => Response.json(url.endsWith('/begin') ? providerChallenge : response));
+        const prepared = await api.prepareProviderLogin('google-web');
+        assert.deepEqual(await api.completeProviderLogin(prepared.handle, providerToken), { error: 'INVALID_RESPONSE' });
+    }
+});
+
+test('Google continuation inherits original expiry and is invalidated by logout or cancellation', async t => {
+    t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
+    for (const invalidation of ['expiry', 'logout', 'abort']) {
+        const controller = new AbortController();
+        const calls = [];
+        const api = createAuthApi(apiBase, async url => {
+            calls.push(url);
+            return Response.json(url.endsWith('/begin') ? { ...providerChallenge, expiresInSeconds: 2 }
+                : url.endsWith('/auth/logout') ? { loggedOut: true }
+                : { signupRequired: true, challenge: { ...providerChallenge,
+                    state: Buffer.alloc(32, 3).toString('base64url'), expiresInSeconds: 300 } });
+        });
+        const prepared = await api.prepareProviderLogin('google-web', { signal: controller.signal });
+        const next = await api.completeProviderLogin(prepared.handle, providerToken);
+        assert.equal(next.signupRequired, true);
+        if (invalidation === 'expiry') t.mock.timers.tick(2000);
+        else if (invalidation === 'logout') await api.logoutRequest();
+        else controller.abort();
+        const before = calls.length;
+        assert.deepEqual(await api.completeProviderLogin(next.handle, providerToken, { userName: 'new-player' }),
+            { error: invalidation === 'expiry' ? 'INVALID_ATTEMPT' : 'CANCELLED' });
+        assert.equal(calls.length, before);
+    }
+});
