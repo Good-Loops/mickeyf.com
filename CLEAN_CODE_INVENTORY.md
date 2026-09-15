@@ -556,6 +556,43 @@ activation. Independent diff review found no actionable regressions. The Docs
 watcher regenerated the removed method and source links. The actual iOS Files
 picker and codec playback remain unverified on-device; no deployment occurred.
 
+## Three Bosses browser-bridge teardown — 2026-09-14
+
+`unityWebGl.ts` repeated the same three best-effort release operations in failed
+initialization and normal shutdown: submission bridge, portrait layout, then
+visibility. Updating that ordered list previously required editing both paths.
+The list now lives in the local `releaseUnityBridges()` function. Each release
+retains its own try/catch so one failure does not skip the remaining releases.
+
+The important difference between the callers remains explicit. Failed startup
+now contains this actual sequence:
+
+```ts
+releasePageScroll?.();
+releaseUnityBridges();
+await instance.Quit();
+throw error;
+```
+
+Normal shutdown still releases page scrolling, attempts to disable submission,
+then calls the same `releaseUnityBridges()`. Its once-only guard, readiness
+cleanup, loader removal, factory reset and singleton lifecycle are unchanged.
+Page-scroll release still propagates errors exactly as before; this refactor
+does not silently introduce a different cleanup policy.
+
+The reference's responsibility principle (printed p. 138) supports one owner
+for the shared bridge-release sequence. This is a local extraction, not a new
+module or generalized resource-management framework. Keeping the two shutdown
+policies separate avoids a boolean mode flag or a changed execution order.
+
+Verification: five mocked public-lifecycle tests exercise normal/repeated quit,
+partially acquired bindings, throwing bridge cleanup, abort during startup and
+the existing page-scroll error policy. The tests run the real loader lifecycle
+with in-memory browser/Unity doubles, not a detached copy of the cleanup code.
+Frontend TypeScript/all 378 tests and the Vite production build passed;
+independent source review found no actionable regressions. No game assets,
+real score submissions, device tests, Unity builds or deployments were involved.
+
 ## Learning-oriented handoff for each future change
 
 The owner requested on 2026-09-10 that improvements be taught, not merely

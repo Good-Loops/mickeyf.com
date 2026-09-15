@@ -2354,6 +2354,13 @@ example. The active branch is `improvement/clean-code-sweep`.
   unchanged. Five focused tests, frontend TypeScript/all 373 tests and Vite build
   passed. Physical Safari picker confirmation is still pending; not deployed.
   See the [teaching checkpoint](CLEAN_CODE_INVENTORY.md#shared-music-picker-and-audioui-boundary--2026-09-14).
+- [x] Three Bosses browser-bridge teardown (2026-09-14): extracted only the
+  identical best-effort submission/layout/visibility release sequence into one
+  local function. Failed startup and normal shutdown keep their distinct
+  submission-disable policy, ordering, errors and once-only behavior. Five
+  mocked lifecycle tests, frontend TypeScript/all 378 tests and Vite build
+  passed; no Unity rebuild, gameplay/device retest or deployment.
+  See the [teaching checkpoint](CLEAN_CODE_INVENTORY.md#three-bosses-browser-bridge-teardown--2026-09-14).
 - [ ] Complete subsequent subsystem reviews one at a time; choose actual
   improvements from evidence, not file length or similar-looking syntax.
 
