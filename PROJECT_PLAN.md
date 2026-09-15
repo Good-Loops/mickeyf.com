@@ -2383,6 +2383,12 @@ example. The active branch is `improvement/clean-code-sweep`.
   pointer checks, touch emulation, TypeScript/all 413 tests and Vite build
   passed. Styling/callers unchanged; no physical-device retest or deployment.
   See the [teaching checkpoint](CLEAN_CODE_INVENTORY.md#shared-hooks-and-dropdown-interaction--2026-09-15).
+- [x] Safari preview styling fix (2026-09-15): reproduced the owner's unstyled
+  page in WebKit by stalling Google Fonts imports. Separated optional font
+  downloads from local layout CSS, preserving families/weights and fallbacks.
+  Both animation pages stay styled with fonts stalled; failure/normal loading,
+  TypeScript/all 415 tests and build passed. LAN preview refreshed; physical
+  music-picker acceptance remains pending, with no public/native deployment.
 - [ ] Complete subsequent subsystem reviews one at a time; choose actual
   improvements from evidence, not file length or similar-looking syntax.
 

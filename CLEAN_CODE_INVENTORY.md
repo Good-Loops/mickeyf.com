@@ -719,6 +719,28 @@ Vite build and `git diff --check` passed. Independent review found no remaining
 actionable issues. No real accounts, gameplay, physical-iPhone acceptance or
 deployment were involved; the deferred Safari Files check remains separate.
 
+## Safari preview font-loading dependency — 2026-09-15
+
+During the owner's music-picker check, Safari showed unstyled content and an
+oversized fullscreen icon. The preview served its complete CSS with the correct
+MIME type. Holding the five external Google Fonts imports in WebKit reproduced
+the same default-font/transparent-background page, while normal requests styled
+it correctly. This identifies a reproducible failure path; the actual phone's
+network trace was not available.
+
+Removed the remote `@import` chain from `_fonts.scss`, keeping every family and
+fallback variable. `main.tsx` now calls `loadAppFonts`, which adds one independent
+dynamic stylesheet with the same families/weights and `display=swap`. Local
+layout styles no longer depend on the font server. Font availability can change
+typography, but not whether the site's layout CSS applies. No font service,
+dependency, permission or design was replaced.
+
+The refreshed LAN preview stayed styled in WebKit with fonts held on both
+animation pages, with font failure, and with normal successful font loading.
+Two focused checks, frontend TypeScript/all 415 tests and Vite build passed;
+independent review found no actionable issues. Physical Safari upload acceptance
+still belongs to the owner. This refresh is local, not a public/native release.
+
 ## Learning-oriented handoff for each future change
 
 The owner requested on 2026-09-10 that improvements be taught, not merely
