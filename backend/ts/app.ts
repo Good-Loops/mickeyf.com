@@ -73,6 +73,7 @@ app.use('/api/leaderboards', createLeaderboardRouter(pool, {
 // parser so a disabled Three Bosses endpoint rejects before reading a body.
 app.use(express.json({ limit: '32kb', strict: true }));
 app.use('/api', createMainRouter({
+    database: pool,
     sessionSecret: runtimeConfig.sessionSecret,
     isProduction: runtimeConfig.isProduction,
     p4VegaScoreSubmissionsEnabled: runtimeConfig.p4VegaScoreSubmissionsEnabled,

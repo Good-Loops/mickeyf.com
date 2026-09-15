@@ -14,7 +14,7 @@
  */
 import { Router } from 'express';
 import { createMainController } from '../controllers/mainController';
-import { pool } from '../db/dbConfig';
+import type { Pool } from 'mysql2/promise';
 import { asyncHandler } from '../middleware/errorHandling';
 import {
     createAuthenticationIpRateLimiter,
@@ -23,6 +23,7 @@ import {
 import { handleGetUsersNotSupported } from './mainRouter.handlers';
 
 type MainRouterDependencies = {
+    database: Pick<Pool, 'getConnection' | 'query'>;
     sessionSecret: string;
     isProduction: boolean;
     p4VegaScoreSubmissionsEnabled: boolean;
@@ -30,6 +31,7 @@ type MainRouterDependencies = {
 };
 
 export function createMainRouter({
+    database,
     sessionSecret,
     isProduction,
     p4VegaScoreSubmissionsEnabled,
@@ -43,7 +45,7 @@ export function createMainRouter({
      */
     const router = Router();
     const mainController = createMainController({
-        database: pool,
+        database,
         sessionSecret,
         isProduction,
         p4VegaScoreSubmissionsEnabled,

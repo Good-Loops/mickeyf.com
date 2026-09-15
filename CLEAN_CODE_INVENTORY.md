@@ -802,6 +802,88 @@ The fixtures exercise query arguments, field projection, nullable/missing
 credentials, unique-key collisions and unexpected failures. No production calls,
 real accounts, SQL migration, score retest or deployment were performed.
 
+## Main-router database injection — 2026-09-15
+
+`mainRouter.ts` previously selected the runtime database through this import:
+
+```ts
+import { pool } from '../db/dbConfig';
+```
+
+It passed `database: pool` to the already-injectable controller. Importing the
+router therefore validated environment-dependent database configuration and
+constructed a pool. Existing HTTP auth fixtures bypassed that router by mounting
+the controller directly, leaving the actual main-router limiter composition
+untested. Pool construction is not itself a claim of an immediate connection.
+
+The router now imports only the `Pool` type and requires
+`database: Pick<Pool, 'getConnection' | 'query'>`. Its controller composition is:
+
+```ts
+const mainController = createMainController({
+    database,
+    sessionSecret,
+    isProduction,
+    p4VegaScoreSubmissionsEnabled,
+    allowedMutationOrigins,
+});
+```
+
+Bootstrap supplies `database: pool` at the existing `/api` mount. Resource
+selection belongs to bootstrap; route registration belongs to the router;
+HTTP decisions and persistence stay in their existing layers. This matches
+the auth/leaderboard routers and adds one explicit dependency, not a new
+container, repository wrapper, default fallback or performance optimization.
+It would be unnecessary indirection if the router already had this boundary.
+
+Routes, methods, responses, dispatch, limiter instances/order/skip rules,
+parser placement, error forwarding, feature gates and startup order are
+unchanged. Controllers, both score repositories and session/SQL/cookie ordering
+were not modified.
+
+Seven new cases mount the actual router with in-memory persistence. They cover
+construction/GET without database calls, HEAD/unmatched routes, a POST reaching
+the supplied query function, invalid-input short circuits, exact 20/account and
+50/IP limits in separate fixtures, non-auth skips and sanitized central errors.
+Public rate-limit headers also characterize IP-before-account ordering. The cold
+import case uses a fresh child process inheriting only OS system/temp paths:
+no runtime database variables, credential seeding, dbConfig mock, dotenv loading
+or parent module cache. HTTP fixtures bind ephemeral loopback ports and close
+their servers; no real database or provider is used.
+
+Validation on 2026-09-15 used the existing Node 22.23.2/npm 11.6.2 installation
+at `C:\Program Files\nodejs`, with process-local PATH only. In this worktree's
+`backend` directory, `npm ci --include=dev --ignore-scripts --no-audit --no-fund`
+exited 0; no lifecycle script was needed. The existing node-domexception
+deprecation warning remains. Dependencies and the lockfile are unchanged;
+`package.json` only adds the new file to its explicit `test:unit` list.
+
+Exact validation commands below ran from `backend`, with `node` and `npm`
+resolved explicitly to that installation:
+
+```powershell
+# Pre-change baseline: exit 0; 43 passed, 0 failed/cancelled/skipped.
+node --test -r ts-node/register .\ts\routers\authRouter.security.test.ts .\ts\security\mainController.security.test.ts .\ts\security\requestRateLimits.test.ts .\ts\middleware\errorHandling.test.ts
+
+# Post-change type checking only: exit 0.
+npm test
+
+# Post-change focused batch: exit 0; 50 passed, 0 failed/cancelled/skipped.
+node --test -r ts-node/register .\ts\routers\mainRouter.test.ts .\ts\routers\authRouter.security.test.ts .\ts\security\mainController.security.test.ts .\ts\security\requestRateLimits.test.ts .\ts\middleware\errorHandling.test.ts
+
+# Webpack production build: exit 0.
+npm run prod
+```
+
+The build writes only this worktree's ignored `backend/dist`; the target was
+checked for tracked files and redirected paths first. Source/diff review and
+`git diff --check` passed. These are focused unit/in-memory HTTP results, not
+a full backend-suite or MySQL integration pass. No migration tests, real
+accounts, cloud calls, deployment, development-server restart, commit or push.
+The parallel provider-fixture failure remains outside this slice and unresolved.
+The separately requested Git branch/worktree hygiene task is recorded as pending
+in Phase 16; none of its inventory, pruning or deletion work was performed.
+
 ## Learning-oriented handoff for each future change
 
 The owner requested on 2026-09-10 that improvements be taught, not merely

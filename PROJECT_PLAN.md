@@ -2403,6 +2403,20 @@ example. The active branch is `improvement/clean-code-sweep`.
   account or database operation.
   Reviewed both score repositories and left their ordered transactions intact.
   See the [teaching checkpoint](CLEAN_CODE_INVENTORY.md#password-account-persistence-boundary--2026-09-15).
+- [x] Main-router database injection (2026-09-15): bootstrap now passes its
+  existing pool to `createMainRouter`; the router no longer imports runtime
+  database configuration. One required dependency matches the other routers,
+  without a fallback or new abstraction. Registration, limiter order/thresholds,
+  controllers, session/SQL/cookie policy and feature gates are unchanged.
+  The four-file pre-change baseline passed 43 tests; the requested five-file
+  post-change batch passed 50, including seven actual-router cases with fake
+  persistence and a cold child-process import without database configuration.
+  Both batches had zero failures, cancellations or skips. Backend TypeScript,
+  webpack and `git diff --check` passed using Node 22.23.2/npm 11.6.2 and a
+  worktree-local locked install with lifecycle scripts disabled. This is focused
+  coverage, not the full backend suite or a database/provider integration run.
+  No commit, deployment, development-server restart or branch cleanup occurred.
+  See the [teaching checkpoint](CLEAN_CODE_INVENTORY.md#main-router-database-injection--2026-09-15).
 - [ ] Complete subsequent subsystem reviews one at a time; choose actual
   improvements from evidence, not file length or similar-looking syntax.
 
@@ -2442,6 +2456,29 @@ The focused first-party `package.json` script audit (originally requested
 2026-09-06) was moved into the bounded pre-release temporary-artifact cleanup
 above by the owner on 2026-09-08. Do not duplicate that audit in this later phase
 unless relevant changes or new evidence warrant it.
+
+### Pending Git branch/worktree hygiene
+
+- [ ] Git branch/worktree hygiene — after this refactor is reviewed and
+  safely preserved:
+  - Inventory all local branches, remote branches, tracking references,
+    worktrees, and relevant open/merged pull requests.
+  - Establish the intended retained development/release branches; do
+    not assume main is the comparison baseline.
+  - Verify current remote state before proposing deletions.
+  - Check unique/unpushed commits and actual integration evidence,
+    including squash/cherry-pick cases where applicable.
+  - Preserve active worktrees, dirty/untracked/ignored local work,
+    protected/default branches, release/rollback references, and
+    anything whose purpose or integration is uncertain.
+  - Produce a keep/delete-candidate/uncertain table with exact names,
+    tip SHAs, and reasons. Age, naming, or a missing upstream alone
+    does not prove a branch obsolete.
+  - After approval of exact candidates, delete only the approved
+    obsolete local/remote branches and prune verified stale tracking
+    references. Preview worktree-metadata pruning separately.
+  - Do not force-delete branches, prune tags, expire reflogs, run
+    git prune, or remove active worktrees.
 
 ## Phase 17 — Ludolume native stores and social sign-in
 
