@@ -90,6 +90,24 @@ test('a Google-only NULL-password account cannot enter through password login', 
     assert.equal(state.cookie, undefined);
 });
 
+test('signup preflight stops before hashing or insertion when an identifier is taken', async (context) => {
+    context.mock.method(bcrypt, 'hash', () => assert.fail('duplicate signup must not hash'));
+    let queryCount = 0;
+    const database = { async query(options: { sql: string }, values: unknown[]) {
+        queryCount++;
+        assert.match(options.sql, /^SELECT 1 FROM users/);
+        assert.deepEqual(values, ['player', 'player@example.test']);
+        return [[{ '1': 1 }], []];
+    } } as unknown as Pool;
+    const { response, state } = responseRecorder();
+    await createTestController(database)(request({ type: 'signup', user_name: 'player',
+        email: 'player@example.test', user_password: 'long-password-123' }), response);
+    assert.equal(queryCount, 1);
+    assert.equal(state.status, 200);
+    assert.deepEqual(state.body, { error: 'DUPLICATE_USER', status: 409 });
+    assert.equal(state.cookie, undefined);
+});
+
 test('a concurrent signup unique-key collision retains the existing duplicate response', async () => {
     let queryCount = 0;
     const database = { async query() {

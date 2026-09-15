@@ -741,6 +741,67 @@ Two focused checks, frontend TypeScript/all 415 tests and Vite build passed;
 independent review found no actionable issues. Physical Safari upload acceptance
 still belongs to the owner. This refresh is local, not a public/native release.
 
+## Safari Files acceptance — 2026-09-15
+
+The owner still saw unstyled content on the built port-5176 preview after the
+font fix. A direct LAN-bound Vite development listener on port 5173 restored
+the testing path while preserving the existing localhost account gateway and
+its loopback-only protections. Both animation canvases rendered in WebKit.
+The owner then confirmed files were selectable and playback worked; no further
+audio change was made. This closes the deferred device check, not every codec
+or a public/native release. The original phone-network cause remains unproven.
+
+## Password-account persistence boundary — 2026-09-15
+
+Reviewed `mainController`, `leaderboardController` and the two score repositories.
+The score repositories retain deliberate session/lock/receipt/write/commit order;
+their length largely reflects explicit SQL. No transaction refactor was justified.
+The leaderboard controller already delegates persistence and projects public DTOs.
+
+The password paths in `mainController` still mixed HTTP decisions with three SQL
+queries and MySQL row/error details. Before, the login lookup was embedded there:
+
+```ts
+const [rows] = await database.query<LoginUserRow[]>({
+    sql: `SELECT user_id, account_uuid, user_name, user_password
+        FROM users WHERE user_name = ? LIMIT 1`,
+    timeout: DATABASE_QUERY_TIMEOUT_MS,
+}, [userName]);
+const user = rows[0];
+```
+
+Now the controller expresses the operation without knowing the row layout:
+
+```ts
+const user = await findPasswordLoginAccount(database, userName);
+const passwordMatches = await bcrypt.compare(
+    password, user?.passwordHash ?? DUMMY_PASSWORD_HASH
+);
+```
+
+The adjacent account repository owns identifier preflight, insertion/unique-key
+translation and credential lookup/projection. A missing account stays undefined;
+a provider-only account still has a null password hash. Neither is authenticated
+by the password path. Unexpected database errors still reach the central handler.
+The database dependency remains an explicit `Pick<Pool, 'query'>`; no container,
+generic repository hierarchy or new package was introduced.
+
+This applies the reference's responsibility principle (printed p. 138): SQL
+schema changes belong to persistence; HTTP response/cookie policy belongs to the
+controller. It adds one small module and direct tests, not faster login or a new
+security feature. Validation and duplicate preflight still precede bcrypt,
+unique constraints still protect concurrent signups, and durable session creation
+still precedes cookies. Queries, timeout, parameter order, hashing cost, origins,
+session revocation and public response fields are unchanged.
+
+Verification: all 15 existing controller cases passed before and after the
+refactor; a new duplicate-preflight case confirms no hashing, insertion or cookie
+after an existing identifier. All 24 focused cases, backend TypeScript and the
+webpack production build passed; independent review found no regression.
+The fixtures exercise query arguments, field projection, nullable/missing
+credentials, unique-key collisions and unexpected failures. No production calls,
+real accounts, SQL migration, score retest or deployment were performed.
+
 ## Learning-oriented handoff for each future change
 
 The owner requested on 2026-09-10 that improvements be taught, not merely

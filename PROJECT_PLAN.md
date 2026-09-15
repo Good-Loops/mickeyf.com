@@ -2352,7 +2352,8 @@ example. The active branch is `improvement/clean-code-sweep`.
   the owner's Safari Files report. Removed duplicated refs/effects/keyboard
   handlers and the engine's UI-listener adapter; playback/visual behavior is
   unchanged. Five focused tests, frontend TypeScript/all 373 tests and Vite build
-  passed. Physical Safari picker confirmation is still pending; not deployed.
+  passed. The owner confirmed Files selection/playback on iPhone on 2026-09-15;
+  this is local acceptance, not a deployment or every-codec claim.
   See the [teaching checkpoint](CLEAN_CODE_INVENTORY.md#shared-music-picker-and-audioui-boundary--2026-09-14).
 - [x] Three Bosses browser-bridge teardown (2026-09-14): extracted only the
   identical best-effort submission/layout/visibility release sequence into one
@@ -2387,8 +2388,21 @@ example. The active branch is `improvement/clean-code-sweep`.
   page in WebKit by stalling Google Fonts imports. Separated optional font
   downloads from local layout CSS, preserving families/weights and fallbacks.
   Both animation pages stay styled with fonts stalled; failure/normal loading,
-  TypeScript/all 415 tests and build passed. LAN preview refreshed; physical
-  music-picker acceptance remains pending, with no public/native deployment.
+  TypeScript/all 415 tests and build passed. The owner still saw unstyled content
+  on the built preview; the live development preview on LAN port 5173 restored
+  the test path. The owner then confirmed Files selection/playback works.
+  No public/native deployment or definitive phone-network diagnosis is claimed.
+- [x] Password-account persistence boundary (2026-09-15): moved the three
+  signup/login queries and unique-key error translation out of the HTTP
+  controller into `passwordAccountRepository.ts`. Explicit credential projection
+  keeps database column names/driver fields out of controller decisions.
+  Validation, bcrypt ordering/cost, session proof/commit/cookies and legacy DTOs
+  remain unchanged. Eight repository cases and 16 controller cases (including a
+  duplicate-preflight short-circuit check), backend TypeScript and webpack
+  production build passed; independent review found no regression. No real
+  account or database operation.
+  Reviewed both score repositories and left their ordered transactions intact.
+  See the [teaching checkpoint](CLEAN_CODE_INVENTORY.md#password-account-persistence-boundary--2026-09-15).
 - [ ] Complete subsequent subsystem reviews one at a time; choose actual
   improvements from evidence, not file length or similar-looking syntax.
 

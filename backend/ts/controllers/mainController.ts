@@ -5,12 +5,16 @@
  */
 import { Request, Response } from 'express';
 import bcrypt from 'bcryptjs';
-import { Pool, RowDataPacket } from 'mysql2/promise';
+import type { Pool } from 'mysql2/promise';
 import {
     readP4VegaLeaderboard,
     submitP4VegaScore,
 } from '../leaderboards/p4VegaScoreRepository';
-import { User } from '../types/customTypes';
+import {
+    createPasswordAccount,
+    findPasswordLoginAccount,
+    isAccountIdentifierTaken,
+} from '../accounts/passwordAccountRepository';
 import { authorizeScoreSubmission } from '../security/scoreSubmissionAuthorization';
 import { clearAuthenticationCookies, NATIVE_SESSION_COOKIE, WEB_SESSION_COOKIE, sessionCookieOptions } from '../security/sessionCookie';
 import { issueSessionToken } from '../security/sessionPolicy';
@@ -31,13 +35,10 @@ type ControllerDependencies = {
     allowedMutationOrigins: readonly string[];
 };
 
-type LoginUserRow = RowDataPacket & Pick<User, 'user_id' | 'user_name' | 'user_password'> & { account_uuid: string };
-
 // A fixed, valid bcrypt hash keeps nonexistent-account checks on the same
 // expensive comparison path without representing any usable credential.
 const DUMMY_PASSWORD_HASH = '$2a$10$b3R9u5f4ObGVED5kC8jxp.xvN3FnQzuhcXzAa9iSYcQBkgL4Nv/ee';
 const PASSWORD_HASH_COST = 10;
-const DATABASE_QUERY_TIMEOUT_MS = 10_000;
 
 export function createMainController({
     database,
@@ -53,35 +54,16 @@ export function createMainController({
         }
 
         const { userName, email, password } = validation.input;
-        const [existingUsers] = await database.query<RowDataPacket[]>(
-            {
-                sql: 'SELECT 1 FROM users WHERE user_name = ? OR email = ? LIMIT 1',
-                timeout: DATABASE_QUERY_TIMEOUT_MS,
-            },
-            [userName, email]
-        );
-
-        if (existingUsers.length > 0) {
+        if (await isAccountIdentifierTaken(database, { userName, email })) {
             // Keep the established client contract: the conflict status is in
             // the response body rather than the HTTP status.
             return res.json({ error: 'DUPLICATE_USER', status: 409 });
         }
 
-        const hashedPassword = await bcrypt.hash(password, PASSWORD_HASH_COST);
-        try {
-            await database.query(
-                {
-                    sql: 'INSERT INTO users (user_name, email, user_password) VALUES (?, ?, ?)',
-                    timeout: DATABASE_QUERY_TIMEOUT_MS,
-                },
-                [userName, email, hashedPassword]
-            );
-        } catch (error) {
-            // Unique keys also protect the race between preflight and INSERT.
-            if (error && typeof error === 'object' && 'errno' in error && error.errno === 1062) {
-                return res.json({ error: 'DUPLICATE_USER', status: 409 });
-            }
-            throw error;
+        const passwordHash = await bcrypt.hash(password, PASSWORD_HASH_COST);
+        const result = await createPasswordAccount(database, { userName, email, passwordHash });
+        if (result === 'duplicate') {
+            return res.json({ error: 'DUPLICATE_USER', status: 409 });
         }
         return res.json({ success: true });
     }
@@ -97,23 +79,13 @@ export function createMainController({
         }
 
         const { userName, password, rememberMe } = validation.input;
-        const [rows] = await database.query<LoginUserRow[]>(
-            {
-                sql: `SELECT user_id, account_uuid, user_name, user_password
-                    FROM users
-                    WHERE user_name = ?
-                    LIMIT 1`,
-                timeout: DATABASE_QUERY_TIMEOUT_MS,
-            },
-            [userName]
-        );
-        const user = rows[0];
+        const user = await findPasswordLoginAccount(database, userName);
         const passwordMatches = await bcrypt.compare(
             password,
-            user?.user_password ?? DUMMY_PASSWORD_HASH
+            user?.passwordHash ?? DUMMY_PASSWORD_HASH
         );
 
-        if (!user || user.user_password === null || !passwordMatches) {
+        if (!user || user.passwordHash === null || !passwordMatches) {
             return res.json({ error: 'AUTH_FAILED' });
         }
 
@@ -125,10 +97,10 @@ export function createMainController({
             await revokeAccountSession(database, userId, accountId, sessionId);
         }
 
-        const session = issueSessionToken({ userId: user.user_id, userName: user.user_name,
-            accountId: user.account_uuid }, sessionSecret, rememberMe);
-        if (!await createAccountSession(database, { userId: user.user_id, accountId: user.account_uuid },
-            session.sessionId, session.expiresAt, user.user_password, rememberMe)) {
+        const session = issueSessionToken({ userId: user.userId, userName: user.userName,
+            accountId: user.accountId }, sessionSecret, rememberMe);
+        if (!await createAccountSession(database, { userId: user.userId, accountId: user.accountId },
+            session.sessionId, session.expiresAt, user.passwordHash, rememberMe)) {
             return res.json({ error: 'AUTH_FAILED' });
         }
         const cookieName = req.headers.origin === 'capacitor://localhost' ? NATIVE_SESSION_COOKIE : WEB_SESSION_COOKIE;
@@ -137,7 +109,7 @@ export function createMainController({
             ...sessionCookieOptions(isProduction, cookieName),
             maxAge: session.maxAge,
         });
-        return res.json({ success: true, user_name: user.user_name });
+        return res.json({ success: true, user_name: user.userName });
     }
 
     async function submitScore(req: Request, res: Response) {
