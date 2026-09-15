@@ -2361,6 +2361,16 @@ example. The active branch is `improvement/clean-code-sweep`.
   mocked lifecycle tests, frontend TypeScript/all 378 tests and Vite build
   passed; no Unity rebuild, gameplay/device retest or deployment.
   See the [teaching checkpoint](CLEAN_CODE_INVENTORY.md#three-bosses-browser-bridge-teardown--2026-09-14).
+- [x] Renderer/upload cancellation ownership (2026-09-14): late Dancing Circles
+  startup is disposed after unmount; cancelled/replaced uploads cannot resume
+  playback, overwrite current state or clear a newer track during old cleanup.
+  Reused mount/session guards and captured-resource teardown, without changing
+  visuals, DSP or autoplay ordering. Three renderer and eight audio cases,
+  frontend TypeScript/all 389 tests and Vite build passed. Device acceptance and
+  Safari Files check remain deferred; no deployment.
+  See the [teaching checkpoint](CLEAN_CODE_INVENTORY.md#renderer-and-upload-cancellation-ownership--2026-09-14).
+- [ ] Inspect pending explicit audio Play requests versus Pause/Stop; keep this
+  transport concern separate from the completed upload/disposal ownership fix.
 - [ ] Complete subsequent subsystem reviews one at a time; choose actual
   improvements from evidence, not file length or similar-looking syntax.
 

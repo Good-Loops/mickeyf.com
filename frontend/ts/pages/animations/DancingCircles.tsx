@@ -60,18 +60,25 @@ const DancingCircles: React.FC = () => {
 	const audio = useAudioEngineState();
 
 	useEffect(() => {
-		if (!canvasWrapperRef.current) return;
+		const container = canvasWrapperRef.current;
+		if (!container) return;
 
+		let cancelled = false;
 		let dispose: (() => void) | undefined;
 
 		(async () => {
-			dispose = await runDancingCircles({
-				container: canvasWrapperRef.current!,
-			});
+			const release = await runDancingCircles({ container });
+			if (cancelled) {
+                // Initialization may finish after React has already cleaned up this mount.
+				release();
+				return;
+			}
+			dispose = release;
 		})();
 
 		return () => {
             // Must dispose on unmount to prevent duplicate loops.
+			cancelled = true;
 			dispose?.();
 		};
 	}, []);

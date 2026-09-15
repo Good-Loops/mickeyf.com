@@ -89,7 +89,7 @@ export class AudioEngine {
     private objectUrl: string | null = null;
     private endedListener: (() => void) | null = null;
 
-    // Used to invalidate old analysis loops when a new track is loaded or stopped
+    // Invalidates pending uploads and analysis loops when a track is replaced or disposed.
     private sessionId: number = 0;
     private listeners = new Set<(state: AudioState) => void>();
     
@@ -116,16 +116,18 @@ export class AudioEngine {
      * @param file - Audio file selected by the user.
      */
     async processAudio(file: File): Promise<void> {
-        this.sessionId++;
+        const currentSessionId = ++this.sessionId;
 
         // Tear down any previous track so analysis sessions don't overlap.
-        await this.teardownTrack({ closeContext: true });
+        await this.teardownTrack();
+        if (currentSessionId !== this.sessionId) return;
         this.patchState({ hasAudio: false, playing: false });
 
         const url = URL.createObjectURL(file);
         this.objectUrl = url;
 
         const audio = new Audio(url);
+        this.audioElement = audio;
 
         this.endedListener = () => {
             // Treat natural end like "paused at end": stop analysis, mark not playing, reset time
@@ -140,7 +142,15 @@ export class AudioEngine {
         audio.addEventListener("ended", this.endedListener);
 
         const audioContext = new window.AudioContext();
-        await audioContext.resume();
+        // Disposal must own these resources even while the browser is resuming audio.
+        this.audioContext = audioContext;
+        try {
+            await audioContext.resume();
+        } catch (error) {
+            if (currentSessionId !== this.sessionId) return;
+            throw error;
+        }
+        if (currentSessionId !== this.sessionId) return;
 
         // Analyzer provides the time-domain buffer used for pitch/volume extraction.
         const analyser = audioContext.createAnalyser();
@@ -153,13 +163,12 @@ export class AudioEngine {
 
         this.sourceNode = source;
 
-        this.audioElement = audio;
-        this.audioContext = audioContext;
         this.patchState({ hasAudio: true });
 
         audio.load();
         try {
             await audio.play();
+            if (currentSessionId !== this.sessionId) return;
             this.patchState({ playing: true });
             this.startAnalysis();
         } catch {
@@ -235,8 +244,9 @@ export class AudioEngine {
      * After disposal, state resets to its defaults.
      */
     async dispose() {
-        this.sessionId++;
-        await this.teardownTrack({ closeContext: true });
+        const currentSessionId = ++this.sessionId;
+        await this.teardownTrack();
+        if (currentSessionId !== this.sessionId) return;
         this.volumeHistory = [];
         this.patchState({ ...DEFAULT_STATE, beat: { ...DEFAULT_STATE.beat } });
     }
@@ -402,41 +412,43 @@ export class AudioEngine {
         }
     }
 
-    private async teardownTrack(options?: { closeContext?: boolean }) {
-        const { closeContext = false } = options ?? {};
-
+    private async teardownTrack() {
         this.stopAnalysisLoop();
 
         const audio = this.audioElement;
-        if (audio && this.endedListener) {
-            audio.removeEventListener("ended", this.endedListener);
-        }
+        const audioContext = this.audioContext;
+        const source = this.sourceNode;
+        const objectUrl = this.objectUrl;
+        const endedListener = this.endedListener;
+
+        // A new upload may start while close() waits; only release this captured track.
+        this.audioElement = null;
+        this.audioContext = null;
+        this.sourceNode = null;
+        this.analyserNode = null;
+        this.objectUrl = null;
         this.endedListener = null;
+
+        if (audio && endedListener) audio.removeEventListener("ended", endedListener);
 
         try {
             audio?.pause();
         } catch {}
 
         try {
-            this.sourceNode?.disconnect();
+            source?.disconnect();
         } catch {}
-        this.sourceNode = null;
-        this.analyserNode = null;
 
-        if (closeContext && this.audioContext) {
-            try { await this.audioContext.close(); } catch {}
-            this.audioContext = null;
+        if (audioContext) {
+            try { await audioContext.close(); } catch {}
         }
 
         // Revoke object URL to avoid memory leaks.
-        if (this.objectUrl) {
+        if (objectUrl) {
             try {
-                URL.revokeObjectURL(this.objectUrl);
+                URL.revokeObjectURL(objectUrl);
             } catch {}
-            this.objectUrl = null;
         }
-
-        this.audioElement = null;
     }
 }
 

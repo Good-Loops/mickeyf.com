@@ -593,6 +593,46 @@ Frontend TypeScript/all 378 tests and the Vite production build passed;
 independent source review found no actionable regressions. No game assets,
 real score submissions, device tests, Unity builds or deployments were involved.
 
+## Renderer and upload cancellation ownership — 2026-09-14
+
+This slice fixes lifecycle bugs, rather than just moving code. Dancing Circles
+previously assigned its disposer only after asynchronous renderer startup. If
+the page unmounted first, its cleanup saw no disposer and the late renderer
+remained alive. The effect now captures its container and cancels its own mount;
+a late result is disposed immediately. Dancing Fractals already had this guard
+and was left unchanged.
+
+The shared AudioEngine previously registered its audio element/context only
+after awaiting context resume, so a concurrent dispose could miss them. Uploads
+now adopt allocated resources before that wait and capture the existing session
+generation. After asynchronous teardown, resume and initial playback, a stale
+generation returns without publishing state or starting analysis. Example from
+the corrected upload path:
+
+```ts
+const currentSessionId = ++this.sessionId;
+await this.teardownTrack();
+if (currentSessionId !== this.sessionId) return;
+```
+
+Teardown captures and clears its owned fields before awaiting context close;
+afterward it revokes only its captured URL. An older dispose also cannot reset a
+newer track's state. The unused optional close-context mode was removed: both
+private callers always close. This applies explicit ownership from the reference
+(printed p. 138), without a generic resource manager or new dependency.
+
+Before the fixes, two renderer and six audio regression cases reproduced the
+bugs. Afterward, three renderer/effect cases and eight fake-Web-Audio cases pass,
+along with frontend TypeScript/all 389 tests and the Vite production build.
+Independent review found no actionable regressions. Generated AudioEngine docs
+have updated source links. No physical device/GPU/codec acceptance is claimed;
+the renderer tests control hook scheduling and the audio tests defer browser
+promises. Visual tuning, DSP, autoplay ordering and public APIs are unchanged.
+
+Separate follow-up: inspect pending explicit `play()` promises versus Pause/Stop;
+those controls are unchanged by this upload/disposal fix. Safari Files picker
+acceptance remains deferred at the owner's request. No deployment occurred.
+
 ## Learning-oriented handoff for each future change
 
 The owner requested on 2026-09-10 that improvements be taught, not merely
