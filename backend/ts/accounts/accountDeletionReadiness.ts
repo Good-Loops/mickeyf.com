@@ -1,8 +1,11 @@
 import type { Pool, PoolConnection } from 'mysql2/promise';
 import { assertAccountIdentityEpoch, verifyAccountIdentitySchema } from '../migrations/accountIdentitySchema';
 import type { MigrationConnection } from '../migrations/leaderboardSchema';
-import { verifyOptionalProviderIdentitySchema } from '../migrations/providerIdentitySchema';
-import { verifyOptionalProviderAttemptSchema } from '../migrations/providerAttemptSchema';
+import { PROVIDER_IDENTITY_MIGRATION_VERSION, verifyOptionalProviderIdentitySchema,
+    verifyProviderIdentitySchema } from '../migrations/providerIdentitySchema';
+import { PROVIDER_ATTEMPT_MIGRATION_VERSION, PROVIDER_ATTEMPT_ACTIONS_MIGRATION_VERSION,
+    inspectProviderAttemptStage, verifyOptionalProviderAttemptSchema,
+    verifyProviderAttemptSchema } from '../migrations/providerAttemptSchema';
 import { ACCOUNT_SESSION_MIGRATION_VERSION, ACCOUNT_SESSION_RENEWAL_MIGRATION_VERSION,
     verifyRenewableAccountSessionSchema, verifyOptionalAccountSessionSchema } from '../migrations/accountSessionSchema';
 
@@ -19,6 +22,13 @@ export class AccountSessionReadinessError extends Error {
     constructor() {
         super('Account session storage readiness could not be verified');
         this.name = 'AccountSessionReadinessError';
+    }
+}
+
+export class ProviderAuthReadinessError extends Error {
+    constructor() {
+        super('Provider authentication storage readiness could not be verified');
+        this.name = 'ProviderAuthReadinessError';
     }
 }
 
@@ -48,6 +58,32 @@ export async function verifyAccountSessionReadiness(database: Pick<Pool, 'getCon
         }
         await verifyAccountIdentitySchema(metadata);
         await verifyRenewableAccountSessionSchema(metadata);
+    });
+}
+
+/** Enabled authentication cannot use the optional-table rules reserved for old-backup recovery. */
+export async function verifyProviderAuthReadiness(
+    database: Pick<Pool, 'getConnection'>, requiresExtendedAttempts = false,
+): Promise<void> {
+    await verifyAccountStorageReadiness(database, ProviderAuthReadinessError, async metadata => {
+        for (const version of [PROVIDER_IDENTITY_MIGRATION_VERSION, PROVIDER_ATTEMPT_MIGRATION_VERSION]) {
+            const [recorded] = await metadata.query('SELECT version FROM schema_migrations WHERE version = ?', [version]);
+            if (!Array.isArray(recorded) || recorded.length !== 1
+                || (recorded[0] as { version?: unknown }).version !== version) {
+                throw new ProviderAuthReadinessError();
+            }
+        }
+        await verifyProviderIdentitySchema(metadata);
+        const stage = await inspectProviderAttemptStage(metadata);
+        if (requiresExtendedAttempts && stage !== 'extended') throw new ProviderAuthReadinessError();
+        const [extended] = await metadata.query('SELECT version FROM schema_migrations WHERE version = ?',
+            [PROVIDER_ATTEMPT_ACTIONS_MIGRATION_VERSION]);
+        const expectedRecords = stage === 'extended' ? 1 : 0;
+        if (!Array.isArray(extended) || extended.length !== expectedRecords
+            || extended.some(record => record?.version !== PROVIDER_ATTEMPT_ACTIONS_MIGRATION_VERSION)) {
+            throw new ProviderAuthReadinessError();
+        }
+        await verifyProviderAttemptSchema(metadata, stage);
     });
 }
 

@@ -16,7 +16,8 @@ test('defines only runtime DML and read-only identity-epoch metadata', () => {
     });
     assert.deepEqual(
         RUNTIME_GRANT_MANIFEST.map(({ table }) => table),
-        ['account_sessions', 'schema_migrations', 'users', 'game_submission_receipts', 'game_personal_bests']
+        ['account_sessions', 'account_provider_identities', 'provider_auth_attempts',
+            'schema_migrations', 'users', 'game_submission_receipts', 'game_personal_bests']
     );
     assert.deepEqual(runtimeColumnPrivilegeInventory().filter(({ tableName }) => tableName === 'schema_migrations'), [
         { tableName: 'schema_migrations', columnName: 'version', privilegeType: 'SELECT' },
@@ -34,6 +35,7 @@ test('defines only runtime DML and read-only identity-epoch metadata', () => {
     );
     assert.deepEqual(runtimeTablePrivilegeInventory(), [
         { tableName: 'account_sessions', privilegeType: 'DELETE' },
+        { tableName: 'provider_auth_attempts', privilegeType: 'DELETE' },
         { tableName: 'users', privilegeType: 'DELETE' },
         { tableName: 'game_submission_receipts', privilegeType: 'DELETE' },
         { tableName: 'game_personal_bests', privilegeType: 'DELETE' },
@@ -58,6 +60,24 @@ test('device sessions permit renewal without rewriting their account, creation t
     assert.ok(['account_uuid', 'created_at', 'remembered'].every(column => !columns('UPDATE').includes(column)));
 });
 
+test('provider grants support linking and consuming attempts without identity reassignment or direct deletion', () => {
+    const identity = RUNTIME_GRANT_MANIFEST.find(({ table }) => table === 'account_provider_identities')!;
+    assert.deepEqual(identity.grants, [
+        { privilege: 'SELECT', columns: ['provider', 'subject', 'account_uuid'] },
+        { privilege: 'INSERT', columns: ['provider', 'subject', 'account_uuid', 'linked_at'] },
+        { privilege: 'UPDATE', columns: ['linked_at'] },
+    ]);
+    assert.deepEqual(identity.tablePrivileges, []);
+    const attempts = RUNTIME_GRANT_MANIFEST.find(({ table }) => table === 'provider_auth_attempts')!;
+    const attemptColumns = ['state_hash', 'binding_hash', 'nonce', 'client_key',
+        'action', 'user_id', 'account_uuid', 'expires_at'];
+    assert.deepEqual(attempts.grants, [
+        { privilege: 'SELECT', columns: attemptColumns },
+        { privilege: 'INSERT', columns: attemptColumns },
+    ]);
+    assert.deepEqual(attempts.tablePrivileges, ['DELETE']);
+});
+
 test('renders the exact production grant statements without applying them', () => {
     assert.deepEqual(
         renderRuntimeGrantStatements(
@@ -66,6 +86,8 @@ test('renders the exact production grant statements without applying them', () =
         ),
         [
             "GRANT SELECT (`session_hash`, `account_uuid`, `created_at`, `expires_at`, `remembered`, `renewed_at`, `previous_session_hash`, `previous_valid_until`), INSERT (`session_hash`, `account_uuid`, `created_at`, `expires_at`, `remembered`, `renewed_at`), UPDATE (`session_hash`, `expires_at`, `renewed_at`, `previous_session_hash`, `previous_valid_until`), DELETE ON `cms`.`account_sessions` TO 'cms_mickeyf'@'%';",
+            "GRANT SELECT (`provider`, `subject`, `account_uuid`), INSERT (`provider`, `subject`, `account_uuid`, `linked_at`), UPDATE (`linked_at`) ON `cms`.`account_provider_identities` TO 'cms_mickeyf'@'%';",
+            "GRANT SELECT (`state_hash`, `binding_hash`, `nonce`, `client_key`, `action`, `user_id`, `account_uuid`, `expires_at`), INSERT (`state_hash`, `binding_hash`, `nonce`, `client_key`, `action`, `user_id`, `account_uuid`, `expires_at`), DELETE ON `cms`.`provider_auth_attempts` TO 'cms_mickeyf'@'%';",
             "GRANT SELECT (`version`, `applied_at`) ON `cms`.`schema_migrations` TO 'cms_mickeyf'@'%';",
             "GRANT SELECT (`user_id`, `account_uuid`, `user_name`, `email`, `user_password`), INSERT (`user_name`, `email`, `user_password`), DELETE ON `cms`.`users` TO 'cms_mickeyf'@'%';",
             "GRANT SELECT (`game_id`, `rules_version`, `user_id`, `run_id`, `score`, `completion_time_ms`, `payload_fingerprint`, `improved_personal_best`, `submitted_at`), INSERT (`game_id`, `rules_version`, `user_id`, `run_id`, `score`, `completion_time_ms`, `payload_fingerprint`, `improved_personal_best`, `submitted_at`), DELETE ON `cms`.`game_submission_receipts` TO 'cms_mickeyf'@'%';",

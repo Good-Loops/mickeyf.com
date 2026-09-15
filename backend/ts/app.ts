@@ -21,9 +21,9 @@ import { createLeaderboardRouter } from './routers/leaderboardRouter';
 import { createMainRouter } from './routers/mainRouter';
 import { createGeneralApiRateLimiter } from './security/requestRateLimits';
 import { createGcsDeletionJournal } from './accounts/gcsDeletionJournal';
-import { verifyAccountDeletionReadiness, verifyAccountSessionReadiness } from './accounts/accountDeletionReadiness';
+import { verifyAccountDeletionReadiness, verifyAccountSessionReadiness,
+    verifyProviderAuthReadiness } from './accounts/accountDeletionReadiness';
 import { verifyPasswordlessAccountSchema } from './migrations/passwordlessAccountSchema';
-import { verifyProviderAttemptSchema } from './migrations/providerAttemptSchema';
 
 const runtimeConfig = loadRuntimeConfig();
 const deletionJournal = runtimeConfig.accountDeletionEnabled
@@ -94,9 +94,10 @@ async function startServer(): Promise<void> {
         if (runtimeConfig.providerAuth.signupEnabled) {
             await verifyPasswordlessAccountSchema(pool);
         }
-        if (runtimeConfig.providerAuth.signupEnabled || (runtimeConfig.accountDeletionEnabled
-            && runtimeConfig.providerAuth.clients['google-web'] !== undefined)) {
-            await verifyProviderAttemptSchema(pool, 'extended');
+        if (runtimeConfig.providerAuth.enabled) {
+            const requiresExtendedAttempts = runtimeConfig.providerAuth.signupEnabled
+                || (runtimeConfig.accountDeletionEnabled && runtimeConfig.providerAuth.clients['google-web'] !== undefined);
+            await verifyProviderAuthReadiness(pool, requiresExtendedAttempts);
         }
         if (runtimeConfig.accountDeletionEnabled) {
             await verifyAccountDeletionReadiness(pool, runtimeConfig.accountIdentityEpoch!);

@@ -456,7 +456,8 @@ export async function inspectRuntimeGrantState(
          FROM information_schema.COLUMNS
          WHERE TABLE_SCHEMA = ?
            AND TABLE_NAME IN (
-               'account_sessions', 'schema_migrations', 'users', 'game_runs', 'game_submission_receipts', 'game_personal_bests'
+               'account_sessions', 'account_provider_identities', 'provider_auth_attempts',
+               'schema_migrations', 'users', 'game_runs', 'game_submission_receipts', 'game_personal_bests'
            )
          /* runtime-grants:columns */`,
         [database],

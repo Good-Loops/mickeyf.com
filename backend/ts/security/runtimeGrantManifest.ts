@@ -11,7 +11,8 @@ export type RuntimeColumnGrant = Readonly<{
 }>;
 
 export type RuntimeTableGrant = Readonly<{
-    table: 'users' | 'game_submission_receipts' | 'game_personal_bests' | 'schema_migrations' | 'account_sessions';
+    table: 'users' | 'game_submission_receipts' | 'game_personal_bests' | 'schema_migrations' | 'account_sessions'
+        | 'account_provider_identities' | 'provider_auth_attempts';
     grants: readonly RuntimeColumnGrant[];
     tablePrivileges: readonly 'DELETE'[];
 }>;
@@ -57,6 +58,32 @@ export const RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freez
             Object.freeze({ privilege: 'UPDATE' as const,
                 columns: Object.freeze(['session_hash', 'expires_at', 'renewed_at',
                     'previous_session_hash', 'previous_valid_until']) }),
+        ]),
+    }),
+    Object.freeze({
+        table: 'account_provider_identities' as const,
+        tablePrivileges: Object.freeze([]),
+        grants: Object.freeze([
+            Object.freeze({ privilege: 'SELECT' as const,
+                columns: Object.freeze(['provider', 'subject', 'account_uuid']) }),
+            Object.freeze({ privilege: 'INSERT' as const,
+                columns: Object.freeze(['provider', 'subject', 'account_uuid', 'linked_at']) }),
+            // MySQL 8.0.31 requires a write privilege for SELECT ... FOR UPDATE.
+            // Identity reassignment and direct identity deletion remain forbidden.
+            Object.freeze({ privilege: 'UPDATE' as const,
+                columns: Object.freeze(['linked_at']) }),
+        ]),
+    }),
+    Object.freeze({
+        table: 'provider_auth_attempts' as const,
+        tablePrivileges: Object.freeze(['DELETE' as const]),
+        grants: Object.freeze([
+            Object.freeze({ privilege: 'SELECT' as const,
+                columns: Object.freeze(['state_hash', 'binding_hash', 'nonce', 'client_key',
+                    'action', 'user_id', 'account_uuid', 'expires_at']) }),
+            Object.freeze({ privilege: 'INSERT' as const,
+                columns: Object.freeze(['state_hash', 'binding_hash', 'nonce', 'client_key',
+                    'action', 'user_id', 'account_uuid', 'expires_at']) }),
         ]),
     }),
     Object.freeze({
@@ -207,7 +234,7 @@ export function runtimeColumnPrivilegeInventory(): readonly RuntimeColumnPrivile
 }
 
 export function runtimeTablePrivilegeInventory(): readonly RuntimeTablePrivilege[] {
-    // MySQL cannot restrict DELETE by column. Sessions need scoped revocation;
+    // MySQL cannot restrict DELETE by column. Attempts need consumption and sessions need revocation;
     // the account and its dependent data tables need transactional self-deletion.
     return Object.freeze(RUNTIME_GRANT_MANIFEST.flatMap(({ table, tablePrivileges }) =>
         tablePrivileges.map((privilegeType) => Object.freeze({

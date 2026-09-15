@@ -273,7 +273,7 @@ test('active runtime sessions block role removal, then a drained rerun converges
         );
         assert.equal(initialPlan.state, 'broad');
         assert.deepEqual(initialPlan.blockers, []);
-        assert.equal(initialPlan.operations.ensureRequiredPrivileges.length, 5);
+        assert.equal(initialPlan.operations.ensureRequiredPrivileges.length, 7);
         assert.equal(
             initialPlan.operations.removeApprovedRole?.approvedRole,
             'mock_cloudsqlsuperuser@%'
@@ -299,7 +299,7 @@ test('active runtime sessions block role removal, then a drained rerun converges
             RUNTIME_ACCOUNT
         );
         assert.equal(preparedPlan.state, 'broad');
-        assert.equal(preparedPlan.operations.ensureRequiredPrivileges.length, 5);
+        assert.equal(preparedPlan.operations.ensureRequiredPrivileges.length, 7);
     } finally {
         await openRuntimeConnection.end();
         await waitForFixtureSessionToClose(openRuntimeConnection.threadId);

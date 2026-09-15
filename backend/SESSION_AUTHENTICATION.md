@@ -105,7 +105,9 @@ a reviewed Hosting preview for built-browser authentication testing.
 2. Review/apply the narrow runtime grant manifest: SELECT on all eight session
    columns, INSERT on the six creation fields, table DELETE and UPDATE only on
    the five rotation fields. No UPDATE to account UUID, creation time or remembered
-   choice, no DDL or provider-table privileges.
+   choice or DDL. The current combined manifest also defines narrow provider
+   identity/attempt privileges; apply it only after those required tables are
+   present. See `PROVIDER_SIGN_IN.md` for the separately gated provider activation.
    Keep maintenance credentials out of the application. Verify grants and schema.
 3. Coordinate the backend and Hosting release. The new backend refuses to start
    without recorded 0011/0012 and valid session storage. Old and new session formats are not

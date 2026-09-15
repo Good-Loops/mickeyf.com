@@ -304,17 +304,39 @@ npm --prefix backend run migrations:plan
 
 The provider-identity command selects only 0009 and requires recorded 0001–0008.
 The separate attempt command selects only 0010 and requires recorded 0001–0009.
-Both validate the exact resulting schema before recording history. Readiness and
-deletion replay allow pre-0010 backups without the attempt table, but reject a
+Both validate the exact resulting schema before recording history. Deletion
+recovery checks allow pre-0010 backups without the attempt table, but reject a
 missing recorded table or malformed cascade. Historical SQL remains unchanged.
+Enabled provider authentication instead requires recorded 0009/0010 and both
+exact schemas at startup. Extended attempt actions additionally require recorded
+0015; signup and Google-authorized deletion continue to require that extended stage.
 These commands are **not** a local-safety guarantee: a loopback proxy may target
 production. No production migration was executed in this checkpoint.
 
-Runtime grants now include only the session table access needed by shared login.
-Before provider activation, update and test the
-reviewed grant manifest for the required provider-table access; do not grant
-blanket database privileges. Coordinate that change with schema, recovery
-compatibility and the enabled application revision.
+The reviewed runtime grant manifest now includes narrow provider-table access:
+identity lookup/insertion, UPDATE only on `linked_at` for the supported MySQL
+locking read, and attempt insertion/consumption. It permits neither identity
+reassignment nor direct identity deletion. These are source definitions, not
+applied production grants. Coordinate their explicit application with schema,
+recovery compatibility and the enabled application revision; no blanket grants.
+
+### Public activation preparation — 2026-09-14
+
+A read-only production query confirmed recorded migrations only through 0008.
+This does not establish whether any unrecorded partial tables exist; the explicit
+migration planner must inspect those before a write. The public backend remains
+the legacy password/session revision, and localhost public preview still uses it.
+
+Provider startup checks and narrow grants now pass isolated validation: 26 focused
+grant unit tests, 13 disposable MySQL grant integration tests (including actual
+provider startup, linking and single-use attempts), and the backend typecheck.
+No production schema, privilege, traffic, OAuth setting or account was changed.
+
+The release choice remains explicit: existing-account Google linking/login can
+keep Google signup disabled; new Google-only accounts still require the approved
+age/consent and available-deletion work. Neither path skips the published privacy
+disclosures or coordinated backend/Hosting/session cutover. Do not silently turn
+the existing-account option into approval for unrestricted new-account signup.
 
 Remaining work, in order:
 

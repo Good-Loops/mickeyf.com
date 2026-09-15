@@ -111,8 +111,8 @@ test('missing account deletion grants produce an additive repair plan, not compl
         assert.equal(plan.state, 'repair');
         assert.equal(plan.compliant, false);
         assert.deepEqual(plan.blockers, []);
-        assert.equal(plan.operations.ensureRequiredPrivileges.length, 5);
-        assert.equal(plan.operations.ensureRequiredPrivileges.filter((sql) => /, DELETE ON /u.test(sql)).length, 4);
+        assert.equal(plan.operations.ensureRequiredPrivileges.length, 7);
+        assert.equal(plan.operations.ensureRequiredPrivileges.filter((sql) => /, DELETE ON /u.test(sql)).length, 5);
         assert.equal(plan.operations.removeApprovedRole, null);
     }
 });
@@ -141,13 +141,14 @@ test('account identity grants require its schema migration and fresh approval', 
     assert.deepEqual(unmigrated.operations.ensureRequiredPrivileges, []);
 });
 
-test('table privileges accept only non-grantable DELETE on the four manifest tables', () => {
+test('table privileges accept only non-grantable DELETE on the five manifest tables', () => {
     const current = exactSnapshot();
     for (const unexpected of [
         { schemaName: DATABASE, tableName: 'users', privilegeType: 'SELECT', isGrantable: 'NO' as const },
         { schemaName: DATABASE, tableName: 'users', privilegeType: 'UPDATE', isGrantable: 'NO' as const },
         { schemaName: DATABASE, tableName: 'users', privilegeType: 'DELETE', isGrantable: 'YES' as const },
         { schemaName: DATABASE, tableName: 'schema_migrations', privilegeType: 'DELETE', isGrantable: 'NO' as const },
+        { schemaName: DATABASE, tableName: 'account_provider_identities', privilegeType: 'DELETE', isGrantable: 'NO' as const },
         { schemaName: 'other_schema', tableName: 'users', privilegeType: 'DELETE', isGrantable: 'NO' as const },
     ]) {
         const plan = createRuntimeGrantPlan({
@@ -188,6 +189,31 @@ test('DELETE remains forbidden at schema and global scope', () => {
         const plan = createRuntimeGrantPlan({ ...current, ...extra }, SETTINGS, RUNTIME_ACCOUNT);
         assert.equal(plan.state, 'blocked');
         assert.deepEqual(plan.operations.ensureRequiredPrivileges, []);
+    }
+});
+
+test('provider grants require both migrated tables and cannot permit identity reassignment', () => {
+    const current = exactSnapshot();
+    for (const tableName of ['account_provider_identities', 'provider_auth_attempts']) {
+        const withoutTable = (column: { tableName: string }) => column.tableName !== tableName;
+        const oldGrants = current.columnPrivileges.filter(withoutTable);
+        const repair = createRuntimeGrantPlan({ ...current, columnPrivileges: oldGrants }, SETTINGS, RUNTIME_ACCOUNT);
+        assert.equal(repair.state, 'repair');
+        assert.deepEqual(repair.blockers, []);
+        assert.equal(repair.operations.ensureRequiredPrivileges.length, 7);
+        const unmigrated = createRuntimeGrantPlan({ ...current,
+            availableColumns: current.availableColumns.filter(withoutTable), columnPrivileges: oldGrants,
+        }, SETTINGS, RUNTIME_ACCOUNT);
+        assert.equal(unmigrated.state, 'blocked');
+        assert.deepEqual(unmigrated.operations.ensureRequiredPrivileges, []);
+    }
+    for (const columnName of ['provider', 'subject', 'account_uuid']) {
+        const unsafe = createRuntimeGrantPlan({ ...current, columnPrivileges: [...current.columnPrivileges, {
+            schemaName: DATABASE, tableName: 'account_provider_identities', columnName,
+            privilegeType: 'UPDATE', isGrantable: 'NO',
+        }] }, SETTINGS, RUNTIME_ACCOUNT);
+        assert.equal(unsafe.state, 'blocked');
+        assert.deepEqual(unsafe.operations.ensureRequiredPrivileges, []);
     }
 });
 
@@ -252,7 +278,7 @@ test('the exact broad role produces only additive grants and one reviewed remova
     assert.equal(plan.state, 'broad');
     assert.equal(plan.compliant, false);
     assert.deepEqual(plan.blockers, []);
-    assert.equal(plan.operations.ensureRequiredPrivileges.length, 5);
+    assert.equal(plan.operations.ensureRequiredPrivileges.length, 7);
     assert.deepEqual(plan.operations.clearDefaultRoles, [
         "SET DEFAULT ROLE NONE TO 'runtime_test'@'%'",
     ]);
@@ -470,10 +496,19 @@ test('verification fails without DELETE and an approved fake apply installs the 
         connection, SETTINGS, RUNTIME_ACCOUNT, approved.sha256, SERVER_UUID
     );
     assert.equal(applied.compliant, true);
-    assert.equal(connection.calls.filter((sql) => /^GRANT /u.test(sql)).length, 5);
+    assert.equal(connection.calls.filter((sql) => /^GRANT /u.test(sql)).length, 7);
     const verified = await verifyRuntimeGrants(connection, SETTINGS, RUNTIME_ACCOUNT);
     assert.equal(verified.compliant, true);
     assert.equal(connection.calls.some((sql) => /^REVOKE|^SET DEFAULT ROLE/u.test(sql)), false);
+});
+
+test('runtime schema inspection includes both provider tables', async () => {
+    const connection = new SnapshotConnection();
+    const plan = await planRuntimeGrants(connection, SETTINGS, RUNTIME_ACCOUNT);
+    assert.equal(plan.compliant, true);
+    const inspection = connection.calls.find(sql => sql.includes('runtime-grants:columns'))!;
+    assert.match(inspection, /'account_provider_identities'/u);
+    assert.match(inspection, /'provider_auth_attempts'/u);
 });
 
 class PostProviderVerificationFailureConnection extends SnapshotConnection {

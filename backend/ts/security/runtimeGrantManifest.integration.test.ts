@@ -9,9 +9,12 @@ import mysql, {
 } from 'mysql2/promise';
 import { loadMigrationConfig } from '../config/migrationConfig';
 import { deleteAccount } from '../accounts/accountDeletionRepository';
+import { findProviderAccount, linkProviderAccount, readProviderAccountMethods } from '../accounts/providerAccountRepository';
 import { createAccountSession, readLiveSession, renewAccountSession, revokeAccountSession } from '../auth/accountSessionRepository';
+import { consumeProviderAttempt, createProviderAttempt, type ProviderAttempt } from '../auth/providerAttemptRepository';
+import type { VerifiedProviderIdentity } from '../auth/providerIdentity';
 import { deriveRenewedSessionId } from './sessionPolicy';
-import { verifyAccountSessionReadiness } from '../accounts/accountDeletionReadiness';
+import { verifyAccountSessionReadiness, verifyProviderAuthReadiness } from '../accounts/accountDeletionReadiness';
 import {
     readP4VegaLeaderboard,
     submitP4VegaScore,
@@ -284,6 +287,46 @@ test('limited runtime session grants support rotation without rewriting immutabl
     await revokeAccountSession(runtimePool, 1, accountId, sessionId);
     assert.equal(await readLiveSession(runtimePool, 1, accountId, sessionId), null);
     assert.equal(await readLiveSession(runtimePool, 1, accountId, renewed.renewal.sessionId), null);
+});
+
+test('limited provider grants support schema readiness, linking and login without identity reassignment', async () => {
+    await verifyProviderAuthReadiness(runtimePool);
+    const password = 'provider-grant-test-only';
+    await administrator.query('UPDATE users SET user_password = ? WHERE user_id = 1', [await bcrypt.hash(password, 4)]);
+    const [accounts] = await runtimePool.query<RowDataPacket[]>('SELECT account_uuid AS accountId FROM users WHERE user_id = 1');
+    const target = { userId: 1, accountId: accounts[0].accountId as string };
+    const proof = { accountId: target.accountId, sessionId: Buffer.alloc(32, 4).toString('base64url') };
+    assert.equal(await createAccountSession(runtimePool, target, proof.sessionId,
+        Math.floor(Date.now() / 1000) + 3_600), true);
+    const identity = { provider: 'google', subject: 'isolated-grant-subject' } as VerifiedProviderIdentity;
+    assert.equal(await findProviderAccount(runtimePool, identity), null);
+    assert.equal(await linkProviderAccount(runtimePool, target, password, identity, proof), 'linked');
+    // The duplicate path performs SELECT ... FOR UPDATE and must work without granting identity reassignment.
+    assert.equal(await linkProviderAccount(runtimePool, target, password, identity, proof), 'already-linked');
+    assert.deepEqual(await findProviderAccount(runtimePool, identity), { ...target, userName: 'player-1' });
+    assert.deepEqual(await readProviderAccountMethods(runtimePool, target.accountId), { hasPassword: true, googleLinked: true });
+    for (const column of ['provider', 'subject', 'account_uuid']) {
+        await assertPrivilegeDenied(() => runtimePool.query(
+            `UPDATE account_provider_identities SET ${column} = ${column} WHERE 1 = 0`));
+    }
+    await assertPrivilegeDenied(() => runtimePool.query('DELETE FROM account_provider_identities WHERE 1 = 0'));
+});
+
+test('limited attempt grants create and consume login and link challenges without UPDATE', async () => {
+    const [accounts] = await runtimePool.query<RowDataPacket[]>('SELECT account_uuid AS accountId FROM users WHERE user_id = 1');
+    for (const [index, action] of (['login', 'link'] as const).entries()) {
+        const attempt: ProviderAttempt = {
+            stateHash: Buffer.alloc(32, index + 10), bindingHash: Buffer.alloc(32, index + 20),
+            nonce: Buffer.alloc(32, index + 30).toString('base64url'), clientKey: 'google-web', action,
+            userId: action === 'link' ? 1 : null, accountId: action === 'link' ? accounts[0].accountId as string : null,
+        };
+        assert.equal(await createProviderAttempt(runtimePool, attempt), 'created');
+        assert.deepEqual(await consumeProviderAttempt(runtimePool, attempt.stateHash, attempt.bindingHash, attempt.clientKey, action), {
+            nonce: attempt.nonce, userId: attempt.userId, accountId: attempt.accountId,
+        });
+        assert.equal(await consumeProviderAttempt(runtimePool, attempt.stateHash, attempt.bindingHash, attempt.clientKey, action), null);
+    }
+    await assertPrivilegeDenied(() => runtimePool.query('UPDATE provider_auth_attempts SET nonce = nonce WHERE 1 = 0'));
 });
 
 test('installs exact column grants and account-deletion table grants with no active role', async () => {

@@ -1,13 +1,18 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Pool, PoolConnection } from 'mysql2/promise';
-import { AccountDeletionReadinessError, AccountSessionReadinessError, verifyAccountDeletionReadiness, verifyAccountSessionReadiness } from './accountDeletionReadiness';
+import { AccountDeletionReadinessError, AccountSessionReadinessError, ProviderAuthReadinessError,
+    verifyAccountDeletionReadiness, verifyAccountSessionReadiness, verifyProviderAuthReadiness } from './accountDeletionReadiness';
+import * as providerIdentitySchema from '../migrations/providerIdentitySchema';
+import * as providerAttemptSchema from '../migrations/providerAttemptSchema';
+import type { MigrationConnection } from '../migrations/leaderboardSchema';
 
 const EPOCH = '2026-09-11 19:00:00.123456';
 
 function fakeDatabase(options: { epoch?: string; badColumn?: boolean; invalidCount?: number;
     providerTable?: 'absent' | 'malformed'; providerMigrationRecorded?: boolean;
     attemptTable?: 'absent' | 'malformed'; attemptMigrationRecorded?: boolean;
+    extendedAttemptMigrationRecorded?: boolean;
     sessionTable?: 'absent' | 'malformed'; sessionMigrationRecorded?: boolean;
     renewalMigrationRecorded?: boolean;
     queryError?: Error; queryPending?: boolean } = {}) {
@@ -19,21 +24,27 @@ function fakeDatabase(options: { epoch?: string; badColumn?: boolean; invalidCou
             if (options.queryError) throw options.queryError;
             if (options.queryPending) return new Promise(() => {});
             if (query.sql.startsWith('SELECT version FROM schema_migrations')) {
-                const recorded = (values ?? []).filter(version => version === '0011_create_account_sessions'
-                    ? options.sessionMigrationRecorded : version === '0012_add_session_renewal'
-                        ? options.renewalMigrationRecorded : version === '0010_create_provider_auth_attempts'
-                            ? options.attemptMigrationRecorded : options.providerMigrationRecorded);
+                const history: Record<string, boolean | undefined> = {
+                    '0009_create_account_provider_identities': options.providerMigrationRecorded,
+                    '0010_create_provider_auth_attempts': options.attemptMigrationRecorded,
+                    '0011_create_account_sessions': options.sessionMigrationRecorded,
+                    '0012_add_session_renewal': options.renewalMigrationRecorded,
+                    '0015_extend_provider_attempt_actions': options.extendedAttemptMigrationRecorded,
+                };
+                const recorded = (values ?? []).filter(version => history[String(version)]);
                 return [recorded.map(version => ({ version })), []];
             }
             if (values?.[0] === 'account_provider_identities') {
                 return [query.sql.includes('COUNT(*)')
                     ? [{ tableCount: options.providerTable === 'malformed' ? 1 : 0 }]
-                    : [{ engine: 'MyISAM', collation: 'utf8mb4_unicode_ci', tableType: 'BASE TABLE' }], []];
+                    : options.providerTable === 'malformed'
+                        ? [{ engine: 'MyISAM', collation: 'utf8mb4_unicode_ci', tableType: 'BASE TABLE' }] : [], []];
             }
             if (values?.[0] === 'provider_auth_attempts') {
                 return [query.sql.includes('COUNT(*)')
                     ? [{ tableCount: options.attemptTable === 'malformed' ? 1 : 0 }]
-                    : [{ engine: 'MyISAM', collation: 'utf8mb4_unicode_ci', tableType: 'BASE TABLE' }], []];
+                    : options.attemptTable === 'malformed'
+                        ? [{ engine: 'MyISAM', collation: 'utf8mb4_unicode_ci', tableType: 'BASE TABLE' }] : [], []];
             }
             if (values?.[0] === 'account_sessions') {
                 return [query.sql.includes('COUNT(*)')
@@ -72,6 +83,79 @@ test('readiness verifies the independently pinned epoch and identity schema usin
         assert.equal(query.timeout, 10_000);
     }
     assert.deepEqual(cleanup, ['release']);
+});
+
+test('provider startup requires recorded identity and attempt migrations before enabling login/link', async () => {
+    for (const options of [{}, { providerMigrationRecorded: true }]) {
+        const fake = fakeDatabase(options);
+        await assert.rejects(verifyProviderAuthReadiness(fake.database), ProviderAuthReadinessError);
+        assert.deepEqual(fake.queries[0].values, [providerIdentitySchema.PROVIDER_IDENTITY_MIGRATION_VERSION]);
+        if (options.providerMigrationRecorded) {
+            assert.deepEqual(fake.queries[1].values, [providerAttemptSchema.PROVIDER_ATTEMPT_MIGRATION_VERSION]);
+        }
+        assert.deepEqual(fake.cleanup, ['release']);
+    }
+});
+
+test('provider startup rejects missing or malformed mandatory identity storage', async () => {
+    for (const providerTable of ['absent', 'malformed'] as const) {
+        const fake = fakeDatabase({ providerMigrationRecorded: true, attemptMigrationRecorded: true, providerTable });
+        await assert.rejects(verifyProviderAuthReadiness(fake.database), ProviderAuthReadinessError);
+        assert.ok(fake.queries.some(({ sql, values }) => sql.includes('information_schema.TABLES')
+            && values?.[0] === 'account_provider_identities'));
+        assert.deepEqual(fake.cleanup, ['release']);
+    }
+});
+
+test('provider startup verifies both mandatory schemas with a bounded read-only connection', async context => {
+    const verified: string[] = [];
+    context.mock.method(providerIdentitySchema, 'verifyProviderIdentitySchema', async () => { verified.push('identities'); });
+    context.mock.method(providerAttemptSchema, 'inspectProviderAttemptStage', async () => 'legacy');
+    context.mock.method(providerAttemptSchema, 'verifyProviderAttemptSchema',
+        async (_metadata: MigrationConnection, stage: providerAttemptSchema.ProviderAttemptSchemaStage = 'legacy') => {
+            verified.push(stage);
+        });
+    const fake = fakeDatabase({ providerMigrationRecorded: true, attemptMigrationRecorded: true });
+    await verifyProviderAuthReadiness(fake.database);
+    assert.deepEqual(verified, ['identities', 'legacy']);
+    assert.ok(fake.queries.every(({ sql, timeout }) => /^SELECT/u.test(sql.trim()) && timeout === 10_000));
+    assert.deepEqual(fake.cleanup, ['release']);
+});
+
+test('provider startup preserves extended signup/deletion requirements and exact recorded attempt stage', async context => {
+    context.mock.method(providerIdentitySchema, 'verifyProviderIdentitySchema', async () => {});
+    context.mock.method(providerAttemptSchema, 'verifyProviderAttemptSchema', async () => {});
+    let stage: 'legacy' | 'extended' = 'legacy';
+    context.mock.method(providerAttemptSchema, 'inspectProviderAttemptStage', async () => stage);
+    for (const scenario of [
+        { stage: 'legacy' as const, required: true, recorded: false, valid: false },
+        { stage: 'legacy' as const, required: false, recorded: true, valid: false },
+        { stage: 'extended' as const, required: false, recorded: false, valid: false },
+        { stage: 'extended' as const, required: false, recorded: true, valid: true },
+        { stage: 'extended' as const, required: true, recorded: true, valid: true },
+    ]) {
+        stage = scenario.stage;
+        const fake = fakeDatabase({ providerMigrationRecorded: true, attemptMigrationRecorded: true,
+            extendedAttemptMigrationRecorded: scenario.recorded });
+        const readiness = verifyProviderAuthReadiness(fake.database, scenario.required);
+        if (scenario.valid) await readiness;
+        else await assert.rejects(readiness, ProviderAuthReadinessError);
+        assert.deepEqual(fake.cleanup, ['release']);
+    }
+});
+
+test('provider startup rejects missing/malformed attempt storage and sanitizes driver failures', async context => {
+    context.mock.method(providerIdentitySchema, 'verifyProviderIdentitySchema', async () => {});
+    const missing = fakeDatabase({ providerMigrationRecorded: true, attemptMigrationRecorded: true });
+    await assert.rejects(verifyProviderAuthReadiness(missing.database), ProviderAuthReadinessError);
+    assert.deepEqual(missing.cleanup, ['release']);
+    const failed = fakeDatabase({ queryError: new Error('driver secret') });
+    await assert.rejects(verifyProviderAuthReadiness(failed.database), error => {
+        assert.ok(error instanceof ProviderAuthReadinessError);
+        assert.doesNotMatch(String(error), /secret/);
+        return true;
+    });
+    assert.deepEqual(failed.cleanup, ['destroy']);
 });
 
 test('deletion readiness rejects missing recorded provider storage and malformed present storage', async () => {
