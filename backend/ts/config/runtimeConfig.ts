@@ -28,6 +28,8 @@ const PRODUCTION_ORIGINS = Object.freeze([
     'https://www.mickeyf.com',
     // Packaged iOS WebView origin, not an HTTP development server or app attestation.
     'capacitor://localhost',
+    // Explicit local frontend access to real accounts/scores; never a wildcard or LAN origin.
+    'http://localhost:5173',
 ]);
 
 const DEVELOPMENT_ORIGINS = Object.freeze([
