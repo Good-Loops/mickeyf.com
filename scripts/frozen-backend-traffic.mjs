@@ -3,7 +3,7 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
-import { accountDeletionEnvironment } from './render-frozen-backend-deploy.mjs';
+import { accountDeletionEnvironment, googleSignInEnvironment } from './render-frozen-backend-deploy.mjs';
 
 export const PROJECT = 'noted-reef-387021';
 export const REGION = 'us-central1';
@@ -27,11 +27,12 @@ function keys(value, expected, label) {
 }
 
 export function validatePins(pins) {
-    const { accountDeletion, ...sourcePins } = pins ?? {};
+    const { accountDeletion, googleSignIn, ...sourcePins } = pins ?? {};
     keys(sourcePins, ['sourceBuildId', 'sourceCommit', 'imageDigest', 'deploymentBuildId',
         'deploymentTriggerId', 'deploymentStepsSha256'], 'Pins');
     requireThat(Object.values(sourcePins).every(value => typeof value === 'string'), 'All source pins must be strings');
     accountDeletionEnvironment(accountDeletion);
+    googleSignInEnvironment(googleSignIn, accountDeletion);
     for (const key of ['sourceBuildId', 'deploymentBuildId', 'deploymentTriggerId']) {
         requireThat(UUID.test(pins[key]), `Invalid ${key}`);
     }
@@ -98,6 +99,7 @@ export function validateFrozenRevision(revision, pins) {
         DB_USER: 'cms_mickeyf', DB_NAME: 'cms',
         P4_VEGA_SCORE_SUBMISSIONS_ENABLED: 'false', THREE_BOSSES_RUN_SUBMISSIONS_ENABLED: 'false',
         ...accountDeletionEnvironment(pins.accountDeletion),
+        ...googleSignInEnvironment(pins.googleSignIn, pins.accountDeletion),
     };
     const expectedCount = Object.keys(expectedPlain).length + 2;
     requireThat(container.env?.length === expectedCount && new Set(container.env.map(e => e.name)).size === expectedCount, 'Unexpected environment variables');
@@ -172,6 +174,32 @@ function checkPreviousDeletionState(containers, pins) {
     requireThat(pins.accountDeletion !== undefined, 'Default-off would disable active deletion; explicitly review enable or disable in the traffic pins');
 }
 
+function checkPreviousGoogleState(containers, pins) {
+    requireThat(containers?.length === 1, 'Active Google state requires one container');
+    const names = ['PROVIDER_AUTH_ENABLED', 'PROVIDER_GOOGLE_SIGNUP_ENABLED', 'GOOGLE_WEB_CLIENT_ID'];
+    const entries = (containers[0].env ?? []).filter(item => /^(?:PROVIDER_|GOOGLE_|APPLE_)/u.test(item.name));
+    requireThat(entries.every(item => names.includes(item.name)
+        && same(Object.keys(item).sort(), ['name', 'value']))
+        && new Set(entries.map(item => item.name)).size === entries.length,
+    'Active provider settings are unsupported, duplicated or not literal values');
+    const previous = Object.fromEntries(entries.map(item => [item.name, item.value]));
+    const enabled = previous.PROVIDER_AUTH_ENABLED ?? 'false';
+    const signup = previous.PROVIDER_GOOGLE_SIGNUP_ENABLED ?? 'false';
+    requireThat(['false', 'true'].includes(enabled) && ['false', 'true'].includes(signup), 'Unknown active Google state');
+    if (enabled === 'false') {
+        requireThat(signup === 'false' && previous.GOOGLE_WEB_CLIENT_ID === undefined, 'Inactive Google settings are inconsistent');
+        return;
+    }
+    requireThat(signup === 'true', 'Active Google configuration is not the reviewed full signup/login contract');
+    const deletion = Object.fromEntries((containers[0].env ?? []).map(item => [item.name, item.value]));
+    requireThat(deletion.ACCOUNT_DELETION_ENABLED === 'true', 'Active Google signup requires account deletion');
+    googleSignInEnvironment({ enabled: true, clientId: previous.GOOGLE_WEB_CLIENT_ID }, {
+        enabled: true, journalBucket: deletion.ACCOUNT_DELETION_JOURNAL_BUCKET, identityEpoch: deletion.ACCOUNT_IDENTITY_EPOCH,
+    });
+    requireThat(pins.googleSignIn !== undefined,
+        'Default-off would disable active Google sign-in; explicitly review enable or disable in the traffic pins');
+}
+
 async function checkedState(provider, pins) {
     validatePins(pins);
     await provider.assertAutomationPaused();
@@ -182,11 +210,13 @@ async function checkedState(provider, pins) {
     validateFrozenRevision(revision, pins);
     validateDeployment(build, pins);
     checkPreviousDeletionState(service.template.containers, pins);
+    checkPreviousGoogleState(service.template.containers, pins);
     const active = new Set(service.traffic.filter(item => item.tag || item.percent > 0).map(item => item.revision));
     for (const name of active) {
         const previous = name === revisionName(pins) ? revision : await provider.getRevision(name);
         requireThat(previous.name === `${SERVICE}/revisions/${name}` && !previous.deleteTime, 'Active revision inventory differs');
         checkPreviousDeletionState(previous.containers, pins);
+        checkPreviousGoogleState(previous.containers, pins);
     }
     return { service, revision };
 }

@@ -5,7 +5,7 @@ import { fileURLToPath } from 'node:url';
 
 // Changing either pin requires reviewing the canonical policy diff, not just
 // refreshing hashes. Canonical source policy remains main-only.
-export const CANONICAL_SHA256 = '4aac15b2a72d3f4129aba82eeded801e792434697aba025c07825561586f741a';
+export const CANONICAL_SHA256 = 'd925e4cc4ea5e25c7d204317d4a905f045cc860615f3dce437aa295fa491d30f';
 export const CANDIDATE_SHA256 = 'dccd0bcf976c77abb3e9fa6d39c1ae855ff127fbf4ec67efd3480e20a4afcda4';
 export const DEPLOY_IMAGE = 'gcr.io/google.com/cloudsdktool/cloud-sdk:alpine@sha256:de1a989b158694a614852e7b53673097da3bdb394b8186d6102386b7a10d73c7';
 const uuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u;
@@ -16,6 +16,7 @@ const sha256 = (text) => createHash('sha256').update(text).digest('hex');
 
 export const ACCOUNT_DELETION_JOURNAL_BUCKET = 'ludolume-deletion-journal-1012884798546';
 export const ORIGINAL_ACCOUNT_IDENTITY_EPOCH = '2026-09-12 00:15:39.954172';
+export const APPROVED_GOOGLE_WEB_CLIENT_ID = '1012884798546-u18tb6962p05mdpfe6nov8uhe0pbeak8.apps.googleusercontent.com';
 
 // Omission is default-off; an explicit false requests a reviewed disable/rollback.
 export function accountDeletionEnvironment(settings) {
@@ -39,13 +40,36 @@ function accountDeletionApproval(pins) {
     return `${pins.accountDeletion.enabled ? 'enable' : 'disable'}-account-deletion:${pins.sourceCommit}:${pins.sourceBuildId}:${pins.imageDigest}`;
 }
 
+/** Public activation means complete signup/login, never a link-only release. */
+export function googleSignInEnvironment(settings, accountDeletion) {
+    const disabled = { PROVIDER_AUTH_ENABLED: 'false', PROVIDER_GOOGLE_SIGNUP_ENABLED: 'false' };
+    if (settings === undefined) return disabled;
+    const keys = settings?.enabled === true ? ['enabled', 'clientId'] : ['enabled'];
+    if (!settings || Array.isArray(settings) || typeof settings.enabled !== 'boolean'
+        || Object.keys(settings).sort().join() !== keys.sort().join()
+        || settings.enabled && settings.clientId !== APPROVED_GOOGLE_WEB_CLIENT_ID) {
+        throw new Error('Google sign-in requires an explicit boolean and exactly the approved web client when enabled.');
+    }
+    if (!settings.enabled) return disabled;
+    if (accountDeletionEnvironment(accountDeletion).ACCOUNT_DELETION_ENABLED !== 'true') {
+        throw new Error('Public Google signup requires the reviewed enabled account-deletion configuration.');
+    }
+    return { PROVIDER_AUTH_ENABLED: 'true', PROVIDER_GOOGLE_SIGNUP_ENABLED: 'true', GOOGLE_WEB_CLIENT_ID: settings.clientId };
+}
+
+function googleSignInApproval(pins) {
+    if (pins.googleSignIn === undefined) return 'DISABLED';
+    return `${pins.googleSignIn.enabled ? 'enable' : 'disable'}-google-sign-in:${pins.sourceCommit}:${pins.sourceBuildId}:${pins.imageDigest}`;
+}
+
 export function validateFrozenPins(value) {
     const keys = ['sourceBuildId', 'sourceCommit', 'imageDigest', 'sourceTriggerId', 'sourceTriggerName', 'sourceRef', 'deploymentTriggerName'];
-    if (!value || Object.keys(value).filter(key => key !== 'accountDeletion').sort().join() !== keys.sort().join()
+    if (!value || Object.keys(value).filter(key => !['accountDeletion', 'googleSignIn'].includes(key)).sort().join() !== keys.sort().join()
         || keys.some((key) => typeof value[key] !== 'string')) {
-        throw new Error('Supply the seven reviewed source/deployment pins and optional accountDeletion configuration only.');
+        throw new Error('Supply the seven reviewed source/deployment pins and optional accountDeletion/googleSignIn configurations only.');
     }
     accountDeletionEnvironment(value.accountDeletion);
+    googleSignInEnvironment(value.googleSignIn, value.accountDeletion);
     if (!uuid.test(value.sourceBuildId) || !uuid.test(value.sourceTriggerId)
         || !/^[0-9a-f]{40}$/u.test(value.sourceCommit) || !/^sha256:[0-9a-f]{64}$/u.test(value.imageDigest)
         || !/^[a-z][a-z0-9-]{0,62}$/u.test(value.sourceTriggerName)
@@ -181,11 +205,16 @@ export function renderFrozenBackendDeployConfig({ canonical, candidate, prefligh
     const severity = frozenState(stepBlock(canonical, 'Enforce Artifact Analysis severity policy'));
     let deletion = stepBlock(canonical, 'Validate account-deletion deployment contract');
     const deletionEnvironment = accountDeletionEnvironment(pins.accountDeletion);
+    const googleEnvironment = googleSignInEnvironment(pins.googleSignIn, pins.accountDeletion);
     for (const [name, value] of Object.entries({
         _ACCOUNT_DELETION_ENABLED: deletionEnvironment.ACCOUNT_DELETION_ENABLED,
         _ACCOUNT_DELETION_JOURNAL_BUCKET: deletionEnvironment.ACCOUNT_DELETION_JOURNAL_BUCKET ?? '',
         _ACCOUNT_IDENTITY_EPOCH: deletionEnvironment.ACCOUNT_IDENTITY_EPOCH ?? '',
         _ACCOUNT_DELETION_APPROVAL: accountDeletionApproval(pins),
+        _PROVIDER_AUTH_ENABLED: googleEnvironment.PROVIDER_AUTH_ENABLED,
+        _PROVIDER_GOOGLE_SIGNUP_ENABLED: googleEnvironment.PROVIDER_GOOGLE_SIGNUP_ENABLED,
+        _GOOGLE_WEB_CLIENT_ID: googleEnvironment.GOOGLE_WEB_CLIENT_ID ?? '',
+        _GOOGLE_SIGN_IN_APPROVAL: googleSignInApproval(pins),
     })) deletion = replaceExactly(deletion, `\${${name}}`, value);
     let deploy = frozenState(stepBlock(canonical, 'Deploy deterministic zero-traffic candidate'));
     deploy = replaceExactly(deploy, "readonly TRIGGER_ID='ef5a2981-95be-4f4d-af91-f997fde73356'", `readonly TRIGGER_ID='${pins.sourceTriggerId}'`);

@@ -538,6 +538,10 @@ steps:
       - 'ACCOUNT_DELETION_JOURNAL_BUCKET=${_ACCOUNT_DELETION_JOURNAL_BUCKET}'
       - 'ACCOUNT_IDENTITY_EPOCH=${_ACCOUNT_IDENTITY_EPOCH}'
       - 'ACCOUNT_DELETION_APPROVAL=${_ACCOUNT_DELETION_APPROVAL}'
+      - 'PROVIDER_AUTH_ENABLED=${_PROVIDER_AUTH_ENABLED}'
+      - 'PROVIDER_GOOGLE_SIGNUP_ENABLED=${_PROVIDER_GOOGLE_SIGNUP_ENABLED}'
+      - 'GOOGLE_WEB_CLIENT_ID=${_GOOGLE_WEB_CLIENT_ID}'
+      - 'GOOGLE_SIGN_IN_APPROVAL=${_GOOGLE_SIGN_IN_APPROVAL}'
     args:
       - '-c'
       - |
@@ -550,9 +554,11 @@ steps:
         BUCKET = "ludolume-deletion-journal-1012884798546"
         EPOCH = "2026-09-12 00:15:39.954172"
         DELETION_KEYS = {"ACCOUNT_DELETION_ENABLED", "ACCOUNT_DELETION_JOURNAL_BUCKET", "ACCOUNT_IDENTITY_EPOCH"}
+        GOOGLE_CLIENT = "1012884798546-u18tb6962p05mdpfe6nov8uhe0pbeak8.apps.googleusercontent.com"
+        GOOGLE_KEYS = {"PROVIDER_AUTH_ENABLED", "PROVIDER_GOOGLE_SIGNUP_ENABLED", "GOOGLE_WEB_CLIENT_ID"}
 
         def reject(message):
-            raise SystemExit(f"Deletion deployment contract rejected: {message}")
+            raise SystemExit(f"Account-feature deployment contract rejected: {message}")
 
         def deployment_environment(values, state):
             enabled = values.get("ACCOUNT_DELETION_ENABLED")
@@ -571,10 +577,48 @@ steps:
                 reject("disable requires empty inactive pins and default-off or exact-image disable approval")
             return {"ACCOUNT_DELETION_ENABLED": "false"}, supplied == approval
 
-        def check_container(spec, environment, explicit_disable):
+        def google_environment(values, state, deletion):
+            enabled, signup = values.get("PROVIDER_AUTH_ENABLED"), values.get("PROVIDER_GOOGLE_SIGNUP_ENABLED")
+            action = "enable" if enabled == "true" else "disable"
+            approval = f"{action}-google-sign-in:{state['commit']}:{state['build_id']}:{state['digest']}"
+            supplied = values.get("GOOGLE_SIGN_IN_APPROVAL")
+            if enabled not in ("false", "true") or signup != enabled:
+                reject("Google signup and sign-in must be enabled or disabled together")
+            if enabled == "true":
+                if (values.get("GOOGLE_WEB_CLIENT_ID") != GOOGLE_CLIENT or supplied != approval
+                        or deletion.get("ACCOUNT_DELETION_ENABLED") != "true"):
+                    reject("Google enable requires the approved client, enabled deletion and exact-image approval")
+                return {key: values[key] for key in GOOGLE_KEYS}, False
+            if values.get("GOOGLE_WEB_CLIENT_ID") != "" or supplied not in ("DISABLED", approval):
+                reject("Google disable requires no client and default-off or exact-image disable approval")
+            return {"PROVIDER_AUTH_ENABLED": "false", "PROVIDER_GOOGLE_SIGNUP_ENABLED": "false"}, supplied == approval
+
+        def check_google_container(container, environment, explicit_disable):
+            entries = [item for item in container.get("env", [])
+                       if item.get("name", "").startswith(("PROVIDER_", "GOOGLE_", "APPLE_"))]
+            if (any(item.get("name") not in GOOGLE_KEYS or set(item) != {"name", "value"} for item in entries)
+                    or len({item["name"] for item in entries}) != len(entries)):
+                reject("active provider settings must be unique, supported literal values")
+            previous = {item["name"]: item["value"] for item in entries}
+            enabled = previous.get("PROVIDER_AUTH_ENABLED", "false")
+            if enabled not in ("false", "true") or previous.get("PROVIDER_GOOGLE_SIGNUP_ENABLED", "false") != enabled:
+                reject("active provider state is unknown or partial")
+            if enabled == "false":
+                if "GOOGLE_WEB_CLIENT_ID" in previous:
+                    reject("inactive Google client must not be retained")
+                return
+            if previous.get("GOOGLE_WEB_CLIENT_ID") != GOOGLE_CLIENT:
+                reject("active Google client differs; investigate before replacing it")
+            if not any(item == {"name": "ACCOUNT_DELETION_ENABLED", "value": "true"} for item in container.get("env", [])):
+                reject("active Google signup requires enabled deletion")
+            if environment.get("PROVIDER_AUTH_ENABLED", "false") != "true" and not explicit_disable:
+                reject("default-off would disable Google; explicit exact-image disable approval required")
+
+        def check_container(spec, environment, explicit_disable, google_explicit_disable=False):
             containers = spec.get("containers") or []
             if len(containers) != 1:
                 reject("active service/revision must have exactly one container")
+            check_google_container(containers[0], environment, google_explicit_disable)
             entries = [item for item in containers[0].get("env", []) if item.get("name") in DELETION_KEYS]
             if len({item["name"] for item in entries}) != len(entries):
                 reject("duplicate active deletion settings")
@@ -590,13 +634,13 @@ steps:
                 if environment["ACCOUNT_DELETION_ENABLED"] != "true" and not explicit_disable:
                     reject("default-off would disable an active feature; explicit exact-image disable approval required")
 
-        def check_previous_state(service, revisions, environment, explicit_disable):
+        def check_previous_state(service, revisions, environment, explicit_disable, google_explicit_disable=False):
             metadata, status = service.get("metadata", {}), service.get("status", {})
             if (not metadata.get("uid") or not metadata.get("generation")
                     or str(status.get("observedGeneration")) != str(metadata["generation"])
                     or not any(c.get("type") == "Ready" and c.get("status") == "True" for c in status.get("conditions", []))):
-                reject("service must be stable before reviewing deletion settings")
-            check_container(service.get("spec", {}).get("template", {}).get("spec", {}), environment, explicit_disable)
+                reject("service must be stable before reviewing account-feature settings")
+            check_container(service.get("spec", {}).get("template", {}).get("spec", {}), environment, explicit_disable, google_explicit_disable)
             active = set()
             for traffic in (service.get("spec", {}).get("traffic", []), status.get("traffic", [])):
                 for target in traffic:
@@ -614,7 +658,7 @@ steps:
             if len(by_name) != len(revisions) or not active or not active <= set(by_name):
                 reject("active revision inventory is incomplete")
             for name in active:
-                check_container(by_name[name].get("spec", {}), environment, explicit_disable)
+                check_container(by_name[name].get("spec", {}), environment, explicit_disable, google_explicit_disable)
             return {"uid": metadata["uid"], "generation": str(metadata["generation"])}
 
         def read_cloud(arguments):
@@ -627,9 +671,11 @@ steps:
             with open("/workspace/verified-stage-a.json", encoding="utf-8") as handle:
                 state = json.load(handle)
             environment, explicit_disable = deployment_environment(os.environ, state)
+            google, google_explicit_disable = google_environment(os.environ, state, environment)
+            environment.update(google)
             service = read_cloud(["services", "describe", "mickeyf-org"])
             revisions = read_cloud(["revisions", "list", "--service=mickeyf-org"])
-            before = check_previous_state(service, revisions, environment, explicit_disable)
+            before = check_previous_state(service, revisions, environment, explicit_disable, google_explicit_disable)
             os.umask(0o077)
             with open("/workspace/account-deletion-contract.json", "x", encoding="utf-8") as handle:
                 json.dump({"environment": environment, "before": before}, handle, sort_keys=True)
@@ -753,7 +799,7 @@ steps:
         with open(sys.argv[1], encoding="utf-8") as handle:
             metadata = json.load(handle)["metadata"]
         if contract["before"] != {"uid": metadata["uid"], "generation": str(metadata["generation"])}:
-            raise SystemExit("Service changed after deletion settings were reviewed")
+            raise SystemExit("Service changed after account-feature settings were reviewed")
         print(",".join(f"{key}={value}" for key, value in sorted(contract["environment"].items())))
         PY
         )"
@@ -2104,6 +2150,10 @@ substitutions:
   _ACCOUNT_DELETION_JOURNAL_BUCKET: ''
   _ACCOUNT_IDENTITY_EPOCH: ''
   _ACCOUNT_DELETION_APPROVAL: 'DISABLED'
+  _PROVIDER_AUTH_ENABLED: 'false'
+  _PROVIDER_GOOGLE_SIGNUP_ENABLED: 'false'
+  _GOOGLE_WEB_CLIENT_ID: ''
+  _GOOGLE_SIGN_IN_APPROVAL: 'DISABLED'
 
 timeout: '1800s'
 

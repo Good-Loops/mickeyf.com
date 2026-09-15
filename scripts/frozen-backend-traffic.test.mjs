@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
-import { accountDeletionEnvironment, ACCOUNT_DELETION_JOURNAL_BUCKET, ORIGINAL_ACCOUNT_IDENTITY_EPOCH } from './render-frozen-backend-deploy.mjs';
+import { accountDeletionEnvironment, googleSignInEnvironment, APPROVED_GOOGLE_WEB_CLIENT_ID,
+    ACCOUNT_DELETION_JOURNAL_BUCKET, ORIGINAL_ACCOUNT_IDENTITY_EPOCH } from './render-frozen-backend-deploy.mjs';
 import {
     PROJECT, REGION, SERVICE, IMAGE, REVISION_TYPE, fingerprint, revisionName,
     deploymentStepsFingerprint, validatePins, validateDeployment, validateFrozenRevision,
@@ -37,7 +38,7 @@ function fixture() {
             startupProbe: { timeoutSeconds: 240, periodSeconds: 240, failureThreshold: 1, tcpSocket: { port: 8080 } },
             env: Object.entries({ NODE_ENV: 'production', CLOUD_SQL_CONNECTION_NAME: `${PROJECT}:${REGION}:cms-mickeyf`,
                 DB_USER: 'cms_mickeyf', DB_NAME: 'cms', P4_VEGA_SCORE_SUBMISSIONS_ENABLED: 'false', THREE_BOSSES_RUN_SUBMISSIONS_ENABLED: 'false',
-                ACCOUNT_DELETION_ENABLED: 'false' })
+                ACCOUNT_DELETION_ENABLED: 'false', PROVIDER_AUTH_ENABLED: 'false', PROVIDER_GOOGLE_SIGNUP_ENABLED: 'false' })
                 .map(([name, value]) => ({ name, value }))
                 .concat(['DB_PASS', 'SESSION_SECRET'].map((name, index) => ({ name, valueSource: { secretKeyRef: { secret: name, version: String(index + 1) } } }))),
             volumeMounts: [{ name: 'cloudsql', mountPath: '/cloudsql' }],
@@ -116,6 +117,91 @@ function setDeletion(containers, settings) {
     containers[0].env = containers[0].env.filter(item => !['ACCOUNT_DELETION_ENABLED', 'ACCOUNT_DELETION_JOURNAL_BUCKET', 'ACCOUNT_IDENTITY_EPOCH'].includes(item.name))
         .concat(Object.entries(accountDeletionEnvironment(settings)).map(([name, value]) => ({ name, value })));
 }
+
+const enabledGoogle = { enabled: true, clientId: APPROVED_GOOGLE_WEB_CLIENT_ID };
+function setGoogle(containers, settings) {
+    containers[0].env = containers[0].env.filter(item => !['PROVIDER_AUTH_ENABLED', 'PROVIDER_GOOGLE_SIGNUP_ENABLED', 'GOOGLE_WEB_CLIENT_ID'].includes(item.name))
+        .concat(Object.entries(googleSignInEnvironment(settings, enabledDeletion)).map(([name, value]) => ({ name, value })));
+}
+
+test('Google candidate requires full signup/login, exact client, and reviewed deletion pins', () => {
+    const f = fixture();
+    const enabledPins = { ...pins, accountDeletion: enabledDeletion, googleSignIn: enabledGoogle };
+    setDeletion(f.revision.containers, enabledDeletion);
+    setGoogle(f.revision.containers, enabledGoogle);
+    validatePins(enabledPins);
+    validateFrozenRevision(f.revision, enabledPins);
+    assert.throws(() => validatePins({ ...pins, googleSignIn: enabledGoogle }), /deletion/iu);
+    for (const settings of [{ ...enabledGoogle, clientId: 'foreign.apps.googleusercontent.com' },
+        { ...enabledGoogle, signupEnabled: false }, { enabled: true }, { enabled: false, clientId: APPROVED_GOOGLE_WEB_CLIENT_ID }]) {
+        assert.throws(() => validatePins({ ...enabledPins, googleSignIn: settings }));
+    }
+    for (const change of [env => env.filter(item => item.name !== 'GOOGLE_WEB_CLIENT_ID'),
+        env => [...env, { name: 'GOOGLE_WEB_CLIENT_ID', value: APPROVED_GOOGLE_WEB_CLIENT_ID }],
+        env => env.map(item => item.name === 'PROVIDER_GOOGLE_SIGNUP_ENABLED' ? { ...item, value: 'false' } : item)]) {
+        const revision = copy(f.revision);
+        revision.containers[0].env = change(revision.containers[0].env);
+        assert.throws(() => validateFrozenRevision(revision, enabledPins), /environment/iu);
+    }
+});
+
+for (const location of ['template', 'live', 'tagged']) test(`Google ${location} state cannot be implicitly disabled by a traffic plan`, async () => {
+    const f = fixture();
+    const reviewedDeletionPins = { ...pins, accountDeletion: enabledDeletion };
+    setDeletion(f.revision.containers, enabledDeletion);
+    const activeContainers = location === 'template' ? f.service.template.containers : f.previousRevision.containers;
+    setDeletion(activeContainers, enabledDeletion);
+    setGoogle(activeContainers, enabledGoogle);
+    if (location === 'tagged') {
+        f.service.traffic = [
+            { type: REVISION_TYPE, revision: revisionName(pins), percent: 100 },
+            { type: REVISION_TYPE, revision: 'mickeyf-org-old-enabled', tag: 'old-enabled-tag' },
+        ];
+        f.service.trafficStatuses = copy(f.service.traffic);
+    }
+    await assert.rejects(planFrozenTraffic(f.provider, reviewedDeletionPins, now), /disable active Google/iu);
+    assert.equal(f.patches(), 0);
+    const plan = await planFrozenTraffic(f.provider, { ...reviewedDeletionPins, googleSignIn: { enabled: false } }, now);
+    assert.deepEqual(plan.pins.googleSignIn, { enabled: false });
+    await applyFrozenTraffic(f.provider, plan, fingerprint(plan), now);
+    assert.equal(f.patches(), 1);
+});
+
+test('Google activation works with a legacy source; configuration drift prevents traffic changes', async () => {
+    const f = fixture();
+    for (const containers of [f.service.template.containers, f.previousRevision.containers]) {
+        containers[0].env = containers[0].env.filter(item => !item.name.startsWith('PROVIDER_'));
+    }
+    setDeletion(f.revision.containers, enabledDeletion);
+    setGoogle(f.revision.containers, enabledGoogle);
+    const enabledPins = { ...pins, accountDeletion: enabledDeletion, googleSignIn: enabledGoogle };
+    const plan = await planFrozenTraffic(f.provider, enabledPins, now);
+    assert.deepEqual(plan.pins.googleSignIn, enabledGoogle);
+    f.revision.containers[0].env.find(item => item.name === 'GOOGLE_WEB_CLIENT_ID').value = 'foreign.apps.googleusercontent.com';
+    await assert.rejects(applyFrozenTraffic(f.provider, plan, fingerprint(plan), now), /environment/iu);
+    assert.equal(f.patches(), 0);
+});
+
+test('unsupported or incomplete active provider settings reject even an explicit disable', async () => {
+    for (const change of [
+        env => [...env, { name: 'APPLE_CLIENT_ID', value: 'com.mickeyf.app' }],
+        env => [...env, { name: 'GOOGLE_IOS_CLIENT_ID', value: 'native-client' }],
+        env => [...env, { name: 'PROVIDER_FUTURE_SETTING', value: 'true' }],
+        env => [...env, { name: 'GOOGLE_WEB_CLIENT_ID', value: APPROVED_GOOGLE_WEB_CLIENT_ID }],
+        env => env.map(item => item.name === 'GOOGLE_WEB_CLIENT_ID' ? { name: item.name, valueSource: { secretKeyRef: {} } } : item),
+        env => env.map(item => item.name === 'PROVIDER_GOOGLE_SIGNUP_ENABLED' ? { ...item, value: 'false' } : item),
+        env => env.map(item => item.name === 'GOOGLE_WEB_CLIENT_ID' ? { ...item, value: 'foreign.apps.googleusercontent.com' } : item),
+        env => env.filter(item => item.name !== 'ACCOUNT_DELETION_ENABLED'),
+    ]) {
+        const f = fixture();
+        setDeletion(f.revision.containers, enabledDeletion);
+        setDeletion(f.previousRevision.containers, enabledDeletion);
+        setGoogle(f.previousRevision.containers, enabledGoogle);
+        f.previousRevision.containers[0].env = change(f.previousRevision.containers[0].env);
+        await assert.rejects(planFrozenTraffic(f.provider, { ...pins, accountDeletion: enabledDeletion, googleSignIn: { enabled: false } }, now));
+        assert.equal(f.patches(), 0);
+    }
+});
 
 test('enabled deletion revision requires exact reviewed pins and exact environment; disabled revision requires literal false', () => {
     const f = fixture();

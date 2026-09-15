@@ -7,6 +7,7 @@ import {
     CANONICAL_SHA256, frozenDeploymentStepsSha256, renderFrozenBackendDeployConfig,
     resolveFrozenDeploymentSteps, validateFrozenPins,
     accountDeletionEnvironment, ACCOUNT_DELETION_JOURNAL_BUCKET, ORIGINAL_ACCOUNT_IDENTITY_EPOCH,
+    googleSignInEnvironment, APPROVED_GOOGLE_WEB_CLIENT_ID,
 } from './render-frozen-backend-deploy.mjs';
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8');
@@ -137,7 +138,7 @@ const enabledDeletion = {
 
 test('deletion defaults off; enabling and intentional disabling are explicit source/image-bound configurations', () => {
     assert.deepEqual(accountDeletionEnvironment(), { ACCOUNT_DELETION_ENABLED: 'false' });
-    assert.deepEqual(config.steps[4].env, [
+    assert.deepEqual(config.steps[4].env.filter(item => item.startsWith('ACCOUNT_')), [
         'ACCOUNT_DELETION_ENABLED=false', 'ACCOUNT_DELETION_JOURNAL_BUCKET=', 'ACCOUNT_IDENTITY_EPOCH=',
         'ACCOUNT_DELETION_APPROVAL=DISABLED',
     ]);
@@ -153,6 +154,112 @@ test('deletion defaults off; enabling and intentional disabling are explicit sou
         assert.notEqual(frozenDeploymentStepsSha256(explicit.steps), frozenDeploymentStepsSha256(config.steps));
         assert.doesNotMatch(JSON.stringify(explicit), /\$\{_ACCOUNT_/u);
     }
+});
+
+test('Google defaults off; full signup/login requires exact client, deletion and source-bound explicit approval', () => {
+    const disabled = { PROVIDER_AUTH_ENABLED: 'false', PROVIDER_GOOGLE_SIGNUP_ENABLED: 'false' };
+    const enabled = { enabled: true, clientId: APPROVED_GOOGLE_WEB_CLIENT_ID };
+    assert.deepEqual(googleSignInEnvironment(), disabled);
+    assert.deepEqual(googleSignInEnvironment({ enabled: false }), disabled);
+    assert.deepEqual(googleSignInEnvironment(enabled, enabledDeletion), {
+        PROVIDER_AUTH_ENABLED: 'true', PROVIDER_GOOGLE_SIGNUP_ENABLED: 'true', GOOGLE_WEB_CLIENT_ID: APPROVED_GOOGLE_WEB_CLIENT_ID,
+    });
+    assert.deepEqual(config.steps[4].env.filter(item => !item.startsWith('ACCOUNT_')), [
+        'PROVIDER_AUTH_ENABLED=false', 'PROVIDER_GOOGLE_SIGNUP_ENABLED=false', 'GOOGLE_WEB_CLIENT_ID=', 'GOOGLE_SIGN_IN_APPROVAL=DISABLED',
+    ]);
+    for (const settings of [null, {}, [], { enabled: 'true' }, { enabled: true },
+        { enabled: true, clientId: `${APPROVED_GOOGLE_WEB_CLIENT_ID} ` }, { enabled: true, clientId: 'other.apps.googleusercontent.com' },
+        { ...enabled, signup: false }, { ...enabled, appleClientId: 'com.mickeyf.app' }, { enabled: false, clientId: APPROVED_GOOGLE_WEB_CLIENT_ID }]) {
+        assert.throws(() => renderFrozenBackendDeployConfig({ ...input, pins: { ...pins, googleSignIn: settings, accountDeletion: enabledDeletion } }));
+    }
+    for (const accountDeletion of [undefined, { enabled: false }, { ...enabledDeletion, journalBucket: 'other' }]) {
+        assert.throws(() => renderFrozenBackendDeployConfig({ ...input, pins: { ...pins, googleSignIn: enabled, accountDeletion } }));
+    }
+    for (const settings of [enabled, { enabled: false }]) {
+        const rendered = renderFrozenBackendDeployConfig({ ...input, pins: { ...pins, accountDeletion: enabledDeletion, googleSignIn: settings } });
+        assert.ok(rendered.steps[4].env.includes(`GOOGLE_SIGN_IN_APPROVAL=${settings.enabled ? 'enable' : 'disable'}-google-sign-in:${pins.sourceCommit}:${pins.sourceBuildId}:${pins.imageDigest}`));
+        assert.notEqual(frozenDeploymentStepsSha256(rendered.steps), frozenDeploymentStepsSha256(config.steps));
+        assert.doesNotMatch(JSON.stringify(rendered), /\$\{_(PROVIDER|GOOGLE)/u);
+    }
+    // The validated artifact feeds both deployment and exact revision verification.
+    assert.match(config.steps[5].args[1], /--set-env-vars=.*\$\$DELETION_ENV/u);
+    assert.match(config.steps[6].args[1], /plain\.update\(json\.load\(handle\)\["environment"\]\)/u);
+    for (const declaration of ["_PROVIDER_AUTH_ENABLED: 'false'", "_PROVIDER_GOOGLE_SIGNUP_ENABLED: 'false'",
+        "_GOOGLE_WEB_CLIENT_ID: ''", "_GOOGLE_SIGN_IN_APPROVAL: 'DISABLED'"]) assert.ok(input.canonical.includes(declaration));
+});
+
+test('canonical Google policy rejects partial activation, client drift and approval/deletion mismatches', () => {
+    const code = String.raw`
+policy = {"__name__": "reviewed_google_contract"}
+exec(compile(payload["policy"], "google-contract.py", "exec"), policy)
+environment = policy["google_environment"]
+state = {"commit":payload["pins"]["sourceCommit"], "build_id":payload["pins"]["sourceBuildId"], "digest":payload["pins"]["imageDigest"]}
+suffix = f"{state['commit']}:{state['build_id']}:{state['digest']}"
+off = {"PROVIDER_AUTH_ENABLED":"false", "PROVIDER_GOOGLE_SIGNUP_ENABLED":"false", "GOOGLE_WEB_CLIENT_ID":"", "GOOGLE_SIGN_IN_APPROVAL":"DISABLED"}
+on = {"PROVIDER_AUTH_ENABLED":"true", "PROVIDER_GOOGLE_SIGNUP_ENABLED":"true", "GOOGLE_WEB_CLIENT_ID":policy["GOOGLE_CLIENT"], "GOOGLE_SIGN_IN_APPROVAL":"enable-google-sign-in:"+suffix}
+deletion = {"ACCOUNT_DELETION_ENABLED":"true"}
+assert environment(off,state,{}) == ({"PROVIDER_AUTH_ENABLED":"false", "PROVIDER_GOOGLE_SIGNUP_ENABLED":"false"},False)
+assert environment(on,state,deletion) == ({key:on[key] for key in policy["GOOGLE_KEYS"]},False)
+assert environment({**off,"GOOGLE_SIGN_IN_APPROVAL":"disable-google-sign-in:"+suffix},state,{})[1]
+def fails(call):
+    try: call()
+    except SystemExit: return
+    raise AssertionError("unsafe Google deployment configuration accepted")
+for key,value in [("PROVIDER_AUTH_ENABLED","TRUE"),("PROVIDER_GOOGLE_SIGNUP_ENABLED","false"),
+                  ("GOOGLE_WEB_CLIENT_ID","other.apps.googleusercontent.com"),("GOOGLE_WEB_CLIENT_ID",policy["GOOGLE_CLIENT"]+" "),
+                  ("GOOGLE_SIGN_IN_APPROVAL","DISABLED"),("GOOGLE_SIGN_IN_APPROVAL","enable-google-sign-in:other")]:
+    fails(lambda:environment({**on,key:value},state,deletion))
+for key in state: fails(lambda:environment(on,{**state,key:"different"},deletion))
+for wrong in [{},{"ACCOUNT_DELETION_ENABLED":"false"}]: fails(lambda:environment(on,state,wrong))
+for changed in [{**off,"GOOGLE_WEB_CLIENT_ID":policy["GOOGLE_CLIENT"]},{**off,"PROVIDER_GOOGLE_SIGNUP_ENABLED":"true"}]:
+    fails(lambda:environment(changed,state,deletion))
+print("Google deployment configuration fixtures passed")
+`;
+    const result = python(code, { policy: resolved[4].args[1], pins });
+    assert.equal(result.status, 0, result.stderr);
+});
+
+test('canonical Google policy protects template, serving and tagged revisions from implicit disable and unknown provider states', () => {
+    const code = String.raw`
+from copy import deepcopy
+policy = {"__name__": "reviewed_google_contract"}
+exec(compile(payload["policy"], "google-contract.py", "exec"), policy)
+previous = policy["check_previous_state"]
+off = {"ACCOUNT_DELETION_ENABLED":"true","ACCOUNT_DELETION_JOURNAL_BUCKET":policy["BUCKET"],"ACCOUNT_IDENTITY_EPOCH":policy["EPOCH"],
+       "PROVIDER_AUTH_ENABLED":"false","PROVIDER_GOOGLE_SIGNUP_ENABLED":"false"}
+on = {**off,"PROVIDER_AUTH_ENABLED":"true","PROVIDER_GOOGLE_SIGNUP_ENABLED":"true","GOOGLE_WEB_CLIENT_ID":policy["GOOGLE_CLIENT"]}
+def spec(values): return {"containers":[{"env":[{"name":key,"value":value} for key,value in values.items()]}]}
+traffic = [{"revisionName":"current","percent":100},{"revisionName":"tagged","tag":"old","percent":0}]
+service = {"metadata":{"uid":"service-uid","generation":2},"spec":{"template":{"spec":spec(off)},"traffic":deepcopy(traffic)},
+           "status":{"observedGeneration":2,"conditions":[{"type":"Ready","status":"True"}],"traffic":deepcopy(traffic)}}
+revisions = [{"metadata":{"name":name},"spec":spec(off)} for name in ["current","tagged"]]
+def fails(call):
+    try: call()
+    except SystemExit: return
+    raise AssertionError("unsafe active Google state accepted")
+for where in ["template","current","tagged"]:
+    current=deepcopy(service); inventory=deepcopy(revisions)
+    if where=="template": current["spec"]["template"]["spec"]=spec(on)
+    else: inventory[0 if where=="current" else 1]["spec"]=spec(on)
+    fails(lambda:previous(current,inventory,off,False))
+    previous(current,inventory,on,False)
+    previous(current,inventory,off,False,True)
+for change in [{"PROVIDER_AUTH_ENABLED":"TRUE"},{"PROVIDER_GOOGLE_SIGNUP_ENABLED":"false"},
+               {"GOOGLE_WEB_CLIENT_ID":"other.apps.googleusercontent.com"},{"GOOGLE_IOS_CLIENT_ID":"ios"},
+               {"APPLE_IOS_BUNDLE_ID":"com.mickeyf.app"},{"APPLE_WEB_SERVICES_ID":"apple"},
+               {"APPLE_CLIENT_ID":"other"},{"GOOGLE_FUTURE_SETTING":"unreviewed"},
+               {"PROVIDER_UNKNOWN_ENABLED":"true"},{"ACCOUNT_DELETION_ENABLED":"false"}]:
+    changed=deepcopy(service); changed["spec"]["template"]["spec"]=spec({**on,**change})
+    fails(lambda:previous(changed,revisions,off,True,True))
+for bad_env in [spec(on)["containers"][0]["env"]+[{"name":"GOOGLE_WEB_CLIENT_ID","value":policy["GOOGLE_CLIENT"]}],
+                spec(off)["containers"][0]["env"]+[{"name":"GOOGLE_WEB_CLIENT_ID","value":policy["GOOGLE_CLIENT"]}],
+                [{"name":"PROVIDER_AUTH_ENABLED","valueFrom":{"secretKeyRef":{"name":"other","key":"1"}}}]]:
+    changed=deepcopy(service); changed["spec"]["template"]["spec"]={"containers":[{"env":bad_env}]}
+    fails(lambda:previous(changed,revisions,off,True,True))
+print("Google active-state fixtures passed")
+`;
+    const result = python(code, { policy: resolved[4].args[1] });
+    assert.equal(result.status, 0, result.stderr);
 });
 
 test('canonical deletion policy rejects unapproved pins and silent live/tagged downgrades but permits approved rollback', () => {

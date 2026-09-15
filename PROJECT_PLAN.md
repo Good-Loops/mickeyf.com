@@ -2569,6 +2569,14 @@ itself activate, implement or defer both providers.
   public preview and the public site must use the same real accounts/scores.
   A link-only rollout is not completion; retain the existing privacy/age/deletion
   requirements for production account creation rather than silently bypassing them.
+  **Deployment preparation (2026-09-14):** canonical/frozen deployment and traffic
+  validation now carry full Google signup/login settings with the exact approved
+  client and enabled-deletion prerequisite. Default-off cannot silently disable
+  an already-active provider; intentional enable/disable is source/image-bound.
+  Offline renderer/traffic checks passed 73 tests. No deployment occurred.
+  The owner explicitly requested returning the localhost Google buttons: restore
+  them on both forms when switching the gateway to the compatible public backend,
+  preserving real accounts/scores instead of selecting the isolated database.
   **Passwordless signup checkpoint (2026-09-14):** owner-approved Google-web
   signup now has a direct official button, username onboarding, atomic NULL-password
   user/Google-link creation and the shared renewable session. Fresh Google proof

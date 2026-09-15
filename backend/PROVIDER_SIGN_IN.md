@@ -367,10 +367,44 @@ compatibility tests passed. Both TypeScript checks and the production frontend
 build passed. These use synthetic provider responses and do not establish live
 Google/public-session acceptance. No production activation occurred.
 
+### Deployment configuration prepared — 2026-09-14
+
+The canonical deployment, frozen renderer and traffic planner now carry the
+Google configuration explicitly. Previously `--set-env-vars` replaced the
+runtime settings without including Google, so activation could be omitted or
+lost during a later deployment.
+
+The optional `googleSignIn` pins accept either `{ "enabled": false }` or
+`{ "enabled": true, "clientId": "1012884798546-u18tb6962p05mdpfe6nov8uhe0pbeak8.apps.googleusercontent.com" }`.
+Enabling requires the existing reviewed enabled `accountDeletion` pins and sets
+both provider login and Google signup flags together. There is no link-only
+release mode. Omission stays off by default, but cannot silently disable Google
+on a current template, serving revision or tagged revision. Intentional disable
+requires an explicit decision bound to the reviewed source/build/image.
+Unsupported provider settings and inconsistent states fail before deployment.
+
+Verification: `node --test scripts/render-frozen-backend-deploy.test.mjs`
+(16 tests, including generated Bash/Python syntax) and
+`node --test scripts/frozen-backend-traffic.test.mjs` (57 tests) passed using
+offline fixtures. No cloud configuration, production data or traffic changed.
+This prepares deployment inputs; it does not satisfy the age/privacy, recovery,
+schema/grant or coordinated-session cutover requirements.
+
+The owner explicitly requested restoring **Continue with Google on localhost**.
+That is part of the public signup/login release: select the gateway's renewable
+protocol and retire the legacy provider-UI guards together with the compatible
+public backend. Preserve the same real accounts and scores; do not silently
+switch localhost back to the isolated database to make the button appear.
+
 Remaining work, in order:
 
-1. Activate the approved Google web client and native Apple capability,
-   update scoped runtime grants and schema, and perform one focused real-provider
+1. Complete the approved age/consent and published-privacy requirements for new
+   accounts, plus deletion recovery/availability prerequisites. Then apply the
+   reviewed schema and narrow runtime grants for the coordinated public web
+   signup/login and renewable-session release. Restore the localhost Google
+   buttons in that release, preserving password access and score ownership;
+   use one focused new/returning Google-user acceptance, not repeated gameplay.
+2. Activate native Apple capability and perform one focused real-provider
    login/link/cancel/session acceptance per implemented platform. Compile the
    new Swift bridge on macOS before any signed rollout. Complete native Google
    SDK/client setup separately, never Google OAuth inside the embedded WebView.
@@ -379,8 +413,6 @@ Remaining work, in order:
    frontend's public-preview verify-only/four-hour/provider-UI compatibility
    branches and update its gateway cookie mapping to the released web cookie.
    Keep the separate public cookie namespace and the isolated automated tests.
-2. Integrate the implemented opt-in Google signup with the approved age/consent
-   requirements before public activation; retain password access and score ownership.
 3. Complete provider disconnect/revocation and privacy disclosures,
    focused real-provider acceptance and separately approved
    deployment. Then resume the remaining Clean Code sweep.
