@@ -2347,6 +2347,13 @@ example. The active branch is `improvement/clean-code-sweep`.
   were checked; desktop and 390x844 status screenshots inspected. This is not a
   new physical-iPhone acceptance or production/native deployment. See the
   [teaching checkpoint](CLEAN_CODE_INVENTORY.md#route-dependencies-and-shared-status-screens--2026-09-14).
+- [x] Animation music-upload boundary (2026-09-14): both pages now use one
+  `MusicUpload` control with MIME plus explicit audio-extension picker hints for
+  the owner's Safari Files report. Removed duplicated refs/effects/keyboard
+  handlers and the engine's UI-listener adapter; playback/visual behavior is
+  unchanged. Five focused tests, frontend TypeScript/all 373 tests and Vite build
+  passed. Physical Safari picker confirmation is still pending; not deployed.
+  See the [teaching checkpoint](CLEAN_CODE_INVENTORY.md#shared-music-picker-and-audioui-boundary--2026-09-14).
 - [ ] Complete subsequent subsystem reviews one at a time; choose actual
   improvements from evidence, not file length or similar-looking syntax.
 

@@ -41,7 +41,6 @@ internal audio thread and is sampled into JS on each analysis tick.</p>
 <h3 class="tsd-index-heading tsd-anchor-link" id="methods">Methods<a href="#methods" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <div class="tsd-index-list"><a href="#dispose" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>dispose</span></a>
 <a href="#getvolumepercentage" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>get<wbr/>Volume<wbr/>Percentage</span></a>
-<a href="#initializeuploadbutton" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>initialize<wbr/>Upload<wbr/>Button</span></a>
 <a href="#pause" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>pause</span></a>
 <a href="#play" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>play</span></a>
 <a href="#processaudio" class="tsd-index-link"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>process<wbr/>Audio</span></a>
@@ -80,7 +79,7 @@ internal audio thread and is sampled into JS on each analysis tick.</p>
 </div>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/Good-Loops/mickeyf.com/blob/main/frontend/ts/animations/helpers/audio/AudioEngine.ts#L255">frontend/ts/animations/helpers/audio/AudioEngine.ts:255</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/Good-Loops/mickeyf.com/blob/main/frontend/ts/animations/helpers/audio/AudioEngine.ts#L237">frontend/ts/animations/helpers/audio/AudioEngine.ts:237</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="getvolumepercentage"><span>get<wbr/>Volume<wbr/>Percentage</span><a href="#getvolumepercentage" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures">
@@ -99,25 +98,7 @@ internal audio thread and is sampled into JS on each analysis tick.</p>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">number</span></h4><p>Percentage in <code>[0, 100]</code>.</p>
 <aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/Good-Loops/mickeyf.com/blob/main/frontend/ts/animations/helpers/audio/AudioEngine.ts#L270">frontend/ts/animations/helpers/audio/AudioEngine.ts:270</a></li></ul></aside></div></li></ul></section>
-<section class="tsd-panel tsd-member">
-<h3 class="tsd-anchor-link" id="initializeuploadbutton"><span>initialize<wbr/>Upload<wbr/>Button</span><a href="#initializeuploadbutton" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
-<ul class="tsd-signatures">
-<li class="">
-<div class="tsd-signature tsd-anchor-link" id="initializeuploadbutton-1"><span class="tsd-kind-call-signature">initializeUploadButton</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">fileInput</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">HTMLInputElement</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-symbol">()</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span><a href="#initializeuploadbutton-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
-<div class="tsd-description">
-<div class="tsd-comment tsd-typography"><p>Wires a file input to <code>processAudio()</code>.</p>
-</div>
-<div class="tsd-parameters">
-<h4 class="tsd-parameters-title">Parameters</h4>
-<ul class="tsd-parameter-list">
-<li><span><span class="tsd-kind-parameter">fileInput</span>: <span class="tsd-signature-type">HTMLInputElement</span></span>
-<div class="tsd-comment tsd-typography"><p>File input element that provides audio files.</p>
-</div></li></ul></div>
-<h4 class="tsd-returns-title">Returns <span class="tsd-signature-symbol">()</span> <span class="tsd-signature-symbol">=&gt;</span> <span class="tsd-signature-type">void</span></h4><p>Cleanup function that removes the event listener.</p>
-<aside class="tsd-sources">
-<ul>
-<li>Defined in <a href="https://github.com/Good-Loops/mickeyf.com/blob/main/frontend/ts/animations/helpers/audio/AudioEngine.ts#L116">frontend/ts/animations/helpers/audio/AudioEngine.ts:116</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/Good-Loops/mickeyf.com/blob/main/frontend/ts/animations/helpers/audio/AudioEngine.ts#L252">frontend/ts/animations/helpers/audio/AudioEngine.ts:252</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="pause"><span>pause</span><a href="#pause" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures">
@@ -128,7 +109,7 @@ internal audio thread and is sampled into JS on each analysis tick.</p>
 </div>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">void</span></h4><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/Good-Loops/mickeyf.com/blob/main/frontend/ts/animations/helpers/audio/AudioEngine.ts#L217">frontend/ts/animations/helpers/audio/AudioEngine.ts:217</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/Good-Loops/mickeyf.com/blob/main/frontend/ts/animations/helpers/audio/AudioEngine.ts#L199">frontend/ts/animations/helpers/audio/AudioEngine.ts:199</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="play"><span>play</span><a href="#play" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures">
@@ -140,7 +121,7 @@ internal audio thread and is sampled into JS on each analysis tick.</p>
 </div>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/Good-Loops/mickeyf.com/blob/main/frontend/ts/animations/helpers/audio/AudioEngine.ts#L192">frontend/ts/animations/helpers/audio/AudioEngine.ts:192</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/Good-Loops/mickeyf.com/blob/main/frontend/ts/animations/helpers/audio/AudioEngine.ts#L174">frontend/ts/animations/helpers/audio/AudioEngine.ts:174</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="processaudio"><span>process<wbr/>Audio</span><a href="#processaudio" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures">
@@ -161,7 +142,7 @@ internal audio thread and is sampled into JS on each analysis tick.</p>
 </div></li></ul></div>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">Promise</span><span class="tsd-signature-symbol">&lt;</span><span class="tsd-signature-type">void</span><span class="tsd-signature-symbol">&gt;</span></h4><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/Good-Loops/mickeyf.com/blob/main/frontend/ts/animations/helpers/audio/AudioEngine.ts#L136">frontend/ts/animations/helpers/audio/AudioEngine.ts:136</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/Good-Loops/mickeyf.com/blob/main/frontend/ts/animations/helpers/audio/AudioEngine.ts#L118">frontend/ts/animations/helpers/audio/AudioEngine.ts:118</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="stop"><span>stop</span><a href="#stop" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures">
@@ -174,7 +155,7 @@ internal audio thread and is sampled into JS on each analysis tick.</p>
 </div>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">void</span></h4><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/Good-Loops/mickeyf.com/blob/main/frontend/ts/animations/helpers/audio/AudioEngine.ts#L231">frontend/ts/animations/helpers/audio/AudioEngine.ts:231</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/Good-Loops/mickeyf.com/blob/main/frontend/ts/animations/helpers/audio/AudioEngine.ts#L213">frontend/ts/animations/helpers/audio/AudioEngine.ts:213</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="subscribe"><span>subscribe</span><a href="#subscribe" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures">
@@ -212,7 +193,7 @@ state patch.</p>
 <details open class="tsd-accordion tsd-page-navigation-section"><summary class="tsd-accordion-summary" data-key="section-Properties"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>Properties</summary>
 <div><a href="#state"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Property"><use href="../assets/icons.svg#icon-1024"></use></svg><span>state</span></a></div></details>
 <details open class="tsd-accordion tsd-page-navigation-section"><summary class="tsd-accordion-summary" data-key="section-Methods"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" aria-hidden="true"><use href="../assets/icons.svg#icon-chevronDown"></use></svg>Methods</summary>
-<div><a href="#dispose"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>dispose</span></a><a href="#getvolumepercentage"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>get<wbr/>Volume<wbr/>Percentage</span></a><a href="#initializeuploadbutton"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>initialize<wbr/>Upload<wbr/>Button</span></a><a href="#pause"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>pause</span></a><a href="#play"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>play</span></a><a href="#processaudio"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>process<wbr/>Audio</span></a><a href="#stop"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>stop</span></a><a href="#subscribe"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>subscribe</span></a></div></details></div></details></div>
+<div><a href="#dispose"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>dispose</span></a><a href="#getvolumepercentage"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>get<wbr/>Volume<wbr/>Percentage</span></a><a href="#pause"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>pause</span></a><a href="#play"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>play</span></a><a href="#processaudio"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>process<wbr/>Audio</span></a><a href="#stop"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>stop</span></a><a href="#subscribe"><svg class="tsd-kind-icon" viewBox="0 0 24 24" aria-label="Method"><use href="../assets/icons.svg#icon-2048"></use></svg><span>subscribe</span></a></div></details></div></details></div>
 <div class="site-menu">
 <nav id="tsd-sidebar-links" class="tsd-navigation"><a href="/index.html" class="tsd-nav-link">Home</a><a href="https://mickeyf.com" class="tsd-nav-link">mickeyf.com</a><a href="https://github.com/Good-Loops/mickeyf.com" class="tsd-nav-link">GitHub</a></nav>
 <nav class="tsd-navigation"><a href="../modules.html">mickeyf.docs</a>

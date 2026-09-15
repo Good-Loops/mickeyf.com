@@ -511,6 +511,51 @@ upload. Temporary preview processes/tabs are closed after verification;
 requested screenshot artifacts live outside the repository. The Docs watcher
 regenerated the affected source-line link, which is included with this change.
 
+## Shared music picker and audio/UI boundary — 2026-09-14
+
+The owner reported greyed-out audio files in Safari's Files picker on both
+Dancing Circles and Dancing Fractals. This happens before file selection reaches
+the engine. Both pages duplicated a label, hidden input, keyboard handler, ref
+and effect, while `AudioEngine.initializeUploadButton()` owned a DOM listener.
+
+Before, each page separately specified:
+
+```tsx
+accept="audio/*"
+```
+
+and connected its input through `audioEngine.initializeUploadButton(input)`.
+After, each page composes the same control (actual Circles code):
+
+```tsx
+<MusicUpload
+    id="dancing-circles-file-upload"
+    classPrefix="dancing-circles"
+    onFileSelect={(file) => { void audioEngine.processAudio(file); }}
+/>
+```
+
+`MusicUpload.tsx` owns picker hints, the existing accessible label/keyboard
+behavior and React's change handler. Its filter combines `audio/*` with explicit
+extensions including MP3, M4A, AAC, WAV, AIFF, FLAC, Ogg and Opus, following the
+[HTML standard's MIME-and-extension guidance](https://html.spec.whatwg.org/multipage/input.html#attr-input-accept).
+The control forwards the original File, including missing/generic MIME types;
+it does not mistake picker hints for codec validation. Files remain local.
+
+This applies the reference's responsibility guidance (printed pp. 35 and 138):
+file-selection UX changes belong to UI code, not the audio-analysis engine.
+The removed input-listener adapter has no remaining callers. Audio graph setup,
+playback, analysis, disposal, animation timing and page styling are unchanged.
+One component is justified by two actual consumers with identical behavior;
+there is no generic upload framework, new dependency or playback rewrite.
+
+Verification: 5 focused component tests, frontend TypeScript/all 373 tests and
+the Vite production build passed. Tests cover both page-specific labels/classes,
+filter hints, missing/generic MIME types, cancellation and synchronous keyboard
+activation. Independent diff review found no actionable regressions. The Docs
+watcher regenerated the removed method and source links. The actual iOS Files
+picker and codec playback remain unverified on-device; no deployment occurred.
+
 ## Learning-oriented handoff for each future change
 
 The owner requested on 2026-09-10 that improvements be taught, not merely

@@ -108,24 +108,6 @@ export class AudioEngine {
     }
 
     /**
-     * Wires a file input to `processAudio()`.
-     *
-     * @param fileInput - File input element that provides audio files.
-     * @returns Cleanup function that removes the event listener.
-     */
-    initializeUploadButton(fileInput: HTMLInputElement): (() => void) {
-        const handleChange = () => {
-            const file = fileInput.files?.[0];
-            if (file) {
-                void this.processAudio(file);
-            }
-        };
-
-        fileInput.addEventListener("change", handleChange);
-        return () => fileInput.removeEventListener("change", handleChange);
-    }
-
-    /**
      * Loads an audio file, constructs the Web Audio graph, and begins playback/analysis.
      *
      * If an existing track is loaded, it is torn down first.

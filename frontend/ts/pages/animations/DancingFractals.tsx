@@ -27,6 +27,7 @@ import notAllowedCursor from '@/assets/cursors/notallowed.cur';
 import Dropdown from '@/components/Dropdown';
 import FullscreenButton from '@/components/FullscreenButton';
 import MusicControls from '@/components/MusicControls';
+import MusicUpload from '@/components/MusicUpload';
 
 type FractalKind = 'tree' | 'flower' | 'mandelbrot';
 
@@ -38,7 +39,6 @@ type FractalEntry<C> = {
 const DancingFractals: React.FC = () => {
     const containerRef = useRef<HTMLDivElement | null>(null);
     const hostRef = useRef<FractalHost | null>(null);
-    const fileInputRef = useRef<HTMLInputElement | null>(null);
     const audio = useAudioEngineState();
 
      // Which fractal is currently selected
@@ -106,14 +106,6 @@ const DancingFractals: React.FC = () => {
         const entry = FRACTALS[fractalKind];
         host.setFractal(entry.ctor as any, entry.getConfig());
     }, [fractalKind]);
-
-    // Hook upload button to audio engine
-    useEffect(() => {
-        const fileInput = fileInputRef.current;
-        if (!fileInput) return;
-
-        return audioEngine.initializeUploadButton(fileInput);
-    }, []);
 
     // Lifetime changes
     useEffect(() => {
@@ -214,13 +206,6 @@ const DancingFractals: React.FC = () => {
     const handlePlay = () => audioEngine.play();
     const handlePause = () => audioEngine.pause();
     const handleStop = () => audioEngine.stop();
-
-    const handleUploadKeyDown = (event: React.KeyboardEvent<HTMLLabelElement>) => {
-        if (event.key !== 'Enter' && event.key !== ' ') return;
-
-        event.preventDefault();
-        fileInputRef.current?.click();
-    };
 
     return (
         <section className='dancing-fractals'>
@@ -360,25 +345,11 @@ const DancingFractals: React.FC = () => {
                         />
                     </div>
 
-                    <div className="dancing-fractals__upload">
-                        <label
-                            className="dancing-fractals__upload-btn"
-                            htmlFor="fractal-music-upload"
-                            role="button"
-                            tabIndex={0}
-                            onKeyDown={handleUploadKeyDown}
-                        >
-                            Upload Music
-                        </label>
-
-                        <input
-                            id="fractal-music-upload"
-                            type="file"
-                            accept="audio/*"
-                            className="dancing-fractals__input"
-                            ref={fileInputRef}
-                        />
-                    </div>
+                    <MusicUpload
+                        id="fractal-music-upload"
+                        classPrefix="dancing-fractals"
+                        onFileSelect={(file) => { void audioEngine.processAudio(file); }}
+                    />
                 </div>
 
             </div>

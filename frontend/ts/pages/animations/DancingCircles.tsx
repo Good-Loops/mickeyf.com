@@ -10,6 +10,7 @@ import {
 } from "@/animations/dancing circles/runDancingCircles";
 import FullscreenButton from "@/components/FullscreenButton";
 import MusicControls from "@/components/MusicControls";
+import MusicUpload from "@/components/MusicUpload";
 import { audioEngine } from "@/animations/helpers/audio/AudioEngine";
 import { useAudioEngineState } from "@/hooks/useAudioEngineState";
 import { CANVAS_WIDTH } from "@/utils/constants";
@@ -52,7 +53,6 @@ const hexToHsv = (hex: string): HsvColor => {
 
 const DancingCircles: React.FC = () => {
 	const canvasWrapperRef = useRef<HTMLDivElement | null>(null);
-	const audioInputRef = useRef<HTMLInputElement | null>(null);
 	const [backgroundColor, setBackgroundColor] = useState(DEFAULT_DANCING_CIRCLES_CUSTOM_COLOR);
 	const [usesAnimatedBackground, setUsesAnimatedBackground] = useState(true);
 	const [isColorPickerOpen, setIsColorPickerOpen] = useState(false);
@@ -76,14 +76,6 @@ const DancingCircles: React.FC = () => {
 		};
 	}, []);
 
-    // Hook upload button to audio engine
-	useEffect(() => {
-        const input = audioInputRef.current;
-        if (!input) return;
-
-        return audioEngine.initializeUploadButton(input);
-    }, []);
-
 	// Stop audio on unmount
 	useEffect(() => {
         return () => {
@@ -94,13 +86,6 @@ const DancingCircles: React.FC = () => {
 	const handlePlay = () => audioEngine.play();
     const handlePause = () => audioEngine.pause();
     const handleStop = () => audioEngine.stop();
-
-    const handleUploadKeyDown = (event: React.KeyboardEvent<HTMLLabelElement>) => {
-        if (event.key !== "Enter" && event.key !== " ") return;
-
-        event.preventDefault();
-        audioInputRef.current?.click();
-    };
 
     const applyBackgroundColor = (nextColor: string, nextPickerColor = hexToHsv(nextColor)) => {
         setBackgroundColor(nextColor);
@@ -191,24 +176,11 @@ const DancingCircles: React.FC = () => {
                     />
                 </div>
 
-                <div className="dancing-circles__upload">
-                    <label
-                        className="dancing-circles__upload-btn"
-                        htmlFor="dancing-circles-file-upload"
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={handleUploadKeyDown}
-                    >
-                        Upload Music
-                    </label>
-                    <input
-                        id="dancing-circles-file-upload"
-                        type="file"
-                        accept="audio/*"
-                        className="dancing-circles__input"
-                        ref={audioInputRef}
-                    />
-                </div>
+                <MusicUpload
+                    id="dancing-circles-file-upload"
+                    classPrefix="dancing-circles"
+                    onFileSelect={(file) => { void audioEngine.processAudio(file); }}
+                />
 
                 <div
                     className="dancing-circles__background-controls"
