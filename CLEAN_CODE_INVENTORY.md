@@ -629,9 +629,58 @@ have updated source links. No physical device/GPU/codec acceptance is claimed;
 the renderer tests control hook scheduling and the audio tests defer browser
 promises. Visual tuning, DSP, autoplay ordering and public APIs are unchanged.
 
-Separate follow-up: inspect pending explicit `play()` promises versus Pause/Stop;
-those controls are unchanged by this upload/disposal fix. Safari Files picker
-acceptance remains deferred at the owner's request. No deployment occurred.
+The separate transport follow-up was completed below on 2026-09-15. Safari
+Files picker acceptance remains deferred at the owner's request. No deployment
+occurred.
+
+## Audio transport intent — 2026-09-15
+
+Previously, explicit Play awaited context resume and media playback, then
+unconditionally set `playing: true`. A later Pause/Stop could therefore lose to
+an older continuation. Upload autoplay and automatic interruption recovery had
+the same missing transport boundary; an old Play rejection could also mark a
+newer successful Play as stopped.
+
+Before, the explicit Play path contained:
+
+```ts
+await this.ensureContextRunning();
+await audio.play();
+this.patchState({ playing: true });
+```
+
+All three playback paths now call one guarded `resumePlayback` helper. A fresh
+Symbol identifies each explicit Play or upload-autoplay intent; Pause, Stop,
+natural end and disposal clear it. The actual current-request check is:
+
+```ts
+private isCurrentPlayback(audio: HTMLAudioElement, request: symbol): boolean {
+    return this.playbackRequest === request && this.audioElement === audio;
+}
+```
+
+Checks surround browser waits, and success state/analysis start stay in that
+same helper to avoid an extra asynchronous gap in its callers. Stale success
+does not silence a newer Play on the same element. Stale failures do not change
+state; a current explicit failure still reports the error and now pauses and
+cancels analysis immediately. Recovery keeps its quiet retry policy. Explicit
+Play also waits for a ready graph, matching the existing UI's `hasAudio` gate.
+
+Track ownership (`sessionId`) and playback intent are separate responsibilities:
+Pause/Stop suppress autoplay without cancelling loading or disposing the track.
+Pause preserves position; Stop rewinds; a fresh Play remains possible. This is
+a focused application of the reference's responsibility principle (printed
+p. 138), not a new service, state-machine framework or dependency. Visuals,
+DSP, file filtering and public method signatures are unchanged.
+
+Verification: 15 new cases failed against the original source; an additional
+microtask-boundary test caught the intermediate helper/caller gap. All 26
+focused audio cases now pass, using the existing fake-browser fixture and
+parameterized scenarios. Frontend TypeScript/all 407 tests, the Vite production
+build and `git diff --check` passed. Independent source review found no
+actionable regressions. Generated AudioEngine source links were refreshed.
+No physical device/codec verification or deployment was performed; the Safari
+Files picker check remains deferred rather than being repeated as a blocker.
 
 ## Learning-oriented handoff for each future change
 

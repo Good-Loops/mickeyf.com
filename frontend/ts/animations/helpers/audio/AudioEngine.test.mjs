@@ -236,3 +236,167 @@ test('resume rejection is ignored only when that upload has already been cancell
         });
     }
 });
+
+for (const control of ['pause', 'stop']) {
+    for (const waitingFor of ['resume', 'play']) {
+        test(`${control} wins over explicit Play waiting for ${waitingFor}`, async () => {
+            const plan = {};
+            const gate = deferred();
+            await withAudio([plan], async ({ engine, contexts, audios, frames }) => {
+                await engine.processAudio(track('transport'));
+                engine.pause();
+                audios[0].currentTime = 12;
+                plan[waitingFor] = gate;
+                if (waitingFor === 'resume') contexts[0].state = 'suspended';
+                const pending = engine.play();
+                await flush();
+                engine[control]();
+                gate.resolve();
+                await pending;
+                assert.equal(audios[0].playCount, waitingFor === 'resume' ? 1 : 2);
+                assert.equal(audios[0].paused, true);
+                assert.equal(audios[0].currentTime, control === 'stop' ? 0 : 12);
+                assert.equal(engine.state.playing, false);
+                assert.equal(frames.size, 0);
+                await engine.play();
+                assert.equal(engine.state.playing, true, 'a fresh Play still works');
+                assert.equal(frames.size, 1);
+            });
+        });
+
+        test(`${control} suppresses upload autoplay while ${waitingFor} is pending`, async () => {
+            const gate = deferred();
+            await withAudio([{ [waitingFor]: gate }], async ({ engine, audios, frames }) => {
+                const pending = engine.processAudio(track('upload'));
+                await flush();
+                engine[control]();
+                gate.resolve();
+                await pending;
+                assert.equal(engine.state.hasAudio, true, 'the track remains loaded');
+                assert.equal(engine.state.playing, false);
+                assert.equal(audios[0].paused, true);
+                assert.equal(audios[0].playCount, waitingFor === 'resume' ? 0 : 1);
+                assert.equal(frames.size, 0);
+                await engine.play();
+                assert.equal(engine.state.playing, true);
+            });
+        });
+    }
+}
+
+test('Stop before upload allocation suppresses autoplay without cancelling loading', async () => {
+    await withAudio([], async ({ engine, audios }) => {
+        const pending = engine.processAudio(track('not-yet-allocated'));
+        engine.stop();
+        await pending;
+        assert.equal(engine.state.hasAudio, true);
+        assert.equal(engine.state.playing, false);
+        assert.equal(audios[0].playCount, 0);
+    });
+});
+
+for (const control of ['pause', 'stop', 'ended']) {
+    test(`${control} cancels automatic recovery waiting for context resume`, async () => {
+        const plan = {};
+        const resume = deferred();
+        await withAudio([plan], async ({ engine, contexts, audios, frames }) => {
+            await engine.processAudio(track('interrupted'));
+            plan.resume = resume;
+            contexts[0].state = 'suspended';
+            audios[0].paused = true;
+            const [id, frame] = frames.entries().next().value;
+            frames.delete(id);
+            frame();
+            if (control === 'ended') {
+                audios[0].ended = true;
+                audios[0].dispatchEvent(new Event('ended'));
+            } else engine[control]();
+            resume.resolve();
+            await flush();
+            assert.equal(audios[0].playCount, 1);
+            assert.equal(engine.state.playing, false);
+            assert.equal(frames.size, 0);
+        });
+    });
+}
+
+for (const outcome of ['resolve', 'reject']) {
+    test(`an older Play ${outcome} cannot override a newer Play on the same track`, async () => {
+        const plan = {};
+        const play = deferred();
+        await withAudio([plan], async ({ engine, audios, frames }) => {
+            await engine.processAudio(track('same-track'));
+            engine.pause();
+            plan.play = play;
+            const previous = engine.play();
+            await flush();
+            engine.pause();
+            delete plan.play;
+            await engine.play();
+            play[outcome](new Error('old Play failed'));
+            await previous;
+            assert.equal(audios[0].paused, false);
+            assert.equal(engine.state.playing, true);
+            assert.equal(frames.size, 1);
+        });
+    });
+}
+
+for (const change of ['dispose', 'replace']) {
+    test(`${change} prevents an old explicit Play from resuming its detached track`, async () => {
+        const plan = {};
+        const resume = deferred();
+        await withAudio([plan], async ({ engine, contexts, audios, frames }) => {
+            await engine.processAudio(track('old'));
+            engine.pause();
+            contexts[0].state = 'suspended';
+            plan.resume = resume;
+            const previous = engine.play();
+            await flush();
+            if (change === 'dispose') await engine.dispose();
+            else await engine.processAudio(track('new'));
+            resume.resolve();
+            await previous;
+            assert.equal(audios[0].playCount, 1);
+            assert.equal(audios[0].paused, true);
+            assert.equal(engine.state.playing, change === 'replace');
+            assert.equal(frames.size, change === 'replace' ? 1 : 0);
+        });
+    });
+}
+
+test('Pause at the play-resolution boundary cannot be overwritten by a caller continuation', async () => {
+    const plan = {};
+    const play = deferred();
+    await withAudio([plan], async ({ engine, frames }) => {
+        await engine.processAudio(track('boundary'));
+        engine.pause();
+        plan.play = play;
+        const pending = engine.play();
+        await flush();
+        const pausing = play.promise.then(() => engine.pause());
+        play.resolve();
+        await Promise.all([pending, pausing]);
+        assert.equal(engine.state.playing, false);
+        assert.equal(frames.size, 0);
+    });
+});
+
+test('a current Play failure remains reported and stops analysis', async t => {
+    const plan = {};
+    const play = deferred();
+    const errors = t.mock.method(console, 'error', () => {});
+    await withAudio([plan], async ({ engine, frames }) => {
+        await engine.processAudio(track('failure'));
+        plan.play = play;
+        const pending = engine.play();
+        await flush();
+        const failure = new Error('current Play failed');
+        play.reject(failure);
+        await pending;
+        assert.equal(engine.state.playing, false);
+        assert.equal(frames.size, 0);
+        assert.equal(errors.mock.callCount(), 1);
+        assert.equal(errors.mock.calls[0].arguments[1], failure);
+    });
+});

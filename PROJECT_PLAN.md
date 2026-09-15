@@ -2369,8 +2369,13 @@ example. The active branch is `improvement/clean-code-sweep`.
   frontend TypeScript/all 389 tests and Vite build passed. Device acceptance and
   Safari Files check remain deferred; no deployment.
   See the [teaching checkpoint](CLEAN_CODE_INVENTORY.md#renderer-and-upload-cancellation-ownership--2026-09-14).
-- [ ] Inspect pending explicit audio Play requests versus Pause/Stop; keep this
-  transport concern separate from the completed upload/disposal ownership fix.
+- [x] Audio transport intent (2026-09-15): shared guarded playback now prevents
+  pending Play, upload autoplay and interruption recovery from overriding a
+  later Pause/Stop. Old success/failure cannot disrupt a newer Play. Track
+  loading/ownership, Pause position and Stop rewind are preserved. All 26 audio
+  cases, frontend TypeScript/all 407 tests and Vite build passed; no deployment
+  or repeated device acceptance. See the
+  [teaching checkpoint](CLEAN_CODE_INVENTORY.md#audio-transport-intent--2026-09-15).
 - [ ] Complete subsequent subsystem reviews one at a time; choose actual
   improvements from evidence, not file length or similar-looking syntax.
 

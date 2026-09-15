@@ -91,6 +91,8 @@ export class AudioEngine {
 
     // Invalidates pending uploads and analysis loops when a track is replaced or disposed.
     private sessionId: number = 0;
+    // Null means playback is no longer wanted, without cancelling the loaded track.
+    private playbackRequest: symbol | null = null;
     private listeners = new Set<(state: AudioState) => void>();
     
     /**
@@ -117,6 +119,7 @@ export class AudioEngine {
      */
     async processAudio(file: File): Promise<void> {
         const currentSessionId = ++this.sessionId;
+        const request = this.playbackRequest = Symbol("upload playback");
 
         // Tear down any previous track so analysis sessions don't overlap.
         await this.teardownTrack();
@@ -130,6 +133,7 @@ export class AudioEngine {
         this.audioElement = audio;
 
         this.endedListener = () => {
+            this.playbackRequest = null;
             // Treat natural end like "paused at end": stop analysis, mark not playing, reset time
             this.patchState({ playing: false });
             this.stopAnalysisLoop();
@@ -167,10 +171,7 @@ export class AudioEngine {
 
         audio.load();
         try {
-            await audio.play();
-            if (currentSessionId !== this.sessionId) return;
-            this.patchState({ playing: true });
-            this.startAnalysis();
+            await this.resumePlayback(audio, request);
         } catch {
         }
     }
@@ -182,7 +183,8 @@ export class AudioEngine {
      */
     async play() {
         const audio = this.audioElement;
-        if (!audio) return;
+        if (!audio || !this.state.hasAudio) return;
+        const request = this.playbackRequest = Symbol("explicit playback");
 
         // If we reached the end previously, restart from the beginning
         if (audio.ended || audio.currentTime >= audio.duration) {
@@ -190,14 +192,10 @@ export class AudioEngine {
         }
 
         try {
-            await this.ensureContextRunning();
-            await audio.play();
-            this.patchState({ playing: true });
-            if (this.rafId === null && this.analyserNode && this.audioContext) {
-                this.startAnalysis();
-            }
+            await this.resumePlayback(audio, request);
         } catch (err) {
-            this.patchState({ playing: false });
+            if (!this.isCurrentPlayback(audio, request)) return;
+            this.pause();
             console.error("AudioHandler.play() error:", err);
         }
     }
@@ -206,6 +204,7 @@ export class AudioEngine {
      * Pauses playback while keeping the current playback position.
      */
     pause() {
+        this.playbackRequest = null;
         if (!this.audioElement) return;
 
         this.patchState({ playing: false });
@@ -220,6 +219,7 @@ export class AudioEngine {
         * `play()` calls can resume without rebuilding the entire graph.
      */
     stop() {
+        this.playbackRequest = null;
         const audio = this.audioElement;
         if (!audio) return;
 
@@ -245,6 +245,7 @@ export class AudioEngine {
      */
     async dispose() {
         const currentSessionId = ++this.sessionId;
+        this.playbackRequest = null;
         await this.teardownTrack();
         if (currentSessionId !== this.sessionId) return;
         this.volumeHistory = [];
@@ -324,10 +325,9 @@ export class AudioEngine {
             if (!this.state.playing) {
                 if (!music.paused) music.pause();
             } else {
-                if (music.paused) {
-                    void this.ensureContextRunning()
-                        .then(() => music.play().catch(() => {}))
-                        .catch(() => {});
+                const request = this.playbackRequest;
+                if (music.paused && request) {
+                    void this.resumePlayback(music, request).catch(() => {});
                 }
             }
 
@@ -395,14 +395,25 @@ export class AudioEngine {
         };
     }
 
-    /**
-     * Ensure the AudioContext is running (autoplay policies).
-     */
-    private async ensureContextRunning() {
-        if (!this.audioContext) return;
-        if (this.audioContext.state === "suspended") {
-            await this.audioContext.resume();
+    private isCurrentPlayback(audio: HTMLAudioElement, request: symbol): boolean {
+        return this.playbackRequest === request && this.audioElement === audio;
+    }
+
+    // All playback paths respect the latest transport command across browser waits.
+    private async resumePlayback(audio: HTMLAudioElement, request: symbol): Promise<void> {
+        const context = this.audioContext;
+        if (!context || !this.isCurrentPlayback(audio, request)) return;
+        if (context.state === "suspended") await context.resume();
+        if (!this.isCurrentPlayback(audio, request)) return;
+
+        await audio.play();
+        if (!this.isCurrentPlayback(audio, request)) {
+            // A newer Play may own this same element; do not silence that request.
+            if (this.playbackRequest === null || this.audioElement !== audio) audio.pause();
+            return;
         }
+        this.patchState({ playing: true });
+        if (this.rafId === null && this.analyserNode) this.startAnalysis();
     }
 
     private stopAnalysisLoop(): void {
