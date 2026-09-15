@@ -135,8 +135,11 @@ test('public middleware preserves upstream HTTP errors and sanitizes transport/b
 
 const testCacheDirectories = new Set();
 
-for (const development of [true, false]) {
-    test(`${development ? 'DEV' : 'production'} display routing preserves the independent gameplay service`, async (t) => {
+for (const [development, publicPreview] of [[true, false], [true, true], [false, false]]) {
+    test(`${development ? (publicPreview ? 'public DEV' : 'isolated DEV') : 'production'} display and gameplay use their configured data source`, async (t) => {
+        const readOnlyPreview = development && !publicPreview;
+        const displayBase = publicPreview ? '/__public-api' : readOnlyPreview ? '/__public-leaderboards' : '';
+        const gameplayBase = publicPreview ? '/__public-api' : development ? 'http://local-api.test' : '';
         const calls = [];
         t.mock.method(globalThis, 'fetch', async (url, init) => {
             calls.push({ url, init });
@@ -150,6 +153,7 @@ for (const development of [true, false]) {
             logLevel: 'silent',
             define: {
                 'import.meta.env.DEV': JSON.stringify(development),
+                'import.meta.env.VITE_USE_PUBLIC_API': JSON.stringify(publicPreview ? '1' : '0'),
                 'import.meta.env.VITE_DEV_API_URL': JSON.stringify('http://local-api.test'),
             },
             server: { middlewareMode: true, watch: null, hmr: false },
@@ -168,16 +172,16 @@ for (const development of [true, false]) {
                 assert.deepEqual(await display.getGameLeaderboard(gameId), payloadFor(`/api/leaderboards/${gameId}`));
             }
             assert.deepEqual(calls.map(call => call.url), allowedPaths.map(path =>
-                `${development ? '/__public-leaderboards' : ''}${path}`
+                `${displayBase}${path}`
             ));
             assert.ok(calls.every(({ init }) => init.method === 'GET'
-                && init.credentials === (development ? 'omit' : 'include')));
+                && init.credentials === (readOnlyPreview ? 'omit' : 'include')));
             assert.equal(display.leaderboardSourceNotice !== null, development);
             assert.equal(server.config.plugins.some(plugin => plugin.name === 'public-leaderboard-preview'), development);
 
             const gameplay = await server.ssrLoadModule('/ts/services/leaderboardService.ts');
             await gameplay.getLeaderboardCatalog();
-            assert.equal(calls.at(-1).url, `${development ? 'http://local-api.test' : ''}/api/leaderboards`);
+            assert.equal(calls.at(-1).url, `${gameplayBase}/api/leaderboards`);
             assert.equal(calls.at(-1).init.credentials, 'include');
             assert.equal(typeof gameplay.issueThreeBossesRunTicket, 'function');
             assert.equal(typeof gameplay.submitThreeBossesRun, 'function');

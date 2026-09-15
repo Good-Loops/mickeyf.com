@@ -7,6 +7,8 @@ import type { ProviderAccountMethods } from '@/services/authApi';
 import { acquireProviderCredential, getAvailableProviderClients, type PublicProviderClient } from '@/services/providerClient';
 import Swal from '@/components/siteAlert';
 import { useAuth } from '@/context/AuthContext';
+import { PUBLIC_API_PREVIEW } from '@/config/apiConfig';
+import PublicAccountPreviewNotice from '@/components/PublicAccountPreviewNotice';
 
 export default function ManageAccount() {
     const { userName, isAuthenticated, loading, deleteAccount, authenticateWithProvider } = useAuth();
@@ -29,7 +31,7 @@ export default function ManageAccount() {
         || (methods.googleLinked && methods.googleDeletionEnabled && !!googleClient));
 
     useEffect(() => {
-        if (loading || !isAuthenticated) return;
+        if (PUBLIC_API_PREVIEW || loading || !isAuthenticated) return;
         let active = true;
         setMethodsLoading(true);
         setMethods(null);
@@ -50,7 +52,7 @@ export default function ManageAccount() {
 
     const handleDelete = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
-        if (submitting.current || !deletionReady || (!passwordless && !password) || confirmation !== 'DELETE') return;
+        if (PUBLIC_API_PREVIEW || submitting.current || !deletionReady || (!passwordless && !password) || confirmation !== 'DELETE') return;
         submitting.current = true;
         setBusy(true);
         setError('');
@@ -133,7 +135,14 @@ export default function ManageAccount() {
                 <RouteHeading id="manage-account-title" className="manage-account__title" focusKey={loading}>
                     Manage account
                 </RouteHeading>
-                {loading ? <p role="status">Checking your session…</p> : !isAuthenticated ? (
+                {PUBLIC_API_PREVIEW ? <>
+                    <PublicAccountPreviewNotice />
+                    {loading ? <p role="status">Checking your session…</p> : isAuthenticated
+                        ? <p className="manage-account__identity">Signed in as <strong>{userName}</strong></p>
+                        : <p><Link to="/login">Log in</Link> to your public account.</p>}
+                    <p>Account linking and deletion are not available on this public backend.
+                        For account help, contact <a href="mailto:mickeyf.plays@gmail.com">mickeyf.plays@gmail.com</a>.</p>
+                </> : loading ? <p role="status">Checking your session…</p> : !isAuthenticated ? (
                     <p><Link to="/login">Log in</Link> to manage your account. You can keep playing as a guest.</p>
                 ) : (
                     <>

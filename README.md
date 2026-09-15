@@ -75,12 +75,25 @@ Copy-Item frontend\.env.example frontend\.env
 Fill in the required local values. Never commit `.env`, `frontend/.env`,
 database credentials, session secrets, Firebase credentials, or ADC files.
 
-In browser development, the leaderboard pages display live public rankings
-through Vite's read-only `/__public-leaderboards` endpoint. Only the public
-catalog and the two game leaderboards are allowed; no credentials are forwarded.
-Authentication, submission eligibility and score writes still use `VITE_DEV_API_URL`
-and the isolated local database. Local test scores do not appear on these public
-boards. Production builds and installed apps retain their normal API routing.
+Choose the browser preview's data source in ignored
+`frontend/.env.development.local`, then restart Front:
+
+- `VITE_USE_PUBLIC_API=1`: open `http://localhost:5173`. Password signup/login,
+  both games' submissions and leaderboards use the **real public service**.
+  These are real accounts and scores, not test fixtures. The currently deployed
+  backend has four-hour password sessions; Google login, renewable sessions and
+  account-management changes remain in isolated development until released.
+- `VITE_USE_PUBLIC_API=0` (default): authentication and submissions use
+  `VITE_DEV_API_URL` and the isolated development database. Leaderboard pages
+  still show public rankings read-only; local test scores do not appear there.
+
+The public mode uses a loopback-only, route-allowlisted Vite `/__public-api`
+gateway with a separate HttpOnly cookie. It preserves the real localhost Origin,
+does not forward local test credentials, and never exposes production database
+credentials to development code. LAN/mobile preview origins are not authorized.
+Automated account/score tests must use the isolated backend, never this gateway.
+Production builds and installed apps retain their normal API routing. Local
+accounts and existing local scores are not copied into production.
 
 The tracked `compose.yaml` expects the Cloud SQL connection name in the root
 `.env`:

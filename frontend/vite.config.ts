@@ -3,9 +3,12 @@ import react from "@vitejs/plugin-react";
 import path from "node:path";
 import { Agent } from "node:http";
 import { publicLeaderboardsPlugin } from "./dev/publicLeaderboards";
+import { publicApiPlugin } from "./dev/publicApi";
 
 export default defineConfig(({ command, mode, isPreview }) => {
   const env = loadEnv(mode, process.cwd(), "VITE_");
+  const developmentServer = command === "serve" && mode === "development" && !isPreview;
+  const publicApiPreview = developmentServer && env.VITE_USE_PUBLIC_API === "1";
   const enableThreeBossesLocal =
     command === "serve"
     && mode === "development"
@@ -13,8 +16,8 @@ export default defineConfig(({ command, mode, isPreview }) => {
     && env.VITE_ENABLE_THREE_BOSSES_LOCAL === "1";
 
   return {
-    plugins: [react(), ...(command === "serve" && mode === "development" && !isPreview
-      ? [publicLeaderboardsPlugin()] : [])],
+    plugins: [react(), ...(developmentServer ? [publicLeaderboardsPlugin()] : []),
+      ...(publicApiPreview ? [publicApiPlugin()] : [])],
     root: ".",
     resolve: {
       alias: {
@@ -22,13 +25,14 @@ export default defineConfig(({ command, mode, isPreview }) => {
       },
     },
     server: {
+      ...(publicApiPreview ? { host: "localhost" } : {}),
       port: 5173,
       strictPort: true,
       proxy: {
-        "/api": {
+        ...(!publicApiPreview ? { "/api": {
           target: "http://localhost:8080",
           changeOrigin: true,
-        },
+        } } : {}),
         ...(enableThreeBossesLocal
           ? {
               "/__local/three-bosses/": {

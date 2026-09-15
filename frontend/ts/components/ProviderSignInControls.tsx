@@ -4,6 +4,7 @@ import { acquireGoogleCredentialInline, acquireProviderCredential, getAvailableP
     type PublicProviderClient } from '@/services/providerClient';
 import Swal from './siteAlert';
 import { requestProviderUsername } from './providerSignupPrompt';
+import { PUBLIC_API_PREVIEW } from '@/config/apiConfig';
 
 type ProviderAction = 'login' | 'link' | 'signup';
 type ProviderSignInControlsProps = {
@@ -53,7 +54,7 @@ export function ProviderSignInButtons({ clients, action, busyClient, disabled, o
 }) {
     const headingId = useId();
     const choices = action === 'signup' ? [] : action === 'link' ? clients : clients.filter(client => client.clientKey !== 'google-web');
-    if (choices.length === 0) return null;
+    if (PUBLIC_API_PREVIEW || choices.length === 0) return null;
     return (
         <div className="provider-sign-in__choices" role="group" aria-labelledby={action === 'link' ? headingId : undefined}
             aria-label={action === 'login' ? 'Other sign-in methods' : undefined} aria-busy={busyClient !== null}>
@@ -88,7 +89,7 @@ export function InlineGoogleSignIn({ client, action = 'login', userName = '', re
     const [feedback, setFeedback] = useState<string | null>(null);
 
     useEffect(() => {
-        if (disabled || loading || !host.current || latest.current.isAuthenticated) return;
+        if (PUBLIC_API_PREVIEW || disabled || loading || !host.current || latest.current.isAuthenticated) return;
         const element = host.current;
         const controller = new AbortController();
         let current = true;
@@ -147,7 +148,7 @@ export function InlineGoogleSignIn({ client, action = 'login', userName = '', re
         // Callback identities, typing and remember-me changes must not create new attempts.
     }, [client, action, disabled, loading, retry]);
 
-    if (isAuthenticated) return null;
+    if (PUBLIC_API_PREVIEW || isAuthenticated) return null;
     return (
         <div className="provider-sign-in__google" aria-busy={phase === 'preparing' || phase === 'completing'}>
             <div ref={host} className="provider-sign-in__google-host" role="group" aria-label="Continue with Google"
@@ -178,6 +179,7 @@ export default function ProviderSignInControls({ action, userName = '', remember
     busyCallback.current = onBusyChange;
 
     useEffect(() => {
+        if (PUBLIC_API_PREVIEW) return;
         mounted.current = true;
         let current = true;
         void getAvailableProviderClients().then(available => {
@@ -200,7 +202,7 @@ export default function ProviderSignInControls({ action, userName = '', remember
     }, []);
 
     const selectProvider = async (client: PublicProviderClient) => {
-        if (action === 'signup') return;
+        if (PUBLIC_API_PREVIEW || action === 'signup') return;
         if (disabled || operation.current || operationLock?.current) return;
         if (operationLock) operationLock.current = true;
         const controller = new AbortController();
@@ -269,7 +271,7 @@ export default function ProviderSignInControls({ action, userName = '', remember
         }
     };
 
-    if (clients.length === 0) return null;
+    if (PUBLIC_API_PREVIEW || clients.length === 0) return null;
     const inlineGoogle = action !== 'link' ? clients.find(client => client.clientKey === 'google-web'
         && (action === 'login' || client.signup === true)) : undefined;
     return (

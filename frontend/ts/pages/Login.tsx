@@ -7,6 +7,8 @@ import { useAuth } from '@/context/AuthContext';
 import { useNavigate } from 'react-router-dom';
 import StaySignedInCheckbox from '@/components/StaySignedInCheckbox';
 import ProviderSignInControls from '@/components/ProviderSignInControls';
+import PublicAccountPreviewNotice from '@/components/PublicAccountPreviewNotice';
+import { PUBLIC_API_PREVIEW } from '@/config/apiConfig';
 
 const Login: React.FC = () => {
     const [userName, setUserName] = useState('');
@@ -26,7 +28,7 @@ const Login: React.FC = () => {
         setLoading(true);
 
         try {
-            const ok = await login(userName, userPassword, { rememberMe });
+            const ok = await login(userName, userPassword, { rememberMe: !PUBLIC_API_PREVIEW && rememberMe });
             if (ok) navigate('/');
         } finally {
             setLoading(false);
@@ -38,6 +40,7 @@ const Login: React.FC = () => {
         <section className="login" aria-labelledby="login-title">
             <h1 id="login-title" className="u-visually-hidden">Log in</h1>
             <div className="login__form-wrapper">
+                <PublicAccountPreviewNotice />
                 <form className="login__form" onSubmit={handleSubmit} aria-busy={busy}>
                     <label className="login__field" htmlFor="login-username">
                         <span className="login__label">Username</span>
@@ -69,14 +72,14 @@ const Login: React.FC = () => {
                             onChange={(event) => setUserPassword(event.target.value)}
                         />
                     </label>
-                    <StaySignedInCheckbox checked={rememberMe} onChange={setRememberMe} disabled={busy} />
+                    {!PUBLIC_API_PREVIEW && <StaySignedInCheckbox checked={rememberMe} onChange={setRememberMe} disabled={busy} />}
                     <button className="login__submit" type="submit" disabled={busy}>
                         {loading ? 'Logging in…' : 'Log in'}
                     </button>
                 </form>
-                <ProviderSignInControls action="login" rememberMe={rememberMe} disabled={loading}
+                {!PUBLIC_API_PREVIEW && <ProviderSignInControls action="login" rememberMe={rememberMe} disabled={loading}
                     operationLock={operationBusy} onBusyChange={setProviderBusy}
-                    onSuccess={() => navigate('/')} />
+                    onSuccess={() => navigate('/')} />}
             </div>
         </section>
     );

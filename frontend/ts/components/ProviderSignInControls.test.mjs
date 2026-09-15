@@ -7,7 +7,8 @@ import { createViteTestServer } from '../testSupport/createViteTestServer.mjs';
 
 const frontendRoot = fileURLToPath(new URL('../../', import.meta.url));
 const viteServer = await createViteTestServer({ root: frontendRoot, configFile: `${frontendRoot}/vite.config.ts`,
-    appType: 'custom', logLevel: 'silent', server: { middlewareMode: true } });
+    appType: 'custom', logLevel: 'silent', define: { 'import.meta.env.VITE_USE_PUBLIC_API': '"0"' },
+    server: { middlewareMode: true } });
 after(() => viteServer.close());
 const { default: ProviderSignInControls, ProviderSignInButtons, InlineGoogleSignIn, providerSignInErrorMessage } =
     await viteServer.ssrLoadModule('/ts/components/ProviderSignInControls.tsx');

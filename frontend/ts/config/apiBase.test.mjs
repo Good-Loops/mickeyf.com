@@ -26,6 +26,13 @@ test('development preserves the existing configured endpoint on browser and nati
     }
 });
 
+test('public preview is explicit and restricted to the development browser', () => {
+    assert.equal(selectApiBase({ ...urls, mode: 'development', isNative: false, publicPreview: true }), '/__public-api');
+    assert.equal(selectApiBase({ ...urls, mode: 'development', isNative: true, publicPreview: true }), urls.developmentUrl);
+    assert.equal(selectApiBase({ ...urls, mode: 'production', isNative: false, publicPreview: true }), '');
+    assert.equal(selectApiBase({ ...urls, mode: 'production', isNative: true, publicPreview: true }), urls.productionUrl);
+});
+
 test('both API trees reach the existing Cloud Run service before the SPA fallback', async () => {
     const { hosting } = JSON.parse(await readFile(new URL('../../../firebase.json', import.meta.url), 'utf8'));
     const spaIndex = hosting.rewrites.findIndex((rewrite) => rewrite.source === '**');

@@ -13,7 +13,7 @@ const productionEnvironment = {
     CLOUD_SQL_CONNECTION_NAME: 'test-project:test-region:test-instance',
 };
 
-test('production runtime configuration allows only the website and packaged iOS origins', () => {
+test('production runtime configuration allows only the website, packaged iOS and exact local preview origins', () => {
     const config = loadRuntimeConfig(productionEnvironment);
 
     assert.equal(config.isProduction, true);
@@ -26,11 +26,15 @@ test('production runtime configuration allows only the website and packaged iOS 
         'https://mickeyf.com',
         'https://www.mickeyf.com',
         'capacitor://localhost',
+        'http://localhost:5173',
     ]);
     for (const origin of [
         'null',
         'http://localhost',
-        'http://localhost:5173',
+        'http://localhost:5174',
+        'http://127.0.0.1:5173',
+        'http://192.168.0.106:5173',
+        'http://localhost:5173.evil.example',
         'https://localhost',
         'capacitor://localhost:5173',
         'capacitor://localhost.evil.example',

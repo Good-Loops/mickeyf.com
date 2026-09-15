@@ -10,6 +10,8 @@ import ProviderSignInControls from "@/components/ProviderSignInControls";
 import { signupRequest } from "@/services/authService";
 import { useAuth } from "@/context/AuthContext";
 import { signupAndLogin } from "./signupFlow.ts";
+import PublicAccountPreviewNotice from '@/components/PublicAccountPreviewNotice';
+import { PUBLIC_API_PREVIEW } from '@/config/apiConfig';
 
 const SignUp: React.FC = () => {
     const [userName, setUserName] = useState("");
@@ -43,7 +45,7 @@ const SignUp: React.FC = () => {
             }, {
                 signup: signupRequest,
                 login: (user, password, options) => login(user, password, { ...options, showFeedback: false }),
-            }, { rememberMe });
+            }, { rememberMe: !PUBLIC_API_PREVIEW && rememberMe });
 
             if (result.status === "rejected") {
                 switch (result.error) {
@@ -106,6 +108,7 @@ const SignUp: React.FC = () => {
         <section className="signup" aria-labelledby="signup-title">
             <h1 id="signup-title" className="u-visually-hidden">Sign up</h1>
             <div className="signup__form-wrapper">
+                <PublicAccountPreviewNotice />
                 <form className="signup__form" onSubmit={handleSubmit} aria-busy={busy}>
                     <label className="signup__field" htmlFor="signup-username">
                         <span className="signup__label">Username</span>
@@ -154,14 +157,14 @@ const SignUp: React.FC = () => {
                             onChange={(inputEvent) => setUserPassword(inputEvent.target.value)}
                         />
                     </label>
-                    <StaySignedInCheckbox checked={rememberMe} onChange={setRememberMe} disabled={busy} />
+                    {!PUBLIC_API_PREVIEW && <StaySignedInCheckbox checked={rememberMe} onChange={setRememberMe} disabled={busy} />}
                     <button className="signup__submit" type="submit" disabled={busy}>
                         {loading ? "Signing up…" : "Sign up"}
                     </button>
                 </form>
-                <ProviderSignInControls action="signup" userName={userName} rememberMe={rememberMe}
+                {!PUBLIC_API_PREVIEW && <ProviderSignInControls action="signup" userName={userName} rememberMe={rememberMe}
                     disabled={loading} operationLock={submitting} onBusyChange={setProviderBusy}
-                    onSuccess={() => { void showSignupSuccess(); }} />
+                    onSuccess={() => { void showSignupSuccess(); }} />}
             </div>
         </section>
     );

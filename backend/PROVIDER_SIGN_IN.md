@@ -281,7 +281,8 @@ The extra bare-localhost origin is now owner-approved, saved and read back;
 credentials/scopes/publication were not changed. Production and native
 providers remain disabled and no deployment occurred.
 
-Real-account acceptance must use a local website account: link Google from
+Provider implementation acceptance must use an isolated local website account
+(`VITE_USE_PUBLIC_API=0`): link Google from
 Manage account using that account's password, then log out and sign in through
 Google with Stay signed in selected. A production website account is not copied
 into this database. Google basic sign-in does not require adding test users
@@ -322,7 +323,11 @@ Remaining work, in order:
    login/link/cancel/session acceptance per implemented platform. Compile the
    new Swift bridge on macOS before any signed rollout. Complete native Google
    SDK/client setup separately, never Google OAuth inside the embedded WebView.
-   Treat Apple's web Services ID separately.
+  Treat Apple's web Services ID separately.
+   When this backend replaces the legacy public revision, also retire the
+   frontend's public-preview verify-only/four-hour/provider-UI compatibility
+   branches and update its gateway cookie mapping to the released web cookie.
+   Keep the separate public cookie namespace and the isolated automated tests.
 2. Integrate the implemented opt-in Google signup with the approved age/consent
    requirements before public activation; retain password access and score ownership.
 3. Complete provider disconnect/revocation and privacy disclosures,
