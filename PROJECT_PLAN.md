@@ -2577,6 +2577,12 @@ itself activate, implement or defer both providers.
   The owner explicitly requested returning the localhost Google buttons: restore
   them on both forms when switching the gateway to the compatible public backend,
   preserving real accounts/scores instead of selecting the isolated database.
+  **Localhost deletion transport (2026-09-14):** renewable gateway supports both
+  password-confirmed and Google-confirmed self-deletion, with exact body shapes,
+  session-cookie isolation and unchanged pending/error outcomes. Twenty mocked
+  gateway tests and frontend typechecking passed. Legacy mode and UI remain
+  unchanged; no real deletion or production activation occurred. At cutover,
+  retire the Manage account compatibility guard along with the sign-in guards.
   **Passwordless signup checkpoint (2026-09-14):** owner-approved Google-web
   signup now has a direct official button, username onboarding, atomic NULL-password
   user/Google-link creation and the shared renewable session. Fresh Google proof

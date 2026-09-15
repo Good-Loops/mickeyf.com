@@ -359,7 +359,8 @@ to the backend's canonical `__session`, including anonymous challenge bindings.
 Local test credentials, native cookies and legacy public cookies are not mixed.
 The Vite plugin still selects legacy mode: switch it and retire the corresponding
 UI/renewal compatibility guards only with the real public backend deployment.
-Provider deletion/admin routes remain outside this gateway's current allowlist.
+Renewable-mode self-service deletion is covered below; admin routes remain
+outside the gateway's allowlist.
 
 Unified-entry verification: 52 backend provider-flow/router tests, 67 frontend
 auth-transport/UI tests, 14 direct gateway tests and four public-preview
@@ -395,6 +396,23 @@ That is part of the public signup/login release: select the gateway's renewable
 protocol and retire the legacy provider-UI guards together with the compatible
 public backend. Preserve the same real accounts and scores; do not silently
 switch localhost back to the isolated database to make the button appear.
+
+### Localhost deletion transport prepared — 2026-09-14
+
+The renewable gateway now forwards both existing self-service deletion flows:
+password confirmation at `/auth/delete-account`, and Google `delete` challenges
+at `/auth/providers/begin` and `/auth/providers/complete`. Exact request shapes
+exclude account selectors; Google deletion is limited to `google-web`. The
+backend remains responsible for session ownership, fresh proof and durable
+deletion. Loopback/Origin restrictions and the separate public cookie remain.
+Confirmed responses relay cookie clearing; pending/failure responses do not
+become success or trigger automatic retries.
+
+`node --experimental-strip-types --test frontend/ts/services/publicApiPreview.test.mjs`
+passed 20 mocked gateway tests; `node frontend/node_modules/typescript/bin/tsc
+-p frontend/tsconfig.json --noEmit` passed. No real accounts or network services
+were used. Legacy mode still blocks deletion, and `/account` remains behind its
+existing public-preview compatibility guard until coordinated activation.
 
 Remaining work, in order:
 

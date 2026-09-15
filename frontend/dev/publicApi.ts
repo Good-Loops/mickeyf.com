@@ -26,7 +26,7 @@ const WRITE_ROUTES = new Set([
 ]);
 const PROVIDER_READ_ROUTES = new Set(['/auth/providers/config', '/auth/providers/account']);
 const PROVIDER_WRITE_ROUTES = new Set(['/auth/providers/begin', '/auth/providers/complete']);
-const PROVIDER_ACTIONS = new Set(['login', 'signup', 'link']);
+const PROVIDER_ACTIONS = new Set(['login', 'signup', 'link', 'delete']);
 const USER_OPERATIONS = new Set(['login', 'signup', 'submit_score']);
 // Preserve the upstream cookie encoding instead of reinterpreting its delimiters.
 const COOKIE_VALUE = /^[\x21\x23-\x2b\x2d-\x3a\x3c-\x5b\x5d-\x7e]*$/;
@@ -96,6 +96,27 @@ function readBody(request: IncomingMessage): Promise<string> {
     });
 }
 
+// The backend verifies proof and derives ownership from the signed session.
+// This allowlist accepts only self-service shapes, never an account selector.
+function validateSelfDeletionBody(route: string, body: Record<string, unknown>): void {
+    const passwordDeletion = route === '/auth/delete-account';
+    if (!passwordDeletion && !(PROVIDER_WRITE_ROUTES.has(route) && body.action === 'delete')) return;
+
+    const fields = passwordDeletion ? ['password', 'confirmation']
+        : route === '/auth/providers/begin' ? ['action', 'clientKey']
+            : ['action', 'clientKey', 'state', 'idToken', 'confirmation'];
+    const exactFields = Object.keys(body).length === fields.length
+        && fields.every(field => Object.prototype.hasOwnProperty.call(body, field));
+    const nonemptyText = (field: string) => typeof body[field] === 'string' && body[field].length > 0;
+    const proofPresent = passwordDeletion ? nonemptyText('password')
+        : body.clientKey === 'google-web' && (route === '/auth/providers/begin'
+            || (nonemptyText('state') && nonemptyText('idToken')));
+    if (!exactFields || !proofPresent
+        || (route !== '/auth/providers/begin' && body.confirmation !== 'DELETE')) {
+        throw new GatewayError(400, 'INVALID_REQUEST');
+    }
+}
+
 async function mutationBody(request: IncomingMessage, route: string): Promise<string | undefined> {
     if (request.headers['content-encoding']) throw new GatewayError(415, 'JSON_REQUIRED');
     if (Number(request.headers['content-length'] ?? 0) > MAX_BODY_BYTES) {
@@ -118,6 +139,7 @@ async function mutationBody(request: IncomingMessage, route: string): Promise<st
     if (PROVIDER_WRITE_ROUTES.has(route) && !PROVIDER_ACTIONS.has((body as { action: string }).action)) {
         throw new GatewayError(404, 'NOT_FOUND');
     }
+    validateSelfDeletionBody(route, body as Record<string, unknown>);
     if ((route === '/auth/logout' || route === '/auth/renew') && Object.keys(body).length > 0) {
         throw new GatewayError(400, 'INVALID_REQUEST');
     }
@@ -145,7 +167,7 @@ export function publicApiMiddleware(
             }
             const allowedRead = READ_ROUTES.has(route) || (protocol === 'renewable' && PROVIDER_READ_ROUTES.has(route));
             const allowedWrite = WRITE_ROUTES.has(route) || (protocol === 'renewable'
-                && (route === '/auth/renew' || PROVIDER_WRITE_ROUTES.has(route)));
+                && (route === '/auth/renew' || route === '/auth/delete-account' || PROVIDER_WRITE_ROUTES.has(route)));
             if (!(mutation ? allowedWrite : request.method === 'GET' && allowedRead)) {
                 throw new GatewayError(404, 'NOT_FOUND');
             }

@@ -257,3 +257,106 @@ test('renewable requests retain exact Origin, loopback and unambiguous cookie re
     }
     assert.throws(() => publicApiMiddleware(fetch, 'automatic'), /Unknown public authentication protocol/);
 });
+
+const deletionRequests = [
+    mutation('/auth/delete-account', { password: 'synthetic-password', confirmation: 'DELETE' }),
+    mutation('/auth/providers/begin', { action: 'delete', clientKey: 'google-web' }),
+    mutation('/auth/providers/complete', { action: 'delete', clientKey: 'google-web',
+        state: 'synthetic-state', idToken: 'synthetic-token', confirmation: 'DELETE' }),
+];
+
+test('renewable self-deletion forwards unchanged proof and only the selected public session', async () => {
+    const calls = [];
+    const middleware = publicApiMiddleware(async (url, init) => {
+        calls.push({ url, init });
+        return Response.json({ accepted: true });
+    }, 'renewable');
+    for (const request of deletionRequests) {
+        const response = await invoke(middleware, { ...request, headers: { ...request.headers,
+            cookie: 'session=local; __session=local-web; ludolume_public_session=legacy; ludolume_public_web_session=s%3Apublic.signature',
+            authorization: 'Bearer local-token', 'x-account-id': 'another-account',
+        } });
+        assert.equal(response.statusCode, 200);
+        const call = calls.at(-1);
+        assert.equal(call.url, `${publicOrigin}${request.url}`);
+        assert.equal(call.init.method, 'POST');
+        assert.equal(call.init.body, request.body);
+        assert.deepEqual(call.init.headers, { Accept: 'application/json', Origin: localOrigin,
+            Cookie: '__session=s%3Apublic.signature', 'Content-Type': 'application/json' });
+        assert.equal(call.init.redirect, 'error');
+    }
+    assert.equal(calls.length, deletionRequests.length);
+});
+
+test('legacy mode still refuses every deletion path before contacting the backend', async () => {
+    const middleware = publicApiMiddleware(async () => assert.fail('Legacy mode forwarded deletion'));
+    for (const request of deletionRequests) assert.equal((await invoke(middleware, request)).statusCode, 404);
+});
+
+test('self-deletion rejects account selectors, missing confirmation/proof and unapproved clients', async () => {
+    const middleware = publicApiMiddleware(async () => assert.fail('Invalid deletion reached the backend'), 'renewable');
+    for (const request of deletionRequests) {
+        const body = JSON.parse(request.body);
+        const invalid = [{ ...body, userId: 42 }, { ...body, accountId: 'someone-else' },
+            ...Object.keys(body).map(key => Object.fromEntries(Object.entries(body).filter(([field]) => field !== key)))];
+        if ('confirmation' in body) invalid.push({ ...body, confirmation: 'delete' });
+        if ('password' in body) invalid.push({ ...body, password: '' }, { ...body, password: null });
+        if ('clientKey' in body) invalid.push({ ...body, clientKey: 'google-ios' }, { ...body, clientKey: 'apple-web' });
+        if ('state' in body) invalid.push({ ...body, state: '' }, { ...body, idToken: null });
+        for (const changed of invalid) {
+            assert.ok((await invoke(middleware, mutation(request.url, changed))).statusCode >= 400);
+        }
+    }
+});
+
+test('deletion retains exact route, method, loopback, Origin, JSON and body-size restrictions', async () => {
+    const middleware = publicApiMiddleware(async () => assert.fail('Unsafe deletion reached the backend'), 'renewable');
+    for (const request of deletionRequests) {
+        for (const changed of [
+            { ...request, method: 'DELETE' }, { ...request, method: 'GET' },
+            { ...request, url: `${request.url}?accountId=42` },
+            { ...request, headers: { ...request.headers, origin: undefined } },
+            { ...request, headers: { ...request.headers, origin: 'https://mickeyf.com' } },
+            { ...request, headers: { ...request.headers, host: '127.0.0.1:5173' } },
+            { ...request, headers: { ...request.headers, 'content-type': 'text/plain' } },
+            { ...request, remoteAddress: '192.168.0.2' },
+            { ...request, body: 'x'.repeat(32 * 1024 + 1) },
+        ]) assert.ok((await invoke(middleware, changed)).statusCode >= 400);
+    }
+});
+
+test('confirmed deletion relays the result and clears only the renewable public cookie', async () => {
+    for (const request of [deletionRequests[0], deletionRequests[2]]) {
+        const result = request.url === '/auth/delete-account' ? { deleted: true } : { success: true, deleted: true };
+        const headers = new Headers({ 'Content-Type': 'application/json' });
+        headers.append('Set-Cookie', '__session=; Max-Age=0; Path=/; HttpOnly; Secure');
+        headers.append('Set-Cookie', 'session=; Max-Age=0; Path=/; HttpOnly; Secure');
+        const middleware = publicApiMiddleware(async () => new Response(JSON.stringify(result), { headers }), 'renewable');
+        const response = await invoke(middleware, request);
+        assert.equal(response.statusCode, 200);
+        assert.deepEqual(JSON.parse(response.body), result);
+        assert.deepEqual(response.headers['set-cookie'], [
+            `ludolume_public_web_session=; Path=${PUBLIC_API_PREFIX}; HttpOnly; SameSite=Lax; Max-Age=0`,
+        ]);
+    }
+});
+
+test('unconfirmed deletion preserves errors without inventing success, clearing cookies or retrying', async () => {
+    for (const request of [deletionRequests[0], deletionRequests[2]]) {
+        for (const [status, error] of [[401, 'UNAUTHENTICATED'], [403, 'INVALID_PASSWORD'],
+            [503, 'ACCOUNT_DELETION_PENDING'], [503, 'ACCOUNT_DELETION_UNAVAILABLE'], [429, 'RATE_LIMITED'],
+            [502, 'PUBLIC_API_UNAVAILABLE']]) {
+            let calls = 0;
+            const middleware = publicApiMiddleware(async () => {
+                calls++;
+                if (status === 502) throw new Error('private transport details');
+                return Response.json({ error }, { status });
+            }, 'renewable');
+            const response = await invoke(middleware, request);
+            assert.equal(calls, 1);
+            assert.equal(response.statusCode, status);
+            assert.deepEqual(JSON.parse(response.body), { error });
+            assert.equal(response.headers['set-cookie'], undefined);
+        }
+    }
+});
