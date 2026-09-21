@@ -364,6 +364,76 @@ test('native abort calls cancel and discards late native success', async () => {
     assert.equal(f.controls.nativeCancelCount, 1);
 });
 
+for (const cancellation of ['abort', 'challenge timeout']) {
+    test(`native ${cancellation} keeps retries blocked until cancellation is acknowledged`, async t => {
+        if (cancellation === 'challenge timeout') t.mock.timers.enable({ apis: ['setTimeout'] });
+        let finishInitial;
+        let acknowledgeCancel;
+        let nativeStarts = 0;
+        let nativeCancels = 0;
+        const f = fixture({ platform: 'ios', isNative: true, identity: {
+            signIn: () => ++nativeStarts === 1
+                ? new Promise(resolve => { finishInitial = resolve; })
+                : Promise.resolve({ identityToken: token }),
+            cancel: () => {
+                nativeCancels++;
+                return new Promise(resolve => { acknowledgeCancel = resolve; });
+            },
+        } });
+        const controller = new AbortController();
+        const credential = f.client.acquireProviderCredential(apple,
+            { ...challenge, expiresInSeconds: 1 }, controller.signal);
+        const rejected = rejectsCode(credential, 'CANCELLED');
+        try {
+            await nextTurn();
+            if (cancellation === 'abort') controller.abort();
+            else t.mock.timers.tick(1000);
+            await rejected;
+            assert.equal(nativeCancels, 1);
+            finishInitial({ identityToken: token });
+            await nextTurn();
+            await rejectsCode(f.client.acquireProviderCredential(apple, challenge, signal()), 'UNAVAILABLE');
+            assert.equal(nativeStarts, 1, 'late native success must not release the cancellation gate');
+            acknowledgeCancel();
+            await nextTurn();
+            assert.equal(await f.client.acquireProviderCredential(apple, challenge, signal()), token);
+            assert.equal(nativeStarts, 2);
+            assert.equal(nativeCancels, 1);
+        } finally {
+            finishInitial?.({ identityToken: token });
+            acknowledgeCancel?.();
+        }
+    });
+}
+
+test('native cancellation rejection is handled and keeps retries fail-closed after late success', async () => {
+    let finishInitial;
+    let rejectCancel;
+    let nativeStarts = 0;
+    const f = fixture({ platform: 'ios', isNative: true, identity: {
+        signIn: () => ++nativeStarts === 1
+            ? new Promise(resolve => { finishInitial = resolve; })
+            : Promise.resolve({ identityToken: token }),
+        cancel: () => new Promise((_resolve, reject) => { rejectCancel = reject; }),
+    } });
+    const controller = new AbortController();
+    const credential = f.client.acquireProviderCredential(apple, challenge, controller.signal);
+    const rejected = rejectsCode(credential, 'CANCELLED');
+    try {
+        await nextTurn();
+        controller.abort();
+        await rejected;
+        rejectCancel(new Error('private cancellation details'));
+        await nextTurn();
+        finishInitial({ identityToken: token });
+        await nextTurn();
+        await rejectsCode(f.client.acquireProviderCredential(apple, challenge, signal()), 'UNAVAILABLE');
+        assert.equal(nativeStarts, 1);
+    } finally {
+        finishInitial?.({ identityToken: token });
+    }
+});
+
 test('unavailable native capability, malformed results and native errors never expose raw details', async () => {
     for (const identity of [
         { getCapabilities: async () => ({ apple: false }) },

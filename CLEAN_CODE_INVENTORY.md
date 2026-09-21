@@ -884,6 +884,56 @@ The parallel provider-fixture failure remains outside this slice and unresolved.
 The separately requested Git branch/worktree hygiene task is recorded as pending
 in Phase 16; none of its inventory, pruning or deletion work was performed.
 
+## Native sign-in cancellation ownership — 2026-09-21
+
+`frontend/ts/services/providerClient.ts` previously cancelled the native sheet
+without retaining ownership of its cleanup:
+
+```ts
+const abort = () => { void Promise.resolve().then(() => identity.cancel()).catch(() => undefined); };
+```
+
+The outer credential request correctly returned promptly on abort, but its
+`finally` also released the acquisition lock. A synthetic bridge reproduced a
+retry starting while the earlier `cancel()` was still unacknowledged. Because
+native cancellation has no request ID, its delayed effect could target that
+replacement request. This is a JavaScript coordination gap, not evidence that
+the current iPhone bridge actually reordered calls.
+
+The implemented callback now owns that uncertainty separately:
+
+```ts
+nativeCancellationUnconfirmed = true;
+void Promise.resolve().then(() => identity.cancel()).then(() => {
+    nativeCancellationUnconfirmed = false;
+}).catch(() => {
+    // Without acknowledgement, keep native retries blocked until the client reloads.
+});
+```
+
+New native acquisitions reject while this flag is set. Late success from the
+cancelled sign-in cannot clear it. Cancellation still returns promptly; only a
+new native attempt waits for confirmed cleanup. The trade-off is deliberate:
+if cancellation fails or never settles, native retry remains unavailable until
+the client/app reloads. An acknowledgement need not mean the sheet is dismissed;
+the existing iOS 15 native `BUSY` guard still protects a retained sheet.
+Google's flow, credential contracts, native Swift code and activation flags are
+unchanged. No abstraction, dependency, provider call or database change was added.
+
+Three regression cases first failed on the old implementation (18 passed,
+3 failed), then the provider-client suite passed 21/21. Auth transport/signup
+tests passed 73/73; frontend TypeScript and Vite production build passed. These
+checks use synthetic providers; no physical-device acceptance, deployment or
+Apple revocation completion is claimed. Commands from the repository root:
+
+```text
+node --experimental-strip-types --test frontend/ts/services/providerClient.test.mjs
+node --experimental-strip-types --test --test-reporter=spec frontend/ts/services/authApi.test.mjs frontend/ts/services/authProviderSignup.test.mjs
+node frontend/node_modules/typescript/bin/tsc -p frontend/tsconfig.json --noEmit
+npm.cmd --prefix frontend run build
+git diff --check
+```
+
 ## Learning-oriented handoff for each future change
 
 The owner requested on 2026-09-10 that improvements be taught, not merely

@@ -104,6 +104,7 @@ export function createProviderClient(dependencies: ProviderClientDependencies) {
     const ios = dependencies.isNative && dependencies.platform === 'ios';
     let googleLoad: Promise<GoogleIdentity> | undefined;
     let acquiring = false;
+    let nativeCancellationUnconfirmed = false;
 
     async function getAvailableProviderClients(): Promise<PublicProviderClient[]> {
         if (!web && !ios) return [];
@@ -242,7 +243,15 @@ export function createProviderClient(dependencies: ProviderClientDependencies) {
         const capabilities = await identity.getCapabilities();
         if (signal.aborted) throw new ProviderCredentialError('CANCELLED');
         if (!isRecord(capabilities) || capabilities.apple !== true) throw new ProviderCredentialError('UNAVAILABLE');
-        const abort = () => { void Promise.resolve().then(() => identity.cancel()).catch(() => undefined); };
+        const abort = () => {
+            // cancel() has no request ID: its delayed effect must not reach a newer sign-in.
+            nativeCancellationUnconfirmed = true;
+            void Promise.resolve().then(() => identity.cancel()).then(() => {
+                nativeCancellationUnconfirmed = false;
+            }).catch(() => {
+                // Without acknowledgement, keep native retries blocked until the client reloads.
+            });
+        };
         signal.addEventListener('abort', abort, { once: true });
         try {
             const result = await identity.signIn({ provider: 'apple', clientId: client.clientId,
@@ -257,6 +266,7 @@ export function createProviderClient(dependencies: ProviderClientDependencies) {
         signal: AbortSignal, inline?: { host: HTMLElement; onReady?: () => void }): Promise<string> {
         const selected = readClient(client);
         if (!selected || acquiring || (selected.platform === 'web' ? !web : !ios)
+            || (selected.platform === 'ios' && nativeCancellationUnconfirmed)
             || (inline && selected.clientKey !== 'google-web')
             || !isRecord(challenge) || Object.keys(challenge).sort().join(',') !== 'expiresInSeconds,nonce,state'
             || typeof challenge.state !== 'string' || !RANDOM_VALUE.test(challenge.state)

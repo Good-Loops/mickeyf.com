@@ -2417,6 +2417,15 @@ example. The active branch is `improvement/clean-code-sweep`.
   coverage, not the full backend suite or a database/provider integration run.
   No commit, deployment, development-server restart or branch cleanup occurred.
   See the [teaching checkpoint](CLEAN_CODE_INVENTORY.md#main-router-database-injection--2026-09-15).
+- [x] Native sign-in cancellation ownership (2026-09-21): native retries now
+  remain blocked until the previous cancellation is acknowledged, even after
+  the cancelled operation returns a late token. Cancellation failures remain
+  blocked until client reload; user cancellation itself still returns promptly.
+  Three new regressions failed before the fix, then all 21 provider-client and
+  73 auth transport/signup cases passed; frontend TypeScript and build passed. Google,
+  native Swift code and disabled Apple activation flags are unchanged. This
+  does not complete Apple's token-revocation lifecycle or prove device timing.
+  See the [teaching checkpoint](CLEAN_CODE_INVENTORY.md#native-sign-in-cancellation-ownership--2026-09-21).
 - [ ] Complete subsequent subsystem reviews one at a time; choose actual
   improvements from evidence, not file length or similar-looking syntax.
 
