@@ -2,10 +2,11 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { MigrationConnection } from './leaderboardSchema';
 import { ACCOUNT_SESSION_MIGRATION_VERSION, ACCOUNT_SESSION_RENEWAL_MIGRATION_VERSION,
+    APPLE_SESSION_PROVENANCE_MIGRATION_VERSION,
     verifyAccountSessionSchema, verifyOptionalAccountSessionSchema, verifyRenewableAccountSessionSchema } from './accountSessionSchema';
 
 type Metadata = Record<string, Array<Record<string, unknown>>>;
-function fixture(renewable = false): Metadata {
+function fixture(renewable = false, appleProvenance = false): Metadata {
     const column = (name: string, type: string, characterSet: string | null = null,
         collation: string | null = null, datetimePrecision: number | null = null, comment = '') => ({
         name, type, nullable: 'NO', characterSet, collation, defaultValue: null, extra: '',
@@ -34,24 +35,33 @@ function fixture(renewable = false): Metadata {
             { ...column('previous_valid_until', 'datetime(6)', null, null, 6, 'UTC'), nullable: 'YES' });
         metadata.STATISTICS.push(index('uq_account_sessions_previous_hash', 'previous_session_hash', 0));
     }
+    if (appleProvenance) {
+        metadata.COLUMNS.push({ ...column('apple_subject_hash', 'binary(32)'), nullable: 'YES' },
+            { ...column('apple_authenticated_at', 'bigint unsigned'), nullable: 'YES' });
+        metadata.TABLE_CONSTRAINTS.push({ name: 'chk_account_sessions_apple_provenance' });
+        metadata.CHECK_CONSTRAINTS = [{ clause: '(((`apple_subject_hash` is null) and (`apple_authenticated_at` is null)) or ((`apple_subject_hash` is not null) and (`apple_authenticated_at` is not null) and (`apple_authenticated_at` > 0)))', enforced: 'YES' }];
+    }
     return metadata;
 }
-function source(metadata = fixture(), options: { exists?: boolean; recorded?: boolean; renewalRecorded?: boolean } = {}): MigrationConnection {
+function source(metadata = fixture(), options: { exists?: boolean; recorded?: boolean; renewalRecorded?: boolean; provenanceRecorded?: boolean } = {}): MigrationConnection {
     return { async query(sql, values) {
         if (sql.includes('COUNT(*)') && sql.includes('information_schema.TABLES')) {
             assert.deepEqual(values, ['account_sessions']);
             return [[{ tableCount: options.exists === false ? 0 : 1 }], []];
         }
         if (sql.includes('FROM schema_migrations')) {
-            assert(values?.every(version => [ACCOUNT_SESSION_MIGRATION_VERSION, ACCOUNT_SESSION_RENEWAL_MIGRATION_VERSION].includes(String(version))));
+            assert(values?.every(version => [ACCOUNT_SESSION_MIGRATION_VERSION, ACCOUNT_SESSION_RENEWAL_MIGRATION_VERSION, APPLE_SESSION_PROVENANCE_MIGRATION_VERSION].includes(String(version))));
             return [[...(options.recorded && values?.includes(ACCOUNT_SESSION_MIGRATION_VERSION)
                 ? [{ version: ACCOUNT_SESSION_MIGRATION_VERSION }] : []),
             ...(options.renewalRecorded && values?.includes(ACCOUNT_SESSION_RENEWAL_MIGRATION_VERSION)
-                ? [{ version: ACCOUNT_SESSION_RENEWAL_MIGRATION_VERSION }] : [])], []];
+                ? [{ version: ACCOUNT_SESSION_RENEWAL_MIGRATION_VERSION }] : []),
+            ...(options.provenanceRecorded && values?.includes(APPLE_SESSION_PROVENANCE_MIGRATION_VERSION)
+                ? [{ version: APPLE_SESSION_PROVENANCE_MIGRATION_VERSION }] : [])], []];
         }
         if (sql.includes('COLUMN_NAME IN')) {
-            return [metadata.COLUMNS.filter(column => ['remembered', 'renewed_at',
-                'previous_session_hash', 'previous_valid_until'].includes(String(column.name))).map(({ name }) => ({ name })), []];
+            const selected = sql.includes('apple_subject_hash') ? ['apple_subject_hash', 'apple_authenticated_at']
+                : ['remembered', 'renewed_at', 'previous_session_hash', 'previous_valid_until'];
+            return [metadata.COLUMNS.filter(column => selected.includes(String(column.name))).map(({ name }) => ({ name })), []];
         }
         const category = /FROM information_schema\.([A-Z_]+)/u.exec(sql)?.[1];
         if (!category || !metadata[category]) throw new Error('Unexpected schema query');
@@ -107,5 +117,25 @@ test('renewal schema is exact; old backups remain valid but partial or missing r
     ]) {
         const metadata = fixture(true); mutate(metadata);
         await assert.rejects(verifyOptionalAccountSessionSchema(source(metadata)), /reviewed schema/u);
+    }
+});
+
+test('Apple provenance is paired, immutable by schema defaults, and compatible with earlier session checks', async () => {
+    await verifyAccountSessionSchema(source(fixture(true, true)), true, true);
+    await verifyRenewableAccountSessionSchema(source(fixture(true, true)));
+    await verifyOptionalAccountSessionSchema(source(fixture(true, true), { provenanceRecorded: true }));
+    await assert.rejects(verifyOptionalAccountSessionSchema(source(fixture(true), { provenanceRecorded: true })), /missing its columns/u);
+    await assert.rejects(verifyOptionalAccountSessionSchema(source(fixture(), { exists: false, provenanceRecorded: true })), /missing its table/u);
+    const partial = fixture(true, true); partial.COLUMNS.pop();
+    await assert.rejects(verifyOptionalAccountSessionSchema(source(partial)), /incomplete/u);
+    for (const mutate of [
+        (data: Metadata) => { data.COLUMNS[8].nullable = 'NO'; },
+        (data: Metadata) => { data.COLUMNS[9].type = 'bigint'; },
+        (data: Metadata) => { data.CHECK_CONSTRAINTS[0].enforced = 'NO'; },
+        (data: Metadata) => { data.CHECK_CONSTRAINTS[0].clause = 'apple_authenticated_at > 0'; },
+        (data: Metadata) => { data.TABLE_CONSTRAINTS.length = 0; },
+    ]) {
+        const data = fixture(true, true); mutate(data);
+        await assert.rejects(verifyOptionalAccountSessionSchema(source(data)), /reviewed schema/u);
     }
 });

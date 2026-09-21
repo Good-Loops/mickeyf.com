@@ -22,6 +22,11 @@ const now = 1_800_000_000;
 const password = ' correct horse ';
 const appleCode = 'synthetic-native-authorization-code';
 const appleRefreshToken = 'synthetic-apple-refresh-token';
+const appleIdentity = { provider: 'apple', subject: 'opaque-provider-subject',
+    appleIssuedAt: now - 10, appleClientId: 'apple-audience' };
+const appleSession = { authenticationMethod: 'apple', appleSessionProof: {
+    subject: appleIdentity.subject, clientId: appleIdentity.appleClientId, issuedAt: appleIdentity.appleIssuedAt,
+} };
 const hash = (value: string) => createHash('sha256').update(value).digest();
 
 function signedToken(nonce: string, provider: IdentityProvider = 'google', extra: Record<string, unknown> = {}): string {
@@ -641,8 +646,8 @@ test('opted-in native Apple entry creates only through a single-use username con
     const { authorizationCode: _appleCode, ...googleShape } = signup;
     assert.deepEqual(await f.flow.complete(f.context, { ...googleShape, clientKey: 'google-web' }), { ok: false, reason: 'INVALID_ATTEMPT' });
     assert.deepEqual(await f.flow.complete(f.context, { ...login, state: next.state }), { ok: false, reason: 'INVALID_ATTEMPT' });
-    assert.deepEqual(await f.flow.complete(f.context, signup), { ok: true, type: 'account-verified', account, authenticationMethod: 'apple' });
-    assert.deepEqual(f.createdAccounts, [[{ provider: 'apple', subject: 'opaque-provider-subject',
+    assert.deepEqual(await f.flow.complete(f.context, signup), { ok: true, type: 'account-verified', account, ...appleSession });
+    assert.deepEqual(f.createdAccounts, [[{ ...appleIdentity,
         email: 'new-player@privaterelay.appleid.com' }, 'new-player', appleRefreshToken]]);
     assert.deepEqual(f.verifiedNonces, [started.nonce, started.nonce, started.nonce]);
     assert.deepEqual(f.exchangedCodes, [appleCode], 'the code is exchanged only at final signup, not the username preflight');
@@ -660,7 +665,7 @@ test('native Apple new signup needs signed verified email while existing subject
             assert.ok(started.ok);
             assert.deepEqual(await f.flow.complete(f.context, { clientKey: 'apple-ios', action: 'login', state: started.state,
                 authorizationCode: appleCode, idToken: signedToken(started.nonce, 'apple', extra) }), known
-                ? { ok: true, type: 'account-verified', account, authenticationMethod: 'apple' } : { ok: false, reason: 'INVALID_EMAIL' });
+                ? { ok: true, type: 'account-verified', account, ...appleSession } : { ok: false, reason: 'INVALID_EMAIL' });
         }
         const signup = await f.flow.begin(f.context, { clientKey: 'apple-ios', action: 'signup' });
         assert.ok(signup.ok);
@@ -687,7 +692,7 @@ test('opted-in native Apple deletion requires fresh subject proof and the curren
             : { ok: false, reason: { token: 'INVALID_PROVIDER_TOKEN', subject: 'INVALID_PROVIDER_TOKEN',
                 missing: 'ACCOUNT_GONE', journal: 'ACCOUNT_DELETION_PENDING' }[failure] });
         if (failure !== 'token') assert.deepEqual(f.deletedAccounts, [[{ userId: account.userId, accountId: account.accountId },
-            { provider: 'apple', subject: 'opaque-provider-subject' }, f.context.session, appleRefreshToken]]);
+            appleIdentity, f.context.session, appleRefreshToken]]);
         else assert.deepEqual(f.deletedAccounts, []);
         assert.deepEqual(await f.flow.complete(f.context, input), { ok: false, reason: 'INVALID_ATTEMPT' });
     }
@@ -744,12 +749,26 @@ test('known Apple login waits for exchanged subject verification and acknowledge
         assert.deepEqual(f.savedAppleTokens, []);
         assert.deepEqual(f.verifiedNonces, [result.nonce, result.nonce]);
         release();
-        assert.deepEqual(await completing, { ok: true, type: 'account-verified', account, authenticationMethod: 'apple' });
-        assert.deepEqual(f.savedAppleTokens, [[account, { provider: 'apple', subject: 'opaque-provider-subject' }, appleRefreshToken]]);
+        assert.deepEqual(await completing, { ok: true, type: 'account-verified', account, ...appleSession });
+        assert.deepEqual(f.savedAppleTokens, [[account, appleIdentity, appleRefreshToken]]);
         assert.deepEqual(f.exchangedCodes, [appleCode]);
         assert.deepEqual(await f.flow.complete(f.context, input), { ok: false, reason: 'INVALID_ATTEMPT' });
         assert.equal(f.exchangedCodes.length, 1);
     } finally { release(); }
+});
+
+test('newer exchanged Apple ID-token issuance never replaces the original native authentication proof', async () => {
+    const f = await fixture(undefined, true, true);
+    const { result, input } = await f.appleChallenge('login');
+    f.controls.exchangeResponse = async () => ({
+        idToken: signedToken(result.nonce, 'apple', { iat: now - 1 }), refreshToken: appleRefreshToken,
+    });
+    const completed = await f.flow.complete(f.context, input);
+    assert.deepEqual(completed, { ok: true, type: 'account-verified', account, ...appleSession });
+    assert.ok(completed.ok && completed.type === 'account-verified');
+    assert.equal(completed.appleSessionProof?.issuedAt, now - 10);
+    assert.equal(Object.isFrozen(completed.appleSessionProof), true);
+    assert.deepEqual(f.savedAppleTokens, [[account, appleIdentity, appleRefreshToken]]);
 });
 
 test('Apple exchange rejects a different subject, provider, nonce or absent usable token before persistence', async () => {
@@ -799,7 +818,7 @@ test('Apple signup, link and deletion hand the exchanged token to their atomic r
         const f = await fixture(action === 'signup' ? undefined : account, true, true);
         const { result, input } = await f.appleChallenge(action);
         assert.deepEqual(await f.flow.complete(f.context, input), action === 'signup'
-            ? { ok: true, type: 'account-verified', account, authenticationMethod: 'apple' } : { ok: true, type: action === 'link' ? 'linked' : 'deleted' });
+            ? { ok: true, type: 'account-verified', account, ...appleSession } : { ok: true, type: action === 'link' ? 'linked' : 'deleted' });
         assert.deepEqual(f.events, ['consume', 'committed', 'verify', 'exchange', 'verify', action]);
         assert.deepEqual(f.verifiedNonces, [result.nonce, result.nonce]);
         assert.deepEqual(f.exchangedCodes, [appleCode]);
@@ -817,7 +836,7 @@ test('a concurrent Apple signup can log in only after saving its newly exchanged
         f.controls.foundAccount = foundAccount;
         const { input } = await f.appleChallenge('signup');
         assert.deepEqual(await f.flow.complete(f.context, input), foundAccount
-            ? { ok: true, type: 'account-verified', account, authenticationMethod: 'apple' } : { ok: false, reason: 'ALREADY_LINKED' });
+            ? { ok: true, type: 'account-verified', account, ...appleSession } : { ok: false, reason: 'ALREADY_LINKED' });
         assert.deepEqual(f.events, ['consume', 'committed', 'verify', 'exchange', 'verify', 'signup', 'find',
             ...(foundAccount ? ['save-token'] : [])]);
         assert.equal(f.savedAppleTokens.length, foundAccount ? 1 : 0);

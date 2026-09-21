@@ -151,8 +151,8 @@ async function prepareDatabase({ credentials, context, containerId }, options) {
     const { applyMigrations, planMigrations } = require('../ts/migrations/migrationRunner');
     const { renderRuntimeGrantStatements } = require('../ts/security/runtimeGrantManifest');
     const migrations = loadMigrationManifest(path.join(backend, 'migrations'));
-    requireLocal(migrations.length === 15 && migrations.at(-1).version === '0015_extend_provider_attempt_actions',
-        'The local bootstrap must be reviewed before applying migrations beyond 0015.');
+    requireLocal(migrations.length === 18 && migrations.at(-1).version === '0018_add_apple_session_provenance',
+        'The local bootstrap must be reviewed before applying migrations beyond 0018.');
     const connectionOptions = { host, port, user: 'root', password: credentials.rootPassword, database: databaseName,
         connectTimeout: 2000, multipleStatements: false, dateStrings: true, timezone: 'Z' };
     let connection;
@@ -178,14 +178,15 @@ async function prepareDatabase({ credentials, context, containerId }, options) {
         const settings = { database: databaseName, advisoryLockTimeoutSeconds: 5, lockWaitTimeoutSeconds: 10 };
         for (const allowedEffectKinds of [['create-table'], ['drop-column'], ['detach-best-source', 'retain-receipts'],
             ['add-account-identity'], ['add-provider-identities'], ['add-provider-attempts'], ['add-account-sessions'], ['add-session-renewal'],
-            ['add-unique-user-names'], ['allow-passwordless-accounts'], ['extend-provider-attempt-actions']]) {
+            ['add-unique-user-names'], ['allow-passwordless-accounts'], ['extend-provider-attempt-actions'],
+            ['add-apple-tokens'], ['add-apple-revocations', 'add-apple-session-provenance']]) {
             await applyMigrations(connection, migrations, settings, { allowedEffectKinds });
         }
         requireLocal((await planMigrations(connection, migrations, settings)).pending.length === 0, 'Local schema setup is incomplete.');
         await connection.query(`CREATE USER IF NOT EXISTS '${runtimeUser}'@'%' IDENTIFIED BY ?`, [credentials.runtimePassword]);
         for (const sql of renderRuntimeGrantStatements(databaseName, { user: runtimeUser, host: '%' })) await connection.query(sql);
         for (const sql of localProviderGrantStatements(options)) await connection.query(sql);
-        console.log(`Verified local database ${databaseName}; migrations 0001–0015 and restricted runtime grants are ready.`);
+        console.log(`Verified local database ${databaseName}; migrations 0001–0018 and restricted runtime grants are ready.`);
     } finally { await connection.end(); }
 }
 

@@ -51,7 +51,7 @@ before(async () => {
     assert.doesNotMatch(identity[0].versionComment, /Google/iu);
     await administrator.query('SET FOREIGN_KEY_CHECKS = 0');
     try {
-        await administrator.query('DROP TABLE IF EXISTS apple_provider_tokens, account_sessions, provider_auth_attempts, account_provider_identities, game_personal_bests, game_runs, game_submission_receipts, schema_migrations, users');
+        await administrator.query('DROP TABLE IF EXISTS apple_auth_revocations, apple_provider_tokens, account_sessions, provider_auth_attempts, account_provider_identities, game_personal_bests, game_runs, game_submission_receipts, schema_migrations, users');
     } finally { await administrator.query('SET FOREIGN_KEY_CHECKS = 1'); }
     await administrator.query(`CREATE TABLE users (
         user_id INT NOT NULL AUTO_INCREMENT, user_name VARCHAR(255) NOT NULL,
@@ -69,7 +69,8 @@ before(async () => {
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-account-sessions'] });
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-session-renewal'] });
     await applyMigrations(connection, migrations, config, {
-        allowedEffectKinds: ['add-unique-user-names', 'allow-passwordless-accounts', 'extend-provider-attempt-actions', 'add-apple-tokens'],
+        allowedEffectKinds: ['add-unique-user-names', 'allow-passwordless-accounts', 'extend-provider-attempt-actions', 'add-apple-tokens',
+            'add-apple-revocations', 'add-apple-session-provenance'],
     });
     await verifyAppleTokenReadiness(connection);
     await administrator.query("SET SESSION time_zone = '+00:00'");

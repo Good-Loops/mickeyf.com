@@ -41,6 +41,7 @@ type MigrationCommand =
     | 'account-sessions-apply'
     | 'session-renewal-apply'
     | 'apple-tokens-apply'
+    | 'apple-revocation-apply'
     | 'account-identity-plan'
     | 'account-identity-apply'
     | 'account-identity-verify'
@@ -78,7 +79,7 @@ function parseCommand(args: readonly string[]): MigrationCommand {
     if (args.length !== 1) {
         throw new Error(
             'Usage: runMigrations.ts '
-            + '<plan|apply|provider-identities-apply|provider-attempts-apply|account-sessions-apply|session-renewal-apply|apple-tokens-apply|'
+            + '<plan|apply|provider-identities-apply|provider-attempts-apply|account-sessions-apply|session-renewal-apply|apple-tokens-apply|apple-revocation-apply|'
             + 'account-identity-plan|account-identity-apply|account-identity-verify|'
             + 'receipts-plan|receipts-apply|receipts-verify|'
             + 'p4-score-drop-plan|p4-score-drop-apply|p4-score-drop-verify>'
@@ -93,6 +94,7 @@ function parseCommand(args: readonly string[]): MigrationCommand {
         && command !== 'account-sessions-apply'
         && command !== 'session-renewal-apply'
         && command !== 'apple-tokens-apply'
+        && command !== 'apple-revocation-apply'
         && command !== 'account-identity-plan'
         && command !== 'account-identity-apply'
         && command !== 'account-identity-verify'
@@ -346,10 +348,12 @@ async function executeCommand(
     }
 
     if (command === 'provider-identities-apply' || command === 'provider-attempts-apply'
-        || command === 'account-sessions-apply' || command === 'session-renewal-apply' || command === 'apple-tokens-apply') {
+        || command === 'account-sessions-apply' || command === 'session-renewal-apply' || command === 'apple-tokens-apply'
+        || command === 'apple-revocation-apply') {
         // Separate selection keeps ordinary legacy-table commands from enabling new auth storage.
         printPlan(await applyMigrations(migrationConnection, migrations, config, {
-            allowedEffectKinds: [command === 'provider-identities-apply'
+            allowedEffectKinds: command === 'apple-revocation-apply'
+                ? ['add-apple-revocations', 'add-apple-session-provenance'] : [command === 'provider-identities-apply'
                 ? 'add-provider-identities' : command === 'provider-attempts-apply'
                     ? 'add-provider-attempts' : command === 'account-sessions-apply'
                         ? 'add-account-sessions' : command === 'apple-tokens-apply' ? 'add-apple-tokens' : 'add-session-renewal'],
@@ -442,7 +446,8 @@ async function main(): Promise<void> {
     const confirmedAccount = loadMigrationAccountConfirmation();
     let confirmation: RuntimeGrantConfirmation = Object.freeze({});
     if (command === 'apply' || command === 'provider-identities-apply' || command === 'provider-attempts-apply'
-        || command === 'account-sessions-apply' || command === 'session-renewal-apply' || command === 'apple-tokens-apply') {
+        || command === 'account-sessions-apply' || command === 'session-renewal-apply' || command === 'apple-tokens-apply'
+        || command === 'apple-revocation-apply') {
         // Refuse before opening a socket, not merely before the first DDL.
         assertMutationAuthorized(config);
     } else if (command.startsWith('account-identity-')) {

@@ -23,10 +23,14 @@ preserves that verified claim. Password/Google and older unmarked sessions stay
 unmarked, even if their account has linked Apple. The disabled native Apple
 credential-loss guard uses this provenance to revoke only the current Apple
 device session through ordinary logout. Linking alone never opts another login
-method into Apple checks. See [scope and remaining global enforcement](PROVIDER_SIGN_IN.md#native-apple-credential-loss--prepared-not-activated-2026-09-21).
+method into Apple checks. The prepared signed server receiver also revokes older
+Apple sessions across devices, using original authentication time rather than
+cookie-renewal time. See [server revocation and activation boundaries](PROVIDER_SIGN_IN.md#signed-apple-server-notifications--prepared-not-activated-2026-09-21).
 
 `account_sessions` stores only hashed current/previous identifiers, account UUID,
-remembered choice and UTC creation/renewal/expiry/grace timestamps. It stores no passwords, raw tokens, IPs or
+remembered choice and UTC creation/renewal/expiry/grace timestamps. Migration 0018
+adds nullable Apple client/subject hash and original authentication time;
+password/Google rows leave both null and renewal preserves them. It stores no passwords, raw tokens, IPs or
 device fingerprints. Each account has at most ten sessions; a new login removes
 expired entries and evicts the oldest when necessary. Expired rows cannot
 authenticate but can remain until another login or account deletion. No new

@@ -28,6 +28,7 @@ type FakeOptions = {
     sessionTable?: 'absent' | 'malformed';
     sessionMigrationRecorded?: boolean;
     appleMigrationRecorded?: boolean;
+    appleRevocationMigrationRecorded?: boolean;
     wrongTarget?: boolean;
     changeIdentityUnderLock?: boolean;
     failAt?: string;
@@ -55,7 +56,8 @@ function fakeReplay(options: FakeOptions = {}) {
             }], []];
             if (sql.includes('DATE_FORMAT(applied_at')) return [[{ epoch: options.wrongEpoch ? 'old' : SETTINGS.expectedIdentityEpoch }], []];
             if (sql.startsWith('SELECT version FROM schema_migrations')) {
-                const recorded = values?.[0] === '0016_create_apple_provider_tokens' ? options.appleMigrationRecorded
+                const recorded = values?.[0] === '0017_create_apple_auth_revocations' ? options.appleRevocationMigrationRecorded
+                    : values?.[0] === '0016_create_apple_provider_tokens' ? options.appleMigrationRecorded
                     : values?.[0] === '0011_create_account_sessions' ? options.sessionMigrationRecorded
                     : values?.[0] === '0010_create_provider_auth_attempts'
                         ? options.attemptMigrationRecorded : options.providerMigrationRecorded;
@@ -77,6 +79,7 @@ function fakeReplay(options: FakeOptions = {}) {
                     : [{ engine: 'MyISAM', collation: 'utf8mb4_unicode_ci', tableType: 'BASE TABLE' }], []];
             }
             if (values?.[0] === 'apple_provider_tokens') return [[{ tableCount: 0 }], []];
+            if (values?.[0] === 'apple_auth_revocations') return [[{ tableCount: 0 }], []];
             if (sql.startsWith('UPDATE apple_provider_tokens')) return [{ affectedRows: 1 }, []];
             if (sql.includes('information_schema.COLUMNS')) return [options.missingIdentity ? [] : [{
                 type: 'char(36)', nullable: 'NO', characterSet: 'ascii', collation: 'ascii_bin',
@@ -190,6 +193,12 @@ test('replay queues surviving Apple credentials even when the account is absent 
 
 test('replay refuses absent Apple token storage when its migration is recorded', async () => {
     const fake = fakeReplay({ appleMigrationRecorded: true });
+    await assert.rejects(planDeletionReplay(fake.database, fake.reader, SETTINGS), /missing its table/u);
+    assert.equal(fake.queries.some(({ sql }) => /^(?:UPDATE|DELETE)/u.test(sql)), false);
+});
+
+test('replay refuses absent Apple revocation storage when its migration is recorded', async () => {
+    const fake = fakeReplay({ appleRevocationMigrationRecorded: true });
     await assert.rejects(planDeletionReplay(fake.database, fake.reader, SETTINGS), /missing its table/u);
     assert.equal(fake.queries.some(({ sql }) => /^(?:UPDATE|DELETE)/u.test(sql)), false);
 });

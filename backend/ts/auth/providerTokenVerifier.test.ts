@@ -113,8 +113,23 @@ test('Apple exposes only its signed verified shared or relay email; missing cont
         const result = await verifier.verify('apple', signedToken({ ...claims('apple'), ...extra }), nonce);
         assert.ok(result.verified);
         assert.deepEqual(result.identity, { provider: 'apple', subject: claims('apple').sub,
+            appleIssuedAt: claims('apple').iat, appleClientId: appleAudience,
             ...(expected === undefined ? {} : { email: expected }) });
     }
+});
+
+test('only original Apple ID-token issuance populates the revocation-check time', async () => {
+    const { verifier } = fixture();
+    const apple = await verifier.verify('apple', signedToken({ ...claims('apple'),
+        appleIssuedAt: nowSeconds + 1_000, appleClientId: 'request-selected-audience' }), nonce);
+    assert.ok(apple.verified);
+    assert.equal(apple.identity.appleIssuedAt, nowSeconds - 10);
+    assert.equal(apple.identity.appleClientId, appleAudience);
+    const google = await verifier.verify('google', signedToken({ ...claims(),
+        appleIssuedAt: nowSeconds + 1_000, appleClientId: appleAudience }), nonce);
+    assert.ok(google.verified);
+    assert.equal(google.identity.appleIssuedAt, undefined);
+    assert.equal(google.identity.appleClientId, undefined);
 });
 
 for (const provider of ['google', 'apple'] as const) {
@@ -126,7 +141,8 @@ for (const provider of ['google', 'apple'] as const) {
         }), nonce);
         assert.deepEqual(result, {
             verified: true,
-            identity: { provider, subject: 'Opaque.Mixed-CASE-provider-subject' },
+            identity: { provider, subject: 'Opaque.Mixed-CASE-provider-subject',
+                ...(provider === 'apple' ? { appleIssuedAt: nowSeconds - 10, appleClientId: appleAudience } : {}) },
         });
         if (result.verified) assert.equal(Object.isFrozen(result.identity), true);
         assert.equal(calls.length, 1);

@@ -7,6 +7,7 @@ import { loadProviderAuthConfig } from './providerAuthConfig';
 const privateKey = generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).privateKey
     .export({ format: 'pem', type: 'pkcs8' }).toString();
 const environment = {
+    APPLE_NOTIFICATIONS_ENABLED: 'true',
     APPLE_TOKEN_LIFECYCLE_ENABLED: 'true', APPLE_IOS_BUNDLE_ID: 'com.example.test',
     APPLE_SIGN_IN_TEAM_ID: 'ABCDEFGHIJ', APPLE_SIGN_IN_KEY_ID: '0123456789', APPLE_SIGN_IN_PRIVATE_KEY: privateKey,
     APPLE_TOKEN_ACTIVE_KEY_ID: 'v1', APPLE_TOKEN_ENCRYPTION_KEYS: JSON.stringify({ v1: Buffer.alloc(32, 9).toString('base64') }),
@@ -51,9 +52,17 @@ test('missing or malformed secret material fails closed without leaking input or
 test('prepared lifecycle stays private and does not enable Apple signup or deletion', () => {
     const config = loadProviderAuthConfig({ ...environment, PROVIDER_AUTH_ENABLED: 'true' });
     assert(config.appleTokenLifecycle);
+    assert(config.appleNotifications);
     assert(config.clients['apple-ios'].appleTokens);
     assert.equal(config.clients['apple-ios'].signupEnabled, false);
     assert.equal(config.clients['apple-ios'].deletionEnabled, false);
     assert.equal(JSON.stringify(config.publicClients).includes(privateKey), false);
     assert.equal(JSON.stringify(config.publicClients).includes('encryption'), false);
+});
+
+test('active Apple sign-in lifecycle cannot be configured without server-side revocation handling', () => {
+    for (const flag of [undefined, 'false', 'TRUE', '1']) {
+        assert.throws(() => loadProviderAuthConfig({ ...environment, PROVIDER_AUTH_ENABLED: 'true',
+            APPLE_NOTIFICATIONS_ENABLED: flag }), { message: 'Apple sign-in requires enabled server notifications.' });
+    }
 });

@@ -7,10 +7,12 @@ import {
 } from './accountIdentitySchema';
 import { PROVIDER_IDENTITY_MIGRATION_VERSION, verifyProviderIdentitySchema } from './providerIdentitySchema';
 import { verifyAppleTokenSchema } from './appleTokenSchema';
+import { verifyAppleRevocationSchema } from './appleRevocationSchema';
 import { PROVIDER_ATTEMPT_MIGRATION_VERSION, PROVIDER_ATTEMPT_ACTIONS_MIGRATION_VERSION,
     inspectProviderAttemptStage, verifyProviderAttemptSchema, type ProviderAttemptSchemaStage } from './providerAttemptSchema';
 import { ACCOUNT_SESSION_MIGRATION_VERSION, inspectAccountSessionRenewal,
-    ACCOUNT_SESSION_RENEWAL_MIGRATION_VERSION, verifyAccountSessionSchema, verifyRenewableAccountSessionSchema } from './accountSessionSchema';
+    ACCOUNT_SESSION_RENEWAL_MIGRATION_VERSION, APPLE_SESSION_PROVENANCE_MIGRATION_VERSION,
+    inspectAppleSessionProvenance, verifyAccountSessionSchema, verifyRenewableAccountSessionSchema } from './accountSessionSchema';
 import { UNIQUE_USER_NAME_MIGRATION_VERSION, PASSWORDLESS_ACCOUNT_MIGRATION_VERSION,
     inspectUniqueUserNames, inspectPasswordlessAccounts, verifyUniqueUserNamesPrecondition,
     verifyUniqueUserNamesSchema, verifyPasswordlessAccountsPrecondition,
@@ -89,7 +91,8 @@ function isPasswordlessMigration(migration: MigrationDefinition): boolean {
 function requiresCompleteEarlierHistory(migration: MigrationDefinition): boolean {
     return migration.effect === 'add-provider-identities' || migration.effect === 'add-provider-attempts'
         || migration.effect === 'add-account-sessions' || migration.effect === 'add-session-renewal'
-        || migration.effect === 'add-apple-tokens' || isPasswordlessMigration(migration);
+        || migration.effect === 'add-apple-tokens' || migration.effect === 'add-apple-revocations'
+        || migration.effect === 'add-apple-session-provenance' || isPasswordlessMigration(migration);
 }
 
 async function inspectLeaderboardStage(
@@ -256,6 +259,11 @@ async function inspectMigrationState(
         const actionsMigration = migrations.find(({ version }) => version === PROVIDER_ATTEMPT_ACTIONS_MIGRATION_VERSION)!;
         assertProviderMigrationHistory(migrations, actionsMigration, appliedByVersion);
     }
+    if (migrations.some(({ version }) => version === APPLE_SESSION_PROVENANCE_MIGRATION_VERSION)
+        && await tableExists(connection, 'account_sessions') && await inspectAppleSessionProvenance(connection)) {
+        const provenance = migrations.find(({ version }) => version === APPLE_SESSION_PROVENANCE_MIGRATION_VERSION)!;
+        assertProviderMigrationHistory(migrations, provenance, appliedByVersion);
+    }
     const applied: string[] = [];
     const pending: string[] = [];
     const recoverable: string[] = [];
@@ -271,6 +279,16 @@ async function inspectMigrationState(
         }
 
         pending.push(migration.version);
+        if (migration.effect === 'add-apple-session-provenance') {
+            if (await tableExists(connection, migration.tableName)) {
+                if (await inspectAppleSessionProvenance(connection)) {
+                    assertProviderMigrationHistory(migrations, migration, appliedByVersion);
+                    await verifyAccountSessionSchema(connection, true, true);
+                    recoverable.push(migration.version);
+                } else await verifyAccountSessionSchema(connection, await inspectAccountSessionRenewal(connection));
+            }
+            continue;
+        }
         if (isPasswordlessMigration(migration)) {
             if (await tableExists(connection, migration.tableName)) {
                 const completed = migration.effect === 'add-unique-user-names'
@@ -353,6 +371,16 @@ async function verifyMigrationPrecondition(
     connection: MigrationConnection,
     migration: MigrationDefinition
 ): Promise<void> {
+    if (migration.effect === 'add-apple-revocations') {
+        await verifyAppleTokenSchema(connection);
+        if (await tableExists(connection, migration.tableName)) throw new Error('Apple revocation migration requires its table to be absent');
+        return;
+    }
+    if (migration.effect === 'add-apple-session-provenance') {
+        await verifyAppleRevocationSchema(connection);
+        await verifyAccountSessionSchema(connection, true, false);
+        return;
+    }
     if (migration.effect === 'add-apple-tokens') {
         await verifyProviderIdentitySchema(connection);
         if (await tableExists(connection, migration.tableName)) throw new Error('Apple token migration requires its table to be absent');
@@ -440,6 +468,14 @@ async function verifyMigrationPostcondition(
     stage: LeaderboardSchemaStage = 'original',
     attemptStage: ProviderAttemptSchemaStage = 'legacy'
 ): Promise<void> {
+    if (migration.effect === 'add-apple-revocations') {
+        await verifyAppleRevocationSchema(connection);
+        return;
+    }
+    if (migration.effect === 'add-apple-session-provenance') {
+        await verifyAccountSessionSchema(connection, true, true);
+        return;
+    }
     if (migration.effect === 'add-apple-tokens') {
         await verifyAppleTokenSchema(connection);
         return;
@@ -465,7 +501,8 @@ async function verifyMigrationPostcondition(
         await verifyAccountIdentitySchema(connection);
         await verifyProviderIdentitySchema(connection);
         await verifyProviderAttemptSchema(connection, attemptStage);
-        await verifyAccountSessionSchema(connection, await inspectAccountSessionRenewal(connection));
+        await verifyAccountSessionSchema(connection, await inspectAccountSessionRenewal(connection),
+            await inspectAppleSessionProvenance(connection));
         return;
     }
     if (migration.effect === 'add-provider-attempts') {
@@ -537,7 +574,8 @@ function assertProviderMigrationHistory(
         : attempts ? PROVIDER_ATTEMPT_PREREQUISITES : PROVIDER_IDENTITY_PREREQUISITES);
     if (!prerequisites.every(version => applied.has(version))
         || migrations.some(({ version }) => version < migration.version && !applied.has(version))) {
-        const label = migration.effect === 'add-apple-tokens' ? 'Apple token storage' : passwordlessPrerequisites ? 'Passwordless account migrations' : renewal ? 'Session renewal'
+        const label = migration.effect === 'add-apple-revocations' || migration.effect === 'add-apple-session-provenance'
+            ? 'Apple revocation migrations' : migration.effect === 'add-apple-tokens' ? 'Apple token storage' : passwordlessPrerequisites ? 'Passwordless account migrations' : renewal ? 'Session renewal'
             : sessions ? 'Account sessions' : `Provider ${attempts ? 'attempts' : 'identities'}`;
         throw new Error(`${label} require all earlier migrations to be recorded first`);
     }

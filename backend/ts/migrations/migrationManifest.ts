@@ -4,7 +4,7 @@ import path from 'node:path';
 
 export type LeaderboardTableName = 'game_runs' | 'game_personal_bests';
 
-export type MigrationEffectKind = 'create-table' | 'drop-column' | 'detach-best-source' | 'retain-receipts' | 'add-account-identity' | 'add-provider-identities' | 'add-provider-attempts' | 'add-account-sessions' | 'add-session-renewal' | 'add-unique-user-names' | 'allow-passwordless-accounts' | 'extend-provider-attempt-actions' | 'add-apple-tokens';
+export type MigrationEffectKind = 'create-table' | 'drop-column' | 'detach-best-source' | 'retain-receipts' | 'add-account-identity' | 'add-provider-identities' | 'add-provider-attempts' | 'add-account-sessions' | 'add-session-renewal' | 'add-unique-user-names' | 'allow-passwordless-accounts' | 'extend-provider-attempt-actions' | 'add-apple-tokens' | 'add-apple-revocations' | 'add-apple-session-provenance';
 
 type MigrationMetadata = Readonly<{
     version: string;
@@ -33,6 +33,8 @@ export type MigrationDefinition = MigrationMetadata & Readonly<
     | { effect: 'add-unique-user-names' | 'allow-passwordless-accounts'; tableName: 'users' }
     | { effect: 'extend-provider-attempt-actions'; tableName: 'provider_auth_attempts' }
     | { effect: 'add-apple-tokens'; tableName: 'apple_provider_tokens' }
+    | { effect: 'add-apple-revocations'; tableName: 'apple_auth_revocations' }
+    | { effect: 'add-apple-session-provenance'; tableName: 'account_sessions' }
 >;
 
 const MIGRATION_SPECS = Object.freeze([
@@ -119,6 +121,16 @@ const MIGRATION_SPECS = Object.freeze([
         fileName: '0016_create_apple_provider_tokens.sql',
         effect: 'add-apple-tokens' as const,
         tableName: 'apple_provider_tokens' as const,
+    }),
+    Object.freeze({
+        fileName: '0017_create_apple_auth_revocations.sql',
+        effect: 'add-apple-revocations' as const,
+        tableName: 'apple_auth_revocations' as const,
+    }),
+    Object.freeze({
+        fileName: '0018_add_apple_session_provenance.sql',
+        effect: 'add-apple-session-provenance' as const,
+        tableName: 'account_sessions' as const,
     }),
 ]);
 

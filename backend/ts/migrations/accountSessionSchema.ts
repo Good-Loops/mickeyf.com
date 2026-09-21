@@ -3,6 +3,7 @@ import { tableExists, type MigrationConnection } from './leaderboardSchema';
 
 export const ACCOUNT_SESSION_MIGRATION_VERSION = '0011_create_account_sessions';
 export const ACCOUNT_SESSION_RENEWAL_MIGRATION_VERSION = '0012_add_session_renewal';
+export const APPLE_SESSION_PROVENANCE_MIGRATION_VERSION = '0018_add_apple_session_provenance';
 const TABLE_NAME = 'account_sessions';
 
 async function rows(connection: MigrationConnection, sql: string, values: unknown[] = [TABLE_NAME]): Promise<Record<string, unknown>[]> {
@@ -18,7 +19,8 @@ function assertExact(label: string, actual: readonly object[], expected: readonl
 }
 
 /** Exact storage and UUID cascade keep revocation durable and deletion complete. */
-export async function verifyAccountSessionSchema(connection: MigrationConnection, renewable = false): Promise<void> {
+export async function verifyAccountSessionSchema(connection: MigrationConnection, renewable = false, appleProvenance = false): Promise<void> {
+    if (appleProvenance && !renewable) throw new Error('Apple session provenance requires renewable sessions');
     assertExact('table', await rows(connection, `
         SELECT ENGINE AS engine, TABLE_COLLATION AS collation, TABLE_TYPE AS tableType
         FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
@@ -36,6 +38,10 @@ export async function verifyAccountSessionSchema(connection: MigrationConnection
         { ...column('renewed_at', 'datetime(6)', null, null, 6, 'UTC'), nullable: 'YES' },
         { ...column('previous_session_hash', 'binary(32)'), nullable: 'YES' },
         { ...column('previous_valid_until', 'datetime(6)', null, null, 6, 'UTC'), nullable: 'YES' },
+    );
+    if (appleProvenance) expectedColumns.push(
+        { ...column('apple_subject_hash', 'binary(32)'), nullable: 'YES' },
+        { ...column('apple_authenticated_at', 'bigint unsigned'), nullable: 'YES' },
     );
     assertExact('columns', await rows(connection, `
         SELECT COLUMN_NAME AS name, COLUMN_TYPE AS type, IS_NULLABLE AS nullable,
@@ -80,7 +86,19 @@ export async function verifyAccountSessionSchema(connection: MigrationConnection
     assertExact('checks', await rows(connection, `
         SELECT CONSTRAINT_NAME AS name FROM information_schema.TABLE_CONSTRAINTS
         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? AND CONSTRAINT_TYPE = 'CHECK' ORDER BY CONSTRAINT_NAME
-    `), []);
+    `), appleProvenance ? [{ name: 'chk_account_sessions_apple_provenance' }] : []);
+    if (appleProvenance) {
+        const checks = await rows(connection, `SELECT checks.CHECK_CLAUSE AS clause, constraints.ENFORCED AS enforced
+            FROM information_schema.CHECK_CONSTRAINTS AS checks
+            INNER JOIN information_schema.TABLE_CONSTRAINTS AS constraints
+                ON constraints.CONSTRAINT_SCHEMA = checks.CONSTRAINT_SCHEMA
+                AND constraints.CONSTRAINT_NAME = checks.CONSTRAINT_NAME
+            WHERE constraints.TABLE_SCHEMA = DATABASE() AND constraints.TABLE_NAME = ?
+                AND constraints.CONSTRAINT_TYPE = 'CHECK' ORDER BY constraints.CONSTRAINT_NAME`);
+        assertExact('check expressions', checks.map(row => ({
+            clause: String(row.clause).replace(/[\s`]/gu, '').toLowerCase(), enforced: row.enforced,
+        })), [{ clause: '(((apple_subject_hashisnull)and(apple_authenticated_atisnull))or((apple_subject_hashisnotnull)and(apple_authenticated_atisnotnull)and(apple_authenticated_at>0)))', enforced: 'YES' }]);
+    }
     assertExact('triggers', await rows(connection, `
         SELECT TRIGGER_NAME AS name FROM information_schema.TRIGGERS
         WHERE TRIGGER_SCHEMA = DATABASE() AND EVENT_OBJECT_TABLE = ? ORDER BY TRIGGER_NAME
@@ -97,22 +115,36 @@ export async function inspectAccountSessionRenewal(connection: MigrationConnecti
 }
 
 export async function verifyRenewableAccountSessionSchema(connection: MigrationConnection): Promise<void> {
-    await verifyAccountSessionSchema(connection, true);
+    await verifyAccountSessionSchema(connection, true, await inspectAppleSessionProvenance(connection));
+}
+
+export async function inspectAppleSessionProvenance(connection: MigrationConnection): Promise<boolean> {
+    const columns = await rows(connection, `SELECT COLUMN_NAME AS name FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?
+        AND COLUMN_NAME IN ('apple_subject_hash', 'apple_authenticated_at')`);
+    if (columns.length === 0) return false;
+    if (columns.length !== 2) throw new Error('Apple session provenance schema is incomplete');
+    return true;
 }
 
 /** Older backups may omit sessions only if 0011 has not been recorded. */
 export async function verifyOptionalAccountSessionSchema(connection: MigrationConnection): Promise<void> {
     if (await tableExists(connection, TABLE_NAME)) {
         const renewable = await inspectAccountSessionRenewal(connection);
+        const appleProvenance = await inspectAppleSessionProvenance(connection);
         if (!renewable && (await rows(connection, 'SELECT version FROM schema_migrations WHERE version = ?',
             [ACCOUNT_SESSION_RENEWAL_MIGRATION_VERSION])).length !== 0) {
             throw new Error('Recorded session renewal migration is missing its columns');
         }
-        await verifyAccountSessionSchema(connection, renewable);
+        if (!appleProvenance && (await rows(connection, 'SELECT version FROM schema_migrations WHERE version = ?',
+            [APPLE_SESSION_PROVENANCE_MIGRATION_VERSION])).length !== 0) {
+            throw new Error('Recorded Apple session provenance migration is missing its columns');
+        }
+        await verifyAccountSessionSchema(connection, renewable, appleProvenance);
         return;
     }
     const recorded = await rows(connection,
-        'SELECT version FROM schema_migrations WHERE version IN (?, ?)',
-        [ACCOUNT_SESSION_MIGRATION_VERSION, ACCOUNT_SESSION_RENEWAL_MIGRATION_VERSION]);
+        'SELECT version FROM schema_migrations WHERE version IN (?, ?, ?)',
+        [ACCOUNT_SESSION_MIGRATION_VERSION, ACCOUNT_SESSION_RENEWAL_MIGRATION_VERSION, APPLE_SESSION_PROVENANCE_MIGRATION_VERSION]);
     if (recorded.length !== 0) throw new Error('Recorded account session migration is missing its table');
 }

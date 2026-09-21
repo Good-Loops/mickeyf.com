@@ -12,6 +12,7 @@ import { establishProviderSession } from './providerSession';
 const account: ProviderAccount = { userId: 7, userName: 'provider-player', accountId: randomUUID() };
 const sessionSecret = 'unit-test-provider-session-secret-not-a-credential';
 const providerToken = 'unit-test-provider-id-token-never-returned';
+const appleProof = { clientId: 'com.example.app', subject: 'apple-subject', issuedAt: Math.floor(Date.now() / 1000) - 5 };
 type QueryCall = { sql: string; values: unknown[] };
 type CookieCall = { name: string; value: string; options: CookieOptions };
 
@@ -34,6 +35,9 @@ function fixture(options: { user?: Record<string, unknown> | null; fail?: string
             if (sql.startsWith('SELECT account_uuid')) return [options.user === null ? []
                 : [options.user ?? { accountId: account.accountId, passwordHash: null }], []];
             if (sql.startsWith('SELECT session_hash')) return [[], []];
+            if (sql.startsWith('SELECT subject FROM account_provider_identities')) return [[{ subject: Buffer.from(appleProof.subject) }], []];
+            if (sql.startsWith('SELECT revoked_at')) return [[], []];
+            if (sql.startsWith('SELECT TIMESTAMPDIFF')) return [[{ now: Math.floor(Date.now() / 1000) }], []];
             if (sql.startsWith('INSERT INTO account_sessions')) stored = values;
             if (sql.startsWith('SELECT u.user_name')) {
                 const live = committed && stored && values[0] === account.userId
@@ -117,11 +121,39 @@ test('Apple session provenance comes from the verified flow, not incoming sessio
         const f = fixture();
         await establishProviderSession(f.database, { headers: { origin: 'capacitor://localhost',
             authenticationMethod: 'apple', authorization: 'Bearer previous-apple-session' } }, f.response,
-        { ...account, authenticationMethod: 'apple' } as ProviderAccount, true, sessionSecret, true, method);
+        { ...account, authenticationMethod: 'apple' } as ProviderAccount, true, sessionSecret, true, method,
+        method === 'apple' ? appleProof : undefined);
         const authentication = verifyRequestToken(f.cookies[0].value, sessionSecret);
         assert.ok(authentication.authenticated);
         assert.equal(authentication.identity.authenticationMethod, method);
     }
+});
+
+test('Apple provenance cannot issue a session without original proof or attach to a non-Apple login', async () => {
+    for (const [method, proof] of [['apple', undefined], [undefined, appleProof]] as const) {
+        const f = fixture();
+        await assert.rejects(establishProviderSession(f.database, { headers: {} }, f.response,
+            account, false, sessionSecret, true, method, proof), /verified original authentication proof/);
+        assert.equal(f.calls.length, 0);
+        assert.equal(f.cookies.length, 0);
+    }
+});
+
+test('Apple proof is checked inside the locked transaction and stored independently of renewable token timestamps', async () => {
+    const f = fixture();
+    assert.equal(await establishProviderSession(f.database, { headers: {} }, f.response,
+        account, true, sessionSecret, true, 'apple', appleProof), true);
+    const sql = f.calls.map(call => call.sql);
+    const proofRead = sql.findIndex(value => value.startsWith('SELECT subject FROM account_provider_identities'));
+    const inserted = f.calls.find(call => call.sql.startsWith('INSERT INTO account_sessions'))!;
+    assert.ok(proofRead > sql.indexOf('START TRANSACTION'));
+    assert.match(inserted.sql, /apple_subject_hash, apple_authenticated_at/);
+    assert.equal((inserted.values[4] as Buffer).length, 32);
+    assert.equal(inserted.values[5], appleProof.issuedAt);
+    const stale = fixture();
+    assert.equal(await establishProviderSession(stale.database, { headers: {} }, stale.response,
+        account, true, sessionSecret, true, 'apple', { ...appleProof, issuedAt: appleProof.issuedAt - 300 }), false);
+    assert.deepEqual(stale.cookies, []);
 });
 
 test('missing account UUIDs and removed or replaced accounts cannot issue provider session cookies', async () => {

@@ -25,6 +25,7 @@ import { verifyAccountDeletionReadiness, verifyAccountSessionReadiness,
     verifyProviderAuthReadiness } from './accounts/accountDeletionReadiness';
 import { verifyPasswordlessAccountSchema } from './migrations/passwordlessAccountSchema';
 import { verifyAppleTokenReadiness } from './migrations/appleTokenSchema';
+import { verifyAppleRevocationReadiness } from './migrations/appleRevocationSchema';
 
 const runtimeConfig = loadRuntimeConfig();
 const deletionJournal = runtimeConfig.accountDeletionEnabled
@@ -94,6 +95,7 @@ async function startServer(): Promise<void> {
         await verifyDatabaseConnection();
         await verifyAccountSessionReadiness(pool);
         if (runtimeConfig.providerAuth.appleTokenLifecycle) await verifyAppleTokenReadiness(pool);
+        if (runtimeConfig.providerAuth.appleNotifications) await verifyAppleRevocationReadiness(pool);
         if (runtimeConfig.providerAuth.signupEnabled) {
             await verifyPasswordlessAccountSchema(pool);
         }

@@ -12,7 +12,7 @@ export type RuntimeColumnGrant = Readonly<{
 
 export type RuntimeTableGrant = Readonly<{
     table: 'users' | 'game_submission_receipts' | 'game_personal_bests' | 'schema_migrations' | 'account_sessions'
-        | 'account_provider_identities' | 'provider_auth_attempts' | 'apple_provider_tokens';
+        | 'account_provider_identities' | 'provider_auth_attempts' | 'apple_provider_tokens' | 'apple_auth_revocations';
     grants: readonly RuntimeColumnGrant[];
     tablePrivileges: readonly 'DELETE'[];
 }>;
@@ -46,6 +46,15 @@ export const PRODUCTION_RUNTIME_DATABASE_ROLE: RuntimeDatabaseAccount =
  */
 export const RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freeze([
     Object.freeze({
+        table: 'apple_auth_revocations' as const,
+        tablePrivileges: Object.freeze(['DELETE' as const]),
+        grants: Object.freeze([
+            Object.freeze({ privilege: 'SELECT' as const, columns: Object.freeze(['subject_hash', 'revoked_at', 'expires_at']) }),
+            Object.freeze({ privilege: 'INSERT' as const, columns: Object.freeze(['subject_hash', 'revoked_at', 'expires_at']) }),
+            Object.freeze({ privilege: 'UPDATE' as const, columns: Object.freeze(['revoked_at', 'expires_at']) }),
+        ]),
+    }),
+    Object.freeze({
         table: 'apple_provider_tokens' as const,
         tablePrivileges: Object.freeze(['DELETE' as const]),
         grants: Object.freeze([
@@ -64,10 +73,11 @@ export const RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freez
         grants: Object.freeze([
             Object.freeze({ privilege: 'SELECT' as const,
                 columns: Object.freeze(['session_hash', 'account_uuid', 'created_at', 'expires_at',
-                    'remembered', 'renewed_at', 'previous_session_hash', 'previous_valid_until']) }),
+                    'remembered', 'renewed_at', 'previous_session_hash', 'previous_valid_until',
+                    'apple_subject_hash', 'apple_authenticated_at']) }),
             Object.freeze({ privilege: 'INSERT' as const,
                 columns: Object.freeze(['session_hash', 'account_uuid', 'created_at', 'expires_at',
-                    'remembered', 'renewed_at']) }),
+                    'remembered', 'renewed_at', 'apple_subject_hash', 'apple_authenticated_at']) }),
             Object.freeze({ privilege: 'UPDATE' as const,
                 columns: Object.freeze(['session_hash', 'expires_at', 'renewed_at',
                     'previous_session_hash', 'previous_valid_until']) }),

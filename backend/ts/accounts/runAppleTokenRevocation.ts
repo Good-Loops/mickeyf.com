@@ -1,6 +1,8 @@
 import mysql, { type PoolConnection } from 'mysql2/promise';
 import { loadAppleRevocationConfig, type AppleRevocationConfig } from '../config/appleRevocationConfig';
 import { verifyAppleTokenReadiness } from '../migrations/appleTokenSchema';
+import { verifyAppleRevocationReadiness } from '../migrations/appleRevocationSchema';
+import { cleanupExpiredAppleRevocations } from '../auth/appleSessionRevocation';
 import type { MigrationConnection } from '../migrations/leaderboardSchema';
 import { createAppleTokenRevocationWorker } from './appleTokenRevocation';
 
@@ -16,6 +18,7 @@ export async function verifyAppleRevocationConnection(connection: PoolConnection
         if (!target || target.databaseName !== 'cms' || target.currentUser !== config.expectedAccount
             || target.serverUuid !== config.expectedServerUuid) throw new Error();
         await verifyAppleTokenReadiness(inspection);
+        await verifyAppleRevocationReadiness(inspection);
     } catch {
         throw new Error('Apple revocation target identity or recorded schema could not be verified.');
     }
@@ -26,6 +29,16 @@ export async function runAppleTokenRevocation(args: readonly string[]): Promise<
     const config = loadAppleRevocationConfig(args);
     const pool = mysql.createPool(config.databaseOptions);
     try {
+        const connection = await pool.getConnection();
+        let guardsPurged: number;
+        try {
+            await verifyAppleRevocationConnection(connection, config);
+            guardsPurged = await cleanupExpiredAppleRevocations(connection);
+        } catch {
+            connection.destroy();
+            throw new Error('Apple revocation guard cleanup could not be confirmed.');
+        }
+        connection.release();
         const worker = createAppleTokenRevocationWorker({
             clientId: config.lifecycle.clientId, vault: config.lifecycle.repository, appleTokens: config.lifecycle.client,
             database: { async getConnection() {
@@ -38,8 +51,11 @@ export async function runAppleTokenRevocation(args: readonly string[]): Promise<
             } },
         });
         const result = await worker.drain();
-        const incomplete = result.status !== 'completed' || result.retried > 0 || result.expired > 0;
-        console.log(JSON.stringify({ component: 'apple-token-revocation', severity: incomplete ? 'ERROR' : 'INFO', ...result }));
+        // A full bounded sweep asks for another pass rather than claiming an empty backlog.
+        const guardCleanupBacklog = guardsPurged === 100;
+        const incomplete = result.status !== 'completed' || result.retried > 0 || result.expired > 0 || guardCleanupBacklog;
+        console.log(JSON.stringify({ component: 'apple-token-revocation', severity: incomplete ? 'ERROR' : 'INFO',
+            ...result, guardsPurged, guardCleanupBacklog }));
         if (incomplete) process.exitCode = 2;
     } finally { await pool.end(); }
 }

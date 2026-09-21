@@ -1,6 +1,8 @@
 import { createHash } from 'node:crypto';
 import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { isAccountId } from '../accounts/deletionJournal';
+import { appleSubjectHash, assertFreshAppleSession, APPLE_SESSION_PROOF_MAX_AGE_SECONDS,
+    APPLE_SESSION_PROOF_FUTURE_TOLERANCE_SECONDS, type AppleSessionProof } from './appleSessionRevocation';
 import { withUserSubmissionLock, type UserSubmissionLockContext } from '../leaderboards/userSubmissionLock';
 import { isSessionId, PERSISTENT_SESSION_SECONDS,
     SESSION_RENEWAL_GRACE_SECONDS, SESSION_RENEWAL_INTERVAL_SECONDS } from '../security/sessionPolicy';
@@ -11,6 +13,7 @@ type SessionReader = Pick<Pool, 'query'> | Pick<PoolConnection, 'query'>;
 const QUERY_TIMEOUT_MS = 10_000;
 const SESSION_LIMIT = 10;
 const EXPIRY_SQL = "TIMESTAMPADD(SECOND, ?, '1970-01-01 00:00:00')";
+class AppleSessionProofRejected extends Error {}
 
 export class AccountSessionUnavailableError extends Error {
     constructor() {
@@ -58,8 +61,11 @@ export async function createAccountSession(
     database: SessionDatabase, target: AccountTarget, sessionId: string, expiresAt: number,
     expectedPasswordHash?: string,
     rememberMe = false,
+    appleProof?: AppleSessionProof,
 ): Promise<boolean> {
     const hash = sessionHash(target, sessionId);
+    const appleHash = appleProof === undefined ? undefined : appleSubjectHash(appleProof);
+    const proof = appleProof === undefined ? undefined : Object.freeze({ ...appleProof });
     const now = Math.floor(Date.now() / 1000);
     if (typeof rememberMe !== 'boolean' || !Number.isSafeInteger(expiresAt)
         || expiresAt <= now || expiresAt > now + PERSISTENT_SESSION_SECONDS
@@ -98,18 +104,28 @@ export async function createAccountSession(
                 }, [account.accountId, sessions[0].session_hash]);
                 if (removed.affectedRows !== 1) throw new AccountSessionUnavailableError();
             }
+            // Recheck after every lock/cap wait and roll back eviction on rejection.
+            // Initial provider verification cannot rule out revocation during sign-in.
+            if (proof && !await assertFreshAppleSession(connection, account.accountId, proof)) throw new AppleSessionProofRejected();
             // UTC arithmetic avoids depending on a pooled connection's session time zone.
             const [inserted] = await connection.query<ResultSetHeader>({
                 sql: `INSERT INTO account_sessions (session_hash, account_uuid, created_at, expires_at,
-                    remembered, renewed_at)
-                    SELECT ?, ?, UTC_TIMESTAMP(6), ${EXPIRY_SQL}, ?, UTC_TIMESTAMP(6)
+                    remembered, renewed_at${proof ? ', apple_subject_hash, apple_authenticated_at' : ''})
+                    SELECT ?, ?, UTC_TIMESTAMP(6), ${EXPIRY_SQL}, ?, UTC_TIMESTAMP(6)${proof ? ', ?, ?' : ''}
                     WHERE ${EXPIRY_SQL} > UTC_TIMESTAMP(6)
-                    AND ${EXPIRY_SQL} <= UTC_TIMESTAMP(6) + INTERVAL 30 DAY`, timeout: QUERY_TIMEOUT_MS,
-            }, [hash, account.accountId, expiresAt, rememberMe ? 1 : 0, expiresAt, expiresAt]);
+                    AND ${EXPIRY_SQL} <= UTC_TIMESTAMP(6) + INTERVAL 30 DAY${proof
+                        ? ` AND ${EXPIRY_SQL} > UTC_TIMESTAMP(6) - INTERVAL ${APPLE_SESSION_PROOF_MAX_AGE_SECONDS} SECOND
+                            AND ${EXPIRY_SQL} <= UTC_TIMESTAMP(6) + INTERVAL ${APPLE_SESSION_PROOF_FUTURE_TOLERANCE_SECONDS} SECOND` : ''}`,
+                timeout: QUERY_TIMEOUT_MS,
+            }, [hash, account.accountId, expiresAt, rememberMe ? 1 : 0,
+                ...(proof ? [appleHash, proof.issuedAt] : []), expiresAt, expiresAt,
+                ...(proof ? [proof.issuedAt, proof.issuedAt] : [])]);
+            if (proof && inserted.affectedRows === 0) throw new AppleSessionProofRejected();
             if (inserted.affectedRows !== 1) throw new AccountSessionUnavailableError();
             return true;
         }, 'READ COMMITTED'));
-    } catch {
+    } catch (error) {
+        if (error instanceof AppleSessionProofRejected) return false;
         // Never retain raw driver parameters, credentials, or an uncertain commit as a successful login.
         throw new AccountSessionUnavailableError();
     }

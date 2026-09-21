@@ -62,7 +62,7 @@ type KeyCache = {
     pending?: Promise<Map<string, KeyObject>>;
 };
 
-class ProviderKeysUnavailable extends Error {
+export class ProviderKeysUnavailable extends Error {
     constructor() { super('Provider verification keys unavailable.'); }
 }
 
@@ -85,7 +85,7 @@ function decodeSegment(segment: string): unknown {
     return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(bytes));
 }
 
-function readTokenKeyId(token: unknown): string | undefined {
+export function readProviderJwsKeyId(token: unknown): string | undefined {
     if (typeof token !== 'string' || token.length > PROVIDER_TOKEN_MAX_LENGTH) return undefined;
     const parts = token.split('.');
     if (parts.length !== 3 || parts.some(part => !/^[a-zA-Z0-9_-]+$/u.test(part))
@@ -193,7 +193,7 @@ async function fetchProviderKeys(
     }
 }
 
-function createKeyResolver(fetcher: typeof globalThis.fetch, now: () => number) {
+export function createProviderKeyResolver(fetcher: typeof globalThis.fetch, now: () => number) {
     const caches = new Map<IdentityProvider, KeyCache>();
     return async (provider: IdentityProvider, keyId: string): Promise<KeyObject | undefined> => {
         let cache = caches.get(provider);
@@ -229,7 +229,7 @@ function createKeyResolver(fetcher: typeof globalThis.fetch, now: () => number) 
 function validClaims(
     claims: unknown, provider: IdentityProvider, audience: string,
     authorizedParty: string | undefined, expectedNonce: string, nowSeconds: number
-): claims is { sub: string } {
+): claims is { sub: string; iat: number } {
     if (!isRecord(claims) || claims.aud !== audience || !isIdentifier(claims.sub, 255)
         || !Number.isSafeInteger(claims.exp) || !Number.isSafeInteger(claims.iat)
         || (claims.iat as number) <= 0 || (claims.exp as number) <= nowSeconds
@@ -283,7 +283,7 @@ export function createProviderTokenVerifier(
     const audiences = { google: configuration.googleAudience, apple: configuration.appleAudience };
     const authorizedParty = configuration.googleAuthorizedParty ?? configuration.googleAudience;
     const now = dependencies.now ?? Date.now;
-    const resolveKey = createKeyResolver(dependencies.fetch ?? globalThis.fetch, now);
+    const resolveKey = createProviderKeyResolver(dependencies.fetch ?? globalThis.fetch, now);
     return {
         async verify(provider, token, expectedNonce) {
             if (provider !== 'google' && provider !== 'apple') {
@@ -295,7 +295,7 @@ export function createProviderTokenVerifier(
                 if (typeof expectedNonce !== 'string' || !/^[a-zA-Z0-9_-]{32,256}$/u.test(expectedNonce)) {
                     return { verified: false, reason: 'INVALID_PROVIDER_TOKEN' };
                 }
-                const keyId = readTokenKeyId(token);
+                const keyId = readProviderJwsKeyId(token);
                 if (!keyId) return { verified: false, reason: 'INVALID_PROVIDER_TOKEN' };
                 const key = await resolveKey(provider, keyId);
                 if (!key) return { verified: false, reason: 'INVALID_PROVIDER_TOKEN' };
@@ -315,6 +315,7 @@ export function createProviderTokenVerifier(
                 return {
                     verified: true,
                     identity: Object.freeze({ provider, subject: claims.sub,
+                        ...(provider === 'apple' ? { appleIssuedAt: claims.iat, appleClientId: audience } : {}),
                         ...(email === undefined ? {} : { email }) }) as VerifiedProviderIdentity,
                 };
             } catch (error) {

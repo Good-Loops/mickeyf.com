@@ -26,6 +26,9 @@ import { createProviderAuthRouter } from './providerAuthRouter';
 import type { ProviderAuthClient } from '../auth/providerAuthFlow';
 import type { PublicProviderAuthClient } from '../config/providerAuthConfig';
 import type { AppleTokenLifecycle } from '../config/appleTokenConfig';
+import type { AppleNotificationVerifier } from '../auth/appleNotificationVerifier';
+import { applyAppleNotification } from '../auth/appleSessionRevocation';
+import { createAppleNotificationRouter } from './appleNotificationRouter';
 
 export { authRoutesContract } from './authRouter.contract';
 
@@ -43,6 +46,7 @@ export function createAuthRouter(
             clients: Readonly<Record<string, ProviderAuthClient>>;
             publicClients?: readonly PublicProviderAuthClient[];
             appleTokenLifecycle?: AppleTokenLifecycle;
+            appleNotifications?: AppleNotificationVerifier;
         };
     } = {}
 ): Router {
@@ -56,6 +60,8 @@ export function createAuthRouter(
      * - None beyond Express route registration.
      */
     const router: Router = Router();
+    router.use('/providers/apple-notifications', createAppleNotificationRouter(providerAuth?.appleNotifications,
+        notification => applyAppleNotification(database, notification)));
 
     // Only public identifiers are exposed, never verifier configuration or credentials.
     router.get('/providers/config', (_request, response) => {

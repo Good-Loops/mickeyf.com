@@ -8,6 +8,7 @@ import type { ProviderAttempt, ConsumedProviderAttempt, ProviderAttemptAction, P
 import type { IdentityProvider, VerifiedProviderIdentity } from './providerIdentity';
 import { type ProviderTokenVerifier, PROVIDER_TOKEN_MAX_LENGTH } from './providerTokenVerifier';
 import { AppleTokenClientError, type AppleTokenClient } from './appleTokenClient';
+import type { AppleSessionProof } from './appleSessionRevocation';
 
 export type ProviderAuthClient = Readonly<{
     provider: IdentityProvider;
@@ -23,7 +24,7 @@ type Failure = { ok: false; reason: 'UNAVAILABLE' | 'INVALID_REQUEST' | 'INVALID
     | 'ACCOUNT_DELETION_UNAVAILABLE' | 'ACCOUNT_DELETION_PENDING' };
 export type ProviderChallengeResult = Failure | { ok: true; state: string; nonce: string; expiresInSeconds: number };
 export type ProviderCompletionResult = Failure
-    | { ok: true; type: 'account-verified'; account: ProviderAccount; authenticationMethod?: 'apple' }
+    | { ok: true; type: 'account-verified'; account: ProviderAccount; authenticationMethod?: 'apple'; appleSessionProof?: AppleSessionProof }
     | { ok: true; type: 'signup-required'; state: string; nonce: string; expiresInSeconds: number }
     | { ok: true; type: 'linked' }
     | { ok: true; type: 'deleted' };
@@ -64,6 +65,15 @@ function matchesContext(context: ProviderAuthContext | null, action: ProviderAtt
     return context !== null && Buffer.isBuffer(context.bindingHash) && context.bindingHash.length === 32
         && (action === 'login' || action === 'signup' ? context.account === null && context.session === null
             : context.account !== null && context.session !== null);
+}
+
+function verifiedAccountResult(account: ProviderAccount, identity: VerifiedProviderIdentity): ProviderCompletionResult {
+    if (identity.provider !== 'apple') return { ok: true, type: 'account-verified', account };
+    if (!Number.isSafeInteger(identity.appleIssuedAt) || !identity.appleIssuedAt || !identity.appleClientId) {
+        return { ok: false, reason: 'INVALID_PROVIDER_TOKEN' };
+    }
+    return { ok: true, type: 'account-verified', account, authenticationMethod: 'apple',
+        appleSessionProof: Object.freeze({ subject: identity.subject, clientId: identity.appleClientId, issuedAt: identity.appleIssuedAt }) };
 }
 
 /**
@@ -181,8 +191,7 @@ export function createProviderAuthFlow({ attempts, accounts, clients, enabled = 
                     if (account) {
                         const token = await exchangeAppleToken();
                         if (token !== undefined) await accounts.saveAppleToken!(account, verified.identity, token);
-                        return { ok: true, type: 'account-verified', account,
-                            ...(verified.identity.provider === 'apple' ? { authenticationMethod: 'apple' as const } : {}) };
+                        return verifiedAccountResult(account, verified.identity);
                     }
                     if (!signupAvailable(selection.clientKey, selection.client)) {
                         return { ok: false, reason: 'NOT_LINKED' };
@@ -214,12 +223,10 @@ export function createProviderAuthFlow({ attempts, accounts, clients, enabled = 
                         // can resolve that race to the existing account.
                         const account = await accounts.find(verified.identity);
                         if (account && token !== undefined) await accounts.saveAppleToken!(account, verified.identity, token);
-                        return account ? { ok: true, type: 'account-verified', account,
-                            ...(verified.identity.provider === 'apple' ? { authenticationMethod: 'apple' as const } : {}) }
+                        return account ? verifiedAccountResult(account, verified.identity)
                             : { ok: false, reason: result.reason };
                     }
-                    return result.created ? { ok: true, type: 'account-verified', account: result.account,
-                        ...(verified.identity.provider === 'apple' ? { authenticationMethod: 'apple' as const } : {}) }
+                    return result.created ? verifiedAccountResult(result.account, verified.identity)
                         : { ok: false, reason: result.reason };
                 }
                 if (selection.action === 'delete') {

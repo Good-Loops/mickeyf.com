@@ -6,6 +6,7 @@ import * as providerIdentitySchema from './providerIdentitySchema';
 import * as attemptSchema from './providerAttemptSchema';
 import * as sessionSchema from './accountSessionSchema';
 import * as appleTokenSchema from './appleTokenSchema';
+import * as appleRevocationSchema from './appleRevocationSchema';
 import type { MigrationConnection } from './leaderboardSchema';
 import { loadMigrationManifest } from './migrationManifest';
 import {
@@ -205,6 +206,8 @@ test('plan is read-only, configures short waits, and releases its advisory lock'
             '0014_allow_passwordless_accounts',
             '0015_extend_provider_attempt_actions',
             '0016_create_apple_provider_tokens',
+            '0017_create_apple_auth_revocations',
+            '0018_add_apple_session_provenance',
         ],
         recoverable: [],
     });
@@ -564,6 +567,7 @@ function passwordlessRunnerFixture(t: TestContext, options: {
     t.mock.method(sessionSchema, 'verifyAccountSessionSchema', async () => {});
     t.mock.method(sessionSchema, 'verifyRenewableAccountSessionSchema', async () => {});
     t.mock.method(sessionSchema, 'inspectAccountSessionRenewal', async () => true);
+    t.mock.method(sessionSchema, 'inspectAppleSessionProvenance', async () => false);
     const connection = new FakeConnection((sql, values) => {
         if (sql.includes('GET_LOCK')) return [{ acquired: 1 }];
         if (sql.includes('RELEASE_LOCK')) return [{ released: 1 }];
@@ -676,4 +680,81 @@ test('Apple token storage requires explicit selection, complete earlier history 
     assert.equal(base.connection.calls.filter(({ sql }) => sql === apple.sql).length, 1, 'recover history without rerunning CREATE');
     base.state.applied.splice(14, 1);
     await assert.rejects(planMigrations(base.connection, migrations, settings), /all earlier migrations/u);
+});
+
+function appleRevocationRunnerFixture(t: TestContext, options: {
+    recordedCount?: number; watermark?: boolean; provenance?: boolean; partialProvenance?: boolean;
+} = {}) {
+    const base = passwordlessRunnerFixture(t, { recordedCount: 15, unique: true, passwordless: true, extended: true });
+    const migrations = loadMigrationManifest();
+    base.state.applied = migrations.slice(0, options.recordedCount ?? 16).map(({ version, checksum }) => ({ version, checksum }));
+    const state = { watermark: options.watermark ?? false, provenance: options.provenance ?? false, verifications: [] as string[] };
+    t.mock.method(appleTokenSchema, 'verifyAppleTokenSchema', async () => {});
+    t.mock.method(appleRevocationSchema, 'verifyAppleRevocationSchema', async () => {
+        assert.equal(state.watermark, true, 'watermark table must exist'); state.verifications.push('watermark');
+    });
+    t.mock.method(sessionSchema, 'inspectAppleSessionProvenance', async () => {
+        if (options.partialProvenance) throw new Error('Apple session provenance schema is incomplete');
+        return state.provenance;
+    });
+    t.mock.method(sessionSchema, 'verifyAccountSessionSchema', async (_connection: MigrationConnection,
+        renewable = false, provenance = false) => {
+        assert.equal(renewable, true); assert.equal(provenance, state.provenance);
+        state.verifications.push(provenance ? 'provenance' : 'renewable');
+    });
+    const originalQuery = base.connection.query.bind(base.connection);
+    base.connection.query = async (sql, values = []) => {
+        if ((sql.includes('COUNT(*)') && values[0] === 'apple_auth_revocations')
+            || sql === migrations[16].sql || sql === migrations[17].sql) {
+            base.connection.calls.push({ sql, values });
+            if (sql === migrations[16].sql) { state.watermark = true; return [{}, []]; }
+            if (sql === migrations[17].sql) { state.provenance = true; return [{}, []]; }
+            return [[{ tableCount: state.watermark ? 1 : 0 }], []];
+        }
+        return originalQuery(sql, values);
+    };
+    return { ...base, migrations, revocations: state };
+}
+
+test('Apple revocation applies only its two explicit effects in order and accepts historical session postconditions afterward', async t => {
+    const fixture = appleRevocationRunnerFixture(t);
+    const { connection, migrations, revocations } = fixture;
+    assert.deepEqual((await applyMigrations(connection, migrations, settings)).pending, migrations.slice(16).map(({ version }) => version));
+    assert.equal(revocations.watermark, false);
+    const result = await applyMigrations(connection, migrations, settings, {
+        allowedEffectKinds: ['add-apple-revocations', 'add-apple-session-provenance'],
+    });
+    assert.deepEqual(result.pending, []);
+    assert.deepEqual(connection.calls.filter(({ sql }) => sql === migrations[16].sql || sql === migrations[17].sql)
+        .map(({ sql }) => sql), migrations.slice(16).map(({ sql }) => sql));
+    assert.ok(revocations.verifications.includes('watermark'));
+    assert.ok(revocations.verifications.includes('provenance'));
+});
+
+test('either Apple revocation DDL may recover an unrecorded completed effect without repeating it', async t => {
+    for (const index of [16, 17]) {
+        const { connection, migrations } = appleRevocationRunnerFixture(t, {
+            recordedCount: index, watermark: true, provenance: index === 17,
+        });
+        const plan = await planMigrations(connection, migrations, settings);
+        assert.deepEqual(plan.recoverable, [migrations[index].version]);
+        await applyMigrations(connection, migrations, settings, { allowedEffectKinds: [migrations[index].effect] });
+        assert.equal(connection.calls.some(({ sql }) => sql === migrations[index].sql), false);
+        t.mock.restoreAll();
+    }
+});
+
+test('partial provenance, missing prerequisite history and missing recorded outcomes fail before writes', async t => {
+    const cases = [
+        { recordedCount: 17, watermark: true, partialProvenance: true },
+        { recordedCount: 16, watermark: true, provenance: true },
+        { recordedCount: 18, watermark: true, provenance: false },
+        { recordedCount: 17, watermark: false },
+    ];
+    for (const options of cases) {
+        const { connection, migrations } = appleRevocationRunnerFixture(t, options);
+        await assert.rejects(planMigrations(connection, migrations, settings));
+        assert.equal(connection.calls.some(({ sql }) => /^(?:CREATE|ALTER|INSERT INTO schema_migrations)/u.test(sql)), false);
+        t.mock.restoreAll();
+    }
 });

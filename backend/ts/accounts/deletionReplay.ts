@@ -9,6 +9,7 @@ import { verifyOptionalProviderIdentitySchema } from '../migrations/providerIden
 import { verifyOptionalProviderAttemptSchema } from '../migrations/providerAttemptSchema';
 import { verifyOptionalAccountSessionSchema } from '../migrations/accountSessionSchema';
 import { verifyOptionalAppleTokenSchema } from '../migrations/appleTokenSchema';
+import { verifyOptionalAppleRevocationSchema } from '../migrations/appleRevocationSchema';
 import { markAppleTokensForRevocation } from './appleTokenRepository';
 import { AccountDeletionRollbackError, deleteOwnedAccountRows } from './accountDeletionRepository';
 import { type DeletionJournalReader, parseDeletionIntent } from './deletionJournal';
@@ -83,6 +84,7 @@ async function verifyTargetSchema(
         await verifyOptionalProviderAttemptSchema(timed);
         await verifyOptionalAccountSessionSchema(timed);
         await verifyOptionalAppleTokenSchema(timed);
+        await verifyOptionalAppleRevocationSchema(timed);
         const [rows] = await timed.query(`SELECT TABLE_NAME AS tableName, ENGINE AS engine
             FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()
             AND TABLE_NAME IN ('users', 'game_personal_bests', 'game_submission_receipts', 'game_runs')`);

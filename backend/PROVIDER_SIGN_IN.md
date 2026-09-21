@@ -32,7 +32,7 @@ revocation queue are implemented, but **not operationally activated**. Configura
 `apple-ios.signupEnabled` and `deletionEnabled` false, omits Apple's public
 signup capability, and the native Info.plist flag stays false. There is no new
 environment switch that activates Apple signup. Finish revocation-worker deployment,
-retention acceptance and the remaining server-side revoked-credential handling before wiring those
+retention acceptance and server-notification endpoint registration before wiring those
 capabilities to deployment settings; then compile on macOS and test one native
 new/returning-account lifecycle. See Apple's [account-deletion guidance](https://developer.apple.com/documentation/technotes/tn3194-handling-account-deletions-and-revoking-tokens-for-sign-in-with-apple).
 
@@ -80,10 +80,12 @@ Preparation commands (not run against production in this checkpoint):
 
 ```text
 npm --prefix backend run migrations:apple-tokens:apply
+npm --prefix backend run migrations:apple-revocation:apply
 npm --prefix backend run apple-tokens:revoke
 ```
 
-`APPLE_TOKEN_LIFECYCLE_ENABLED=true` requires `APPLE_IOS_BUNDLE_ID`, dedicated
+`APPLE_TOKEN_LIFECYCLE_ENABLED=true` requires `APPLE_NOTIFICATIONS_ENABLED=true`,
+`APPLE_IOS_BUNDLE_ID`, dedicated
 `APPLE_SIGN_IN_TEAM_ID`, `APPLE_SIGN_IN_KEY_ID`, `APPLE_SIGN_IN_PRIVATE_KEY`,
 `APPLE_TOKEN_ACTIVE_KEY_ID`, and `APPLE_TOKEN_ENCRYPTION_KEYS` (a JSON key-ID to
 canonical base64-encoded 32-byte key map, up to eight retained rotation keys).
@@ -105,7 +107,7 @@ backlog, lock contention, failure or expiry without confirmed revocation.
 Before activation: publish matching retention disclosures; apply/verify the
 reviewed migration and grants; configure the guarded maintenance command on an
 approved reliable execution path with backlog/failure observation; prove expiry
-and retry behavior there; finish server-side revoked-credential/session invalidation;
+and retry behavior there; register and verify signed server-notification delivery;
 then approve native signing/build/device acceptance. The worker is not silently
 attached to receipt cleanup or deletion-audit jobs. No new cloud service or timer
 has been created. Physical expiry requires the maintenance execution path to run;
@@ -179,8 +181,8 @@ provider links or other devices are deleted/revoked by this client signal.
 
 This is a native-client protection, **not global server enforcement**: a copied
 cookie or another device is not invalidated solely by a client notification.
-Verified Apple server notifications, replay/order handling and race-safe
-server-side invalidation remain separate activation work. Apple Account deletion
+The server implementation below supplies independent global enforcement once
+its receiver is deployed and registered with Apple. Apple Account deletion
 does not reliably trigger the native revocation notification, so foreground
 credential-state checks are necessary. See [Apple's account-change guidance](https://developer.apple.com/documentation/signinwithapple/processing-changes-for-sign-in-with-apple-accounts).
 Native capability/signup/deletion switches remain disabled. Swift verification
@@ -202,6 +204,76 @@ From `backend`:
 ```text
 node --test --test-reporter=dot -r ts-node/register ts/security/sessionPolicy.test.ts ts/security/requestAuthentication.test.ts ts/auth/providerSession.test.ts ts/auth/providerAuthFlow.test.ts ts/routers/providerAuthRouter.test.ts ts/routers/authRouter.security.test.ts
 ```
+
+## Signed Apple server notifications — prepared, not activated (2026-09-21)
+
+`POST /auth/providers/apple-notifications` is absent unless
+`APPLE_NOTIFICATIONS_ENABLED=true`. Receiving remains independently configurable
+when new provider sign-in is paused. Token-lifecycle issuance requires the
+receiver flag; startup also verifies recorded migrations 0017/0018 and exact
+schemas. This checkpoint changes no live configuration or Apple portal setting.
+
+The endpoint accepts only `{ "payload": "<signed JWT>" }`: at most 32 KiB JSON
+and a 16 KiB payload. A cookie, Origin or bearer token does not authorize a
+notification. Verification requires RS256 with Apple's fixed HTTPS key source,
+issuer, the configured bundle ID as exact audience, event subject/type and
+bounded timestamps. It accepts delayed signed messages rather than applying the
+five-minute *login* deadline. Optional JWT expiry is enforced. Unknown events or
+invalid proofs are rejected, while key/storage failures return a sanitized 503.
+The response acknowledges only completed application; retries are idempotent.
+
+`consent-revoked` and `account-deleted` delete only Apple-authenticated sessions
+whose **original verified ID-token issuance time** is at or before the event.
+The new nullable session provenance binds that time to a SHA-256 hash of the
+exact Apple client/subject. Cookie renewal cannot reset it; the exchanged token's
+later issuance time cannot replace it. Newer Apple logins, password/Google
+sessions, accounts, provider links and scores are preserved. Email-forwarding
+events are acknowledged without mutating sessions or persisting email data.
+
+To close sign-in races, the receiver commits an event cutoff before looking up
+the subject or acquiring the account lock. It then deletes matching sessions
+under the same lock used by issuance, renewal, deletion and protected writes.
+Issuance rechecks the identity, cutoff and proof age immediately before INSERT;
+the INSERT also checks age against database time. A rejected proof rolls back
+any session-cap eviction. Unknown-subject notifications receive the same cutoff,
+so a concurrently completing signup cannot issue a pre-revocation session.
+
+`apple_auth_revocations` holds at most 10,000 hashed-subject cutoffs, not a raw
+notification history. Each logical cutoff expires 330 seconds after the signed
+event, covering the 300-second accepted proof age plus clock tolerance. Duplicate
+or older events cannot restart that deadline. Delayed events still delete old
+surviving sessions even after no cutoff is needed. This hash is pseudonymous
+security data, **not anonymous data**. Physical removal is bounded to 100 rows
+per pass, on notifications and in the existing explicit `apple-tokens:revoke`
+maintenance command. A full batch requests another pass. Physical retention
+depends on that worker actually running; it is not guaranteed to be 330 seconds.
+
+Before activation, disclose this short-lived security processing and agree the
+maintenance cadence/physical retention bound, alongside the approved seven-day
+encrypted deletion-retry exception. Apply/verify 0016, 0017, 0018 and scoped grants;
+register the approved HTTPS receiver; verify delivery and maintenance execution;
+then perform the approved native build/lifecycle check. This adds no scheduler.
+Check for prepared/legacy Apple sessions without SQL provenance and invalidate
+those before enabling Apple. Do not infer a session's login method from its
+account's provider link. A database restore must invalidate restored sessions
+before traffic resumes: deletion replay cannot replay Apple's past notifications.
+
+Disposable MySQL verification passed six notification/issuance/renewal/cleanup
+cases and fifteen restricted-grant cases, including real lock ordering and the
+database CHECK constraint. Both test containers/networks were removed. No live
+Apple call, production migration, native compilation or deployment was performed.
+The complete backend unit suite, backend TypeScript check and eleven local
+launcher/test-selection checks also passed. Unit execution used the complete
+`test:unit` list with concurrency limited to two, as documented above.
+
+```text
+node backend/scripts/run-migration-tests.mjs --apple-revocation
+node backend/scripts/run-migration-tests.mjs --runtime-grants
+node --test backend/scripts/dev-isolated.test.cjs backend/scripts/run-migration-tests.test.mjs
+npm --prefix backend test
+```
+
+Reference: [Apple account-change notifications](https://developer.apple.com/documentation/signinwithapple/processing-changes-for-sign-in-with-apple-accounts).
 
 ## Identity and account ownership
 

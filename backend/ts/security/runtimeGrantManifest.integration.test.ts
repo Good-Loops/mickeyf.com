@@ -11,6 +11,7 @@ import { loadMigrationConfig } from '../config/migrationConfig';
 import { deleteAccount } from '../accounts/accountDeletionRepository';
 import { createAppleTokenRepository, type StoredAppleToken } from '../accounts/appleTokenRepository';
 import { verifyAppleTokenReadiness } from '../migrations/appleTokenSchema';
+import { verifyAppleRevocationReadiness } from '../migrations/appleRevocationSchema';
 import { findProviderAccount, linkProviderAccount, readProviderAccountMethods } from '../accounts/providerAccountRepository';
 import { createAccountSession, readLiveSession, renewAccountSession, revokeAccountSession } from '../auth/accountSessionRepository';
 import { consumeProviderAttempt, createProviderAttempt, type ProviderAttempt } from '../auth/providerAttemptRepository';
@@ -117,6 +118,7 @@ async function createSchema(): Promise<void> {
     try {
         await administrator.query(`
             DROP TABLE IF EXISTS
+                apple_auth_revocations,
                 apple_provider_tokens,
                 account_sessions,
                 provider_auth_attempts,
@@ -157,13 +159,15 @@ async function createSchema(): Promise<void> {
         allowedEffectKinds: ['add-provider-identities', 'add-provider-attempts', 'add-account-sessions', 'add-session-renewal'],
     });
     await applyMigrations(asMigrationConnection(administrator), migrations, config, {
-        allowedEffectKinds: ['add-unique-user-names', 'allow-passwordless-accounts', 'extend-provider-attempt-actions', 'add-apple-tokens'],
+        allowedEffectKinds: ['add-unique-user-names', 'allow-passwordless-accounts', 'extend-provider-attempt-actions', 'add-apple-tokens',
+            'add-apple-revocations', 'add-apple-session-provenance'],
     });
 }
 
 async function resetData(): Promise<void> {
     await administrator.query('SET FOREIGN_KEY_CHECKS = 0');
     try {
+        await administrator.query('TRUNCATE TABLE apple_auth_revocations');
         await administrator.query('TRUNCATE TABLE apple_provider_tokens');
         await administrator.query('TRUNCATE TABLE account_sessions');
         await administrator.query('TRUNCATE TABLE provider_auth_attempts');
@@ -270,6 +274,35 @@ after(async () => {
         await root.end();
     }
     if (administrator) await administrator.end();
+});
+
+test('runtime Apple watermark and provenance grants enforce exact schema, bounded purge and immutable attribution', async () => {
+    const connection = await runtimePool.getConnection();
+    try { await verifyAppleRevocationReadiness(connection as unknown as MigrationConnection); }
+    finally { connection.release(); }
+    const subjectHash = randomBytes(32);
+    await runtimePool.query(`INSERT INTO apple_auth_revocations (subject_hash, revoked_at, expires_at)
+        VALUES (?, 100, UTC_TIMESTAMP(6) + INTERVAL 1 HOUR)`, [subjectHash]);
+    await runtimePool.query(`UPDATE apple_auth_revocations SET revoked_at = 200,
+        expires_at = UTC_TIMESTAMP(6) + INTERVAL 2 HOUR WHERE subject_hash = ?`, [subjectHash]);
+    const [watermarks] = await runtimePool.query<RowDataPacket[]>('SELECT * FROM apple_auth_revocations WHERE subject_hash = ?', [subjectHash]);
+    assert.equal(watermarks[0].revoked_at, 200);
+    await assertPrivilegeDenied(() => runtimePool.query('UPDATE apple_auth_revocations SET subject_hash = subject_hash WHERE 1 = 0'));
+    const [accounts] = await runtimePool.query<RowDataPacket[]>('SELECT account_uuid FROM users WHERE user_id = 1');
+    const insertSession = (hash: Buffer | null, timestamp: number | null) => runtimePool.query(`INSERT INTO account_sessions
+        (session_hash, account_uuid, created_at, expires_at, remembered, renewed_at, apple_subject_hash, apple_authenticated_at)
+        VALUES (?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6) + INTERVAL 1 HOUR, 0, NULL, ?, ?)`,
+    [randomBytes(32), accounts[0].account_uuid, hash, timestamp]);
+    await insertSession(subjectHash, 201);
+    for (const [hash, timestamp] of [[subjectHash, null], [null, 201], [subjectHash, 0]] as const) {
+        await assert.rejects(insertSession(hash, timestamp), (error: unknown) =>
+            (error as MysqlError).code === 'ER_CHECK_CONSTRAINT_VIOLATED');
+    }
+    for (const column of ['apple_subject_hash', 'apple_authenticated_at']) {
+        await assertPrivilegeDenied(() => runtimePool.query(`UPDATE account_sessions SET ${column} = ${column} WHERE 1 = 0`));
+    }
+    await runtimePool.query('DELETE FROM apple_auth_revocations WHERE subject_hash = ?', [subjectHash]);
+    assert.deepEqual((await runtimePool.query<RowDataPacket[]>('SELECT * FROM apple_auth_revocations'))[0], []);
 });
 
 test('runtime Apple token grants permit encrypted persistence and revocation but never credential rebinding', async () => {

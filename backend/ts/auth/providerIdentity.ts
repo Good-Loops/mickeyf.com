@@ -12,5 +12,9 @@ export type VerifiedProviderIdentity = Readonly<{
     subject: string;
     /** Optional provider-signed verified contact email; never an identity/link key. */
     email?: string;
+    /** Original verified Apple ID-token issuance, never a request-selected time. */
+    appleIssuedAt?: number;
+    /** Exact server-configured audience whose Apple ID token was verified. */
+    appleClientId?: string;
     [verifiedProviderIdentity]: true;
 }>;

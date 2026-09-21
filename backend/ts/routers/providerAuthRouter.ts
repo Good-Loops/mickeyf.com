@@ -225,7 +225,7 @@ export function createProviderAuthRouter(options: ProviderAuthRouterOptions): Ro
                     return res.json({ success: true, deleted: true });
                 }
                 if (!await services.establishSession(database, req, res, result.account, rememberMe === true,
-                    sessionSecret, isProduction, result.authenticationMethod)) return fail(res, 'ACCOUNT_GONE');
+                    sessionSecret, isProduction, result.authenticationMethod, result.appleSessionProof)) return fail(res, 'ACCOUNT_GONE');
                 return res.json({ success: true, user_name: result.account.userName });
             } catch { return fail(res, 'UNAVAILABLE'); }
         }));

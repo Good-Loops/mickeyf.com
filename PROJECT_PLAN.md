@@ -2736,9 +2736,21 @@ itself activate, implement or defer both providers.
   Checks and logout are serialized with login; unconfirmed logout hides local
   auth and retries without claiming server success. Unknown/platform-error
   states do not trigger logout. No schema, keys, cloud jobs or activation changed.
-  Remaining lifecycle work: signed Apple server notifications and race-safe
-  server-side invalidation, then approved maintenance/retention operation and
-  native build/device acceptance. Do not repeat accepted gameplay checks.
+  **Signed Apple notification checkpoint (2026-09-21):** independent disabled
+  receiver verifies Apple's signature/audience and revokes only pre-event Apple
+  sessions. Original proof time survives renewal. Expiring hashed-subject
+  cutoffs and account locks close concurrent-login/signup races, including
+  unknown subjects; duplicate/late events preserve newer authorizations.
+  Migrations0017/0018, scoped grants, compatible restore verification and bounded
+  cleanup in the existing explicit Apple maintenance command are prepared.
+  Six focused disposable SQL cases and fifteen restricted-grant cases passed;
+  no live migration, provider setting, cloud job or deployment changed.
+  Remaining: approve/document the cutoff's short-lived security-data processing
+  and physical purge bound; publish the encrypted-token retention exception;
+  configure/verify the maintenance path and registered HTTPS receiver; invalidate
+  any legacy Apple sessions without provenance; then native build/lifecycle
+  acceptance. Restored sessions must be invalidated before reopening traffic.
+  KWS remains a separate signup-audience gate. Do not repeat accepted gameplay.
   The owner approved the CORS-only backend deployment for exactly
   `capacitor://localhost`, and renewed the same temporary Node/OpenSSL exception
   through 2026-10-07 only for the matching unchanged-runtime/base/dependency
