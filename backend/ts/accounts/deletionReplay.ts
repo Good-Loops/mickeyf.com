@@ -8,6 +8,8 @@ import type { MigrationConnection } from '../migrations/leaderboardSchema';
 import { verifyOptionalProviderIdentitySchema } from '../migrations/providerIdentitySchema';
 import { verifyOptionalProviderAttemptSchema } from '../migrations/providerAttemptSchema';
 import { verifyOptionalAccountSessionSchema } from '../migrations/accountSessionSchema';
+import { verifyOptionalAppleTokenSchema } from '../migrations/appleTokenSchema';
+import { markAppleTokensForRevocation } from './appleTokenRepository';
 import { AccountDeletionRollbackError, deleteOwnedAccountRows } from './accountDeletionRepository';
 import { type DeletionJournalReader, parseDeletionIntent } from './deletionJournal';
 
@@ -80,6 +82,7 @@ async function verifyTargetSchema(
         await verifyOptionalProviderIdentitySchema(timed);
         await verifyOptionalProviderAttemptSchema(timed);
         await verifyOptionalAccountSessionSchema(timed);
+        await verifyOptionalAppleTokenSchema(timed);
         const [rows] = await timed.query(`SELECT TABLE_NAME AS tableName, ENGINE AS engine
             FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE()
             AND TABLE_NAME IN ('users', 'game_personal_bests', 'game_submission_receipts', 'game_runs')`);
@@ -118,7 +121,12 @@ async function prepareReplay(
     const target = await verifyTargetSchema(database, settings, budget);
     const snapshot = await validatedJournal(reader, settings.maxIntents);
     budget.remaining();
-    const accountIds = [...new Set(snapshot.intents.map(intent => intent.accountId))];
+    // The sorted first intent is authoritative; replay must never restart retention.
+    const requestedAt = new Map<string, string>();
+    for (const intent of snapshot.intents) {
+        if (!requestedAt.has(intent.accountId)) requestedAt.set(intent.accountId, intent.requestedAt);
+    }
+    const accountIds = [...requestedAt.keys()];
     const sha256 = createHash('sha256').update(JSON.stringify({
         formatVersion: 1, target, journalDigest: snapshot.digest, intents: snapshot.intents,
         maxIntents: settings.maxIntents, maxDurationMs: settings.maxDurationMs,
@@ -127,7 +135,7 @@ async function prepareReplay(
         formatVersion: 1, sha256, target, journalDigest: snapshot.digest,
         intentCount: snapshot.intents.length, accountCount: accountIds.length,
     });
-    return { plan, accountIds };
+    return { plan, accountIds, requestedAt };
 }
 
 export async function planDeletionReplay(
@@ -159,10 +167,21 @@ async function findUserId(
 }
 
 async function replayOneAccount(
-    database: ReplayDatabase, accountId: string, settings: DeletionReplaySettings, budget: ReplayBudget
+    database: ReplayDatabase, accountId: string, requestedAt: string, settings: DeletionReplaySettings, budget: ReplayBudget
 ): Promise<boolean> {
     const userId = await findUserId(database, accountId, settings, budget);
-    if (userId === undefined) return false;
+    if (userId === undefined) {
+        const connection = await database.getConnection();
+        let reusable = true;
+        try {
+            await inspectTarget(connection, settings, budget);
+            // Old snapshots can contain retained tokens after the account was removed.
+            // These idempotent SQL transitions never contact Apple from a recovery target.
+            await markAppleTokensForRevocation(connection, accountId, requestedAt);
+            return false;
+        } catch (error) { reusable = false; connection.destroy(); throw error; }
+        finally { if (reusable) connection.release(); }
+    }
     return withUserSubmissionLock(database, userId, async ({ connection, invalidateConnection }) => {
         try { await inspectTarget(connection, settings, budget); }
         catch (error) {
@@ -181,7 +200,8 @@ async function replayOneAccount(
             if (rows[0] && rows[0].accountId !== accountId) {
                 throw new Error('Account identity changed while acquiring the deletion replay lock');
             }
-            if (rows[0]) await deleteOwnedAccountRows(connection, userId);
+            if (rows[0]) await deleteOwnedAccountRows(connection, userId, accountId, requestedAt);
+            else await markAppleTokensForRevocation(connection, accountId, requestedAt);
             phase = 'commit';
             await connection.query({ sql: 'COMMIT', timeout: budget.remaining() });
             return rows.length === 1;
@@ -203,14 +223,14 @@ export async function applyDeletionReplay(
     approvedPlanSha256: string
 ): Promise<DeletionReplayResult> {
     const budget = new ReplayBudget(settings.maxDurationMs);
-    const { plan, accountIds } = await prepareReplay(database, reader, settings, budget);
+    const { plan, accountIds, requestedAt } = await prepareReplay(database, reader, settings, budget);
     if (!/^[0-9a-f]{64}$/u.test(approvedPlanSha256) || plan.sha256 !== approvedPlanSha256) {
         throw new Error('Deletion replay plan changed; review a fresh plan before applying');
     }
     let deletedAccounts = 0;
     for (const accountId of accountIds) {
         budget.remaining();
-        if (await replayOneAccount(database, accountId, settings, budget)) deletedAccounts++;
+        if (await replayOneAccount(database, accountId, requestedAt.get(accountId)!, settings, budget)) deletedAccounts++;
     }
     const after = await prepareReplay(database, reader, settings, budget);
     if (after.plan.sha256 !== plan.sha256) {

@@ -16,7 +16,7 @@ test('defines only runtime DML and read-only identity-epoch metadata', () => {
     });
     assert.deepEqual(
         RUNTIME_GRANT_MANIFEST.map(({ table }) => table),
-        ['account_sessions', 'account_provider_identities', 'provider_auth_attempts',
+        ['apple_provider_tokens', 'account_sessions', 'account_provider_identities', 'provider_auth_attempts',
             'schema_migrations', 'users', 'game_submission_receipts', 'game_personal_bests']
     );
     assert.deepEqual(runtimeColumnPrivilegeInventory().filter(({ tableName }) => tableName === 'schema_migrations'), [
@@ -34,6 +34,7 @@ test('defines only runtime DML and read-only identity-epoch metadata', () => {
         false
     );
     assert.deepEqual(runtimeTablePrivilegeInventory(), [
+        { tableName: 'apple_provider_tokens', privilegeType: 'DELETE' },
         { tableName: 'account_sessions', privilegeType: 'DELETE' },
         { tableName: 'provider_auth_attempts', privilegeType: 'DELETE' },
         { tableName: 'users', privilegeType: 'DELETE' },
@@ -47,6 +48,13 @@ test('account identity is readable but cannot be inserted or rewritten by runtim
         runtimeColumnPrivilegeInventory().filter(({ tableName, columnName }) => tableName === 'users' && columnName === 'account_uuid'),
         [{ tableName: 'users', columnName: 'account_uuid', privilegeType: 'SELECT' }]
     );
+});
+
+test('Apple credentials permit queue transitions but forbid ciphertext and ownership reassignment', () => {
+    const grant = RUNTIME_GRANT_MANIFEST.find(({ table }) => table === 'apple_provider_tokens')!;
+    assert.deepEqual(grant.grants.find(({ privilege }) => privilege === 'UPDATE')?.columns,
+        ['revocation_requested_at', 'next_attempt_at', 'retention_deadline', 'attempt_count']);
+    assert.deepEqual(grant.tablePrivileges, ['DELETE']);
 });
 
 test('device sessions permit renewal without rewriting their account, creation time or remembered choice', () => {
@@ -85,6 +93,7 @@ test('renders the exact production grant statements without applying them', () =
             PRODUCTION_RUNTIME_DATABASE_ACCOUNT
         ),
         [
+            "GRANT SELECT (`token_id`, `account_uuid`, `client_id`, `encrypted_token`, `created_at`, `revocation_requested_at`, `next_attempt_at`, `retention_deadline`, `attempt_count`), INSERT (`token_id`, `account_uuid`, `client_id`, `encrypted_token`, `created_at`), UPDATE (`revocation_requested_at`, `next_attempt_at`, `retention_deadline`, `attempt_count`), DELETE ON `cms`.`apple_provider_tokens` TO 'cms_mickeyf'@'%';",
             "GRANT SELECT (`session_hash`, `account_uuid`, `created_at`, `expires_at`, `remembered`, `renewed_at`, `previous_session_hash`, `previous_valid_until`), INSERT (`session_hash`, `account_uuid`, `created_at`, `expires_at`, `remembered`, `renewed_at`), UPDATE (`session_hash`, `expires_at`, `renewed_at`, `previous_session_hash`, `previous_valid_until`), DELETE ON `cms`.`account_sessions` TO 'cms_mickeyf'@'%';",
             "GRANT SELECT (`provider`, `subject`, `account_uuid`), INSERT (`provider`, `subject`, `account_uuid`, `linked_at`), UPDATE (`linked_at`) ON `cms`.`account_provider_identities` TO 'cms_mickeyf'@'%';",
             "GRANT SELECT (`state_hash`, `binding_hash`, `nonce`, `client_key`, `action`, `user_id`, `account_uuid`, `expires_at`), INSERT (`state_hash`, `binding_hash`, `nonce`, `client_key`, `action`, `user_id`, `account_uuid`, `expires_at`), DELETE ON `cms`.`provider_auth_attempts` TO 'cms_mickeyf'@'%';",

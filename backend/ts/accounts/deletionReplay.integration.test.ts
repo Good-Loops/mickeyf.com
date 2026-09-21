@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
-import { createHash, randomUUID } from 'node:crypto';
+import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { after, before, test } from 'node:test';
 import bcrypt from 'bcryptjs';
-import mysql, { type Connection, type Pool, type RowDataPacket } from 'mysql2/promise';
+import mysql, { type Connection, type Pool, type ResultSetHeader, type RowDataPacket } from 'mysql2/promise';
 import type { DeletionReplaySettings } from '../config/deletionReplayConfig';
 import { loadMigrationConfig } from '../config/migrationConfig';
 import { submitP4VegaScore } from '../leaderboards/p4VegaScoreRepository';
@@ -11,6 +11,8 @@ import { ACCOUNT_IDENTITY_MIGRATION_VERSION } from '../migrations/accountIdentit
 import type { MigrationConnection } from '../migrations/leaderboardSchema';
 import { loadMigrationManifest } from '../migrations/migrationManifest';
 import { applyMigrations } from '../migrations/migrationRunner';
+import { verifyAppleTokenReadiness } from '../migrations/appleTokenSchema';
+import { createAppleTokenRepository, type StoredAppleToken } from './appleTokenRepository';
 import { deleteAccount } from './accountDeletionRepository';
 import type { AccountDeletionJournal, DeletionIntent, DeletionJournalReader } from './deletionJournal';
 import { applyDeletionReplay, planDeletionReplay } from './deletionReplay';
@@ -49,7 +51,7 @@ before(async () => {
     assert.doesNotMatch(identity[0].versionComment, /Google/iu);
     await administrator.query('SET FOREIGN_KEY_CHECKS = 0');
     try {
-        await administrator.query('DROP TABLE IF EXISTS account_sessions, provider_auth_attempts, account_provider_identities, game_personal_bests, game_runs, game_submission_receipts, schema_migrations, users');
+        await administrator.query('DROP TABLE IF EXISTS apple_provider_tokens, account_sessions, provider_auth_attempts, account_provider_identities, game_personal_bests, game_runs, game_submission_receipts, schema_migrations, users');
     } finally { await administrator.query('SET FOREIGN_KEY_CHECKS = 1'); }
     await administrator.query(`CREATE TABLE users (
         user_id INT NOT NULL AUTO_INCREMENT, user_name VARCHAR(255) NOT NULL,
@@ -66,6 +68,10 @@ before(async () => {
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-provider-attempts'] });
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-account-sessions'] });
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-session-renewal'] });
+    await applyMigrations(connection, migrations, config, {
+        allowedEffectKinds: ['add-unique-user-names', 'allow-passwordless-accounts', 'extend-provider-attempt-actions', 'add-apple-tokens'],
+    });
+    await verifyAppleTokenReadiness(connection);
     await administrator.query("SET SESSION time_zone = '+00:00'");
     const [epoch] = await administrator.query<RowDataPacket[]>(
         "SELECT DATE_FORMAT(applied_at, '%Y-%m-%d %H:%i:%s.%f') AS epoch FROM schema_migrations WHERE version = ?",
@@ -207,4 +213,60 @@ test('reconciles a restored deleted identity, preserves others, and never target
         ...settings, expectedIdentityEpoch: '2000-01-01 00:00:00.000000',
     }), /independently/u);
     assert.deepEqual(await snapshotRows(), reused);
+});
+
+test('encrypted Apple credentials survive deletion only within the original journal retry window', async () => {
+    const vault = createAppleTokenRepository({
+        clientId: 'com.example.disposable', activeKeyId: 'isolated-v1',
+        encryptionKeys: { 'isolated-v1': randomBytes(32) },
+    });
+    const [inserted] = await administrator.query<ResultSetHeader>(
+        'INSERT INTO users (user_name,email,user_password) VALUES (?,?,?)',
+        ['apple-token-fixture', 'apple-token@example.test', await bcrypt.hash(TEST_PASSWORD, 4)]);
+    const [users] = await administrator.query<RowDataPacket[]>('SELECT account_uuid FROM users WHERE user_id = ?', [inserted.insertId]);
+    const accountId = users[0].account_uuid as string;
+    await insertProviderLink(inserted.insertId, 'apple', 'apple-token-fixture-subject');
+    const row = vault.prepare('isolated-refresh-secret', accountId);
+    const connection = await database.getConnection();
+    try {
+        await connection.beginTransaction();
+        await vault.save(connection, row);
+        await connection.commit();
+    } finally { connection.release(); }
+    const readTokens = async () => (await administrator.query<(RowDataPacket & StoredAppleToken)[]>(
+        'SELECT * FROM apple_provider_tokens ORDER BY token_id'))[0];
+    const active = await readTokens();
+    assert.equal(active.length, 1);
+    assert.equal(vault.decrypt(active[0]), 'isolated-refresh-secret');
+    assert.equal(active[0].encrypted_token.includes(Buffer.from('isolated-refresh-secret')), false);
+    assert.equal(active[0].retention_deadline, null);
+    const intents: DeletionIntent[] = [];
+    const journal: AccountDeletionJournal & DeletionJournalReader = {
+        async recordAccountDeletion(deletedId) {
+            intents.push({ version: 1, action: 'delete-account', accountId: deletedId, requestedAt: new Date().toISOString() });
+        },
+        async readDeletionIntents() {
+            return { intents, digest: createHash('sha256').update(JSON.stringify(intents)).digest('hex') };
+        },
+    };
+    assert.equal(await deleteAccount(database, inserted.insertId, TEST_PASSWORD, journal), 'deleted');
+    const pending = await readTokens();
+    assert.equal(pending.length, 1, 'no foreign-key cascade discards the revocation credential');
+    assert.equal(vault.decrypt(pending[0]), 'isolated-refresh-secret');
+    assert.ok(pending[0].revocation_requested_at);
+    assert.ok(pending[0].next_attempt_at);
+    assert.equal(Date.parse(`${pending[0].retention_deadline.replace(' ', 'T')}Z`)
+        - Date.parse(`${pending[0].revocation_requested_at.replace(' ', 'T')}Z`), 7 * 24 * 60 * 60 * 1000);
+    const plan = await planDeletionReplay(database, journal, settings);
+    assert.equal((await applyDeletionReplay(database, journal, settings, plan.sha256)).absentAccounts, 1);
+    assert.equal((await readTokens())[0].retention_deadline, pending[0].retention_deadline,
+        'absent-account replay cannot extend an existing deadline');
+
+    // A restored pre-deletion credential must use the old journal time, not the restoration date.
+    await administrator.query(`UPDATE apple_provider_tokens SET revocation_requested_at = NULL,
+        next_attempt_at = NULL, retention_deadline = NULL WHERE token_id = ?`, [row.token_id]);
+    intents[0] = { ...intents[0], requestedAt: new Date(Date.now() - 8 * 24 * 60 * 60 * 1000).toISOString() };
+    const oldPlan = await planDeletionReplay(database, journal, settings);
+    assert.equal((await applyDeletionReplay(database, journal, settings, oldPlan.sha256)).absentAccounts, 1);
+    assert.deepEqual(await readTokens(), [], 'expired restored credentials are purged without keys or Apple I/O');
 });

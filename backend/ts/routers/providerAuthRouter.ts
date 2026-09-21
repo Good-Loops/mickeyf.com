@@ -2,7 +2,8 @@ import { json, Router, type Request, type Response } from 'express';
 import { ipKeyGenerator, rateLimit } from 'express-rate-limit';
 import type { Pool } from 'mysql2/promise';
 import { createProviderAccount, findProviderAccount, linkProviderAccount,
-    readProviderAccountMethods } from '../accounts/providerAccountRepository';
+    persistProviderCredential, readProviderAccountMethods, type ProviderCredentialWriter } from '../accounts/providerAccountRepository';
+import type { AppleTokenLifecycle } from '../config/appleTokenConfig';
 import { deleteProviderAccount } from '../accounts/accountDeletionRepository';
 import type { AccountDeletionJournal } from '../accounts/deletionJournal';
 import { readLiveSession } from '../auth/accountSessionRepository';
@@ -48,11 +49,18 @@ export type ProviderAuthRouterOptions = Readonly<{
     signupEnabled?: boolean;
     accountDeletionEnabled?: boolean;
     deletionJournal?: AccountDeletionJournal;
+    appleTokenRepository?: AppleTokenLifecycle['repository'];
     services?: ProviderAuthRouterServices;
 }>;
 
 function createServices(options: ProviderAuthRouterOptions): ProviderAuthRouterServices {
     const { database, sessionSecret, allowedOrigins, clients } = options;
+    const credentialWriter = (refreshToken?: string): ProviderCredentialWriter | undefined => {
+        if (refreshToken === undefined) return undefined;
+        if (!options.appleTokenRepository) throw new Error('Apple token storage is unavailable.');
+        const repository = options.appleTokenRepository;
+        return async (connection, account) => repository.save(connection, repository.prepare(refreshToken, account.accountId));
+    };
     return {
         readContext: createProviderAuthContextReader({ database, sessionSecret, allowedOrigins }),
         flow: createProviderAuthFlow({ enabled: true, clients, signupEnabled: options.signupEnabled,
@@ -63,11 +71,18 @@ function createServices(options: ProviderAuthRouterOptions): ProviderAuthRouterS
             },
             accounts: {
                 find: identity => findProviderAccount(database, identity),
-                link: (target, password, identity, session) => linkProviderAccount(database, target, password, identity, session),
-                create: (identity, userName) => createProviderAccount(database, identity, userName),
+                link: (target, password, identity, session, token) => linkProviderAccount(database, target, password, identity, session,
+                    credentialWriter(token)),
+                create: (identity, userName, token) => createProviderAccount(database, identity, userName, credentialWriter(token)),
+                ...(options.appleTokenRepository ? {
+                    saveAppleToken: (account, identity, token) => persistProviderCredential(database, account, identity, credentialWriter(token)!),
+                } satisfies Pick<ProviderAuthFlowDependencies['accounts'], 'saveAppleToken'> : {}),
                 ...(options.deletionJournal ? {
-                    delete: (target, identity, session) => deleteProviderAccount(database, target.userId,
-                        identity, options.deletionJournal!, session),
+                    delete: (target, identity, session, token) => {
+                        const writer = credentialWriter(token);
+                        return deleteProviderAccount(database, target.userId, identity, options.deletionJournal!, session,
+                            writer ? (connection, accountId) => writer(connection, { userId: target.userId, accountId }) : undefined);
+                    },
                 } satisfies Pick<ProviderAuthFlowDependencies['accounts'], 'delete'> : {}),
             },
         }),
@@ -89,7 +104,8 @@ export function createProviderAuthRouter(options: ProviderAuthRouterOptions): Ro
         && Object.prototype.hasOwnProperty.call(options.clients, 'google-web') && options.clients['google-web'].provider === 'google';
     const appleDeletionEnabled = deletionAvailable
         && Object.prototype.hasOwnProperty.call(options.clients, 'apple-ios') && options.clients['apple-ios'].provider === 'apple'
-        && options.clients['apple-ios'].deletionEnabled === true;
+        && options.clients['apple-ios'].deletionEnabled === true
+        && options.clients['apple-ios'].appleTokens !== undefined && options.appleTokenRepository !== undefined;
     const canDeleteWith = (clientKey: unknown) => clientKey === 'google-web' ? googleDeletionEnabled
         : clientKey === 'apple-ios' && appleDeletionEnabled;
     const limiterOptions = {

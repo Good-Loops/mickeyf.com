@@ -7,6 +7,9 @@ const apple = { clientKey: 'apple-ios', provider: 'apple', platform: 'ios', clie
 const challenge = { state: Buffer.alloc(32, 1).toString('base64url'),
     nonce: Buffer.alloc(32, 2).toString('base64url'), expiresInSeconds: 300 };
 const token = 'synthetic.header.signature';
+const authorizationCode = 'synthetic-one-time-code';
+const nativeResult = Object.freeze({ identityToken: token, authorizationCode });
+const appleCredential = { idToken: token, authorizationCode };
 const nextTurn = () => new Promise(resolve => setImmediate(resolve));
 const signal = () => new AbortController().signal;
 const rejectsCode = (promise, code) => assert.rejects(promise, error => {
@@ -29,7 +32,7 @@ function fixture(overrides = {}) {
     };
     const identity = {
         async getCapabilities() { calls.push('capabilities'); return { apple: true, google: false }; },
-        async signIn(input) { calls.push(['native', input]); return { identityToken: token }; },
+        async signIn(input) { calls.push(['native', input]); return nativeResult; },
         async cancel() { controls.nativeCancelCount++; },
         ...overrides.identity,
     };
@@ -338,9 +341,11 @@ test('the challenge deadline closes only the owned Google popup and clears pendi
     assert.equal(f.controls.popup, null);
 });
 
-test('native Apple requests only the configured audience and server challenge, returning only the token', async () => {
+test('native Apple requests only the configured audience and challenge, returning only token and code', async () => {
     const f = fixture({ platform: 'ios', isNative: true });
-    assert.equal(await f.client.acquireProviderCredential(apple, challenge, signal()), token);
+    const credential = await f.client.acquireProviderCredential(apple, challenge, signal());
+    assert.deepEqual(credential, appleCredential);
+    assert.equal(Object.isFrozen(credential), true);
     assert.deepEqual(f.calls, ['capabilities', ['native', { provider: 'apple', clientId: apple.clientId,
         nonce: challenge.nonce, state: challenge.state }]]);
     assert.equal(f.scripts.length, 0);
@@ -359,7 +364,7 @@ test('native abort calls cancel and discards late native success', async () => {
     controller.abort();
     await rejected;
     assert.equal(f.controls.nativeCancelCount, 1);
-    finish({ identityToken: token });
+    finish(nativeResult);
     await nextTurn();
     assert.equal(f.controls.nativeCancelCount, 1);
 });
@@ -374,7 +379,7 @@ for (const cancellation of ['abort', 'challenge timeout']) {
         const f = fixture({ platform: 'ios', isNative: true, identity: {
             signIn: () => ++nativeStarts === 1
                 ? new Promise(resolve => { finishInitial = resolve; })
-                : Promise.resolve({ identityToken: token }),
+                : Promise.resolve(nativeResult),
             cancel: () => {
                 nativeCancels++;
                 return new Promise(resolve => { acknowledgeCancel = resolve; });
@@ -390,17 +395,17 @@ for (const cancellation of ['abort', 'challenge timeout']) {
             else t.mock.timers.tick(1000);
             await rejected;
             assert.equal(nativeCancels, 1);
-            finishInitial({ identityToken: token });
+            finishInitial(nativeResult);
             await nextTurn();
             await rejectsCode(f.client.acquireProviderCredential(apple, challenge, signal()), 'UNAVAILABLE');
             assert.equal(nativeStarts, 1, 'late native success must not release the cancellation gate');
             acknowledgeCancel();
             await nextTurn();
-            assert.equal(await f.client.acquireProviderCredential(apple, challenge, signal()), token);
+            assert.deepEqual(await f.client.acquireProviderCredential(apple, challenge, signal()), appleCredential);
             assert.equal(nativeStarts, 2);
             assert.equal(nativeCancels, 1);
         } finally {
-            finishInitial?.({ identityToken: token });
+            finishInitial?.(nativeResult);
             acknowledgeCancel?.();
         }
     });
@@ -413,7 +418,7 @@ test('native cancellation rejection is handled and keeps retries fail-closed aft
     const f = fixture({ platform: 'ios', isNative: true, identity: {
         signIn: () => ++nativeStarts === 1
             ? new Promise(resolve => { finishInitial = resolve; })
-            : Promise.resolve({ identityToken: token }),
+            : Promise.resolve(nativeResult),
         cancel: () => new Promise((_resolve, reject) => { rejectCancel = reject; }),
     } });
     const controller = new AbortController();
@@ -425,20 +430,23 @@ test('native cancellation rejection is handled and keeps retries fail-closed aft
         await rejected;
         rejectCancel(new Error('private cancellation details'));
         await nextTurn();
-        finishInitial({ identityToken: token });
+        finishInitial(nativeResult);
         await nextTurn();
         await rejectsCode(f.client.acquireProviderCredential(apple, challenge, signal()), 'UNAVAILABLE');
         assert.equal(nativeStarts, 1);
     } finally {
-        finishInitial?.({ identityToken: token });
+        finishInitial?.(nativeResult);
     }
 });
 
 test('unavailable native capability, malformed results and native errors never expose raw details', async () => {
     for (const identity of [
         { getCapabilities: async () => ({ apple: false }) },
-        { signIn: async () => ({ identityToken: token, private: 'unwanted' }) },
-        { signIn: async () => ({ identityToken: 'invalid' }) },
+        ...[null, token, { identityToken: token }, { ...nativeResult, private: 'unwanted' },
+            { ...nativeResult, identityToken: 'invalid' },
+            ...[undefined, null, '', ' ', 'code with space', 'code\n', '\u007f', 'é', 'x'.repeat(4097)]
+                .map(authorizationCode => ({ identityToken: token, authorizationCode }))]
+            .map(result => ({ signIn: async () => result })),
         { signIn: async () => { throw new Error('private identity token'); } },
     ]) {
         await rejectsCode(fixture({ platform: 'ios', isNative: true, identity }).client

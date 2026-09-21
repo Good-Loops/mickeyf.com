@@ -145,6 +145,22 @@ async function withServer(
             return [state.exists ? [{ passwordHash, userName: 'player', user_id: 42,
                 accountId: state.accountId }] : [], []];
         }
+        if (sql.startsWith('UPDATE apple_provider_tokens SET ')) {
+            const intentTime = 'LEAST(CAST(? AS DATETIME(6)), UTC_TIMESTAMP(6))';
+            assert.equal(sql, `UPDATE apple_provider_tokens SET revocation_requested_at = LEAST(COALESCE(revocation_requested_at, ${intentTime}), ${intentTime}), retention_deadline = LEAST(COALESCE(retention_deadline, TIMESTAMPADD(DAY, 7, ${intentTime})), TIMESTAMPADD(DAY, 7, ${intentTime})), next_attempt_at = LEAST(COALESCE(next_attempt_at, UTC_TIMESTAMP(6)), UTC_TIMESTAMP(6)) WHERE account_uuid = ?`);
+            assert.ok(values && values.length === 5 && typeof values[0] === 'string');
+            assert.match(values[0], /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{3}$/);
+            assert.deepEqual(values, [values[0], values[0], values[0], values[0], state.accountId]);
+            assert.equal(state.journalCalls, 1, 'persist deletion intent before marking retained Apple tokens');
+            state.writes.push(sql);
+            return [{ affectedRows: 0 }, []];
+        }
+        if (sql === 'DELETE FROM apple_provider_tokens WHERE account_uuid = ? AND retention_deadline <= UTC_TIMESTAMP(6)') {
+            assert.deepEqual(values, [state.accountId]);
+            assert.match(state.writes.at(-1)!, /^UPDATE apple_provider_tokens SET /);
+            state.writes.push(sql);
+            return [{ affectedRows: 0 }, []];
+        }
         assert.match(sql, /^DELETE FROM (game_personal_bests|game_submission_receipts|users) WHERE user_id = \?$/);
         assert.deepEqual(values, [42]);
         state.writes.push(sql);
@@ -171,6 +187,12 @@ async function withServer(
             };
             return {
                 async query(options: { sql: string; timeout: number }, values?: unknown[]) {
+                    if (options.sql === 'SET TRANSACTION ISOLATION LEVEL READ COMMITTED') {
+                        assert.equal(options.timeout, 10_000);
+                        assert.equal(values, undefined);
+                        assert.equal(snapshot, null, 'configure only the next transaction, before it starts');
+                        return [{ affectedRows: 0 }, []];
+                    }
                     if (['START TRANSACTION', 'COMMIT', 'ROLLBACK'].includes(options.sql)) {
                         assert.equal(options.timeout, 10_000);
                         if (options.sql === 'START TRANSACTION') await beginTransaction();
@@ -580,7 +602,12 @@ test('deletion works for web/native origins and rejects old sessions, tickets an
             assert.deepEqual(await result.json(), { deleted: true });
             assert.match(result.headers.get('set-cookie')!, /^__session=.*Expires=Thu, 01 Jan 1970.*HttpOnly; Secure;.*SameSite=Lax/);
             assert.ok(result.headers.getSetCookie().some(value => /^session=.*SameSite=None/.test(value)));
-            assert.equal(state.writes.length, 3);
+            assert.equal(state.writes.length, 5);
+            assert.deepEqual(state.writes.slice(2), [
+                'DELETE FROM game_personal_bests WHERE user_id = ?',
+                'DELETE FROM game_submission_receipts WHERE user_id = ?',
+                'DELETE FROM users WHERE user_id = ?',
+            ]);
             const after = await fetch(base + '/auth/verify-token', { headers: { Cookie: cookie } });
             assert.deepEqual(await after.json(), { loggedIn: false });
             assert.equal(after.headers.get('set-cookie'), null);
@@ -590,7 +617,7 @@ test('deletion works for web/native origins and rejects old sessions, tickets an
             const replay = await post(base, { ...run, completionTimeMs: 50_000, runTicket: issued.runTicket }, {}, '/api/leaderboards/three-bosses/runs');
             assert.equal(replay.status, 401);
             assert.equal((await post(base, deletion)).status, 401);
-            assert.equal(state.writes.length, 3);
+            assert.equal(state.writes.length, 5);
         });
     }
 });

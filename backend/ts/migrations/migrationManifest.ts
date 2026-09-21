@@ -4,7 +4,7 @@ import path from 'node:path';
 
 export type LeaderboardTableName = 'game_runs' | 'game_personal_bests';
 
-export type MigrationEffectKind = 'create-table' | 'drop-column' | 'detach-best-source' | 'retain-receipts' | 'add-account-identity' | 'add-provider-identities' | 'add-provider-attempts' | 'add-account-sessions' | 'add-session-renewal' | 'add-unique-user-names' | 'allow-passwordless-accounts' | 'extend-provider-attempt-actions';
+export type MigrationEffectKind = 'create-table' | 'drop-column' | 'detach-best-source' | 'retain-receipts' | 'add-account-identity' | 'add-provider-identities' | 'add-provider-attempts' | 'add-account-sessions' | 'add-session-renewal' | 'add-unique-user-names' | 'allow-passwordless-accounts' | 'extend-provider-attempt-actions' | 'add-apple-tokens';
 
 type MigrationMetadata = Readonly<{
     version: string;
@@ -32,6 +32,7 @@ export type MigrationDefinition = MigrationMetadata & Readonly<
     | { effect: 'add-session-renewal'; tableName: 'account_sessions' }
     | { effect: 'add-unique-user-names' | 'allow-passwordless-accounts'; tableName: 'users' }
     | { effect: 'extend-provider-attempt-actions'; tableName: 'provider_auth_attempts' }
+    | { effect: 'add-apple-tokens'; tableName: 'apple_provider_tokens' }
 >;
 
 const MIGRATION_SPECS = Object.freeze([
@@ -113,6 +114,11 @@ const MIGRATION_SPECS = Object.freeze([
         fileName: '0015_extend_provider_attempt_actions.sql',
         effect: 'extend-provider-attempt-actions' as const,
         tableName: 'provider_auth_attempts' as const,
+    }),
+    Object.freeze({
+        fileName: '0016_create_apple_provider_tokens.sql',
+        effect: 'add-apple-tokens' as const,
+        tableName: 'apple_provider_tokens' as const,
     }),
 ]);
 

@@ -6,6 +6,9 @@ const apiBase = 'https://api.example.test';
 const challenge = { state: Buffer.alloc(32, 3).toString('base64url'),
     nonce: Buffer.alloc(32, 4).toString('base64url'), expiresInSeconds: 300 };
 const idToken = 'synthetic.header.signature';
+const appleCredential = { idToken, authorizationCode: 'synthetic-one-time-code' };
+const credentialFor = clientKey => clientKey === 'apple-ios' ? appleCredential : idToken;
+const proofFor = clientKey => clientKey === 'apple-ios' ? appleCredential : { idToken };
 const signup = { action: 'signup', clientKey: 'google-web', userName: 'New Player' };
 const deletion = { action: 'delete', clientKey: 'google-web', confirmation: 'DELETE' };
 const nextTurn = () => new Promise(resolve => setImmediate(resolve));
@@ -34,11 +37,11 @@ test(`prepared ${clientKey} signup binds its action and challenge before choosin
         assert.deepEqual(Object.keys(prepared.handle), []);
         prepared.challenge = { ...challenge, state: 'caller-state', nonce: 'caller-nonce' };
         const options = { userName: '  New Player  ', rememberMe };
-        const completion = api.completeProviderLogin(prepared.handle, idToken, options);
+        const completion = api.completeProviderLogin(prepared.handle, credentialFor(clientKey), options);
         options.userName = 'Changed after submit'; options.rememberMe = !expected;
         assert.deepEqual(await completion, { success: true, user_name: 'New Player' });
         assert.deepEqual(calls[1].body, { action: 'signup', clientKey,
-            state: challenge.state, idToken, userName: 'New Player', rememberMe: expected });
+            state: challenge.state, ...proofFor(clientKey), userName: 'New Player', rememberMe: expected });
         assert.equal(calls[1].init.method, 'POST');
         assert.deepEqual(calls[1].init.headers, { 'Content-Type': 'application/json' });
         assert.equal(calls[2].url, `${apiBase}/auth/verify-token`);
@@ -98,17 +101,17 @@ test(`direct ${clientKey} signup sends no password or email and needs exact matc
         { loggedIn: true, user_name: 'New Player', accountId: 'caller-account' }];
     for (const session of sessions) {
         const { api, calls } = fixture({ session });
-        assert.deepEqual(await api.runProviderAuthentication({ ...signup, rememberMe: true }, async () => idToken),
+        assert.deepEqual(await api.runProviderAuthentication({ ...signup, rememberMe: true }, async () => credentialFor(clientKey)),
             { error: 'SESSION_NOT_ESTABLISHED' });
         assert.deepEqual(calls[0].body, { action: 'signup', clientKey });
-        assert.deepEqual(calls[1].body, { ...signup, rememberMe: true, state: challenge.state, idToken });
+        assert.deepEqual(calls[1].body, { ...signup, rememberMe: true, state: challenge.state, ...proofFor(clientKey) });
         assert.equal(calls.length, 3);
     }
     for (const completion of [{ success: true }, { success: true, linked: true },
         { success: true, user_name: 'New Player', token: 'private-token' },
         { success: true, user_name: 'New Player', deleted: true }]) {
         const { api, calls } = fixture({ completion });
-        assert.deepEqual(await api.runProviderAuthentication(signup, async () => idToken), { error: 'INVALID_RESPONSE' });
+        assert.deepEqual(await api.runProviderAuthentication(signup, async () => credentialFor(clientKey)), { error: 'INVALID_RESPONSE' });
         assert.equal(calls.length, 2, 'a malformed completion never counts as creation/session proof');
     }
 });
@@ -133,11 +136,11 @@ test(`${clientKey} deletion posts only its fresh server challenge, token and lit
     assert.deepEqual(await api.runProviderAuthentication(deletion, async (received, signal) => {
         assert.deepEqual(received, challenge);
         assert.equal(signal.aborted, false);
-        return idToken;
+        return credentialFor(clientKey);
     }), { success: true, deleted: true });
     assert.deepEqual(calls.map(({ body }) => body), [
         { action: 'delete', clientKey },
-        { ...deletion, state: challenge.state, idToken },
+        { ...deletion, state: challenge.state, ...proofFor(clientKey) },
     ]);
     assert.ok(calls.every(({ init }) => init.method === 'POST' && init.credentials === 'include'));
     assert.equal(calls.some(({ url }) => url.endsWith('/verify-token')), false, 'a valid deletion receipt is not a login');

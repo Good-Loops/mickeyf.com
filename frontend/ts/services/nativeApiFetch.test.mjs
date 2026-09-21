@@ -197,6 +197,9 @@ test('Apple native contract preserves the server challenge and discards cancelle
     assert.match(identity, /call\?\.reject\("Native sign-in was cancelled\.", "CANCELLED"\)\s*call = nil/);
     assert.match(identity, /guard !self\.finished, let call = self\.call else \{ return \}/);
     assert.match(identity, /tokenData\.count <= 16_384/);
-    assert.match(identity, /call\.resolve\(\["identityToken": identityToken\]\)/);
+    assert.match(identity, /let codeData = credential\.authorizationCode, !codeData\.isEmpty, codeData\.count <= 4_096/);
+    assert.match(identity, /codeData\.allSatisfy\(\{ \(33\.\.\.126\)\.contains\(\$0\) \}\)/);
+    assert.match(identity, /let authorizationCode = String\(data: codeData, encoding: \.utf8\)/);
+    assert.match(identity, /call\.resolve\(\["identityToken": identityToken, "authorizationCode": authorizationCode\]\)/);
     assert.doesNotMatch(identity, /NSLog|print\(|localizedDescription|SHA256|WKWebView|UserDefaults|Keychain/);
 });

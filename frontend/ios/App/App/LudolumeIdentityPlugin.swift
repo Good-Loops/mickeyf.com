@@ -126,12 +126,15 @@ private final class LudolumeAppleAuthorization: NSObject, ASAuthorizationControl
             guard let credential = authorization.credential as? ASAuthorizationAppleIDCredential,
                   credential.state == self.state,
                   let tokenData = credential.identityToken, !tokenData.isEmpty, tokenData.count <= 16_384,
-                  let identityToken = String(data: tokenData, encoding: .utf8) else {
+                  let identityToken = String(data: tokenData, encoding: .utf8),
+                  let codeData = credential.authorizationCode, !codeData.isEmpty, codeData.count <= 4_096,
+                  codeData.allSatisfy({ (33...126).contains($0) }),
+                  let authorizationCode = String(data: codeData, encoding: .utf8) else {
                 call.reject("Invalid native sign-in response.", "INVALID_RESPONSE")
                 return
             }
-            // The server verifies this short-lived token; no provider profile or app cookie crosses here.
-            call.resolve(["identityToken": identityToken])
+            // The server verifies the token and exchanges the short-lived code; neither is persisted here.
+            call.resolve(["identityToken": identityToken, "authorizationCode": authorizationCode])
         }
     }
 

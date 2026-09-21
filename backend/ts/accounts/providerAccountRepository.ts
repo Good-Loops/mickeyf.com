@@ -9,6 +9,7 @@ import { assertAccountId } from './deletionJournal';
 
 export type ProviderAccount = Readonly<{ userId: number; userName: string; accountId: string }>;
 export type AccountLinkTarget = Readonly<{ userId: number; accountId: string }>;
+export type ProviderCredentialWriter = (connection: PoolConnection, account: AccountLinkTarget) => Promise<void>;
 export type ProviderLinkResult = 'linked' | 'already-linked' | 'link-conflict' | 'invalid-password' | 'not-found';
 export type ProviderAccountCreationResult =
     | Readonly<{ created: true; account: ProviderAccount }>
@@ -106,6 +107,7 @@ export async function readProviderAccountMethods(
 /** A new passwordless account and its verified identity become visible only together, after commit. */
 export async function createProviderAccount(
     database: Pick<Pool, 'getConnection'>, identity: VerifiedProviderIdentity, userName: string,
+    writeCredential?: ProviderCredentialWriter,
 ): Promise<ProviderAccountCreationResult> {
     const subject = identitySubject(identity);
     // Match password-signup normalization and bounds without creating a placeholder password.
@@ -160,6 +162,7 @@ export async function createProviderAccount(
                 try { await connection.rollback(); } catch (error) { reusable = false; throw error; }
                 return result;
             }
+            await writeCredential?.(connection, result.account);
             phase = 'commit';
             await connection.commit();
             return result;
@@ -214,6 +217,7 @@ export async function linkProviderAccount(
     password: string,
     identity: VerifiedProviderIdentity,
     expectedSession: SessionProof,
+    writeCredential?: ProviderCredentialWriter,
 ): Promise<ProviderLinkResult> {
     const subject = identitySubject(identity);
     if (!target || !Number.isSafeInteger(target.userId) || target.userId <= 0) {
@@ -247,6 +251,9 @@ export async function linkProviderAccount(
                     else if (!await bcrypt.compare(password, account.passwordHash)) result = 'invalid-password';
                     else if (await readLiveSession(connection, accountTarget.userId, accountTarget.accountId, sessionId)) {
                         result = await insertLink(connection, accountTarget, identity, subject);
+                        if (result === 'linked' || result === 'already-linked') {
+                            await writeCredential?.(connection, accountTarget);
+                        }
                     }
                 }
                 phase = 'commit';
@@ -263,4 +270,43 @@ export async function linkProviderAccount(
         // A failed commit/lock release might follow a durable INSERT: retry, never claim success early.
         throw new ProviderAccountUnavailableError();
     }
+}
+
+/** Store a returning provider user's credential under the same lock used by deletion. */
+export async function persistProviderCredential(
+    database: Pick<Pool, 'getConnection'>, target: AccountLinkTarget,
+    identity: VerifiedProviderIdentity, writeCredential: ProviderCredentialWriter,
+): Promise<void> {
+    if (!target || !Number.isSafeInteger(target.userId) || target.userId <= 0 || typeof writeCredential !== 'function') {
+        throw new TypeError('An authenticated account and credential writer are required.');
+    }
+    assertAccountId(target.accountId);
+    identitySubject(identity);
+    const accountTarget = { ...target };
+    const verifiedIdentity = { ...identity };
+    try {
+        await withUserSubmissionLock(database, accountTarget.userId, async ({ connection, invalidateConnection }) => {
+            let phase: 'begin' | 'active' | 'commit' = 'begin';
+            try {
+                await connection.beginTransaction();
+                phase = 'active';
+                const [rows] = await connection.query<RowDataPacket[]>({
+                    sql: 'SELECT account_uuid AS accountId FROM users WHERE user_id = ? LIMIT 1 FOR UPDATE',
+                    timeout: QUERY_TIMEOUT_MS,
+                }, [accountTarget.userId]);
+                const linked = await findProviderAccount(connection, verifiedIdentity);
+                if (!Array.isArray(rows) || rows.length !== 1 || rows[0].accountId !== accountTarget.accountId
+                    || linked?.accountId !== accountTarget.accountId || linked.userId !== accountTarget.userId) {
+                    throw new ProviderAccountUnavailableError();
+                }
+                await writeCredential(connection, accountTarget);
+                phase = 'commit';
+                await connection.commit();
+            } catch (error) {
+                if (phase !== 'active') invalidateConnection();
+                try { await connection.rollback(); } catch { invalidateConnection(); }
+                throw error;
+            }
+        });
+    } catch { throw new ProviderAccountUnavailableError(); }
 }

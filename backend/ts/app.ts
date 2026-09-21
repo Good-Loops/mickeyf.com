@@ -24,6 +24,7 @@ import { createGcsDeletionJournal } from './accounts/gcsDeletionJournal';
 import { verifyAccountDeletionReadiness, verifyAccountSessionReadiness,
     verifyProviderAuthReadiness } from './accounts/accountDeletionReadiness';
 import { verifyPasswordlessAccountSchema } from './migrations/passwordlessAccountSchema';
+import { verifyAppleTokenReadiness } from './migrations/appleTokenSchema';
 
 const runtimeConfig = loadRuntimeConfig();
 const deletionJournal = runtimeConfig.accountDeletionEnabled
@@ -92,6 +93,7 @@ async function startServer(): Promise<void> {
     try {
         await verifyDatabaseConnection();
         await verifyAccountSessionReadiness(pool);
+        if (runtimeConfig.providerAuth.appleTokenLifecycle) await verifyAppleTokenReadiness(pool);
         if (runtimeConfig.providerAuth.signupEnabled) {
             await verifyPasswordlessAccountSchema(pool);
         }

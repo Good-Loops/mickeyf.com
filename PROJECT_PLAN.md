@@ -2716,6 +2716,18 @@ itself activate, implement or defer both providers.
   production rollout was performed. Next: finish that Apple lifecycle, native
   Google SDK/client setup, then the remaining Clean Code sweep.
   See [scope, migration boundary and remaining steps](backend/PROVIDER_SIGN_IN.md).
+  **Apple token lifecycle preparation (2026-09-21):** native authorization-code
+  transport, server exchange with nonce/subject binding, encrypted refresh-token
+  storage and transactional deletion/retry state are implemented behind the
+  existing disabled capabilities. Owner approved encrypted post-deletion retry
+  retention for at most seven days, erased sooner on confirmed revocation.
+  Backup replay preserves the earliest deadline and never contacts Apple.
+  Migration 0016 and the bounded explicit worker are source preparation only;
+  no production schema, keys, jobs, provider settings or deployment changed.
+  Before activation, document this privacy exception, verify the maintenance
+  execution/expiry path and grants, finish revoked-credential/session handling,
+  then perform the native build/device check. No repeat gameplay or general
+  login acceptance is requested. KWS remains a separate signup-audience gate.
   The owner approved the CORS-only backend deployment for exactly
   `capacitor://localhost`, and renewed the same temporary Node/OpenSSL exception
   through 2026-10-07 only for the matching unchanged-runtime/base/dependency

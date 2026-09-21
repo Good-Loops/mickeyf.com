@@ -1,5 +1,5 @@
 import type { SweetAlertOptions } from 'sweetalert2';
-import type { ProviderAuthenticationChallenge } from './authApi.ts';
+import type { AppleProviderCredential, ProviderAuthenticationChallenge, ProviderCredential } from './authApi.ts';
 
 export type PublicProviderClient = Readonly<
     | { clientKey: 'google-web'; provider: 'google'; platform: 'web'; clientId: string; signup?: true }
@@ -239,7 +239,7 @@ export function createProviderClient(dependencies: ProviderClientDependencies) {
         });
     }
 
-    async function nativeCredential(client: PublicProviderClient, challenge: ProviderAuthenticationChallenge, signal: AbortSignal): Promise<string> {
+    async function nativeCredential(client: PublicProviderClient, challenge: ProviderAuthenticationChallenge, signal: AbortSignal): Promise<AppleProviderCredential> {
         const capabilities = await identity.getCapabilities();
         if (signal.aborted) throw new ProviderCredentialError('CANCELLED');
         if (!isRecord(capabilities) || capabilities.apple !== true) throw new ProviderCredentialError('UNAVAILABLE');
@@ -257,13 +257,21 @@ export function createProviderClient(dependencies: ProviderClientDependencies) {
             const result = await identity.signIn({ provider: 'apple', clientId: client.clientId,
                 nonce: challenge.nonce, state: challenge.state });
             if (signal.aborted) throw new ProviderCredentialError('CANCELLED');
-            if (!isRecord(result) || Object.keys(result).join(',') !== 'identityToken') throw new ProviderCredentialError('UNAVAILABLE');
-            return readToken(result.identityToken);
+            if (!isRecord(result) || Object.keys(result).sort().join(',') !== 'authorizationCode,identityToken'
+                || typeof result.authorizationCode !== 'string' || result.authorizationCode.length < 1
+                || result.authorizationCode.length > 4096 || /[^\x21-\x7e]/.test(result.authorizationCode)) {
+                throw new ProviderCredentialError('UNAVAILABLE');
+            }
+            return Object.freeze({ idToken: readToken(result.identityToken), authorizationCode: result.authorizationCode });
         } finally { signal.removeEventListener('abort', abort); }
     }
 
+    function acquireProviderCredential(client: PublicProviderClient, challenge: ProviderAuthenticationChallenge,
+        signal: AbortSignal, inline: { host: HTMLElement; onReady?: () => void }): Promise<string>;
+    function acquireProviderCredential(client: PublicProviderClient, challenge: ProviderAuthenticationChallenge,
+        signal: AbortSignal): Promise<ProviderCredential>;
     async function acquireProviderCredential(client: PublicProviderClient, challenge: ProviderAuthenticationChallenge,
-        signal: AbortSignal, inline?: { host: HTMLElement; onReady?: () => void }): Promise<string> {
+        signal: AbortSignal, inline?: { host: HTMLElement; onReady?: () => void }): Promise<ProviderCredential> {
         const selected = readClient(client);
         if (!selected || acquiring || (selected.platform === 'web' ? !web : !ios)
             || (selected.platform === 'ios' && nativeCancellationUnconfirmed)
@@ -276,7 +284,7 @@ export function createProviderClient(dependencies: ProviderClientDependencies) {
         }
         acquiring = true;
         try {
-            return await cancellable(activeSignal => inline
+            return await cancellable<ProviderCredential>(activeSignal => inline
                 ? renderGoogleCredential(selected, challenge, inline.host, activeSignal, inline.onReady)
                 : selected.platform === 'web'
                 ? googleCredential(selected, challenge, activeSignal) : nativeCredential(selected, challenge, activeSignal),
@@ -317,7 +325,7 @@ export async function getAvailableProviderClients(): Promise<PublicProviderClien
 }
 
 export async function acquireProviderCredential(client: PublicProviderClient, challenge: ProviderAuthenticationChallenge,
-    signal: AbortSignal): Promise<string> {
+    signal: AbortSignal): Promise<ProviderCredential> {
     try { return await (await configuredClient()).acquireProviderCredential(client, challenge, signal); }
     catch (error) { throw sanitizedError(error); }
 }

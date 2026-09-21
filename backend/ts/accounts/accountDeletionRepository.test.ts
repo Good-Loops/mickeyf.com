@@ -72,6 +72,8 @@ function fakeDatabase(options: FakeOptions = {}) {
                 return [options.providerSubject === null ? []
                     : [{ subject: options.providerSubject ?? Buffer.from(PROVIDER_IDENTITY.subject) }], []];
             }
+            if (sql.startsWith('UPDATE apple_provider_tokens')) { record('mark-apple-tokens'); return [{ affectedRows: 1 }, []]; }
+            if (sql.startsWith('DELETE FROM apple_provider_tokens')) { record('purge-expired-apple-tokens'); return [{ affectedRows: 0 }, []]; }
             record(sql);
             return [{ affectedRows: sql === 'DELETE FROM users WHERE user_id = ?'
                 ? options.deletedAccounts ?? 1 : 2 }, []];
@@ -108,12 +110,14 @@ test('reauthenticates and deletes only this user and all their scores/receipts u
     assert.equal(await deleteAccount(fake.database, 42, PASSWORD, fake.journal), 'deleted');
     assert.deepEqual(fake.events, [
         'connect', 'acquire', 'begin', 'read-password', 'journal',
+        'mark-apple-tokens', 'purge-expired-apple-tokens',
         'DELETE FROM game_personal_bests WHERE user_id = ?',
         'DELETE FROM game_submission_receipts WHERE user_id = ?',
         'DELETE FROM users WHERE user_id = ?',
         'commit', 'unlock', 'release',
     ]);
-    assert.deepEqual(fake.queries.map(({ values }) => values), [[42, 5], [42], [42], [42], [42], [42]]);
+    assert.deepEqual(fake.queries.filter(({ sql }) => !sql.includes('apple_provider_tokens')).map(({ values }) => values),
+        [[42, 5], [42], [42], [42], [42], [42]]);
     assert.ok(fake.queries.every(({ timeout }) => timeout === 10_000));
     assert.match(fake.queries[0].sql, /mickeyf:leaderboard-user:/);
     assert.match(fake.queries[1].sql, /WHERE user_id = \? LIMIT 1 FOR UPDATE$/);
@@ -129,6 +133,32 @@ test('missing users and incorrect passwords never issue a deletion', async () =>
         assert.equal(await deleteAccount(fake.database, 42, password, fake.journal), expected);
         assert.deepEqual(fake.events, ['connect', 'acquire', 'begin', 'read-password', 'commit', 'unlock', 'release']);
     }
+});
+
+test('fresh provider credentials persist only after proof and before the journal, and all deletions queue Apple tokens', async () => {
+    const fake = fakeDatabase({ passwordHash: null });
+    await deleteProviderAccount(fake.database, 42, PROVIDER_IDENTITY, fake.journal, SESSION, async (_connection, accountId) => {
+        assert.equal(accountId, ACCOUNT_ID);
+        assert.equal(fake.events.at(-1), 'read-session');
+        assert.equal(fake.events.includes('journal'), false);
+        fake.events.push('save-fresh-token');
+    });
+    assert(fake.events.indexOf('save-fresh-token') < fake.events.indexOf('journal'));
+    assert(fake.events.indexOf('journal') < fake.events.indexOf('mark-apple-tokens'));
+    assert(fake.events.indexOf('mark-apple-tokens') < fake.events.indexOf('DELETE FROM users WHERE user_id = ?'));
+    const mark = fake.queries.find(({ sql }) => sql.startsWith('UPDATE apple_provider_tokens'))!;
+    assert.equal(mark.values?.at(-1), ACCOUNT_ID);
+    for (const options of [{ sessionExists: false }, { providerSubject: null }]) {
+        const rejected = fakeDatabase(options);
+        await deleteProviderAccount(rejected.database, 42, PROVIDER_IDENTITY, rejected.journal, SESSION,
+            async () => assert.fail('Rejected proof must not retain credentials'));
+        assert.equal(rejected.events.includes('mark-apple-tokens'), false);
+    }
+    const failed = fakeDatabase();
+    await assert.rejects(deleteProviderAccount(failed.database, 42, PROVIDER_IDENTITY, failed.journal, SESSION,
+        async () => { throw new Error('synthetic storage failure'); }));
+    assert.equal(failed.events.includes('journal'), false);
+    assert.equal(failed.events.includes('rollback'), true);
 });
 
 test('NULL-password accounts reject password reauthentication without invoking the deletion journal', async () => {
@@ -285,6 +315,7 @@ test(`fresh ${provider} proof authenticates deletion of its exact linked subject
     assert.equal(await deleteProviderAccount(fake.database, 42, { ...PROVIDER_IDENTITY, provider }, fake.journal, SESSION), 'deleted');
     assert.deepEqual(fake.events, [
         'connect', 'acquire', 'begin', 'read-session', 'read-password', 'read-provider', 'read-session', 'journal',
+        'mark-apple-tokens', 'purge-expired-apple-tokens',
         'DELETE FROM game_personal_bests WHERE user_id = ?',
         'DELETE FROM game_submission_receipts WHERE user_id = ?', 'DELETE FROM users WHERE user_id = ?',
         'commit', 'unlock', 'release',

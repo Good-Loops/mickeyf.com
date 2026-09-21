@@ -27,6 +27,7 @@ type FakeOptions = {
     attemptMigrationRecorded?: boolean;
     sessionTable?: 'absent' | 'malformed';
     sessionMigrationRecorded?: boolean;
+    appleMigrationRecorded?: boolean;
     wrongTarget?: boolean;
     changeIdentityUnderLock?: boolean;
     failAt?: string;
@@ -54,7 +55,8 @@ function fakeReplay(options: FakeOptions = {}) {
             }], []];
             if (sql.includes('DATE_FORMAT(applied_at')) return [[{ epoch: options.wrongEpoch ? 'old' : SETTINGS.expectedIdentityEpoch }], []];
             if (sql.startsWith('SELECT version FROM schema_migrations')) {
-                const recorded = values?.[0] === '0011_create_account_sessions' ? options.sessionMigrationRecorded
+                const recorded = values?.[0] === '0016_create_apple_provider_tokens' ? options.appleMigrationRecorded
+                    : values?.[0] === '0011_create_account_sessions' ? options.sessionMigrationRecorded
                     : values?.[0] === '0010_create_provider_auth_attempts'
                         ? options.attemptMigrationRecorded : options.providerMigrationRecorded;
                 return [recorded ? [{ version: values?.[0] }] : [], []];
@@ -74,6 +76,8 @@ function fakeReplay(options: FakeOptions = {}) {
                     ? [{ tableCount: options.sessionTable === 'malformed' ? 1 : 0 }]
                     : [{ engine: 'MyISAM', collation: 'utf8mb4_unicode_ci', tableType: 'BASE TABLE' }], []];
             }
+            if (values?.[0] === 'apple_provider_tokens') return [[{ tableCount: 0 }], []];
+            if (sql.startsWith('UPDATE apple_provider_tokens')) return [{ affectedRows: 1 }, []];
             if (sql.includes('information_schema.COLUMNS')) return [options.missingIdentity ? [] : [{
                 type: 'char(36)', nullable: 'NO', characterSet: 'ascii', collation: 'ascii_bin',
                 defaultValue: 'uuid()', extra: 'DEFAULT_GENERATED', generationExpression: '',
@@ -150,7 +154,7 @@ test('replay locks and rechecks UUID, deletes only owned rows, and is repeatable
     const result = await applyDeletionReplay(fake.database, fake.reader, SETTINGS, plan.sha256);
     assert.equal(result.deletedAccounts, 1);
     assert.deepEqual([...fake.accounts], [[99, SECOND_ID]]);
-    const mutations = fake.queries.filter(query => query.sql.startsWith('DELETE'));
+    const mutations = fake.queries.filter(query => query.sql.startsWith('DELETE') && !query.sql.includes('apple_provider_tokens'));
     assert.equal(mutations.length, 3);
     assert.ok(mutations.every(query => query.values?.[0] === 42));
     const lock = fake.events.findIndex(sql => sql.includes('GET_LOCK'));
@@ -166,6 +170,28 @@ test('every record is validated before any deletion, including malformed trailin
     const fake = fakeReplay({ initialIntents: [INTENT, { ...INTENT, unexpectedEmail: 'must-not-store@example.test' } as DeletionIntent] });
     await assert.rejects(applyDeletionReplay(fake.database, fake.reader, SETTINGS, 'a'.repeat(64)), /Invalid deletion intent/u);
     assert.equal(fake.events.some(sql => sql.startsWith('DELETE')), false);
+});
+
+test('replay queues surviving Apple credentials even when the account is absent and never renews the journal deadline', async () => {
+    const fake = fakeReplay({ initialIntents: [{ ...INTENT, requestedAt: '2026-09-12T12:15:00.000Z' }, INTENT] });
+    fake.accounts.delete(42);
+    const plan = await planDeletionReplay(fake.database, fake.reader, SETTINGS);
+    for (let run = 0; run < 2; run++) {
+        const result = await applyDeletionReplay(fake.database, fake.reader, SETTINGS, plan.sha256);
+        assert.equal(result.absentAccounts, 1);
+    }
+    const transitions = fake.queries.filter(({ sql }) => sql.startsWith('UPDATE apple_provider_tokens'));
+    assert.equal(transitions.length, 2);
+    for (const transition of transitions) {
+        assert.deepEqual(transition.values, [...Array(4).fill('2026-09-11 12:15:00.000'), FIRST_ID]);
+    }
+    assert.equal(fake.queries.some(({ sql }) => sql.startsWith('DELETE FROM users')), false);
+});
+
+test('replay refuses absent Apple token storage when its migration is recorded', async () => {
+    const fake = fakeReplay({ appleMigrationRecorded: true });
+    await assert.rejects(planDeletionReplay(fake.database, fake.reader, SETTINGS), /missing its table/u);
+    assert.equal(fake.queries.some(({ sql }) => /^(?:UPDATE|DELETE)/u.test(sql)), false);
 });
 
 test('target, epoch, schema and review limits fail closed', async () => {

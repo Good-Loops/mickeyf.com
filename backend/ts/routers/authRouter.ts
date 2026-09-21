@@ -25,6 +25,7 @@ import { createLogoutHandler } from './authRouter.handlers';
 import { createProviderAuthRouter } from './providerAuthRouter';
 import type { ProviderAuthClient } from '../auth/providerAuthFlow';
 import type { PublicProviderAuthClient } from '../config/providerAuthConfig';
+import type { AppleTokenLifecycle } from '../config/appleTokenConfig';
 
 export { authRoutesContract } from './authRouter.contract';
 
@@ -41,6 +42,7 @@ export function createAuthRouter(
             signupEnabled?: boolean;
             clients: Readonly<Record<string, ProviderAuthClient>>;
             publicClients?: readonly PublicProviderAuthClient[];
+            appleTokenLifecycle?: AppleTokenLifecycle;
         };
     } = {}
 ): Router {
@@ -65,6 +67,7 @@ export function createAuthRouter(
         database, sessionSecret, isProduction, allowedOrigins: allowedMutationOrigins,
         clients: providerAuth?.clients ?? {}, enabled: providerAuth?.enabled === true,
         signupEnabled: providerAuth?.signupEnabled, accountDeletionEnabled, deletionJournal,
+        appleTokenRepository: providerAuth?.appleTokenLifecycle?.repository,
     }));
 
     /** GET /verify-token — validates auth context for the current request. */

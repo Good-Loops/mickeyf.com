@@ -5,10 +5,12 @@ import { assertAccountId, type AccountDeletionJournal } from './deletionJournal'
 import { readLiveSession } from '../auth/accountSessionRepository';
 import type { VerifiedProviderIdentity } from '../auth/providerIdentity';
 import { isSessionId, type SessionProof } from '../security/sessionPolicy';
+import { markAppleTokensForRevocation } from './appleTokenRepository';
 
 type AccountPasswordRow = RowDataPacket & { passwordHash: string | null; accountId: string };
 type AccountReauthentication = (connection: PoolConnection, account: AccountPasswordRow)
     => Promise<'authenticated' | 'not-found' | 'invalid-password'>;
+export type BeforeAccountDeletion = (connection: PoolConnection, accountId: string) => Promise<void>;
 
 export type AccountDeletionResult = 'deleted' | 'not-found' | 'invalid-password';
 
@@ -35,7 +37,8 @@ async function deleteAuthenticatedAccount(
     connection: PoolConnection,
     userId: number,
     reauthenticate: AccountReauthentication,
-    recordDeletion: (accountId: string) => Promise<void>
+    recordDeletion: (accountId: string) => Promise<void>,
+    beforeDeletion?: BeforeAccountDeletion,
 ): Promise<AccountDeletionResult> {
     const [accounts] = await connection.query<AccountPasswordRow[]>(
         {
@@ -49,15 +52,25 @@ async function deleteAuthenticatedAccount(
     assertAccountId(accounts[0].accountId);
     const authentication = await reauthenticate(connection, accounts[0]);
     if (authentication !== 'authenticated') return authentication;
+    if (beforeDeletion) {
+        await beforeDeletion(connection, accounts[0].accountId);
+        // Token persistence may wait on SQL; recheck the live proof before recording intent.
+        const currentAuthentication = await reauthenticate(connection, accounts[0]);
+        if (currentAuthentication !== 'authenticated') return currentAuthentication;
+    }
+    const requestedAt = new Date().toISOString();
     // This intent must survive SQL rollback. Never delete if persistence of
     // the independently stored intent has not been acknowledged.
     await recordDeletion(accounts[0].accountId);
-    await deleteOwnedAccountRows(connection, userId);
+    await deleteOwnedAccountRows(connection, userId, accounts[0].accountId, requestedAt);
     return 'deleted';
 }
 
 /** Caller must hold the account row lock inside a transaction. */
-export async function deleteOwnedAccountRows(connection: PoolConnection, userId: number): Promise<void> {
+export async function deleteOwnedAccountRows(
+    connection: PoolConnection, userId: number, accountId: string, requestedAt?: string,
+): Promise<void> {
+    await markAppleTokensForRevocation(connection, accountId, requestedAt);
     // Both child tables restrict parent deletion. Explicit, scoped deletes
     // remove every game's data without weakening those foreign keys.
     for (const sql of [
@@ -108,6 +121,7 @@ export async function deleteProviderAccount(
     identity: VerifiedProviderIdentity,
     journal: AccountDeletionJournal,
     expectedSession: SessionProof,
+    beforeDeletion?: BeforeAccountDeletion,
 ): Promise<AccountDeletionResult> {
     if (!expectedSession || !isSessionId(expectedSession.sessionId)) {
         throw new TypeError('Provider account deletion requires an authenticated session proof.');
@@ -129,7 +143,7 @@ export async function deleteProviderAccount(
         if (!links[0] || !Buffer.isBuffer(links[0].subject) || !links[0].subject.equals(subject)) return 'invalid-password';
         // Verification or the row-lock wait may outlive expiry. Check again immediately before journaling.
         return await readLiveSession(connection, userId, proof.accountId, proof.sessionId) ? 'authenticated' : 'not-found';
-    });
+    }, beforeDeletion);
 }
 
 async function deleteReauthenticatedAccount(
@@ -138,6 +152,7 @@ async function deleteReauthenticatedAccount(
     journal: AccountDeletionJournal,
     expectedSession: SessionProof | undefined,
     reauthenticate: AccountReauthentication,
+    beforeDeletion?: BeforeAccountDeletion,
 ): Promise<AccountDeletionResult> {
     if (!journal || typeof journal.recordAccountDeletion !== 'function') {
         throw new TypeError('Account deletion requires an independent journal.');
@@ -164,7 +179,7 @@ async function deleteReauthenticatedAccount(
                     const result = await deleteAuthenticatedAccount(connection, userId, reauthenticate, async accountId => {
                         await journal.recordAccountDeletion(accountId);
                         recorded = true;
-                    });
+                    }, beforeDeletion);
                     phase = 'commit';
                     await connection.commit();
                     return result;

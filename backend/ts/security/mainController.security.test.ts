@@ -192,6 +192,7 @@ test('login commits a revocable session before its signed cookie, with matching 
         const { response, state } = responseRecorder();
         let inserted: unknown[] | undefined;
         let committed = false;
+        let isolationConfigured = false;
         const database = {
             async query(options: { sql: string; timeout: number }, values: unknown[]) {
                 assert.match(options.sql.replace(/\s+/g, ' '), /SELECT user_id, account_uuid, user_name, user_password FROM users WHERE user_name = \? LIMIT 1/);
@@ -206,7 +207,17 @@ test('login commits a revocable session before its signed cookie, with matching 
                         assert.equal(options.timeout, 10_000);
                         if (sql.includes('GET_LOCK')) { assert.deepEqual(values, [42, 5]); return [[{ lockResult: 1 }], []]; }
                         if (sql.includes('RELEASE_LOCK')) { assert.deepEqual(values, [42]); return [[{ lockResult: 1 }], []]; }
-                        if (sql === 'START TRANSACTION') return [{ affectedRows: 0 }, []];
+                        if (sql === 'SET TRANSACTION ISOLATION LEVEL READ COMMITTED') {
+                            assert.equal(values, undefined);
+                            assert.equal(isolationConfigured, false);
+                            assert.equal(inserted, undefined);
+                            isolationConfigured = true;
+                            return [{ affectedRows: 0 }, []];
+                        }
+                        if (sql === 'START TRANSACTION') {
+                            assert.equal(isolationConfigured, true, 'session creation explicitly avoids cross-account gap locks');
+                            return [{ affectedRows: 0 }, []];
+                        }
                         if (sql === 'COMMIT') {
                             assert.equal(state.cookie, undefined, 'never expose a cookie before the session commit');
                             assert.ok(inserted);

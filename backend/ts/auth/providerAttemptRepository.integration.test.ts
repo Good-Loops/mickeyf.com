@@ -12,7 +12,8 @@ import { WEB_SESSION_COOKIE } from '../security/sessionCookie';
 import { createAccountSession, revokeAccountSession } from './accountSessionRepository';
 import mysql, { type Connection, type Pool, type PoolConnection, type QueryOptions, type ResultSetHeader, type RowDataPacket } from 'mysql2/promise';
 import { deleteAccount } from '../accounts/accountDeletionRepository';
-import { findProviderAccount, linkProviderAccount } from '../accounts/providerAccountRepository';
+import { findProviderAccount, linkProviderAccount, persistProviderCredential } from '../accounts/providerAccountRepository';
+import { createAppleTokenRepository, type StoredAppleToken } from '../accounts/appleTokenRepository';
 import { loadMigrationConfig } from '../config/migrationConfig';
 import { submitP4VegaScore } from '../leaderboards/p4VegaScoreRepository';
 import { submitThreeBossesRun } from '../leaderboards/threeBossesRunRepository';
@@ -31,6 +32,14 @@ import { createProviderAuthRouter } from '../routers/providerAuthRouter';
 const config = loadMigrationConfig();
 const testPort = Number(process.env.MIGRATION_TEST_PORT);
 const TEST_PASSWORD = 'attempt-isolated-test-only';
+const tokenVault = createAppleTokenRepository({ clientId: 'com.example.disposable', activeKeyId: 'test',
+    encryptionKeys: { test: randomBytes(32) } });
+const localAppleTokens = {
+    async exchangeCode(authorizationCode: string) {
+        return { idToken: authorizationCode, refreshToken: 'isolated-composed-refresh-token' };
+    },
+    async revoke() { throw new Error('This fixture must not make a revocation call'); },
+};
 let administrator: Connection;
 let database: Pool;
 let passwordHash: string;
@@ -67,7 +76,7 @@ before(async () => {
     assert.doesNotMatch(identity[0].versionComment, /Google/iu);
     await administrator.query('SET FOREIGN_KEY_CHECKS = 0');
     try {
-        await administrator.query(`DROP TABLE IF EXISTS account_sessions, provider_auth_attempts, account_provider_identities,
+        await administrator.query(`DROP TABLE IF EXISTS apple_provider_tokens, account_sessions, provider_auth_attempts, account_provider_identities,
             game_personal_bests, game_runs, game_submission_receipts, schema_migrations, users`);
     } finally { await administrator.query('SET FOREIGN_KEY_CHECKS = 1'); }
     await administrator.query(`CREATE TABLE users (
@@ -88,6 +97,7 @@ before(async () => {
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-unique-user-names'] });
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['allow-passwordless-accounts'] });
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['extend-provider-attempt-actions'] });
+    await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-apple-tokens'] });
     database = mysql.createPool({
         host: config.host, port: config.port, database: config.database, user: config.user, password: config.password,
         connectTimeout: 10000, multipleStatements: false, connectionLimit: 2, dateStrings: true, timezone: 'Z',
@@ -440,14 +450,17 @@ test('complete flow links a locally verified provider proof, verifies anonymous 
     });
     const flow = createProviderAuthFlow({
         enabled: true,
-        clients: { 'apple-web': { provider: 'apple', verifier } },
+        clients: { 'apple-web': { provider: 'apple', verifier, appleTokens: localAppleTokens } },
         attempts: {
             create: value => createProviderAttempt(database, value),
             consume: (state, binding, client, action) => consumeProviderAttempt(database, state, binding, client, action),
         },
         accounts: {
             find: identity => findProviderAccount(database, identity),
-            link: (target, password, identity, session) => linkProviderAccount(database, target, password, identity, session),
+            link: (target, password, identity, session, refreshToken) => linkProviderAccount(database, target, password, identity, session,
+                (connection, locked) => tokenVault.save(connection, tokenVault.prepare(refreshToken!, locked.accountId))),
+            saveAppleToken: (target, identity, refreshToken) => persistProviderCredential(database, target, identity,
+                (connection, locked) => tokenVault.save(connection, tokenVault.prepare(refreshToken, locked.accountId))),
         },
     });
     const sessionSecret = randomBytes(32).toString('base64url');
@@ -469,7 +482,7 @@ test('complete flow links a locally verified provider proof, verifies anonymous 
     if (!linking.ok) throw new Error('The isolated linking challenge must be created');
     const linkingInput = {
         clientKey: 'apple-web', action: 'link', state: linking.state,
-        idToken: signProviderProof(linking.nonce), password: TEST_PASSWORD,
+        idToken: signProviderProof(linking.nonce), authorizationCode: signProviderProof(linking.nonce), password: TEST_PASSWORD,
     };
     assert.deepEqual(await flow.complete(await readContext(linkingRequest), linkingInput), { ok: true, type: 'linked' });
     assert.deepEqual(await flow.complete(await readContext(linkingRequest), linkingInput), { ok: false, reason: 'INVALID_ATTEMPT' });
@@ -489,6 +502,7 @@ test('complete flow links a locally verified provider proof, verifies anonymous 
     if (!login.ok) throw new Error('The isolated login challenge must be created');
     const loginInput = {
         clientKey: 'apple-web', action: 'login', state: login.state, idToken: signProviderProof(login.nonce),
+        authorizationCode: signProviderProof(login.nonce),
     };
     assert.deepEqual(await flow.complete(await readContext(anonymousRequest), loginInput), {
         ok: true, type: 'account-verified', account: { ...account, userName },
@@ -504,6 +518,10 @@ test('complete flow links a locally verified provider proof, verifies anonymous 
     assert.equal(newLinks.length, 1);
     assert.deepEqual(newLinks[0].subject, Buffer.from(subject));
     assert.deepEqual(completed.account_provider_identities.filter(row => row !== newLinks[0]), original.account_provider_identities);
+    const [storedTokens] = await administrator.query<(RowDataPacket & StoredAppleToken)[]>(
+        'SELECT * FROM apple_provider_tokens WHERE account_uuid = ?', [account.accountId]);
+    assert.equal(storedTokens.length, 2, 'link and returning login each retain their own encrypted credential');
+    for (const row of storedTokens) assert.equal(tokenVault.decrypt(row), 'isolated-composed-refresh-token');
 });
 
 test('logout or expiry during provider verification prevents the composed flow from creating a link', async () => {
@@ -527,7 +545,7 @@ test('logout or expiry during provider verification prevents the composed flow f
         const identity = { provider: 'apple', subject: `VerificationSession-${invalidation}` } as VerifiedProviderIdentity;
         const flow = createProviderAuthFlow({
             enabled: true,
-            clients: { 'apple-web': { provider: 'apple', verifier: { async verify() {
+            clients: { 'apple-web': { provider: 'apple', appleTokens: localAppleTokens, verifier: { async verify() {
                 signalVerification();
                 await verificationGate;
                 return { verified: true, identity };
@@ -538,13 +556,16 @@ test('logout or expiry during provider verification prevents the composed flow f
             },
             accounts: {
                 find: verified => findProviderAccount(database, verified),
-                link: (target, password, verified, session) => linkProviderAccount(database, target, password, verified, session),
+                link: (target, password, verified, session, refreshToken) => linkProviderAccount(database, target, password, verified, session,
+                    (connection, locked) => tokenVault.save(connection, tokenVault.prepare(refreshToken!, locked.accountId))),
+                saveAppleToken: (target, verified, refreshToken) => persistProviderCredential(database, target, verified,
+                    (connection, locked) => tokenVault.save(connection, tokenVault.prepare(refreshToken, locked.accountId))),
             },
         });
         const challenge = await flow.begin(context, { clientKey: 'apple-web', action: 'link' });
         assert.ok(challenge.ok);
         const input = { clientKey: 'apple-web', action: 'link', state: challenge.state,
-            idToken: 'synthetic-verifier-input', password: TEST_PASSWORD };
+            idToken: 'synthetic-verifier-input', authorizationCode: 'synthetic-code', password: TEST_PASSWORD };
         const original = await snapshotAccountData();
         const completing = flow.complete(context, input);
         await Promise.race([verificationStarted, completing.then(() => {
@@ -564,5 +585,7 @@ test('logout or expiry during provider verification prevents the composed flow f
         assert.equal(await readContext(request), null);
         assert.equal(await findProviderAccount(database, identity), null);
         assert.deepEqual(await snapshotAccountData(), original);
+        assert.deepEqual((await administrator.query<RowDataPacket[]>(
+            'SELECT token_id FROM apple_provider_tokens WHERE account_uuid = ?', [account.accountId]))[0], []);
     }
 });

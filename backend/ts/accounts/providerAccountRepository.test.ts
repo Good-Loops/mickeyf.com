@@ -6,7 +6,7 @@ import type { Pool, PoolConnection } from 'mysql2/promise';
 import type { VerifiedProviderIdentity } from '../auth/providerIdentity';
 import type { SessionProof } from '../security/sessionPolicy';
 import { createProviderAccount, findProviderAccount, linkProviderAccount, readProviderAccountMethods,
-    ProviderAccountUnavailableError } from './providerAccountRepository';
+    persistProviderCredential, ProviderAccountUnavailableError, type ProviderAccount } from './providerAccountRepository';
 
 const accountId = '123e4567-e89b-42d3-a456-426614174000';
 const otherId = '123e4567-e89b-42d3-a456-426614174001';
@@ -20,6 +20,7 @@ const identity = { provider: 'google', subject: 'CaseSensitiveSubject' } as Veri
 function fixture(options: {
     accountId?: string; absent?: boolean; duplicate?: { accountId: string; subject: Buffer }[];
     sessionMissing?: boolean; passwordHash?: string | null;
+    returningAccount?: ProviderAccount | null; lock?: () => Promise<void>;
     fail?: 'begin' | 'session' | 'insert' | 'commit' | 'unlock'; rollbackFails?: boolean;
 } = {}) {
     const events: string[] = [];
@@ -34,11 +35,18 @@ function fixture(options: {
         async query(query: { sql: string; timeout: number }, values: unknown[]) {
             const sql = query.sql.replace(/\s+/g, ' ').trim();
             queries.push({ ...query, sql, values });
-            if (sql.includes('GET_LOCK')) { step('lock'); return [[{ lockResult: 1 }]]; }
+            if (sql.includes('GET_LOCK')) { step('lock'); await options.lock?.(); return [[{ lockResult: 1 }]]; }
             if (sql.includes('RELEASE_LOCK')) { step('unlock'); return [[{ lockResult: 1 }]]; }
             if (sql.startsWith('SELECT user_password')) {
                 step('password'); return [options.absent ? [] : [{ accountId: options.accountId ?? accountId,
                     passwordHash: options.passwordHash === undefined ? passwordHash : options.passwordHash }]];
+            }
+            if (sql.startsWith('SELECT account_uuid AS accountId FROM users')) {
+                step('account'); return [options.absent ? [] : [{ accountId: options.accountId ?? accountId }]];
+            }
+            if (sql.includes('FROM account_provider_identities AS p')) {
+                step('lookup'); return [options.returningAccount === null ? []
+                    : [options.returningAccount ?? { ...target, userName: 'existing' }]];
             }
             if (sql.includes('FROM account_sessions AS s')) {
                 step('session'); return [options.sessionMissing ? [] : [{ userName: 'existing' }]];
@@ -51,7 +59,7 @@ function fixture(options: {
             throw new Error('Unexpected query');
         },
     } as unknown as PoolConnection;
-    return { events, queries, database: { getConnection: async () => connection } as Pick<Pool, 'getConnection'> };
+    return { events, queries, connection, database: { getConnection: async () => connection } as Pick<Pool, 'getConnection'> };
 }
 
 test('links only a password-proven matching incarnation with a live session under the existing user lock and transaction', async () => {
@@ -208,7 +216,7 @@ function signupFixture(options: {
         },
     } as unknown as PoolConnection;
     const database = { async getConnection() { step('connect'); return connection; } } as Pick<Pool, 'getConnection'>;
-    return { account, events, queries, database };
+    return { account, events, queries, connection, database };
 }
 
 const signupIdentity = { ...identity, email: '  Verified@Example.test  ' } as VerifiedProviderIdentity;
@@ -285,6 +293,154 @@ test('signup does not report creation until the database acknowledges commit', a
     assert.equal(finished, false);
     acknowledge();
     assert.equal((await creation).created, true);
+});
+
+test('signup writes credentials on the same connection after identity creation and rolls everything back if that write fails', async () => {
+    for (const fail of [false, true]) {
+        const f = signupFixture();
+        const creation = createProviderAccount(f.database, { ...signupIdentity, provider: 'apple' }, 'new-player',
+            async (connection, createdAccount) => {
+                assert.equal(connection, f.connection);
+                assert.deepEqual(createdAccount, f.account);
+                assert.deepEqual(f.events, ['connect', 'begin', 'lookup', 'user', 'account', 'identity']);
+                f.events.push('credential');
+                if (fail) throw new Error('private refresh token and encryption details');
+            });
+        if (fail) {
+            await assert.rejects(creation, ProviderAccountUnavailableError);
+            assert.deepEqual(f.events.slice(-3), ['credential', 'rollback', 'release']);
+            assert.equal(f.events.includes('commit'), false);
+        } else {
+            assert.deepEqual(await creation, { created: true, account: f.account });
+            assert.deepEqual(f.events.slice(-3), ['credential', 'commit', 'release']);
+        }
+    }
+    for (const options of [{ existing: true }, { duplicate: 'user' as const }, { duplicate: 'identity' as const }]) {
+        const f = signupFixture(options);
+        const result = await createProviderAccount(f.database, { ...signupIdentity, provider: 'apple' }, 'new-player',
+            async () => { assert.fail('a failed account insert cannot save credentials'); });
+        assert.equal(result.created, false);
+        assert.equal(f.events.includes('commit'), false);
+    }
+});
+
+test('linking saves credentials only after exact ownership and live-session proof, in the same rollback boundary', async () => {
+    const appleIdentity = { ...identity, provider: 'apple' as const };
+    for (const duplicate of [undefined, [{ accountId, subject: Buffer.from(identity.subject) }]]) {
+        for (const fail of [false, true]) {
+            const f = fixture({ duplicate });
+            const linking = linkProviderAccount(f.database, target, password, appleIdentity, sessionProof,
+                async (connection, linkedAccount) => {
+                    assert.equal(connection, f.connection);
+                    assert.deepEqual(linkedAccount, target);
+                    assert.deepEqual(f.events, ['lock', 'begin', 'password', 'session', 'insert', ...(duplicate ? ['existing'] : [])]);
+                    f.events.push('credential');
+                    if (fail) throw new Error('private provider credential');
+                });
+            if (fail) {
+                await assert.rejects(linking, ProviderAccountUnavailableError);
+                assert.deepEqual(f.events.slice(-4), ['credential', 'rollback', 'unlock', 'release']);
+                assert.equal(f.events.includes('commit'), false);
+            } else {
+                assert.equal(await linking, duplicate ? 'already-linked' : 'linked');
+                assert.deepEqual(f.events.slice(-4), ['credential', 'commit', 'unlock', 'release']);
+            }
+        }
+    }
+    for (const options of [{ absent: true }, { sessionMissing: true }, { passwordHash: null },
+        { duplicate: [{ accountId: otherId, subject: Buffer.from(identity.subject) }] }]) {
+        const f = fixture(options);
+        const result = await linkProviderAccount(f.database, target, password, appleIdentity, sessionProof,
+            async () => { assert.fail('missing authentication or another owner cannot save credentials'); });
+        assert.ok(['not-found', 'invalid-password', 'link-conflict'].includes(result));
+    }
+});
+
+test('returning-login credentials are saved only under the deletion lock for the same incarnation and exact subject', async () => {
+    const f = fixture();
+    await persistProviderCredential(f.database, target, { ...identity, provider: 'apple' }, async (connection, matched) => {
+        assert.equal(connection, f.connection);
+        assert.deepEqual(matched, target);
+        assert.deepEqual(f.events, ['lock', 'begin', 'account', 'lookup']);
+        f.events.push('credential');
+    });
+    assert.deepEqual(f.events, ['lock', 'begin', 'account', 'lookup', 'credential', 'commit', 'unlock', 'release']);
+    assert.match(f.queries.find(query => query.sql.includes('FROM users WHERE'))!.sql, /FOR UPDATE$/);
+    const lookup = f.queries.find(query => query.sql.includes('INNER JOIN users'))!;
+    assert.deepEqual(lookup.values, ['apple', Buffer.from(identity.subject)]);
+    assert.match(lookup.sql, /u\.account_uuid = p\.account_uuid/);
+    assert.ok(f.queries.every(query => !/email|INSERT INTO users/i.test(query.sql)));
+    for (const options of [{ absent: true }, { accountId: otherId }, { returningAccount: null },
+        { returningAccount: { userId: target.userId, accountId: otherId, userName: 'other' } },
+        { returningAccount: { userId: target.userId + 1, accountId, userName: 'other' } }]) {
+        const missing = fixture(options);
+        await assert.rejects(persistProviderCredential(missing.database, target, identity,
+            async () => { missing.events.push('unexpected-credential'); }), ProviderAccountUnavailableError);
+        assert.equal(missing.events.includes('unexpected-credential'), false);
+        assert.equal(missing.events.includes('commit'), false);
+        assert.deepEqual(missing.events.slice(-3), ['rollback', 'unlock', 'release']);
+    }
+});
+
+test('deletion while returning-login credential persistence waits for the user lock prevents any credential write', async () => {
+    let release!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    const options = { absent: false, lock: () => pending };
+    const f = fixture(options);
+    const saving = persistProviderCredential(f.database, target, identity,
+        async () => { f.events.push('unexpected-credential'); });
+    const rejected = assert.rejects(saving, ProviderAccountUnavailableError);
+    try {
+        await new Promise<void>(resolve => setImmediate(resolve));
+        assert.deepEqual(f.events, ['lock']);
+        options.absent = true;
+        release();
+        await rejected;
+        assert.equal(f.events.includes('unexpected-credential'), false);
+        assert.equal(f.events.includes('commit'), false);
+    } finally { release(); }
+});
+
+test('returning-login persistence captures its account and verified identity before awaiting the shared lock', async () => {
+    let release!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    const f = fixture({ lock: () => pending });
+    const mutableTarget = { ...target };
+    const mutableIdentity = { ...identity };
+    const saving = persistProviderCredential(f.database, mutableTarget, mutableIdentity, async (_connection, captured) => {
+        assert.deepEqual(captured, target);
+        f.events.push('credential');
+    });
+    try {
+        await new Promise<void>(resolve => setImmediate(resolve));
+        mutableTarget.userId = 99;
+        mutableTarget.accountId = otherId;
+        mutableIdentity.subject = 'ReplacementSubject';
+        mutableIdentity.provider = 'apple';
+        release();
+        await saving;
+        assert.deepEqual(f.queries.find(query => query.sql.includes('FROM users WHERE'))!.values, [target.userId]);
+        assert.deepEqual(f.queries.find(query => query.sql.includes('INNER JOIN users'))!.values,
+            ['google', Buffer.from(identity.subject)]);
+    } finally { release(); }
+});
+
+test('returning-login persistence never confirms an unacknowledged credential write or commit', async () => {
+    for (const fail of ['credential', 'commit'] as const) {
+        const f = fixture(fail === 'commit' ? { fail } : {});
+        await assert.rejects(persistProviderCredential(f.database, target, identity, async () => {
+            f.events.push('credential');
+            if (fail === 'credential') throw new Error('private token write failure');
+        }), error => {
+            assert.ok(error instanceof ProviderAccountUnavailableError);
+            assert.equal('cause' in error, false);
+            assert.doesNotMatch(String(error), /private|token/);
+            return true;
+        });
+        assert.ok(f.events.includes('rollback'));
+        if (fail === 'credential') assert.equal(f.events.includes('commit'), false);
+        else assert.ok(f.events.includes('destroy'));
+    }
 });
 
 test('account methods are UUID-scoped booleans, without exposing hashes, email or provider subjects', async () => {

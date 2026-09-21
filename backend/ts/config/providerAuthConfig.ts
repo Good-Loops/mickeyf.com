@@ -1,5 +1,6 @@
 import type { ProviderAuthClient } from '../auth/providerAuthFlow';
 import { createProviderTokenVerifier } from '../auth/providerTokenVerifier';
+import { loadAppleTokenConfig, type AppleTokenLifecycle } from './appleTokenConfig';
 
 type Environment = Readonly<Record<string, string | undefined>>;
 type VerifierDependencies = Parameters<typeof createProviderTokenVerifier>[1];
@@ -14,6 +15,7 @@ export type ProviderAuthConfig = Readonly<{
     signupEnabled: boolean;
     clients: Readonly<Record<string, ProviderAuthClient>>;
     publicClients: readonly PublicProviderAuthClient[];
+    appleTokenLifecycle?: AppleTokenLifecycle;
 }>;
 
 const disabledConfig: ProviderAuthConfig = Object.freeze({
@@ -44,6 +46,7 @@ export function loadProviderAuthConfig(
     const googleWebId = optionalClientId(env, 'GOOGLE_WEB_CLIENT_ID', /^[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/);
     const appleIosId = optionalClientId(env, 'APPLE_IOS_BUNDLE_ID', /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/);
     const signupEnabled = env.PROVIDER_GOOGLE_SIGNUP_ENABLED === 'true';
+    const appleTokenLifecycle = loadAppleTokenConfig(env);
     if (signupEnabled && !googleWebId) throw new Error('Google signup requires GOOGLE_WEB_CLIENT_ID');
     if (googleWebId === undefined && appleIosId === undefined) {
         throw new Error('PROVIDER_AUTH_ENABLED requires GOOGLE_WEB_CLIENT_ID or APPLE_IOS_BUNDLE_ID');
@@ -59,10 +62,12 @@ export function loadProviderAuthConfig(
     }
     if (appleIosId !== undefined) {
         clients['apple-ios'] = Object.freeze({ provider: 'apple',
-            // Account creation stays unavailable until Apple's token-revocation lifecycle is connected.
+            ...(appleTokenLifecycle ? { appleTokens: appleTokenLifecycle.client } : {}),
+            // Lifecycle preparation does not enable account creation or native release.
             signupEnabled: false, deletionEnabled: false,
             verifier: createProviderTokenVerifier({ appleAudience: appleIosId }, verifierDependencies) });
         publicClients.push(Object.freeze({ clientKey: 'apple-ios', provider: 'apple', platform: 'ios', clientId: appleIosId }));
     }
-    return Object.freeze({ enabled: true, signupEnabled, clients: Object.freeze(clients), publicClients: Object.freeze(publicClients) });
+    return Object.freeze({ enabled: true, signupEnabled, clients: Object.freeze(clients), publicClients: Object.freeze(publicClients),
+        ...(appleTokenLifecycle ? { appleTokenLifecycle } : {}) });
 }

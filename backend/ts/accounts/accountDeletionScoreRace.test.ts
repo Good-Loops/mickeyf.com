@@ -10,6 +10,7 @@ const USER_ID = 42;
 const PASSWORD = 'test-only-password';
 const PASSWORD_HASH = bcrypt.hashSync(PASSWORD, 4);
 const RUN_ID = 'e99d42ad-860d-4b15-b145-8519eb5b73b4';
+const OTHER_ACCOUNT_ID = 'a92d42ad-860d-4b15-b145-8519eb5b73b4';
 const journal = { async recordAccountDeletion() {} };
 type Database = Pick<Pool, 'getConnection'>;
 
@@ -18,11 +19,19 @@ type Database = Pick<Pool, 'getConnection'>;
 function createConcurrentDatabase() {
     const state = { userExists: true, bests: 0, receipts: 0, scoreWrites: 0 };
     const operations: string[] = [];
+    const appleTokens = [
+        { accountId: RUN_ID, pending: false, expired: false },
+        { accountId: RUN_ID, pending: true, expired: true },
+        { accountId: OTHER_ACCOUNT_ID, pending: false, expired: false },
+        { accountId: OTHER_ACCOUNT_ID, pending: true, expired: true },
+    ];
+    const appleTokenOperations: string[] = [];
     let previousLock = Promise.resolve();
     const database = {
         async getConnection() {
             let releaseLock: (() => void) | undefined;
             let lockHeld = false;
+            let transactionActive = false;
             return {
                 async query(options: { sql: string }, values: unknown[]) {
                     const sql = options.sql.replace(/\s+/g, ' ').trim();
@@ -53,6 +62,34 @@ function createConcurrentDatabase() {
                     if (sql.startsWith('SELECT') && /FROM game_(personal_bests|submission_receipts)/.test(sql)) {
                         return [[], []];
                     }
+                    if (sql.startsWith('UPDATE apple_provider_tokens SET ')) {
+                        assert.ok(transactionActive && state.userExists, 'token marking shares the live account deletion transaction');
+                        assert.match(sql, /revocation_requested_at = LEAST\(/);
+                        assert.match(sql, /retention_deadline = LEAST\(/);
+                        assert.match(sql, /next_attempt_at = LEAST\(/);
+                        assert.ok(sql.endsWith('WHERE account_uuid = ?'));
+                        assert.equal(values.length, 5);
+                        assert.equal(values[4], RUN_ID);
+                        assert.equal(typeof values[0], 'string');
+                        assert.ok(values.slice(0, 4).every(value => value === values[0]));
+                        appleTokenOperations.push('mark');
+                        const owned = appleTokens.filter(token => token.accountId === values[4]);
+                        for (const token of owned) token.pending = true;
+                        return [{ affectedRows: owned.length }, []];
+                    }
+                    if (sql === 'DELETE FROM apple_provider_tokens WHERE account_uuid = ? AND retention_deadline <= UTC_TIMESTAMP(6)') {
+                        assert.ok(transactionActive && state.userExists, 'expired-token purge precedes account removal in the same transaction');
+                        assert.deepEqual(values, [RUN_ID]);
+                        appleTokenOperations.push('purge');
+                        let purged = 0;
+                        for (let index = appleTokens.length - 1; index >= 0; index--) {
+                            if (appleTokens[index].accountId === values[0] && appleTokens[index].expired) {
+                                appleTokens.splice(index, 1);
+                                purged++;
+                            }
+                        }
+                        return [{ affectedRows: purged }, []];
+                    }
                     if (sql.startsWith('INSERT INTO game_')) {
                         assert.ok(state.userExists, 'a score must never recreate deleted account data');
                         if (sql.includes('INSERT INTO game_personal_bests')) state.bests += 1;
@@ -64,15 +101,24 @@ function createConcurrentDatabase() {
                     else throw new Error(`Unexpected fixture query: ${sql}`);
                     return [{ affectedRows: 1 }, []];
                 },
-                async beginTransaction() { assert.ok(lockHeld); },
-                async commit() { assert.ok(lockHeld); },
+                async beginTransaction() { assert.ok(lockHeld); transactionActive = true; },
+                async commit() { assert.ok(lockHeld); transactionActive = false; },
                 async rollback() { assert.fail('successful race cases must not roll back'); },
                 release() { assert.equal(lockHeld, false); },
                 destroy() { releaseLock?.(); },
             } as unknown as PoolConnection;
         },
     } as Database;
-    return { database, state, operations };
+    return { database, state, operations, appleTokens, appleTokenOperations };
+}
+
+function assertAppleRevocationQueued(fake: ReturnType<typeof createConcurrentDatabase>) {
+    assert.deepEqual(fake.appleTokenOperations, ['mark', 'purge']);
+    assert.deepEqual(fake.appleTokens, [
+        { accountId: RUN_ID, pending: true, expired: false },
+        { accountId: OTHER_ACCOUNT_ID, pending: false, expired: false },
+        { accountId: OTHER_ACCOUNT_ID, pending: true, expired: true },
+    ], 'retain only unexpired owned revocation work and leave other accounts untouched');
 }
 
 const games = [
@@ -105,6 +151,7 @@ for (const game of games) {
         assert.deepEqual({ ...fake.state, scoreWrites: undefined }, {
             userExists: false, bests: 0, receipts: 0, scoreWrites: undefined,
         });
+        assertAppleRevocationQueued(fake);
     });
 
     test(`${game.name}: deletion completes before a waiting submission and no score data is recreated`, async () => {
@@ -116,5 +163,6 @@ for (const game of games) {
         assert.deepEqual(results, ['deleted', 'user-not-found']);
         assert.deepEqual(fake.operations, ['delete', 'submit']);
         assert.deepEqual(fake.state, { userExists: false, bests: 0, receipts: 0, scoreWrites: 0 });
+        assertAppleRevocationQueued(fake);
     });
 }

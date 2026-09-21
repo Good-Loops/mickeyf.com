@@ -12,7 +12,7 @@ export type RuntimeColumnGrant = Readonly<{
 
 export type RuntimeTableGrant = Readonly<{
     table: 'users' | 'game_submission_receipts' | 'game_personal_bests' | 'schema_migrations' | 'account_sessions'
-        | 'account_provider_identities' | 'provider_auth_attempts';
+        | 'account_provider_identities' | 'provider_auth_attempts' | 'apple_provider_tokens';
     grants: readonly RuntimeColumnGrant[];
     tablePrivileges: readonly 'DELETE'[];
 }>;
@@ -45,6 +45,19 @@ export const PRODUCTION_RUNTIME_DATABASE_ROLE: RuntimeDatabaseAccount =
  * verification. Migration writes and schema changes remain maintenance-only.
  */
 export const RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freeze([
+    Object.freeze({
+        table: 'apple_provider_tokens' as const,
+        tablePrivileges: Object.freeze(['DELETE' as const]),
+        grants: Object.freeze([
+            Object.freeze({ privilege: 'SELECT' as const,
+                columns: Object.freeze(['token_id', 'account_uuid', 'client_id', 'encrypted_token', 'created_at',
+                    'revocation_requested_at', 'next_attempt_at', 'retention_deadline', 'attempt_count']) }),
+            Object.freeze({ privilege: 'INSERT' as const,
+                columns: Object.freeze(['token_id', 'account_uuid', 'client_id', 'encrypted_token', 'created_at']) }),
+            Object.freeze({ privilege: 'UPDATE' as const,
+                columns: Object.freeze(['revocation_requested_at', 'next_attempt_at', 'retention_deadline', 'attempt_count']) }),
+        ]),
+    }),
     Object.freeze({
         table: 'account_sessions' as const,
         tablePrivileges: Object.freeze(['DELETE' as const]),

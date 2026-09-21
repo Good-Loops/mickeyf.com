@@ -5,6 +5,7 @@ import * as identitySchema from './accountIdentitySchema';
 import * as providerIdentitySchema from './providerIdentitySchema';
 import * as attemptSchema from './providerAttemptSchema';
 import * as sessionSchema from './accountSessionSchema';
+import * as appleTokenSchema from './appleTokenSchema';
 import type { MigrationConnection } from './leaderboardSchema';
 import { loadMigrationManifest } from './migrationManifest';
 import {
@@ -203,6 +204,7 @@ test('plan is read-only, configures short waits, and releases its advisory lock'
             '0013_add_unique_user_names',
             '0014_allow_passwordless_accounts',
             '0015_extend_provider_attempt_actions',
+            '0016_create_apple_provider_tokens',
         ],
         recoverable: [],
     });
@@ -542,7 +544,7 @@ test('passwordless migration effects require explicit selection and complete ear
 function passwordlessRunnerFixture(t: TestContext, options: {
     recordedCount?: number; unique?: boolean; passwordless?: boolean; extended?: boolean; duplicates?: boolean;
 } = {}) {
-    const migrations = loadMigrationManifest();
+    const migrations = loadMigrationManifest().filter(({ version }) => version <= '0015_extend_provider_attempt_actions');
     const state = { unique: options.unique ?? false, passwordless: options.passwordless ?? false,
         extended: options.extended ?? false,
         applied: migrations.slice(0, options.recordedCount ?? 12).map(({ version, checksum }) => ({ version, checksum })) };
@@ -643,4 +645,35 @@ test('recorded 0015 rejects legacy checks, while extended checks reject missing 
     const missingHistory = passwordlessRunnerFixture(t, { recordedCount: 13, unique: true, passwordless: true, extended: true });
     await assert.rejects(planMigrations(missingHistory.connection, missingHistory.migrations, settings), /all earlier migrations/u);
     assert.equal(missingHistory.connection.calls.some(({ sql }) => /^(?:ALTER TABLE|INSERT INTO schema_migrations)/u.test(sql)), false);
+});
+
+test('Apple token storage requires explicit selection, complete earlier history and verifies recoverable DDL', async t => {
+    const base = passwordlessRunnerFixture(t, { recordedCount: 15, unique: true, passwordless: true, extended: true });
+    const apple = loadMigrationManifest().find(({ effect }) => effect === 'add-apple-tokens')!;
+    const migrations = [...base.migrations, apple];
+    let exists = false;
+    let verifications = 0;
+    t.mock.method(appleTokenSchema, 'verifyAppleTokenSchema', async () => { assert.equal(exists, true); verifications++; });
+    const originalQuery = base.connection.query.bind(base.connection);
+    base.connection.query = async (sql, values = []) => {
+        if ((sql.includes('COUNT(*)') && values[0] === 'apple_provider_tokens') || sql === apple.sql) {
+            base.connection.calls.push({ sql, values });
+            if (sql === apple.sql) { exists = true; return [{}, []]; }
+            return [[{ tableCount: exists ? 1 : 0 }], []];
+        }
+        return originalQuery(sql, values);
+    };
+    const legacy = await applyMigrations(base.connection, migrations, settings);
+    assert.deepEqual(legacy.pending, [apple.version]);
+    assert.equal(exists, false);
+    const applied = await applyMigrations(base.connection, migrations, settings, { allowedEffectKinds: ['add-apple-tokens'] });
+    assert.deepEqual(applied.pending, []);
+    assert.ok(verifications > 0);
+    assert.equal(base.connection.calls.filter(({ sql }) => sql === apple.sql).length, 1);
+    base.state.applied.pop();
+    assert.deepEqual((await planMigrations(base.connection, migrations, settings)).recoverable, [apple.version]);
+    await applyMigrations(base.connection, migrations, settings, { allowedEffectKinds: ['add-apple-tokens'] });
+    assert.equal(base.connection.calls.filter(({ sql }) => sql === apple.sql).length, 1, 'recover history without rerunning CREATE');
+    base.state.applied.splice(14, 1);
+    await assert.rejects(planMigrations(base.connection, migrations, settings), /all earlier migrations/u);
 });

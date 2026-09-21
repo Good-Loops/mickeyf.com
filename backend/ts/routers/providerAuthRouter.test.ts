@@ -7,6 +7,7 @@ import cookieParser from 'cookie-parser';
 import express from 'express';
 import type { Pool } from 'mysql2/promise';
 import { AccountDeletionPendingError } from '../accounts/accountDeletionRepository';
+import { createAppleTokenRepository } from '../accounts/appleTokenRepository';
 import { readProviderAccountMethods, type ProviderAccountCreationResult } from '../accounts/providerAccountRepository';
 import { createProviderAuthContextReader } from '../auth/providerAuthContext';
 import { createProviderAuthFlow, type ProviderAuthClient, type ProviderChallengeResult, type ProviderCompletionResult } from '../auth/providerAuthFlow';
@@ -34,7 +35,7 @@ function signedCookie(value: string, name = '__session') {
 }
 
 type Features = { signupEnabled?: boolean; accountDeletionEnabled?: boolean; withJournal?: boolean; missingProviderTable?: boolean;
-    appleDeletionEnabled?: boolean };
+    appleDeletionEnabled?: boolean; appleTokens?: boolean; appleStorage?: boolean };
 
 function fixture(features: Features = {}) {
     const state = {
@@ -71,6 +72,7 @@ function fixture(features: Features = {}) {
     } };
     clients['google-web'] = clients['google-test'];
     clients['apple-ios'] = { provider: 'apple', deletionEnabled: features.appleDeletionEnabled,
+        ...(features.appleTokens ? { appleTokens: { async exchangeCode() { throw new Error('unused'); }, async revoke() {} } } : {}),
         verifier: { async verify() { return { verified: false, reason: 'INVALID_PROVIDER_TOKEN' }; } } };
     const flow = createProviderAuthFlow({ enabled: true, clients, signupEnabled: features.signupEnabled,
         deletionEnabled: features.accountDeletionEnabled && features.withJournal, attempts: {
@@ -83,6 +85,7 @@ function fixture(features: Features = {}) {
             return attempt;
         },
     }, accounts: {
+        ...(features.appleStorage ? { async saveAppleToken() { assert.fail('unused'); } } : {}),
         async find(verified) { state.events.push('find'); assert.deepEqual(verified, identity); return state.linked ? account : null; },
         async link(target, password, verified, proof) {
             state.events.push('link');
@@ -139,7 +142,10 @@ function fixture(features: Features = {}) {
             return state.methods;
         },
     };
-    return { database, clients, services, state };
+    const appleTokenRepository = features.appleStorage ? createAppleTokenRepository({
+        clientId: 'com.example.test', activeKeyId: 'v1', encryptionKeys: { v1: Buffer.alloc(32, 3) },
+    }) : undefined;
+    return { database, clients, services, state, appleTokenRepository };
 }
 
 async function withServer(run: (base: string, setup: ReturnType<typeof fixture>) => Promise<void>, enabled = true,
@@ -551,16 +557,20 @@ test('account methods expose only booleans after signed-cookie and live-session 
     }, true, { accountDeletionEnabled: true, withJournal: true });
 });
 
-test('Apple deletion capability needs its own opt-in as well as the journal and global deletion switch', async () => {
+test('Apple deletion requires its own opt-in, journal, global switch, token exchange and storage', async () => {
     for (const features of [
         { accountDeletionEnabled: true, withJournal: true },
         { appleDeletionEnabled: true, withJournal: true },
         { appleDeletionEnabled: true, accountDeletionEnabled: true },
         { appleDeletionEnabled: true, accountDeletionEnabled: true, withJournal: true },
-    ]) {
+        { appleDeletionEnabled: true, accountDeletionEnabled: true, withJournal: true, appleTokens: true },
+        { appleDeletionEnabled: true, accountDeletionEnabled: true, withJournal: true, appleStorage: true },
+        { appleDeletionEnabled: true, accountDeletionEnabled: true, withJournal: true, appleTokens: true, appleStorage: true },
+    ] satisfies Features[]) {
         await withServer(async (base, { state }) => {
             state.methods = { hasPassword: false, googleLinked: false, appleLinked: true };
-            const allowed = !!(features.appleDeletionEnabled && features.accountDeletionEnabled && features.withJournal);
+            const allowed = !!(features.appleDeletionEnabled && features.accountDeletionEnabled && features.withJournal
+                && features.appleTokens && features.appleStorage);
             const cookie = signedCookie(issueSessionToken(account, secret).token, 'session');
             const response = await fetch(`${base}/account`, { headers: { cookie } });
             assert.deepEqual(await response.json(), { hasPassword: false, googleLinked: false, googleDeletionEnabled: false,

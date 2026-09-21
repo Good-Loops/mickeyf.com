@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { after, before, beforeEach, test } from 'node:test';
 import bcrypt from 'bcryptjs';
 import mysql, {
@@ -9,6 +9,8 @@ import mysql, {
 } from 'mysql2/promise';
 import { loadMigrationConfig } from '../config/migrationConfig';
 import { deleteAccount } from '../accounts/accountDeletionRepository';
+import { createAppleTokenRepository, type StoredAppleToken } from '../accounts/appleTokenRepository';
+import { verifyAppleTokenReadiness } from '../migrations/appleTokenSchema';
 import { findProviderAccount, linkProviderAccount, readProviderAccountMethods } from '../accounts/providerAccountRepository';
 import { createAccountSession, readLiveSession, renewAccountSession, revokeAccountSession } from '../auth/accountSessionRepository';
 import { consumeProviderAttempt, createProviderAttempt, type ProviderAttempt } from '../auth/providerAttemptRepository';
@@ -115,6 +117,7 @@ async function createSchema(): Promise<void> {
     try {
         await administrator.query(`
             DROP TABLE IF EXISTS
+                apple_provider_tokens,
                 account_sessions,
                 provider_auth_attempts,
                 account_provider_identities,
@@ -153,11 +156,15 @@ async function createSchema(): Promise<void> {
     await applyMigrations(asMigrationConnection(administrator), migrations, config, {
         allowedEffectKinds: ['add-provider-identities', 'add-provider-attempts', 'add-account-sessions', 'add-session-renewal'],
     });
+    await applyMigrations(asMigrationConnection(administrator), migrations, config, {
+        allowedEffectKinds: ['add-unique-user-names', 'allow-passwordless-accounts', 'extend-provider-attempt-actions', 'add-apple-tokens'],
+    });
 }
 
 async function resetData(): Promise<void> {
     await administrator.query('SET FOREIGN_KEY_CHECKS = 0');
     try {
+        await administrator.query('TRUNCATE TABLE apple_provider_tokens');
         await administrator.query('TRUNCATE TABLE account_sessions');
         await administrator.query('TRUNCATE TABLE provider_auth_attempts');
         await administrator.query('TRUNCATE TABLE account_provider_identities');
@@ -263,6 +270,34 @@ after(async () => {
         await root.end();
     }
     if (administrator) await administrator.end();
+});
+
+test('runtime Apple token grants permit encrypted persistence and revocation but never credential rebinding', async () => {
+    const [accounts] = await administrator.query<RowDataPacket[]>('SELECT account_uuid FROM users WHERE user_id = 1');
+    const accountId = accounts[0].account_uuid as string;
+    await administrator.query(`INSERT INTO account_provider_identities (account_uuid,provider,subject,linked_at)
+        VALUES (?, 'apple', ?, UTC_TIMESTAMP(6))`, [accountId, Buffer.from('apple-grants-fixture')]);
+    const vault = createAppleTokenRepository({ clientId: 'com.example.disposable', activeKeyId: 'isolated-v1',
+        encryptionKeys: { 'isolated-v1': randomBytes(32) } });
+    const row = vault.prepare('isolated-grant-refresh-token', accountId);
+    const connection = await runtimePool.getConnection();
+    try {
+        await verifyAppleTokenReadiness(connection as unknown as MigrationConnection);
+        await connection.beginTransaction();
+        await vault.save(connection, row);
+        await vault.markForRevocation(connection, accountId);
+        await connection.query('DELETE FROM users WHERE user_id = 1');
+        await connection.commit();
+    } finally { connection.release(); }
+    const [pending] = await runtimePool.query<(RowDataPacket & StoredAppleToken)[]>('SELECT * FROM apple_provider_tokens');
+    assert.equal(pending.length, 1);
+    assert.equal(vault.decrypt(pending[0]), 'isolated-grant-refresh-token');
+    assert.ok(pending[0].retention_deadline);
+    for (const column of ['token_id', 'account_uuid', 'client_id', 'encrypted_token', 'created_at']) {
+        await assertPrivilegeDenied(() => runtimePool.query(`UPDATE apple_provider_tokens SET ${column} = ${column} WHERE 1 = 0`));
+    }
+    await runtimePool.query('DELETE FROM apple_provider_tokens WHERE token_id = ?', [row.token_id]);
+    assert.deepEqual((await runtimePool.query<RowDataPacket[]>('SELECT * FROM apple_provider_tokens'))[0], []);
 });
 
 test('limited runtime session grants support rotation without rewriting immutable session properties', async () => {

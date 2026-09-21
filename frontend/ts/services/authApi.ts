@@ -29,7 +29,9 @@ export type ProviderAuthenticationResult =
     | { success: true; linked: true }
     | { success: true; deleted: true }
     | { error: string };
-export type AcquireProviderCredential = (challenge: ProviderAuthenticationChallenge, signal: AbortSignal) => Promise<string>;
+export type AppleProviderCredential = Readonly<{ idToken: string; authorizationCode: string }>;
+export type ProviderCredential = string | AppleProviderCredential;
+export type AcquireProviderCredential = (challenge: ProviderAuthenticationChallenge, signal: AbortSignal) => Promise<ProviderCredential>;
 export type ProviderAuthenticationOptions = Readonly<{ signal?: AbortSignal }>;
 declare const preparedProviderLogin: unique symbol;
 /** Only the auth API instance that prepared this opaque handle can complete it. */
@@ -111,6 +113,14 @@ function validProviderToken(idToken: unknown): idToken is string {
         && /^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(idToken);
 }
 
+function readProviderCredential(clientKey: string, value: unknown): { idToken: string; authorizationCode?: string } | null {
+    if (clientKey !== 'apple-ios') return validProviderToken(value) ? { idToken: value } : null;
+    if (!isRecord(value) || !hasKeys(value, 'authorizationCode,idToken') || !validProviderToken(value.idToken)
+        || typeof value.authorizationCode !== 'string' || value.authorizationCode.length < 1
+        || value.authorizationCode.length > 4096 || /[^\x21-\x7e]/.test(value.authorizationCode)) return null;
+    return { idToken: value.idToken, authorizationCode: value.authorizationCode };
+}
+
 function readProviderChallenge(value: unknown): ProviderAuthenticationChallenge | null {
     if (!isRecord(value) || !hasKeys(value, 'expiresInSeconds,nonce,state')
         || typeof value.state !== 'string' || !PROVIDER_RANDOM_VALUE.test(value.state)
@@ -125,8 +135,8 @@ function credentialFailure(error: unknown): { error: string } {
         ? 'CANCELLED' : 'UNAVAILABLE' };
 }
 
-async function acquireProviderToken(challenge: ProviderAuthenticationChallenge, acquireCredential: AcquireProviderCredential,
-    deadline: number, signal?: AbortSignal): Promise<{ idToken: string } | { error: string }> {
+async function acquireProviderProof(clientKey: string, challenge: ProviderAuthenticationChallenge, acquireCredential: AcquireProviderCredential,
+    deadline: number, signal?: AbortSignal): Promise<{ idToken: string; authorizationCode?: string } | { error: string }> {
     const controller = new AbortController();
     let cancellation: string | null = null;
     let cancel!: (reason: string) => void;
@@ -146,11 +156,8 @@ async function acquireProviderToken(challenge: ProviderAuthenticationChallenge, 
         const credential = Promise.resolve().then(async () => {
             if (cancellation !== null) return { error: cancellation };
             try {
-                const idToken = await acquireCredential(challenge, controller.signal);
-                if (!validProviderToken(idToken)) {
-                    return { error: 'INVALID_PROVIDER_TOKEN' };
-                }
-                return { idToken };
+                const proof = readProviderCredential(clientKey, await acquireCredential(challenge, controller.signal));
+                return proof ?? { error: 'INVALID_PROVIDER_TOKEN' };
             } catch (error) { return credentialFailure(error); }
         });
         return await Promise.race([credential, cancelled]);
@@ -355,20 +362,21 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
         const challenge = readProviderChallenge(beginning.body);
         if (!challenge) return { error: 'INVALID_RESPONSE' };
         const deadline = Date.now() + challenge.expiresInSeconds * 1000;
-        const credential = await acquireProviderToken(challenge, acquireCredential, deadline, signal);
+        const credential = await acquireProviderProof(input.clientKey, challenge, acquireCredential, deadline, signal);
         if (signal?.aborted) return { error: 'CANCELLED' };
         if ('error' in credential) return credential;
         if (Date.now() >= deadline) return { error: 'INVALID_ATTEMPT' };
-        const result = await completeProviderAuthentication(input, challenge.state, credential.idToken);
+        const result = await completeProviderAuthentication(input, challenge.state, credential);
         return 'signupRequired' in result ? { error: 'UNAVAILABLE' } : result;
     }
 
     async function completeProviderAuthentication(input: ProviderAuthenticationInput, state: string,
-        idToken: string): Promise<ProviderCompletionResponse> {
+        credential: { idToken: string; authorizationCode?: string }): Promise<ProviderCompletionResponse> {
         // Once complete is sent, await its cookie mutation and verification even
         // if UI cancellation arrives. Cancelling cannot undo a server-side login.
         const completion = await postProviderOperation('complete', {
-            action: input.action, clientKey: input.clientKey, state, idToken,
+            action: input.action, clientKey: input.clientKey, state, idToken: credential.idToken,
+            ...(input.clientKey === 'apple-ios' ? { authorizationCode: credential.authorizationCode } : {}),
             ...(input.action === 'login' || input.action === 'signup' ? { rememberMe: input.rememberMe === true }
                 : input.action === 'link' ? { password: input.password } : { confirmation: 'DELETE' }),
             ...(input.action === 'signup' ? { userName: input.userName } : {}),
@@ -429,7 +437,7 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
         });
     }
 
-    function completeProviderLogin(handle: PreparedProviderLogin, idToken: string,
+    function completeProviderLogin(handle: PreparedProviderLogin, credential: ProviderCredential,
         options: CompleteProviderLoginOptions = {}): Promise<CompleteProviderLoginResult> {
         if (!validCompletionOptions(options)) return Promise.resolve({ error: 'INVALID_REQUEST' });
         const login = isRecord(handle) ? preparedLogins.get(handle) : undefined;
@@ -441,7 +449,8 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
         const signal = options.signal;
         const error = preparedLoginError(login, signal);
         if (error) return Promise.resolve({ error });
-        if (!validProviderToken(idToken)) return Promise.resolve({ error: 'INVALID_PROVIDER_TOKEN' });
+        const proof = readProviderCredential(login.clientKey, credential);
+        if (!proof) return Promise.resolve({ error: 'INVALID_PROVIDER_TOKEN' });
         const rememberMe = options.rememberMe === true;
         const userName = options.userName?.trim();
         return enqueueMutation(async () => {
@@ -450,7 +459,7 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
             const startedAt = Date.now();
             const result = await completeProviderAuthentication({ action: login.action, clientKey: login.clientKey, rememberMe,
                 ...(login.action === 'signup' ? { userName } : {}) },
-                login.state, idToken);
+                login.state, proof);
             if (!('signupRequired' in result)) return result;
             const continuationError = preparedLoginError(login, signal);
             if (continuationError) return { error: continuationError };

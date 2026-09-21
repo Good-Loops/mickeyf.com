@@ -73,6 +73,7 @@ async function createSchema(): Promise<void> {
     try {
         await administrator.query(`
             DROP TABLE IF EXISTS
+                apple_provider_tokens,
                 account_sessions,
                 provider_auth_attempts,
                 account_provider_identities,
@@ -109,6 +110,9 @@ async function createSchema(): Promise<void> {
     });
     await applyMigrations(asMigrationConnection(administrator), migrations, config, {
         allowedEffectKinds: ['add-provider-identities', 'add-provider-attempts', 'add-account-sessions', 'add-session-renewal'],
+    });
+    await applyMigrations(asMigrationConnection(administrator), migrations, config, {
+        allowedEffectKinds: ['add-unique-user-names', 'allow-passwordless-accounts', 'extend-provider-attempt-actions', 'add-apple-tokens'],
     });
 }
 
@@ -273,7 +277,7 @@ test('active runtime sessions block role removal, then a drained rerun converges
         );
         assert.equal(initialPlan.state, 'broad');
         assert.deepEqual(initialPlan.blockers, []);
-        assert.equal(initialPlan.operations.ensureRequiredPrivileges.length, 7);
+        assert.equal(initialPlan.operations.ensureRequiredPrivileges.length, 8);
         assert.equal(
             initialPlan.operations.removeApprovedRole?.approvedRole,
             'mock_cloudsqlsuperuser@%'
@@ -299,7 +303,7 @@ test('active runtime sessions block role removal, then a drained rerun converges
             RUNTIME_ACCOUNT
         );
         assert.equal(preparedPlan.state, 'broad');
-        assert.equal(preparedPlan.operations.ensureRequiredPrivileges.length, 7);
+        assert.equal(preparedPlan.operations.ensureRequiredPrivileges.length, 8);
     } finally {
         await openRuntimeConnection.end();
         await waitForFixtureSessionToClose(openRuntimeConnection.threadId);

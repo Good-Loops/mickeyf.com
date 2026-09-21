@@ -60,7 +60,7 @@ before(async () => {
     // This suite runs last and replaces only the already verified disposable fixtures.
     await administrator.query('SET FOREIGN_KEY_CHECKS = 0');
     try {
-        await administrator.query(`DROP TABLE IF EXISTS account_sessions, provider_auth_attempts, account_provider_identities,
+        await administrator.query(`DROP TABLE IF EXISTS apple_provider_tokens, account_sessions, provider_auth_attempts, account_provider_identities,
             game_personal_bests, game_runs, game_submission_receipts, schema_migrations, users`);
     } finally { await administrator.query('SET FOREIGN_KEY_CHECKS = 1'); }
     await administrator.query(`CREATE TABLE users (
@@ -81,6 +81,7 @@ before(async () => {
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-unique-user-names'] });
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['allow-passwordless-accounts'] });
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['extend-provider-attempt-actions'] });
+    await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-apple-tokens'] });
     database = mysql.createPool({
         host: config.host, port: config.port, database: config.database, user: config.user, password: config.password,
         connectTimeout: 10000, multipleStatements: false, connectionLimit: 2, dateStrings: true, timezone: 'Z',

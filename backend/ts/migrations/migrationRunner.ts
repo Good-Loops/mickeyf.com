@@ -6,6 +6,7 @@ import {
     verifyAccountIdentitySchema,
 } from './accountIdentitySchema';
 import { PROVIDER_IDENTITY_MIGRATION_VERSION, verifyProviderIdentitySchema } from './providerIdentitySchema';
+import { verifyAppleTokenSchema } from './appleTokenSchema';
 import { PROVIDER_ATTEMPT_MIGRATION_VERSION, PROVIDER_ATTEMPT_ACTIONS_MIGRATION_VERSION,
     inspectProviderAttemptStage, verifyProviderAttemptSchema, type ProviderAttemptSchemaStage } from './providerAttemptSchema';
 import { ACCOUNT_SESSION_MIGRATION_VERSION, inspectAccountSessionRenewal,
@@ -88,7 +89,7 @@ function isPasswordlessMigration(migration: MigrationDefinition): boolean {
 function requiresCompleteEarlierHistory(migration: MigrationDefinition): boolean {
     return migration.effect === 'add-provider-identities' || migration.effect === 'add-provider-attempts'
         || migration.effect === 'add-account-sessions' || migration.effect === 'add-session-renewal'
-        || isPasswordlessMigration(migration);
+        || migration.effect === 'add-apple-tokens' || isPasswordlessMigration(migration);
 }
 
 async function inspectLeaderboardStage(
@@ -352,6 +353,11 @@ async function verifyMigrationPrecondition(
     connection: MigrationConnection,
     migration: MigrationDefinition
 ): Promise<void> {
+    if (migration.effect === 'add-apple-tokens') {
+        await verifyProviderIdentitySchema(connection);
+        if (await tableExists(connection, migration.tableName)) throw new Error('Apple token migration requires its table to be absent');
+        return;
+    }
     if (migration.effect === 'add-unique-user-names') {
         await verifyUniqueUserNamesPrecondition(connection);
         return;
@@ -434,6 +440,10 @@ async function verifyMigrationPostcondition(
     stage: LeaderboardSchemaStage = 'original',
     attemptStage: ProviderAttemptSchemaStage = 'legacy'
 ): Promise<void> {
+    if (migration.effect === 'add-apple-tokens') {
+        await verifyAppleTokenSchema(connection);
+        return;
+    }
     if (migration.effect === 'add-unique-user-names') {
         await verifyUniqueUserNamesSchema(connection);
         return;
@@ -527,7 +537,7 @@ function assertProviderMigrationHistory(
         : attempts ? PROVIDER_ATTEMPT_PREREQUISITES : PROVIDER_IDENTITY_PREREQUISITES);
     if (!prerequisites.every(version => applied.has(version))
         || migrations.some(({ version }) => version < migration.version && !applied.has(version))) {
-        const label = passwordlessPrerequisites ? 'Passwordless account migrations' : renewal ? 'Session renewal'
+        const label = migration.effect === 'add-apple-tokens' ? 'Apple token storage' : passwordlessPrerequisites ? 'Passwordless account migrations' : renewal ? 'Session renewal'
             : sessions ? 'Account sessions' : `Provider ${attempts ? 'attempts' : 'identities'}`;
         throw new Error(`${label} require all earlier migrations to be recorded first`);
     }

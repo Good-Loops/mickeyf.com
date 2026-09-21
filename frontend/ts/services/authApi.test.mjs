@@ -442,10 +442,14 @@ const providerInput = { action: 'login', clientKey: 'google-web', rememberMe: tr
 const providerChallenge = { state: Buffer.alloc(32, 1).toString('base64url'),
     nonce: Buffer.alloc(32, 2).toString('base64url'), expiresInSeconds: 300 };
 const providerToken = 'synthetic.header.signature';
+const appleCredential = { idToken: providerToken, authorizationCode: 'synthetic-one-time-code' };
+const credentialFor = clientKey => clientKey === 'apple-ios' ? appleCredential : providerToken;
 const nextTurn = () => new Promise(resolve => setImmediate(resolve));
 
-test('provider login owns begin, credential acquisition, complete and saved-cookie verification', async () => {
+for (const clientKey of ['google-web', 'apple-ios']) {
+test(`${clientKey} login owns begin, credential acquisition, complete and saved-cookie verification`, async () => {
     const calls = [];
+    const input = { ...providerInput, clientKey };
     const api = createAuthApi(apiBase, async (url, init) => {
         calls.push(url);
         assert.equal(init.credentials, 'include');
@@ -457,21 +461,67 @@ test('provider login owns begin, credential acquisition, complete and saved-cook
         assert.equal(init.method, 'POST');
         assert.deepEqual(init.headers, { 'Content-Type': 'application/json' });
         if (url.endsWith('/begin')) {
-            assert.deepEqual(JSON.parse(init.body), { action: 'login', clientKey: 'google-web' });
+            assert.deepEqual(JSON.parse(init.body), { action: 'login', clientKey });
             return Response.json(providerChallenge);
         }
-        assert.deepEqual(JSON.parse(init.body), { ...providerInput, state: providerChallenge.state, idToken: providerToken });
+        assert.deepEqual(JSON.parse(init.body), { ...input, state: providerChallenge.state,
+            ...(clientKey === 'apple-ios' ? appleCredential : { idToken: providerToken }) });
         return Response.json({ success: true, user_name: 'Player' });
     });
-    assert.deepEqual(await api.runProviderAuthentication(providerInput, async (challenge, signal) => {
+    assert.deepEqual(await api.runProviderAuthentication(input, async (challenge, signal) => {
         calls.push('acquire');
         assert.deepEqual(challenge, providerChallenge);
         assert.equal(Object.isFrozen(challenge), true);
         assert.equal(signal.aborted, false);
-        return providerToken;
+        return credentialFor(clientKey);
     }), { success: true, user_name: 'Player' });
     assert.deepEqual(calls, [`${apiBase}/auth/providers/begin`, 'acquire',
         `${apiBase}/auth/providers/complete`, `${apiBase}/auth/verify-token`]);
+});
+}
+
+test('provider completions reject missing Apple codes, malformed proofs and cross-provider credentials without sending them', async () => {
+    const invalidApple = [providerToken, null, [], {}, { idToken: providerToken },
+        { ...appleCredential, identityToken: providerToken }, { ...appleCredential, email: 'private@example.test' },
+        { ...appleCredential, idToken: 'invalid' },
+        ...[undefined, null, '', 1, ' ', 'code with space', 'code\n', '\u0000', '\u007f', 'é', 'x'.repeat(4097)]
+            .map(authorizationCode => ({ idToken: providerToken, authorizationCode }))];
+    for (const [clientKey, values] of [['google-web', [appleCredential, { idToken: providerToken }]], ['apple-ios', invalidApple]]) {
+        for (const credential of values) {
+            const calls = [];
+            const api = createAuthApi(apiBase, async (url, init) => {
+                calls.push(JSON.parse(init.body));
+                assert.ok(url.endsWith('/begin'), 'invalid proof cannot reach completion');
+                return Response.json(providerChallenge);
+            });
+            const prepared = await api.prepareProviderLogin(clientKey);
+            assert.deepEqual(await api.completeProviderLogin(prepared.handle, credential), { error: 'INVALID_PROVIDER_TOKEN' });
+            assert.deepEqual(await api.completeProviderLogin(prepared.handle, credentialFor(clientKey)), { error: 'INVALID_ATTEMPT' });
+            assert.deepEqual(await api.runProviderAuthentication({ action: 'login', clientKey }, async () => credential),
+                { error: 'INVALID_PROVIDER_TOKEN' });
+            assert.equal(calls.length, 2);
+            assert.ok(calls.every(body => !('idToken' in body) && !('authorizationCode' in body)));
+        }
+    }
+});
+
+test('prepared Apple completion snapshots both proof fields before queued work and accepts bounded opaque codes', async () => {
+    for (const authorizationCode of ['!', 'opaque+/=._-~', 'x'.repeat(4096)]) {
+        const calls = [];
+        const api = createAuthApi(apiBase, async (url, init) => {
+            if (url.endsWith('/begin')) return Response.json(providerChallenge);
+            if (url.endsWith('/verify-token')) return Response.json({ loggedIn: true, user_name: 'Player' });
+            calls.push(JSON.parse(init.body));
+            return Response.json({ success: true, user_name: 'Player' });
+        });
+        const prepared = await api.prepareProviderLogin('apple-ios');
+        const credential = { idToken: providerToken, authorizationCode };
+        const completion = api.completeProviderLogin(prepared.handle, credential);
+        credential.idToken = 'changed'; credential.authorizationCode = 'changed';
+        assert.deepEqual(await completion, { success: true, user_name: 'Player' });
+        assert.deepEqual(calls, [{ action: 'login', clientKey: 'apple-ios', state: providerChallenge.state,
+            idToken: providerToken, authorizationCode, rememberMe: false }]);
+    }
 });
 
 test('provider linking sends the unchanged password only on complete and never requests a new login session', async () => {
@@ -480,16 +530,16 @@ test('provider linking sends the unchanged password only on complete and never r
     const api = createAuthApi(apiBase, async (url, init) => {
         calls.push(url);
         if (url.endsWith('/begin')) {
-            assert.deepEqual(JSON.parse(init.body), { action: 'link', clientKey: 'apple-native' });
+            assert.deepEqual(JSON.parse(init.body), { action: 'link', clientKey: 'apple-ios' });
             return Response.json(providerChallenge);
         }
         assert.equal(url, `${apiBase}/auth/providers/complete`);
-        assert.deepEqual(JSON.parse(init.body), { action: 'link', clientKey: 'apple-native',
-            password, state: providerChallenge.state, idToken: providerToken });
+        assert.deepEqual(JSON.parse(init.body), { action: 'link', clientKey: 'apple-ios',
+            password, state: providerChallenge.state, ...appleCredential });
         return Response.json({ success: true, linked: true });
     });
-    assert.deepEqual(await api.runProviderAuthentication({ action: 'link', clientKey: 'apple-native', password },
-        async () => providerToken), { success: true, linked: true });
+    assert.deepEqual(await api.runProviderAuthentication({ action: 'link', clientKey: 'apple-ios', password },
+        async () => appleCredential), { success: true, linked: true });
     assert.equal(calls.length, 2);
 });
 
@@ -1044,7 +1094,7 @@ test('split completion requires the same exact saved-cookie verification as the 
 });
 
 for (const clientKey of ['google-web', 'apple-ios']) {
-test(`new ${clientKey} entry returns an opaque username continuation and completes without a second begin or credential exchange`, async () => {
+test(`new ${clientKey} entry retains its proof through an opaque username continuation without a second begin`, async () => {
     const calls = [];
     const signupChallenge = { ...providerChallenge, state: Buffer.alloc(32, 3).toString('base64url'), expiresInSeconds: 200 };
     const api = createAuthApi(apiBase, async (url, init) => {
@@ -1056,17 +1106,19 @@ test(`new ${clientKey} entry returns an opaque username continuation and complet
             : { success: true, user_name: 'new-player' });
     });
     const prepared = await api.prepareProviderLogin(clientKey);
-    const next = await api.completeProviderLogin(prepared.handle, providerToken, { rememberMe: true });
+    const next = await api.completeProviderLogin(prepared.handle, credentialFor(clientKey), { rememberMe: true });
     assert.equal(next.signupRequired, true);
     assert.deepEqual(Object.keys(next).sort(), ['handle', 'signupRequired']);
     assert.deepEqual(Object.keys(next.handle), []);
     assert.equal(calls.length, 2, 'no session verification or account creation before username consent');
-    assert.deepEqual(await api.completeProviderLogin(next.handle, providerToken, { rememberMe: true, userName: ' new-player ' }),
+    assert.deepEqual(calls[1].body, { action: 'login', clientKey, state: providerChallenge.state,
+        ...(clientKey === 'apple-ios' ? appleCredential : { idToken: providerToken }), rememberMe: true });
+    assert.deepEqual(await api.completeProviderLogin(next.handle, credentialFor(clientKey), { rememberMe: true, userName: ' new-player ' }),
         { success: true, user_name: 'new-player' });
     assert.deepEqual(calls[2].body, { clientKey, action: 'signup', state: signupChallenge.state,
-        idToken: providerToken, rememberMe: true, userName: 'new-player' });
+        ...(clientKey === 'apple-ios' ? appleCredential : { idToken: providerToken }), rememberMe: true, userName: 'new-player' });
     assert.equal(calls.filter(call => call.url.endsWith('/begin')).length, 1);
-    assert.deepEqual(await api.completeProviderLogin(next.handle, providerToken, { userName: 'again' }),
+    assert.deepEqual(await api.completeProviderLogin(next.handle, credentialFor(clientKey), { userName: 'again' }),
         { error: 'INVALID_ATTEMPT' });
 });
 
@@ -1079,7 +1131,7 @@ test(`${clientKey} signup continuation rejects changed nonce, reused state and e
     ]) {
         const api = createAuthApi(apiBase, async url => Response.json(url.endsWith('/begin') ? providerChallenge : response));
         const prepared = await api.prepareProviderLogin(clientKey);
-        assert.deepEqual(await api.completeProviderLogin(prepared.handle, providerToken), { error: 'INVALID_RESPONSE' });
+        assert.deepEqual(await api.completeProviderLogin(prepared.handle, credentialFor(clientKey)), { error: 'INVALID_RESPONSE' });
     }
 });
 
@@ -1096,13 +1148,13 @@ test(`${clientKey} continuation inherits original expiry and is invalidated by l
                     state: Buffer.alloc(32, 3).toString('base64url'), expiresInSeconds: 300 } });
         });
         const prepared = await api.prepareProviderLogin(clientKey, { signal: controller.signal });
-        const next = await api.completeProviderLogin(prepared.handle, providerToken);
+        const next = await api.completeProviderLogin(prepared.handle, credentialFor(clientKey));
         assert.equal(next.signupRequired, true);
         if (invalidation === 'expiry') t.mock.timers.tick(2000);
         else if (invalidation === 'logout') await api.logoutRequest();
         else controller.abort();
         const before = calls.length;
-        assert.deepEqual(await api.completeProviderLogin(next.handle, providerToken, { userName: 'new-player' }),
+        assert.deepEqual(await api.completeProviderLogin(next.handle, credentialFor(clientKey), { userName: 'new-player' }),
             { error: invalidation === 'expiry' ? 'INVALID_ATTEMPT' : 'CANCELLED' });
         assert.equal(calls.length, before);
     }

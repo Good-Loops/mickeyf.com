@@ -262,15 +262,15 @@ export default function ProviderSignInControls({ action, userName = '', remember
                 if (!mounted.current || controller.signal.aborted) return;
                 if ('error' in prepared) result = prepared;
                 else {
-                    const idToken = await acquireProviderCredential(client, prepared.challenge, controller.signal);
+                    const credential = await acquireProviderCredential(client, prepared.challenge, controller.signal);
                     if (!mounted.current || controller.signal.aborted) return;
-                    result = await completeProviderLogin(prepared.handle, idToken, { rememberMe, signal: controller.signal });
+                    result = await completeProviderLogin(prepared.handle, credential, { rememberMe, signal: controller.signal });
                     if (!mounted.current || controller.signal.aborted) return;
                     if ('signupRequired' in result) {
                         const chosenName = await requestProviderUsername(userName, controller.signal, client.provider);
                         if (!mounted.current || controller.signal.aborted) return;
                         if (chosenName === null) { controller.abort(); return; }
-                        result = await completeProviderLogin(result.handle, idToken,
+                        result = await completeProviderLogin(result.handle, credential,
                             { rememberMe, signal: controller.signal, userName: chosenName });
                     }
                 }

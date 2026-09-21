@@ -14,7 +14,7 @@
 import { createContext, useContext, useState, ReactNode, useEffect, useRef } from 'react';
 import { loginRequest, logoutRequest, verifyRequest, renewRequest, deleteAccountRequest, runProviderAuthentication,
     prepareProviderLogin as prepareProviderLoginRequest, completeProviderLogin as completeProviderLoginRequest } from '@/services/authService';
-import type { DeleteAccountResponse, ProviderAuthenticationInput, AcquireProviderCredential,
+import type { DeleteAccountResponse, ProviderAuthenticationInput, AcquireProviderCredential, ProviderCredential,
     ProviderAuthenticationOptions, ProviderAuthenticationResult, PreparedProviderLogin, PrepareProviderLoginResult,
     CompleteProviderLoginOptions, CompleteProviderLoginResult } from '@/services/authApi';
 import { watchSessionRenewalActivity } from '@/services/sessionRenewalActivity';
@@ -33,7 +33,7 @@ type AuthContextType = {
     authenticateWithProvider: (input: ProviderAuthenticationInput, acquireCredential: AcquireProviderCredential,
         options?: ProviderAuthenticationOptions) => Promise<ProviderAuthenticationResult>;
     prepareProviderLogin: (clientKey: string, options?: ProviderAuthenticationOptions, action?: 'login' | 'signup') => Promise<PrepareProviderLoginResult>;
-    completeProviderLogin: (handle: PreparedProviderLogin, idToken: string,
+    completeProviderLogin: (handle: PreparedProviderLogin, credential: ProviderCredential,
         options?: CompleteProviderLoginOptions) => Promise<CompleteProviderLoginResult>;
 };
 
@@ -184,11 +184,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         return result;
     };
 
-    const completeProviderLogin: AuthContextType['completeProviderLogin'] = async (handle, idToken, options) => {
+    const completeProviderLogin: AuthContextType['completeProviderLogin'] = async (handle, credential, options) => {
         const actionVersion = preparedLoginVersions.current.get(handle);
         preparedLoginVersions.current.delete(handle);
         if (actionVersion === undefined || actionVersion !== authActionVersion.current) return { error: 'CANCELLED' };
-        const result = await completeProviderLoginRequest(handle, idToken, options);
+        const result = await completeProviderLoginRequest(handle, credential, options);
         if (actionVersion !== authActionVersion.current) return { error: 'CANCELLED' };
         if ('signupRequired' in result) preparedLoginVersions.current.set(result.handle, actionVersion);
         if ('user_name' in result) {
