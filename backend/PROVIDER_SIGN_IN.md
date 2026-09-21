@@ -32,7 +32,7 @@ revocation queue are implemented, but **not operationally activated**. Configura
 `apple-ios.signupEnabled` and `deletionEnabled` false, omits Apple's public
 signup capability, and the native Info.plist flag stays false. There is no new
 environment switch that activates Apple signup. Finish revocation-worker deployment,
-retention acceptance and revoked-credential handling before wiring those
+retention acceptance and the remaining server-side revoked-credential handling before wiring those
 capabilities to deployment settings; then compile on macOS and test one native
 new/returning-account lifecycle. See Apple's [account-deletion guidance](https://developer.apple.com/documentation/technotes/tn3194-handling-account-deletions-and-revoking-tokens-for-sign-in-with-apple).
 
@@ -105,7 +105,7 @@ backlog, lock contention, failure or expiry without confirmed revocation.
 Before activation: publish matching retention disclosures; apply/verify the
 reviewed migration and grants; configure the guarded maintenance command on an
 approved reliable execution path with backlog/failure observation; prove expiry
-and retry behavior there; implement revoked-credential/session invalidation;
+and retry behavior there; finish server-side revoked-credential/session invalidation;
 then approve native signing/build/device acceptance. The worker is not silently
 attached to receipt cleanup or deletion-audit jobs. No new cloud service or timer
 has been created. Physical expiry requires the maintenance execution path to run;
@@ -150,6 +150,58 @@ Frontend directory: `node --experimental-strip-types --test --test-reporter=spec
 ts/services/providerClient.test.mjs ts/services/authApi.test.mjs
 ts/services/authProviderSignup.test.mjs ts/services/nativeApiFetch.test.mjs
 ts/components/ProviderSignInControls.test.mjs`.
+
+## Native Apple credential loss — prepared, not activated (2026-09-21)
+
+New Apple-issued sessions carry the signed `authenticationMethod: 'apple'` claim;
+renewal preserves it. Password, Google and existing unmarked sessions do not
+inherit it merely because an account has an Apple link. No session-table change
+is needed. `GET /auth/providers/apple-credential` accepts only the current live,
+unambiguous native signed cookie and exact `capacitor://localhost` Origin. It
+returns that session's linked subject, or `userId: null` for non-Apple sessions;
+caller-selected subjects, Bearer tokens, web cookies and query selectors are rejected.
+Responses are non-cacheable; provider/storage failures are sanitized.
+
+The native bridge observes Apple credential revocation and app foreground return.
+Startup, renewal and those notifications check platform authorization before
+trusting/extending an Apple session. Confirmed `revoked`/`notFound` states invoke
+the existing cookie-bearing device logout. Unknown states, app-transfer states
+and failed checks are unavailable, not evidence of revocation. Checks have a
+ten-second deadline and share the auth mutation queue; a late old-account check
+cannot sign out a newer login. Signals during a pending check coalesce into a
+follow-up instead of being dropped.
+
+If Apple confirms credential loss but server logout fails, authenticated UI is
+hidden and the cookie is retained for a later foreground/activity logout retry.
+The client does not claim server revocation succeeded. A new successful login
+does not inherit the previous session's pending logout. No account, scores,
+provider links or other devices are deleted/revoked by this client signal.
+
+This is a native-client protection, **not global server enforcement**: a copied
+cookie or another device is not invalidated solely by a client notification.
+Verified Apple server notifications, replay/order handling and race-safe
+server-side invalidation remain separate activation work. Apple Account deletion
+does not reliably trigger the native revocation notification, so foreground
+credential-state checks are necessary. See [Apple's account-change guidance](https://developer.apple.com/documentation/signinwithapple/processing-changes-for-sign-in-with-apple-accounts).
+Native capability/signup/deletion switches remain disabled. Swift verification
+here is source-contract testing, not a macOS build or device acceptance.
+
+Verification: 162 focused frontend tests and 110 focused backend tests passed,
+along with both TypeScript checks and `git diff --check`. No database integration
+rerun was needed for this schema-free change; no live Apple calls were made.
+Focused commands (repository root unless noted):
+
+```text
+node frontend/node_modules/typescript/bin/tsc --noEmit -p frontend/tsconfig.json
+node backend/node_modules/typescript/bin/tsc --noEmit -p backend/tsconfig.json
+node --experimental-strip-types --test frontend/ts/services/nativeAppleSession.test.mjs frontend/ts/services/authApi.appleSession.test.mjs frontend/ts/services/authApi.test.mjs frontend/ts/services/authProviderSignup.test.mjs frontend/ts/services/nativeApiFetch.test.mjs frontend/ts/services/sessionRenewalActivity.test.mjs frontend/ts/services/providerClient.test.mjs frontend/ts/components/ProviderSignInControls.test.mjs
+```
+
+From `backend`:
+
+```text
+node --test --test-reporter=dot -r ts-node/register ts/security/sessionPolicy.test.ts ts/security/requestAuthentication.test.ts ts/auth/providerSession.test.ts ts/auth/providerAuthFlow.test.ts ts/routers/providerAuthRouter.test.ts ts/routers/authRouter.security.test.ts
+```
 
 ## Identity and account ownership
 

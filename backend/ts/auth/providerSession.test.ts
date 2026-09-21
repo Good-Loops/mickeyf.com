@@ -112,6 +112,18 @@ test('production provider sessions use signed HttpOnly web or native cookies and
     }
 });
 
+test('Apple session provenance comes from the verified flow, not incoming session headers or account fields', async () => {
+    for (const method of [undefined, 'apple'] as const) {
+        const f = fixture();
+        await establishProviderSession(f.database, { headers: { origin: 'capacitor://localhost',
+            authenticationMethod: 'apple', authorization: 'Bearer previous-apple-session' } }, f.response,
+        { ...account, authenticationMethod: 'apple' } as ProviderAccount, true, sessionSecret, true, method);
+        const authentication = verifyRequestToken(f.cookies[0].value, sessionSecret);
+        assert.ok(authentication.authenticated);
+        assert.equal(authentication.identity.authenticationMethod, method);
+    }
+});
+
 test('missing account UUIDs and removed or replaced accounts cannot issue provider session cookies', async () => {
     const invalid = fixture();
     await assert.rejects(establishProviderSession(invalid.database, { headers: {} }, invalid.response,

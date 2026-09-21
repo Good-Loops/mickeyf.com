@@ -62,6 +62,25 @@ export async function findProviderAccount(
     }
 }
 
+/** Only a validated, live native Apple session may request its own platform identifier. */
+export async function readAppleCredentialSubject(
+    database: Pick<Pool, 'query'>, accountId: string,
+): Promise<string | null> {
+    assertAccountId(accountId);
+    try {
+        const [rows] = await database.query<RowDataPacket[]>({
+            sql: `SELECT subject FROM account_provider_identities
+                WHERE account_uuid = ? AND provider = 'apple' LIMIT 2`, timeout: QUERY_TIMEOUT_MS,
+        }, [accountId]);
+        if (!Array.isArray(rows) || rows.length > 1) throw new ProviderAccountUnavailableError();
+        if (!rows[0]) return null;
+        const subject = rows[0].subject;
+        if (!Buffer.isBuffer(subject) || subject.length < 1 || subject.length > 255
+            || subject.some(byte => byte < 33 || byte > 126)) throw new ProviderAccountUnavailableError();
+        return subject.toString('ascii');
+    } catch { throw new ProviderAccountUnavailableError(); }
+}
+
 /** Called after HTTP session authentication; never returns password hashes, emails or provider subjects. */
 export async function readProviderAccountMethods(
     database: Pick<Pool, 'query'>, accountId: string,

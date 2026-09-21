@@ -2,7 +2,8 @@ import { json, Router, type Request, type Response } from 'express';
 import { ipKeyGenerator, rateLimit } from 'express-rate-limit';
 import type { Pool } from 'mysql2/promise';
 import { createProviderAccount, findProviderAccount, linkProviderAccount,
-    persistProviderCredential, readProviderAccountMethods, type ProviderCredentialWriter } from '../accounts/providerAccountRepository';
+    persistProviderCredential, readAppleCredentialSubject, readProviderAccountMethods,
+    type ProviderCredentialWriter } from '../accounts/providerAccountRepository';
 import type { AppleTokenLifecycle } from '../config/appleTokenConfig';
 import { deleteProviderAccount } from '../accounts/accountDeletionRepository';
 import type { AccountDeletionJournal } from '../accounts/deletionJournal';
@@ -144,6 +145,39 @@ export function createProviderAuthRouter(options: ProviderAuthRouterOptions): Ro
         } catch { return fail(res, 'UNAVAILABLE'); }
     }));
 
+    router.get('/apple-credential', rateLimit({ ...limiterOptions, limit: 60 }), asyncHandler(async (req, res) => {
+        res.setHeader('Cache-Control', 'no-store');
+        if (req.headers.origin !== 'capacitor://localhost' || !options.allowedOrigins.includes('capacitor://localhost')
+            || Object.keys(req.query).length !== 0 || req.headers.authorization !== undefined) {
+            return res.status(403).json({ error: 'INVALID_REQUEST' });
+        }
+        // Do not let cookie-parser's first-value handling choose between duplicate device credentials.
+        const cookieNames = (req.headers.cookie ?? '').split(';').map(cookie => cookie.trim().split('=', 1)[0]);
+        if (cookieNames.filter(name => name === NATIVE_SESSION_COOKIE).length !== 1
+            || cookieNames.includes(WEB_SESSION_COOKIE)
+            || SESSION_COOKIE_NAMES.some(name => req.cookies?.[name] !== undefined)
+            || req.signedCookies?.[WEB_SESSION_COOKIE] !== undefined
+            || typeof req.signedCookies?.[NATIVE_SESSION_COOKIE] !== 'string') {
+            return res.status(401).json({ error: 'UNAUTHENTICATED' });
+        }
+        const authentication = authenticateRequest(req, sessionSecret);
+        if (!authentication.authenticated) return res.status(401).json({ error: 'UNAUTHENTICATED' });
+        try {
+            const { userId, accountId, sessionId, userName, authenticationMethod } = authentication.identity;
+            const account = await readLiveSession(database, userId, accountId, sessionId);
+            if (!account || account.userName !== userName) return res.status(401).json({ error: 'UNAUTHENTICATED' });
+            // Linking Apple does not turn a password/Google session into an Apple session.
+            if (authenticationMethod !== 'apple') return res.json({ userId: null });
+            if (options.enabled !== true || !options.appleTokenRepository
+                || options.clients['apple-ios']?.provider !== 'apple' || !options.clients['apple-ios'].appleTokens) {
+                return fail(res, 'UNAVAILABLE');
+            }
+            const subject = await readAppleCredentialSubject(database, accountId);
+            if (subject === null) return res.status(401).json({ error: 'UNAUTHENTICATED' });
+            return res.json({ userId: subject });
+        } catch { return fail(res, 'UNAVAILABLE'); }
+    }));
+
     if (!options.enabled) return router;
     if (Object.keys(options.clients).length === 0) throw new TypeError('Enabled provider routes require configured clients.');
     const services = options.services ?? createServices(options);
@@ -191,7 +225,7 @@ export function createProviderAuthRouter(options: ProviderAuthRouterOptions): Ro
                     return res.json({ success: true, deleted: true });
                 }
                 if (!await services.establishSession(database, req, res, result.account, rememberMe === true,
-                    sessionSecret, isProduction)) return fail(res, 'ACCOUNT_GONE');
+                    sessionSecret, isProduction, result.authenticationMethod)) return fail(res, 'ACCOUNT_GONE');
                 return res.json({ success: true, user_name: result.account.userName });
             } catch { return fail(res, 'UNAVAILABLE'); }
         }));

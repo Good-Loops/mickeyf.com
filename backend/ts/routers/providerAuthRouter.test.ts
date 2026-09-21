@@ -49,6 +49,7 @@ function fixture(features: Features = {}) {
             hasPassword: boolean; googleLinked: boolean; appleLinked: boolean;
         } | null,
         methodsFailure: false,
+        appleSubjects: [Buffer.from('Exact.Apple.Subject')] as unknown[],
     };
     const attempts = new Map<string, ProviderAttempt>();
     const database = { async query(query: { sql: string }) {
@@ -59,6 +60,10 @@ function fixture(features: Features = {}) {
         }
         if (features.missingProviderTable && query.sql.includes('FROM account_provider_identities')) {
             throw { errno: 1146, code: 'ER_NO_SUCH_TABLE' };
+        }
+        if (query.sql.startsWith('SELECT subject FROM account_provider_identities')) {
+            state.events.push('apple-subject');
+            return [state.appleSubjects.map(subject => ({ subject })), []];
         }
         return [state.sessionExists ? [{ userName: account.userName }] : [], []];
     }, async getConnection() { throw new Error('No real database connection is allowed.'); } } as unknown as Pick<Pool, 'query' | 'getConnection'>;
@@ -181,6 +186,92 @@ async function challenge(base: string, action = 'login', headers: Record<string,
     assert.ok(body.expiresInSeconds >= 1 && body.expiresInSeconds <= 300);
     return { ...body, cookie: response.headers.getSetCookie()[0]?.split(';')[0] ?? headers.cookie ?? '', response };
 }
+
+test('native Apple credential discovery exposes only the current Apple session subject without cookies or mutations', async () => {
+    await withServer(async (base, { state }) => {
+        const issued = issueSessionToken(account, secret, true, Date.now(), 'apple');
+        const response = await fetch(`${base}/apple-credential`, { headers: {
+            origin: 'capacitor://localhost', cookie: signedCookie(issued.token, 'session'),
+        } });
+        assert.equal(response.status, 200);
+        assert.deepEqual(await response.json(), { userId: 'Exact.Apple.Subject' });
+        assert.equal(response.headers.get('cache-control'), 'no-store');
+        assert.equal(response.headers.get('set-cookie'), null);
+        assert.equal(state.databaseReads, 2);
+        assert.deepEqual(state.events, ['apple-subject']);
+    }, true, { appleTokens: true, appleStorage: true });
+});
+
+test('password and Google native sessions never discover linked Apple identities, including with providers disabled', async () => {
+    for (const enabled of [false, true]) {
+        await withServer(async (base, { state }) => {
+            const issued = issueSessionToken(account, secret);
+            const response = await fetch(`${base}/apple-credential`, { headers: {
+                origin: 'capacitor://localhost', cookie: signedCookie(issued.token, 'session'),
+            } });
+            assert.equal(response.status, 200);
+            assert.deepEqual(await response.json(), { userId: null });
+            assert.equal(state.databaseReads, 1);
+            assert.deepEqual(state.events, []);
+        }, enabled);
+    }
+});
+
+test('Apple credential discovery rejects web, Bearer, ambiguous, unsigned and foreign-subject inputs before SQL', async () => {
+    await withServer(async (base, { state }) => {
+        const issued = issueSessionToken(account, secret, true, Date.now(), 'apple');
+        const native = signedCookie(issued.token, 'session');
+        for (const extra of [
+            { origin: origin }, { origin: '' }, { authorization: `Bearer ${issued.token}` },
+            { cookie: '' }, { cookie: signedCookie(issued.token) }, { cookie: `session=${issued.token}` },
+            { cookie: `${native}; ${native}` }, { cookie: `${native}; ${signedCookie(issued.token)}` },
+            { cookie: signedCookie('invalid', 'session') },
+        ]) {
+            const response = await fetch(`${base}/apple-credential`, {
+                headers: { origin: 'capacitor://localhost', cookie: native, ...extra } as Record<string, string>,
+            });
+            assert.ok([401, 403].includes(response.status));
+            assert.equal(response.headers.get('set-cookie'), null);
+        }
+        const selectedSubject = await fetch(`${base}/apple-credential?userId=someone-else`, {
+            headers: { origin: 'capacitor://localhost', cookie: native },
+        });
+        assert.equal(selectedSubject.status, 403);
+        assert.equal(state.databaseReads, 0);
+    }, true, { appleTokens: true, appleStorage: true });
+});
+
+test('Apple credential discovery fails closed for revoked sessions, missing links, unavailable storage and malformed subjects', async () => {
+    await withServer(async (base, { state }) => {
+        const issued = issueSessionToken(account, secret, true, Date.now(), 'apple');
+        const request = () => fetch(`${base}/apple-credential`, {
+            headers: { origin: 'capacitor://localhost', cookie: signedCookie(issued.token, 'session') },
+        });
+        state.sessionExists = false;
+        assert.equal((await request()).status, 401);
+        assert.deepEqual(state.events, []);
+        state.sessionExists = true;
+        state.appleSubjects = [];
+        assert.equal((await request()).status, 401);
+        for (const subjects of [['plain-string'], [Buffer.from('subject\n')], [Buffer.from([255])],
+            [Buffer.from('first'), Buffer.from('second')]]) {
+            state.appleSubjects = subjects;
+            const response = await request();
+            assert.equal(response.status, 503);
+            assert.deepEqual(await response.json(), { error: 'UNAVAILABLE' });
+        }
+        state.contextFailure = true;
+        assert.equal((await request()).status, 503);
+    }, true, { appleTokens: true, appleStorage: true });
+    await withServer(async (base, { state }) => {
+        const issued = issueSessionToken(account, secret, true, Date.now(), 'apple');
+        const response = await fetch(`${base}/apple-credential`, {
+            headers: { origin: 'capacitor://localhost', cookie: signedCookie(issued.token, 'session') },
+        });
+        assert.equal(response.status, 503);
+        assert.deepEqual(state.events, []);
+    }, false);
+});
 
 test('disabled router has no provider endpoints or side effects, and enabled routes require clients', async () => {
     const setup = fixture();

@@ -9,17 +9,69 @@ public class LudolumeIdentityPlugin: CAPPlugin, CAPBridgedPlugin {
     public let jsName = "LudolumeIdentity"
     public let pluginMethods: [CAPPluginMethod] = [
         CAPPluginMethod(name: "getCapabilities", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "getCredentialState", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "signIn", returnType: CAPPluginReturnPromise),
         CAPPluginMethod(name: "cancel", returnType: CAPPluginReturnPromise)
     ]
     private var pendingRequest: LudolumeAppleAuthorization?
+    private var credentialObservers: [NSObjectProtocol] = []
 
     private var appleSignInEnabled: Bool {
         Bundle.main.object(forInfoDictionaryKey: "LudolumeAppleSignInEnabled") as? Bool == true
     }
 
+    public override func load() {
+        guard appleSignInEnabled, credentialObservers.isEmpty else { return }
+        // Account deletion may not send a revocation notification, so recheck on resume too.
+        for name in [ASAuthorizationAppleIDProvider.credentialRevokedNotification,
+                     UIApplication.didBecomeActiveNotification] {
+            credentialObservers.append(NotificationCenter.default.addObserver(
+                forName: name, object: nil, queue: .main
+            ) { [weak self] _ in
+                guard let self, self.appleSignInEnabled else { return }
+                self.notifyListeners("appleCredentialChanged", data: [:])
+            })
+        }
+    }
+
+    deinit {
+        credentialObservers.forEach { NotificationCenter.default.removeObserver($0) }
+    }
+
     @objc func getCapabilities(_ call: CAPPluginCall) {
         call.resolve(["apple": appleSignInEnabled, "google": false])
+    }
+
+    @objc func getCredentialState(_ call: CAPPluginCall) {
+        guard appleSignInEnabled else {
+            call.reject("Native credential state is unavailable.", "UNAVAILABLE")
+            return
+        }
+        guard let userId = call.getString("userId"), !userId.isEmpty,
+              userId.utf8.count <= 255,
+              userId.utf8.allSatisfy({ (33...126).contains($0) }) else {
+            call.reject("Invalid native credential-state request.", "INVALID_REQUEST")
+            return
+        }
+        ASAuthorizationAppleIDProvider().getCredentialState(forUserID: userId) { state, error in
+            DispatchQueue.main.async {
+                guard error == nil else {
+                    call.reject("Native credential state is unavailable.", "UNAVAILABLE")
+                    return
+                }
+                let value: String
+                switch state {
+                case .authorized: value = "authorized"
+                case .revoked: value = "revoked"
+                case .notFound: value = "notFound"
+                case .transferred: value = "transferred"
+                @unknown default:
+                    call.reject("Native credential state is unavailable.", "UNAVAILABLE")
+                    return
+                }
+                call.resolve(["state": value])
+            }
+        }
     }
 
     @objc func signIn(_ call: CAPPluginCall) {

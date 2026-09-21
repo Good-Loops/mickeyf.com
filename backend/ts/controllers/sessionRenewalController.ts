@@ -36,7 +36,7 @@ export function createSessionRenewalController({ database, sessionSecret, isProd
             if (!account) return res.json({ loggedIn: false });
             if (account.renewal) {
                 const token = issueRenewedSessionToken({ userId, accountId, userName: account.userName },
-                    sessionSecret, account.renewal);
+                    sessionSecret, account.renewal, authentication.identity.authenticationMethod);
                 const maxAge = account.renewal.expiresAt * 1000 - Date.now();
                 if (maxAge <= 0) return res.json({ loggedIn: false });
                 const name = origin === 'capacitor://localhost' ? NATIVE_SESSION_COOKIE : WEB_SESSION_COOKIE;

@@ -353,6 +353,35 @@ test('ordinary sessions verify through renewal without extending expiry or issui
     });
 });
 
+test('remembered Apple provenance survives HTTP renewal but a new password login does not inherit it', async () => {
+    await withServer(async (base, state) => {
+        const apple = issueSessionToken(account, secret, true, Date.now(), 'apple');
+        const hash = sessionHash(apple.sessionId);
+        state.sessions.set(hash, apple.expiresAt);
+        state.sessionMetadata.set(hash, { remembered: 1, renewedAt: Math.floor(Date.now() / 1000) - 901,
+            previousHash: null, previousValidUntil: 0 });
+        const renewed = await post(base, {}, { Cookie: signedCookie(apple.token, 'session'),
+            Origin: 'capacitor://localhost' }, '/auth/renew');
+        assert.equal(renewed.status, 200);
+        const renewedCookie = renewed.headers.getSetCookie()[0].split(';')[0];
+        const renewedToken = cookieParser.signedCookie(decodeURIComponent(renewedCookie.slice('session='.length)), secret);
+        assert.equal(typeof renewedToken, 'string');
+        const authentication = verifyRequestToken(renewedToken as string, secret);
+        assert.ok(authentication.authenticated);
+        assert.equal(authentication.identity.authenticationMethod, 'apple');
+        const login = await post(base, { type: 'login', user_name: 'player', user_password: password,
+            remember_me: true }, { Cookie: renewedCookie, Origin: 'capacitor://localhost' }, '/api/users');
+        assert.equal(login.status, 200);
+        const replacement = login.headers.getSetCookie().find(value => value.startsWith('session=s%3A')
+            && !value.includes('Expires=Thu, 01 Jan 1970'))!;
+        assert.ok(replacement);
+        const token = cookieParser.signedCookie(decodeURIComponent(replacement.split(';')[0].slice('session='.length)), secret);
+        const passwordAuthentication = verifyRequestToken(token as string, secret);
+        assert.ok(passwordAuthentication.authenticated);
+        assert.equal(passwordAuthentication.identity.authenticationMethod, undefined);
+    });
+});
+
 test('missing, invalid, expired and revoked sessions cannot renew or clear newer credentials', async () => {
     for (const scenario of ['missing', 'invalid-token', 'expired-token', 'idle-expired', 'revoked', 'replacement-account']) {
         await withServer(async (base, state) => {

@@ -11,6 +11,7 @@ export const SESSION_RENEWAL_GRACE_SECONDS = 2 * 60;
 
 export type SessionAccount = Readonly<{ userId: number; userName: string; accountId: string }>;
 export type SessionProof = Readonly<{ accountId: string; sessionId: string }>;
+export type SessionAuthenticationMethod = 'apple';
 
 export function isSessionId(value: unknown): value is string {
     return typeof value === 'string' && /^[A-Za-z0-9_-]{43}$/.test(value)
@@ -30,17 +31,20 @@ export function deriveRenewedSessionId(sessionId: string, secret: string): strin
 
 /** Renewal timestamps come from the committed session row, never the request body. */
 export function issueRenewedSessionToken(account: SessionAccount, secret: string,
-    renewal: Readonly<{ sessionId: string; issuedAt: number; expiresAt: number }>): string {
+    renewal: Readonly<{ sessionId: string; issuedAt: number; expiresAt: number }>,
+    authenticationMethod?: SessionAuthenticationMethod): string {
     if (!secret || !Number.isSafeInteger(account.userId) || account.userId <= 0
         || !isAccountId(account.accountId) || typeof account.userName !== 'string' || !account.userName
         || !isSessionId(renewal.sessionId) || !Number.isSafeInteger(renewal.issuedAt) || renewal.issuedAt <= 0
         || !Number.isSafeInteger(renewal.expiresAt) || renewal.expiresAt <= renewal.issuedAt
-        || renewal.expiresAt - renewal.issuedAt > PERSISTENT_SESSION_SECONDS) {
+        || renewal.expiresAt - renewal.issuedAt > PERSISTENT_SESSION_SECONDS
+        || (authenticationMethod !== undefined && authenticationMethod !== 'apple')) {
         throw new TypeError('Valid account and committed renewal metadata are required.');
     }
     return jwt.sign({ purpose: SESSION_PURPOSE, version: SESSION_VERSION,
         user_id: account.userId, user_name: account.userName, account_uuid: account.accountId,
-        jti: renewal.sessionId, iat: renewal.issuedAt, exp: renewal.expiresAt },
+        jti: renewal.sessionId, iat: renewal.issuedAt, exp: renewal.expiresAt,
+        ...(authenticationMethod === undefined ? {} : { authenticationMethod }) },
     sessionSigningKey(secret), { algorithm: 'HS256' });
 }
 
@@ -49,11 +53,13 @@ export function sessionLifetimeSeconds(staySignedIn: boolean): number {
     return staySignedIn ? PERSISTENT_SESSION_SECONDS : STANDARD_SESSION_SECONDS;
 }
 
-export function issueSessionToken(account: SessionAccount, secret: string, staySignedIn = false, nowMs = Date.now()) {
+export function issueSessionToken(account: SessionAccount, secret: string, staySignedIn = false, nowMs = Date.now(),
+    authenticationMethod?: SessionAuthenticationMethod) {
     if (!secret || !Number.isSafeInteger(account.userId) || account.userId <= 0
         || typeof account.userName !== 'string' || account.userName.length === 0
         || !isAccountId(account.accountId) || typeof staySignedIn !== 'boolean'
-        || !Number.isSafeInteger(nowMs) || nowMs < 0) {
+        || !Number.isSafeInteger(nowMs) || nowMs < 0
+        || (authenticationMethod !== undefined && authenticationMethod !== 'apple')) {
         throw new TypeError('Valid account and session configuration are required.');
     }
     const issuedAt = Math.floor(nowMs / 1000);
@@ -62,6 +68,7 @@ export function issueSessionToken(account: SessionAccount, secret: string, stayS
     const token = jwt.sign({ purpose: SESSION_PURPOSE, version: SESSION_VERSION,
         user_id: account.userId, user_name: account.userName, account_uuid: account.accountId,
         jti: sessionId,
-        iat: issuedAt, exp: issuedAt + lifetime }, sessionSigningKey(secret), { algorithm: 'HS256' });
+        iat: issuedAt, exp: issuedAt + lifetime,
+        ...(authenticationMethod === undefined ? {} : { authenticationMethod }) }, sessionSigningKey(secret), { algorithm: 'HS256' });
     return { token, sessionId, expiresAt: issuedAt + lifetime, maxAge: lifetime * 1000 };
 }

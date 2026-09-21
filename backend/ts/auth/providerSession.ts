@@ -2,7 +2,7 @@ import type { Request, Response } from 'express';
 import type { Pool } from 'mysql2/promise';
 import type { ProviderAccount } from '../accounts/providerAccountRepository';
 import { clearAuthenticationCookies, NATIVE_SESSION_COOKIE, sessionCookieOptions, WEB_SESSION_COOKIE } from '../security/sessionCookie';
-import { issueSessionToken } from '../security/sessionPolicy';
+import { issueSessionToken, type SessionAuthenticationMethod } from '../security/sessionPolicy';
 import { createAccountSession } from './accountSessionRepository';
 
 /** Called only after provider verification and an existing provider/account lookup.
@@ -11,8 +11,9 @@ import { createAccountSession } from './accountSessionRepository';
 export async function establishProviderSession(
     database: Pick<Pool, 'getConnection'>, req: Pick<Request, 'headers'>, res: Response,
     account: ProviderAccount, rememberMe: boolean, sessionSecret: string, isProduction: boolean,
+    authenticationMethod?: SessionAuthenticationMethod,
 ): Promise<boolean> {
-    const issued = issueSessionToken(account, sessionSecret, rememberMe);
+    const issued = issueSessionToken(account, sessionSecret, rememberMe, Date.now(), authenticationMethod);
     const created = await createAccountSession(database, account, issued.sessionId,
         issued.expiresAt, undefined, rememberMe);
     if (!created) return false;

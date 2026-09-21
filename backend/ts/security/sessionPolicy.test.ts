@@ -1,10 +1,34 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import jwt from 'jsonwebtoken';
+import { verifyRequestToken } from './requestAuthentication';
 import { deriveRenewedSessionId, issueRenewedSessionToken, issueSessionToken, isSessionId, sessionSigningKey, STANDARD_SESSION_SECONDS, PERSISTENT_SESSION_SECONDS } from './sessionPolicy';
 
 const account = { userId: 7, userName: 'session-test', accountId: '11111111-2222-4333-8444-555555555555' };
 const secret = 'synthetic-session-policy-secret';
+
+test('only explicit server-selected Apple provenance is signed, preserved and verified', () => {
+    const apple = issueSessionToken(account, secret, true, Date.now(), 'apple');
+    const authenticated = verifyRequestToken(apple.token, secret);
+    assert.ok(authenticated.authenticated);
+    assert.equal(authenticated.identity.authenticationMethod, 'apple');
+    const now = Math.floor(Date.now() / 1000);
+    const renewed = issueRenewedSessionToken(account, secret, {
+        sessionId: deriveRenewedSessionId(apple.sessionId, secret), issuedAt: now,
+        expiresAt: now + PERSISTENT_SESSION_SECONDS,
+    }, authenticated.identity.authenticationMethod);
+    const authentication = verifyRequestToken(renewed, secret);
+    assert.ok(authentication.authenticated);
+    assert.equal(authentication.identity.authenticationMethod, 'apple');
+    const password = issueSessionToken({ ...account, authenticationMethod: 'apple' } as typeof account, secret);
+    assert.equal((jwt.decode(password.token) as jwt.JwtPayload).authenticationMethod, undefined);
+    assert.throws(() => issueSessionToken(account, secret, false, Date.now(), 'google' as 'apple'), TypeError);
+    const claims = jwt.decode(apple.token) as jwt.JwtPayload;
+    for (const authenticationMethod of ['google', null, true, 'apple\n']) {
+        const invalid = jwt.sign({ ...claims, authenticationMethod }, sessionSigningKey(secret));
+        assert.equal(verifyRequestToken(invalid, secret).authenticated, false);
+    }
+});
 
 test('renewal retries derive the same canonical credential with a separate domain', () => {
     const original = issueSessionToken(account, secret, true);

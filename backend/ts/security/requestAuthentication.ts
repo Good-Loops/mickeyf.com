@@ -15,7 +15,7 @@ import { isAccountId } from '../accounts/deletionJournal';
 import { WEB_SESSION_COOKIE } from './sessionCookie';
 import { SESSION_PURPOSE, SESSION_VERSION, PERSISTENT_SESSION_SECONDS, sessionSigningKey, isSessionId, type SessionAccount, type SessionProof } from './sessionPolicy';
 
-export type AuthenticatedIdentity = SessionAccount & SessionProof;
+export type AuthenticatedIdentity = SessionAccount & SessionProof & Readonly<{ authenticationMethod?: 'apple' }>;
 
 export type RequestAuthenticationResult =
     | { authenticated: true; identity: AuthenticatedIdentity }
@@ -77,6 +77,7 @@ export function verifyRequestToken(
             || (decoded.user_id as number) <= 0
             || typeof decoded.user_name !== 'string'
             || decoded.user_name.length === 0
+            || (decoded.authenticationMethod !== undefined && decoded.authenticationMethod !== 'apple')
         ) {
             return { authenticated: false, reason: 'INVALID_CREDENTIALS' };
         }
@@ -88,6 +89,7 @@ export function verifyRequestToken(
                 userName: decoded.user_name,
                 accountId: decoded.account_uuid,
                 sessionId: decoded.jti,
+                ...(decoded.authenticationMethod === 'apple' ? { authenticationMethod: 'apple' as const } : {}),
             },
         };
     } catch {

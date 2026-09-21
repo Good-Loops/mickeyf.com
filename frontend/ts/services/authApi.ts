@@ -1,4 +1,5 @@
 /** Auth HTTP transport, independent of React and environment configuration. */
+import type { AppleSessionState } from './nativeAppleSession.ts';
 type AccountCredentials = {
     user_name: string;
     user_password: string;
@@ -14,7 +15,7 @@ export type DeleteAccountResponse =
     | { error: 'INVALID_REQUEST' | 'INVALID_PASSWORD' | 'UNAUTHENTICATED' | 'ACCOUNT_DELETION_UNAVAILABLE' | 'ACCOUNT_DELETION_PENDING' | 'RATE_LIMITED' };
 export type VerificationResponse =
     | { loggedIn: true; user_name: string }
-    | { loggedIn: false };
+    | { loggedIn: false; revocationPending?: true };
 type UserOperation =
     | ({ type: 'login' } & LoginPayload)
     | ({ type: 'signup' } & SignupPayload);
@@ -167,9 +168,11 @@ async function acquireProviderProof(clientKey: string, challenge: ProviderAuthen
     }
 }
 
-export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetch) {
+export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetch,
+    checkAppleSession?: () => Promise<AppleSessionState>) {
     let pendingMutation: Promise<void> = Promise.resolve();
     let providerLoginGeneration = 0;
+    let appleRevocationPending = false;
     type PreparedLogin = {
         clientKey: string; state: string; nonce: string; deadline: number;
         action: 'login' | 'signup';
@@ -212,6 +215,10 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
     }
 
     async function loginRequest(payload: LoginPayload): Promise<LoginResponse> {
+        // An uncertain login response may still replace the cookie. Never apply
+        // a previous account's pending revocation to a newly issued session.
+        const previousRevocation = appleRevocationPending;
+        appleRevocationPending = false;
         const response = await postUserOperation({
             type: 'login',
             user_name: payload.user_name,
@@ -219,7 +226,10 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
             remember_me: payload.remember_me === true,
         });
         const result: LoginResponse = await response.json();
-        if ('error' in result) return result;
+        if ('error' in result) {
+            appleRevocationPending = previousRevocation;
+            return result;
+        }
 
         // Accepting a password does not prove the client retained its cookie.
         // Confirm the next request authenticates before showing login success.
@@ -244,6 +254,8 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
     }
 
     async function verifyRequest(): Promise<VerificationResponse> {
+        const invalidated = await invalidateRevokedAppleSession();
+        if (invalidated) return invalidated;
         const response = await fetchRequest(`${apiBase}/auth/verify-token`, {
             method: 'GET',
             credentials: 'include',
@@ -252,6 +264,24 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
             throw new Error(`HTTP error ${response.status}`);
         }
         return response.json();
+    }
+
+    async function invalidateRevokedAppleSession(): Promise<VerificationResponse | null> {
+        if (!appleRevocationPending) {
+            const state = await checkAppleSession?.();
+            if (state === 'signedOut') return { loggedIn: false };
+            if (state !== 'revoked') return null;
+            appleRevocationPending = true;
+        }
+        invalidatePreparedLogins();
+        try {
+            await logoutRequest();
+            return { loggedIn: false };
+        } catch {
+            // Apple confirmed credential loss, but the server may be offline.
+            // Hide authenticated UI and retain the cookie solely to retry logout.
+            return { loggedIn: false, revocationPending: true };
+        }
     }
 
     async function providerAccountMethodsRequest(): Promise<ProviderAccountMethods | null> {
@@ -274,6 +304,8 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
     }
 
     async function renewRequest(): Promise<VerificationResponse> {
+        const invalidated = await invalidateRevokedAppleSession();
+        if (invalidated) return invalidated;
         const response = await fetchRequest(`${apiBase}/auth/renew`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -307,6 +339,7 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
             || Object.keys(result).length !== 1) {
             throw new Error('Could not confirm sign-out.');
         }
+        appleRevocationPending = false;
     }
 
     async function deleteAccountRequest(password: string): Promise<DeleteAccountResponse> {
@@ -321,6 +354,7 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
         const result: unknown = await response.json();
         if (result && typeof result === 'object') {
             if (response.status === 200 && 'deleted' in result && result.deleted === true && !('error' in result)) {
+                appleRevocationPending = false;
                 return { deleted: true };
             }
             if ('error' in result) {
@@ -372,6 +406,8 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
 
     async function completeProviderAuthentication(input: ProviderAuthenticationInput, state: string,
         credential: { idToken: string; authorizationCode?: string }): Promise<ProviderCompletionResponse> {
+        const previousRevocation = appleRevocationPending;
+        if (input.action === 'login' || input.action === 'signup') appleRevocationPending = false;
         // Once complete is sent, await its cookie mutation and verification even
         // if UI cancellation arrives. Cancelling cannot undo a server-side login.
         const completion = await postProviderOperation('complete', {
@@ -381,7 +417,12 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
                 : input.action === 'link' ? { password: input.password } : { confirmation: 'DELETE' }),
             ...(input.action === 'signup' ? { userName: input.userName } : {}),
         });
-        if (!completion.ok) return { error: completion.error };
+        if (!completion.ok) {
+            // UNAVAILABLE includes an uncertain transport result: its cookie may
+            // already belong to a new session. Definite rejection cannot replace it.
+            if (completion.error !== 'UNAVAILABLE') appleRevocationPending = previousRevocation;
+            return { error: completion.error };
+        }
         const result = completion.body;
         if (input.action === 'login' && supportsProviderSignup(input.clientKey) && isRecord(result)
             && hasKeys(result, 'challenge,signupRequired') && result.signupRequired === true) {
@@ -393,8 +434,11 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
             return hasKeys(result, 'linked,success') && result.linked === true
                 ? { success: true, linked: true } : { error: 'INVALID_RESPONSE' };
         }
-        if (input.action === 'delete') return hasKeys(result, 'deleted,success') && result.deleted === true
-            ? { success: true, deleted: true } : { error: 'INVALID_RESPONSE' };
+        if (input.action === 'delete') {
+            if (!hasKeys(result, 'deleted,success') || result.deleted !== true) return { error: 'INVALID_RESPONSE' };
+            appleRevocationPending = false;
+            return { success: true, deleted: true };
+        }
         if (!hasKeys(result, 'success,user_name') || typeof result.user_name !== 'string'
             || result.user_name.length < 1 || result.user_name.length > 255 || CONTROL_CHARACTERS.test(result.user_name)) {
             return { error: 'INVALID_RESPONSE' };
@@ -486,7 +530,9 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
             const request = { ...payload };
             return enqueueMutation(() => signupRequest(request));
         },
-        verifyRequest,
+        // A guarded read can cause logout. Plain web readers keep their existing
+        // non-mutating behavior, including during an open provider dialog.
+        verifyRequest: checkAppleSession ? () => enqueueMutation(verifyRequest) : verifyRequest,
         providerAccountMethodsRequest,
         renewRequest: () => enqueueMutation(async () => {
             try {

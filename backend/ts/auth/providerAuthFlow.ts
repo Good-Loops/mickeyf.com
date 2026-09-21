@@ -23,7 +23,7 @@ type Failure = { ok: false; reason: 'UNAVAILABLE' | 'INVALID_REQUEST' | 'INVALID
     | 'ACCOUNT_DELETION_UNAVAILABLE' | 'ACCOUNT_DELETION_PENDING' };
 export type ProviderChallengeResult = Failure | { ok: true; state: string; nonce: string; expiresInSeconds: number };
 export type ProviderCompletionResult = Failure
-    | { ok: true; type: 'account-verified'; account: ProviderAccount }
+    | { ok: true; type: 'account-verified'; account: ProviderAccount; authenticationMethod?: 'apple' }
     | { ok: true; type: 'signup-required'; state: string; nonce: string; expiresInSeconds: number }
     | { ok: true; type: 'linked' }
     | { ok: true; type: 'deleted' };
@@ -181,7 +181,8 @@ export function createProviderAuthFlow({ attempts, accounts, clients, enabled = 
                     if (account) {
                         const token = await exchangeAppleToken();
                         if (token !== undefined) await accounts.saveAppleToken!(account, verified.identity, token);
-                        return { ok: true, type: 'account-verified', account };
+                        return { ok: true, type: 'account-verified', account,
+                            ...(verified.identity.provider === 'apple' ? { authenticationMethod: 'apple' as const } : {}) };
                     }
                     if (!signupAvailable(selection.clientKey, selection.client)) {
                         return { ok: false, reason: 'NOT_LINKED' };
@@ -213,9 +214,12 @@ export function createProviderAuthFlow({ attempts, accounts, clients, enabled = 
                         // can resolve that race to the existing account.
                         const account = await accounts.find(verified.identity);
                         if (account && token !== undefined) await accounts.saveAppleToken!(account, verified.identity, token);
-                        return account ? { ok: true, type: 'account-verified', account } : { ok: false, reason: result.reason };
+                        return account ? { ok: true, type: 'account-verified', account,
+                            ...(verified.identity.provider === 'apple' ? { authenticationMethod: 'apple' as const } : {}) }
+                            : { ok: false, reason: result.reason };
                     }
-                    return result.created ? { ok: true, type: 'account-verified', account: result.account }
+                    return result.created ? { ok: true, type: 'account-verified', account: result.account,
+                        ...(verified.identity.provider === 'apple' ? { authenticationMethod: 'apple' as const } : {}) }
                         : { ok: false, reason: result.reason };
                 }
                 if (selection.action === 'delete') {

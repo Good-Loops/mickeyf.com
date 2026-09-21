@@ -12,7 +12,7 @@
  * - The service layer (`services/authService.ts`) owns network/provider calls.
  */
 import { createContext, useContext, useState, ReactNode, useEffect, useRef } from 'react';
-import { loginRequest, logoutRequest, verifyRequest, renewRequest, deleteAccountRequest, runProviderAuthentication,
+import { loginRequest, logoutRequest, verifyRequest, renewRequest, deleteAccountRequest, runProviderAuthentication, watchAppleCredentialChanges,
     prepareProviderLogin as prepareProviderLoginRequest, completeProviderLogin as completeProviderLoginRequest } from '@/services/authService';
 import type { DeleteAccountResponse, ProviderAuthenticationInput, AcquireProviderCredential, ProviderCredential,
     ProviderAuthenticationOptions, ProviderAuthenticationResult, PreparedProviderLogin, PrepareProviderLoginResult,
@@ -64,11 +64,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             try {
                 const session = await renewRequest();
                 // A late renewal must not undo a newer login, logout or deletion.
-                if (!canApply()) return true;
-                sessionMayExist.current = session.loggedIn;
+                if (!canApply()) {
+                    // Revocation may have logged out while a newer login was
+                    // queued. Re-read its outcome; never apply the old account.
+                    if (active && !session.loggedIn) void renewalActivity.current?.renewNow();
+                    return true;
+                }
+                sessionMayExist.current = session.loggedIn || session.revocationPending === true;
                 setIsAuthenticated(session.loggedIn);
                 setUserName(session.loggedIn ? session.user_name : null);
-                return true;
+                return session.loggedIn || !session.revocationPending;
             } catch {
                 // An outage is not evidence of sign-out. Later activity can retry quietly.
                 return !canApply();
@@ -84,9 +89,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             renew: renewSession,
         });
         renewalActivity.current = activity;
+        let stopAppleListener: (() => void) | undefined;
+        void watchAppleCredentialChanges(() => {
+            if (active) void activity.renewNow();
+        }).then(stop => {
+            if (active) stopAppleListener = stop;
+            else stop();
+        });
         void activity.renewNow();
         return () => {
             active = false;
+            stopAppleListener?.();
             activity.stop();
             renewalActivity.current = null;
         };
@@ -111,6 +124,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             if (actionVersion !== authActionVersion.current) return false;
 
             if ('error' in res) {
+                void renewalActivity.current?.renewNow();
                 if (!showFeedback) return false;
                 if (res.error === 'AUTH_FAILED') {
                     await Swal.fire({
@@ -143,6 +157,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             return actionVersion === authActionVersion.current;
         } catch (err) {
             if (actionVersion !== authActionVersion.current) return false;
+            void renewalActivity.current?.renewNow();
             console.error(err);
             if (showFeedback) {
                 await Swal.fire({
@@ -162,6 +177,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         // A canceled dialog cannot undo a completed server request; a newer
         // logout still owns the UI and runs after completion in the same queue.
         if (actionVersion !== authActionVersion.current) return { error: 'CANCELLED' };
+        if ('error' in result) void renewalActivity.current?.renewNow();
         if ('user_name' in result) {
             setIsAuthenticated(true);
             setUserName(result.user_name);
@@ -190,6 +206,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         if (actionVersion === undefined || actionVersion !== authActionVersion.current) return { error: 'CANCELLED' };
         const result = await completeProviderLoginRequest(handle, credential, options);
         if (actionVersion !== authActionVersion.current) return { error: 'CANCELLED' };
+        if ('error' in result) void renewalActivity.current?.renewNow();
         if ('signupRequired' in result) preparedLoginVersions.current.set(result.handle, actionVersion);
         if ('user_name' in result) {
             // An idle button or rejected late callback must never supersede a
@@ -221,10 +238,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             if (actionVersion !== authActionVersion.current) return;
             try {
                 const session = await verifyRequest();
-                if (actionVersion !== authActionVersion.current) return;
+                if (actionVersion !== authActionVersion.current) {
+                    if (!session.loggedIn) void renewalActivity.current?.renewNow();
+                    return;
+                }
                 setIsAuthenticated(session.loggedIn);
                 setUserName(session.loggedIn ? session.user_name : null);
-                sessionMayExist.current = session.loggedIn;
+                sessionMayExist.current = session.loggedIn || session.revocationPending === true;
                 renewalActivity.current?.resetCooldown();
             } catch (verificationError) {
                 // If the network is still unavailable, preserve the last known UI state.

@@ -142,7 +142,8 @@ test('native provider transport admits only explicit provider routes within the 
     const providerRoutes = [...native.matchAll(/"((?:GET|POST) \/auth\/providers\/[^"\n]+)"/g)]
         .map((match) => match[1]);
     assert.deepEqual(providerRoutes, [
-        'GET /auth/providers/config', 'GET /auth/providers/account', 'POST /auth/providers/begin', 'POST /auth/providers/complete',
+        'GET /auth/providers/config', 'GET /auth/providers/account', 'GET /auth/providers/apple-credential',
+        'POST /auth/providers/begin', 'POST /auth/providers/complete',
     ]);
     assert.match(native, /maximumRequestBytes = 32 \* 1024/);
     assert.match(native, /bodyData\?\.count \?\? 0\) <= maximumRequestBytes/);
@@ -164,7 +165,7 @@ test('Apple identity bridge is registered in the App target but remains explicit
     assert.match(info, /<key>LudolumeAppleSignInEnabled<\/key>\s*<false\/>/);
     assert.match(identity, /forInfoDictionaryKey: "LudolumeAppleSignInEnabled"\) as\? Bool == true/);
     assert.match(identity, /call\.resolve\(\["apple": appleSignInEnabled, "google": false\]\)/);
-    for (const method of ['getCapabilities', 'signIn', 'cancel']) {
+    for (const method of ['getCapabilities', 'getCredentialState', 'signIn', 'cancel']) {
         assert.ok(identity.includes(`CAPPluginMethod(name: "${method}", returnType: CAPPluginReturnPromise)`));
     }
     const { default: xcode } = await import('xcode');
@@ -174,6 +175,37 @@ test('Apple identity bridge is registered in the App target but remains explicit
     assert.ok(target);
     const sources = project.pbxSourcesBuildPhaseObj(target[0]).files;
     assert.ok(sources.some(({ comment }) => comment === 'LudolumeIdentityPlugin.swift in Sources'));
+});
+
+test('Apple credential state remains gated, bounded and separate from sign-in', async () => {
+    // Structural contract only; these checks do not compile or exercise AuthenticationServices.
+    const identity = await readFile(new URL('../../ios/App/App/LudolumeIdentityPlugin.swift', import.meta.url), 'utf8');
+    const method = identity.slice(identity.indexOf('@objc func getCredentialState('), identity.indexOf('@objc func signIn('));
+    assert.match(method, /guard appleSignInEnabled else/);
+    assert.match(method, /let userId = call\.getString\("userId"\), !userId\.isEmpty/);
+    assert.match(method, /userId\.utf8\.count <= 255/);
+    assert.match(method, /userId\.utf8\.allSatisfy\(\{ \(33\.\.\.126\)\.contains\(\$0\) \}\)/);
+    assert.match(method, /getCredentialState\(forUserID: userId\)/);
+    assert.match(method, /guard error == nil else/);
+    for (const state of ['authorized', 'revoked', 'notFound', 'transferred']) {
+        assert.ok(method.includes(`case .${state}: value = "${state}"`));
+    }
+    assert.match(method, /@unknown default:\s*call\.reject\("Native credential state is unavailable\.", "UNAVAILABLE"\)/);
+    assert.match(method, /call\.resolve\(\["state": value\]\)/);
+    assert.doesNotMatch(method, /signIn\(|pendingRequest|identityToken|authorizationCode|localizedDescription/);
+});
+
+test('Apple native credential-change observers send no identifiers and are released with the plugin', async () => {
+    const identity = await readFile(new URL('../../ios/App/App/LudolumeIdentityPlugin.swift', import.meta.url), 'utf8');
+    const observers = identity.slice(identity.indexOf('public override func load()'), identity.indexOf('@objc func getCapabilities('));
+    assert.match(observers, /guard appleSignInEnabled, credentialObservers\.isEmpty else/);
+    assert.match(observers, /ASAuthorizationAppleIDProvider\.credentialRevokedNotification/);
+    assert.match(observers, /UIApplication\.didBecomeActiveNotification/);
+    assert.match(observers, /queue: \.main/);
+    assert.match(observers, /\[weak self\]/);
+    assert.match(observers, /notifyListeners\("appleCredentialChanged", data: \[:\]\)/);
+    assert.match(observers, /deinit\s*\{\s*credentialObservers\.forEach \{ NotificationCenter\.default\.removeObserver\(\$0\) \}/);
+    assert.doesNotMatch(observers, /userId|identityToken|authorizationCode|retainUntilConsumed/);
 });
 
 test('Apple native contract preserves the server challenge and discards cancelled or invalid credentials', async () => {

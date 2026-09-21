@@ -18,6 +18,13 @@ account UUID, random 256-bit session identifier and issuance/expiry timestamps.
 Its purpose-specific signing key prevents an older numeric-ID-only runtime from
 silently accepting the new long-lived token while ignoring revocation.
 
+Apple login/signup additionally signs `authenticationMethod: 'apple'`; renewal
+preserves that verified claim. Password/Google and older unmarked sessions stay
+unmarked, even if their account has linked Apple. The disabled native Apple
+credential-loss guard uses this provenance to revoke only the current Apple
+device session through ordinary logout. Linking alone never opts another login
+method into Apple checks. See [scope and remaining global enforcement](PROVIDER_SIGN_IN.md#native-apple-credential-loss--prepared-not-activated-2026-09-21).
+
 `account_sessions` stores only hashed current/previous identifiers, account UUID,
 remembered choice and UTC creation/renewal/expiry/grace timestamps. It stores no passwords, raw tokens, IPs or
 device fingerprints. Each account has at most ten sessions; a new login removes

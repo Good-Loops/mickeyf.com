@@ -16,6 +16,7 @@ export function watchSessionRenewalActivity({
 }: RenewalActivityOptions): { renewNow: () => Promise<void>; resetCooldown: () => void; stop: () => void } {
     let nextAttemptAt = now() + SESSION_RENEWAL_INTERVAL_MS;
     let pending = false;
+    let recheckRequested = false;
     let stopped = false;
 
     async function attemptRenewal(): Promise<void> {
@@ -28,6 +29,10 @@ export function watchSessionRenewalActivity({
             nextAttemptAt = now() + SESSION_RENEWAL_RETRY_MS;
         } finally {
             pending = false;
+            if (recheckRequested && !stopped) {
+                recheckRequested = false;
+                await attemptRenewal();
+            }
         }
     }
 
@@ -46,7 +51,12 @@ export function watchSessionRenewalActivity({
     documentEvents.addEventListener('visibilitychange', onActivity);
 
     return {
-        renewNow: attemptRenewal,
+        renewNow: () => {
+            // A native revocation/resume signal must not vanish merely because
+            // a check that started before that signal is still in flight.
+            if (pending) { recheckRequested = true; return Promise.resolve(); }
+            return attemptRenewal();
+        },
         resetCooldown: () => { nextAttemptAt = now() + SESSION_RENEWAL_INTERVAL_MS; },
         stop: () => {
             stopped = true;

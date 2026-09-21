@@ -174,3 +174,29 @@ test('unmount also cancels an activity attempt queued in the current event turn'
     await flush();
     assert.equal(state.calls, 0);
 });
+
+test('native signals during an in-flight check coalesce into one follow-up check', async () => {
+    let release;
+    const blocked = new Promise(resolve => { release = resolve; });
+    const { state, watcher } = setup(async () => { await blocked; return true; });
+    const initial = watcher.renewNow();
+    await watcher.renewNow();
+    await watcher.renewNow();
+    assert.equal(state.calls, 1);
+    release();
+    await initial;
+    assert.equal(state.calls, 2, 'the later native signal cannot be lost to the pending check');
+    watcher.stop();
+});
+
+test('unmount discards a pending native follow-up check', async () => {
+    let release;
+    const blocked = new Promise(resolve => { release = resolve; });
+    const { state, watcher } = setup(async () => { await blocked; return true; });
+    const initial = watcher.renewNow();
+    await watcher.renewNow();
+    watcher.stop();
+    release();
+    await initial;
+    assert.equal(state.calls, 1);
+});

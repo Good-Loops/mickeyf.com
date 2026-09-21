@@ -2728,6 +2728,17 @@ itself activate, implement or defer both providers.
   execution/expiry path and grants, finish revoked-credential/session handling,
   then perform the native build/device check. No repeat gameplay or general
   login acceptance is requested. KWS remains a separate signup-audience gate.
+  **Native Apple credential-loss checkpoint (2026-09-21):** signed session
+  provenance now distinguishes Apple login from merely having a linked Apple
+  identity, survives renewal, and is absent from password/Google sessions.
+  The native-only credential lookup and platform startup/resume/revocation
+  checks reuse current-device logout without deleting accounts or scores.
+  Checks and logout are serialized with login; unconfirmed logout hides local
+  auth and retries without claiming server success. Unknown/platform-error
+  states do not trigger logout. No schema, keys, cloud jobs or activation changed.
+  Remaining lifecycle work: signed Apple server notifications and race-safe
+  server-side invalidation, then approved maintenance/retention operation and
+  native build/device acceptance. Do not repeat accepted gameplay checks.
   The owner approved the CORS-only backend deployment for exactly
   `capacitor://localhost`, and renewed the same temporary Node/OpenSSL exception
   through 2026-10-07 only for the matching unchanged-runtime/base/dependency
