@@ -2685,11 +2685,17 @@ itself activate, implement or defer both providers.
   signup/delete challenges. Public signup remains disabled and subject to the
   age/consent backlog; production requires available deletion, reviewed grants,
   migration and explicit deployment approval. No native Google or cloud rollout.
-  **Bounded follow-up:** one isolated fixture reported `AccountSessionUnavailableError`
-  while creating sessions concurrently for different accounts. Cause is unproven;
-  serialized setup preserves the provider-link race being tested, but does not
-  prove parallel session creation fixed. Reproduce with sanitized SQL error codes
-  during the session reliability pass; production session code is unchanged here.
+  **Session concurrency follow-up (2026-09-21):** reproduced different-account
+  first-session creation failing with `ER_LOCK_DEADLOCK / 1213 / 40001` when
+  both transactions held overlapping empty-index gap locks. Creation now uses
+  next-transaction-only `READ COMMITTED`; per-user/proof/cap locks, commit
+  safeguards, renewal/logout isolation and pool defaults remain unchanged.
+  One combined disposable provider/replay/session run passed 39/39, session
+  unit tests 12/12 and backend typechecking passed. No production change.
+  Copilot's router dependency-injection checkpoint `8c5dc7e1` is preserved and
+  synced. Next: native Apple first-time signup, native Google sign-in, then the
+  remaining Clean Code sweep. KWS's pending response does not block this
+  implementation/testing; all-ages public activation keeps its consent gates.
   See [scope, migration boundary and remaining steps](backend/PROVIDER_SIGN_IN.md).
   The owner approved the CORS-only backend deployment for exactly
   `capacitor://localhost`, and renewed the same temporary Node/OpenSSL exception

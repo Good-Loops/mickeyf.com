@@ -450,9 +450,37 @@ not a claim that one full run was green. Fixtures were corrected to choose the
 last issued session cookie and pin historical session-migration expectations.
 Parallel session setup also failed once with a sanitized unavailable error;
 only setup was serialized, the intended link race remains concurrent, and the
-underlying session-creation cause remains a recorded follow-up.
+underlying session-creation cause was left for the focused follow-up below.
 
-Commands (from repository root unless noted):
+Session concurrency follow-up (2026-09-21): a deterministic two-account test
+held both real MySQL transactions after their empty session-range scans, before
+either insert. The previous implementation failed with sanitized driver codes
+`ER_LOCK_DEADLOCK / 1213 / 40001`; the other 38 integration cases passed.
+The account-specific named locks did not prevent overlapping index gap locks
+under `REPEATABLE READ`. Session creation now uses next-transaction-only
+`READ COMMITTED`, retaining the named lock, user-row lock, proof checks,
+ten-device cap and fail-closed commit handling. Renewal/logout isolation and
+pooled connection defaults are unchanged. This does not claim that all possible
+database deadlocks are eliminated. MySQL requires ROW/MIXED binary logging for
+this mode, already enforced by the account-identity migration precondition.
+
+After the fix, one complete `--provider-identities` run passed 39/39 (replay 1,
+provider accounts 14, attempts/HTTP 12, sessions 12), including independent
+authentication/revocation and unchanged pooled isolation. Session unit tests
+passed 12/12 and backend typechecking passed. The pinned disposable database
+was removed by the harness; no production data, schema, provider flags or
+deployment changed. Commands from the repository root:
+
+```text
+node backend/scripts/run-migration-tests.mjs --provider-identities
+npm.cmd --prefix backend test
+```
+
+Backend directory: `node --test -r ts-node/register ts/auth/accountSessionRepository.test.ts`.
+References: [MySQL transaction scope](https://dev.mysql.com/doc/refman/8.0/en/set-transaction.html)
+and [isolation and gap locking](https://dev.mysql.com/doc/refman/8.0/en/innodb-transaction-isolation-levels.html).
+
+Earlier checkpoint commands (from repository root unless noted):
 
 ```text
 npm --prefix backend test

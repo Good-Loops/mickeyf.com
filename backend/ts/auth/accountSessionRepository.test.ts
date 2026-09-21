@@ -46,8 +46,9 @@ test('creation hashes the secret, confirms commit, bounds expiry and locks befor
     assert.equal(f.calls.flatMap(call => call.values).includes(sessionId), false);
     assert.equal(f.calls.flatMap(call => call.values).includes('expected-hash'), false);
     assert(f.calls[0].sql.includes('GET_LOCK'));
-    assert.equal(f.calls[1].sql, 'START TRANSACTION');
-    assert.match(f.calls[2].sql, /FOR UPDATE/u);
+    assert.equal(f.calls[1].sql, 'SET TRANSACTION ISOLATION LEVEL READ COMMITTED');
+    assert.equal(f.calls[2].sql, 'START TRANSACTION');
+    assert.match(f.calls[3].sql, /FOR UPDATE/u);
     assert.equal(f.calls.at(-2)?.sql, 'COMMIT');
     assert.match(f.calls.at(-1)!.sql, /RELEASE_LOCK/u);
     assert.equal(f.released(), true);
@@ -103,6 +104,7 @@ test('logout is idempotent, user-serialized and only removes matching UUID and d
     assert.match(deletion.sql, /INNER JOIN users/u);
     assert.match(deletion.sql, /previous_session_hash = \?/u);
     assert.doesNotMatch(deletion.sql, /previous_valid_until/u);
+    assert.equal(f.calls.some(call => call.sql.startsWith('SET TRANSACTION')), false);
     assert.equal(f.calls.at(-2)?.sql, 'COMMIT');
 });
 
@@ -138,6 +140,7 @@ test('renewal rotates only after fifteen minutes and uses a fresh database-clock
     assert.equal(f.calls.flatMap(call => call.values).includes(replacement), false);
     assert.equal(f.calls.at(-2)?.sql, 'COMMIT');
     assert.match(f.calls.find(call => call.sql.startsWith('SELECT u.user_name'))!.sql, /FOR UPDATE/u);
+    assert.equal(f.calls.some(call => call.sql.startsWith('SET TRANSACTION')), false);
 });
 
 test('ordinary, recently renewed and absent sessions are read-only; no callback gets a non-renewable credential', async () => {
@@ -197,8 +200,8 @@ test('invalid credentials and expiries are rejected before acquiring a connectio
     assert.deepEqual(f.calls, []);
 });
 
-test('storage failures expose no driver data; uncertain begin/commit/release destroys the connection', async () => {
-    for (const fail of ['START TRANSACTION', 'COMMIT', 'RELEASE_LOCK', 'INSERT INTO account_sessions']) {
+test('storage failures expose no driver data; uncertain isolation/begin/commit/release destroys the connection', async () => {
+    for (const fail of ['SET TRANSACTION', 'START TRANSACTION', 'COMMIT', 'RELEASE_LOCK', 'INSERT INTO account_sessions']) {
         const f = fixture({ fail });
         await assert.rejects(createAccountSession(f.database, target, sessionId, expiresAt()), error => {
             assert(error instanceof AccountSessionUnavailableError);
@@ -207,6 +210,7 @@ test('storage failures expose no driver data; uncertain begin/commit/release des
             return true;
         });
         assert.equal(f.destroyed(), fail !== 'INSERT INTO account_sessions');
+        if (fail === 'SET TRANSACTION') assert.equal(f.calls.some(call => call.sql === 'START TRANSACTION'), false);
         if (fail === 'INSERT INTO account_sessions') assert(f.calls.some(call => call.sql === 'ROLLBACK'));
     }
     const f = fixture({ fail: 'SELECT u.user_name' });

@@ -146,6 +146,68 @@ test('expiration, password replacement, account deletion and numeric-ID reuse ca
     assert.equal(await readLiveSession(database, target.userId, target.accountId, id), null);
 });
 
+test('different accounts can create their first sessions concurrently', async (t) => {
+    // Physically empty the disposable index: DELETE can leave unpurged gap-lock boundaries.
+    await administrator.query('TRUNCATE TABLE account_sessions');
+    const targets = [await account('parallel-first'), await account('parallel-second')];
+    const ids = targets.map(newId);
+    let arrivals = 0;
+    let timedOut = false;
+    let release!: () => void;
+    const bothScanned = new Promise<void>(resolve => { release = resolve; });
+    const timer = setTimeout(() => { timedOut = true; release(); }, 5000);
+    const sqlErrors: string[] = [];
+    const poolDefaults: string[] = [];
+    const synchronized = {
+        async getConnection() {
+            const connection = await database.getConnection();
+            return {
+                async query(query: QueryOptions, values?: unknown[]) {
+                    try {
+                        const result = await connection.query(query, values);
+                        if (query.sql === 'COMMIT') {
+                            const [settings] = await connection.query<RowDataPacket[]>(
+                                'SELECT @@session.transaction_isolation AS isolationLevel');
+                            poolDefaults.push(String(settings[0].isolationLevel));
+                        }
+                        if (query.sql.startsWith('SELECT session_hash FROM account_sessions')) {
+                            if (++arrivals === targets.length) release();
+                            await bothScanned;
+                        }
+                        return result;
+                    } catch (error) {
+                        const failure = error as { code?: string; errno?: number; sqlState?: string };
+                        sqlErrors.push(`${failure.code}/${failure.errno}/${failure.sqlState}`);
+                        release();
+                        throw error;
+                    }
+                },
+                release() { connection.release(); },
+                destroy() { connection.destroy(); },
+            } as unknown as PoolConnection;
+        },
+    };
+    try {
+        const results = await Promise.allSettled(targets.map((target, index) =>
+            createAccountSession(synchronized, target, ids[index], expiry(), passwordHash)));
+        if (sqlErrors.length) t.diagnostic(`SQL error codes only: ${sqlErrors.join(', ')}`);
+        assert.equal(timedOut, false, 'both accounts must reach the insert boundary together');
+        assert.equal(arrivals, 2);
+        assert.deepEqual(results, targets.map(() => ({ status: 'fulfilled', value: true })));
+        assert.deepEqual(poolDefaults, ['REPEATABLE-READ', 'REPEATABLE-READ']);
+        assert.equal((await rows()).length, 2);
+        for (const [index, target] of targets.entries()) {
+            assert.notEqual(await readLiveSession(database, target.userId, target.accountId, ids[index]), null);
+        }
+        await revokeAccountSession(database, targets[0].userId, targets[0].accountId, ids[0]);
+        assert.equal(await readLiveSession(database, targets[0].userId, targets[0].accountId, ids[0]), null);
+        assert.notEqual(await readLiveSession(database, targets[1].userId, targets[1].accountId, ids[1]), null);
+    } finally {
+        clearTimeout(timer);
+        release();
+    }
+});
+
 test('parallel device creation obeys the ten-session cap and evicts oldest only when required', async () => {
     const target = await account(); const unrelated = await account(); const keep = newId();
     assert.equal(await createAccountSession(database, unrelated, keep, expiry()), true);

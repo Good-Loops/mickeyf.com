@@ -28,9 +28,15 @@ function sessionHash(target: AccountTarget, sessionId: string): Buffer {
     return createHash('sha256').update(sessionId, 'ascii').digest();
 }
 
-async function transaction<T>(context: UserSubmissionLockContext, operation: () => Promise<T>): Promise<T> {
+async function transaction<T>(
+    context: UserSubmissionLockContext, operation: () => Promise<T>, isolationLevel?: 'READ COMMITTED',
+): Promise<T> {
     let phase: 'begin' | 'active' | 'commit' = 'begin';
     try {
+        if (isolationLevel === 'READ COMMITTED') {
+            // Only the next transaction changes; never change a pooled connection's session default.
+            await context.connection.query({ sql: 'SET TRANSACTION ISOLATION LEVEL READ COMMITTED', timeout: QUERY_TIMEOUT_MS });
+        }
         await context.connection.query({ sql: 'START TRANSACTION', timeout: QUERY_TIMEOUT_MS });
         phase = 'active';
         const result = await operation();
@@ -63,6 +69,7 @@ export async function createAccountSession(
     }
     const account = { ...target };
     try {
+        // The account lock protects proof/cap checks; range gap locks would also block unrelated logins.
         return await withUserSubmissionLock(database, account.userId, context => transaction(context, async () => {
             const { connection } = context;
             const [users] = await connection.query<RowDataPacket[]>({
@@ -101,7 +108,7 @@ export async function createAccountSession(
             }, [hash, account.accountId, expiresAt, rememberMe ? 1 : 0, expiresAt, expiresAt]);
             if (inserted.affectedRows !== 1) throw new AccountSessionUnavailableError();
             return true;
-        }));
+        }, 'READ COMMITTED'));
     } catch {
         // Never retain raw driver parameters, credentials, or an uncertain commit as a successful login.
         throw new AccountSessionUnavailableError();
