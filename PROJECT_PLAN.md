@@ -2751,6 +2751,15 @@ itself activate, implement or defer both providers.
   any legacy Apple sessions without provenance; then native build/lifecycle
   acceptance. Restored sessions must be invalidated before reopening traffic.
   KWS remains a separate signup-audience gate. Do not repeat accepted gameplay.
+  **Apple maintenance preparation (2026-09-21):** packaged a standalone production
+  entrypoint and separated verified DB-only expiry cleanup from Apple retry-key
+  parsing. Bounded drains, real backlog probes and work/shutdown deadlines replace
+  the single-pass command. Live read-only inventory found only the two existing
+  receipt/audit jobs; none were changed. The proposed separate five-minute job,
+  estimated cost, notification endpoint and draft privacy insert are documented
+  in [APPLE_MAINTENANCE.md](backend/APPLE_MAINTENANCE.md). No policy was published.
+  Approval, least-privilege job credentials, startup-secret-independent purge
+  operation and the strict physical-retention wording remain before activation.
   The owner approved the CORS-only backend deployment for exactly
   `capacitor://localhost`, and renewed the same temporary Node/OpenSSL exception
   through 2026-10-07 only for the matching unchanged-runtime/base/dependency

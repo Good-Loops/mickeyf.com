@@ -5,6 +5,7 @@ module.exports = {
         server: ['./ts/app.ts'],
         'submission-receipt-cleanup': ['./ts/leaderboards/runSubmissionReceiptCleanup.ts'],
         'account-deletion-audit': ['./ts/accounts/runDeletionAudit.ts'],
+        'apple-token-revocation': ['./ts/accounts/appleTokenRevocationMain.ts'],
     },
     target: 'node',
     module: {

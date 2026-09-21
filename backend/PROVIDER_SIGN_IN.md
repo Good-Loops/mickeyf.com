@@ -43,6 +43,8 @@ while linked; after account deletion, retain only the encrypted revocation work
 for at most seven days, deleting it sooner when Apple confirms revocation.
 This exception must be included in the published privacy policy before activation.
 It is an approved implementation contract, not a claim about current production.
+Operational preparation, proposed cadence/cost, draft disclosure wording and
+the exact notification URL are in [Apple maintenance](APPLE_MAINTENANCE.md).
 
 The native bridge returns the ID token and one-use authorization code. Both stay
 in operation memory, including the username continuation; neither is logged or
@@ -72,7 +74,10 @@ The explicit maintenance worker processes at most 20 due rows per pass under a
 database-scoped lock. SQL changes commit before network calls. Transient failures
 retry with 60-second exponential backoff, capped at one hour and the original
 deadline. Expiry purging does not require working decryption keys or a reachable
-Apple service. Only confirmed revocation deletes early; failures never restore
+Apple service. The compiled command now performs a bounded DB-only expiry drain
+before parsing Apple retry keys, then probes for remaining backlog. It has a
+180-second work deadline and five-second shutdown; see the operational runbook
+for startup-secret failure limits. Only confirmed revocation deletes early; failures never restore
 an account or extend retention. Reports contain aggregate counters, not tokens
 or account identifiers. A bounded backlog requires another scheduled pass.
 

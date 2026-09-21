@@ -7,7 +7,6 @@ export type AppleRevocationConfig = Readonly<{
     databaseOptions: PoolOptions;
     expectedAccount: string;
     expectedServerUuid: string;
-    lifecycle: AppleTokenLifecycle;
 }>;
 const CONNECTION_NAME = 'noted-reef-387021:us-central1:cms-mickeyf';
 
@@ -37,12 +36,17 @@ export function loadAppleRevocationConfig(args: readonly string[], env: Environm
         || env.APPLE_REVOCATION_DB_HOST !== undefined || env.APPLE_REVOCATION_DB_PORT !== undefined) {
         throw new Error('Apple revocation requires the reviewed production socket, database and runtime identity.');
     }
-    const lifecycle = loadAppleTokenConfig(env);
-    if (!lifecycle) throw new Error('Apple revocation requires explicit token lifecycle activation.');
     return Object.freeze({
         databaseOptions: Object.freeze({ user, password, database, socketPath: `/cloudsql/${connectionName}`,
             connectionLimit: 1, waitForConnections: false, queueLimit: 0, connectTimeout: 10_000,
             multipleStatements: false, timezone: 'Z', dateStrings: true }),
-        expectedAccount, expectedServerUuid, lifecycle,
+        expectedAccount, expectedServerUuid,
     });
+}
+
+/** Parse retry credentials only after verified DB-only expiry cleanup has completed. */
+export function loadAppleRevocationLifecycle(env: Environment = process.env): AppleTokenLifecycle {
+    const lifecycle = loadAppleTokenConfig(env);
+    if (!lifecycle) throw new Error('Apple revocation requires explicit token lifecycle activation.');
+    return lifecycle;
 }
