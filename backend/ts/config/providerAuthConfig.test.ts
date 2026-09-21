@@ -63,6 +63,8 @@ test('Google signup requires its own exact opt-in and is advertised only for con
     assert.equal(enabled.signupEnabled, true);
     assert.ok('signup' in enabled.publicClients[0] && enabled.publicClients[0].signup === true);
     assert.equal('signup' in enabled.publicClients[1], false);
+    assert.equal(enabled.clients['apple-ios'].signupEnabled, false);
+    assert.equal(enabled.clients['apple-ios'].deletionEnabled, false);
     for (const value of [undefined, 'false', 'TRUE', '1']) {
         const config = loadProviderAuthConfig({ ...enabledEnvironment, PROVIDER_GOOGLE_SIGNUP_ENABLED: value });
         assert.equal(config.signupEnabled, false);

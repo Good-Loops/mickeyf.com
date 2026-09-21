@@ -8,7 +8,13 @@ import type { ProviderAttempt, ConsumedProviderAttempt, ProviderAttemptAction, P
 import type { IdentityProvider, VerifiedProviderIdentity } from './providerIdentity';
 import { type ProviderTokenVerifier, PROVIDER_TOKEN_MAX_LENGTH } from './providerTokenVerifier';
 
-export type ProviderAuthClient = Readonly<{ provider: IdentityProvider; verifier: ProviderTokenVerifier }>;
+export type ProviderAuthClient = Readonly<{
+    provider: IdentityProvider;
+    verifier: ProviderTokenVerifier;
+    /** Native Apple account creation/deletion require separate reviewed activation. */
+    signupEnabled?: boolean;
+    deletionEnabled?: boolean;
+}>;
 type Failure = { ok: false; reason: 'UNAVAILABLE' | 'INVALID_REQUEST' | 'INVALID_CONTEXT'
     | 'BUSY' | 'INVALID_ATTEMPT' | 'INVALID_PROVIDER_TOKEN' | 'NOT_LINKED' | 'INVALID_PASSWORD'
     | 'LINK_CONFLICT' | 'ACCOUNT_GONE' | 'DUPLICATE_USER' | 'ALREADY_LINKED' | 'INVALID_USERNAME' | 'INVALID_EMAIL'
@@ -42,8 +48,13 @@ function inputClient(input: unknown, clients: ReadonlyMap<string, ProviderAuthCl
         || !['login', 'link', 'signup', 'delete'].includes(input.action)) return null;
     const client = clients.get(input.clientKey);
     if ((input.action === 'signup' || input.action === 'delete')
-        && (input.clientKey !== 'google-web' || client?.provider !== 'google')) return null;
+        && !supportsPasswordlessAccounts(input.clientKey, client)) return null;
     return client ? { client, clientKey: input.clientKey, action: input.action as ProviderAttemptAction } : null;
+}
+
+function supportsPasswordlessAccounts(clientKey: string, client: ProviderAuthClient | undefined): boolean {
+    return clientKey === 'google-web' && client?.provider === 'google'
+        || clientKey === 'apple-ios' && client?.provider === 'apple';
 }
 
 function matchesContext(context: ProviderAuthContext | null, action: ProviderAttemptAction): context is ProviderAuthContext {
@@ -62,11 +73,21 @@ export function createProviderAuthFlow({ attempts, accounts, clients, enabled = 
     const configuredClients = new Map(Object.entries(clients).map(([key, client]) => {
         if (!/^[a-z0-9_-]{1,64}$/.test(key) || !['google', 'apple'].includes(client.provider)
             || typeof client.verifier?.verify !== 'function') throw new TypeError('Invalid provider client configuration.');
+        if ([client.signupEnabled, client.deletionEnabled].some(value => value !== undefined && typeof value !== 'boolean')) {
+            throw new TypeError('Invalid provider client configuration.');
+        }
         return [key, Object.freeze({ ...client })] as const;
     }));
-    function unavailableAction(action: ProviderAttemptAction): Failure | null {
-        if (action === 'signup' && (!signupEnabled || !accounts.create)) return { ok: false, reason: 'UNAVAILABLE' };
-        if (action === 'delete' && (!deletionEnabled || !accounts.delete)) return { ok: false, reason: 'ACCOUNT_DELETION_UNAVAILABLE' };
+    function signupAvailable(clientKey: string, client: ProviderAuthClient): boolean {
+        return signupEnabled && !!accounts.create && supportsPasswordlessAccounts(clientKey, client)
+            && (client.provider !== 'apple' || client.signupEnabled === true);
+    }
+    function unavailableAction(action: ProviderAttemptAction, clientKey: string, client: ProviderAuthClient): Failure | null {
+        if (action === 'signup' && !signupAvailable(clientKey, client)) return { ok: false, reason: 'UNAVAILABLE' };
+        if (action === 'delete' && (!deletionEnabled || !accounts.delete
+            || (client.provider === 'apple' && client.deletionEnabled !== true))) {
+            return { ok: false, reason: 'ACCOUNT_DELETION_UNAVAILABLE' };
+        }
         return null;
     }
     return {
@@ -76,7 +97,7 @@ export function createProviderAuthFlow({ attempts, accounts, clients, enabled = 
             if (!selection || !isRecord(input) || Object.keys(input).sort().join(',') !== 'action,clientKey') {
                 return { ok: false, reason: 'INVALID_REQUEST' };
             }
-            const unavailable = unavailableAction(selection.action);
+            const unavailable = unavailableAction(selection.action, selection.clientKey, selection.client);
             if (unavailable) return unavailable;
             if (!matchesContext(context, selection.action)) return { ok: false, reason: 'INVALID_CONTEXT' };
             const state = randomBytes(32).toString('base64url');
@@ -105,7 +126,7 @@ export function createProviderAuthFlow({ attempts, accounts, clients, enabled = 
                 }[selection.action])) {
                 return { ok: false, reason: 'INVALID_REQUEST' };
             }
-            const unavailable = unavailableAction(selection.action);
+            const unavailable = unavailableAction(selection.action, selection.clientKey, selection.client);
             if (unavailable) return unavailable;
             if (!matchesContext(context, selection.action)) return { ok: false, reason: 'INVALID_CONTEXT' };
             if (selection.action === 'signup' && (typeof input.userName !== 'string' || input.userName.trim().length === 0
@@ -133,7 +154,7 @@ export function createProviderAuthFlow({ attempts, accounts, clients, enabled = 
                 if (selection.action === 'login') {
                     const account = await accounts.find(verified.identity);
                     if (account) return { ok: true, type: 'account-verified', account };
-                    if (selection.clientKey !== 'google-web' || !signupEnabled || !accounts.create) {
+                    if (!signupAvailable(selection.clientKey, selection.client)) {
                         return { ok: false, reason: 'NOT_LINKED' };
                     }
                     if (verified.identity.email === undefined) return { ok: false, reason: 'INVALID_EMAIL' };

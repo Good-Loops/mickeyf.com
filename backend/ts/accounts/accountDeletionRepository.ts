@@ -113,17 +113,18 @@ export async function deleteProviderAccount(
         throw new TypeError('Provider account deletion requires an authenticated session proof.');
     }
     assertAccountId(expectedSession.accountId);
-    if (!identity || identity.provider !== 'google' || typeof identity.subject !== 'string'
+    if (!identity || !['google', 'apple'].includes(identity.provider) || typeof identity.subject !== 'string'
         || !/^[\x21-\x7e]{1,255}$/.test(identity.subject)) return 'invalid-password';
     const subject = Buffer.from(identity.subject, 'ascii');
+    const provider = identity.provider;
     const proof = { ...expectedSession };
     return deleteReauthenticatedAccount(database, userId, journal, proof, async (connection, account) => {
         if (account.accountId !== proof.accountId) return 'not-found';
         const [links] = await connection.query<RowDataPacket[]>({
             sql: `SELECT subject FROM account_provider_identities
-                WHERE account_uuid = ? AND provider = 'google' LIMIT 2 FOR SHARE`,
+                WHERE account_uuid = ? AND provider = ? LIMIT 2 FOR SHARE`,
             timeout: DATABASE_QUERY_TIMEOUT_MS,
-        }, [proof.accountId]);
+        }, [proof.accountId, provider]);
         if (!Array.isArray(links) || links.length > 1) throw new Error('Provider account linkage could not be verified.');
         if (!links[0] || !Buffer.isBuffer(links[0].subject) || !links[0].subject.equals(subject)) return 'invalid-password';
         // Verification or the row-lock wait may outlive expiry. Check again immediately before journaling.

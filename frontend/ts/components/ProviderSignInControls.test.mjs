@@ -13,6 +13,8 @@ after(() => viteServer.close());
 const { default: ProviderSignInControls, ProviderSignInButtons, InlineGoogleSignIn, providerSignInErrorMessage } =
     await viteServer.ssrLoadModule('/ts/components/ProviderSignInControls.tsx');
 const { AuthProvider } = await viteServer.ssrLoadModule('/ts/context/AuthContext.tsx');
+const { requestProviderUsername } = await viteServer.ssrLoadModule('/ts/components/providerSignupPrompt.ts');
+const { default: alert } = await viteServer.ssrLoadModule('/ts/components/siteAlert.ts');
 const google = { clientKey: 'google-web', provider: 'google', platform: 'web', clientId: 'synthetic.apps.googleusercontent.com' };
 const apple = { clientKey: 'apple-ios', provider: 'apple', platform: 'ios', clientId: 'com.example.synthetic' };
 
@@ -51,11 +53,20 @@ test('direct Google host is inert while password login is busy and does not star
     assert.doesNotMatch(rendered, /<button|Loading Google sign-in|Or sign in with/);
 });
 
-test('native login preserves its explicit account selector without a login heading', () => {
+test('native login has a Continue with Apple control without a login heading', () => {
     const rendered = markup({ clients: [apple] });
     assert.match(rendered, /aria-label="Other sign-in methods"/);
-    assert.match(rendered, />Apple account<\/button>/);
+    assert.match(rendered, />Continue with Apple<\/button>/);
     assert.doesNotMatch(rendered, /<h2|Or sign in with|google/);
+});
+
+test('Apple signup requires the explicit server capability and does not add another Google selector', () => {
+    assert.equal(markup({ clients: [google, apple], action: 'signup' }), '');
+    const rendered = markup({ clients: [google, { ...apple, signup: true }], action: 'signup' });
+    assert.match(rendered, />Continue with Apple<\/button>/);
+    assert.match(rendered, /aria-label="Other sign-in methods"/);
+    assert.equal((rendered.match(/<button/g) ?? []).length, 1);
+    assert.doesNotMatch(rendered, /Google|google|Link a sign-in method|<h2/);
 });
 
 test('native Apple entry is a neutral account selector and link controls have a distinct heading', () => {
@@ -85,6 +96,49 @@ test('signup-disabled guidance keeps password login and linking explicitly optio
     assert.match(message, /Manage account/);
     assert.match(message, /optional/);
     assert.doesNotMatch(message, /automatically|email/i);
+});
+
+test('Apple onboarding and deletion failures name Apple without prescribing Google accounts', () => {
+    for (const error of ['NOT_LINKED', 'ALREADY_LINKED', 'DUPLICATE_USER', 'INVALID_EMAIL', 'ACCOUNT_DELETION_UNAVAILABLE']) {
+        const message = providerSignInErrorMessage(error, 'signup', 'apple');
+        assert.match(message, /Apple/);
+        assert.doesNotMatch(message, /Google|Gmail|Workspace/);
+    }
+    assert.match(providerSignInErrorMessage('NOT_LINKED', 'login', 'apple'), /optional/);
+});
+
+for (const [provider, expectedName] of [['google', 'Google'], ['apple', 'Apple']]) {
+    test(`${provider} onboarding asks for a public username using the actual sign-in method`, async t => {
+        t.mock.method(alert, 'fire', async options => {
+            assert.match(options.text, new RegExp(`sign in with ${expectedName}—no password needed`));
+            assert.doesNotMatch(options.text, /link|password account/i);
+            assert.equal(options.inputValue, 'Initial name');
+            assert.equal(options.inputValidator(''), 'Enter a username (1–64 characters).');
+            assert.equal(options.inputValidator('New Player'), undefined);
+            options.didDestroy();
+            return { isConfirmed: true, value: ' New Player ' };
+        });
+        assert.equal(await requestProviderUsername('Initial name', new AbortController().signal, provider), 'New Player');
+    });
+}
+
+test('cancelled Apple onboarding closes only its own prompt and returns no registration consent', async t => {
+    const controller = new AbortController();
+    const popup = {};
+    let closeCount = 0;
+    let finish;
+    t.mock.method(alert, 'getPopup', () => popup);
+    t.mock.method(alert, 'close', () => { closeCount++; finish(); });
+    t.mock.method(alert, 'fire', options => new Promise(resolve => {
+        finish = () => { options.didDestroy(); resolve({ isConfirmed: false }); };
+        options.didOpen(popup);
+    }));
+    const pending = requestProviderUsername('', controller.signal, 'apple');
+    controller.abort();
+    assert.equal(await pending, null);
+    assert.equal(closeCount, 1);
+    assert.equal(await requestProviderUsername('', controller.signal, 'apple'), null);
+    assert.equal(closeCount, 1, 'an already-cancelled operation never opens another prompt');
 });
 
 test('cancellation is quiet and unknown errors cannot inject provider details or claim an unconfirmed result', () => {

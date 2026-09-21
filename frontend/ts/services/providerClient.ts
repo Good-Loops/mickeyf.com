@@ -3,7 +3,7 @@ import type { ProviderAuthenticationChallenge } from './authApi.ts';
 
 export type PublicProviderClient = Readonly<
     | { clientKey: 'google-web'; provider: 'google'; platform: 'web'; clientId: string; signup?: true }
-    | { clientKey: 'apple-ios'; provider: 'apple'; platform: 'ios'; clientId: string }
+    | { clientKey: 'apple-ios'; provider: 'apple'; platform: 'ios'; clientId: string; signup?: true }
 >;
 
 type NativeIdentity = {
@@ -48,14 +48,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readClient(value: unknown): PublicProviderClient | null {
     if (!isRecord(value) || !['clientId,clientKey,platform,provider', 'clientId,clientKey,platform,provider,signup'].includes(Object.keys(value).sort().join(','))
-        || ('signup' in value && (value.signup !== true || value.clientKey !== 'google-web'))
+        || ('signup' in value && value.signup !== true)
         || typeof value.clientId !== 'string' || !/^[\x21-\x7e]{1,255}$/.test(value.clientId)) return null;
     if (value.clientKey === 'google-web' && value.provider === 'google' && value.platform === 'web') {
         return Object.freeze({ clientKey: value.clientKey, provider: value.provider, platform: value.platform, clientId: value.clientId,
             ...(value.signup === true ? { signup: true as const } : {}) });
     }
     if (value.clientKey === 'apple-ios' && value.provider === 'apple' && value.platform === 'ios') {
-        return Object.freeze({ clientKey: value.clientKey, provider: value.provider, platform: value.platform, clientId: value.clientId });
+        return Object.freeze({ clientKey: value.clientKey, provider: value.provider, platform: value.platform, clientId: value.clientId,
+            ...(value.signup === true ? { signup: true as const } : {}) });
     }
     return null;
 }

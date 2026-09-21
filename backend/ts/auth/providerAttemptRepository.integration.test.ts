@@ -221,7 +221,8 @@ test('real HTTP and SQL create a passwordless Google account, establish its sess
         const sessionCookie = signup.headers.getSetCookie().filter(value => value.startsWith('__session=')).at(-1)!.split(';')[0];
         const methods = await fetch(`${base}/account`, { headers: { cookie: sessionCookie } });
         assert.equal(methods.status, 200);
-        assert.deepEqual(await methods.json(), { hasPassword: false, googleLinked: true, googleDeletionEnabled: true });
+        assert.deepEqual(await methods.json(), { hasPassword: false, googleLinked: true, googleDeletionEnabled: true,
+            appleLinked: false, appleDeletionEnabled: false });
         const [users] = await administrator.query<RowDataPacket[]>('SELECT account_uuid, user_password FROM users WHERE user_name = ?', [userName]);
         assert.equal(users.length, 1);
         assert.equal(users[0].user_password, null);

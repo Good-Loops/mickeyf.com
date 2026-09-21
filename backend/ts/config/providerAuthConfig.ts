@@ -6,7 +6,7 @@ type VerifierDependencies = Parameters<typeof createProviderTokenVerifier>[1];
 
 export type PublicProviderAuthClient = Readonly<
     | { clientKey: 'google-web'; provider: 'google'; platform: 'web'; clientId: string; signup?: true }
-    | { clientKey: 'apple-ios'; provider: 'apple'; platform: 'ios'; clientId: string }
+    | { clientKey: 'apple-ios'; provider: 'apple'; platform: 'ios'; clientId: string; signup?: true }
 >;
 
 export type ProviderAuthConfig = Readonly<{
@@ -59,6 +59,8 @@ export function loadProviderAuthConfig(
     }
     if (appleIosId !== undefined) {
         clients['apple-ios'] = Object.freeze({ provider: 'apple',
+            // Account creation stays unavailable until Apple's token-revocation lifecycle is connected.
+            signupEnabled: false, deletionEnabled: false,
             verifier: createProviderTokenVerifier({ appleAudience: appleIosId }, verifierDependencies) });
         publicClients.push(Object.freeze({ clientKey: 'apple-ios', provider: 'apple', platform: 'ios', clientId: appleIosId }));
     }

@@ -1,6 +1,6 @@
 # Google and Apple sign-in foundation
 
-## Status — 2026-09-14
+## Status — 2026-09-21
 
 Implemented backend identity verification, one-use attempts and an opt-in HTTP
 adapter connected to shared sessions; **not an enabled sign-in feature**.
@@ -17,6 +17,25 @@ Sign in with Apple. The pending KWS/privacy work remains part of Ludolume's
 release and age/consent plan, not a prerequisite for these synthetic backend
 tests; provider sign-in must never bypass those account-creation safeguards.
 
+Native Apple onboarding is now implemented behind disabled capabilities. Login
+and signup share the prepared identity check; an unknown subject receives a
+nonce-bound, single-use username continuation, while an existing account signs
+in directly. No existing password account must link a provider. Apple's signed,
+verified shared or private-relay email may create a new account, but email is
+never used to find, merge or take over an existing account. Linked login and
+fresh deletion proof do not require the token to contain an email.
+
+The native bridge requests only email, not a profile name. `Manage account`
+recognizes Apple-linked accounts and selects a deletion method only when the
+server explicitly permits that provider. The SQL deletion proof path is tested,
+but **is not complete Apple authorization revocation**. Configuration keeps
+`apple-ios.signupEnabled` and `deletionEnabled` false, omits Apple's public
+signup capability, and the native Info.plist flag stays false. There is no new
+environment switch that activates Apple signup. Complete authorization-code
+exchange/token revocation and revoked-credential handling before wiring those
+capabilities to deployment settings; then compile on macOS and test one native
+new/returning-account lifecycle. See Apple's [account-deletion guidance](https://developer.apple.com/documentation/technotes/tn3194-handling-account-deletions-and-revoking-tokens-for-sign-in-with-apple).
+
 ## Identity and account ownership
 
 `auth/providerTokenVerifier.ts` accepts a signed ID token only after checking
@@ -27,7 +46,7 @@ a separately configured native presenter must be present in the token.
 Configuration belongs to the server, never to submitted request fields.
 
 The successful result identifies `{ provider, subject }` and can include a
-Google-authoritative verified email for separately enabled account creation. Its nominal
+provider-authoritative verified email for separately enabled account creation. Its nominal
 TypeScript type prevents accidental use of decoded/request claims, but is not
 a runtime security boundary. Only the verifier should construct it.
 
@@ -422,8 +441,10 @@ Remaining work, in order:
    signup/login and renewable-session release. Restore the localhost Google
    buttons in that release, preserving password access and score ownership;
    use one focused new/returning Google-user acceptance, not repeated gameplay.
-2. Activate native Apple capability and perform one focused real-provider
-   login/link/cancel/session acceptance per implemented platform. Compile the
+2. Finish Apple's authorization-code exchange, token revocation and revoked-
+   credential handling before enabling its implemented signup/deletion paths.
+   Activate native Apple capability and perform one focused real-provider
+   signup/login/cancel/session/deletion acceptance per implemented platform. Compile the
    new Swift bridge on macOS before any signed rollout. Complete native Google
    SDK/client setup separately, never Google OAuth inside the embedded WebView.
   Treat Apple's web Services ID separately.
@@ -436,6 +457,30 @@ Remaining work, in order:
    deployment. Then resume the remaining Clean Code sweep.
 
 ## Focused validation
+
+Native Apple onboarding checkpoint (2026-09-21): 87/87 backend verifier/flow/
+account/deletion unit tests, 33/33 router/config tests, 88/88 frontend auth/
+signup/component tests and 32/32 provider-client/native source-contract tests
+passed. Both TypeScript checks passed. One pinned disposable MySQL provider
+group passed 40/40, including Apple relay signup, subject-only returning lookup,
+cross-provider deletion rejection and unrelated-account preservation. The
+harness removed its test database and network. No real Apple account, production
+database, provider configuration or deployment changed. Swift source contracts
+are not a macOS compilation or physical-device test.
+
+Commands, from the corresponding package directory:
+
+```text
+# backend
+node --test -r ts-node/register ts/auth/providerTokenVerifier.test.ts ts/auth/providerAuthFlow.test.ts ts/accounts/providerAccountRepository.test.ts ts/accounts/accountDeletionRepository.test.ts
+node --test -r ts-node/register ts/routers/providerAuthRouter.test.ts ts/config/providerAuthConfig.test.ts
+node scripts/run-migration-tests.mjs --provider-identities
+npm.cmd test
+# frontend
+node --experimental-strip-types --test ts/services/authApi.test.mjs ts/services/authProviderSignup.test.mjs ts/components/ProviderSignInControls.test.mjs
+node --experimental-strip-types --test ts/services/providerClient.test.mjs ts/services/nativeApiFetch.test.mjs
+node node_modules/typescript/bin/tsc -p tsconfig.json --noEmit
+```
 
 Passwordless signup checkpoint (2026-09-14): both TypeScript checks passed;
 the combined frontend auth/provider tests passed 91/91, password-signup flow

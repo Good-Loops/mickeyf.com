@@ -42,7 +42,10 @@ export type CompleteProviderLoginResult = ProviderAuthenticationResult
     | { signupRequired: true; handle: PreparedProviderLogin };
 type ProviderCompletionResponse = ProviderAuthenticationResult
     | { signupRequired: true; challenge: ProviderAuthenticationChallenge };
-export type ProviderAccountMethods = Readonly<{ hasPassword: boolean; googleLinked: boolean; googleDeletionEnabled: boolean }>;
+export type ProviderAccountMethods = Readonly<{
+    hasPassword: boolean; googleLinked: boolean; googleDeletionEnabled: boolean;
+    appleLinked: boolean; appleDeletionEnabled: boolean;
+}>;
 
 const PROVIDER_TOKEN_MAX_LENGTH = 16_384;
 const PROVIDER_RANDOM_VALUE = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
@@ -66,10 +69,10 @@ function hasKeys(value: Record<string, unknown>, keys: string): boolean {
 function validProviderInput(input: unknown): input is ProviderAuthenticationInput {
     if (!isRecord(input) || Object.keys(input).some(key => !['action', 'clientKey', 'rememberMe', 'password', 'userName', 'confirmation'].includes(key))
         || typeof input.clientKey !== 'string' || !/^[a-z0-9_-]{1,64}$/.test(input.clientKey)) return false;
-    if (input.action === 'delete') return input.clientKey === 'google-web' && input.confirmation === 'DELETE'
+    if (input.action === 'delete') return supportsProviderSignup(input.clientKey) && input.confirmation === 'DELETE'
         && input.password === undefined && input.rememberMe === undefined && input.userName === undefined;
     if (input.confirmation !== undefined) return false;
-    if (input.action === 'signup') return input.clientKey === 'google-web' && validProviderUserName(input.userName)
+    if (input.action === 'signup') return supportsProviderSignup(input.clientKey) && validProviderUserName(input.userName)
         && input.password === undefined && (input.rememberMe === undefined || typeof input.rememberMe === 'boolean');
     if (input.userName !== undefined) return false;
     if (input.action === 'login') {
@@ -78,6 +81,10 @@ function validProviderInput(input: unknown): input is ProviderAuthenticationInpu
     return input.action === 'link' && input.rememberMe === undefined
         && typeof input.password === 'string' && input.password.length > 0 && input.password.length <= 72
         && new TextEncoder().encode(input.password).length <= 72 && !CONTROL_CHARACTERS.test(input.password);
+}
+
+function supportsProviderSignup(clientKey: string): boolean {
+    return clientKey === 'google-web' || clientKey === 'apple-ios';
 }
 
 function validProviderUserName(value: unknown): value is string {
@@ -245,9 +252,17 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
             const response = await fetchRequest(`${apiBase}/auth/providers/account`, { method: 'GET', credentials: 'include' });
             if (!response.ok) return null;
             const result: unknown = await response.json();
-            return isRecord(result) && hasKeys(result, 'googleDeletionEnabled,googleLinked,hasPassword')
-                && typeof result.hasPassword === 'boolean' && typeof result.googleLinked === 'boolean'
-                && typeof result.googleDeletionEnabled === 'boolean' ? result as ProviderAccountMethods : null;
+            if (!isRecord(result) || typeof result.hasPassword !== 'boolean' || typeof result.googleLinked !== 'boolean'
+                || typeof result.googleDeletionEnabled !== 'boolean') return null;
+            // The legacy backend has no Apple capabilities. Normalize that
+            // exact response to disabled rather than assuming availability.
+            if (hasKeys(result, 'googleDeletionEnabled,googleLinked,hasPassword')) return {
+                hasPassword: result.hasPassword, googleLinked: result.googleLinked,
+                googleDeletionEnabled: result.googleDeletionEnabled, appleLinked: false, appleDeletionEnabled: false,
+            };
+            return hasKeys(result, 'appleDeletionEnabled,appleLinked,googleDeletionEnabled,googleLinked,hasPassword')
+                && typeof result.appleLinked === 'boolean' && typeof result.appleDeletionEnabled === 'boolean'
+                ? result as ProviderAccountMethods : null;
         } catch { return null; }
     }
 
@@ -360,7 +375,7 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
         });
         if (!completion.ok) return { error: completion.error };
         const result = completion.body;
-        if (input.action === 'login' && input.clientKey === 'google-web' && isRecord(result)
+        if (input.action === 'login' && supportsProviderSignup(input.clientKey) && isRecord(result)
             && hasKeys(result, 'challenge,signupRequired') && result.signupRequired === true) {
             const challenge = readProviderChallenge(result.challenge);
             return challenge ? { signupRequired: true, challenge } : { error: 'INVALID_RESPONSE' };
@@ -389,7 +404,7 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
     function prepareProviderLogin(clientKey: string, options: ProviderAuthenticationOptions = {},
         action: 'login' | 'signup' = 'login'): Promise<PrepareProviderLoginResult> {
         if (!validProviderInput({ action: 'login', clientKey }) || !validProviderOptions(options)
-            || (action !== 'login' && (action !== 'signup' || clientKey !== 'google-web'))) {
+            || (action !== 'login' && (action !== 'signup' || !supportsProviderSignup(clientKey)))) {
             return Promise.resolve({ error: 'INVALID_REQUEST' });
         }
         const signal = options.signal;

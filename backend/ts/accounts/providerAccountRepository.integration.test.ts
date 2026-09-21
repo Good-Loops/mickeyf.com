@@ -362,7 +362,7 @@ test('passwordless signup stores NULL, links only the verified subject and creat
         'SELECT user_password, email FROM users WHERE account_uuid = ?', [account.accountId]);
     assert.deepEqual(users.map(row => ({ ...row })), [{ user_password: null, email: 'passwordless-created@example.test' }]);
     assert.deepEqual(await findProviderAccount(database, identity), account);
-    assert.deepEqual(await readProviderAccountMethods(database, account.accountId), { hasPassword: false, googleLinked: true });
+    assert.deepEqual(await readProviderAccountMethods(database, account.accountId), { hasPassword: false, googleLinked: true, appleLinked: false });
     const [sessions] = await administrator.query<RowDataPacket[]>(
         'SELECT session_hash FROM account_sessions WHERE account_uuid = ?', [account.accountId]);
     assert.equal(sessions.length, 0);
@@ -384,7 +384,7 @@ test('username/email collisions and repeated signup never attach to or modify an
             signupIdentity('unique-google-for-email', 'SIGNUP-COLLISION-EXISTING@example.test'), 'signup-unique-name'),
         { created: false, reason: 'DUPLICATE_USER' });
         assert.deepEqual(await providerRows(), before);
-        assert.deepEqual(await readProviderAccountMethods(database, existing.accountId), { hasPassword: true, googleLinked: false });
+        assert.deepEqual(await readProviderAccountMethods(database, existing.accountId), { hasPassword: true, googleLinked: false, appleLinked: false });
     });
     const created = await createPasswordlessFixture('signup-repeated-subject');
     await preservesUsersAndScores(async () => {
@@ -473,4 +473,36 @@ test('logout, expiry and account-incarnation replacement prevent provider deleti
             assert.deepEqual(intents, []);
         });
     }
+});
+
+test('Apple relay signup stores its exact provider subject; fresh proof without email deletes only that account', async () => {
+    const unrelated = await createAccount('apple-proof-unrelated-player', { scores: false });
+    const identity = { provider: 'apple', subject: 'NativeAppleSignupSubject',
+        email: 'native-apple@privaterelay.appleid.com' } as VerifiedProviderIdentity;
+    const created = await createProviderAccount(database, identity, 'native-apple-player');
+    assert.ok(created.created);
+    const { account } = created;
+    assert.deepEqual(await readProviderAccountMethods(database, account.accountId),
+        { hasPassword: false, googleLinked: false, appleLinked: true });
+    const proof = { provider: 'apple', subject: identity.subject } as VerifiedProviderIdentity;
+    assert.deepEqual(await findProviderAccount(database, proof), account);
+    assert.equal(await findProviderAccount(database, { ...proof, provider: 'google' }), null);
+    await preservesUsersAndScores(async () => {
+        assert.deepEqual(await createProviderAccount(database, { ...identity, subject: 'AnotherAppleSubject' }, 'other-apple-player'),
+            { created: false, reason: 'DUPLICATE_USER' });
+        assert.equal(await findProviderAccount(database, { ...proof, subject: 'AnotherAppleSubject' }), null);
+    });
+    const session = await createPasswordlessSession(account);
+    const intents: string[] = [];
+    const journal = { async recordAccountDeletion(accountId: string) { intents.push(accountId); } };
+    assert.equal(await deleteProviderAccount(database, account.userId, { ...proof, provider: 'google' }, journal, session), 'invalid-password');
+    assert.equal(await deleteProviderAccount(database, account.userId, { ...proof, subject: identity.subject.toLowerCase() }, journal, session), 'invalid-password');
+    assert.deepEqual(intents, []);
+    assert.equal(await deleteProviderAccount(database, account.userId, proof, journal, session), 'deleted');
+    assert.deepEqual(intents, [account.accountId]);
+    assert.equal(await findProviderAccount(database, proof), null);
+    assert.equal(await readLiveSession(database, account.userId, account.accountId, session.sessionId), null);
+    const [remaining] = await administrator.query<RowDataPacket[]>(
+        'SELECT account_uuid FROM users WHERE user_id = ?', [unrelated.userId]);
+    assert.equal(remaining[0]?.account_uuid, unrelated.accountId);
 });

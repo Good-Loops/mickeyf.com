@@ -187,6 +187,8 @@ test('Apple native contract preserves the server challenge and discards cancelle
     assert.match(identity, /bytes\.base64EncodedString\(\)/);
     assert.match(identity, /request\.nonce = nonce/);
     assert.match(identity, /request\.state = state/);
+    assert.match(identity, /request\.requestedScopes = \[\.email\]/);
+    assert.doesNotMatch(identity, /\.fullName|credential\.email/);
     assert.match(identity, /credential\.state == self\.state/);
     assert.match(identity, /guard self\.pendingRequest == nil/);
     assert.match(identity, /controller\.delegate = self/);

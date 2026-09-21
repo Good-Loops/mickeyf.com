@@ -89,6 +89,8 @@ private final class LudolumeAppleAuthorization: NSObject, ASAuthorizationControl
         self.state = state
         self.onComplete = onComplete
         let request = ASAuthorizationAppleIDProvider().createRequest()
+        // Signup uses only Apple's signed email claim; a profile name is unnecessary.
+        request.requestedScopes = [.email]
         request.nonce = nonce
         request.state = state
         controller = ASAuthorizationController(authorizationRequests: [request])

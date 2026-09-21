@@ -213,20 +213,22 @@ function signupFixture(options: {
 
 const signupIdentity = { ...identity, email: '  Verified@Example.test  ' } as VerifiedProviderIdentity;
 
-test('signup atomically inserts a NULL password and exact Google subject; only commit confirms creation', async () => {
+for (const provider of ['google', 'apple'] as const) {
+test(`${provider} signup atomically inserts a NULL password and exact subject; only commit confirms creation`, async () => {
     const f = signupFixture();
-    assert.deepEqual(await createProviderAccount(f.database, signupIdentity, '  new-player  '),
+    assert.deepEqual(await createProviderAccount(f.database, { ...signupIdentity, provider }, '  new-player  '),
         { created: true, account: f.account });
     assert.deepEqual(f.events, ['connect', 'begin', 'lookup', 'user', 'account', 'identity', 'commit', 'release']);
     assert.deepEqual(f.queries[1], {
         sql: 'INSERT INTO users (user_name, email, user_password) VALUES (?, ?, NULL)',
         values: ['new-player', 'verified@example.test'],
     });
-    assert.deepEqual(f.queries.at(-1)?.values, ['google', Buffer.from(identity.subject), accountId]);
+    assert.deepEqual(f.queries.at(-1)?.values, [provider, Buffer.from(identity.subject), accountId]);
     assert.ok(f.queries.every(query => !/UPDATE|ON DUPLICATE|WHERE.*email|account_sessions/i.test(query.sql)));
 });
+}
 
-test('signup rejects invalid usernames, unverified/missing emails and non-Google identities before database use', async () => {
+test('signup rejects invalid usernames, unverified/missing emails and unsupported identities before database use', async () => {
     const f = signupFixture();
     for (const name of ['', ' ', 'x'.repeat(65), 'bad\u0000name', null]) {
         assert.deepEqual(await createProviderAccount(f.database, signupIdentity, name as string),
@@ -237,7 +239,7 @@ test('signup rejects invalid usernames, unverified/missing emails and non-Google
             { created: false, reason: 'INVALID_EMAIL' });
     }
     await assert.rejects(createProviderAccount(f.database,
-        { ...signupIdentity, provider: 'apple' } as VerifiedProviderIdentity, 'new-player'), TypeError);
+        { ...signupIdentity, provider: 'other' } as unknown as VerifiedProviderIdentity, 'new-player'), TypeError);
     assert.deepEqual(f.events, []);
 });
 
@@ -286,23 +288,25 @@ test('signup does not report creation until the database acknowledges commit', a
 });
 
 test('account methods are UUID-scoped booleans, without exposing hashes, email or provider subjects', async () => {
-    for (const [hasPassword, googleLinked] of [[0, 1], [1, 0], [1, 1], [0, 0]]) {
+    for (const [hasPassword, googleLinked, appleLinked] of [[0, 1, 0], [1, 0, 0], [1, 1, 1], [0, 0, 1], [0, 0, 0]]) {
         const database = { async query(query: { sql: string; timeout: number }, values: unknown[]) {
-            assert.deepEqual(values, [accountId]);
             assert.equal(query.timeout, 10_000);
             assert.doesNotMatch(query.sql, /email|subject|passwordHash/);
             if (query.sql.includes('FROM users')) {
+                assert.deepEqual(values, [accountId]);
                 assert.match(query.sql, /WHERE u\.account_uuid = \? LIMIT 2/);
                 assert.match(query.sql, /user_password IS NOT NULL/);
                 return [[{ hasPassword }]];
             }
+            assert.deepEqual(values, [accountId, accountId]);
             assert.match(query.sql, /FROM account_provider_identities\s+WHERE account_uuid = \?/);
-            return [[{ googleLinked }]];
+            return [[{ googleLinked, appleLinked }]];
         } } as unknown as Pick<Pool, 'query'>;
         assert.deepEqual(await readProviderAccountMethods(database, accountId),
-            { hasPassword: hasPassword === 1, googleLinked: googleLinked === 1 });
+            { hasPassword: hasPassword === 1, googleLinked: googleLinked === 1, appleLinked: appleLinked === 1 });
     }
-    for (const row of [{ hasPassword: null, googleLinked: 1 }, { hasPassword: 0, googleLinked: '1' }]) {
+    for (const row of [{ hasPassword: null, googleLinked: 1, appleLinked: 0 },
+        { hasPassword: 0, googleLinked: '1', appleLinked: 0 }, { hasPassword: 0, googleLinked: 0, appleLinked: '1' }]) {
         const database = { query: async () => [[row]] } as unknown as Pick<Pool, 'query'>;
         await assert.rejects(readProviderAccountMethods(database, accountId), ProviderAccountUnavailableError);
     }
@@ -321,7 +325,7 @@ test('legacy password metadata tolerates only the confirmed missing provider tab
         } } as unknown as Pick<Pool, 'query'>;
     }
     assert.deepEqual(await readProviderAccountMethods(metadataDatabase(1), accountId, { allowMissingProviderTable: true }),
-        { hasPassword: true, googleLinked: false });
+        { hasPassword: true, googleLinked: false, appleLinked: false });
     await assert.rejects(readProviderAccountMethods(metadataDatabase(1), accountId), ProviderAccountUnavailableError);
     for (const hasPassword of [0, null, '1']) {
         await assert.rejects(readProviderAccountMethods(metadataDatabase(hasPassword), accountId,

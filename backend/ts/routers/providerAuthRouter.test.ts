@@ -33,7 +33,8 @@ function signedCookie(value: string, name = '__session') {
     return `${name}=${encodeURIComponent(`s:${value}.${signature}`)}`;
 }
 
-type Features = { signupEnabled?: boolean; accountDeletionEnabled?: boolean; withJournal?: boolean; missingProviderTable?: boolean };
+type Features = { signupEnabled?: boolean; accountDeletionEnabled?: boolean; withJournal?: boolean; missingProviderTable?: boolean;
+    appleDeletionEnabled?: boolean };
 
 function fixture(features: Features = {}) {
     const state = {
@@ -43,7 +44,9 @@ function fixture(features: Features = {}) {
         beginFailure: null as FailureReason | null, completionFailure: null as FailureReason | null,
         creation: { created: true, account } as ProviderAccountCreationResult,
         deletion: 'deleted' as 'deleted' | 'invalid-password' | 'not-found' | 'pending' | 'unavailable',
-        methods: { hasPassword: false, googleLinked: true } as { hasPassword: boolean; googleLinked: boolean } | null,
+        methods: { hasPassword: false, googleLinked: true, appleLinked: false } as {
+            hasPassword: boolean; googleLinked: boolean; appleLinked: boolean;
+        } | null,
         methodsFailure: false,
     };
     const attempts = new Map<string, ProviderAttempt>();
@@ -67,6 +70,8 @@ function fixture(features: Features = {}) {
         } },
     } };
     clients['google-web'] = clients['google-test'];
+    clients['apple-ios'] = { provider: 'apple', deletionEnabled: features.appleDeletionEnabled,
+        verifier: { async verify() { return { verified: false, reason: 'INVALID_PROVIDER_TOKEN' }; } } };
     const flow = createProviderAuthFlow({ enabled: true, clients, signupEnabled: features.signupEnabled,
         deletionEnabled: features.accountDeletionEnabled && features.withJournal, attempts: {
         async create(attempt) { state.events.push('create'); attempts.set(attempt.stateHash.toString('hex'), attempt); return 'created'; },
@@ -529,12 +534,14 @@ test('account methods expose only booleans after signed-cookie and live-session 
         const response = await fetch(`${base}/account`, { headers: { cookie } });
         assert.equal(response.status, 200);
         assert.equal(response.headers.get('cache-control'), 'no-store');
-        assert.deepEqual(await response.json(), { hasPassword: false, googleLinked: true, googleDeletionEnabled: true });
+        assert.deepEqual(await response.json(), { hasPassword: false, googleLinked: true, googleDeletionEnabled: true,
+            appleLinked: false, appleDeletionEnabled: false });
         assert.equal(response.headers.get('set-cookie'), null);
         assert.deepEqual(state.events, ['methods']);
-        state.methods = { hasPassword: true, googleLinked: false };
+        state.methods = { hasPassword: true, googleLinked: false, appleLinked: false };
         const passwordOnly = await fetch(`${base}/account`, { headers: { cookie } });
-        assert.deepEqual(await passwordOnly.json(), { hasPassword: true, googleLinked: false, googleDeletionEnabled: false });
+        assert.deepEqual(await passwordOnly.json(), { hasPassword: true, googleLinked: false, googleDeletionEnabled: false,
+            appleLinked: false, appleDeletionEnabled: false });
         state.methods = null;
         assert.equal((await fetch(`${base}/account`, { headers: { cookie } })).status, 401);
         state.methodsFailure = true;
@@ -542,6 +549,35 @@ test('account methods expose only booleans after signed-cookie and live-session 
         assert.equal(failure.status, 503);
         assert.deepEqual(await failure.json(), { error: 'UNAVAILABLE' });
     }, true, { accountDeletionEnabled: true, withJournal: true });
+});
+
+test('Apple deletion capability needs its own opt-in as well as the journal and global deletion switch', async () => {
+    for (const features of [
+        { accountDeletionEnabled: true, withJournal: true },
+        { appleDeletionEnabled: true, withJournal: true },
+        { appleDeletionEnabled: true, accountDeletionEnabled: true },
+        { appleDeletionEnabled: true, accountDeletionEnabled: true, withJournal: true },
+    ]) {
+        await withServer(async (base, { state }) => {
+            state.methods = { hasPassword: false, googleLinked: false, appleLinked: true };
+            const allowed = !!(features.appleDeletionEnabled && features.accountDeletionEnabled && features.withJournal);
+            const cookie = signedCookie(issueSessionToken(account, secret).token, 'session');
+            const response = await fetch(`${base}/account`, { headers: { cookie } });
+            assert.deepEqual(await response.json(), { hasPassword: false, googleLinked: false, googleDeletionEnabled: false,
+                appleLinked: true, appleDeletionEnabled: allowed });
+            const headers = { cookie, origin: 'capacitor://localhost' };
+            const begin = await post(base, 'begin', { action: 'delete', clientKey: 'apple-ios' }, headers);
+            assert.equal(begin.status, allowed ? 200 : 503);
+            if (!allowed) {
+                assert.deepEqual(await begin.json(), { error: 'ACCOUNT_DELETION_UNAVAILABLE' });
+                const complete = await post(base, 'complete', { action: 'delete', clientKey: 'apple-ios',
+                    state: 'unused', idToken: 'unused', confirmation: 'DELETE' }, headers);
+                assert.equal(complete.status, 503);
+                assert.equal(state.contextReads, 0);
+            }
+            assert.equal(state.events.includes('delete'), false);
+        }, true, features);
+    }
 });
 
 test('account methods reject unsigned, bearer, conflicting and stale sessions without returning metadata', async () => {
@@ -563,11 +599,12 @@ test('account methods reject unsigned, bearer, conflicting and stale sessions wi
 
 test('account methods remain available for password users when provider authentication is disabled', async () => {
     await withServer(async (base, { state }) => {
-        state.methods = { hasPassword: true, googleLinked: false };
+        state.methods = { hasPassword: true, googleLinked: false, appleLinked: false };
         const cookie = signedCookie(issueSessionToken(account, secret).token);
         const response = await fetch(`${base}/account`, { headers: { cookie } });
         assert.equal(response.status, 200);
-        assert.deepEqual(await response.json(), { hasPassword: true, googleLinked: false, googleDeletionEnabled: false });
+        assert.deepEqual(await response.json(), { hasPassword: true, googleLinked: false, googleDeletionEnabled: false,
+            appleLinked: false, appleDeletionEnabled: false });
         assert.deepEqual(state.events, ['methods']);
         assert.equal((await post(base, 'begin', beginInput)).status, 404);
     }, false);
@@ -576,12 +613,13 @@ test('account methods remain available for password users when provider authenti
 test('old-schema metadata works only for verified password users with provider authentication disabled', async () => {
     for (const [enabled, hasPassword, status] of [[false, true, 200], [true, true, 503], [false, false, 503]] as const) {
         await withServer(async (base, { state }) => {
-            state.methods = { hasPassword, googleLinked: false };
+            state.methods = { hasPassword, googleLinked: false, appleLinked: false };
             const cookie = signedCookie(issueSessionToken(account, secret).token);
             const response = await fetch(`${base}/account`, { headers: { cookie } });
             assert.equal(response.status, status);
             assert.deepEqual(await response.json(), status === 200
-                ? { hasPassword: true, googleLinked: false, googleDeletionEnabled: false } : { error: 'UNAVAILABLE' });
+                ? { hasPassword: true, googleLinked: false, googleDeletionEnabled: false,
+                    appleLinked: false, appleDeletionEnabled: false } : { error: 'UNAVAILABLE' });
             assert.equal(response.headers.get('set-cookie'), null);
         }, enabled, { missingProviderTable: true });
     }

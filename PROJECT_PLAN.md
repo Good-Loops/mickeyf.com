@@ -2693,9 +2693,19 @@ itself activate, implement or defer both providers.
   One combined disposable provider/replay/session run passed 39/39, session
   unit tests 12/12 and backend typechecking passed. No production change.
   Copilot's router dependency-injection checkpoint `8c5dc7e1` is preserved and
-  synced. Next: native Apple first-time signup, native Google sign-in, then the
-  remaining Clean Code sweep. KWS's pending response does not block this
+  synced. KWS's pending response does not block provider
   implementation/testing; all-ages public activation keeps its consent gates.
+  **Native Apple onboarding (2026-09-21):** implemented a shared login/signup
+  username continuation, signed verified shared/private-relay email, immutable
+  provider-subject ownership, remembered-session reuse and fresh-proof SQL
+  deletion. Account management now discovers Apple capabilities. Existing
+  accounts do not have to link, and email never auto-merges accounts. Apple
+  signup/deletion and native capability remain disabled: complete authorization-
+  code exchange/token revocation and revoked-credential handling before activation.
+  Focused backend tests passed 87+33, frontend tests 88+32, both typechecks and
+  disposable MySQL provider group 40/40. No real Apple, macOS/TestFlight or
+  production rollout was performed. Next: finish that Apple lifecycle, native
+  Google SDK/client setup, then the remaining Clean Code sweep.
   See [scope, migration boundary and remaining steps](backend/PROVIDER_SIGN_IN.md).
   The owner approved the CORS-only backend deployment for exactly
   `capacitor://localhost`, and renewed the same temporary Node/OpenSSL exception

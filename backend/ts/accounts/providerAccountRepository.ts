@@ -13,7 +13,7 @@ export type ProviderLinkResult = 'linked' | 'already-linked' | 'link-conflict' |
 export type ProviderAccountCreationResult =
     | Readonly<{ created: true; account: ProviderAccount }>
     | Readonly<{ created: false; reason: 'DUPLICATE_USER' | 'ALREADY_LINKED' | 'INVALID_USERNAME' | 'INVALID_EMAIL' }>;
-export type ProviderAccountMethods = Readonly<{ hasPassword: boolean; googleLinked: boolean }>;
+export type ProviderAccountMethods = Readonly<{ hasPassword: boolean; googleLinked: boolean; appleLinked: boolean }>;
 
 const QUERY_TIMEOUT_MS = 10_000;
 
@@ -80,19 +80,23 @@ export async function readProviderAccountMethods(
         try {
             const [providers] = await database.query<RowDataPacket[]>({
                 sql: `SELECT EXISTS(SELECT 1 FROM account_provider_identities
-                    WHERE account_uuid = ? AND provider = 'google') AS googleLinked`, timeout: QUERY_TIMEOUT_MS,
-            }, [accountId]);
-            if (!Array.isArray(providers) || providers.length !== 1 || ![0, 1].includes(providers[0].googleLinked)) {
+                    WHERE account_uuid = ? AND provider = 'google') AS googleLinked,
+                    EXISTS(SELECT 1 FROM account_provider_identities
+                    WHERE account_uuid = ? AND provider = 'apple') AS appleLinked`, timeout: QUERY_TIMEOUT_MS,
+            }, [accountId, accountId]);
+            if (!Array.isArray(providers) || providers.length !== 1 || ![0, 1].includes(providers[0].googleLinked)
+                || ![0, 1].includes(providers[0].appleLinked)) {
                 throw new ProviderAccountUnavailableError();
             }
-            return Object.freeze({ hasPassword, googleLinked: providers[0].googleLinked === 1 });
+            return Object.freeze({ hasPassword, googleLinked: providers[0].googleLinked === 1,
+                appleLinked: providers[0].appleLinked === 1 });
         } catch (error) {
             // This fixed query references only the provider table. Its exact
             // absence is safe only for a verified password account with provider
             // mutations disabled; permission/outage/schema errors are not absence.
             if (allowMissingProviderTable && hasPassword && error !== null && typeof error === 'object'
                 && 'errno' in error && error.errno === 1146 && 'code' in error && error.code === 'ER_NO_SUCH_TABLE') {
-                return Object.freeze({ hasPassword: true, googleLinked: false });
+                return Object.freeze({ hasPassword: true, googleLinked: false, appleLinked: false });
             }
             throw error;
         }
@@ -104,7 +108,6 @@ export async function createProviderAccount(
     database: Pick<Pool, 'getConnection'>, identity: VerifiedProviderIdentity, userName: string,
 ): Promise<ProviderAccountCreationResult> {
     const subject = identitySubject(identity);
-    if (identity.provider !== 'google') throw new TypeError('Passwordless signup requires a verified Google identity.');
     // Match password-signup normalization and bounds without creating a placeholder password.
     if (typeof userName !== 'string' || userName.trim().length === 0 || userName.trim().length > 64
         || /[\u0000-\u001f\u007f]/u.test(userName.trim())) return { created: false, reason: 'INVALID_USERNAME' };
@@ -144,7 +147,7 @@ export async function createProviderAccount(
                     const [linked] = await connection.query<ResultSetHeader>({
                         sql: `INSERT INTO account_provider_identities (provider, subject, account_uuid, linked_at)
                             VALUES (?, ?, ?, UTC_TIMESTAMP(6))`, timeout: QUERY_TIMEOUT_MS,
-                    }, ['google', subject, account.accountId]);
+                    }, [verifiedIdentity.provider, subject, account.accountId]);
                     if (linked.affectedRows !== 1) throw new ProviderAccountUnavailableError();
                     result = { created: true, account };
                 } catch (error) {

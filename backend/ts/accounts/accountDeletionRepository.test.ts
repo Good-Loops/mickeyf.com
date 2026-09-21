@@ -279,9 +279,10 @@ test('SQL deletion waits for durable journal acknowledgement', async () => {
     assert.equal(await deletion, 'deleted');
 });
 
-test('fresh Google deletion authenticates the exact linked subject and live session under the shared account lock', async () => {
+for (const provider of ['google', 'apple'] as const) {
+test(`fresh ${provider} proof authenticates deletion of its exact linked subject under the shared account lock`, async () => {
     const fake = fakeDatabase({ passwordHash: null });
-    assert.equal(await deleteProviderAccount(fake.database, 42, PROVIDER_IDENTITY, fake.journal, SESSION), 'deleted');
+    assert.equal(await deleteProviderAccount(fake.database, 42, { ...PROVIDER_IDENTITY, provider }, fake.journal, SESSION), 'deleted');
     assert.deepEqual(fake.events, [
         'connect', 'acquire', 'begin', 'read-session', 'read-password', 'read-provider', 'read-session', 'journal',
         'DELETE FROM game_personal_bests WHERE user_id = ?',
@@ -289,11 +290,12 @@ test('fresh Google deletion authenticates the exact linked subject and live sess
         'commit', 'unlock', 'release',
     ]);
     const providerQuery = fake.queries.find(({ sql }) => sql.includes('FROM account_provider_identities'))!;
-    assert.deepEqual(providerQuery.values, [ACCOUNT_ID]);
-    assert.match(providerQuery.sql, /WHERE account_uuid = \? AND provider = 'google' LIMIT 2 FOR SHARE/);
+    assert.deepEqual(providerQuery.values, [ACCOUNT_ID, provider]);
+    assert.match(providerQuery.sql, /WHERE account_uuid = \? AND provider = \? LIMIT 2 FOR SHARE/);
     assert.ok(fake.queries.every(({ values }) => !values?.includes(PROVIDER_IDENTITY.subject)
         && !values?.includes(PASSWORD) && !values?.includes(SESSION_ID)));
 });
+}
 
 test('provider deletion rejects wrong account, subject case, missing link, revoked session and expiry before journal', async () => {
     for (const [options, expected] of [
@@ -308,7 +310,7 @@ test('provider deletion rejects wrong account, subject case, missing link, revok
         assert.equal(fake.events.includes('journal'), false);
         assert.equal(fake.queries.some(({ sql }) => sql.startsWith('DELETE')), false);
     }
-    for (const identity of [{ ...PROVIDER_IDENTITY, provider: 'apple' }, { ...PROVIDER_IDENTITY, subject: '' }]) {
+    for (const identity of [{ ...PROVIDER_IDENTITY, provider: 'other' }, { ...PROVIDER_IDENTITY, subject: '' }]) {
         const fake = fakeDatabase();
         assert.equal(await deleteProviderAccount(fake.database, 42, identity as VerifiedProviderIdentity, fake.journal, SESSION), 'invalid-password');
         assert.deepEqual(fake.events, []);

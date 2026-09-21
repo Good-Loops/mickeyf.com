@@ -92,9 +92,29 @@ test('only authoritative Google-signed verified email is exposed, normalized and
         if (result.verified) assert.deepEqual(result.identity, { provider: 'google', subject: claims().sub,
             ...(expected === undefined ? {} : { email: expected }) });
     }
-    const apple = await verifier.verify('apple', signedToken({ ...claims('apple'), email: 'player@gmail.com',
-        email_verified: true, hd: 'example.com' }), nonce);
-    assert.equal(apple.verified && apple.identity.email, undefined);
+});
+
+test('Apple exposes only its signed verified shared or relay email; missing contact data preserves subject login', async () => {
+    const { verifier } = fixture();
+    for (const [extra, expected] of [
+        [{ email: ' Player@Example.COM ', email_verified: true }, 'player@example.com'],
+        [{ email: ' Hidden@privaterelay.appleid.com ', email_verified: 'true', is_private_email: 'true' }, 'hidden@privaterelay.appleid.com'],
+        [{}, undefined],
+        [{ email: '', email_verified: true }, undefined],
+        [{ email: 'player@example.com', email_verified: false }, undefined],
+        [{ email: 'player@example.com', email_verified: 'false' }, undefined],
+        [{ email: 'player@example.com', email_verified: 'TRUE' }, undefined],
+        [{ email: 'player@example.com', email_verified: 1 }, undefined],
+        [{ email: 'player@example.com' }, undefined],
+        [{ email: 'not-an-email', email_verified: true }, undefined],
+        [{ email: 'bad\u0000@example.com', email_verified: true }, undefined],
+        [{ email: 'a'.repeat(255) + '@example.com', email_verified: true }, undefined],
+    ] as const) {
+        const result = await verifier.verify('apple', signedToken({ ...claims('apple'), ...extra }), nonce);
+        assert.ok(result.verified);
+        assert.deepEqual(result.identity, { provider: 'apple', subject: claims('apple').sub,
+            ...(expected === undefined ? {} : { email: expected }) });
+    }
 });
 
 for (const provider of ['google', 'apple'] as const) {
@@ -102,7 +122,7 @@ for (const provider of ['google', 'apple'] as const) {
         const { verifier, calls } = fixture();
         const result = await verifier.verify(provider, signedToken({
             ...claims(provider), email: 'private@example.invalid', name: 'Never returned',
-            email_verified: true,
+            email_verified: false,
         }), nonce);
         assert.deepEqual(result, {
             verified: true,

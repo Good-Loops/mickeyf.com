@@ -45,7 +45,7 @@ async function trustedContext(currentAccount?: ProviderAccount, bindingByte = 1)
     return context;
 }
 
-async function fixture(currentAccount?: ProviderAccount, newActions = false) {
+async function fixture(currentAccount?: ProviderAccount, newActions = false, appleActions = false) {
     const context = await trustedContext(currentAccount);
     const events: string[] = [];
     const pending = new Map<string, ProviderAttempt>();
@@ -86,6 +86,7 @@ async function fixture(currentAccount?: ProviderAccount, newActions = false) {
     const clients: Record<string, ProviderAuthClient> = {
         'google-native': { provider: 'google', verifier }, 'apple-native': { provider: 'apple', verifier },
         'google-web': { provider: 'google', verifier },
+        'apple-ios': { provider: 'apple', verifier, signupEnabled: appleActions, deletionEnabled: appleActions },
     };
     Object.setPrototypeOf(clients, { inherited: clients['google-native'] });
     const dependencies: ProviderAuthFlowDependencies = {
@@ -563,4 +564,93 @@ test('Google deletion rejects an old token, mismatched identity, removed account
     const fresh = await f.challenge('delete');
     f.controls.failAt = 'delete';
     assert.deepEqual(await f.flow.complete(f.context, fresh.input), { ok: false, reason: 'ACCOUNT_DELETION_UNAVAILABLE' });
+});
+
+test('global Google signup/deletion switches never enable native Apple account mutations', async () => {
+    const anonymous = await fixture(undefined, true);
+    const authenticated = await fixture(account, true);
+    assert.deepEqual(await anonymous.flow.begin(anonymous.context, { clientKey: 'apple-ios', action: 'signup' }),
+        { ok: false, reason: 'UNAVAILABLE' });
+    assert.deepEqual(await authenticated.flow.begin(authenticated.context, { clientKey: 'apple-ios', action: 'delete' }),
+        { ok: false, reason: 'ACCOUNT_DELETION_UNAVAILABLE' });
+    assert.deepEqual(anonymous.events, []);
+    assert.deepEqual(authenticated.events, []);
+    anonymous.controls.foundAccount = null;
+    const started = await anonymous.flow.begin(anonymous.context, { clientKey: 'apple-ios', action: 'login' });
+    assert.ok(started.ok);
+    assert.deepEqual(await anonymous.flow.complete(anonymous.context, { clientKey: 'apple-ios', action: 'login',
+        state: started.state, idToken: signedToken(started.nonce, 'apple', { email: 'player@example.com', email_verified: true }) }),
+    { ok: false, reason: 'NOT_LINKED' });
+    assert.deepEqual(anonymous.createdAccounts, []);
+});
+
+test('opted-in native Apple entry creates only through a single-use username continuation with signed relay email', async () => {
+    const f = await fixture(undefined, true, true);
+    f.controls.foundAccount = null;
+    const started = await f.flow.begin(f.context, { clientKey: 'apple-ios', action: 'login' });
+    assert.ok(started.ok);
+    const login = { clientKey: 'apple-ios', action: 'login', state: started.state,
+        idToken: signedToken(started.nonce, 'apple', { email: 'new-player@privaterelay.appleid.com', email_verified: 'true' }) };
+    f.events.length = 0;
+    const next = await f.flow.complete(f.context, login);
+    assert.ok(next.ok && next.type === 'signup-required');
+    assert.notEqual(next.state, started.state);
+    assert.equal(next.nonce, started.nonce);
+    assert.deepEqual(f.events, ['consume', 'committed', 'verify', 'find', 'create']);
+    assert.deepEqual(f.createdAccounts, []);
+    const signup = { ...login, action: 'signup', state: next.state, userName: ' new-player ' };
+    for (const extra of [{ email: 'untrusted@example.com' }, { name: 'untrusted name' }, { password: 'unused' }]) {
+        assert.deepEqual(await f.flow.complete(f.context, { ...signup, ...extra }), { ok: false, reason: 'INVALID_REQUEST' });
+    }
+    assert.deepEqual(await f.flow.complete(await trustedContext(undefined, 2), signup), { ok: false, reason: 'INVALID_ATTEMPT' });
+    assert.deepEqual(await f.flow.complete(f.context, { ...signup, clientKey: 'google-web' }), { ok: false, reason: 'INVALID_ATTEMPT' });
+    assert.deepEqual(await f.flow.complete(f.context, { ...login, state: next.state }), { ok: false, reason: 'INVALID_ATTEMPT' });
+    assert.deepEqual(await f.flow.complete(f.context, signup), { ok: true, type: 'account-verified', account });
+    assert.deepEqual(f.createdAccounts, [[{ provider: 'apple', subject: 'opaque-provider-subject',
+        email: 'new-player@privaterelay.appleid.com' }, 'new-player']]);
+    assert.deepEqual(f.verifiedNonces, [started.nonce, started.nonce]);
+    assert.deepEqual(await f.flow.complete(f.context, signup), { ok: false, reason: 'INVALID_ATTEMPT' });
+    assert.deepEqual(await f.flow.complete(f.context, login), { ok: false, reason: 'INVALID_ATTEMPT' });
+    assert.deepEqual(f.linkedTargets, []);
+});
+
+test('native Apple new signup needs signed verified email while existing subject login does not', async () => {
+    for (const extra of [{}, { email: '', email_verified: true }, { email: 'player@example.com', email_verified: false }]) {
+        const f = await fixture(undefined, true, true);
+        for (const known of [false, true]) {
+            f.controls.foundAccount = known ? account : null;
+            const started = await f.flow.begin(f.context, { clientKey: 'apple-ios', action: 'login' });
+            assert.ok(started.ok);
+            assert.deepEqual(await f.flow.complete(f.context, { clientKey: 'apple-ios', action: 'login', state: started.state,
+                idToken: signedToken(started.nonce, 'apple', extra) }), known
+                ? { ok: true, type: 'account-verified', account } : { ok: false, reason: 'INVALID_EMAIL' });
+        }
+        const signup = await f.flow.begin(f.context, { clientKey: 'apple-ios', action: 'signup' });
+        assert.ok(signup.ok);
+        assert.deepEqual(await f.flow.complete(f.context, { clientKey: 'apple-ios', action: 'signup', state: signup.state,
+            userName: 'new-player', idToken: signedToken(signup.nonce, 'apple', extra) }), { ok: false, reason: 'INVALID_EMAIL' });
+        assert.deepEqual(f.createdAccounts, []);
+    }
+});
+
+test('opted-in native Apple deletion requires fresh subject proof and the current session, not an email', async () => {
+    for (const failure of ['none', 'token', 'subject', 'missing', 'journal'] as const) {
+        const f = await fixture(account, true, true);
+        const started = await f.flow.begin(f.context, { clientKey: 'apple-ios', action: 'delete' });
+        assert.ok(started.ok);
+        const input = { clientKey: 'apple-ios', action: 'delete', state: started.state, confirmation: 'DELETE',
+            idToken: signedToken(failure === 'token' ? 'a'.repeat(43) : started.nonce, 'apple') };
+        if (failure === 'subject') f.controls.deletion = 'invalid-password';
+        if (failure === 'missing') f.controls.deletion = 'not-found';
+        if (failure === 'journal') f.controls.deletion = 'pending';
+        assert.deepEqual(await f.flow.complete(f.context, { ...input, confirmation: 'delete' }), { ok: false, reason: 'INVALID_REQUEST' });
+        assert.deepEqual(await f.flow.complete({ ...f.context, session: null }, input), { ok: false, reason: 'INVALID_CONTEXT' });
+        assert.deepEqual(await f.flow.complete(f.context, input), failure === 'none' ? { ok: true, type: 'deleted' }
+            : { ok: false, reason: { token: 'INVALID_PROVIDER_TOKEN', subject: 'INVALID_PROVIDER_TOKEN',
+                missing: 'ACCOUNT_GONE', journal: 'ACCOUNT_DELETION_PENDING' }[failure] });
+        if (failure !== 'token') assert.deepEqual(f.deletedAccounts, [[{ userId: account.userId, accountId: account.accountId },
+            { provider: 'apple', subject: 'opaque-provider-subject' }, f.context.session]]);
+        else assert.deepEqual(f.deletedAccounts, []);
+        assert.deepEqual(await f.flow.complete(f.context, input), { ok: false, reason: 'INVALID_ATTEMPT' });
+    }
 });

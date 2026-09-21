@@ -1,7 +1,8 @@
 import Swal from './siteAlert';
 
 /** Finish onboarding without keeping a provider token in UI state or browser storage. */
-export async function requestProviderUsername(initialValue: string, signal: AbortSignal): Promise<string | null> {
+export async function requestProviderUsername(initialValue: string, signal: AbortSignal,
+    provider: 'google' | 'apple'): Promise<string | null> {
     if (signal.aborted) return null;
     let popup: HTMLElement | undefined;
     const cancel = () => { if (popup && Swal.getPopup() === popup) Swal.close(); };
@@ -11,7 +12,7 @@ export async function requestProviderUsername(initialValue: string, signal: Abor
     try {
         const decision = await Swal.fire<string>({
             title: 'Choose your username',
-            text: 'This name appears on Ludolume leaderboards. You’ll sign in with Google—no password needed.',
+            text: `This name appears on Ludolume leaderboards. You’ll sign in with ${provider === 'apple' ? 'Apple' : 'Google'}—no password needed.`,
             input: 'text', inputLabel: 'Ludolume username', inputValue: initialValue,
             inputAttributes: { autocomplete: 'username', autocapitalize: 'off', maxlength: '64' },
             inputValidator: value => value.trim().length > 0 && value.trim().length <= 64

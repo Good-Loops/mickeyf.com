@@ -18,15 +18,19 @@ type ProviderSignInControlsProps = {
     onSuccess?: () => void;
 };
 
-export function providerSignInErrorMessage(error: string, action: ProviderAction | 'delete'): string | null {
+export function providerSignInErrorMessage(error: string, action: ProviderAction | 'delete',
+    provider: 'google' | 'apple' = 'google'): string | null {
+    const providerName = provider === 'apple' ? 'Apple' : 'Google';
     switch (error) {
         case 'CANCELLED': return null;
-        case 'NOT_LINKED': return 'New Google accounts are not available on this server yet. Existing password accounts can sign in normally; linking Google in Manage account is optional.';
-        case 'ALREADY_LINKED': return 'This Google account already has a Ludolume account. Go to Log in and continue with Google.';
-        case 'DUPLICATE_USER': return 'That username or email is already in use. Choose another username, or log in to your existing account to link Google.';
+        case 'NOT_LINKED': return `New ${providerName} accounts are not available on this server yet. Existing password accounts can sign in normally; linking ${providerName} in Manage account is optional.`;
+        case 'ALREADY_LINKED': return `This ${providerName} account already has a Ludolume account. Go to Log in and continue with ${providerName}.`;
+        case 'DUPLICATE_USER': return `That username or email is already in use. Choose another username, or log in to your existing account to link ${providerName}.`;
         case 'INVALID_USERNAME': return 'Choose a username with 1–64 characters and no control characters.';
-        case 'INVALID_EMAIL': return 'Google could not verify current ownership of this email. Use a Gmail or Google Workspace account, or sign up with a password.';
-        case 'ACCOUNT_DELETION_UNAVAILABLE': return 'Google account deletion is not available on this server yet.';
+        case 'INVALID_EMAIL': return provider === 'apple'
+            ? 'Apple did not provide a verified email for this signup. Try again, or sign up with a password.'
+            : 'Google could not verify current ownership of this email. Use a Gmail or Google Workspace account, or sign up with a password.';
+        case 'ACCOUNT_DELETION_UNAVAILABLE': return `${providerName} account deletion is not available on this server yet.`;
         case 'ACCOUNT_DELETION_PENDING': return 'Your deletion request was recorded, but completion has not been confirmed. Retrying will not cancel it. Contact mickeyf.plays@gmail.com if it remains pending.';
         case 'INVALID_PASSWORD': return 'That password did not match. Enter your current password and try again.';
         case 'LINK_CONFLICT': return 'This provider account cannot be linked here. It may already be linked to another account.';
@@ -53,18 +57,20 @@ export function ProviderSignInButtons({ clients, action, busyClient, disabled, o
     onSelect: (client: PublicProviderClient) => void;
 }) {
     const headingId = useId();
-    const choices = action === 'signup' ? [] : action === 'link' ? clients : clients.filter(client => client.clientKey !== 'google-web');
+    const choices = action === 'link' ? clients : clients.filter(client => client.clientKey !== 'google-web'
+        && (action !== 'signup' || client.signup === true));
     if (PUBLIC_API_PREVIEW || choices.length === 0) return null;
     return (
         <div className="provider-sign-in__choices" role="group" aria-labelledby={action === 'link' ? headingId : undefined}
-            aria-label={action === 'login' ? 'Other sign-in methods' : undefined} aria-busy={busyClient !== null}>
+            aria-label={action !== 'link' ? 'Other sign-in methods' : undefined} aria-busy={busyClient !== null}>
             {action === 'link' && <h2 className="provider-sign-in__heading" id={headingId}>Link a sign-in method</h2>}
             <div className="provider-sign-in__buttons">
                 {choices.map(client => (
                     <button className="provider-sign-in__button" type="button" key={client.clientKey}
                         disabled={disabled || busyClient !== null} onClick={() => onSelect(client)}>
                         {busyClient === client.clientKey ? 'Please wait…'
-                            : client.provider === 'google' ? 'google' : 'Apple account'}
+                            : client.provider === 'google' ? 'google'
+                                : action === 'link' ? 'Apple account' : 'Continue with Apple'}
                     </button>
                 ))}
             </div>
@@ -127,7 +133,7 @@ export function InlineGoogleSignIn({ client, action = 'login', userName = '', re
                     { rememberMe: latest.current.rememberMe, signal: controller.signal });
                 if (!active()) return;
                 if ('signupRequired' in result) {
-                    const chosenName = await requestProviderUsername(latest.current.userName, controller.signal);
+                    const chosenName = await requestProviderUsername(latest.current.userName, controller.signal, client.provider);
                     if (!active()) return;
                     if (chosenName === null) { fail('CANCELLED'); controller.abort(); return; }
                     result = await latest.current.completeProviderLogin(result.handle, idToken,
@@ -174,7 +180,7 @@ export function InlineGoogleSignIn({ client, action = 'login', userName = '', re
 
 export default function ProviderSignInControls({ action, userName = '', rememberMe = false, disabled = false,
     operationLock, onBusyChange, onSuccess }: ProviderSignInControlsProps) {
-    const { authenticateWithProvider } = useAuth();
+    const { authenticateWithProvider, prepareProviderLogin, completeProviderLogin } = useAuth();
     const [clients, setClients] = useState<PublicProviderClient[]>([]);
     const [busyClient, setBusyClient] = useState<string | null>(null);
     const [feedback, setFeedback] = useState<{ text: string; error: boolean } | null>(null);
@@ -208,7 +214,7 @@ export default function ProviderSignInControls({ action, userName = '', remember
     }, []);
 
     const selectProvider = async (client: PublicProviderClient) => {
-        if (PUBLIC_API_PREVIEW || action === 'signup') return;
+        if (PUBLIC_API_PREVIEW || (action === 'signup' && client.signup !== true)) return;
         if (disabled || operation.current || operationLock?.current) return;
         if (operationLock) operationLock.current = true;
         const controller = new AbortController();
@@ -242,28 +248,52 @@ export default function ProviderSignInControls({ action, userName = '', remember
                 if (!password) return;
             }
             if (controller.signal.aborted) return;
-            const pending = authenticateWithProvider(
-                action === 'link' ? { action, clientKey: client.clientKey, password }
-                    : { action, clientKey: client.clientKey, rememberMe },
-                (challenge, signal) => acquireProviderCredential(client, challenge, signal),
-                { signal: controller.signal },
-            );
-            password = undefined;
-            const result = await pending;
+            let result;
+            if (action === 'link') {
+                const pending = authenticateWithProvider({ action, clientKey: client.clientKey, password },
+                    (challenge, signal) => acquireProviderCredential(client, challenge, signal),
+                    { signal: controller.signal });
+                password = undefined;
+                result = await pending;
+            } else {
+                // Login and Sign up share one identity check. Only an unknown
+                // identity receives a bound, single-use username continuation.
+                const prepared = await prepareProviderLogin(client.clientKey, { signal: controller.signal });
+                if (!mounted.current || controller.signal.aborted) return;
+                if ('error' in prepared) result = prepared;
+                else {
+                    const idToken = await acquireProviderCredential(client, prepared.challenge, controller.signal);
+                    if (!mounted.current || controller.signal.aborted) return;
+                    result = await completeProviderLogin(prepared.handle, idToken, { rememberMe, signal: controller.signal });
+                    if (!mounted.current || controller.signal.aborted) return;
+                    if ('signupRequired' in result) {
+                        const chosenName = await requestProviderUsername(userName, controller.signal, client.provider);
+                        if (!mounted.current || controller.signal.aborted) return;
+                        if (chosenName === null) { controller.abort(); return; }
+                        result = await completeProviderLogin(result.handle, idToken,
+                            { rememberMe, signal: controller.signal, userName: chosenName });
+                    }
+                }
+            }
             if (!mounted.current || controller.signal.aborted) return;
             if ('error' in result) {
-                const text = providerSignInErrorMessage(result.error, action);
+                const text = providerSignInErrorMessage(result.error, action, client.provider);
                 if (text) setFeedback({ text, error: true });
+                return;
+            }
+            if (action === 'link' ? !('linked' in result) : !('user_name' in result)) {
+                setFeedback({ text: providerSignInErrorMessage('UNAVAILABLE', action, client.provider)!, error: true });
                 return;
             }
             if (action === 'link') setFeedback({
                 text: `${client.provider === 'google' ? 'Google' : 'Apple'} account linked.`, error: false,
             });
             onSuccess?.();
-        } catch {
-            if (mounted.current && !controller.signal.aborted) setFeedback({
-                text: providerSignInErrorMessage('UNAVAILABLE', action)!, error: true,
-            });
+        } catch (error) {
+            const code = error && typeof error === 'object' && 'code' in error && error.code === 'CANCELLED'
+                ? 'CANCELLED' : 'UNAVAILABLE';
+            const text = providerSignInErrorMessage(code, action, client.provider);
+            if (mounted.current && !controller.signal.aborted && text) setFeedback({ text, error: true });
         } finally {
             password = undefined;
             if (operation.current === controller) {

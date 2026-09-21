@@ -84,8 +84,14 @@ function fail(res: Response, reason: ProviderFailureReason) {
 export function createProviderAuthRouter(options: ProviderAuthRouterOptions): Router {
     const router = Router();
     const { database, sessionSecret, isProduction } = options;
-    const googleDeletionEnabled = options.enabled === true && options.accountDeletionEnabled === true && options.deletionJournal !== undefined
+    const deletionAvailable = options.enabled === true && options.accountDeletionEnabled === true && options.deletionJournal !== undefined;
+    const googleDeletionEnabled = deletionAvailable
         && Object.prototype.hasOwnProperty.call(options.clients, 'google-web') && options.clients['google-web'].provider === 'google';
+    const appleDeletionEnabled = deletionAvailable
+        && Object.prototype.hasOwnProperty.call(options.clients, 'apple-ios') && options.clients['apple-ios'].provider === 'apple'
+        && options.clients['apple-ios'].deletionEnabled === true;
+    const canDeleteWith = (clientKey: unknown) => clientKey === 'google-web' ? googleDeletionEnabled
+        : clientKey === 'apple-ios' && appleDeletionEnabled;
     const limiterOptions = {
         windowMs: 15 * 60 * 1000, standardHeaders: 'draft-8' as const,
         legacyHeaders: false, message: { error: 'RATE_LIMITED' }, passOnStoreError: false,
@@ -117,7 +123,8 @@ export function createProviderAuthRouter(options: ProviderAuthRouterOptions): Ro
                 { allowMissingProviderTable: options.enabled !== true });
             if (!methods) return res.status(401).json({ error: 'UNAUTHENTICATED' });
             return res.json({ hasPassword: methods.hasPassword, googleLinked: methods.googleLinked,
-                googleDeletionEnabled: googleDeletionEnabled && methods.googleLinked });
+                googleDeletionEnabled: googleDeletionEnabled && methods.googleLinked,
+                appleLinked: methods.appleLinked, appleDeletionEnabled: appleDeletionEnabled && methods.appleLinked });
         } catch { return fail(res, 'UNAVAILABLE'); }
     }));
 
@@ -128,7 +135,7 @@ export function createProviderAuthRouter(options: ProviderAuthRouterOptions): Ro
     router.post('/begin', rateLimit({ ...limiterOptions, limit: PROVIDER_BEGIN_IP_LIMIT }),
         json({ limit: '32kb', strict: true }), asyncHandler(async (req, res) => {
             if (isRecord(req.body) && req.body.action === 'signup' && !options.signupEnabled) return fail(res, 'UNAVAILABLE');
-            if (isRecord(req.body) && req.body.action === 'delete' && !googleDeletionEnabled) return fail(res, 'ACCOUNT_DELETION_UNAVAILABLE');
+            if (isRecord(req.body) && req.body.action === 'delete' && !canDeleteWith(req.body.clientKey)) return fail(res, 'ACCOUNT_DELETION_UNAVAILABLE');
             try {
                 const context = await services.readContext(req, 'begin');
                 const result = await services.flow.begin(context, req.body);
@@ -150,7 +157,7 @@ export function createProviderAuthRouter(options: ProviderAuthRouterOptions): Ro
         json({ limit: '32kb', strict: true }), linkPasswordLimiter, asyncHandler(async (req, res) => {
             if (!isRecord(req.body)) return fail(res, 'INVALID_REQUEST');
             if (req.body.action === 'signup' && !options.signupEnabled) return fail(res, 'UNAVAILABLE');
-            if (req.body.action === 'delete' && !googleDeletionEnabled) return fail(res, 'ACCOUNT_DELETION_UNAVAILABLE');
+            if (req.body.action === 'delete' && !canDeleteWith(req.body.clientKey)) return fail(res, 'ACCOUNT_DELETION_UNAVAILABLE');
             const hasRememberMe = Object.prototype.hasOwnProperty.call(req.body, 'rememberMe');
             if (hasRememberMe && ((req.body.action !== 'login' && req.body.action !== 'signup') || typeof req.body.rememberMe !== 'boolean')) {
                 return fail(res, 'INVALID_REQUEST');

@@ -13,7 +13,7 @@ import PublicAccountPreviewNotice from '@/components/PublicAccountPreviewNotice'
 export default function ManageAccount() {
     const { userName, isAuthenticated, loading, deleteAccount, authenticateWithProvider } = useAuth();
     const [methods, setMethods] = useState<ProviderAccountMethods | null>(null);
-    const [googleClient, setGoogleClient] = useState<PublicProviderClient | undefined>();
+    const [deletionClient, setDeletionClient] = useState<PublicProviderClient | undefined>();
     const [methodsLoading, setMethodsLoading] = useState(true);
     const [methodsRetry, setMethodsRetry] = useState(0);
     const [password, setPassword] = useState('');
@@ -27,19 +27,22 @@ export default function ManageAccount() {
     const deletionOperation = useRef<AbortController | null>(null);
     const confirmationPopup = useRef<HTMLElement | null>(null);
     const passwordless = methods?.hasPassword === false;
-    const deletionReady = !!methods && (methods.hasPassword
-        || (methods.googleLinked && methods.googleDeletionEnabled && !!googleClient));
+    const deletionReady = !!methods && (methods.hasPassword || !!deletionClient);
+    const deletionProviderName = deletionClient?.provider === 'apple' ? 'Apple' : 'Google';
 
     useEffect(() => {
         if (PUBLIC_API_PREVIEW || loading || !isAuthenticated) return;
         let active = true;
         setMethodsLoading(true);
         setMethods(null);
+        setDeletionClient(undefined);
         void Promise.all([providerAccountMethodsRequest(), getAvailableProviderClients().catch(() => [])])
             .then(([availableMethods, clients]) => {
                 if (!active) return;
                 setMethods(availableMethods);
-                setGoogleClient(clients.find(client => client.clientKey === 'google-web'));
+                setDeletionClient(clients.find(client => client.clientKey === 'google-web'
+                    ? availableMethods?.googleLinked && availableMethods.googleDeletionEnabled
+                    : client.clientKey === 'apple-ios' && availableMethods?.appleLinked && availableMethods.appleDeletionEnabled));
                 setMethodsLoading(false);
             });
         return () => { active = false; };
@@ -73,14 +76,14 @@ export default function ManageAccount() {
                 didOpen: popup => { confirmationPopup.current = popup; },
                 didDestroy: onConfirmationClosed,
             });
-            // Google needs the alert host only after the destructive confirmation has closed.
+            // Provider presentation starts only after the destructive confirmation has closed.
             await confirmationClosed;
             confirmationPopup.current = null;
             if (!decision.isConfirmed || controller.signal.aborted) return;
 
-            const result = passwordless && googleClient
-                ? await authenticateWithProvider({ action: 'delete', clientKey: googleClient.clientKey, confirmation: 'DELETE' },
-                    (challenge, signal) => acquireProviderCredential(googleClient, challenge, signal),
+            const result = passwordless && deletionClient
+                ? await authenticateWithProvider({ action: 'delete', clientKey: deletionClient.clientKey, confirmation: 'DELETE' },
+                    (challenge, signal) => acquireProviderCredential(deletionClient, challenge, signal),
                     { signal: controller.signal })
                 : await deleteAccount(password);
             if (controller.signal.aborted) return;
@@ -105,7 +108,7 @@ export default function ManageAccount() {
                 return;
             }
             if (passwordless) {
-                setError(providerSignInErrorMessage(result.error, 'delete') ?? '');
+                setError(providerSignInErrorMessage(result.error, 'delete', deletionClient?.provider) ?? '');
                 return;
             }
             setError(result.error === 'INVALID_PASSWORD'
@@ -161,8 +164,8 @@ export default function ManageAccount() {
                                 <button type="button" onClick={() => setMethodsRetry(value => value + 1)}>Try again</button></div>
                         ) : <form className="manage-account__form" onSubmit={handleDelete} aria-busy={controlsBusy} aria-describedby="deletion-consequences">
                             {passwordless ? <p>{deletionReady
-                                ? 'After confirming, verify the Google account linked to Ludolume. No password is needed.'
-                                : 'Google verification for deletion is unavailable here. Use the Ludolume website when enabled, or contact mickeyf.plays@gmail.com.'}</p> : <label className="manage-account__field" htmlFor="delete-account-password">
+                                ? `After confirming, verify the ${deletionProviderName} account linked to Ludolume. No password is needed.`
+                                : 'Provider verification for deletion is unavailable here. Contact mickeyf.plays@gmail.com for account help.'}</p> : <label className="manage-account__field" htmlFor="delete-account-password">
                                 <span className="manage-account__label">Current password</span>
                                 <input
                                     id="delete-account-password"
@@ -194,7 +197,7 @@ export default function ManageAccount() {
                             </label>
                             {error && <p className="manage-account__error" role="alert">{error}</p>}
                             <button className="manage-account__submit" type="submit" disabled={controlsBusy || !deletionReady || (!passwordless && !password) || confirmation !== 'DELETE'}>
-                                {busy ? 'Please wait…' : passwordless ? 'Verify with Google and delete' : 'Delete account'}
+                                {busy ? 'Please wait…' : passwordless && deletionClient ? `Verify with ${deletionProviderName} and delete` : 'Delete account'}
                             </button>
                         </form>}
                     </>

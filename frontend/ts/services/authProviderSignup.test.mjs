@@ -24,11 +24,12 @@ function fixture({ completion = { success: true, user_name: 'New Player' },
     return { api, calls };
 }
 
-test('prepared Google signup binds its action and challenge before choosing a username and stay-signed-in option', async () => {
+for (const clientKey of ['google-web', 'apple-ios']) {
+test(`prepared ${clientKey} signup binds its action and challenge before choosing a username and stay-signed-in option`, async () => {
     for (const [rememberMe, expected] of [[undefined, false], [false, false], [true, true]]) {
         const { api, calls } = fixture();
-        const prepared = await api.prepareProviderLogin('google-web', {}, 'signup');
-        assert.deepEqual(calls[0].body, { action: 'signup', clientKey: 'google-web' });
+        const prepared = await api.prepareProviderLogin(clientKey, {}, 'signup');
+        assert.deepEqual(calls[0].body, { action: 'signup', clientKey });
         assert.equal(Object.isFrozen(prepared.handle), true);
         assert.deepEqual(Object.keys(prepared.handle), []);
         prepared.challenge = { ...challenge, state: 'caller-state', nonce: 'caller-nonce' };
@@ -36,7 +37,7 @@ test('prepared Google signup binds its action and challenge before choosing a us
         const completion = api.completeProviderLogin(prepared.handle, idToken, options);
         options.userName = 'Changed after submit'; options.rememberMe = !expected;
         assert.deepEqual(await completion, { success: true, user_name: 'New Player' });
-        assert.deepEqual(calls[1].body, { action: 'signup', clientKey: 'google-web',
+        assert.deepEqual(calls[1].body, { action: 'signup', clientKey,
             state: challenge.state, idToken, userName: 'New Player', rememberMe: expected });
         assert.equal(calls[1].init.method, 'POST');
         assert.deepEqual(calls[1].init.headers, { 'Content-Type': 'application/json' });
@@ -45,13 +46,14 @@ test('prepared Google signup binds its action and challenge before choosing a us
         assert.equal(calls[2].body, undefined);
     }
 });
+}
 
-test('signup validates username and rejects caller-provided email, password, account proof or a non-Google client before I/O', async () => {
+test('signup validates username and rejects caller-provided email, password, account proof or an unsupported client before I/O', async () => {
     const api = createAuthApi(apiBase, async () => assert.fail('invalid signup must not send a request'));
     const acquire = async () => assert.fail('invalid signup must not open a provider');
     const invalid = [
         ...[undefined, null, '', '   ', 'x'.repeat(65), 'bad\u0000name', 'bad\nname', 4].map(userName => ({ ...signup, userName })),
-        ...['apple-ios', 'google-native', 'unknown'].map(clientKey => ({ ...signup, clientKey })),
+        ...['apple-web', 'google-native', 'unknown'].map(clientKey => ({ ...signup, clientKey })),
         { ...signup, email: 'caller@example.test' }, { ...signup, password: 'fake-password' },
         { ...signup, accountId: 'caller-account' }, { ...signup, userId: 42 },
         { ...signup, nonce: challenge.nonce }, { ...signup, state: challenge.state },
@@ -60,7 +62,7 @@ test('signup validates username and rejects caller-provided email, password, acc
     for (const input of invalid) {
         assert.deepEqual(await api.runProviderAuthentication(input, acquire), { error: 'INVALID_REQUEST' });
     }
-    for (const clientKey of ['apple-ios', 'google-native']) {
+    for (const clientKey of ['apple-web', 'google-native']) {
         assert.deepEqual(await api.prepareProviderLogin(clientKey, {}, 'signup'), { error: 'INVALID_REQUEST' });
     }
     for (const action of ['delete', 'link', 'SIGNUP', null]) {
@@ -87,7 +89,9 @@ test('prepared signup cannot become login/delete, and a validated completion con
         { error: 'INVALID_REQUEST' }, 'login does not silently become signup');
 });
 
-test('direct signup sends no password or email and needs exact matching cookie-session proof', async () => {
+for (const clientKey of ['google-web', 'apple-ios']) {
+test(`direct ${clientKey} signup sends no password or email and needs exact matching cookie-session proof`, async () => {
+    const signup = { action: 'signup', clientKey, userName: 'New Player' };
     const sessions = [null, {}, [], { loggedIn: false }, { loggedIn: true },
         { loggedIn: true, user_name: 'Other Player' },
         { loggedIn: true, user_name: 'New Player', token: 'private-token' },
@@ -96,7 +100,7 @@ test('direct signup sends no password or email and needs exact matching cookie-s
         const { api, calls } = fixture({ session });
         assert.deepEqual(await api.runProviderAuthentication({ ...signup, rememberMe: true }, async () => idToken),
             { error: 'SESSION_NOT_ESTABLISHED' });
-        assert.deepEqual(calls[0].body, { action: 'signup', clientKey: 'google-web' });
+        assert.deepEqual(calls[0].body, { action: 'signup', clientKey });
         assert.deepEqual(calls[1].body, { ...signup, rememberMe: true, state: challenge.state, idToken });
         assert.equal(calls.length, 3);
     }
@@ -108,6 +112,7 @@ test('direct signup sends no password or email and needs exact matching cookie-s
         assert.equal(calls.length, 2, 'a malformed completion never counts as creation/session proof');
     }
 });
+}
 
 test('signup collision and email-authority failures are accepted only with their exact status and body', async () => {
     for (const [error, status] of [['ALREADY_LINKED', 409], ['DUPLICATE_USER', 409],
@@ -121,7 +126,9 @@ test('signup collision and email-authority failures are accepted only with their
     }
 });
 
-test('Google deletion posts only its fresh server challenge, token and literal destructive confirmation', async () => {
+for (const clientKey of ['google-web', 'apple-ios']) {
+test(`${clientKey} deletion posts only its fresh server challenge, token and literal destructive confirmation`, async () => {
+    const deletion = { action: 'delete', clientKey, confirmation: 'DELETE' };
     const { api, calls } = fixture({ completion: { success: true, deleted: true } });
     assert.deepEqual(await api.runProviderAuthentication(deletion, async (received, signal) => {
         assert.deepEqual(received, challenge);
@@ -129,19 +136,20 @@ test('Google deletion posts only its fresh server challenge, token and literal d
         return idToken;
     }), { success: true, deleted: true });
     assert.deepEqual(calls.map(({ body }) => body), [
-        { action: 'delete', clientKey: 'google-web' },
+        { action: 'delete', clientKey },
         { ...deletion, state: challenge.state, idToken },
     ]);
     assert.ok(calls.every(({ init }) => init.method === 'POST' && init.credentials === 'include'));
     assert.equal(calls.some(({ url }) => url.endsWith('/verify-token')), false, 'a valid deletion receipt is not a login');
 });
+}
 
 test('deletion rejects missing confirmation and every login/signup/link or caller identity field before I/O', async () => {
     const api = createAuthApi(apiBase, async () => assert.fail('invalid deletion cannot send a request'));
     const acquire = async () => assert.fail('invalid deletion cannot open Google');
     for (const input of [
         ...[undefined, null, true, 'delete', ' DELETE '].map(confirmation => ({ ...deletion, confirmation })),
-        { ...deletion, clientKey: 'apple-ios' }, { ...deletion, rememberMe: false },
+        { ...deletion, clientKey: 'apple-web' }, { ...deletion, rememberMe: false },
         { ...deletion, password: 'private' }, { ...deletion, userName: 'New Player' },
         { ...deletion, accountId: 'caller-account' }, { ...deletion, userId: 42 },
         { ...deletion, nonce: challenge.nonce }, { ...deletion, state: challenge.state },
@@ -189,19 +197,25 @@ test('a sent Google deletion finishes before a later logout, even if its UI canc
     assert.equal(calls.at(-1), `${apiBase}/auth/logout`);
 });
 
-test('account method discovery requires all three strict capability booleans and never exposes unknown fields', async () => {
+test('account method discovery accepts exact current or legacy capability shapes without exposing unknown fields', async () => {
     const methods = { hasPassword: false, googleLinked: true, googleDeletionEnabled: true };
-    for (const body of [methods, { ...methods, hasPassword: true, googleDeletionEnabled: false }]) {
+    for (const body of [methods, { ...methods, hasPassword: true, googleDeletionEnabled: false },
+        { ...methods, appleLinked: true, appleDeletionEnabled: false },
+        { ...methods, appleLinked: true, appleDeletionEnabled: true }]) {
         const api = createAuthApi(apiBase, async (url, init) => {
             assert.equal(url, `${apiBase}/auth/providers/account`);
             assert.deepEqual(init, { method: 'GET', credentials: 'include' });
             return Response.json(body);
         });
-        assert.deepEqual(await api.providerAccountMethodsRequest(), body);
+        assert.deepEqual(await api.providerAccountMethodsRequest(), { appleLinked: false, appleDeletionEnabled: false, ...body });
     }
     for (const body of [null, {}, [], { hasPassword: false, googleLinked: true },
         { ...methods, hasPassword: 'false' }, { ...methods, googleLinked: 1 },
-        { ...methods, googleDeletionEnabled: 'true' }, { ...methods, accountId: 'private-account' }]) {
+        { ...methods, googleDeletionEnabled: 'true' }, { ...methods, accountId: 'private-account' },
+        { ...methods, appleLinked: true }, { ...methods, appleDeletionEnabled: false },
+        { ...methods, appleLinked: 'true', appleDeletionEnabled: false },
+        { ...methods, appleLinked: true, appleDeletionEnabled: 1 },
+        { ...methods, appleLinked: true, appleDeletionEnabled: true, accountId: 'private-account' }]) {
         const api = createAuthApi(apiBase, async () => Response.json(body));
         assert.equal(await api.providerAccountMethodsRequest(), null);
     }

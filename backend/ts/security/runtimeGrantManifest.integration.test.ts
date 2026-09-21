@@ -304,7 +304,9 @@ test('limited provider grants support schema readiness, linking and login withou
     // The duplicate path performs SELECT ... FOR UPDATE and must work without granting identity reassignment.
     assert.equal(await linkProviderAccount(runtimePool, target, password, identity, proof), 'already-linked');
     assert.deepEqual(await findProviderAccount(runtimePool, identity), { ...target, userName: 'player-1' });
-    assert.deepEqual(await readProviderAccountMethods(runtimePool, target.accountId), { hasPassword: true, googleLinked: true });
+    assert.deepEqual(await readProviderAccountMethods(runtimePool, target.accountId), {
+        hasPassword: true, googleLinked: true, appleLinked: false,
+    });
     for (const column of ['provider', 'subject', 'account_uuid']) {
         await assertPrivilegeDenied(() => runtimePool.query(
             `UPDATE account_provider_identities SET ${column} = ${column} WHERE 1 = 0`));

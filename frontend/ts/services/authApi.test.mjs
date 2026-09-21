@@ -1043,7 +1043,8 @@ test('split completion requires the same exact saved-cookie verification as the 
     assert.deepEqual(await api.completeProviderLogin(prepared.handle, providerToken), { error: 'SESSION_NOT_ESTABLISHED' });
 });
 
-test('new Google entry returns an opaque username continuation and completes without a second begin or credential exchange', async () => {
+for (const clientKey of ['google-web', 'apple-ios']) {
+test(`new ${clientKey} entry returns an opaque username continuation and completes without a second begin or credential exchange`, async () => {
     const calls = [];
     const signupChallenge = { ...providerChallenge, state: Buffer.alloc(32, 3).toString('base64url'), expiresInSeconds: 200 };
     const api = createAuthApi(apiBase, async (url, init) => {
@@ -1054,7 +1055,7 @@ test('new Google entry returns an opaque username continuation and completes wit
         return Response.json(body.action === 'login' ? { signupRequired: true, challenge: signupChallenge }
             : { success: true, user_name: 'new-player' });
     });
-    const prepared = await api.prepareProviderLogin('google-web');
+    const prepared = await api.prepareProviderLogin(clientKey);
     const next = await api.completeProviderLogin(prepared.handle, providerToken, { rememberMe: true });
     assert.equal(next.signupRequired, true);
     assert.deepEqual(Object.keys(next).sort(), ['handle', 'signupRequired']);
@@ -1062,14 +1063,14 @@ test('new Google entry returns an opaque username continuation and completes wit
     assert.equal(calls.length, 2, 'no session verification or account creation before username consent');
     assert.deepEqual(await api.completeProviderLogin(next.handle, providerToken, { rememberMe: true, userName: ' new-player ' }),
         { success: true, user_name: 'new-player' });
-    assert.deepEqual(calls[2].body, { clientKey: 'google-web', action: 'signup', state: signupChallenge.state,
+    assert.deepEqual(calls[2].body, { clientKey, action: 'signup', state: signupChallenge.state,
         idToken: providerToken, rememberMe: true, userName: 'new-player' });
     assert.equal(calls.filter(call => call.url.endsWith('/begin')).length, 1);
     assert.deepEqual(await api.completeProviderLogin(next.handle, providerToken, { userName: 'again' }),
         { error: 'INVALID_ATTEMPT' });
 });
 
-test('Google signup continuation rejects changed nonce, reused state and extra response fields', async () => {
+test(`${clientKey} signup continuation rejects changed nonce, reused state and extra response fields`, async () => {
     for (const response of [
         { signupRequired: true, challenge: providerChallenge },
         { signupRequired: true, challenge: { ...providerChallenge, state: Buffer.alloc(32, 3).toString('base64url'),
@@ -1077,12 +1078,12 @@ test('Google signup continuation rejects changed nonce, reused state and extra r
         { signupRequired: true, challenge: providerChallenge, email: 'private@example.test' },
     ]) {
         const api = createAuthApi(apiBase, async url => Response.json(url.endsWith('/begin') ? providerChallenge : response));
-        const prepared = await api.prepareProviderLogin('google-web');
+        const prepared = await api.prepareProviderLogin(clientKey);
         assert.deepEqual(await api.completeProviderLogin(prepared.handle, providerToken), { error: 'INVALID_RESPONSE' });
     }
 });
 
-test('Google continuation inherits original expiry and is invalidated by logout or cancellation', async t => {
+test(`${clientKey} continuation inherits original expiry and is invalidated by logout or cancellation`, async t => {
     t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
     for (const invalidation of ['expiry', 'logout', 'abort']) {
         const controller = new AbortController();
@@ -1094,7 +1095,7 @@ test('Google continuation inherits original expiry and is invalidated by logout 
                 : { signupRequired: true, challenge: { ...providerChallenge,
                     state: Buffer.alloc(32, 3).toString('base64url'), expiresInSeconds: 300 } });
         });
-        const prepared = await api.prepareProviderLogin('google-web', { signal: controller.signal });
+        const prepared = await api.prepareProviderLogin(clientKey, { signal: controller.signal });
         const next = await api.completeProviderLogin(prepared.handle, providerToken);
         assert.equal(next.signupRequired, true);
         if (invalidation === 'expiry') t.mock.timers.tick(2000);
@@ -1106,3 +1107,4 @@ test('Google continuation inherits original expiry and is invalidated by logout 
         assert.equal(calls.length, before);
     }
 });
+}
