@@ -2752,12 +2752,28 @@ to the renewable protocol once the compatible public backend is deployed.
 No environment flag, cloud resource, database or live account was changed.
 See [the cutover contract](backend/PROVIDER_SIGN_IN.md#explicit-localhost-cutover-configuration--2026-09-21).
 
-The owner asked to discuss a limited initial signup audience instead of waiting
-for the complete all-ages account flow. This is not approval of an age threshold,
-country restriction or release. KWS remains separate from independent development;
-published privacy information and backend/deletion/schema readiness still need
-completion for public signup activation. Refresh dated live-readiness evidence
-after resolving gcloud's certificate-trust error, without disabling TLS checks.
+The owner subsequently approved initial adult-only new-account signup without
+invitations, while retaining the all-ages/parent-managed flow as later work.
+Apply eligibility to password, Google and Apple account creation; preserve
+existing-account login, optional linking and guest play. Do not assume existing
+accounts are adult-verified or change country availability. A checkbox or a
+Google identity is not verified age, and this audience decision does not itself
+resolve regional privacy obligations.
+
+KWS Age Verification is the candidate for adult self-registration, distinct from
+Parent Verification. Its portal requires service enablement before test setup.
+The owner authorized the test-access contact request; submission closed without
+a visible error, but receipt is unconfirmed because no durable confirmation was
+captured. Do not resend automatically. No agreement was accepted or service
+activated. See the [signup preparation and integration boundary](backend/PROVIDER_SIGN_IN.md#adult-only-signup-preparation--2026-09-21).
+
+Next: obtain test access, review the applicable agreement and result-binding
+contract, then implement and narrowly test one server-enforced eligibility flow
+across all new-account paths. Independent development need not await the older
+privacy enquiry. Published privacy information and backend/deletion/schema
+readiness still need completion before public signup activation. Refresh dated
+live-readiness evidence after resolving gcloud's certificate-trust error, without
+disabling TLS checks. No release is authorized by this planning checkpoint.
 
 ### Approved privacy implementation backlog — not implemented
 

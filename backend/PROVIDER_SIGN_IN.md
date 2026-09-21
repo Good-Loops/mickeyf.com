@@ -433,12 +433,12 @@ mix challenge/session cookies. No local environment flag or production setting
 was changed in this checkpoint.
 
 Read-only activation review still finds unfinished age/consent and published-
-privacy work, plus the coordinated schema/deletion/runtime rollout. The owner
-requested discussion of a limited initial signup audience; no age restriction
-or change to the all-ages plan has been approved. KWS does not block independent
-development. A fresh Cloud Run metadata read failed during gcloud auth refresh
-with a certificate-trust error; dated cloud/schema/backup observations below
-must not be presented as current evidence. TLS verification remains enabled.
+privacy work, plus the coordinated schema/deletion/runtime rollout. The initial
+audience discussion is superseded by the adult-only signup decision below.
+KWS does not block independent development. A fresh Cloud Run metadata read
+failed during gcloud auth refresh with a certificate-trust error; dated
+cloud/schema/backup observations below must not be presented as current
+evidence. TLS verification remains enabled.
 
 Validation: 60 focused tests passed with mocked network requests, including
 actual Vite plugin wiring, both cookie protocols, invalid configuration,
@@ -454,6 +454,39 @@ TypeScript and whitespace checks passed. Existing duplicate Capacitor plugin
 registration warnings occur across the isolated SSR scenarios. These checks do
 not establish real-provider acceptance or public activation; no broad gameplay
 or backend test campaign was repeated.
+
+### Adult-only signup preparation — 2026-09-21
+
+The owner approved an initial adult-only new-account flow without invitations,
+with KWS test integration in parallel. The later all-ages/parent-managed plan is
+not cancelled. This does not activate signup, classify existing users as adults,
+or authorize a production deployment or country restrictions.
+
+The registration check must cover password, Google and Apple account creation.
+Existing-account login and optional provider linking are separate operations;
+do not require linking or age verification merely to show a provider button.
+Guest play remains outside the registration flow. This scope is not a claim
+that an adult-only label exempts the service from children's privacy obligations.
+
+Use KWS **Age Verification** for registrants verifying their own eligibility,
+not Parent Verification as a substitute. The live portal and
+[Age Verification setup documentation](https://dev.epicgames.com/docs/kids-web-services/age-verification-service/set-up/av-service-set-up)
+require KWS to enable this service before self-service configuration and terms
+review. With the owner's explicit approval, the test-access request form was
+submitted; it closed after its sending state without a visible error, but no
+durable confirmation or case number was captured. Receipt is unconfirmed; do
+not automatically resend. This is separate from the earlier privacy enquiry.
+No service agreement was accepted, credentials created or test/production
+configuration published.
+
+Implementation boundary: account creation must require a server-validated,
+single-use eligibility result bound to the registration context and registrant.
+Consume it in the same transaction as account creation; browser flags, provider
+identity tokens and test-environment results must not authorize production
+signup. Keep raw verification inputs out of this application. Validate the
+actual result-binding API before adding an adapter or evidence schema. Preserve
+OAuth's existing short challenge lifetime; verification must not extend it.
+The flow, UI and live integration remain unimplemented at this checkpoint.
 
 ### Localhost deletion transport prepared — 2026-09-14
 
