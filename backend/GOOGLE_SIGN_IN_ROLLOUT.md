@@ -68,12 +68,28 @@ separately; Apple maintenance is not a prerequisite for Google-only issuance.
    automatically. Reuse the target/account confirmations and reviewed
    writer-exclusion procedure. No migration is executed during preparation.
 
-   **Remaining source change:** prepare a Google-only runtime grant profile.
-   The current combined manifest includes Apple tables and 0018 session columns;
-   applying it to a Google-only 0015 schema would fail. Prefer the narrow profile
-   over silently adding Apple storage/privileges to this release. The Apple
-   deletion repository tolerates genuinely absent, unrecorded Apple storage;
-   recorded-but-missing tables remain errors.
+   **Google-only grant profile prepared:** use the existing grant commands with
+   `-- --profile=google`, including plan, verify and the later approved apply.
+   For example: `npm --prefix backend run runtime-grants:plan -- --profile=google`.
+   This profile retains password/Google accounts, scores, renewable sessions and
+   account deletion, without Apple tables or session-provenance columns. Omitted
+   profile still selects the existing full `google-apple` manifest; it does not
+   infer a profile from whichever tables happen to exist.
+
+   Plan format 5 includes the profile in its approval hash. Obtain a fresh plan;
+   an older or differently profiled approval cannot authorize the operation.
+   Unexpected Apple permissions or existing Apple schema block the Google-only
+   path instead of silently downgrading an Apple-enabled database. It is for the
+   pre-Apple schema through 0015, with Apple features disabled. The Apple deletion
+   repository tolerates genuinely absent, unrecorded Apple storage; recorded-but-
+   missing tables remain errors. All existing target, account, server, drain and
+   plan confirmations remain required. No grants were applied during preparation.
+
+   Google-only commands also require a direct schema-wide `SELECT` grant for the
+   **maintenance account**, not the website account, and reject recorded Apple
+   migrations 0016–0018. This deliberately narrow inspection prerequisite avoids
+   treating privilege-filtered metadata as proof of absence; role/global-only
+   access is not inferred. See MySQL's [schema privilege metadata](https://dev.mysql.com/doc/refman/8.0/en/information-schema-schema-privileges-table.html).
 
 3. **Prepare the coordinated session cutover.** Current deployment and traffic
    checks pin `SESSION_SECRET:2`. Add explicit, reviewed version pin support
@@ -129,6 +145,17 @@ opening new registrations.
   node node_modules/typescript/bin/tsc -p tsconfig.json --noEmit
   ```
 
-- Next source task: separate the Google runtime grants from dormant Apple
-  grants, then support the reviewed session-secret version in deployment checks.
+- Google-only grant profile is now prepared, with shared permissions defined
+  once and Apple-specific additions kept separate. Its 79 focused tests,
+  TypeScript check and `git diff --check` passed. Tests use mocked metadata and
+  connections; no live or containerized MySQL acceptance was run at this checkpoint.
+
+  Commands from `backend`:
+
+  ```text
+  node --test --test-reporter=dot -r ts-node/register ts/security/runtimeGrantManifest.test.ts ts/security/runtimeGrantOperations.test.ts ts/security/runRuntimeGrants.test.ts ts/config/migrationConfig.test.ts ts/accounts/appleTokenRepository.test.ts
+  node node_modules/typescript/bin/tsc -p tsconfig.json --noEmit
+  ```
+
+- Next source task: support the reviewed session-secret version in deployment checks.
   Signup eligibility remains an independent activation requirement throughout.

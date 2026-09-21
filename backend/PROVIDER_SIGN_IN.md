@@ -635,6 +635,14 @@ reassignment nor direct identity deletion. These are source definitions, not
 applied production grants. Coordinate their explicit application with schema,
 recovery compatibility and the enabled application revision; no blanket grants.
 
+For the Google-first rollout, `runtime-grants:plan`, `runtime-grants:verify` and
+`runtime-grants:apply` now accept `-- --profile=google`. This selects only the
+pre-Apple permissions through schema 0015. The default remains `google-apple`;
+profile selection is explicit and bound into the format-5 approval hash. Existing
+Apple schema or privileges block the Google-only path rather than authorizing
+a downgrade. See the [rollout plan](GOOGLE_SIGN_IN_ROLLOUT.md) for ordering and
+activation limits. These source changes do not enable any sign-in controls.
+
 ### Public activation preparation — 2026-09-14
 
 A read-only production query confirmed recorded migrations only through 0008.

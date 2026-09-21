@@ -2856,9 +2856,14 @@ persistent settings. Production still serves `mickeyf-org-localhost-dbb80d4f`;
 its provider-config endpoint returns 404, explaining the absent localhost Google
 button. Added a guarded command for Google signup migrations 0013–0015 without
 expanding ordinary migration behavior (51 focused mocked tests and typecheck
-passed). No SQL, grants, flags, deployment or servers changed. Next prepare the
-Google-only runtime grant profile and explicit session-secret version pinning;
-registration safeguards remain required before activation. Apple browser sign-in
+passed). The Google-only runtime grant profile is now prepared too: shared
+permissions remain centralized, Apple permissions are separate, and the selected
+profile is bound to the reviewed approval hash. Existing Apple schema/privileges
+block a Google-only downgrade; direct maintenance schema visibility and migration
+history are checked before inspection. The 79 focused grant/CLI/configuration
+tests and typecheck passed. No live SQL, grants, flags, deployment or servers
+changed. Next prepare explicit session-secret version pinning; registration
+safeguards remain required before activation. Apple browser sign-in
 is separate unimplemented work, not a hidden completed button. See the
 [ordered real-account rollout](backend/GOOGLE_SIGN_IN_ROLLOUT.md).
 

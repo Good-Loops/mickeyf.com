@@ -5,6 +5,14 @@ export type RuntimeDatabaseAccount = Readonly<{
 
 export type RuntimeDmlPrivilege = 'SELECT' | 'INSERT' | 'UPDATE';
 
+export type RuntimeGrantProfile = 'google' | 'google-apple';
+
+export function parseRuntimeGrantProfile(value: string | undefined): RuntimeGrantProfile {
+    if (value === undefined) return 'google-apple';
+    if (value === 'google' || value === 'google-apple') return value;
+    throw new Error('Runtime grant profile must be google or google-apple');
+}
+
 export type RuntimeColumnGrant = Readonly<{
     privilege: RuntimeDmlPrivilege;
     columns: readonly string[];
@@ -40,11 +48,7 @@ export const PRODUCTION_RUNTIME_DATABASE_ROLE: RuntimeDatabaseAccount =
         host: '%',
     });
 
-/**
- * Exact runtime DML plus two read-only migration fields for identity-epoch
- * verification. Migration writes and schema changes remain maintenance-only.
- */
-export const RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freeze([
+const APPLE_RUNTIME_TABLE_GRANTS: readonly RuntimeTableGrant[] = Object.freeze([
     Object.freeze({
         table: 'apple_auth_revocations' as const,
         tablePrivileges: Object.freeze(['DELETE' as const]),
@@ -67,17 +71,20 @@ export const RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freez
                 columns: Object.freeze(['revocation_requested_at', 'next_attempt_at', 'retention_deadline', 'attempt_count']) }),
         ]),
     }),
+]);
+
+/** Password/Google accounts, renewable sessions, scores and self-deletion through schema 0015. */
+export const GOOGLE_RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freeze([
     Object.freeze({
         table: 'account_sessions' as const,
         tablePrivileges: Object.freeze(['DELETE' as const]),
         grants: Object.freeze([
             Object.freeze({ privilege: 'SELECT' as const,
                 columns: Object.freeze(['session_hash', 'account_uuid', 'created_at', 'expires_at',
-                    'remembered', 'renewed_at', 'previous_session_hash', 'previous_valid_until',
-                    'apple_subject_hash', 'apple_authenticated_at']) }),
+                    'remembered', 'renewed_at', 'previous_session_hash', 'previous_valid_until']) }),
             Object.freeze({ privilege: 'INSERT' as const,
                 columns: Object.freeze(['session_hash', 'account_uuid', 'created_at', 'expires_at',
-                    'remembered', 'renewed_at', 'apple_subject_hash', 'apple_authenticated_at']) }),
+                    'remembered', 'renewed_at']) }),
             Object.freeze({ privilege: 'UPDATE' as const,
                 columns: Object.freeze(['session_hash', 'expires_at', 'renewed_at',
                     'previous_session_hash', 'previous_valid_until']) }),
@@ -213,6 +220,32 @@ export const RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freez
     }),
 ]);
 
+/**
+ * Preserve the existing full profile; Apple adds storage and session provenance,
+ * never migration writes or schema privileges. Shared grants have one definition.
+ */
+export const RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freeze([
+    ...APPLE_RUNTIME_TABLE_GRANTS,
+    ...GOOGLE_RUNTIME_GRANT_MANIFEST.map(tableGrant => {
+        if (tableGrant.table !== 'account_sessions') return tableGrant;
+        return Object.freeze({
+            ...tableGrant,
+            grants: Object.freeze(tableGrant.grants.map(grant =>
+                grant.privilege === 'SELECT' || grant.privilege === 'INSERT'
+                    ? Object.freeze({ ...grant, columns: Object.freeze([
+                        ...grant.columns, 'apple_subject_hash', 'apple_authenticated_at',
+                    ]) })
+                    : grant)),
+        });
+    }),
+]);
+
+function manifestForProfile(profile: RuntimeGrantProfile | undefined): readonly RuntimeTableGrant[] {
+    return parseRuntimeGrantProfile(profile) === 'google'
+        ? GOOGLE_RUNTIME_GRANT_MANIFEST
+        : RUNTIME_GRANT_MANIFEST;
+}
+
 const SAFE_IDENTIFIER = /^[A-Za-z0-9_]{1,64}$/u;
 const SAFE_ACCOUNT_PART = /^[A-Za-z0-9_.%~\-]{1,255}$/u;
 
@@ -244,8 +277,8 @@ export function runtimeDatabaseAccountName(
     return `${account.user}@${account.host}`;
 }
 
-export function runtimeColumnPrivilegeInventory(): readonly RuntimeColumnPrivilege[] {
-    return Object.freeze(RUNTIME_GRANT_MANIFEST.flatMap(({ table, grants }) =>
+export function runtimeColumnPrivilegeInventory(profile?: RuntimeGrantProfile): readonly RuntimeColumnPrivilege[] {
+    return Object.freeze(manifestForProfile(profile).flatMap(({ table, grants }) =>
         grants.flatMap(({ privilege, columns }) => columns.map((columnName) =>
             Object.freeze({
                 tableName: table,
@@ -256,10 +289,10 @@ export function runtimeColumnPrivilegeInventory(): readonly RuntimeColumnPrivile
     ));
 }
 
-export function runtimeTablePrivilegeInventory(): readonly RuntimeTablePrivilege[] {
+export function runtimeTablePrivilegeInventory(profile?: RuntimeGrantProfile): readonly RuntimeTablePrivilege[] {
     // MySQL cannot restrict DELETE by column. Attempts need consumption and sessions need revocation;
     // the account and its dependent data tables need transactional self-deletion.
-    return Object.freeze(RUNTIME_GRANT_MANIFEST.flatMap(({ table, tablePrivileges }) =>
+    return Object.freeze(manifestForProfile(profile).flatMap(({ table, tablePrivileges }) =>
         tablePrivileges.map((privilegeType) => Object.freeze({
             tableName: table,
             privilegeType,
@@ -273,12 +306,13 @@ export function runtimeTablePrivilegeInventory(): readonly RuntimeTablePrivilege
  */
 export function renderRuntimeGrantStatements(
     databaseName: string,
-    account: RuntimeDatabaseAccount
+    account: RuntimeDatabaseAccount,
+    profile?: RuntimeGrantProfile
 ): readonly string[] {
     const database = quoteIdentifier(databaseName, 'Database name');
     const principal = renderRuntimeDatabaseAccount(account);
 
-    return Object.freeze(RUNTIME_GRANT_MANIFEST.map(({ table, grants, tablePrivileges }) => {
+    return Object.freeze(manifestForProfile(profile).map(({ table, grants, tablePrivileges }) => {
         const columnPrivileges = grants.map(({ privilege, columns }) => {
             const columnList = columns
                 .map((column) => quoteIdentifier(column, 'Column name'))

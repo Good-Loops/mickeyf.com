@@ -86,15 +86,25 @@ test('revocation uses earliest journal time and purges expired retained material
     assert.deepEqual(calls[1].values, [accountId]);
 });
 
-test('only an absent unrecorded historical token table is optional', async () => {
-    for (const recorded of [false, true]) {
-        const connection = { async query(query: QueryOptions) {
-            if (query.sql.startsWith('UPDATE')) throw Object.assign(new Error('private'), { code: 'ER_NO_SUCH_TABLE' });
-            if (query.sql.includes('information_schema.TABLES')) return [[{ tableCount: 0 }], []];
-            return [recorded ? [{ version: '0016_create_apple_provider_tokens' }] : [], []];
-        } } as unknown as PoolConnection;
-        const result = markAppleTokensForRevocation(connection, accountId);
-        if (recorded) await assert.rejects(result, AppleTokenStorageError); else await result;
+test('only an absent unrecorded token table is optional, including Google-only grants', async () => {
+    for (const code of ['ER_NO_SUCH_TABLE', 'ER_TABLEACCESS_DENIED_ERROR']) {
+        for (const recorded of [false, true]) {
+            const calls: string[] = [];
+            const connection = { async query(query: QueryOptions, values: unknown[]) {
+                calls.push(query.sql);
+                if (query.sql.startsWith('UPDATE')) throw Object.assign(new Error('private'), { code });
+                if (query.sql.includes('information_schema.TABLES')) {
+                    assert.deepEqual(values, ['apple_provider_tokens']);
+                    return [[{ tableCount: 0 }], []];
+                }
+                assert.equal(query.sql, 'SELECT version FROM schema_migrations WHERE version = ?');
+                assert.deepEqual(values, ['0016_create_apple_provider_tokens']);
+                return [recorded ? [{ version: '0016_create_apple_provider_tokens' }] : [], []];
+            } } as unknown as PoolConnection;
+            const result = markAppleTokensForRevocation(connection, accountId);
+            if (recorded) await assert.rejects(result, AppleTokenStorageError); else await result;
+            assert.equal(calls.length, 3);
+        }
     }
     const denied = { async query() { throw Object.assign(new Error('private'), { code: 'ER_TABLEACCESS_DENIED_ERROR' }); } } as unknown as PoolConnection;
     await assert.rejects(markAppleTokensForRevocation(denied, accountId), AppleTokenStorageError);

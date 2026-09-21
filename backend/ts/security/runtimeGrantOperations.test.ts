@@ -12,9 +12,11 @@ import {
     type RuntimeGrantSnapshot,
 } from './runtimeGrantOperations';
 import {
+    renderRuntimeGrantStatements,
     runtimeColumnPrivilegeInventory,
     runtimeTablePrivilegeInventory,
     type RuntimeDatabaseAccount,
+    type RuntimeGrantProfile,
 } from './runtimeGrantManifest';
 
 const DATABASE = 'migration_test';
@@ -38,8 +40,8 @@ const SETTINGS: RuntimeGrantSettings = Object.freeze({
     lockWaitTimeoutSeconds: 1,
 });
 
-function exactSnapshot(): RuntimeGrantSnapshot {
-    const inventory = runtimeColumnPrivilegeInventory();
+function exactSnapshot(profile?: RuntimeGrantProfile): RuntimeGrantSnapshot {
+    const inventory = runtimeColumnPrivilegeInventory(profile);
     return {
         databaseName: DATABASE,
         currentUser: 'migration_admin@%',
@@ -63,7 +65,7 @@ function exactSnapshot(): RuntimeGrantSnapshot {
         globalPrivileges: [{ privilegeType: 'USAGE', isGrantable: 'NO' }],
         dynamicGlobalPrivileges: [],
         schemaPrivileges: [],
-        tablePrivileges: runtimeTablePrivilegeInventory().map((privilege) => ({
+        tablePrivileges: runtimeTablePrivilegeInventory(profile).map((privilege) => ({
             schemaName: DATABASE,
             ...privilege,
             isGrantable: 'NO',
@@ -90,7 +92,8 @@ test('exact runtime grants produce a stable reduced no-op plan', () => {
     const second = createRuntimeGrantPlan(snapshot, SETTINGS, RUNTIME_ACCOUNT);
 
     assert.equal(first.state, 'reduced');
-    assert.equal(first.formatVersion, 4);
+    assert.equal(first.formatVersion, 5);
+    assert.equal(first.profile, 'google-apple');
     assert.deepEqual(first.expectedTablePrivileges, [...snapshot.tablePrivileges].sort((left, right) =>
         left.tableName.localeCompare(right.tableName)));
     assert.equal(first.compliant, true);
@@ -102,6 +105,88 @@ test('exact runtime grants produce a stable reduced no-op plan', () => {
         clearDefaultRoles: [],
         removeApprovedRole: null,
     });
+});
+
+test('Google-only grants accept schema through signup without requiring Apple storage', () => {
+    const snapshot = exactSnapshot('google');
+    const plan = createRuntimeGrantPlan(snapshot, { ...SETTINGS, profile: 'google' }, RUNTIME_ACCOUNT);
+
+    assert.equal(plan.profile, 'google');
+    assert.equal(plan.state, 'reduced');
+    assert.equal(plan.compliant, true);
+    assert.deepEqual(plan.blockers, []);
+    assert.deepEqual(plan.operations.ensureRequiredPrivileges, []);
+    assert.equal(plan.expectedColumnPrivileges.some(({ tableName, columnName }) =>
+        tableName.startsWith('apple_') || columnName.startsWith('apple_')), false);
+    assert.equal(plan.expectedTablePrivileges.some(({ tableName }) => tableName.startsWith('apple_')), false);
+
+    const fullPlan = createRuntimeGrantPlan(snapshot, SETTINGS, RUNTIME_ACCOUNT);
+    assert.equal(fullPlan.profile, 'google-apple');
+    assert.equal(fullPlan.state, 'blocked');
+    assert.match(fullPlan.blockers.join(' '), /required runtime columns are missing:.*apple_/u);
+    assert.deepEqual(fullPlan.operations.ensureRequiredPrivileges, []);
+});
+
+test('Google-only repair renders only its exact selected manifest', () => {
+    const snapshot = { ...exactSnapshot('google'), columnPrivileges: [], tablePrivileges: [] };
+    const plan = createRuntimeGrantPlan(snapshot, { ...SETTINGS, profile: 'google' }, RUNTIME_ACCOUNT);
+
+    assert.equal(plan.state, 'repair');
+    assert.deepEqual(plan.blockers, []);
+    assert.deepEqual(plan.operations.ensureRequiredPrivileges,
+        renderRuntimeGrantStatements(DATABASE, RUNTIME_ACCOUNT, 'google')
+            .map((statement) => statement.replace(/;$/u, '')));
+    assert.equal(plan.operations.ensureRequiredPrivileges.some(sql => /apple_|^REVOKE/iu.test(sql)), false);
+});
+
+test('selecting Google does not automatically revoke existing Apple permissions', () => {
+    const google = exactSnapshot('google');
+    const full = exactSnapshot();
+    const appleColumns = full.columnPrivileges.filter(({ tableName, columnName }) =>
+        tableName.startsWith('apple_') || columnName.startsWith('apple_'));
+    const appleTables = full.tablePrivileges.filter(({ tableName }) => tableName.startsWith('apple_'));
+    for (const extra of [
+        { columnPrivileges: [...google.columnPrivileges, ...appleColumns] },
+        { tablePrivileges: [...google.tablePrivileges, ...appleTables] },
+    ]) {
+        const plan = createRuntimeGrantPlan({ ...google, ...extra },
+            { ...SETTINGS, profile: 'google' }, RUNTIME_ACCOUNT);
+        assert.equal(plan.state, 'blocked');
+        assert.match(plan.blockers.join(' '), /unexpected or grantable (?:column|table) privileges/u);
+        assert.deepEqual(plan.operations, {
+            ensureRequiredPrivileges: [], clearDefaultRoles: [], removeApprovedRole: null,
+        });
+    }
+});
+
+test('Google-only grants refuse existing Apple schema even without Apple privileges', () => {
+    const google = exactSnapshot('google');
+    for (const appleColumn of [
+        { tableName: 'apple_provider_tokens', columnName: 'provider_subject' },
+        { tableName: 'apple_auth_revocations', columnName: 'subject_hash' },
+        { tableName: 'account_sessions', columnName: 'apple_subject_hash' },
+        { tableName: 'account_sessions', columnName: 'apple_authenticated_at' },
+    ]) {
+        const plan = createRuntimeGrantPlan({ ...google,
+            availableColumns: [...google.availableColumns, appleColumn],
+        }, { ...SETTINGS, profile: 'google' }, RUNTIME_ACCOUNT);
+        assert.equal(plan.state, 'blocked');
+        assert.match(plan.blockers.join(' '), /require pre-Apple schema/u);
+        assert.deepEqual(plan.operations, {
+            ensureRequiredPrivileges: [], clearDefaultRoles: [], removeApprovedRole: null,
+        });
+    }
+});
+
+test('the normalized profile is explicit and bound to the plan digest', () => {
+    const snapshot = exactSnapshot();
+    const implicit = createRuntimeGrantPlan(snapshot, SETTINGS, RUNTIME_ACCOUNT);
+    const explicit = createRuntimeGrantPlan(snapshot, { ...SETTINGS, profile: 'google-apple' }, RUNTIME_ACCOUNT);
+    const google = createRuntimeGrantPlan(snapshot, { ...SETTINGS, profile: 'google' }, RUNTIME_ACCOUNT);
+
+    assert.equal(implicit.profile, 'google-apple');
+    assert.equal(implicit.sha256, explicit.sha256);
+    assert.notEqual(google.sha256, explicit.sha256);
 });
 
 test('missing account deletion grants produce an additive repair plan, not compliance', () => {
@@ -413,12 +498,30 @@ test('wrong server, maintenance identity, or PROCESS capability blocks every ope
 
 class SnapshotConnection implements RuntimeGrantConnection {
     readonly calls: string[] = [];
+    readonly lockNames: unknown[] = [];
+    readonly googleGuardBindings: { sql: string; values: readonly unknown[] | undefined }[] = [];
+    schemaSelectCount = 1;
+    maintenanceCurrentUser = 'migration_admin@%';
+    recordedAppleVersions: string[] = [];
     destroyed = false;
 
-    async query(sql: string): Promise<[unknown, unknown]> {
+    constructor(readonly snapshot = exactSnapshot()) {}
+
+    async query(sql: string, values?: readonly unknown[]): Promise<[unknown, unknown]> {
         this.calls.push(sql);
-        if (sql.includes('GET_LOCK')) return [[{ acquired: 1 }], []];
+        if (sql.includes('GET_LOCK')) {
+            this.lockNames.push(values?.[0]);
+            return [[{ acquired: 1 }], []];
+        }
         if (sql.includes('RELEASE_LOCK')) return [[{ released: 1 }], []];
+        if (sql.includes('runtime-grants:google-schema-visibility')) {
+            this.googleGuardBindings.push({ sql, values });
+            return [[{ currentUser: this.maintenanceCurrentUser, schemaSelectCount: this.schemaSelectCount }], []];
+        }
+        if (sql.includes('runtime-grants:google-apple-history')) {
+            this.googleGuardBindings.push({ sql, values });
+            return [this.recordedAppleVersions.map(version => ({ version })), []];
+        }
         if (sql.includes('runtime-grants:identity')) return [[{
             databaseName: DATABASE,
             currentUser: 'migration_admin@%',
@@ -446,16 +549,16 @@ class SnapshotConnection implements RuntimeGrantConnection {
             return [[{ Select_priv: 'N', Process_priv: 'N' }], []];
         }
         if (sql.includes('runtime-grants:columns')) {
-            return [exactSnapshot().availableColumns, []];
+            return [this.snapshot.availableColumns, []];
         }
         if (sql.includes('runtime-grants:global')) {
             return [[{ privilegeType: 'USAGE', isGrantable: 'NO' }], []];
         }
         if (sql.includes('runtime-grants:column')) {
-            return [exactSnapshot().columnPrivileges, []];
+            return [this.snapshot.columnPrivileges, []];
         }
         if (sql.includes('runtime-grants:table')) {
-            return [exactSnapshot().tablePrivileges, []];
+            return [this.snapshot.tablePrivileges, []];
         }
         if (sql.includes('runtime-grants:active-sessions')) {
             return [[{ sessionCount: 0, processPrivilegeProof: 1 }], []];
@@ -471,7 +574,7 @@ class SnapshotConnection implements RuntimeGrantConnection {
 class MissingDeleteConnection extends SnapshotConnection {
     grantsInstalled = false;
 
-    override async query(sql: string): Promise<[unknown, unknown]> {
+    override async query(sql: string, values?: readonly unknown[]): Promise<[unknown, unknown]> {
         if (/^GRANT /u.test(sql)) {
             this.calls.push(sql);
             this.grantsInstalled = true;
@@ -481,7 +584,7 @@ class MissingDeleteConnection extends SnapshotConnection {
             this.calls.push(sql);
             return [[], []];
         }
-        return super.query(sql);
+        return super.query(sql, values);
     }
 }
 
@@ -500,6 +603,110 @@ test('verification fails without DELETE and an approved fake apply installs the 
     const verified = await verifyRuntimeGrants(connection, SETTINGS, RUNTIME_ACCOUNT);
     assert.equal(verified.compliant, true);
     assert.equal(connection.calls.some((sql) => /^REVOKE|^SET DEFAULT ROLE/u.test(sql)), false);
+});
+
+test('Google-only apply and verification keep the selected schema and permissions throughout', async () => {
+    const settings: RuntimeGrantSettings = { ...SETTINGS, profile: 'google' };
+    const connection = new MissingDeleteConnection(exactSnapshot('google'));
+    await assert.rejects(() => verifyRuntimeGrants(connection, settings, RUNTIME_ACCOUNT), /do not exactly match/u);
+    const approved = await planRuntimeGrants(connection, settings, RUNTIME_ACCOUNT);
+    const applied = await applyRuntimeGrants(connection, settings, RUNTIME_ACCOUNT, approved.sha256, SERVER_UUID);
+    assert.equal(applied.profile, 'google');
+    assert.equal(applied.compliant, true);
+    assert.deepEqual(connection.calls.filter(sql => /^GRANT /u.test(sql)),
+        renderRuntimeGrantStatements(DATABASE, RUNTIME_ACCOUNT, 'google')
+            .map(statement => statement.replace(/;$/u, '')));
+    const verified = await verifyRuntimeGrants(connection, settings, RUNTIME_ACCOUNT);
+    assert.equal(verified.profile, 'google');
+    assert.equal(verified.compliant, true);
+    const visibilityProofs = connection.googleGuardBindings.filter(({ sql }) =>
+        sql.includes('google-schema-visibility'));
+    assert.ok(visibilityProofs.length > 3);
+    for (const { values } of visibilityProofs) assert.deepEqual(values, ["'migration_admin'@'%'", DATABASE]);
+    const historyProofs = connection.googleGuardBindings.filter(({ sql }) => sql.includes('google-apple-history'));
+    assert.equal(historyProofs.length, visibilityProofs.length);
+    for (const { sql, values } of historyProofs) {
+        assert.match(sql, /FROM `migration_test`\.schema_migrations/u);
+        assert.deepEqual(values, ['0016_create_apple_provider_tokens', '0017_create_apple_auth_revocations',
+            '0018_add_apple_session_provenance']);
+    }
+    await assert.rejects(() => verifyRuntimeGrants(connection, SETTINGS, RUNTIME_ACCOUNT), /do not exactly match/u);
+    assert.equal(connection.calls.some(sql => /^REVOKE|^SET DEFAULT ROLE/u.test(sql)), false);
+});
+
+test('Google-only plan, verification and apply refuse unproven maintenance schema visibility', async () => {
+    const settings = { ...SETTINGS, profile: 'google' } as const;
+    for (const visibility of [
+        { schemaSelectCount: 0, maintenanceCurrentUser: 'migration_admin@%' },
+        { schemaSelectCount: 1, maintenanceCurrentUser: 'other_admin@%' },
+    ]) {
+        const connection = new SnapshotConnection(exactSnapshot('google'));
+        const approved = await planRuntimeGrants(connection, settings, RUNTIME_ACCOUNT);
+        Object.assign(connection, visibility);
+        connection.calls.length = 0;
+        for (const operation of [
+            () => planRuntimeGrants(connection, settings, RUNTIME_ACCOUNT),
+            () => verifyRuntimeGrants(connection, settings, RUNTIME_ACCOUNT),
+            () => applyRuntimeGrants(connection, settings, RUNTIME_ACCOUNT, approved.sha256, SERVER_UUID),
+        ]) await assert.rejects(operation, /confirmed maintenance account.*direct schema-wide SELECT/u);
+        assert.equal(connection.calls.some(sql => /google-apple-history|runtime-grants:identity/u.test(sql)), false);
+        assert.equal(connection.calls.some(sql => /^\s*(?:GRANT|REVOKE|SET DEFAULT ROLE)/iu.test(sql)), false);
+        assert.equal(connection.calls.some(sql => sql.includes('RELEASE_LOCK')), true);
+    }
+});
+
+test('recorded Apple migrations block Google grants even when no Apple objects are visible', async () => {
+    const settings = { ...SETTINGS, profile: 'google' } as const;
+    for (const version of ['0016_create_apple_provider_tokens', '0017_create_apple_auth_revocations',
+        '0018_add_apple_session_provenance']) {
+        const connection = new SnapshotConnection(exactSnapshot('google'));
+        const approved = await planRuntimeGrants(connection, settings, RUNTIME_ACCOUNT);
+        connection.recordedAppleVersions = [version];
+        connection.calls.length = 0;
+        for (const operation of [
+            () => planRuntimeGrants(connection, settings, RUNTIME_ACCOUNT),
+            () => verifyRuntimeGrants(connection, settings, RUNTIME_ACCOUNT),
+            () => applyRuntimeGrants(connection, settings, RUNTIME_ACCOUNT, approved.sha256, SERVER_UUID),
+        ]) await assert.rejects(operation, /Apple migration history is recorded/u);
+        assert.equal(connection.calls.some(sql => sql.includes('runtime-grants:identity')), false);
+        assert.equal(connection.calls.some(sql => /^\s*(?:GRANT|REVOKE|SET DEFAULT ROLE)/iu.test(sql)), false);
+    }
+});
+
+test('full-profile planning does not require the additional Google schema gate', async () => {
+    const connection = new SnapshotConnection();
+    connection.schemaSelectCount = 0;
+    connection.recordedAppleVersions = ['0016_create_apple_provider_tokens'];
+    const plan = await planRuntimeGrants(connection, SETTINGS, RUNTIME_ACCOUNT);
+    assert.equal(plan.compliant, true);
+    assert.deepEqual(connection.googleGuardBindings, []);
+});
+
+test('changing the approved profile refuses apply before any privilege mutation', async () => {
+    for (const profile of ['google', 'google-apple'] as const) {
+        const connection = new SnapshotConnection({ ...exactSnapshot(profile), tablePrivileges: [] });
+        const settings = { ...SETTINGS, profile };
+        const changedSettings = { ...SETTINGS, profile: profile === 'google' ? 'google-apple' : 'google' } as const;
+        const approved = await planRuntimeGrants(connection, settings, RUNTIME_ACCOUNT);
+        const changed = await planRuntimeGrants(connection, changedSettings, RUNTIME_ACCOUNT);
+        assert.equal(approved.state, 'repair');
+        assert.notEqual(approved.sha256, changed.sha256);
+        await assert.rejects(() => applyRuntimeGrants(connection, changedSettings, RUNTIME_ACCOUNT, approved.sha256, SERVER_UUID),
+            /state changed/u);
+        assert.equal(connection.calls.some(sql => /^\s*(?:GRANT|REVOKE|SET DEFAULT ROLE)/iu.test(sql)), false);
+        assert.equal(new Set(connection.lockNames).size, 1);
+        assert.equal(connection.lockNames[0], runtimeGrantLockName(DATABASE, RUNTIME_ACCOUNT));
+    }
+});
+
+test('invalid runtime grant profiles are rejected before any database inspection', async () => {
+    const settings = { ...SETTINGS, profile: 'unknown' as RuntimeGrantProfile };
+    const connection = new SnapshotConnection();
+    assert.throws(() => createRuntimeGrantPlan(exactSnapshot(), settings, RUNTIME_ACCOUNT), /profile/iu);
+    await assert.rejects(() => planRuntimeGrants(connection, settings, RUNTIME_ACCOUNT), /profile/iu);
+    await assert.rejects(() => verifyRuntimeGrants(connection, settings, RUNTIME_ACCOUNT), /profile/iu);
+    await assert.rejects(() => applyRuntimeGrants(connection, settings, RUNTIME_ACCOUNT, '0'.repeat(64), SERVER_UUID), /profile/iu);
+    assert.deepEqual(connection.calls, []);
 });
 
 test('runtime schema inspection includes both provider tables', async () => {

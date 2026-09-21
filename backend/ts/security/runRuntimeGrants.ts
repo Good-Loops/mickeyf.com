@@ -23,23 +23,28 @@ import {
     verifyRuntimeGrants,
 } from './runtimeGrantOperations';
 import {
+    parseRuntimeGrantProfile,
     PRODUCTION_RUNTIME_DATABASE_ACCOUNT,
     PRODUCTION_RUNTIME_DATABASE_ROLE,
     runtimeDatabaseAccountName,
     type RuntimeDatabaseAccount,
+    type RuntimeGrantProfile,
 } from './runtimeGrantManifest';
 
 type RuntimeGrantCliCommand = RuntimeGrantCommand;
 
 let activeCommand: RuntimeGrantCliCommand | undefined;
 
-function parseCommand(args: readonly string[]): RuntimeGrantCliCommand {
-    if (args.length !== 1) {
+function parseCommand(args: readonly string[]): Readonly<{
+    command: RuntimeGrantCliCommand;
+    profile: RuntimeGrantProfile;
+}> {
+    if (args.length < 1 || args.length > 2) {
         throw new Error(
-            'Usage: runRuntimeGrants.ts <plan|verify|apply>'
+            'Usage: runRuntimeGrants.ts <plan|verify|apply> [--profile=google|google-apple]'
         );
     }
-    const [command] = args;
+    const [command, profileArgument] = args;
     if (
         command !== 'plan'
         && command !== 'verify'
@@ -47,7 +52,13 @@ function parseCommand(args: readonly string[]): RuntimeGrantCliCommand {
     ) {
         throw new Error('Unknown runtime grant command');
     }
-    return command;
+    if (profileArgument !== undefined && !profileArgument.startsWith('--profile=')) {
+        throw new Error('Expected --profile=google or --profile=google-apple after the command');
+    }
+    return {
+        command,
+        profile: parseRuntimeGrantProfile(profileArgument?.slice('--profile='.length)),
+    };
 }
 
 function isApplyCommand(command: RuntimeGrantCliCommand): boolean {
@@ -123,6 +134,7 @@ async function withOperationDeadline<T>(
 
 async function executeCommand(
     command: RuntimeGrantCliCommand,
+    profile: RuntimeGrantProfile,
     connection: Connection,
     config: MigrationConfig,
     confirmation: Readonly<{
@@ -133,6 +145,7 @@ async function executeCommand(
     signal: AbortSignal
 ): Promise<RuntimeGrantPlan> {
     const settings = {
+        profile,
         database: config.database,
         expectedServerUuid: PRODUCTION_CLOUD_SQL_TARGET.serverUuid,
         maintenanceAccount,
@@ -183,8 +196,8 @@ function safeErrorMessage(error: unknown, password: string): string {
     return password.length > 0 ? message.split(password).join('[REDACTED]') : message;
 }
 
-async function main(): Promise<void> {
-    const command = parseCommand(process.argv.slice(2));
+export async function runRuntimeGrants(args: readonly string[]): Promise<void> {
+    const { command, profile } = parseCommand(args);
     activeCommand = command;
     const config = loadMigrationConfig();
     const confirmedMaintenanceAccount = loadMigrationAccountConfirmation();
@@ -229,6 +242,7 @@ async function main(): Promise<void> {
             isApplyCommand(command),
             (signal) => executeCommand(
                 command,
+                profile,
                 connection,
                 config,
                 confirmation,
@@ -246,19 +260,21 @@ async function main(): Promise<void> {
     }
 }
 
-main().catch((error: unknown) => {
-    if (error instanceof RuntimeGrantDriftError) {
-        console.log(JSON.stringify({
-            command: activeCommand ?? 'unknown',
-            plan: error.plan,
-        }, null, 2));
-    }
-    let password = '';
-    try {
-        password = loadMigrationConfig().password;
-    } catch {
-        // Configuration errors are already secret-safe.
-    }
-    console.error(safeErrorMessage(error, password));
-    process.exitCode = error instanceof RuntimeGrantDriftError ? 2 : 1;
-});
+if (require.main === module) {
+    runRuntimeGrants(process.argv.slice(2)).catch((error: unknown) => {
+        if (error instanceof RuntimeGrantDriftError) {
+            console.log(JSON.stringify({
+                command: activeCommand ?? 'unknown',
+                plan: error.plan,
+            }, null, 2));
+        }
+        let password = '';
+        try {
+            password = loadMigrationConfig().password;
+        } catch {
+            // Configuration errors are already secret-safe.
+        }
+        console.error(safeErrorMessage(error, password));
+        process.exitCode = error instanceof RuntimeGrantDriftError ? 2 : 1;
+    });
+}

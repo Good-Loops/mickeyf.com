@@ -1,13 +1,62 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
+    GOOGLE_RUNTIME_GRANT_MANIFEST,
+    parseRuntimeGrantProfile,
     PRODUCTION_RUNTIME_DATABASE_ACCOUNT,
     PRODUCTION_RUNTIME_DATABASE_ROLE,
     renderRuntimeGrantStatements,
     RUNTIME_GRANT_MANIFEST,
     runtimeColumnPrivilegeInventory,
     runtimeTablePrivilegeInventory,
+    type RuntimeGrantProfile,
 } from './runtimeGrantManifest';
+
+test('Google profile excludes Apple storage and provenance without changing shared privileges', () => {
+    assert.deepEqual(GOOGLE_RUNTIME_GRANT_MANIFEST.map(({ table }) => table), [
+        'account_sessions', 'account_provider_identities', 'provider_auth_attempts',
+        'schema_migrations', 'users', 'game_submission_receipts', 'game_personal_bests',
+    ]);
+    const columns = runtimeColumnPrivilegeInventory('google');
+    assert.deepEqual(columns, runtimeColumnPrivilegeInventory('google-apple').filter(
+        ({ tableName, columnName }) => !tableName.startsWith('apple_') && !columnName.startsWith('apple_')
+    ));
+    assert.deepEqual(runtimeTablePrivilegeInventory('google'), [
+        { tableName: 'account_sessions', privilegeType: 'DELETE' },
+        { tableName: 'provider_auth_attempts', privilegeType: 'DELETE' },
+        { tableName: 'users', privilegeType: 'DELETE' },
+        { tableName: 'game_submission_receipts', privilegeType: 'DELETE' },
+        { tableName: 'game_personal_bests', privilegeType: 'DELETE' },
+    ]);
+    const statements = renderRuntimeGrantStatements('cms', PRODUCTION_RUNTIME_DATABASE_ACCOUNT, 'google');
+    assert.equal(statements.length, 7);
+    assert.ok(statements.every(statement => !statement.includes('apple_')));
+    assert.equal(statements[0],
+        "GRANT SELECT (`session_hash`, `account_uuid`, `created_at`, `expires_at`, `remembered`, `renewed_at`, `previous_session_hash`, `previous_valid_until`), INSERT (`session_hash`, `account_uuid`, `created_at`, `expires_at`, `remembered`, `renewed_at`), UPDATE (`session_hash`, `expires_at`, `renewed_at`, `previous_session_hash`, `previous_valid_until`), DELETE ON `cms`.`account_sessions` TO 'cms_mickeyf'@'%';");
+    assert.deepEqual(statements.slice(1),
+        renderRuntimeGrantStatements('cms', PRODUCTION_RUNTIME_DATABASE_ACCOUNT, 'google-apple').slice(3));
+});
+
+test('omitting the profile preserves the existing full manifest', () => {
+    assert.equal(parseRuntimeGrantProfile(undefined), 'google-apple');
+    assert.equal(parseRuntimeGrantProfile('google'), 'google');
+    assert.equal(parseRuntimeGrantProfile('google-apple'), 'google-apple');
+    assert.deepEqual(runtimeColumnPrivilegeInventory(), runtimeColumnPrivilegeInventory('google-apple'));
+    assert.deepEqual(runtimeTablePrivilegeInventory(), runtimeTablePrivilegeInventory('google-apple'));
+    assert.deepEqual(renderRuntimeGrantStatements('cms', PRODUCTION_RUNTIME_DATABASE_ACCOUNT),
+        renderRuntimeGrantStatements('cms', PRODUCTION_RUNTIME_DATABASE_ACCOUNT, 'google-apple'));
+});
+
+test('unknown grant profiles fail closed rather than falling back to broader grants', () => {
+    for (const value of ['', 'Google', 'google ', 'apple', 'all', 'google; DROP TABLE users']) {
+        const profile = value as RuntimeGrantProfile; // Exercise untyped callers too.
+        assert.throws(() => parseRuntimeGrantProfile(value), /Runtime grant profile/);
+        assert.throws(() => runtimeColumnPrivilegeInventory(profile), /Runtime grant profile/);
+        assert.throws(() => runtimeTablePrivilegeInventory(profile), /Runtime grant profile/);
+        assert.throws(() => renderRuntimeGrantStatements('cms', PRODUCTION_RUNTIME_DATABASE_ACCOUNT, profile),
+            /Runtime grant profile/);
+    }
+});
 
 test('defines only runtime DML and read-only identity-epoch metadata', () => {
     assert.deepEqual(PRODUCTION_RUNTIME_DATABASE_ROLE, {

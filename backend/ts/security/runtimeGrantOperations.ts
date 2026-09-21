@@ -1,11 +1,16 @@
 import { createHash } from 'node:crypto';
+import { APPLE_SESSION_PROVENANCE_MIGRATION_VERSION } from '../migrations/accountSessionSchema';
+import { APPLE_REVOCATION_MIGRATION_VERSION } from '../migrations/appleRevocationSchema';
+import { APPLE_TOKEN_MIGRATION_VERSION } from '../migrations/appleTokenSchema';
 import {
+    parseRuntimeGrantProfile,
     renderRuntimeDatabaseAccount,
     renderRuntimeGrantStatements,
     runtimeColumnPrivilegeInventory,
     runtimeTablePrivilegeInventory,
     runtimeDatabaseAccountName,
     type RuntimeDatabaseAccount,
+    type RuntimeGrantProfile,
 } from './runtimeGrantManifest';
 
 export interface RuntimeGrantConnection {
@@ -14,6 +19,7 @@ export interface RuntimeGrantConnection {
 }
 
 export type RuntimeGrantSettings = Readonly<{
+    profile?: RuntimeGrantProfile;
     database: string;
     expectedServerUuid: string;
     maintenanceAccount: RuntimeDatabaseAccount;
@@ -135,7 +141,8 @@ export type RuntimeGrantOperationPhases = Readonly<{
 }>;
 
 type RuntimeGrantPlanPayload = Readonly<{
-    formatVersion: 4;
+    formatVersion: 5;
+    profile: RuntimeGrantProfile;
     database: string;
     runtimeAccount: string;
     approvedRole: string;
@@ -274,8 +281,8 @@ function renderPrivilegeName(value: string): string {
     return normalized;
 }
 
-function expectedColumnPrivileges(database: string): ColumnPrivilege[] {
-    return sorted(runtimeColumnPrivilegeInventory().map((privilege) => ({
+function expectedColumnPrivileges(database: string, profile: RuntimeGrantProfile): ColumnPrivilege[] {
+    return sorted(runtimeColumnPrivilegeInventory(profile).map((privilege) => ({
         schemaName: database,
         tableName: privilege.tableName,
         columnName: privilege.columnName,
@@ -284,8 +291,8 @@ function expectedColumnPrivileges(database: string): ColumnPrivilege[] {
     })));
 }
 
-function expectedTablePrivileges(database: string): TablePrivilege[] {
-    return sorted(runtimeTablePrivilegeInventory().map((privilege) => ({
+function expectedTablePrivileges(database: string, profile: RuntimeGrantProfile): TablePrivilege[] {
+    return sorted(runtimeTablePrivilegeInventory(profile).map((privilege) => ({
         schemaName: database,
         ...privilege,
         isGrantable: 'NO' as const,
@@ -781,6 +788,16 @@ function blockersFor(
     if (missingColumns.length > 0) {
         blockers.push(`required runtime columns are missing: ${missingColumns.join(', ')}`);
     }
+    // Account deletion still probes existing Apple storage with Apple flags off;
+    // omitting its permissions is safe only before that schema is introduced.
+    if (settings.profile === 'google' && snapshot.availableColumns.some(({ tableName, columnName }) =>
+        tableName === 'apple_provider_tokens'
+        || tableName === 'apple_auth_revocations'
+        || (tableName === 'account_sessions'
+            && (columnName === 'apple_subject_hash' || columnName === 'apple_authenticated_at'))
+    )) {
+        blockers.push('Google-only grants require pre-Apple schema; Apple storage or session provenance already exists');
+    }
     if (snapshot.availableColumns.some(({ tableName, columnName }) =>
         tableName === 'game_runs'
         || (tableName === 'game_personal_bests' && columnName === 'source_game_run_id')
@@ -902,6 +919,7 @@ function buildOperationPhases(
     database: string,
     account: RuntimeDatabaseAccount,
     settings: RuntimeGrantSettings,
+    profile: RuntimeGrantProfile,
     expected: readonly ColumnPrivilege[],
     expectedTables: readonly TablePrivilege[]
 ): RuntimeGrantOperationPhases {
@@ -917,7 +935,7 @@ function buildOperationPhases(
     return {
         ensureRequiredPrivileges: hasRequiredPrivilegeSubset(snapshot, expected, expectedTables)
             ? empty
-            : renderRuntimeGrantStatements(database, account)
+            : renderRuntimeGrantStatements(database, account, profile)
                 .map((statement) => statement.replace(/;$/u, '')),
         clearDefaultRoles: snapshot.defaultRoles.length > 0
             ? [`SET DEFAULT ROLE NONE TO ${target}`]
@@ -980,8 +998,9 @@ export function createRuntimeGrantPlan(
     settings: RuntimeGrantSettings,
     account: RuntimeDatabaseAccount
 ): RuntimeGrantPlan {
-    const expected = expectedColumnPrivileges(settings.database);
-    const expectedTables = expectedTablePrivileges(settings.database);
+    const profile = parseRuntimeGrantProfile(settings.profile);
+    const expected = expectedColumnPrivileges(settings.database, profile);
+    const expectedTables = expectedTablePrivileges(settings.database, profile);
     const blockers = blockersFor(
         snapshot,
         settings,
@@ -991,7 +1010,8 @@ export function createRuntimeGrantPlan(
     );
     const state = classifyState(snapshot, expected, expectedTables, blockers);
     const payload: RuntimeGrantPlanPayload = {
-        formatVersion: 4,
+        formatVersion: 5,
+        profile,
         database: settings.database,
         runtimeAccount: runtimeDatabaseAccountName(account),
         approvedRole: runtimeDatabaseAccountName(settings.approvedRole),
@@ -1015,12 +1035,14 @@ export function createRuntimeGrantPlan(
             settings.database,
             account,
             settings,
+            profile,
             expected,
             expectedTables
         ),
     };
     const digestPayload = {
         formatVersion: payload.formatVersion,
+        profile: payload.profile,
         database: payload.database,
         runtimeAccount: payload.runtimeAccount,
         approvedRole: payload.approvedRole,
@@ -1154,16 +1176,52 @@ async function withRuntimeGrantLock<T>(
     }
 }
 
+async function inspectSelectedRuntimeGrantState(
+    connection: RuntimeGrantConnection,
+    settings: RuntimeGrantSettings,
+    account: RuntimeDatabaseAccount
+): Promise<RuntimeGrantSnapshot> {
+    if (settings.profile === 'google') {
+        // Information-schema visibility is privilege-filtered. Prove direct
+        // schema visibility before treating absent Apple objects as evidence.
+        const [visibility] = await queryRows<{
+            currentUser: string;
+            schemaSelectCount: number | string;
+        }>(connection, `
+            SELECT CURRENT_USER() AS currentUser, COUNT(*) AS schemaSelectCount
+            FROM information_schema.SCHEMA_PRIVILEGES
+            WHERE GRANTEE = ? AND TABLE_SCHEMA = ? AND PRIVILEGE_TYPE = 'SELECT'
+            /* runtime-grants:google-schema-visibility */
+        `, [renderRuntimeDatabaseAccount(settings.maintenanceAccount), settings.database],
+        'Google grant schema visibility inspection');
+        if (visibility?.currentUser !== runtimeDatabaseAccountName(settings.maintenanceAccount)
+            || Number(visibility.schemaSelectCount) !== 1) {
+            throw new Error('Google-only grants require the confirmed maintenance account to have direct schema-wide SELECT');
+        }
+        const appleHistory = await queryRows<{ version: string }>(connection, `
+            SELECT version FROM ${quoteIdentifier(settings.database, 'Database name')}.schema_migrations
+            WHERE version IN (?, ?, ?)
+            /* runtime-grants:google-apple-history */
+        `, [APPLE_TOKEN_MIGRATION_VERSION, APPLE_REVOCATION_MIGRATION_VERSION,
+            APPLE_SESSION_PROVENANCE_MIGRATION_VERSION], 'Google grant Apple migration history inspection');
+        if (appleHistory.length > 0) {
+            throw new Error('Google-only grants require pre-Apple schema; Apple migration history is recorded');
+        }
+    }
+    return inspectRuntimeGrantState(connection, settings.database, account);
+}
+
 export async function planRuntimeGrants(
     connection: RuntimeGrantConnection,
     settings: RuntimeGrantSettings,
     account: RuntimeDatabaseAccount
 ): Promise<RuntimeGrantPlan> {
+    settings = { ...settings, profile: parseRuntimeGrantProfile(settings.profile) };
     return withRuntimeGrantLock(connection, settings, account, async () =>
         createRuntimeGrantPlan(
-            await inspectRuntimeGrantState(
+            await inspectSelectedRuntimeGrantState(
                 connection,
-                settings.database,
+                settings,
                 account
             ),
             settings,
@@ -1189,10 +1247,11 @@ export async function applyRuntimeGrants(
     confirmedServerUuid: string,
     roleRemover?: RuntimeRoleRemover
 ): Promise<RuntimeGrantPlan> {
+    settings = { ...settings, profile: parseRuntimeGrantProfile(settings.profile) };
     return withRuntimeGrantLock(connection, settings, account, async () => {
-        const initialSnapshot = await inspectRuntimeGrantState(
+        const initialSnapshot = await inspectSelectedRuntimeGrantState(
             connection,
-            settings.database,
+            settings,
             account
         );
         const approvedPlan = createRuntimeGrantPlan(initialSnapshot, settings, account);
@@ -1214,9 +1273,9 @@ export async function applyRuntimeGrants(
         }
 
         await executeStatements(connection, approvedPlan.operations.ensureRequiredPrivileges);
-        const preparedSnapshot = await inspectRuntimeGrantState(
+        const preparedSnapshot = await inspectSelectedRuntimeGrantState(
             connection,
-            settings.database,
+            settings,
             account
         );
         const preparedBlockers = blockersFor(
@@ -1239,9 +1298,9 @@ export async function applyRuntimeGrants(
         assertRoleStateStable(initialSnapshot, preparedSnapshot);
 
         await executeStatements(connection, approvedPlan.operations.clearDefaultRoles);
-        const defaultClearedSnapshot = await inspectRuntimeGrantState(
+        const defaultClearedSnapshot = await inspectSelectedRuntimeGrantState(
             connection,
-            settings.database,
+            settings,
             account
         );
         const defaultClearedBlockers = blockersFor(
@@ -1285,9 +1344,9 @@ export async function applyRuntimeGrants(
         let finalPlan: RuntimeGrantPlan;
         try {
             finalPlan = createRuntimeGrantPlan(
-                await inspectRuntimeGrantState(
+                await inspectSelectedRuntimeGrantState(
                     connection,
-                    settings.database,
+                    settings,
                     account
                 ),
                 settings,
