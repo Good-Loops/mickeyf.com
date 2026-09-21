@@ -376,8 +376,8 @@ The localhost gateway now has a tested `renewable` protocol option for provider
 discovery, begin/complete and renewal. It maps only `ludolume_public_web_session`
 to the backend's canonical `__session`, including anonymous challenge bindings.
 Local test credentials, native cookies and legacy public cookies are not mixed.
-The Vite plugin still selects legacy mode: switch it and retire the corresponding
-UI/renewal compatibility guards only with the real public backend deployment.
+The Vite plugin defaults to legacy mode: select the renewable protocol only
+with the real public backend deployment.
 Renewable-mode self-service deletion is covered below; admin routes remain
 outside the gateway's allowlist.
 
@@ -412,9 +412,48 @@ schema/grant or coordinated-session cutover requirements.
 
 The owner explicitly requested restoring **Continue with Google on localhost**.
 That is part of the public signup/login release: select the gateway's renewable
-protocol and retire the legacy provider-UI guards together with the compatible
-public backend. Preserve the same real accounts and scores; do not silently
-switch localhost back to the isolated database to make the button appear.
+protocol together with the compatible public backend. Preserve the same real
+accounts and scores; do not silently switch localhost back to the isolated
+database to make the button appear.
+
+### Explicit localhost cutover configuration — 2026-09-21
+
+`VITE_USE_PUBLIC_API=1` continues to select real public accounts and scores.
+The separate `VITE_PUBLIC_AUTH_PROTOCOL` accepts only `legacy` (the default) or
+`renewable`. Vite and the browser share its parser. Only legacy mode hides
+provider/account-management controls and uses verify-only, four-hour sessions;
+renewable mode permits discovery and the existing renewal/deletion flows.
+The live-account notice remains visible in either development-preview mode.
+Production/native API selection and leaderboard sources are unchanged.
+
+Do not set `renewable` until the matching public backend is live. Restart Vite
+at cutover and sign in again: the two protocols deliberately have different
+cookie namespaces. There is no automatic negotiation or fallback that could
+mix challenge/session cookies. No local environment flag or production setting
+was changed in this checkpoint.
+
+Read-only activation review still finds unfinished age/consent and published-
+privacy work, plus the coordinated schema/deletion/runtime rollout. The owner
+requested discussion of a limited initial signup audience; no age restriction
+or change to the all-ages plan has been approved. KWS does not block independent
+development. A fresh Cloud Run metadata read failed during gcloud auth refresh
+with a certificate-trust error; dated cloud/schema/backup observations below
+must not be presented as current evidence. TLS verification remains enabled.
+
+Validation: 60 focused tests passed with mocked network requests, including
+actual Vite plugin wiring, both cookie protocols, invalid configuration,
+provider capability visibility, and unchanged public leaderboard routing:
+
+```text
+node --experimental-strip-types --test --test-reporter=spec frontend/ts/config/publicAuthProtocol.test.mjs frontend/ts/services/publicApiPreviewCompatibility.test.mjs frontend/ts/services/publicApiPreview.test.mjs frontend/ts/config/apiBase.test.mjs frontend/ts/services/publicLeaderboards.test.mjs frontend/ts/components/ProviderSignInControls.test.mjs
+node frontend/node_modules/typescript/bin/tsc -p frontend/tsconfig.json --noEmit
+git diff --check
+```
+
+TypeScript and whitespace checks passed. Existing duplicate Capacitor plugin
+registration warnings occur across the isolated SSR scenarios. These checks do
+not establish real-provider acceptance or public activation; no broad gameplay
+or backend test campaign was repeated.
 
 ### Localhost deletion transport prepared — 2026-09-14
 
@@ -448,9 +487,9 @@ Remaining work, in order:
    new Swift bridge on macOS before any signed rollout. Complete native Google
    SDK/client setup separately, never Google OAuth inside the embedded WebView.
   Treat Apple's web Services ID separately.
-   When this backend replaces the legacy public revision, also retire the
-   frontend's public-preview verify-only/four-hour/provider-UI compatibility
-   branches and update its gateway cookie mapping to the released web cookie.
+   When this backend replaces the legacy public revision, select the frontend's
+   renewable public-preview protocol to enable the matching UI, renewal and
+   web-cookie mapping. Remove the legacy option after its rollback window closes.
    Keep the separate public cookie namespace and the isolated automated tests.
 3. Complete provider disconnect/revocation and privacy disclosures,
    focused real-provider acceptance and separately approved

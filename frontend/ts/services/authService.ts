@@ -1,5 +1,5 @@
 /** Configured auth requests; UI/context callers own state and alerts. */
-import { API_BASE, PUBLIC_API_PREVIEW } from '@/config/apiConfig';
+import { API_BASE, LEGACY_PUBLIC_API_PREVIEW } from '@/config/apiConfig';
 import { createAuthApi } from './authApi.ts';
 import { apiFetch } from './apiFetch.ts';
 
@@ -17,5 +17,5 @@ export const {
     providerAccountMethodsRequest,
 } = authApi;
 
-// The deployed preview backend has fixed four-hour sessions, not renewal.
-export const renewRequest = PUBLIC_API_PREVIEW ? authApi.verifyRequest : authApi.renewRequest;
+// Only the explicitly selected legacy protocol lacks session renewal.
+export const renewRequest = LEGACY_PUBLIC_API_PREVIEW ? authApi.verifyRequest : authApi.renewRequest;

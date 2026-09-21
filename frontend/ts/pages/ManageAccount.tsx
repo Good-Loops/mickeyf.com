@@ -7,7 +7,7 @@ import type { ProviderAccountMethods } from '@/services/authApi';
 import { acquireProviderCredential, getAvailableProviderClients, type PublicProviderClient } from '@/services/providerClient';
 import Swal from '@/components/siteAlert';
 import { useAuth } from '@/context/AuthContext';
-import { PUBLIC_API_PREVIEW } from '@/config/apiConfig';
+import { LEGACY_PUBLIC_API_PREVIEW } from '@/config/apiConfig';
 import PublicAccountPreviewNotice from '@/components/PublicAccountPreviewNotice';
 
 export default function ManageAccount() {
@@ -31,7 +31,7 @@ export default function ManageAccount() {
     const deletionProviderName = deletionClient?.provider === 'apple' ? 'Apple' : 'Google';
 
     useEffect(() => {
-        if (PUBLIC_API_PREVIEW || loading || !isAuthenticated) return;
+        if (LEGACY_PUBLIC_API_PREVIEW || loading || !isAuthenticated) return;
         let active = true;
         setMethodsLoading(true);
         setMethods(null);
@@ -55,7 +55,7 @@ export default function ManageAccount() {
 
     const handleDelete = async (event: FormEvent<HTMLFormElement>) => {
         event.preventDefault();
-        if (PUBLIC_API_PREVIEW || submitting.current || !deletionReady || (!passwordless && !password) || confirmation !== 'DELETE') return;
+        if (LEGACY_PUBLIC_API_PREVIEW || submitting.current || !deletionReady || (!passwordless && !password) || confirmation !== 'DELETE') return;
         submitting.current = true;
         setBusy(true);
         setError('');
@@ -138,8 +138,8 @@ export default function ManageAccount() {
                 <RouteHeading id="manage-account-title" className="manage-account__title" focusKey={loading}>
                     Manage account
                 </RouteHeading>
-                {PUBLIC_API_PREVIEW ? <>
-                    <PublicAccountPreviewNotice />
+                <PublicAccountPreviewNotice />
+                {LEGACY_PUBLIC_API_PREVIEW ? <>
                     {loading ? <p role="status">Checking your session…</p> : isAuthenticated
                         ? <p className="manage-account__identity">Signed in as <strong>{userName}</strong></p>
                         : <p><Link to="/login">Log in</Link> to your public account.</p>}

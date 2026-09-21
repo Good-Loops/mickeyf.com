@@ -4,6 +4,7 @@ import path from "node:path";
 import { Agent } from "node:http";
 import { publicLeaderboardsPlugin } from "./dev/publicLeaderboards";
 import { publicApiPlugin } from "./dev/publicApi";
+import { parsePublicAuthProtocol } from "./ts/config/publicAuthProtocol";
 
 export default defineConfig(({ command, mode, isPreview }) => {
   const env = loadEnv(mode, process.cwd(), "VITE_");
@@ -17,7 +18,7 @@ export default defineConfig(({ command, mode, isPreview }) => {
 
   return {
     plugins: [react(), ...(developmentServer ? [publicLeaderboardsPlugin()] : []),
-      ...(publicApiPreview ? [publicApiPlugin()] : [])],
+      ...(publicApiPreview ? [publicApiPlugin(parsePublicAuthProtocol(env.VITE_PUBLIC_AUTH_PROTOCOL))] : [])],
     root: ".",
     resolve: {
       alias: {

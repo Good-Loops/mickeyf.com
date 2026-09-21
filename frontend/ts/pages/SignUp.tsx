@@ -11,7 +11,7 @@ import { signupRequest } from "@/services/authService";
 import { useAuth } from "@/context/AuthContext";
 import { signupAndLogin } from "./signupFlow.ts";
 import PublicAccountPreviewNotice from '@/components/PublicAccountPreviewNotice';
-import { PUBLIC_API_PREVIEW } from '@/config/apiConfig';
+import { LEGACY_PUBLIC_API_PREVIEW } from '@/config/apiConfig';
 
 const SignUp: React.FC = () => {
     const [userName, setUserName] = useState("");
@@ -45,7 +45,7 @@ const SignUp: React.FC = () => {
             }, {
                 signup: signupRequest,
                 login: (user, password, options) => login(user, password, { ...options, showFeedback: false }),
-            }, { rememberMe: !PUBLIC_API_PREVIEW && rememberMe });
+            }, { rememberMe: !LEGACY_PUBLIC_API_PREVIEW && rememberMe });
 
             if (result.status === "rejected") {
                 switch (result.error) {
@@ -157,12 +157,12 @@ const SignUp: React.FC = () => {
                             onChange={(inputEvent) => setUserPassword(inputEvent.target.value)}
                         />
                     </label>
-                    {!PUBLIC_API_PREVIEW && <StaySignedInCheckbox checked={rememberMe} onChange={setRememberMe} disabled={busy} />}
+                    {!LEGACY_PUBLIC_API_PREVIEW && <StaySignedInCheckbox checked={rememberMe} onChange={setRememberMe} disabled={busy} />}
                     <button className="signup__submit" type="submit" disabled={busy}>
                         {loading ? "Signing up…" : "Sign up"}
                     </button>
                 </form>
-                {!PUBLIC_API_PREVIEW && <ProviderSignInControls action="signup" userName={userName} rememberMe={rememberMe}
+                {!LEGACY_PUBLIC_API_PREVIEW && <ProviderSignInControls action="signup" userName={userName} rememberMe={rememberMe}
                     disabled={loading} operationLock={submitting} onBusyChange={setProviderBusy}
                     onSuccess={() => { void showSignupSuccess(); }} />}
             </div>

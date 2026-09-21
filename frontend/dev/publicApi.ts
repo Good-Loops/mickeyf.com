@@ -1,10 +1,12 @@
 import type { IncomingMessage } from 'node:http';
 import type { Connect, Plugin } from 'vite';
+import type { PublicAuthProtocol } from '../ts/config/publicAuthProtocol.ts';
+
+export type { PublicAuthProtocol } from '../ts/config/publicAuthProtocol.ts';
 
 export const PUBLIC_API_PREFIX = '/__public-api';
 const PUBLIC_ORIGIN = 'https://mickeyf-org-j7yuum4tiq-uc.a.run.app';
 const LOCAL_ORIGIN = 'http://localhost:5173';
-export type PublicAuthProtocol = 'legacy' | 'renewable';
 const SESSION_COOKIES = {
     legacy: { local: 'ludolume_public_session', upstream: 'session' },
     renewable: { local: 'ludolume_public_web_session', upstream: '__session' },

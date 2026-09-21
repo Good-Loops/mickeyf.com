@@ -2743,6 +2743,22 @@ Primary references checked 2026-09-10:
 [Apple login/account review requirements](https://developer.apple.com/app-store/review/guidelines/).
 Provider login and store publication are planned, not implemented or verified.
 
+### Public-account preview cutover checkpoint — 2026-09-21
+
+Localhost now has an explicit, validated legacy/renewable authentication selector
+separate from the real-account API choice. Default legacy behavior is unchanged;
+the provider controls, remembered sessions and account management are available
+to the renewable protocol once the compatible public backend is deployed.
+No environment flag, cloud resource, database or live account was changed.
+See [the cutover contract](backend/PROVIDER_SIGN_IN.md#explicit-localhost-cutover-configuration--2026-09-21).
+
+The owner asked to discuss a limited initial signup audience instead of waiting
+for the complete all-ages account flow. This is not approval of an age threshold,
+country restriction or release. KWS remains separate from independent development;
+published privacy information and backend/deletion/schema readiness still need
+completion for public signup activation. Refresh dated live-readiness evidence
+after resolving gcloud's certificate-trust error, without disabling TLS checks.
+
 ### Approved privacy implementation backlog — not implemented
 
 Owner decisions confirmed during the 2026-09-10 privacy-policy review. The
