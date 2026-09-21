@@ -9,8 +9,10 @@ export const APPLE_IMMEDIATE_REVOCATION_TIMEOUT_MS = 10_000;
 const QUERY_TIMEOUT_MS = 10_000;
 const REVOCATION_LOCK = "CONCAT('mickeyf:apple-revocation:', LEFT(SHA2(DATABASE(), 256), 16))";
 const PENDING = 'revocation_requested_at IS NOT NULL';
-const EXPIRED = `${PENDING} AND retention_deadline <= UTC_TIMESTAMP(6)`;
-const DUE = `${PENDING} AND next_attempt_at <= UTC_TIMESTAMP(6) AND retention_deadline > UTC_TIMESTAMP(6)`;
+// Purge queued tokens a day before the seven-day maximum, leaving hourly cleanup recovery headroom.
+const PURGE_CUTOFF = 'TIMESTAMPADD(HOUR, 24, UTC_TIMESTAMP(6))';
+export const APPLE_TOKEN_PURGE_PREDICATE = `${PENDING} AND retention_deadline <= ${PURGE_CUTOFF}`;
+const DUE = `${PENDING} AND next_attempt_at <= UTC_TIMESTAMP(6) AND retention_deadline > ${PURGE_CUTOFF}`;
 const MAX_ATTEMPT_COUNT = 4_294_967_295;
 
 type Dependencies = Readonly<{
@@ -61,7 +63,7 @@ export function createAppleTokenRevocationWorker({ database, vault, appleTokens,
 
     async function purgeExpired(connection: PoolConnection, batchSize: number, accountId?: string): Promise<number> {
         const [result] = await connection.query<ResultSetHeader>({
-            sql: `DELETE FROM apple_provider_tokens WHERE ${EXPIRED}${accountId ? ' AND account_uuid = ?' : ''}
+            sql: `DELETE FROM apple_provider_tokens WHERE ${APPLE_TOKEN_PURGE_PREDICATE}${accountId ? ' AND account_uuid = ?' : ''}
                 ORDER BY retention_deadline, token_id LIMIT ${batchSize}`, timeout: QUERY_TIMEOUT_MS,
         }, accountId ? [accountId] : []);
         return affectedRows(result, batchSize);
@@ -91,7 +93,7 @@ export function createAppleTokenRevocationWorker({ database, vault, appleTokens,
             // after earlier serial calls, and never write the retention deadline.
             const [claim] = await connection.query<ResultSetHeader>({
                 sql: `UPDATE apple_provider_tokens SET attempt_count = LEAST(attempt_count + 1, ${MAX_ATTEMPT_COUNT}),
-                    next_attempt_at = LEAST(retention_deadline, TIMESTAMPADD(SECOND, ?, UTC_TIMESTAMP(6)))
+                    next_attempt_at = LEAST(TIMESTAMPADD(HOUR, -24, retention_deadline), TIMESTAMPADD(SECOND, ?, UTC_TIMESTAMP(6)))
                     WHERE token_id = ? AND ${DUE}${scope}`, timeout: QUERY_TIMEOUT_MS,
             }, [delaySeconds, row.token_id, ...scopeValues]);
             if (affectedRows(claim, 1) === 0) continue;
@@ -117,7 +119,7 @@ export function createAppleTokenRevocationWorker({ database, vault, appleTokens,
         }
         counts.expired += await purgeExpired(connection, batchSize, accountId);
         const [remaining] = await connection.query<RowDataPacket[]>({
-            sql: `SELECT 1 AS pending FROM apple_provider_tokens WHERE ((${EXPIRED}) OR (${DUE}))${scope} LIMIT 1`,
+            sql: `SELECT 1 AS pending FROM apple_provider_tokens WHERE ((${APPLE_TOKEN_PURGE_PREDICATE}) OR (${DUE}))${scope} LIMIT 1`,
             timeout: QUERY_TIMEOUT_MS,
         }, scopeValues);
         if (!Array.isArray(remaining) || remaining.length > 1) throw new AppleTokenRevocationError('INVALID_RESULT');

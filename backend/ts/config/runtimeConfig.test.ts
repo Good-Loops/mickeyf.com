@@ -192,3 +192,18 @@ test('database configuration fails closed and uses bounded local connection inpu
     assert.equal(developmentDatabase.host, 'localhost');
     assert.equal(developmentDatabase.port, 3306);
 });
+
+test('HTTP Apple maintenance requires deferred secrets, not container-injected Apple keys', () => {
+    const env = { ...productionEnvironment, APPLE_MAINTENANCE_HTTP_ENABLED: 'true',
+        APPLE_MAINTENANCE_CALLER_SUBJECT: '123456789012345678901',
+        APPLE_MAINTENANCE_EXPECTED_SERVER_UUID: '12345678-1234-1234-1234-123456789abc' };
+    assert.throws(() => loadRuntimeConfig(env), /runtime secret access/);
+    const runtimeEnv = { ...env, APPLE_TOKEN_RUNTIME_SECRETS_ENABLED: 'true' };
+    assert.ok(loadRuntimeConfig(runtimeEnv).appleMaintenance);
+    // Missing key references are handled after DB cleanup, not as a startup requirement.
+    assert.equal(loadRuntimeConfig(runtimeEnv).providerAuth.enabled, false);
+    for (const name of ['APPLE_SIGN_IN_PRIVATE_KEY', 'APPLE_TOKEN_ENCRYPTION_KEYS']) {
+        assert.throws(() => loadRuntimeConfig({ ...runtimeEnv, [name]: 'synthetic' }), /without injected Apple keys/);
+    }
+    assert.equal(loadRuntimeConfig(productionEnvironment).appleMaintenance, undefined);
+});

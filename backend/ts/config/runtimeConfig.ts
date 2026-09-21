@@ -1,5 +1,6 @@
 import { DELETION_JOURNAL_BUCKET } from '../accounts/gcsDeletionJournal';
 import { loadProviderAuthConfig, type ProviderAuthConfig } from './providerAuthConfig';
+import { loadAppleMaintenanceConfig, type AppleMaintenanceConfig } from './appleMaintenanceConfig';
 
 export type RuntimeEnvironment = 'development' | 'test' | 'production';
 
@@ -17,6 +18,7 @@ export type RuntimeConfig = {
     accountIdentityEpoch: string | undefined;
     journalBucket: string | undefined;
     providerAuth: ProviderAuthConfig;
+    appleMaintenance: AppleMaintenanceConfig | undefined;
 };
 
 export type DatabaseConfig = {
@@ -100,6 +102,11 @@ export function loadRuntimeConfig(env: Environment = process.env): RuntimeConfig
         throw new Error('ACCOUNT_IDENTITY_EPOCH must be the original identity migration UTC timestamp');
     }
 
+    const appleMaintenance = loadAppleMaintenanceConfig(env);
+    if (appleMaintenance && (env.APPLE_TOKEN_RUNTIME_SECRETS_ENABLED !== 'true'
+        || env.APPLE_SIGN_IN_PRIVATE_KEY !== undefined || env.APPLE_TOKEN_ENCRYPTION_KEYS !== undefined)) {
+        throw new Error('Apple HTTP maintenance requires runtime secret access without injected Apple keys.');
+    }
     const providerAuth = loadProviderAuthConfig(env);
     if (nodeEnv === 'production' && providerAuth.signupEnabled && !accountDeletionEnabled) {
         throw new Error('Google signup requires account deletion to be enabled in production');
@@ -125,6 +132,7 @@ export function loadRuntimeConfig(env: Environment = process.env): RuntimeConfig
         accountIdentityEpoch,
         journalBucket,
         providerAuth,
+        appleMaintenance,
     });
 }
 

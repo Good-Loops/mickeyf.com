@@ -26,6 +26,11 @@ import { verifyAccountDeletionReadiness, verifyAccountSessionReadiness,
 import { verifyPasswordlessAccountSchema } from './migrations/passwordlessAccountSchema';
 import { verifyAppleTokenReadiness } from './migrations/appleTokenSchema';
 import { verifyAppleRevocationReadiness } from './migrations/appleRevocationSchema';
+import { APPLE_MAINTENANCE_PATH } from './config/appleMaintenanceConfig';
+import { createAppleMaintenanceRouter } from './routers/appleMaintenanceRouter';
+import { runAppleMaintenance } from './accounts/runAppleTokenRevocation';
+import { loadAppleRuntimeLifecycle } from './config/appleRuntimeSecrets';
+import { prepareRuntimeProviderAuth } from './config/providerAuthConfig';
 
 const runtimeConfig = loadRuntimeConfig();
 const deletionJournal = runtimeConfig.accountDeletionEnabled
@@ -51,6 +56,12 @@ app.use(helmet({
     // HSTS is valuable only when the service is running behind production TLS.
     strictTransportSecurity: runtimeConfig.isProduction ? undefined : false,
 }));
+
+// This endpoint accepts only a pinned workload identity, never browser cookies.
+// Mount before CORS/preflight and body parsers so they cannot bypass its checks.
+app.use(APPLE_MAINTENANCE_PATH, createAppleMaintenanceRouter(runtimeConfig.appleMaintenance, () =>
+    runAppleMaintenance({ database: pool, expectedServerUuid: runtimeConfig.appleMaintenance!.expectedServerUuid,
+        loadLifecycle: () => loadAppleRuntimeLifecycle() })));
 
 app.use(cors({
     origin: [...runtimeConfig.corsOrigins],
@@ -81,20 +92,12 @@ app.use('/api', createMainRouter({
     p4VegaScoreSubmissionsEnabled: runtimeConfig.p4VegaScoreSubmissionsEnabled,
     allowedMutationOrigins: runtimeConfig.corsOrigins,
 }));
-app.use('/auth', createAuthRouter(
-    pool, runtimeConfig.sessionSecret, runtimeConfig.isProduction, runtimeConfig.corsOrigins,
-    { accountDeletionEnabled: runtimeConfig.accountDeletionEnabled, deletionJournal,
-        providerAuth: runtimeConfig.providerAuth }
-));
-
-app.use(notFoundHandler);
-app.use(requestErrorHandler);
-
 async function startServer(): Promise<void> {
     try {
         await verifyDatabaseConnection();
         await verifyAccountSessionReadiness(pool);
-        if (runtimeConfig.providerAuth.appleTokenLifecycle) await verifyAppleTokenReadiness(pool);
+        const providerAuth = await prepareRuntimeProviderAuth(runtimeConfig.providerAuth);
+        if (providerAuth.appleTokenLifecycle) await verifyAppleTokenReadiness(pool);
         if (runtimeConfig.providerAuth.appleNotifications) await verifyAppleRevocationReadiness(pool);
         if (runtimeConfig.providerAuth.signupEnabled) {
             await verifyPasswordlessAccountSchema(pool);
@@ -107,6 +110,12 @@ async function startServer(): Promise<void> {
         if (runtimeConfig.accountDeletionEnabled) {
             await verifyAccountDeletionReadiness(pool, runtimeConfig.accountIdentityEpoch!);
         }
+        app.use('/auth', createAuthRouter(
+            pool, runtimeConfig.sessionSecret, runtimeConfig.isProduction, runtimeConfig.corsOrigins,
+            { accountDeletionEnabled: runtimeConfig.accountDeletionEnabled, deletionJournal, providerAuth }
+        ));
+        app.use(notFoundHandler);
+        app.use(requestErrorHandler);
         app.listen(runtimeConfig.port, () => {
             console.log('Backend listening', {
                 port: runtimeConfig.port,

@@ -2,7 +2,8 @@ import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
 import test from 'node:test';
 import jwt from 'jsonwebtoken';
-import { loadProviderAuthConfig } from './providerAuthConfig';
+import { loadProviderAuthConfig, prepareRuntimeProviderAuth } from './providerAuthConfig';
+import type { AppleTokenLifecycle } from './appleTokenConfig';
 
 const googleWebId = '1234567890-syntheticWebClient.apps.googleusercontent.com';
 const appleIosId = 'com.Example.Synthetic-App';
@@ -138,5 +139,61 @@ test('configured Apple native audience stays byte-exact and excludes web or othe
     for (const aud of ['com.example.web-service', appleIosId.toLowerCase(), [appleIosId]]) {
         assert.deepEqual(await verifier.verify('apple', token('apple', { aud }), nonce),
             { verified: false, reason: 'INVALID_PROVIDER_TOKEN' });
+    }
+});
+
+const runtimeEnvironment = { ...enabledEnvironment, APPLE_TOKEN_RUNTIME_SECRETS_ENABLED: 'true',
+    APPLE_TOKEN_LIFECYCLE_ENABLED: 'true', APPLE_NOTIFICATIONS_ENABLED: 'true' };
+
+test('runtime Apple secrets are deferred and unavailable Apple is absent from public discovery', async () => {
+    const config = loadProviderAuthConfig(runtimeEnvironment);
+    assert.equal(config.appleTokenLifecycle, undefined);
+    assert.equal(config.clients['apple-ios'].appleTokens, undefined);
+    assert.ok(config.appleNotifications);
+    assert.deepEqual(config.publicClients.map(client => client.provider), ['google']);
+    let reports = 0;
+    const prepared = await prepareRuntimeProviderAuth(config, runtimeEnvironment, {
+        loadLifecycle: async () => { throw new Error('synthetic secret must not be reported'); },
+        reportUnavailable: () => { reports++; },
+    });
+    assert.equal(prepared, config);
+    assert.equal(reports, 1);
+    assert.equal(prepared.clients['google-web'], config.clients['google-web']);
+});
+
+test('successfully loaded lifecycle advertises Apple without enabling signup or deletion', async () => {
+    const config = loadProviderAuthConfig(runtimeEnvironment);
+    // These handles are never invoked: the test checks wiring, not encryption or network clients.
+    const lifecycle = { clientId: appleIosId, client: {}, repository: {} } as AppleTokenLifecycle;
+    const prepared = await prepareRuntimeProviderAuth(config, runtimeEnvironment, { loadLifecycle: async () => lifecycle });
+    assert.equal(prepared.appleTokenLifecycle, lifecycle);
+    assert.equal(prepared.clients['apple-ios'].appleTokens, lifecycle.client);
+    assert.equal(prepared.clients['apple-ios'].signupEnabled, false);
+    assert.equal(prepared.clients['apple-ios'].deletionEnabled, false);
+    assert.deepEqual(prepared.publicClients.map(client => client.provider), ['google', 'apple']);
+    assert.equal(config.appleTokenLifecycle, undefined);
+});
+
+test('runtime hydration rejects wrong audiences or missing notifications without losing Google', async () => {
+    for (const env of [runtimeEnvironment, { ...runtimeEnvironment, APPLE_NOTIFICATIONS_ENABLED: 'false' }]) {
+        const config = loadProviderAuthConfig(env);
+        const lifecycle = { clientId: env.APPLE_NOTIFICATIONS_ENABLED === 'true' ? 'com.other.app' : appleIosId,
+            client: {}, repository: {} } as AppleTokenLifecycle;
+        let reports = 0;
+        assert.equal(await prepareRuntimeProviderAuth(config, env, {
+            loadLifecycle: async () => lifecycle, reportUnavailable: () => { reports++; },
+        }), config);
+        assert.equal(reports, 1);
+    }
+});
+
+test('ordinary or disabled provider startup performs no runtime secret fetch', async () => {
+    for (const env of [enabledEnvironment, { ...runtimeEnvironment, PROVIDER_AUTH_ENABLED: 'false' },
+        { ...runtimeEnvironment, APPLE_TOKEN_LIFECYCLE_ENABLED: 'false' },
+        { ...runtimeEnvironment, APPLE_IOS_BUNDLE_ID: undefined, APPLE_NOTIFICATIONS_ENABLED: 'false' }]) {
+        const config = loadProviderAuthConfig(env);
+        assert.equal(await prepareRuntimeProviderAuth(config, env, {
+            loadLifecycle: async () => { assert.fail('Unexpected secret access'); },
+        }), config);
     }
 });

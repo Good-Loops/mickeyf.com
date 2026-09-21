@@ -1,8 +1,10 @@
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { type TestContext } from 'node:test';
 import type { Pool, PoolConnection, QueryOptions } from 'mysql2/promise';
 import type { AppleTokenLifecycle } from '../config/appleTokenConfig';
-import { runAppleTokenRevocation } from './runAppleTokenRevocation';
+import * as tokenSchema from '../migrations/appleTokenSchema';
+import * as revocationSchema from '../migrations/appleRevocationSchema';
+import { APPLE_HTTP_MAINTENANCE_MAX_DURATION_MS, runAppleMaintenance, runAppleTokenRevocation } from './runAppleTokenRevocation';
 
 const environment = {
     NODE_ENV: 'production', APPLE_REVOCATION_RUN_ENABLED: 'true', APPLE_TOKEN_LIFECYCLE_ENABLED: 'true',
@@ -32,9 +34,14 @@ function fixture(tokens = 0, guards = 0, due = 0) {
             assert.equal(input.timeout, 10_000);
             const overridden = queryOverride?.(sql);
             if (overridden) return overridden;
+            if (sql.startsWith('SELECT DATABASE()')) {
+                events.push('identity');
+                return [[{ databaseName: 'cms', currentUser: 'cms_mickeyf@%',
+                    serverUuid: environment.APPLE_REVOCATION_EXPECTED_SERVER_UUID }], []];
+            }
             if (sql === 'SET SESSION autocommit = 1') { events.push('autocommit'); return [{}, []]; }
             if (sql.startsWith('SELECT EXISTS')) {
-                assert.match(sql, /revocation_requested_at IS NOT NULL AND retention_deadline <= UTC_TIMESTAMP\(6\)/u);
+                assert.match(sql, /revocation_requested_at IS NOT NULL AND retention_deadline <= TIMESTAMPADD\(HOUR, 24, UTC_TIMESTAMP\(6\)\)/u);
                 assert.match(sql, /apple_auth_revocations WHERE expires_at <= UTC_TIMESTAMP\(6\)/u);
                 events.push('probe');
                 return [[{ tokens: Number(state.tokens > 0), guards: Number(state.guards > 0) }], []];
@@ -47,7 +54,7 @@ function fixture(tokens = 0, guards = 0, due = 0) {
                 return [{ affectedRows: deleted }, []];
             }
             if (sql.startsWith('DELETE FROM apple_provider_tokens') && sql.includes('retention_deadline')) {
-                assert.match(sql, /WHERE revocation_requested_at IS NOT NULL AND retention_deadline <= UTC_TIMESTAMP\(6\)/u);
+                assert.match(sql, /WHERE revocation_requested_at IS NOT NULL AND retention_deadline <= TIMESTAMPADD\(HOUR, 24, UTC_TIMESTAMP\(6\)\)/u);
                 const limit = Number(sql.match(/LIMIT (\d+)$/u)![1]);
                 events.push(`tokens:${limit}`);
                 const deleted = Math.min(limit, state.tokens);
@@ -242,4 +249,108 @@ test('shutdown has its own bounded wait and destroys a session with uncertain dr
     assert.equal(f.logs.at(-1)?.reason, 'shutdown');
     assert.equal(f.state.destroyed, 1);
     assert.equal(f.state.socketDestroyed, 1);
+});
+
+function httpFixture(context: TestContext, tokens = 0, guards = 0, due = 0) {
+    const f = fixture(tokens, guards, due);
+    context.mock.method(tokenSchema, 'verifyAppleTokenReadiness', async () => { f.events.push('token-schema'); });
+    context.mock.method(revocationSchema, 'verifyAppleRevocationReadiness', async () => { f.events.push('revocation-schema'); });
+    return { ...f, options: { database: f.pool, expectedServerUuid: environment.APPLE_REVOCATION_EXPECTED_SERVER_UUID,
+        loadLifecycle: f.dependencies.loadLifecycle, log: f.dependencies.log } };
+}
+
+test('shared HTTP maintenance verifies one session and returns it without ending the website pool', async context => {
+    const f = httpFixture(context, 0, 2, 1);
+    assert.equal(await runAppleMaintenance(f.options), 0);
+    assert.deepEqual(f.events.slice(0, 4), ['acquire', 'identity', 'token-schema', 'revocation-schema']);
+    assert.equal(f.state.released, 1);
+    assert.equal(f.state.destroyed, 0);
+    assert.equal(f.state.appleCalls, 1);
+    assert.equal(f.events.includes('end'), false);
+    assert.equal(f.events.filter(event => event === 'acquire').length, 1);
+});
+
+test('shared HTTP maintenance purges queued day-six tokens and expired guards before asynchronous keys fail', async context => {
+    const f = httpFixture(context, 3, 2, 1);
+    assert.equal(await runAppleMaintenance({ ...f.options, async loadLifecycle() {
+        assert.equal(f.state.tokens, 0);
+        assert.equal(f.state.guards, 0);
+        throw new Error('private secret loader failure');
+    } }), 1);
+    assert.equal(f.state.appleCalls, 0);
+    assert.equal(f.logs[0].reason, 'lifecycle');
+    assert.equal(f.logs[0].expiredTokensPurged, 3);
+    assert.equal(f.events.includes('end'), false);
+    assert.doesNotMatch(JSON.stringify(f.logs), /private/u);
+});
+
+test('shared HTTP maintenance rejects each wrong database identity before schema or cleanup', async context => {
+    for (const mismatch of [{ databaseName: 'other' }, { currentUser: 'root@localhost' }, { serverUuid: 'wrong-server' }]) {
+        const f = httpFixture(context, 1, 1, 1);
+        f.overrideQuery(sql => sql.startsWith('SELECT DATABASE()') ? Promise.resolve([[{
+            databaseName: 'cms', currentUser: 'cms_mickeyf@%',
+            serverUuid: environment.APPLE_REVOCATION_EXPECTED_SERVER_UUID, ...mismatch,
+        }], []]) : undefined);
+        assert.equal(await runAppleMaintenance(f.options), 1);
+        assert.equal(f.queries.length, 1);
+        assert.equal(f.events.includes('token-schema'), false);
+        assert.equal(f.state.lifecycleLoads, 0);
+        assert.equal(f.state.destroyed, 1);
+        assert.equal(f.events.includes('end'), false);
+    }
+});
+
+test('shared HTTP maintenance rejects unrecorded schema before any writes', async context => {
+    const f = httpFixture(context, 1, 1, 1);
+    context.mock.method(revocationSchema, 'verifyAppleRevocationReadiness', async () => {
+        throw new Error('private schema detail');
+    });
+    assert.equal(await runAppleMaintenance(f.options), 1);
+    assert.equal(f.queries.length, 1);
+    assert.equal(f.state.lifecycleLoads, 0);
+    assert.equal(f.state.destroyed, 1);
+    assert.equal(f.events.includes('end'), false);
+});
+
+test('a late async key lookup cannot decrypt, call Apple or issue SQL after the shared maintenance deadline', async context => {
+    const f = httpFixture(context, 1, 1, 2);
+    const pending = deferred<AppleTokenLifecycle>();
+    assert.equal(await runAppleMaintenance({ ...f.options, loadLifecycle: () => pending.promise }, { maxDurationMs: 15 }), 1);
+    assert.equal(f.state.tokens, 0);
+    assert.equal(f.state.guards, 0);
+    const queryCount = f.queries.length;
+    pending.resolve(f.dependencies.loadLifecycle());
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.queries.length, queryCount);
+    assert.equal(f.state.appleCalls, 0);
+    assert.equal(f.state.released, 0);
+    assert.equal(f.state.destroyed, 1);
+    assert.equal(f.events.includes('end'), false);
+    assert.equal(f.logs[0].reason, 'deadline');
+});
+
+test('shared timeout closes only its borrowed session and makes no later SQL after network completion', async context => {
+    const f = httpFixture(context, 0, 0, 2);
+    const pending = deferred<void>();
+    f.overrideRevoke(() => pending.promise);
+    assert.equal(await runAppleMaintenance(f.options, { maxDurationMs: 15 }), 1);
+    const queryCount = f.queries.length;
+    pending.resolve();
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.queries.length, queryCount);
+    assert.equal(f.state.appleCalls, 1);
+    assert.equal(f.state.destroyed, 1);
+    assert.equal(f.events.includes('end'), false);
+});
+
+test('shared maintenance keeps a strict ninety-second maximum and requires an explicit server UUID', async context => {
+    const f = httpFixture(context);
+    assert.equal(APPLE_HTTP_MAINTENANCE_MAX_DURATION_MS, 90_000);
+    for (const maxDurationMs of [0, -1, 1.1, 90_001, NaN]) {
+        assert.throws(() => runAppleMaintenance(f.options, { maxDurationMs }));
+    }
+    for (const expectedServerUuid of ['', `${f.options.expectedServerUuid}\n`]) {
+        assert.equal(await runAppleMaintenance({ ...f.options, expectedServerUuid }), 1);
+    }
+    assert.equal(f.events.includes('acquire'), false);
 });

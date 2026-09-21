@@ -3,6 +3,7 @@ import { createProviderTokenVerifier } from '../auth/providerTokenVerifier';
 import { loadAppleTokenConfig, type AppleTokenLifecycle } from './appleTokenConfig';
 import { loadAppleNotificationConfig } from './appleNotificationConfig';
 import type { AppleNotificationVerifier } from '../auth/appleNotificationVerifier';
+import { loadAppleRuntimeLifecycle } from './appleRuntimeSecrets';
 
 type Environment = Readonly<Record<string, string | undefined>>;
 type VerifierDependencies = Parameters<typeof createProviderTokenVerifier>[1];
@@ -38,6 +39,7 @@ function optionalClientId(env: Environment, name: string, pattern: RegExp): stri
 /** Server-owned client selection; constructing verifiers never fetches provider keys. */
 export function loadProviderAuthConfig(
     env: Environment = process.env, verifierDependencies: VerifierDependencies = {},
+    runtimeLifecycle?: AppleTokenLifecycle,
 ): ProviderAuthConfig {
     const appleNotifications = loadAppleNotificationConfig(env, verifierDependencies);
     if (env.PROVIDER_AUTH_ENABLED !== 'true') return appleNotifications
@@ -51,7 +53,12 @@ export function loadProviderAuthConfig(
     const googleWebId = optionalClientId(env, 'GOOGLE_WEB_CLIENT_ID', /^[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/);
     const appleIosId = optionalClientId(env, 'APPLE_IOS_BUNDLE_ID', /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/);
     const signupEnabled = env.PROVIDER_GOOGLE_SIGNUP_ENABLED === 'true';
-    const appleTokenLifecycle = loadAppleTokenConfig(env);
+    const runtimeSecrets = env.APPLE_TOKEN_RUNTIME_SECRETS_ENABLED === 'true';
+    // Runtime secret access happens after configuration and cannot prevent DB-only cleanup.
+    const appleTokenLifecycle = runtimeSecrets ? runtimeLifecycle : loadAppleTokenConfig(env);
+    if (appleTokenLifecycle && appleTokenLifecycle.clientId !== appleIosId) {
+        throw new Error('Apple lifecycle audience does not match the configured client.');
+    }
     if (appleTokenLifecycle && !appleNotifications) throw new Error('Apple sign-in requires enabled server notifications.');
     if (signupEnabled && !googleWebId) throw new Error('Google signup requires GOOGLE_WEB_CLIENT_ID');
     if (googleWebId === undefined && appleIosId === undefined) {
@@ -72,8 +79,27 @@ export function loadProviderAuthConfig(
             // Lifecycle preparation does not enable account creation or native release.
             signupEnabled: false, deletionEnabled: false,
             verifier: createProviderTokenVerifier({ appleAudience: appleIosId }, verifierDependencies) });
-        publicClients.push(Object.freeze({ clientKey: 'apple-ios', provider: 'apple', platform: 'ios', clientId: appleIosId }));
+        if (!runtimeSecrets || appleTokenLifecycle) {
+            publicClients.push(Object.freeze({ clientKey: 'apple-ios', provider: 'apple', platform: 'ios', clientId: appleIosId }));
+        }
     }
     return Object.freeze({ enabled: true, signupEnabled, clients: Object.freeze(clients), publicClients: Object.freeze(publicClients),
         ...(appleTokenLifecycle ? { appleTokenLifecycle } : {}), ...(appleNotifications ? { appleNotifications } : {}) });
+}
+
+/** A credential outage disables Apple issuance, not Google, notifications or maintenance. */
+export async function prepareRuntimeProviderAuth(config: ProviderAuthConfig, env: Environment = process.env,
+    dependencies: Readonly<{ loadLifecycle?: () => Promise<AppleTokenLifecycle>; reportUnavailable?: () => void }> = {},
+): Promise<ProviderAuthConfig> {
+    if (env.APPLE_TOKEN_RUNTIME_SECRETS_ENABLED !== 'true' || env.APPLE_TOKEN_LIFECYCLE_ENABLED !== 'true'
+        || !config.enabled || !config.clients['apple-ios']) return config;
+    try {
+        const lifecycle = await (dependencies.loadLifecycle ?? (() => loadAppleRuntimeLifecycle(env)))();
+        return loadProviderAuthConfig(env, {}, lifecycle);
+    } catch {
+        (dependencies.reportUnavailable ?? (() => console.error(JSON.stringify({
+            component: 'apple-runtime-credentials', severity: 'ERROR', status: 'unavailable',
+        }))))();
+        return config;
+    }
 }

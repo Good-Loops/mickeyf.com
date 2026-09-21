@@ -2760,16 +2760,29 @@ itself activate, implement or defer both providers.
   **No-new-recurring-spend revision (2026-09-21):** the owner rejected the
   separate five-minute job; it was never created and is no longer recommended.
   Confirmed local deletion now attempts one account-scoped Apple revocation,
-  bounded to ten seconds, leaving durable retries on failure. Next implement
-  a workload-identity-protected backend maintenance endpoint, called once from
-  the existing hourly receipt dispatch even when receipt cleanup fails. Keep
+  bounded to ten seconds, leaving durable retries on failure. Implemented the
+  disabled workload-identity-protected backend maintenance endpoint and a single
+  call from the existing hourly receipt dispatch, independent of receipt failure.
+  Receipt work and dispatch run concurrently and both are awaited; either
+  failure fails the existing job. Backend work is capped at 90 seconds, dispatch
+  at 110 seconds, alongside the unchanged 120-second receipt budget/five-second
+  shutdown, fitting the existing 180-second job timeout. Keep
   Apple keys/token SQL access in the backend; do not broaden either restricted
   worker's SQL grants, add a schedule, increase frequency or set minimum
-  instances. This fallback is not implemented; immediate attempts alone cannot
-  enforce retention. Proactive purge headroom within the approved seven-day
-  maximum, startup-key-independent DB purge, honest physical-retention wording
-  and one real-path dummy acceptance remain before activation. Existing-resource
-  reuse avoids the new fixed setup but does not promise zero metered usage.
+  instances. Application code now loads pinned numeric Apple Secret Manager
+  versions after container startup; the HTTP path rejects inline/injected Apple
+  keys. A bootstrap secret outage hides only Apple until process restart; Google,
+  notifications and DB purge remain available. Each maintenance pass reloads
+  keys after DB-only purge. Queued credentials are purged beginning on day six,
+  leaving 24 hours of headroom within the original seven-day deadline, not an
+  outage-proof deletion guarantee. All new flags remain off; no live resource,
+  grant, key or deployment changed. Before activation, verify the exact caller
+  numeric uniqueId/service-base audience, schema/runtime settings, honest
+  retention wording and one real-path dummy retry/purge/failure acceptance.
+  Existing-resource reuse avoids the new fixed setup but does not promise zero
+  metered usage. Source verification passed 182 focused tests, backend
+  TypeScript, isolated production server/receipt builds and the disabled
+  compiled-entry smoke check; exact test commands are in the maintenance runbook.
   The owner approved the CORS-only backend deployment for exactly
   `capacitor://localhost`, and renewed the same temporary Node/OpenSSL exception
   through 2026-10-07 only for the matching unchanged-runtime/base/dependency

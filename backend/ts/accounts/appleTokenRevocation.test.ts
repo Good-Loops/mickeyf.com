@@ -27,7 +27,7 @@ function fixture(initial: Row[], options: Options = {}) {
     const events: string[] = [];
     const clock = { now: 1_000 };
     const state = { acquired: 0, released: 0, destroyed: 0, socketDestroyed: 0, lockHeld: false };
-    const due = (item: Row) => item.pending && item.next <= clock.now && item.deadline > clock.now;
+    const due = (item: Row) => item.pending && item.next <= clock.now && item.deadline > clock.now + DAY;
     const remove = (items: Row[]) => { for (const item of items) rows.splice(rows.indexOf(item), 1); };
     const connection = {
         connection: { stream: { destroy() { state.socketDestroyed++; } } },
@@ -55,11 +55,12 @@ function fixture(initial: Row[], options: Options = {}) {
             if (sql === 'SET SESSION autocommit = 1') { events.push('autocommit'); return [{}, []]; }
             if (sql.startsWith('UPDATE')) {
                 events.push('claim');
-                assert.match(sql, /SET attempt_count = LEAST\(attempt_count \+ 1, 4294967295\), next_attempt_at = LEAST\(retention_deadline, TIMESTAMPADD\(SECOND, \?, UTC_TIMESTAMP\(6\)\)\)/u);
+                assert.match(sql, /SET attempt_count = LEAST\(attempt_count \+ 1, 4294967295\), next_attempt_at = LEAST\(TIMESTAMPADD\(HOUR, -24, retention_deadline\), TIMESTAMPADD\(SECOND, \?, UTC_TIMESTAMP\(6\)\)\)/u);
+                assert.match(sql, /retention_deadline > TIMESTAMPADD\(HOUR, 24, UTC_TIMESTAMP\(6\)\)/u);
                 const candidate = rows.find(item => item.token_id === values[1] && due(item) && inScope(item));
                 if (!candidate) return [{ affectedRows: 0 }, []];
                 candidate.attempt_count = Math.min(candidate.attempt_count + 1, 4_294_967_295);
-                candidate.next = Math.min(candidate.deadline, clock.now + Number(values[0]) * 1_000);
+                candidate.next = Math.min(candidate.deadline - DAY, clock.now + Number(values[0]) * 1_000);
                 return [{ affectedRows: 1 }, []];
             }
             if (sql.startsWith('DELETE') && sql.includes('WHERE token_id = ?')) {
@@ -69,13 +70,15 @@ function fixture(initial: Row[], options: Options = {}) {
             }
             if (sql.startsWith('DELETE')) {
                 events.push('purge');
-                const expired = rows.filter(item => item.pending && item.deadline <= clock.now && inScope(item)).slice(0, limit);
+                assert.match(sql, /revocation_requested_at IS NOT NULL AND retention_deadline <= TIMESTAMPADD\(HOUR, 24, UTC_TIMESTAMP\(6\)\)/u);
+                const expired = rows.filter(item => item.pending && item.deadline <= clock.now + DAY && inScope(item)).slice(0, limit);
                 remove(expired); return [{ affectedRows: expired.length }, []];
             }
             if (sql.startsWith('SELECT 1')) {
-                return [rows.filter(item => item.pending && (item.deadline <= clock.now || due(item)) && inScope(item)).slice(0, 1), []];
+                return [rows.filter(item => item.pending && (item.deadline <= clock.now + DAY || due(item)) && inScope(item)).slice(0, 1), []];
             }
             assert.match(sql, /^SELECT token_id/u);
+            assert.match(sql, /retention_deadline > TIMESTAMPADD\(HOUR, 24, UTC_TIMESTAMP\(6\)\)/u);
             events.push('select');
             const selected = rows.filter(item => due(item) && inScope(item)).slice(0, limit).map(item => ({ ...item }));
             return [options.selectedRows?.(selected) ?? selected, []];
@@ -128,11 +131,12 @@ test('unavailable and invalid-grant responses retry with bounded exponential bac
     }
 });
 
-test('expired tokens purge before Apple is contacted, and failure cannot extend the exact retention deadline', async () => {
-    const f = fixture([row({ deadline: 1_000 }), row({ deadline: 2_000 })], {
+test('day-six tokens purge before Apple is contacted, and retry failure cannot extend the original deadline', async () => {
+    const f = fixture([row({ deadline: DAY + 1_000 }), row({ deadline: DAY + 2_000 })], {
         revoke: async () => {
             assert.equal(f.rows.length, 1, 'expired material was already purged');
-            assert.equal(f.rows[0].next, 2_000, 'next retry is capped at retention deadline');
+            assert.equal(f.rows[0].next, 2_000, 'next retry is capped a day before the maximum retention deadline');
+            assert.equal(f.rows[0].deadline, DAY + 2_000, 'the original seven-day deadline is not extended');
             f.clock.now = 2_000;
             throw new Error('private upstream outage');
         },
@@ -142,9 +146,21 @@ test('expired tokens purge before Apple is contacted, and failure cannot extend 
 });
 
 test('later candidates are rechecked for expiry after each serial Apple call', async () => {
-    const f = fixture([row(), row({ deadline: 2_000 })], { revoke: async () => { f.clock.now = 2_000; } });
+    const f = fixture([row(), row({ deadline: DAY + 2_000 })], { revoke: async () => { f.clock.now = 2_000; } });
     assert.deepEqual(await f.worker.drain(), { status: 'completed', selected: 2, revoked: 1, retried: 0, expired: 1 });
     assert.equal(f.events.filter(event => event === 'revoke').length, 1);
+});
+
+test('day-six purge applies at the exact boundary, excludes active tokens, and does not revoke purged rows', async () => {
+    const atBoundary = row();
+    const active = row({ pending: false });
+    const notYet = row({ deadline: 7 * DAY + 1, next: 7 * DAY });
+    const f = fixture([atBoundary, active, notYet]);
+    f.clock.now = 6 * DAY;
+    assert.deepEqual(await f.worker.drain(), { status: 'completed', selected: 0, revoked: 0, retried: 0, expired: 1 });
+    assert.deepEqual(f.rows, [active, notYet]);
+    assert.equal(f.events.includes('decrypt'), false);
+    assert.equal(f.events.includes('revoke'), false);
 });
 
 test('wrong clients and decryption errors retain encrypted work without passing anything to Apple', async () => {
