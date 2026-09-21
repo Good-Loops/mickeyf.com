@@ -1,6 +1,7 @@
 import { Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { AccountDeletionPendingError, deleteAccount } from '../accounts/accountDeletionRepository';
+import { attemptAppleAccountRevocation, type AppleAccountRevocation } from '../accounts/attemptAppleAccountRevocation';
 import type { AccountDeletionJournal } from '../accounts/deletionJournal';
 import { hasAllowedMutationOrigin, isJsonMutationRequest } from '../security/mutationRequest';
 import { authenticateRequest } from '../security/requestAuthentication';
@@ -14,12 +15,14 @@ type AccountDeletionDependencies = {
     allowedMutationOrigins: readonly string[];
     accountDeletionEnabled?: boolean;
     deletionJournal?: AccountDeletionJournal;
+    appleAccountRevocation?: AppleAccountRevocation;
 };
 
 export function createAccountDeletionController({
     database, sessionSecret, isProduction, allowedMutationOrigins,
     accountDeletionEnabled = false,
     deletionJournal,
+    appleAccountRevocation,
 }: AccountDeletionDependencies) {
     return async function deleteCurrentAccount(req: Request, res: Response) {
         // Keep destructive account operations unavailable until recovery protection
@@ -60,6 +63,7 @@ export function createAccountDeletionController({
             if (result === 'not-found') {
                 return res.status(401).json({ error: 'UNAUTHENTICATED' });
             }
+            await attemptAppleAccountRevocation(authentication.identity.accountId, appleAccountRevocation);
             return res.json({ deleted: true });
         } catch (error) {
             if (error instanceof AccountDeletionPendingError) {

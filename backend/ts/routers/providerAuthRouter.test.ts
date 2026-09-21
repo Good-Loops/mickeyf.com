@@ -26,6 +26,7 @@ const secret = 'synthetic-provider-http-test-secret';
 const origin = 'https://provider.example.test';
 const account = { userId: 42, userName: 'provider-player', accountId: '11111111-2222-4333-8444-555555555555' };
 const identity = { provider: 'google', subject: 'synthetic-provider-subject', email: 'synthetic@gmail.com' } as VerifiedProviderIdentity;
+const appleIdentity = { provider: 'apple', subject: 'synthetic-apple-subject' } as VerifiedProviderIdentity;
 const beginInput = { clientKey: 'google-test', action: 'login' };
 type FailureReason = Extract<ProviderCompletionResult, { ok: false }>['reason'];
 
@@ -35,7 +36,7 @@ function signedCookie(value: string, name = '__session') {
 }
 
 type Features = { signupEnabled?: boolean; accountDeletionEnabled?: boolean; withJournal?: boolean; missingProviderTable?: boolean;
-    appleDeletionEnabled?: boolean; appleTokens?: boolean; appleStorage?: boolean };
+    appleDeletionEnabled?: boolean; appleTokens?: boolean; appleStorage?: boolean; immediateRevocation?: boolean };
 
 function fixture(features: Features = {}) {
     const state = {
@@ -50,6 +51,7 @@ function fixture(features: Features = {}) {
         } | null,
         methodsFailure: false,
         appleSubjects: [Buffer.from('Exact.Apple.Subject')] as unknown[],
+        revocationAccounts: [] as string[], revocationFailure: false,
     };
     const attempts = new Map<string, ProviderAttempt>();
     const database = { async query(query: { sql: string }) {
@@ -77,8 +79,12 @@ function fixture(features: Features = {}) {
     } };
     clients['google-web'] = clients['google-test'];
     clients['apple-ios'] = { provider: 'apple', deletionEnabled: features.appleDeletionEnabled,
-        ...(features.appleTokens ? { appleTokens: { async exchangeCode() { throw new Error('unused'); }, async revoke() {} } } : {}),
-        verifier: { async verify() { return { verified: false, reason: 'INVALID_PROVIDER_TOKEN' }; } } };
+        ...(features.appleTokens ? { appleTokens: { async exchangeCode(code: string) {
+            assert.equal(code, 'accepted-code');
+            return { idToken: 'accepted-token', refreshToken: 'synthetic-apple-refresh-token' };
+        }, async revoke() {} } } : {}),
+        verifier: { async verify(_provider, token) { return token === 'accepted-token'
+            ? { verified: true, identity: appleIdentity } : { verified: false, reason: 'INVALID_PROVIDER_TOKEN' }; } } };
     const flow = createProviderAuthFlow({ enabled: true, clients, signupEnabled: features.signupEnabled,
         deletionEnabled: features.accountDeletionEnabled && features.withJournal, attempts: {
         async create(attempt) { state.events.push('create'); attempts.set(attempt.stateHash.toString('hex'), attempt); return 'created'; },
@@ -107,10 +113,11 @@ function fixture(features: Features = {}) {
             assert.equal(userName, 'new-player');
             return state.creation;
         },
-        async delete(target, verified, proof) {
+        async delete(target, verified, proof, appleToken) {
             state.events.push('delete');
             assert.deepEqual(target, { userId: account.userId, accountId: account.accountId });
-            assert.deepEqual(verified, identity);
+            assert.deepEqual(verified, verified.provider === 'apple' ? appleIdentity : identity);
+            assert.equal(appleToken, verified.provider === 'apple' ? 'synthetic-apple-refresh-token' : undefined);
             state.proofs.push(proof);
             if (state.deletion === 'pending') throw new AccountDeletionPendingError(new Error('private journal details'));
             if (state.deletion === 'unavailable') throw new Error('private deletion failure');
@@ -150,7 +157,16 @@ function fixture(features: Features = {}) {
     const appleTokenRepository = features.appleStorage ? createAppleTokenRepository({
         clientId: 'com.example.test', activeKeyId: 'v1', encryptionKeys: { v1: Buffer.alloc(32, 3) },
     }) : undefined;
-    return { database, clients, services, state, appleTokenRepository };
+    const appleAccountRevocation = features.immediateRevocation ? {
+        async revokeForAccount(accountId: string) {
+            assert.equal(state.events.at(-1), 'delete', 'revocation follows completed deletion');
+            state.events.push('revoke');
+            state.revocationAccounts.push(accountId);
+            if (state.revocationFailure) throw new Error('private Apple token/provider details');
+            return { status: 'completed' as const, selected: 1, revoked: 1, retried: 0, expired: 0 };
+        },
+    } : undefined;
+    return { database, clients, services, state, appleTokenRepository, appleAccountRevocation };
 }
 
 async function withServer(run: (base: string, setup: ReturnType<typeof fixture>) => Promise<void>, enabled = true,
@@ -622,7 +638,47 @@ test('wrong Google identity, removed accounts and uncertain deletion preserve co
             assert.equal(response.headers.get('set-cookie'), null);
         }
         assert.deepEqual(state.rememberMe, []);
-    }, true, { accountDeletionEnabled: true, withJournal: true });
+        assert.deepEqual(state.revocationAccounts, [], 'unconfirmed deletion must never invoke Apple');
+    }, true, { accountDeletionEnabled: true, withJournal: true, immediateRevocation: true });
+});
+
+test('Google and Apple deletion revoke only the authenticated account and retain success if Apple is unavailable', async t => {
+    const warnings: unknown[][] = [];
+    t.mock.method(console, 'warn', (...values: unknown[]) => { warnings.push(values); });
+    for (const provider of ['google', 'apple'] as const) {
+        for (const unavailable of [false, true]) {
+            await withServer(async (base, { state }) => {
+                state.revocationFailure = unavailable;
+                const native = provider === 'apple';
+                const clientKey = native ? 'apple-ios' : 'google-web';
+                const headers = { cookie: signedCookie(issueSessionToken(account, secret).token, native ? 'session' : '__session'),
+                    origin: native ? 'capacitor://localhost' : origin };
+                const begin = await post(base, 'begin', { action: 'delete', clientKey }, headers);
+                assert.equal(begin.status, 200);
+                const { state: attempt } = await begin.json() as { state: string };
+                const input = { action: 'delete', clientKey, state: attempt, idToken: 'accepted-token', confirmation: 'DELETE',
+                    ...(native ? { authorizationCode: 'accepted-code' } : {}) };
+                const foreignScope = await post(base, 'complete', { ...input, accountId: '99999999-2222-4333-8444-555555555555' }, headers);
+                assert.equal(foreignScope.status, 400);
+                assert.deepEqual(state.revocationAccounts, []);
+                const result = await post(base, 'complete', input, headers);
+                assert.equal(result.status, 200);
+                assert.deepEqual(await result.json(), { success: true, deleted: true });
+                assert.deepEqual(state.revocationAccounts, [account.accountId]);
+                assert.deepEqual(state.events.slice(-2), ['delete', 'revoke']);
+                assert.equal(result.headers.getSetCookie().length, 2);
+                assert.deepEqual(state.rememberMe, []);
+                const replay = await post(base, 'complete', input, headers);
+                assert.equal(replay.status, 400);
+                assert.equal(state.revocationAccounts.length, 1);
+            }, true, { accountDeletionEnabled: true, withJournal: true, immediateRevocation: true,
+                appleDeletionEnabled: true, appleTokens: true, appleStorage: true });
+        }
+    }
+    assert.deepEqual(warnings, [
+        ['Apple account revocation attempt unavailable; queued work retained'],
+        ['Apple account revocation attempt unavailable; queued work retained'],
+    ]);
 });
 
 test('account methods expose only booleans after signed-cookie and live-session verification', async () => {

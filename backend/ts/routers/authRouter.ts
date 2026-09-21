@@ -29,6 +29,7 @@ import type { AppleTokenLifecycle } from '../config/appleTokenConfig';
 import type { AppleNotificationVerifier } from '../auth/appleNotificationVerifier';
 import { applyAppleNotification } from '../auth/appleSessionRevocation';
 import { createAppleNotificationRouter } from './appleNotificationRouter';
+import { createAppleTokenRevocationWorker } from '../accounts/appleTokenRevocation';
 
 export { authRoutesContract } from './authRouter.contract';
 
@@ -60,6 +61,11 @@ export function createAuthRouter(
      * - None beyond Express route registration.
      */
     const router: Router = Router();
+    const appleLifecycle = providerAuth?.appleTokenLifecycle;
+    const appleAccountRevocation = appleLifecycle ? createAppleTokenRevocationWorker({
+        database, clientId: appleLifecycle.clientId,
+        vault: appleLifecycle.repository, appleTokens: appleLifecycle.client,
+    }) : undefined;
     router.use('/providers/apple-notifications', createAppleNotificationRouter(providerAuth?.appleNotifications,
         notification => applyAppleNotification(database, notification)));
 
@@ -74,6 +80,7 @@ export function createAuthRouter(
         clients: providerAuth?.clients ?? {}, enabled: providerAuth?.enabled === true,
         signupEnabled: providerAuth?.signupEnabled, accountDeletionEnabled, deletionJournal,
         appleTokenRepository: providerAuth?.appleTokenLifecycle?.repository,
+        appleAccountRevocation,
     }));
 
     /** GET /verify-token — validates auth context for the current request. */
@@ -88,6 +95,7 @@ export function createAuthRouter(
             database, sessionSecret, isProduction, allowedMutationOrigins,
             accountDeletionEnabled,
             deletionJournal,
+            appleAccountRevocation,
         })));
 
     /** POST /logout — revokes this device's session before clearing its cookies. */

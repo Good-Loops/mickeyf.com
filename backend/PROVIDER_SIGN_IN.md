@@ -31,7 +31,7 @@ server explicitly permits that provider. The SQL deletion proof and encrypted
 revocation queue are implemented, but **not operationally activated**. Configuration keeps
 `apple-ios.signupEnabled` and `deletionEnabled` false, omits Apple's public
 signup capability, and the native Info.plist flag stays false. There is no new
-environment switch that activates Apple signup. Finish revocation-worker deployment,
+environment switch that activates Apple signup. Finish reliable revocation/cleanup operation,
 retention acceptance and server-notification endpoint registration before wiring those
 capabilities to deployment settings; then compile on macOS and test one native
 new/returning-account lifecycle. See Apple's [account-deletion guidance](https://developer.apple.com/documentation/technotes/tn3194-handling-account-deletions-and-revoking-tokens-for-sign-in-with-apple).
@@ -43,7 +43,9 @@ while linked; after account deletion, retain only the encrypted revocation work
 for at most seven days, deleting it sooner when Apple confirms revocation.
 This exception must be included in the published privacy policy before activation.
 It is an approved implementation contract, not a claim about current production.
-Operational preparation, proposed cadence/cost, draft disclosure wording and
+The owner requires no additional recurring-spend setup: the separate five-minute
+Apple job was not created and is no longer proposed. The existing-infrastructure
+fallback plan, draft disclosure wording and
 the exact notification URL are in [Apple maintenance](APPLE_MAINTENANCE.md).
 
 The native bridge returns the ID token and one-use authorization code. Both stay
@@ -70,6 +72,11 @@ no token, key, email or additional field is written to it. Isolated backup repla
 marks/purges credentials using the earliest deletion intent, even for an absent
 account; it never contacts Apple and cannot restart the seven-day deadline.
 
+After confirmed local deletion, the HTTP path now attempts one account-scoped
+Apple revocation within a ten-second total budget. Failure leaves durable work
+queued; it cannot undo deletion or report the removed account as still present.
+This improves the normal case but is not a scheduled retry or retention guarantee.
+
 The explicit maintenance worker processes at most 20 due rows per pass under a
 database-scoped lock. SQL changes commit before network calls. Transient failures
 retry with 60-second exponential backoff, capped at one hour and the original
@@ -79,7 +86,7 @@ before parsing Apple retry keys, then probes for remaining backlog. It has a
 180-second work deadline and five-second shutdown; see the operational runbook
 for startup-secret failure limits. Only confirmed revocation deletes early; failures never restore
 an account or extend retention. Reports contain aggregate counters, not tokens
-or account identifiers. A bounded backlog requires another scheduled pass.
+or account identifiers. A bounded backlog requires another maintenance pass.
 
 Preparation commands (not run against production in this checkpoint):
 
@@ -110,13 +117,17 @@ isolated-runtime settings are rejected. A nonzero result signals retries,
 backlog, lock contention, failure or expiry without confirmed revocation.
 
 Before activation: publish matching retention disclosures; apply/verify the
-reviewed migration and grants; configure the guarded maintenance command on an
-approved reliable execution path with backlog/failure observation; prove expiry
+reviewed migration and grants; implement the authenticated backend maintenance
+endpoint and bounded call from the existing hourly receipt dispatch, without
+sharing Apple keys or broadening that worker's SQL grants; prove expiry
 and retry behavior there; register and verify signed server-notification delivery;
-then approve native signing/build/device acceptance. The worker is not silently
-attached to receipt cleanup or deletion-audit jobs. No new cloud service or timer
-has been created. Physical expiry requires the maintenance execution path to run;
-an unscheduled worker alone does not satisfy the retention commitment.
+then approve native signing/build/device acceptance. The proposed fallback,
+proactive purge headroom, startup-key-independent purge and failure monitoring
+are not implemented or activated by the immediate-attempt change. No new cloud
+service or recurring timer has been created. The standalone command remains available
+for operator/recovery work. Immediate attempts and an unscheduled command alone
+do not satisfy the retention commitment, and resource reuse does not guarantee
+zero additional metered usage.
 
 Apple exchange and SQL cannot form one distributed transaction. A lost exchange
 response or failed persistence is reported as failure, not successful login.

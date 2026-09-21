@@ -2755,11 +2755,21 @@ itself activate, implement or defer both providers.
   entrypoint and separated verified DB-only expiry cleanup from Apple retry-key
   parsing. Bounded drains, real backlog probes and work/shutdown deadlines replace
   the single-pass command. Live read-only inventory found only the two existing
-  receipt/audit jobs; none were changed. The proposed separate five-minute job,
-  estimated cost, notification endpoint and draft privacy insert are documented
+  receipt/audit jobs; none were changed. The notification endpoint and draft privacy insert are documented
   in [APPLE_MAINTENANCE.md](backend/APPLE_MAINTENANCE.md). No policy was published.
-  Approval, least-privilege job credentials, startup-secret-independent purge
-  operation and the strict physical-retention wording remain before activation.
+  **No-new-recurring-spend revision (2026-09-21):** the owner rejected the
+  separate five-minute job; it was never created and is no longer recommended.
+  Confirmed local deletion now attempts one account-scoped Apple revocation,
+  bounded to ten seconds, leaving durable retries on failure. Next implement
+  a workload-identity-protected backend maintenance endpoint, called once from
+  the existing hourly receipt dispatch even when receipt cleanup fails. Keep
+  Apple keys/token SQL access in the backend; do not broaden either restricted
+  worker's SQL grants, add a schedule, increase frequency or set minimum
+  instances. This fallback is not implemented; immediate attempts alone cannot
+  enforce retention. Proactive purge headroom within the approved seven-day
+  maximum, startup-key-independent DB purge, honest physical-retention wording
+  and one real-path dummy acceptance remain before activation. Existing-resource
+  reuse avoids the new fixed setup but does not promise zero metered usage.
   The owner approved the CORS-only backend deployment for exactly
   `capacitor://localhost`, and renewed the same temporary Node/OpenSSL exception
   through 2026-10-07 only for the matching unchanged-runtime/base/dependency

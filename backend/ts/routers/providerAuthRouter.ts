@@ -6,6 +6,7 @@ import { createProviderAccount, findProviderAccount, linkProviderAccount,
     type ProviderCredentialWriter } from '../accounts/providerAccountRepository';
 import type { AppleTokenLifecycle } from '../config/appleTokenConfig';
 import { deleteProviderAccount } from '../accounts/accountDeletionRepository';
+import { attemptAppleAccountRevocation, type AppleAccountRevocation } from '../accounts/attemptAppleAccountRevocation';
 import type { AccountDeletionJournal } from '../accounts/deletionJournal';
 import { readLiveSession } from '../auth/accountSessionRepository';
 import { createProviderAuthContextReader } from '../auth/providerAuthContext';
@@ -51,6 +52,7 @@ export type ProviderAuthRouterOptions = Readonly<{
     accountDeletionEnabled?: boolean;
     deletionJournal?: AccountDeletionJournal;
     appleTokenRepository?: AppleTokenLifecycle['repository'];
+    appleAccountRevocation?: AppleAccountRevocation;
     services?: ProviderAuthRouterServices;
 }>;
 
@@ -222,6 +224,9 @@ export function createProviderAuthRouter(options: ProviderAuthRouterOptions): Ro
                 if (result.type === 'linked') return res.json({ success: true, linked: true });
                 if (result.type === 'deleted') {
                     clearAuthenticationCookies(res, isProduction);
+                    if (context?.account) {
+                        await attemptAppleAccountRevocation(context.account.accountId, options.appleAccountRevocation);
+                    }
                     return res.json({ success: true, deleted: true });
                 }
                 if (!await services.establishSession(database, req, res, result.account, rememberMe === true,

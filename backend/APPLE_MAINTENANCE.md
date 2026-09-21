@@ -19,50 +19,62 @@ Do not add token access or Apple private keys to the existing receipt worker or
 the read-only deletion-audit worker. Their independent purposes and permissions
 remain unchanged.
 
-## Recommended operation — owner approval required
+## No additional recurring spend — revised direction
 
-Use one separate Cloud Run Job on the existing platform, proposed name
-`ludolume-apple-token-revocation`, and one five-minute Scheduler dispatch.
-No always-running service, new database or message queue is needed.
+The owner rejected the proposed separate five-minute Apple job on 2026-09-21.
+It was never created and is **not** a prerequisite for development or the
+recommended deployment. Do not add jobs, schedules, increased dispatch frequency,
+minimum instances or paid services. Reusing existing resources can still add
+metered requests/runtime; it is not a promise of a zero billing increase.
 
-- One task, parallelism one, 1 vCPU/512 MiB, 210-second platform task timeout.
-  The command has its own 180-second work deadline and five-second shutdown.
-- No automatic platform task retries or Scheduler retries. The SQL queue owns
-  retry timing; a later schedule retries due work. The worker's database lock
-  serializes Apple calls even if manual dispatches overlap.
-- Run `node dist/apple-token-revocation.min.js apply` from a reviewed immutable
-  image digest. The regular backend build includes this standalone entrypoint;
-  it does not open an HTTP server. The source npm alias is for operator work,
-  not a command available inside the production image (which has no ts-node).
-- Prefer a dedicated job service account with Cloud SQL Client and access only
-  to its pinned database password, Apple signing key and encryption-key secrets.
-  The present command still pins `cms_mickeyf@%`: it is **not** a dedicated
-  least-privilege SQL account. Review that trade-off explicitly or prepare a
-  narrower SQL identity before activation; do not call it isolated merely
-  because the cloud service account is separate.
-- Reuse the existing Scheduler caller
-  `mickeyf-receipt-scheduler@noted-reef-387021.iam.gserviceaccount.com` only by
-  granting invocation on this additional job, not project-wide invocation or
-  token/SQL access. Dispatch uses OAuth to the Cloud Run Jobs API, not OIDC.
-- Reuse the previously approved operator email channel; verify its current
-  destination before adding policies. Alert on failed job executions, aggregate
-  cleanup/retry errors and absence of successful completion for 15 minutes.
-  Receipt of a successful Scheduler response is not job completion.
+The first source improvement is an immediate, account-scoped revocation attempt
+after confirmed local account deletion: one Apple call, with a ten-second total
+budget. A failure leaves the existing encrypted retry record for recovery and
+does not turn an already-completed local deletion into a failure. No timer,
+background promise or app traffic is treated as a reliable retry scheduler.
 
-### Cost boundary
+### Smallest scheduled fallback — proposed, not implemented
 
-At a five-minute cadence there are 8,640 executions in a 30-day month. Cloud Run
-Jobs have a one-minute minimum billed duration. At the published us-central1
-on-demand rates for 1 vCPU and 0.5 GiB, 60 seconds each is approximately
-**USD 9.85/month before shared free allowances**, not a quote or spending cap.
-Longer runs increase that amount. Builds, storage, logging, secrets and existing
-SQL costs are separate. Scheduler is USD 0.10/job/31 days after the billing
-account's first three free jobs; this project's two schedules do not establish
-free-tier availability across the whole billing account.
+Reuse the existing hourly receipt-job dispatch, not its SQL credentials or its
+process for Apple work:
 
-Sources checked 2026-09-21: [Cloud Run pricing](https://cloud.google.com/run/pricing),
-[Scheduler pricing](https://cloud.google.com/scheduler/pricing),
-[scheduled jobs and OAuth](https://docs.cloud.google.com/run/docs/execute/jobs-on-schedule).
+1. Add one bounded service-to-service request from the receipt job to a new
+   disabled-by-default backend maintenance endpoint. The job obtains its own
+   short-lived workload identity token. The endpoint must verify Google's
+   signature, exact audience and pinned receipt-job identity before doing work;
+   user sessions, caller-supplied identity headers and arbitrary callback URLs
+   are not authorization. The existing public API's ingress is not this check.
+2. The backend, which already needs the Apple lifecycle credentials for sign-in,
+   owns DB-only purge and due retries under the existing database lock. Accept
+   no caller-selected account, SQL, deadline or batch size. Use fixed row/time
+   limits, aggregate results and fail-closed configuration. No Apple signing
+   key, encryption key or token-table privilege goes to the receipt job. The
+   read-only deletion-audit job remains untouched.
+3. Run the request independently of the receipt-cleanup result, including when
+   receipt SQL/configuration fails; bound both operations so neither starves
+   the other. Record both outcomes. A failed retry/purge cannot be hidden behind
+   a successful receipt result. Review the existing execution timeout and
+   failure/missing-success monitoring rather than adding a new monitoring
+   service. The hourly Scheduler target and caller do not need to change.
+
+The existing receipt entrypoint currently performs only receipt cleanup and
+has no such call. The API has no maintenance endpoint or workload-token guard.
+Implement this path and make DB-only maintenance start independently of Apple
+retry-key availability before activating Apple sign-in. Verify the existing
+workload identity and exact endpoint audience at deployment; do not substitute
+a permanent shared password or service-account key. One authorized dummy
+dispatch will then verify retry, purge and failure reporting on the actual path.
+
+### Operator/recovery command retained
+
+`node dist/apple-token-revocation.min.js apply` remains a bounded, explicitly
+enabled operator/recovery command, not an automatically scheduled deployment.
+The regular backend build includes this standalone entrypoint; it does not open
+an HTTP server. The source npm alias needs ts-node and is not the production
+image command. It verifies the pinned runtime SQL identity before writes and
+uses a 180-second work deadline plus five-second shutdown. Its runtime SQL
+account is broader than a dedicated maintenance account; do not transfer that
+credential to either existing restricted job.
 
 ## Data lifetime: expiry is not physical deletion
 
@@ -89,15 +101,22 @@ The deployment design must keep a DB-only purge path runnable during Apple
 secret outages (for example, load retry secrets after startup), not just handle
 invalid in-process key values. No such cloud secret-loading path is activated here.
 
-Cutoffs expire logically 330 seconds after the signed event. With healthy
-five-minute dispatch and an empty backlog, their physical removal normally
-follows within one additional interval plus job runtime. Likewise, a retry
-record expiring at seven days can otherwise wait until the next sweep.
+Cutoffs expire logically 330 seconds after the signed event. Under the proposed
+hourly fallback, their physical removal would follow on a later successful
+sweep, normally within one additional interval plus execution delay when
+healthy. That longer physical lifetime needs explicit acceptance before
+activation; it is not a five-minute physical-deletion guarantee. Likewise, a
+retry record expiring at seven days can otherwise wait until the next sweep.
 Neither periodic execution nor an alert guarantees an exact physical maximum
 during an outage. **Do not publish a strict seven-day physical-deletion claim
 on this evidence alone or silently extend the owner's approved retention.**
-Before activation, settle proactive purge headroom and the operational response
-for overdue rows, test the actual execution path once with dummy records, and
+The proposed fallback should purge queued encrypted records 24 hours before
+their existing seven-day deadline, before attempting retries. That shortens the
+normal retry window to six days and reserves multiple hourly opportunities for
+deletion; it never restarts or extends the approved deadline. This headroom is
+not implemented, nor does it guarantee recovery from an outage lasting longer
+than the reserved window. Before activation, implement/verify that rule and the
+operational response for overdue rows, test the actual path once with dummy records, and
 approve wording that accurately distinguishes retry eligibility, deletion and
 backup expiry. Existing restore/deletion-journal controls still apply; a restored
 database must not resume traffic with resurrected sessions or expired tokens.
@@ -149,20 +168,21 @@ without database mutation. Register this only on the primary App ID; do not
 replace an existing app-group notification URL without checking its consumers.
 See [Apple endpoint registration](https://developer.apple.com/help/account/capabilities/enabling-server-to-server-notifications/).
 
-1. Obtain approval for the exact operational/data changes and retention wording.
-   Provision/review the job identity, SQL privileges and pinned secret versions;
-   use a Sign in with Apple key, not the App Store Connect API key. No secret
-   values belong in the repository, shell arguments or logs.
-2. Apply/verify the reviewed schema and grants under the existing migration
-   procedure. Build/scan the exact backend image. Create the job disabled first;
-   configure the reviewed execution-failure/backlog alerts before real deletion.
-3. Enable and execute the maintenance job only after approval, using authorized
-   dummy data for one bounded expiry/retry proof. Enable its schedule and verify
-   the actual execution result. Do not repeat generic gameplay/login checks.
-4. Deploy the signed notification receiver with new Apple issuance still off;
+1. Finish the bounded backend endpoint, workload-token guard and existing
+   hourly dispatch hook described above, including proactive/key-independent
+   purge and separate failure results. Retain the approved seven-day maximum;
+   settle the short-lived cutoff's physical-retention wording. Do not create
+   new scheduled resources or silently increase the existing cadence.
+2. Under scoped deployment approval, apply/verify reviewed schema/grants and
+   build/scan the exact image. Use the backend's dedicated Sign in with Apple
+   credentials, not its App Store Connect key or either restricted worker's
+   credentials. Keep new sign-in issuance off while enabling and proving the
+   maintenance path once with authorized dummy records. Verify existing
+   execution/backlog/missing-success reporting on that same dispatch.
+3. Deploy the signed notification receiver with new Apple issuance still off;
    register the verified endpoint in Apple and prove one controlled delivery.
    Keep notification receipt running if later pausing new Apple sign-ins.
-5. Only after privacy/audience, deletion fallback, cleanup and notification
+4. Only after privacy/audience, deletion fallback, cleanup and notification
    operation are accepted, enable the approved native capability, profile and
    app build. Perform one new/returning-user/deletion lifecycle check. KWS remains
    a separate account-creation eligibility decision, not a prerequisite to this
@@ -172,7 +192,28 @@ If cleanup fails, repair it and stop new Apple issuance when necessary; do not
 erase operational errors or disable retention work as a rollback. Never restore
 already-deleted accounts or broaden SQL permissions just to clear an alert.
 
-## Preparation verification
+## Immediate-attempt verification
+
+The no-new-recurring-spend source change passed 78 focused tests: 15 worker,
+12 maintenance-command regression and 51 password/provider HTTP tests. These
+use synthetic credentials and local fixtures, not live SQL or Apple requests.
+They verify one-account/one-call scope, commit and lock-release ordering,
+timeouts and late continuations, successful local deletion despite an Apple
+failure, and no added queue work when lifecycle configuration is absent.
+
+From `backend`:
+
+```text
+node --test -r ts-node/register ts/accounts/appleTokenRevocation.test.ts
+node --test -r ts-node/register ts/accounts/runAppleTokenRevocation.test.ts
+node --test -r ts-node/register ts/routers/authRouter.security.test.ts ts/routers/providerAuthRouter.test.ts
+```
+
+Backend TypeScript and scoped `git diff --check` passed. No cloud resource,
+schedule, IAM/SQL grant, production configuration or public sign-in capability
+was changed. This is not operational acceptance of the proposed hourly fallback.
+
+## Earlier standalone-command preparation verification
 
 Passed on 2026-09-21: 27 focused configuration/worker/command tests,
 backend TypeScript and `git diff --check`. The actual new production webpack

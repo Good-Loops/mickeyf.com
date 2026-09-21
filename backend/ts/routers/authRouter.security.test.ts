@@ -15,6 +15,7 @@ import { createLeaderboardRouter } from './leaderboardRouter';
 import { issueSessionToken, PERSISTENT_SESSION_SECONDS } from '../security/sessionPolicy';
 import { verifyRequestToken } from '../security/requestAuthentication';
 import { loadProviderAuthConfig } from '../config/providerAuthConfig';
+import { createAppleTokenRepository } from '../accounts/appleTokenRepository';
 
 const secret = 'account-deletion-test-secret-not-a-credential';
 const password = 'unit-test-password';
@@ -38,16 +39,18 @@ type TestState = {
     accountId: string; sessions: Map<string, number>; revokedSessions: string[];
     sessionMetadata: Map<string, { remembered: number; renewedAt: number; previousHash: string | null; previousValidUntil: number }>;
     rotations: number;
+    events: string[]; revocationQueries: number; revokedAppleTokens: string[]; appleUnavailable: boolean;
 };
 
 async function withServer(
     run: (base: string, state: TestState) => Promise<void>,
     options: { accountDeletionEnabled?: boolean; withoutJournal?: boolean;
-        providerAuth?: ReturnType<typeof loadProviderAuthConfig> } = { accountDeletionEnabled: true }
+        providerAuth?: ReturnType<typeof loadProviderAuthConfig>; immediateRevocation?: boolean } = { accountDeletionEnabled: true }
 ) {
     const passwordHash = await bcrypt.hash(password, 4);
     const state: TestState = { exists: true, unavailable: false, writes: [], databaseCalls: 0,
         journalCalls: 0, journalUnavailable: false, commitUnavailable: false,
+        events: [], revocationQueries: 0, revokedAppleTokens: [], appleUnavailable: false,
         accountId: account.accountId, revokedSessions: [], rotations: 0, sessions: new Map([
             [sessionHash(primarySession.sessionId), primarySession.expiresAt],
             [sessionHash(otherSession.sessionId), otherSession.expiresAt],
@@ -57,13 +60,47 @@ async function withServer(
             [sessionHash(otherSession.sessionId), { remembered: 0, renewedAt: Math.floor(Date.now() / 1000),
                 previousHash: null, previousValidUntil: 0 }],
         ]) };
+    const appleRepository = createAppleTokenRepository({ clientId: 'com.example.test', activeKeyId: 'synthetic',
+        encryptionKeys: { synthetic: Buffer.alloc(32, 3) } });
+    const appleRow = appleRepository.prepare('synthetic-apple-refresh-token', account.accountId);
+    let appleRowRetained = true;
+    async function revocationQuery(sql: string, values?: unknown[]) {
+        state.revocationQueries++;
+        if (sql.includes('GET_LOCK')) {
+            assert.deepEqual(state.events.slice(-3), ['commit', 'account-unlock', 'connection-release']);
+            assert.equal(state.exists, false);
+            state.events.push('revocation-start');
+            return [[{ acquired: 1 }], []];
+        }
+        if (sql.includes('RELEASE_LOCK')) return [[{ released: 1 }], []];
+        if (sql === 'SET SESSION autocommit = 1') return [{ affectedRows: 0 }, []];
+        assert.match(sql, /account_uuid = \?/);
+        assert.equal(values?.at(-1), account.accountId, 'scope comes from the authenticated deleted account');
+        if (sql.startsWith('SELECT token_id,')) return [[{ ...appleRow, attempt_count: 0 }], []];
+        if (sql.startsWith('UPDATE apple_provider_tokens SET attempt_count')) return [{ affectedRows: 1 }, []];
+        if (sql.startsWith('DELETE FROM apple_provider_tokens WHERE token_id')) {
+            assert.deepEqual(values, [appleRow.token_id, account.accountId]);
+            appleRowRetained = false;
+            return [{ affectedRows: 1 }, []];
+        }
+        if (sql.startsWith('DELETE FROM apple_provider_tokens WHERE revocation_requested_at')) return [{ affectedRows: 0 }, []];
+        if (sql.startsWith('SELECT 1 AS pending')) return [[], []];
+        assert.fail(`Unexpected revocation query: ${sql}`);
+    }
     async function query(options: { sql: string; timeout?: number }, values?: unknown[]) {
         state.databaseCalls++;
         if (state.unavailable) throw new Error('private-database-error');
         const sql = options.sql.replace(/\s+/g, ' ').trim();
         assert.equal(options.timeout, 10_000);
+        if (sql.includes('mickeyf:apple-revocation:') || sql === 'SET SESSION autocommit = 1'
+            || sql.startsWith('SELECT token_id,') || sql.startsWith('UPDATE apple_provider_tokens SET attempt_count')
+            || sql.startsWith('DELETE FROM apple_provider_tokens WHERE token_id')
+            || sql.startsWith('DELETE FROM apple_provider_tokens WHERE revocation_requested_at')
+            || sql.startsWith('SELECT 1 AS pending')) return revocationQuery(sql, values);
         if (sql.includes('GET_LOCK')) { assert.deepEqual(values, [42, 5]); return [[{ lockResult: 1 }], []]; }
-        if (sql.includes('RELEASE_LOCK')) { assert.deepEqual(values, [42]); return [[{ lockResult: 1 }], []]; }
+        if (sql.includes('RELEASE_LOCK')) {
+            assert.deepEqual(values, [42]); state.events.push('account-unlock'); return [[{ lockResult: 1 }], []];
+        }
         if (sql.startsWith('SELECT user_id, account_uuid, user_name, user_password FROM users')) {
             assert.deepEqual(values, ['player']);
             return [state.exists ? [{ user_id: 42, account_uuid: state.accountId, user_name: 'player', user_password: passwordHash }] : [], []];
@@ -180,6 +217,7 @@ async function withServer(
             const commit = async () => {
                 if (state.commitUnavailable) throw new Error('commit acknowledgement lost');
                 snapshot = null;
+                state.events.push('commit');
             };
             const rollback = async () => {
                 if (snapshot) Object.assign(state, snapshot);
@@ -202,7 +240,7 @@ async function withServer(
                     }
                     return query(options, values);
                 },
-                beginTransaction, commit, rollback, release() {}, destroy() {},
+                beginTransaction, commit, rollback, release() { state.events.push('connection-release'); }, destroy() {},
             };
         },
     } as unknown as Pick<Pool, 'query' | 'getConnection'>;
@@ -210,7 +248,13 @@ async function withServer(
     app.use(cookieParser(secret), express.json());
     app.use('/auth', createAuthRouter(database, secret, true, origins, {
         accountDeletionEnabled: options.accountDeletionEnabled,
-        providerAuth: options.providerAuth,
+        providerAuth: options.immediateRevocation ? { enabled: false, clients: {},
+            appleTokenLifecycle: { clientId: 'com.example.test', repository: appleRepository,
+                client: { async exchangeCode() { assert.fail('deletion does not exchange another code'); }, async revoke(refreshToken) {
+                    assert.equal(appleRowRetained, true);
+                    state.revokedAppleTokens.push(refreshToken);
+                    if (state.appleUnavailable) throw new Error('private Apple response with token details');
+                } } } } : options.providerAuth,
         deletionJournal: options.withoutJournal ? undefined : {
             async recordAccountDeletion() {
                 state.journalCalls++;
@@ -614,7 +658,36 @@ test('wrong password preserves account/session and repeated guesses are limited'
         assert.equal((await post(base, deletion)).status, 429);
         assert.equal(state.exists, true);
         assert.deepEqual(state.writes, []);
-    });
+        assert.equal(state.revocationQueries, 0);
+        assert.deepEqual(state.revokedAppleTokens, []);
+    }, { accountDeletionEnabled: true, immediateRevocation: true });
+});
+
+test('web and native password deletion attempt scoped Apple revocation only after commit and unlock', async t => {
+    const warnings: unknown[][] = [];
+    t.mock.method(console, 'warn', (...values: unknown[]) => { warnings.push(values); });
+    for (const origin of origins) {
+        for (const unavailable of [false, true]) {
+            await withServer(async (base, state) => {
+                state.appleUnavailable = unavailable;
+                const tampered = await post(base, { ...deletion, accountId: '99999999-2222-4333-8444-555555555555' }, { Origin: origin });
+                assert.equal(tampered.status, 400);
+                assert.equal(state.revocationQueries, 0);
+                const response = await post(base, deletion, { Origin: origin });
+                assert.equal(response.status, 200);
+                assert.deepEqual(await response.json(), { deleted: true });
+                assert.equal(state.exists, false);
+                assert.ok(state.revocationQueries > 0);
+                assert.deepEqual(state.revokedAppleTokens, ['synthetic-apple-refresh-token']);
+                assert.deepEqual(state.events.slice(0, 4), ['commit', 'account-unlock', 'connection-release', 'revocation-start']);
+                assert.equal(response.headers.getSetCookie().length, 2);
+            }, { accountDeletionEnabled: true, immediateRevocation: true });
+        }
+    }
+    assert.deepEqual(warnings, [
+        ['Apple account revocation has pending work'],
+        ['Apple account revocation has pending work'],
+    ]);
 });
 
 test('deletion works for web/native origins and rejects old sessions, tickets and p4 retries', async () => {
@@ -631,6 +704,7 @@ test('deletion works for web/native origins and rejects old sessions, tickets an
             assert.deepEqual(await result.json(), { deleted: true });
             assert.match(result.headers.get('set-cookie')!, /^__session=.*Expires=Thu, 01 Jan 1970.*HttpOnly; Secure;.*SameSite=Lax/);
             assert.ok(result.headers.getSetCookie().some(value => /^session=.*SameSite=None/.test(value)));
+            assert.equal(state.revocationQueries, 0, 'disabled Apple lifecycle adds no queue queries');
             assert.equal(state.writes.length, 5);
             assert.deepEqual(state.writes.slice(2), [
                 'DELETE FROM game_personal_bests WHERE user_id = ?',
@@ -672,10 +746,12 @@ test('journal uncertainty prevents SQL deletion; recorded intent with uncertain 
                 ? 'ACCOUNT_DELETION_UNAVAILABLE' : 'ACCOUNT_DELETION_PENDING' });
             assert.equal(response.headers.get('set-cookie'), null);
             assert.equal(state.journalCalls, 1);
+            assert.equal(state.revocationQueries, 0, 'unconfirmed commit must not start immediate revocation');
+            assert.deepEqual(state.revokedAppleTokens, []);
             if (failure === 'journalUnavailable') {
                 assert.deepEqual(state.writes, []);
                 assert.equal(state.exists, true);
             }
-        });
+        }, { accountDeletionEnabled: true, immediateRevocation: true });
     }
 });
