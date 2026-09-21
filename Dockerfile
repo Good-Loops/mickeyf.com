@@ -1,6 +1,6 @@
 # Registry-verified multi-platform digest for the supported Node 22 LTS Alpine
 # image. Update the tag and digest together during a reviewed runtime upgrade.
-FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS node-runtime-base
+FROM node:22-alpine@sha256:b6f26b36c8ff49624cfdac716b8ea1138d606df02586a77d364bb5536a634f85 AS node-runtime-base
 
 # Artifact Registry identifies Alpine's OpenSSL 3.5.7-r0 package record as
 # affected. This patches Alpine's shared libraries; Node's separately embedded
