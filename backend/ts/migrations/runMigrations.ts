@@ -40,6 +40,7 @@ type MigrationCommand =
     | 'provider-attempts-apply'
     | 'account-sessions-apply'
     | 'session-renewal-apply'
+    | 'google-signup-apply'
     | 'apple-tokens-apply'
     | 'apple-revocation-apply'
     | 'account-identity-plan'
@@ -79,7 +80,7 @@ function parseCommand(args: readonly string[]): MigrationCommand {
     if (args.length !== 1) {
         throw new Error(
             'Usage: runMigrations.ts '
-            + '<plan|apply|provider-identities-apply|provider-attempts-apply|account-sessions-apply|session-renewal-apply|apple-tokens-apply|apple-revocation-apply|'
+            + '<plan|apply|provider-identities-apply|provider-attempts-apply|account-sessions-apply|session-renewal-apply|google-signup-apply|apple-tokens-apply|apple-revocation-apply|'
             + 'account-identity-plan|account-identity-apply|account-identity-verify|'
             + 'receipts-plan|receipts-apply|receipts-verify|'
             + 'p4-score-drop-plan|p4-score-drop-apply|p4-score-drop-verify>'
@@ -93,6 +94,7 @@ function parseCommand(args: readonly string[]): MigrationCommand {
         && command !== 'provider-attempts-apply'
         && command !== 'account-sessions-apply'
         && command !== 'session-renewal-apply'
+        && command !== 'google-signup-apply'
         && command !== 'apple-tokens-apply'
         && command !== 'apple-revocation-apply'
         && command !== 'account-identity-plan'
@@ -347,6 +349,13 @@ async function executeCommand(
         return;
     }
 
+    if (command === 'google-signup-apply') {
+        printPlan(await applyMigrations(migrationConnection, migrations, config, {
+            allowedEffectKinds: ['add-unique-user-names', 'allow-passwordless-accounts', 'extend-provider-attempt-actions'],
+        }));
+        return;
+    }
+
     if (command === 'provider-identities-apply' || command === 'provider-attempts-apply'
         || command === 'account-sessions-apply' || command === 'session-renewal-apply' || command === 'apple-tokens-apply'
         || command === 'apple-revocation-apply') {
@@ -440,14 +449,14 @@ function safeErrorMessage(error: unknown, password: string): string {
     return password.length > 0 ? message.split(password).join('[REDACTED]') : message;
 }
 
-async function main(): Promise<void> {
-    const command = parseCommand(process.argv.slice(2));
+export async function runMigrations(args: readonly string[]): Promise<void> {
+    const command = parseCommand(args);
     const config = loadMigrationConfig();
     const confirmedAccount = loadMigrationAccountConfirmation();
     let confirmation: RuntimeGrantConfirmation = Object.freeze({});
     if (command === 'apply' || command === 'provider-identities-apply' || command === 'provider-attempts-apply'
         || command === 'account-sessions-apply' || command === 'session-renewal-apply' || command === 'apple-tokens-apply'
-        || command === 'apple-revocation-apply') {
+        || command === 'apple-revocation-apply' || command === 'google-signup-apply') {
         // Refuse before opening a socket, not merely before the first DDL.
         assertMutationAuthorized(config);
     } else if (command.startsWith('account-identity-')) {
@@ -504,13 +513,15 @@ async function main(): Promise<void> {
     }
 }
 
-main().catch((error: unknown) => {
-    let password = '';
-    try {
-        password = loadMigrationConfig().password;
-    } catch {
-        // Configuration errors are already secret-safe.
-    }
-    console.error(safeErrorMessage(error, password));
-    process.exitCode = 1;
-});
+if (require.main === module) {
+    runMigrations(process.argv.slice(2)).catch((error: unknown) => {
+        let password = '';
+        try {
+            password = loadMigrationConfig().password;
+        } catch {
+            // Configuration errors are already secret-safe.
+        }
+        console.error(safeErrorMessage(error, password));
+        process.exitCode = 1;
+    });
+}

@@ -2847,9 +2847,20 @@ Next: obtain test access, review the applicable agreement and result-binding
 contract, then implement and narrowly test one server-enforced eligibility flow
 across all new-account paths. Independent development need not await the older
 privacy enquiry. Published privacy information and backend/deletion/schema
-readiness still need completion before public signup activation. Refresh dated
-live-readiness evidence after resolving gcloud's certificate-trust error, without
-disabling TLS checks. No release is authorized by this planning checkpoint.
+readiness still need completion before public signup activation. No release is
+authorized by this planning checkpoint.
+
+**Real-account rollout preparation (2026-09-21):** read-only cloud access was
+restored using Windows' existing trusted CA, without disabling TLS or changing
+persistent settings. Production still serves `mickeyf-org-localhost-dbb80d4f`;
+its provider-config endpoint returns 404, explaining the absent localhost Google
+button. Added a guarded command for Google signup migrations 0013–0015 without
+expanding ordinary migration behavior (51 focused mocked tests and typecheck
+passed). No SQL, grants, flags, deployment or servers changed. Next prepare the
+Google-only runtime grant profile and explicit session-secret version pinning;
+registration safeguards remain required before activation. Apple browser sign-in
+is separate unimplemented work, not a hidden completed button. See the
+[ordered real-account rollout](backend/GOOGLE_SIGN_IN_ROLLOUT.md).
 
 ### Approved privacy implementation backlog — not implemented
 

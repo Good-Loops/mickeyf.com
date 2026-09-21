@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test, { type TestContext } from 'node:test';
+import mysql, { type Connection } from 'mysql2/promise';
 import * as leaderboardSchema from './leaderboardSchema';
 import * as identitySchema from './accountIdentitySchema';
 import * as providerIdentitySchema from './providerIdentitySchema';
@@ -9,6 +10,7 @@ import * as appleTokenSchema from './appleTokenSchema';
 import * as appleRevocationSchema from './appleRevocationSchema';
 import type { MigrationConnection } from './leaderboardSchema';
 import { loadMigrationManifest } from './migrationManifest';
+import { runMigrations } from './runMigrations';
 import {
     applyMigrations,
     migrationLockName,
@@ -572,7 +574,7 @@ function passwordlessRunnerFixture(t: TestContext, options: {
         if (sql.includes('GET_LOCK')) return [{ acquired: 1 }];
         if (sql.includes('RELEASE_LOCK')) return [{ released: 1 }];
         if (sql.includes('COUNT(*)') && sql.includes('information_schema.TABLES')) {
-            return [{ tableCount: values[0] === 'game_runs' ? 0 : 1 }];
+            return [{ tableCount: ['game_runs', 'apple_provider_tokens', 'apple_auth_revocations'].includes(String(values[0])) ? 0 : 1 }];
         }
         if (sql.includes('FROM schema_migrations')) return state.applied;
         if (sql.includes('INSERT INTO schema_migrations')) {
@@ -596,6 +598,108 @@ function passwordlessRunnerFixture(t: TestContext, options: {
     });
     return { connection, migrations, state };
 }
+
+function googleSignupCommandFixture(t: TestContext, options: Parameters<typeof passwordlessRunnerFixture>[1] = {}) {
+    const fixture = passwordlessRunnerFixture(t, options);
+    const previousEnvironment = Object.fromEntries(Object.entries(process.env).filter(([key]) => key.startsWith('MIGRATION_')));
+    for (const key of Object.keys(previousEnvironment)) delete process.env[key];
+    Object.assign(process.env, {
+        MIGRATION_DB_HOST: '127.0.0.1', MIGRATION_DB_PORT: '3306', MIGRATION_DB_USER: 'migration-user',
+        MIGRATION_DB_PASS: 'synthetic-test-password', MIGRATION_DB_NAME: settings.database,
+        MIGRATION_CONFIRM_ACCOUNT: 'migration-user@%', MIGRATION_CONFIRM_DATABASE: settings.database,
+        MIGRATION_CONFIRM_TARGET: `127.0.0.1:3306/${settings.database}`, MIGRATION_ALLOW_APPLY: '1',
+    });
+    t.after(() => {
+        for (const key of Object.keys(process.env)) if (key.startsWith('MIGRATION_')) delete process.env[key];
+        Object.assign(process.env, previousEnvironment);
+    });
+    const identity = { databaseName: settings.database, currentUser: 'migration-user@%',
+        serverUuid: '00000000-0000-4000-8000-000000000000', serverVersion: '8.0.31', versionComment: 'synthetic' };
+    const originalQuery = fixture.connection.query.bind(fixture.connection);
+    fixture.connection.query = async (sql, values = []) => {
+        if (sql.includes('CURRENT_USER() AS currentUser')) {
+            fixture.connection.calls.push({ sql, values });
+            return [[identity], []];
+        }
+        return originalQuery(sql, values);
+    };
+    const end = t.mock.fn(async () => {});
+    const connection = Object.assign(fixture.connection, { end }) as unknown as Connection;
+    const connect = t.mock.method(mysql, 'createConnection', async () => connection);
+    const output = t.mock.method(console, 'log', () => {});
+    return { ...fixture, identity, connect, end, output };
+}
+
+test('Google signup command applies exactly 0013–0015 and leaves Apple schema pending', async t => {
+    const { connection, migrations, state, connect, end, output } = googleSignupCommandFixture(t);
+    await runMigrations(['google-signup-apply']);
+    assert.equal(connect.mock.callCount(), 1);
+    assert.equal(end.mock.callCount(), 1);
+    assert.deepEqual(state.applied.map(({ version }) => version), migrations.map(({ version }) => version));
+    assert.deepEqual(connection.calls.filter(({ sql }) => sql.startsWith('ALTER TABLE')).map(({ sql }) => sql),
+        migrations.slice(12, 15).map(({ sql }) => sql));
+    assert.deepEqual(connection.calls.filter(({ sql }) => sql.startsWith('INSERT INTO schema_migrations'))
+        .map(({ values }) => values[0]), migrations.slice(12, 15).map(({ version }) => version));
+    assert.equal(output.mock.calls[1].arguments[0],
+        `Pending migrations: ${loadMigrationManifest().slice(15).map(({ version }) => version).join(', ')}`);
+});
+
+test('ordinary apply does not acquire Google signup or Apple migration effects', async t => {
+    const { connection, state, end } = googleSignupCommandFixture(t);
+    await runMigrations(['apply']);
+    assert.equal(state.applied.length, 12);
+    assert.equal(connection.calls.some(({ sql }) => /^(?:CREATE TABLE|ALTER TABLE|INSERT INTO schema_migrations)/u.test(sql)), false);
+    assert.equal(end.mock.callCount(), 1);
+});
+
+test('Google signup command rejects malformed arguments before connecting', async t => {
+    const { connect } = googleSignupCommandFixture(t);
+    for (const args of [[], ['google-signup'], ['google-signup-apply', 'extra'], ['google-signup-apply ']]) {
+        await assert.rejects(runMigrations(args), /Usage:|Unknown migration command/u);
+    }
+    assert.equal(connect.mock.callCount(), 0);
+});
+
+test('Google signup command requires exact account, database, target and apply confirmations before connecting', async t => {
+    const { connect } = googleSignupCommandFixture(t);
+    for (const [key, value] of [
+        ['MIGRATION_CONFIRM_ACCOUNT', undefined], ['MIGRATION_CONFIRM_ACCOUNT', 'migration-user'],
+        ['MIGRATION_CONFIRM_DATABASE', undefined], ['MIGRATION_CONFIRM_DATABASE', 'another_database'],
+        ['MIGRATION_CONFIRM_TARGET', undefined], ['MIGRATION_CONFIRM_TARGET', `127.0.0.1:3307/${settings.database}`],
+        ['MIGRATION_ALLOW_APPLY', undefined], ['MIGRATION_ALLOW_APPLY', 'true'], ['MIGRATION_ALLOW_APPLY', '0'],
+    ]) {
+        const previous = process.env[key!];
+        if (value === undefined) delete process.env[key!]; else process.env[key!] = value;
+        await assert.rejects(runMigrations(['google-signup-apply']), new RegExp(key!));
+        process.env[key!] = previous;
+    }
+    assert.equal(connect.mock.callCount(), 0);
+});
+
+test('Google signup command rejects a connected account or database mismatch before any migration query', async t => {
+    const { connection, identity, end } = googleSignupCommandFixture(t);
+    for (const key of ['databaseName', 'currentUser'] as const) {
+        const previous = identity[key]; identity[key] = 'wrong-target';
+        await assert.rejects(runMigrations(['google-signup-apply']), /Connected database or account does not match/u);
+        identity[key] = previous;
+    }
+    assert.equal(connection.calls.length, 2);
+    assert.ok(connection.calls.every(({ sql }) => sql.includes('CURRENT_USER() AS currentUser')));
+    assert.equal(end.mock.callCount(), 2);
+});
+
+test('Google signup command fails closed on duplicate names or incomplete prerequisite history', async t => {
+    for (const options of [{ duplicates: true }, { recordedCount: 11 }]) {
+        await t.test(JSON.stringify(options), async t => {
+            const { connection, state, end } = googleSignupCommandFixture(t, options);
+            const appliedCount = state.applied.length;
+            await assert.rejects(runMigrations(['google-signup-apply']), /duplicate user names|all earlier migrations/u);
+            assert.equal(state.applied.length, appliedCount);
+            assert.equal(connection.calls.some(({ sql }) => /^(?:CREATE TABLE|ALTER TABLE|INSERT INTO schema_migrations)/u.test(sql)), false);
+            assert.equal(end.mock.callCount(), 1);
+        });
+    }
+});
 
 test('passwordless DDL is ordered, verifies each outcome before history, and plans cleanly at 0015', async t => {
     const { connection, migrations } = passwordlessRunnerFixture(t);

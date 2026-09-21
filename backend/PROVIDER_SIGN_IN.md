@@ -698,6 +698,15 @@ protocol together with the compatible public backend. Preserve the same real
 accounts and scores; do not silently switch localhost back to the isolated
 database to make the button appear.
 
+**Fresh rollout review (2026-09-21):** live reads confirm the serving revision is
+still `mickeyf-org-localhost-dbb80d4f`, with provider/deletion settings absent and
+the direct provider-config route returning 404. Localhost remains in legacy
+public mode; the button is not deployed functionality hidden by CSS. The
+[real-account rollout plan](GOOGLE_SIGN_IN_ROLLOUT.md) records the verified
+baseline, newly guarded migration entrypoint, grant-profile/session-secret preparation,
+and coordinated cutover. Preparation does not enable public signup or change
+the approved eligibility requirement.
+
 ### Explicit localhost cutover configuration — 2026-09-21
 
 `VITE_USE_PUBLIC_API=1` continues to select real public accounts and scores.
@@ -717,10 +726,12 @@ was changed in this checkpoint.
 Read-only activation review still finds unfinished age/consent and published-
 privacy work, plus the coordinated schema/deletion/runtime rollout. The initial
 audience discussion is superseded by the adult-only signup decision below.
-KWS does not block independent development. A fresh Cloud Run metadata read
-failed during gcloud auth refresh with a certificate-trust error; dated
-cloud/schema/backup observations below must not be presented as current
-evidence. TLS verification remains enabled.
+KWS does not block independent development. An earlier Cloud Run metadata read
+failed during gcloud auth refresh with a certificate-trust error. The fresh
+rollout review above resolved that read using the CA already trusted by Windows,
+with TLS verification still enabled. Only the selected service/job/trigger
+metadata was refreshed; dated schema/backup observations below remain historical,
+not current database evidence.
 
 Validation: 60 focused tests passed with mocked network requests, including
 actual Vite plugin wiring, both cookie protocols, invalid configuration,

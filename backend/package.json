@@ -16,6 +16,7 @@
         "migrations:provider-attempts:apply": "ts-node ts/migrations/runMigrations.ts provider-attempts-apply",
         "migrations:account-sessions:apply": "ts-node ts/migrations/runMigrations.ts account-sessions-apply",
         "migrations:session-renewal:apply": "ts-node ts/migrations/runMigrations.ts session-renewal-apply",
+        "migrations:google-signup:apply": "ts-node ts/migrations/runMigrations.ts google-signup-apply",
         "migrations:apple-tokens:apply": "ts-node ts/migrations/runMigrations.ts apple-tokens-apply",
         "migrations:apple-revocation:apply": "ts-node ts/migrations/runMigrations.ts apple-revocation-apply",
         "apple-tokens:revoke": "ts-node ts/accounts/runAppleTokenRevocation.ts apply",
