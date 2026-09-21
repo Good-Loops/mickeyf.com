@@ -951,6 +951,35 @@ for consolidation: runtime strings can trim whitespace, migration passwords
 must preserve it, and cleanup credentials must not silently fall back to
 runtime credentials. Similar syntax does not imply identical policy.
 
+## Shared hue-distance calculation — 2026-09-21
+
+`utils/hsl.ts` and `PitchColorPhaseController.ts` duplicated the same hue
+wrapping and shortest-path calculation. Both now use `signedHueDistance` in the
+existing color utility. The controller no longer owns a private math copy.
+
+Before: interpolation and transition completion each calculated and adjusted
+their own hue delta. After:
+
+```ts
+// hsl.ts: interpolation
+return wrapHue(wrapHue(h1) + signedHueDistance(h1, h2) * t);
+// PitchColorPhaseController.ts: transition completion
+const hueDelta = signedHueDistance(nextColor.hue, target.hue);
+```
+
+This centralizes one rule, not merely similar-looking code. A transition from
+350° to 10° travels +20°, not -340°. Exact ±180° ties retain their original
+direction; rounding, extrapolation, invalid-input propagation and animation
+thresholds are unchanged. One small named function replaces the duplicate;
+no new module, dependency or generalized animation framework was added.
+
+Three characterization tests passed before the change; all four focused tests
+passed afterward, including direct signed-distance cases. Commands from
+`frontend`: `node --experimental-strip-types --test --test-reporter=spec
+ts/utils/hsl.test.mjs` and `node node_modules/typescript/bin/tsc -p tsconfig.json
+--noEmit`. Root `git diff --check` passed. No full suite, production build,
+device/gameplay retest or deployment was needed for this calculation-only change.
+
 ## Inventory closeout
 
 Read-only Git/path enumeration, local reference reading and targeted frontend/

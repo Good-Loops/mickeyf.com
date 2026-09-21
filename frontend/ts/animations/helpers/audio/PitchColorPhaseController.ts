@@ -17,7 +17,7 @@
 import { PitchColorPolicy, type ColorDecision } from "@/animations/helpers/audio/PitchColorPolicy";
 import { clamp } from "@/utils/clamp";
 import { expSmoothing } from "@/utils/expSmoothing";
-import { HslColor, lerpHsl, wrapHue } from "@/utils/hsl";
+import { HslColor, lerpHsl, signedHueDistance, wrapHue } from "@/utils/hsl";
 
 type CommitTransition = {
     active: boolean;
@@ -374,7 +374,7 @@ export class PitchColorPhaseController {
 
         this.state.commitTransition.color = nextColor;
 
-        const hueDelta = this.hueDistance(nextColor.hue, target.hue);
+        const hueDelta = signedHueDistance(nextColor.hue, target.hue);
         const saturationDelta = Math.abs(nextColor.saturation - target.saturation);
         const lightnessDelta = Math.abs(nextColor.lightness - target.lightness);
 
@@ -413,12 +413,4 @@ export class PitchColorPhaseController {
         }
     }
 
-    private hueDistance(from: number, to: number): number {
-        const a = wrapHue(from);
-        const b = wrapHue(to);
-        let delta = b - a;
-        if (delta > 180) delta -= 360;
-        if (delta < -180) delta += 360;
-        return delta;
-    }
 }

@@ -2428,6 +2428,11 @@ example. The active branch is `improvement/clean-code-sweep`.
   See the [teaching checkpoint](CLEAN_CODE_INVENTORY.md#native-sign-in-cancellation-ownership--2026-09-21).
 - [ ] Complete subsequent subsystem reviews one at a time; choose actual
   improvements from evidence, not file length or similar-looking syntax.
+- [x] Shared hue-distance calculation (2026-09-21): interpolation and pitch-color
+  transition settling now reuse the same existing-utility function. Preserved
+  wraparound, signed half-turn ties, rounding and thresholds. Four focused tests,
+  frontend TypeScript and whitespace checks passed; no full-suite/device retest.
+  See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#shared-hue-distance-calculation--2026-09-21).
 
 Record-notification follow-up (2026-09-10): p4-Vega's existing results-card badge
 was not a SweetAlert, and Three Bosses had no browser record announcement. Both
