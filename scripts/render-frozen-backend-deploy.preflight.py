@@ -29,6 +29,13 @@ def reject(message):
     raise SystemExit(f"Frozen candidate preflight rejected: {message}")
 
 
+def validate_session_secret_version(pins):
+    version = pins.get("sessionSecretVersion") if isinstance(pins, dict) else None
+    if not isinstance(version, str) or re.fullmatch(r"[1-9][0-9]*", version) is None:
+        reject("sessionSecretVersion must be an explicit positive decimal string without aliases or whitespace")
+    return version
+
+
 def command(arguments):
     try:
         result = subprocess.run(["gcloud", *arguments], capture_output=True, text=True, timeout=60)
@@ -277,9 +284,10 @@ def main():
     pins_path, build_id, trigger_id, approval, phase = sys.argv[1:]
     with open(pins_path, encoding="utf-8") as handle:
         pins = json.load(handle)
+    session_secret_version = validate_session_secret_version(pins)
     if (re.fullmatch(UUID, build_id) is None or re.fullmatch(UUID, trigger_id) is None
             or trigger_id in (STAGE_A, pins["canonicalDeployTriggerId"], pins["sourceTriggerId"])
-            or approval != f"freeze-zero-traffic:{pins['sourceCommit']}:{pins['sourceBuildId']}:{pins['imageDigest']}"
+            or approval != f"freeze-zero-traffic:{pins['sourceCommit']}:{pins['sourceBuildId']}:{pins['imageDigest']}:session-secret:{session_secret_version}"
             or phase not in ("initial", "before-deploy", "after-deploy")):
         reject("explicit one-shot approval or current deployment identity is invalid")
     def build(identifier):

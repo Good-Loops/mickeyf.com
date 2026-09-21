@@ -8,6 +8,7 @@ import {
     resolveFrozenDeploymentSteps, validateFrozenPins,
     accountDeletionEnvironment, ACCOUNT_DELETION_JOURNAL_BUCKET, ORIGINAL_ACCOUNT_IDENTITY_EPOCH,
     googleSignInEnvironment, APPROVED_GOOGLE_WEB_CLIENT_ID,
+    frozenDeploymentApproval, validateSessionSecretVersion,
 } from './render-frozen-backend-deploy.mjs';
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8');
@@ -16,13 +17,13 @@ const pins = {
     sourceBuildId: '123e4567-e89b-42d3-a456-426614174000', sourceCommit: 'a'.repeat(40),
     imageDigest: `sha256:${'b'.repeat(64)}`, sourceTriggerId: '648fadca-3cd1-4b57-9d35-0f62a1468443',
     sourceTriggerName: 'feature-new-leaderboard-candidate', sourceRef: 'refs/heads/feature/three-bosses-polish',
-    deploymentTriggerName: 'frozen-backend-receipts',
+    deploymentTriggerName: 'frozen-backend-receipts', sessionSecretVersion: '2',
 };
 const input = { canonical: read('../cloudbuild.deploy.yaml'), candidate: read('../cloudbuild.candidate.yaml'), preflight, pins };
 const config = renderFrozenBackendDeployConfig(input);
 const buildId = '223e4567-e89b-42d3-a456-426614174000';
 const deploymentTriggerId = '323e4567-e89b-42d3-a456-426614174000';
-const approval = `freeze-zero-traffic:${pins.sourceCommit}:${pins.sourceBuildId}:${pins.imageDigest}`;
+const approval = frozenDeploymentApproval(pins);
 const resolved = resolveFrozenDeploymentSteps(config.steps, { buildId, deploymentTriggerId, approval });
 
 function python(code, payload) {
@@ -55,6 +56,79 @@ test('only exact reviewed work-branch pins render; main triggers and shell injec
         { sourceTriggerId: 'ef5a2981-95be-4f4d-af91-f997fde73356' }, { sourceTriggerId: 'd71109da-8350-4f2f-a3be-2053bb6ccd45' },
         { deploymentTriggerName: 'main-push-mickeyf-com' }, { unexpected: 'value' },
     ]) assert.throws(() => validateFrozenPins({ ...pins, ...change }));
+});
+
+const invalidSessionVersions = [undefined, null, 2, true, '', '0', '02', '-1', '1.5',
+    'latest', 'current', ' 2', '2 ', '2\n', '2\r\n', '2\u00a0', '2;echo unsafe'];
+
+test('session-secret version must be supplied as an exact positive decimal string', () => {
+    for (const version of ['1', '2', '17']) {
+        assert.equal(validateSessionSecretVersion(version), version);
+        assert.equal(validateFrozenPins({ ...pins, sessionSecretVersion: version }).sessionSecretVersion, version);
+    }
+    for (const sessionSecretVersion of invalidSessionVersions) {
+        assert.throws(() => validateSessionSecretVersion(sessionSecretVersion));
+        assert.throws(() => renderFrozenBackendDeployConfig({ ...input, pins: { ...pins, sessionSecretVersion } }));
+    }
+    const { sessionSecretVersion, ...missingVersion } = pins;
+    assert.throws(() => validateFrozenPins(missingVersion));
+});
+
+test('one reviewed version pins deployment, runtime verification, approval and resolved steps digest', () => {
+    const alternatePins = { ...pins, sessionSecretVersion: '17' };
+    const alternateConfig = renderFrozenBackendDeployConfig({ ...input, pins: alternatePins });
+    const alternateApproval = frozenDeploymentApproval(alternatePins);
+    assert.equal(alternateApproval, `freeze-zero-traffic:${pins.sourceCommit}:${pins.sourceBuildId}:${pins.imageDigest}:session-secret:17`);
+    assert.match(alternateConfig.steps[5].args[1], /DB_PASS=DB_PASS:1,SESSION_SECRET=SESSION_SECRET:17/u);
+    assert.match(alternateConfig.steps[6].args[1], /"DB_PASS": "1",\s+"SESSION_SECRET": "17"/u);
+    assert.doesNotMatch(alternateConfig.steps[5].args[1], /SESSION_SECRET=SESSION_SECRET:2/u);
+    assert.doesNotMatch(alternateConfig.steps[6].args[1], /"SESSION_SECRET": "2"/u);
+    const alternateSteps = resolveFrozenDeploymentSteps(alternateConfig.steps, {
+        buildId, deploymentTriggerId, approval: alternateApproval,
+    });
+    assert.notEqual(frozenDeploymentStepsSha256(alternateSteps), frozenDeploymentStepsSha256(resolved));
+    for (const invalidApproval of [approval.replace(':session-secret:2', ''), ...invalidSessionVersions.map(
+        version => approval.replace(':session-secret:2', `:session-secret:${version}`),
+    ).filter(value => value !== approval)]) {
+        assert.throws(() => resolveFrozenDeploymentSteps(config.steps, { buildId, deploymentTriggerId, approval: invalidApproval }));
+    }
+});
+
+test('Python preflight rejects missing, malformed or differently approved versions before cloud access', () => {
+    const result = python(`
+from io import StringIO
+from unittest.mock import patch
+class CloudReached(Exception): pass
+calls = []
+def cloud_command(args):
+    calls.append(args)
+    raise CloudReached()
+def run(candidate, approval):
+    calls.clear()
+    with patch.dict(namespace, {"open": lambda *args, **kwargs: StringIO(json.dumps(candidate)), "command": cloud_command}), \\
+            patch.object(sys, "argv", ["preflight", "unused", payload["buildId"], payload["triggerId"], approval, "initial"]):
+        try:
+            namespace["main"]()
+        except SystemExit:
+            assert not calls, "invalid version/approval reached cloud access"
+            return False
+        except CloudReached:
+            assert len(calls) == 1
+            return True
+    raise AssertionError("preflight unexpectedly finished")
+base = payload["pins"]
+for value in payload["invalidVersions"]:
+    assert not run(dict(base, sessionSecretVersion=value), payload["approval"])
+missing = {key: value for key, value in base.items() if key != "sessionSecretVersion"}
+assert not run(missing, payload["approval"])
+assert not run(base, payload["approval"].replace(":session-secret:2", ""))
+alternate = dict(base, sessionSecretVersion="17")
+assert not run(alternate, payload["approval"])
+assert run(base, payload["approval"])
+assert run(alternate, payload["approval"].replace(":session-secret:2", ":session-secret:17"))
+`, { pins: validateFrozenPins(pins), approval, buildId, triggerId: deploymentTriggerId,
+        invalidVersions: invalidSessionVersions });
+    assert.equal(result.status, 0, result.stderr);
 });
 
 test('source-less generated package requires approval and contains no traffic promotion, expiry, notification or secrets payload', () => {

@@ -91,10 +91,13 @@ separately; Apple maintenance is not a prerequisite for Google-only issuance.
    treating privilege-filtered metadata as proof of absence; role/global-only
    access is not inferred. See MySQL's [schema privilege metadata](https://dev.mysql.com/doc/refman/8.0/en/information-schema-schema-privileges-table.html).
 
-3. **Prepare the coordinated session cutover.** Current deployment and traffic
-   checks pin `SESSION_SECRET:2`. Add explicit, reviewed version pin support
-   before the required rotation; do not guess a new version, use `latest`,
-   create a secret or weaken image/source/approval checks. Align the backend,
+3. **Prepare the coordinated session cutover.** The frozen deployment and traffic
+   tools now require an explicit `sessionSecretVersion`: a positive decimal
+   string, not `latest` or another alias. The overall approval, resolved steps
+   digest and runtime checks bind to that same version. The canonical main
+   deployment remains unchanged at version 2; do not reactivate it for rotated
+   sessions until its configuration is separately aligned. No new version has
+   been chosen, created, read or rotated during this preparation. Align the backend,
    Hosting and localhost cookie contracts using
    [the session rollout](SESSION_AUTHENTICATION.md#coordinated-activation-not-executed-by-this-checkpoint).
    Old and new sessions are incompatible: require fresh sign-in and avoid mixed
@@ -157,5 +160,12 @@ opening new registrations.
   node node_modules/typescript/bin/tsc -p tsconfig.json --noEmit
   ```
 
-- Next source task: support the reviewed session-secret version in deployment checks.
-  Signup eligibility remains an independent activation requirement throughout.
+- Explicit session-secret version pins are prepared in the frozen renderer,
+  preflight and traffic tools. Missing/malformed pins, legacy approvals and
+  mismatched runtime versions fail closed. `npm run test:frozen-backend` passed
+  94 tests offline, including generated Bash syntax and embedded Python;
+  no cloud command, secret read or rotation is part of that test run.
+- Next: review the concrete production migration/grant/recovery state and finish
+  the server-validated signup eligibility contract when test access is available.
+  Do not repeat completed generic gameplay/login acceptance or activate providers
+  while these independent requirements remain unresolved.

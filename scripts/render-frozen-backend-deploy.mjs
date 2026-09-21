@@ -18,6 +18,18 @@ export const ACCOUNT_DELETION_JOURNAL_BUCKET = 'ludolume-deletion-journal-101288
 export const ORIGINAL_ACCOUNT_IDENTITY_EPOCH = '2026-09-12 00:15:39.954172';
 export const APPROVED_GOOGLE_WEB_CLIENT_ID = '1012884798546-u18tb6962p05mdpfe6nov8uhe0pbeak8.apps.googleusercontent.com';
 
+export function validateSessionSecretVersion(value) {
+    if (typeof value !== 'string' || value !== value.trim() || !/^[1-9][0-9]*$/u.test(value)) {
+        throw new Error('sessionSecretVersion must be an explicit positive decimal version string, not an alias.');
+    }
+    return value;
+}
+
+export function frozenDeploymentApproval(pins) {
+    return `freeze-zero-traffic:${pins.sourceCommit}:${pins.sourceBuildId}:${pins.imageDigest}`
+        + `:session-secret:${validateSessionSecretVersion(pins.sessionSecretVersion)}`;
+}
+
 // Omission is default-off; an explicit false requests a reviewed disable/rollback.
 export function accountDeletionEnvironment(settings) {
     if (settings === undefined) return { ACCOUNT_DELETION_ENABLED: 'false' };
@@ -63,11 +75,12 @@ function googleSignInApproval(pins) {
 }
 
 export function validateFrozenPins(value) {
-    const keys = ['sourceBuildId', 'sourceCommit', 'imageDigest', 'sourceTriggerId', 'sourceTriggerName', 'sourceRef', 'deploymentTriggerName'];
+    const keys = ['sourceBuildId', 'sourceCommit', 'imageDigest', 'sourceTriggerId', 'sourceTriggerName', 'sourceRef', 'deploymentTriggerName', 'sessionSecretVersion'];
     if (!value || Object.keys(value).filter(key => !['accountDeletion', 'googleSignIn'].includes(key)).sort().join() !== keys.sort().join()
         || keys.some((key) => typeof value[key] !== 'string')) {
-        throw new Error('Supply the seven reviewed source/deployment pins and optional accountDeletion/googleSignIn configurations only.');
+        throw new Error('Supply the eight reviewed source/deployment pins, including sessionSecretVersion, and optional accountDeletion/googleSignIn configurations only.');
     }
+    validateSessionSecretVersion(value.sessionSecretVersion);
     accountDeletionEnvironment(value.accountDeletion);
     googleSignInEnvironment(value.googleSignIn, value.accountDeletion);
     if (!uuid.test(value.sourceBuildId) || !uuid.test(value.sourceTriggerId)
@@ -164,8 +177,9 @@ export const frozenDeploymentStepsSha256 = (steps) => sha256(canonicalJson(steps
 
 export function resolveFrozenDeploymentSteps(steps, { buildId, deploymentTriggerId, approval }) {
     if (!uuid.test(buildId) || !uuid.test(deploymentTriggerId)
-        || !/^freeze-zero-traffic:[0-9a-f]{40}:[0-9a-f-]{36}:sha256:[0-9a-f]{64}$/u.test(approval)) {
-        throw new Error('Resolved steps require the exact deployment build, trigger and approval.');
+        || typeof approval !== 'string' || approval !== approval.trim()
+        || !/^freeze-zero-traffic:[0-9a-f]{40}:[0-9a-f-]{36}:sha256:[0-9a-f]{64}:session-secret:[1-9][0-9]*$/u.test(approval)) {
+        throw new Error('Resolved steps require the exact deployment build, trigger and version-bound approval.');
     }
     const replacements = { '${BUILD_ID}': buildId, '${_DEPLOY_TRIGGER_ID}': deploymentTriggerId, '${_APPROVAL}': approval, '$$': '$' };
     const substitute = (value) => {
@@ -217,6 +231,8 @@ export function renderFrozenBackendDeployConfig({ canonical, candidate, prefligh
         _GOOGLE_SIGN_IN_APPROVAL: googleSignInApproval(pins),
     })) deletion = replaceExactly(deletion, `\${${name}}`, value);
     let deploy = frozenState(stepBlock(canonical, 'Deploy deterministic zero-traffic candidate'));
+    deploy = replaceExactly(deploy, 'DB_PASS=DB_PASS:1,SESSION_SECRET=SESSION_SECRET:2',
+        `DB_PASS=DB_PASS:1,SESSION_SECRET=SESSION_SECRET:${pins.sessionSecretVersion}`);
     deploy = replaceExactly(deploy, "readonly TRIGGER_ID='ef5a2981-95be-4f4d-af91-f997fde73356'", `readonly TRIGGER_ID='${pins.sourceTriggerId}'`);
     deploy = replaceExactly(deploy, 'P4_VEGA_SCORE_SUBMISSIONS_ENABLED=true,THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=true',
         'P4_VEGA_SCORE_SUBMISSIONS_ENABLED=false,THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=false');
@@ -227,6 +243,7 @@ export function renderFrozenBackendDeployConfig({ canonical, candidate, prefligh
         '        revision_preexisted=false\n        deployed_here=false\n        gcloud run revisions list --service="$$SERVICE_NAME" --project="$$PROJECT_ID" \\\n          --region="$$RUN_REGION" --platform=managed --format=json > /workspace/frozen-revisions.json\n        python3 - /workspace/frozen-revisions.json "$$REVISION_NAME" <<\'PY\'\n        import json, sys\n        with open(sys.argv[1], encoding="utf-8") as handle:\n            revisions = json.load(handle)\n        if not isinstance(revisions, list) or any(item.get("metadata", {}).get("name") == sys.argv[2] for item in revisions):\n            raise SystemExit("Frozen revision already exists or inventory is malformed; inspect it instead of redeploying")\n        PY');
 
     let verify = frozenState(stepBlock(canonical, 'Verify runtime and unchanged traffic'));
+    verify = replaceExactly(verify, '"SESSION_SECRET": "2"', `"SESSION_SECRET": "${pins.sessionSecretVersion}"`);
     verify = replaceExactly(verify, "readonly TRIGGER_ID='ef5a2981-95be-4f4d-af91-f997fde73356'", `readonly TRIGGER_ID='${pins.sourceTriggerId}'`);
     verify = replaceExactly(verify, '        readonly NOTIFICATION_JSON=\'/workspace/slack-notification.json\'\n', '');
     verify = replaceExactly(verify, '"P4_VEGA_SCORE_SUBMISSIONS_ENABLED": "true"', '"P4_VEGA_SCORE_SUBMISSIONS_ENABLED": "false"');
@@ -269,7 +286,7 @@ async function main() {
         const config = renderFrozenBackendDeployConfig(input);
         const steps = resolveFrozenDeploymentSteps(config.steps, {
             buildId: process.argv[4], deploymentTriggerId: process.argv[5],
-            approval: `freeze-zero-traffic:${parsedPins.sourceCommit}:${parsedPins.sourceBuildId}:${parsedPins.imageDigest}`,
+            approval: frozenDeploymentApproval(parsedPins),
         });
         process.stdout.write(frozenDeploymentStepsSha256(steps) + '\n');
     } else process.stdout.write(renderFrozenBackendDeploy(input));

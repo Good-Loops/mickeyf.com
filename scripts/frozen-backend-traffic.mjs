@@ -3,7 +3,8 @@ import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
-import { accountDeletionEnvironment, googleSignInEnvironment } from './render-frozen-backend-deploy.mjs';
+import { accountDeletionEnvironment, googleSignInEnvironment, validateSessionSecretVersion,
+    frozenDeploymentApproval } from './render-frozen-backend-deploy.mjs';
 
 export const PROJECT = 'noted-reef-387021';
 export const REGION = 'us-central1';
@@ -29,8 +30,9 @@ function keys(value, expected, label) {
 export function validatePins(pins) {
     const { accountDeletion, googleSignIn, ...sourcePins } = pins ?? {};
     keys(sourcePins, ['sourceBuildId', 'sourceCommit', 'imageDigest', 'deploymentBuildId',
-        'deploymentTriggerId', 'deploymentStepsSha256'], 'Pins');
+        'deploymentTriggerId', 'deploymentStepsSha256', 'sessionSecretVersion'], 'Pins');
     requireThat(Object.values(sourcePins).every(value => typeof value === 'string'), 'All source pins must be strings');
+    validateSessionSecretVersion(pins.sessionSecretVersion);
     accountDeletionEnvironment(accountDeletion);
     googleSignInEnvironment(googleSignIn, accountDeletion);
     for (const key of ['sourceBuildId', 'deploymentBuildId', 'deploymentTriggerId']) {
@@ -68,14 +70,15 @@ export function validateDeployment(build, pins) {
         && (options.pool === undefined || same(options.pool, {})) && build.timeout === '2400s',
     'Unreviewed deployment execution options');
     requireThat(build.substitutions?._DEPLOY_TRIGGER_ID === pins.deploymentTriggerId
-        && build.substitutions?._APPROVAL === `freeze-zero-traffic:${pins.sourceCommit}:${pins.sourceBuildId}:${pins.imageDigest}`,
-    'Deployment substitution approval differs from the pinned source and image');
+        && build.substitutions?._APPROVAL === frozenDeploymentApproval(pins),
+    'Deployment substitution approval differs from the pinned source, image or session-secret version');
     requireThat(deploymentStepsFingerprint(build.steps) === pins.deploymentStepsSha256
         && build.steps.every(step => step.status === 'SUCCESS' && (step.exitCode ?? 0) === 0
             && !step.allowFailure && !step.allowExitCodes?.length), 'Deployment steps differ from the offline reviewed config');
 }
 
 export function validateFrozenRevision(revision, pins) {
+    const sessionSecretVersion = validateSessionSecretVersion(pins.sessionSecretVersion);
     requireThat(revision.name === `${SERVICE}/revisions/${revisionName(pins)}`
         && revision.service === 'mickeyf-org' && revision.uid && !revision.deleteTime && !revision.reconciling
         && revision.conditions?.some(c => c.type === 'Ready' && c.state === 'CONDITION_SUCCEEDED'), 'Frozen revision is not Ready');
@@ -106,7 +109,7 @@ export function validateFrozenRevision(revision, pins) {
     for (const [name, value] of Object.entries(expectedPlain)) {
         requireThat(same(container.env.find(e => e.name === name), { name, value }), `Frozen environment differs: ${name}`);
     }
-    for (const [name, version] of [['DB_PASS', '1'], ['SESSION_SECRET', '2']]) {
+    for (const [name, version] of [['DB_PASS', '1'], ['SESSION_SECRET', sessionSecretVersion]]) {
         const env = container.env.find(e => e.name === name);
         const reference = env?.valueSource?.secretKeyRef;
         requireThat(env && !('value' in env) && reference?.version === version

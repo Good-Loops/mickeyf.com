@@ -2862,8 +2862,12 @@ profile is bound to the reviewed approval hash. Existing Apple schema/privileges
 block a Google-only downgrade; direct maintenance schema visibility and migration
 history are checked before inspection. The 79 focused grant/CLI/configuration
 tests and typecheck passed. No live SQL, grants, flags, deployment or servers
-changed. Next prepare explicit session-secret version pinning; registration
-safeguards remain required before activation. Apple browser sign-in
+changed. Explicit session-secret version pinning is now prepared in the frozen
+deployment/preflight/traffic tools: approval and runtime checks use the same
+reviewed version, with no default or alias. The canonical main deployment remains
+unchanged. Next review the concrete production migration/grant/recovery state;
+server-validated registration eligibility remains required before activation.
+Apple browser sign-in
 is separate unimplemented work, not a hidden completed button. See the
 [ordered real-account rollout](backend/GOOGLE_SIGN_IN_ROLLOUT.md).
 
