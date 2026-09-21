@@ -980,6 +980,36 @@ ts/utils/hsl.test.mjs` and `node node_modules/typescript/bin/tsc -p tsconfig.jso
 --noEmit`. Root `git diff --check` passed. No full suite, production build,
 device/gameplay retest or deployment was needed for this calculation-only change.
 
+## Gameplay note-selection state and fixed data — 2026-09-21
+
+`GameplayNoteSelector` previously rebuilt its interval lookup for each candidate
+note, and rebuilt chord-pattern/scale mappings for each subsequent pickup.
+These unchanged tables are now module-local readonly constants. The semitone
+offset is local to the calculation, not an instance field requiring a reset.
+Two misleading key-history fields were removed: both always remained C, so the
+same transposition is now explicitly relative to `BASE_SCALE_KEY = 'C'`.
+
+Before: `this.halfTones = ...; transpose(notes, this.halfTones); this.halfTones = 0`.
+After: `let semitoneOffset = ...; transpose(notes, semitoneOffset)`.
+The private setter is named `selectScale` rather than `getNotesForScale`; its
+previous return value was unused. This separates fixed data, temporary work and
+actual per-player state without introducing a service or a new runtime module.
+
+All eight selector/playback cases passed before and after, including captured
+note sequences and random-call counts; frontend TypeScript and whitespace checks
+passed. Root command: `node --experimental-strip-types --test --test-reporter=spec
+frontend/ts/games/helpers/GameplayNoteSelector.test.mjs
+frontend/ts/games/helpers/gameplayNotePlayback.test.mjs`; typecheck:
+`node frontend/node_modules/typescript/bin/tsc -p frontend/tsconfig.json --noEmit`.
+Audio output is mocked; no device listening test, full suite or deployment.
+
+Follow-up defects exposed by characterization, intentionally not fixed here:
+the existing transpose wrap maps the first G pickup to 415.3 Hz, and one tested
+scale/key-switch sequence yields an undefined candidate. These preserved outputs
+are baseline evidence, not assertions that the musical behavior is correct.
+Review the pitch-index/interval units and empty-candidate policy as a separate
+behavior-changing fix before updating those expectations.
+
 ## Inventory closeout
 
 Read-only Git/path enumeration, local reference reading and targeted frontend/

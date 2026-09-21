@@ -2428,6 +2428,14 @@ example. The active branch is `improvement/clean-code-sweep`.
   See the [teaching checkpoint](CLEAN_CODE_INVENTORY.md#native-sign-in-cancellation-ownership--2026-09-21).
 - [ ] Complete subsequent subsystem reviews one at a time; choose actual
   improvements from evidence, not file length or similar-looking syntax.
+- [x] Gameplay note-selector cleanup (2026-09-21): fixed lookup tables are shared
+  readonly data, semitone offsets are local, and redundant C-only key history is
+  explicit. Eight focused selector/playback tests and frontend TypeScript passed.
+  No musical policy or random-call ordering changed. See
+  [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#gameplay-note-selection-state-and-fixed-data--2026-09-21).
+- [ ] Follow up the note-selector characterization findings: transposition wraps
+  G to the wrong pitch, and a tested key/scale switch can leave no note candidate.
+  Review pitch/interval units and the fallback policy without changing game feel.
 - [x] Shared hue-distance calculation (2026-09-21): interpolation and pitch-color
   transition settling now reuse the same existing-utility function. Preserved
   wraparound, signed half-turn ties, rounding and thresholds. Four focused tests,

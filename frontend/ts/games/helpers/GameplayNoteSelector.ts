@@ -5,6 +5,84 @@ import { createGameplayNotePlayback } from './gameplayNotePlayback';
 
 import { MembraneSynth, type Context } from 'tone';
 
+const BASE_SCALE_KEY = 'C';
+
+const VALID_INTERVALS_BY_SCALE: Readonly<Record<string, readonly number[]>> = {
+    Major: [2, 4, 5, 7, 9, 11],
+    Minor: [2, 3, 5, 7, 8, 10],
+    Pentatonic: [2, 4, 7, 9],
+    Blues: [3, 5, 6, 7, 10], // Blues scale adds the 'blue note' (flat 5)
+    Dorian: [2, 3, 5, 7, 9, 10],
+    Mixolydian: [2, 4, 5, 7, 9, 10],
+    Phrygian: [1, 3, 5, 7, 8, 10],
+    Lydian: [2, 4, 6, 7, 9, 11],
+    Locrian: [1, 3, 5, 6, 8, 10],
+    Chromatic: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], // All semitones
+    'Harmonic Major': [2, 4, 5, 7, 8, 11],
+    'Melodic Minor': [2, 3, 5, 7, 9, 11],
+    'Whole Tone': [2, 4, 6, 8, 10], // All intervals are whole steps
+    'Hungarian Minor': [2, 3, 6, 7, 8, 11],
+    'Double Harmonic': [1, 4, 5, 7, 8, 11], // Also known as the Byzantine scale
+    'Neapolitan Major': [1, 3, 5, 7, 9, 11],
+    'Neapolitan Minor': [1, 3, 5, 7, 8, 11],
+    Augmented: [3, 4, 7, 8], // Alternating minor third and half step
+    Hexatonic: [2, 4, 7, 9, 10], // A generic 6-note scale
+    Enigmatic: [1, 4, 6, 8, 10, 11],
+    'Spanish Gypsy': [1, 4, 5, 7, 8, 10], // Also called the Phrygian Dominant
+    Hirajoshi: [2, 3, 7, 8], // Japanese pentatonic scale
+    'Balinese Pelog': [1, 2, 6, 7, 11], // Indonesian gamelan scale
+    Egyptian: [2, 5, 7, 10], // Pentatonic scale used in traditional Egyptian music
+    'Hungarian Gypsy': [2, 3, 6, 7, 8, 11], // Similar to Hungarian Minor
+    Persian: [1, 4, 5, 6, 8, 11], // Persian scale with half and whole steps
+    Tritone: [3, 6, 9], // Contains tritone intervals
+    Flamenco: [1, 3, 4, 6, 8, 9, 11], // Typical flamenco scale intervals
+    Iwato: [1, 5, 6, 10], // Japanese scale
+    'Blues Heptatonic': [2, 3, 5, 6, 7, 10], // Seven-note blues scale
+};
+
+const CHORD_TONE_PATTERNS: Readonly<Record<string, readonly number[]>> = {
+    standardFour: [0, 2, 4, 6], // Root, third, fifth, seventh
+    standardThree: [0, 2, 4], // Root, third, fifth (no seventh)
+    augmented: [0, 2, 4], // Root, major third, augmented fifth
+    minorBlues: [0, 3, 5], // Root, flat third, fifth
+    locrian: [0, 2, 3], // Root, minor third, diminished fifth
+    tritone: [0, 3, 6], // Root and tritone
+    empty: [], // For scales without defined chord tones
+};
+
+const CHORD_TONE_INDICES_BY_SCALE: Readonly<Record<string, readonly number[]>> = {
+    Major: CHORD_TONE_PATTERNS['standardFour'],
+    Minor: CHORD_TONE_PATTERNS['standardFour'],
+    Pentatonic: CHORD_TONE_PATTERNS['standardThree'],
+    Blues: CHORD_TONE_PATTERNS['minorBlues'],
+    Dorian: CHORD_TONE_PATTERNS['standardFour'],
+    Mixolydian: CHORD_TONE_PATTERNS['standardFour'],
+    Phrygian: CHORD_TONE_PATTERNS['standardThree'],
+    Lydian: CHORD_TONE_PATTERNS['standardFour'],
+    Locrian: CHORD_TONE_PATTERNS['locrian'],
+    Chromatic: CHORD_TONE_PATTERNS['empty'],
+    'Harmonic Major': CHORD_TONE_PATTERNS['standardFour'],
+    'Melodic Minor': CHORD_TONE_PATTERNS['standardFour'],
+    'Whole Tone': CHORD_TONE_PATTERNS['standardThree'],
+    'Hungarian Minor': CHORD_TONE_PATTERNS['standardFour'],
+    'Double Harmonic': CHORD_TONE_PATTERNS['standardFour'],
+    'Neapolitan Major': CHORD_TONE_PATTERNS['standardFour'],
+    'Neapolitan Minor': CHORD_TONE_PATTERNS['standardFour'],
+    Augmented: CHORD_TONE_PATTERNS['augmented'],
+    Hexatonic: CHORD_TONE_PATTERNS['standardThree'],
+    Enigmatic: CHORD_TONE_PATTERNS['augmented'],
+    'Spanish Gypsy': CHORD_TONE_PATTERNS['standardThree'],
+    Hirajoshi: CHORD_TONE_PATTERNS['standardThree'],
+    'Balinese Pelog': CHORD_TONE_PATTERNS['standardThree'],
+    Egyptian: CHORD_TONE_PATTERNS['standardThree'],
+    'Hungarian Gypsy': CHORD_TONE_PATTERNS['standardFour'],
+    Persian: CHORD_TONE_PATTERNS['standardThree'],
+    Tritone: CHORD_TONE_PATTERNS['tritone'],
+    Flamenco: CHORD_TONE_PATTERNS['minorBlues'],
+    Iwato: CHORD_TONE_PATTERNS['standardThree'],
+    'Blues Heptatonic': CHORD_TONE_PATTERNS['standardFour'],
+};
+
 /**
  * Represents a musical scale definition.
  */
@@ -39,8 +117,6 @@ export class GameplayNoteSelector {
         });
     }
 
-    private selectedKey = 'C';
-    private lastKey = 'C';
     private lastPlayedNote?: number;
 
     private selectedScale: Scale = {
@@ -48,44 +124,30 @@ export class GameplayNoteSelector {
         notes: scales['Major'].notes,
     };
 
-    private halfTones = 0;
-
     /**
-     * Gets the notes for the selected scale and key, transposing if necessary.
+     * Selects the scale's base notes, transposing from C rather than the previous pickup's key.
      * @param selectedKey - The selected key.
      * @param scaleName - The name of the scale.
-     * @param lastKey - The last key that was selected.
-     * @returns The notes for the selected scale and key.
      */
-    private getNotesForScale(
+    private selectScale(
         selectedKey: string,
-        scaleName: string,
-        lastKey?: string
-    ): number[] {
+        scaleName: string
+    ): void {
         let notes = scales[scaleName]?.notes || scales['Major'].notes;
 
-        // Update halfTones and transpose only if the key has changed
-        if (lastKey !== selectedKey) {
-            // Transpose the notes according to the selected key
-            this.halfTones =
-                keys[selectedKey].semitone -
-                keys[lastKey || selectedKey].semitone;
+        if (BASE_SCALE_KEY !== selectedKey) {
+            let semitoneOffset = keys[selectedKey].semitone - keys[BASE_SCALE_KEY].semitone;
 
-            if (this.halfTones > 6) {
-                this.halfTones -= 12;
-            } else if (this.halfTones < -6) {
-                this.halfTones += 12;
+            if (semitoneOffset > 6) {
+                semitoneOffset -= 12;
+            } else if (semitoneOffset < -6) {
+                semitoneOffset += 12;
             }
 
-            notes = transpose(notes, this.halfTones);
-
-            // Reset halfTones
-            this.halfTones = 0;
+            notes = transpose(notes, semitoneOffset);
         }
 
         this.selectedScale = { name: scaleName, notes };
-
-        return notes;
     }
 
     /**
@@ -146,41 +208,9 @@ export class GameplayNoteSelector {
         const interval = Math.abs(
             Math.floor((note - lastPlayedNote + 12) % 12)
         );
-        const validIntervals: { [key: string]: number[] } = {
-            Major: [2, 4, 5, 7, 9, 11],
-            Minor: [2, 3, 5, 7, 8, 10],
-            Pentatonic: [2, 4, 7, 9],
-            Blues: [3, 5, 6, 7, 10], // Blues scale adds the 'blue note' (flat 5)
-            Dorian: [2, 3, 5, 7, 9, 10],
-            Mixolydian: [2, 4, 5, 7, 9, 10],
-            Phrygian: [1, 3, 5, 7, 8, 10],
-            Lydian: [2, 4, 6, 7, 9, 11],
-            Locrian: [1, 3, 5, 6, 8, 10],
-            Chromatic: [1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11], // All semitones
-            'Harmonic Major': [2, 4, 5, 7, 8, 11],
-            'Melodic Minor': [2, 3, 5, 7, 9, 11],
-            'Whole Tone': [2, 4, 6, 8, 10], // All intervals are whole steps
-            'Hungarian Minor': [2, 3, 6, 7, 8, 11],
-            'Double Harmonic': [1, 4, 5, 7, 8, 11], // Also known as the Byzantine scale
-            'Neapolitan Major': [1, 3, 5, 7, 9, 11],
-            'Neapolitan Minor': [1, 3, 5, 7, 8, 11],
-            Augmented: [3, 4, 7, 8], // Alternating minor third and half step
-            Hexatonic: [2, 4, 7, 9, 10], // A generic 6-note scale
-            Enigmatic: [1, 4, 6, 8, 10, 11],
-            'Spanish Gypsy': [1, 4, 5, 7, 8, 10], // Also called the Phrygian Dominant
-            Hirajoshi: [2, 3, 7, 8], // Japanese pentatonic scale
-            'Balinese Pelog': [1, 2, 6, 7, 11], // Indonesian gamelan scale
-            Egyptian: [2, 5, 7, 10], // Pentatonic scale used in traditional Egyptian music
-            'Hungarian Gypsy': [2, 3, 6, 7, 8, 11], // Similar to Hungarian Minor
-            Persian: [1, 4, 5, 6, 8, 11], // Persian scale with half and whole steps
-            Tritone: [3, 6, 9], // Contains tritone intervals
-            Flamenco: [1, 3, 4, 6, 8, 9, 11], // Typical flamenco scale intervals
-            Iwato: [1, 5, 6, 10], // Japanese scale
-            'Blues Heptatonic': [2, 3, 5, 6, 7, 10], // Seven-note blues scale
-        };
 
         const { name } = this.selectedScale;
-        return validIntervals[name]?.includes(interval) || false;
+        return VALID_INTERVALS_BY_SCALE[name]?.includes(interval) || false;
     }
 
     /**
@@ -188,54 +218,8 @@ export class GameplayNoteSelector {
      * @returns The common chord tones for the selected scale.
      */
     private getCommonChordTones(): number[] {
-        const { notes } = this.selectedScale;
-
-        const chordTonePatterns: { [key: string]: number[] } = {
-            standardFour: [0, 2, 4, 6], // Root, third, fifth, seventh
-            standardThree: [0, 2, 4], // Root, third, fifth (no seventh)
-            augmented: [0, 2, 4], // Root, major third, augmented fifth
-            minorBlues: [0, 3, 5], // Root, flat third, fifth
-            locrian: [0, 2, 3], // Root, minor third, diminished fifth
-            tritone: [0, 3, 6], // Root and tritone
-            empty: [], // For scales without defined chord tones
-        };
-
-        // Mapping scales to chord tone patterns
-        const scaleCommonChordTones: { [key: string]: number[] } = {
-            Major: chordTonePatterns['standardFour'],
-            Minor: chordTonePatterns['standardFour'],
-            Pentatonic: chordTonePatterns['standardThree'],
-            Blues: chordTonePatterns['minorBlues'],
-            Dorian: chordTonePatterns['standardFour'],
-            Mixolydian: chordTonePatterns['standardFour'],
-            Phrygian: chordTonePatterns['standardThree'],
-            Lydian: chordTonePatterns['standardFour'],
-            Locrian: chordTonePatterns['locrian'],
-            Chromatic: chordTonePatterns['empty'],
-            'Harmonic Major': chordTonePatterns['standardFour'],
-            'Melodic Minor': chordTonePatterns['standardFour'],
-            'Whole Tone': chordTonePatterns['standardThree'],
-            'Hungarian Minor': chordTonePatterns['standardFour'],
-            'Double Harmonic': chordTonePatterns['standardFour'],
-            'Neapolitan Major': chordTonePatterns['standardFour'],
-            'Neapolitan Minor': chordTonePatterns['standardFour'],
-            Augmented: chordTonePatterns['augmented'],
-            Hexatonic: chordTonePatterns['standardThree'],
-            Enigmatic: chordTonePatterns['augmented'],
-            'Spanish Gypsy': chordTonePatterns['standardThree'],
-            Hirajoshi: chordTonePatterns['standardThree'],
-            'Balinese Pelog': chordTonePatterns['standardThree'],
-            Egyptian: chordTonePatterns['standardThree'],
-            'Hungarian Gypsy': chordTonePatterns['standardFour'],
-            Persian: chordTonePatterns['standardThree'],
-            Tritone: chordTonePatterns['tritone'],
-            Flamenco: chordTonePatterns['minorBlues'],
-            Iwato: chordTonePatterns['standardThree'],
-            'Blues Heptatonic': chordTonePatterns['standardFour'],
-        };
-
-        const { name } = this.selectedScale;
-        return scaleCommonChordTones[name]?.map((index) => notes[index]) || [];
+        const { name, notes } = this.selectedScale;
+        return CHORD_TONE_INDICES_BY_SCALE[name]?.map((index) => notes[index]) || [];
     }
 
     /**
@@ -266,11 +250,7 @@ export class GameplayNoteSelector {
             )?.textContent ||
             'C';
 
-        this.getNotesForScale(selectedKey, selectedScale, this.lastKey);
-
-        if (this.lastKey !== this.selectedKey) {
-            this.lastKey = this.selectedKey;
-        }
+        this.selectScale(selectedKey, selectedScale);
 
         const isFirstNote = !this.lastPlayedNote as boolean;
 
