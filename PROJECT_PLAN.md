@@ -2433,9 +2433,17 @@ example. The active branch is `improvement/clean-code-sweep`.
   explicit. Eight focused selector/playback tests and frontend TypeScript passed.
   No musical policy or random-call ordering changed. See
   [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#gameplay-note-selection-state-and-fixed-data--2026-09-21).
-- [ ] Follow up the note-selector characterization findings: transposition wraps
-  G to the wrong pitch, and a tested key/scale switch can leave no note candidate.
-  Review pitch/interval units and the fallback policy without changing game feel.
+- [x] Corrected the note-selector findings (2026-09-21): transposition wraps by
+  twelve pitch classes, Hz ratios become semitone intervals, and an empty
+  candidate pool restarts on the selected tonic. Normalized two G-frequency
+  rounding mismatches in the scale catalog. Seventeen focused tests and frontend
+  TypeScript passed; playback timing/range and gameplay are unchanged. No deploy.
+  See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#pickup-pitch-and-missing-note-corrections--2026-09-21).
+- [ ] Three Bosses UI follow-up (owner direction, 2026-09-21): update Unity and
+  explore Figma-assisted UI Toolkit design. First verify the target Editor,
+  packages and available Figma-to-UI Toolkit workflow; support is not yet checked.
+  Keep the UI change separate from this audio fix and preserve WebGL/mobile
+  touch behavior and performance. No Editor update or UI migration performed yet.
 - [x] Shared hue-distance calculation (2026-09-21): interpolation and pitch-color
   transition settling now reuse the same existing-utility function. Preserved
   wraparound, signed half-turn ties, rounding and thresholds. Four focused tests,

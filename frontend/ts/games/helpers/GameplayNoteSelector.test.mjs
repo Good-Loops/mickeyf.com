@@ -27,6 +27,8 @@ const server = await createViteTestServer({
 after(() => server.close());
 const { GameplayNoteSelector } = await server.ssrLoadModule('/ts/games/helpers/GameplayNoteSelector.ts');
 const { keys } = await server.ssrLoadModule('/ts/utils/keys.ts');
+const { scales } = await server.ssrLoadModule('/ts/utils/scales.ts');
+const { transpose } = await server.ssrLoadModule('/ts/utils/transpose.ts');
 const { synths } = await server.ssrLoadModule('tone');
 
 function fixture(t, context) {
@@ -36,21 +38,16 @@ function fixture(t, context) {
     return { selector, synth };
 }
 
-test('first pickups preserve the current tonic in every defined key', t => {
+test('first pickups play the correct tonic in every defined key', t => {
     const notes = Object.keys(keys).map(key => {
         const { selector, synth } = fixture(t);
         selector.playNote({ key, scaleName: 'Major' });
         return [key, synth.notes[0]];
     });
-    // Characterize the existing octave wrapping, including the notes above F#/Gb.
-    assert.deepEqual(notes, [
-        ['C', 261.63], ['C#/Db', 277.18], ['D', 293.66], ['D#/Eb', 311.13],
-        ['E', 329.63], ['F', 349.23], ['F#/Gb', 370], ['G', 415.3],
-        ['G#/Ab', 440], ['A', 466.16], ['A#/Bb', 493.88], ['B', 523.25],
-    ]);
+    assert.deepEqual(notes, Object.entries(keys).map(([key, { frequency }]) => [key, frequency]));
 });
 
-test('key and scale switches preserve repeat-pickup notes and random consumption', t => {
+test('the previously failing key and scale switches never skip or emit an undefined pickup', t => {
     const { selector, synth } = fixture(t);
     const draws = [.9, .25, .1, .75, .6, .99, .2, .4];
     let draw = 0;
@@ -62,11 +59,52 @@ test('key and scale switches preserve repeat-pickup notes and random consumption
         selector.playNote({ key, scaleName });
         selector.playNote({ key, scaleName });
     }
-    assert.deepEqual(synth.notes, [
-        261.63, 493.88, 293.66, 329.63, 349.23, 466.16, 293.66, 440,
-        277.18, 523.25, 466.16, 415.3, undefined, 293.66, 261.63, 415.3,
-    ]);
-    assert.equal(draw, 33);
+    assert.equal(synth.notes.length, 16);
+    assert.ok(synth.notes.every(note => Number.isFinite(note) && note > 0));
+});
+
+test('every offered key and scale keeps pickups in scale, including empty preferred pools', t => {
+    const { selector, synth } = fixture(t);
+    const draws = [0, .25, .5, .75, .999999];
+    let draw = 0;
+    t.mock.method(Math, 'random', () => draws[draw++ % draws.length]);
+    for (const [key, { semitone }] of Object.entries(keys)) {
+        const offset = semitone - keys.C.semitone;
+        const shift = offset > 6 ? offset - 12 : offset;
+        for (const [scaleName, { notes }] of Object.entries(scales)) {
+            const expected = key === 'C' ? notes : transpose(notes, shift);
+            const before = synth.notes.length;
+            for (let pickup = 0; pickup < 10; pickup++) selector.playNote({ key, scaleName });
+            assert.equal(synth.notes.length, before + 10, `${key} ${scaleName} skipped a pickup`);
+            assert.ok(synth.notes.slice(before).every(note => Number.isFinite(note) && expected.includes(note)),
+                `${key} ${scaleName} produced a missing or out-of-scale note`);
+        }
+    }
+});
+
+test('unknown scale names use Major for both notes and selection rules', t => {
+    t.mock.method(Math, 'random', () => .9);
+    const { selector, synth } = fixture(t);
+    for (let pickup = 0; pickup < 4; pickup++) selector.playNote({ key: 'C', scaleName: 'unknown' });
+    assert.equal(synth.notes.length, 4);
+    assert.ok(synth.notes.every(note => Number.isFinite(note) && scales.Major.notes.includes(note)));
+});
+
+test('interval filtering compares semitones rather than differences in Hz', t => {
+    t.mock.method(Math, 'random', () => .1);
+    const { selector, synth } = fixture(t);
+    selector.playNote({ key: 'C', scaleName: 'Major' });
+    selector.playNote({ key: 'C', scaleName: 'Major' });
+    assert.deepEqual(synth.notes, [261.63, 293.66]); // C to D is two semitones.
+});
+
+test('an empty interval pool restarts on the selected tonic without random selection', t => {
+    const random = t.mock.method(Math, 'random', () => .9);
+    const { selector, synth } = fixture(t);
+    selector.playNote({ key: 'C#/Db', scaleName: 'Major' });
+    selector.playNote({ key: 'C', scaleName: 'Pentatonic' });
+    assert.deepEqual(synth.notes, [277.18, 261.63]);
+    assert.equal(random.mock.callCount(), 0);
 });
 
 test('omitted selection reads the DOM and missing elements default to C Major', t => {

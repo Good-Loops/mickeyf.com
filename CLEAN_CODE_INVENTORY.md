@@ -1010,6 +1010,34 @@ are baseline evidence, not assertions that the musical behavior is correct.
 Review the pitch-index/interval units and empty-candidate policy as a separate
 behavior-changing fix before updating those expectations.
 
+## Pickup pitch and missing-note corrections — 2026-09-21
+
+Resolved the preceding characterization findings as an explicit behavior fix:
+
+- `transpose` previously wrapped over 13 array entries, counting both C4 and C5
+  as different pitch classes. It now wraps by 12 while retaining either endpoint
+  when in range: the G tonic is 392 Hz, not 415.3 Hz. Unsupported frequencies and
+  noninteger shifts fail explicitly; two scale-catalog G values now consistently
+  use 392 rather than 391.99 Hz.
+- Interval filtering previously subtracted Hz values but compared the result
+  with semitone rules. It now uses `12 * Math.log2(note / previousNote)`, rounded
+  and wrapped into a pitch class. Frequency ratios, not differences, determine
+  musical intervals.
+- Chord/non-chord selection now chooses from valid candidates directly. If a
+  key/scale switch leaves none, the selected tonic restarts the melody. Unknown
+  scale names use Major for both notes and interval rules.
+
+The existing note register, duration, volume and gameplay remain unchanged;
+the incorrect note sequences and their random draw counts are not preserved.
+No new runtime module or dependency was needed. Seventeen focused cases passed:
+`node --experimental-strip-types --test --test-reporter=spec
+frontend/ts/utils/transpose.test.mjs
+frontend/ts/games/helpers/GameplayNoteSelector.test.mjs
+frontend/ts/games/helpers/gameplayNotePlayback.test.mjs`.
+`node frontend/node_modules/typescript/bin/tsc -p frontend/tsconfig.json --noEmit`
+and scoped `git diff --check` passed. Audio is mocked; no listening test, full
+suite, production build or deployment was performed.
+
 ## Inventory closeout
 
 Read-only Git/path enumeration, local reference reading and targeted frontend/

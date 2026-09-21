@@ -133,7 +133,8 @@ export class GameplayNoteSelector {
         selectedKey: string,
         scaleName: string
     ): void {
-        let notes = scales[scaleName]?.notes || scales['Major'].notes;
+        const name = scales[scaleName]?.notes ? scaleName : 'Major';
+        let notes = scales[name].notes;
 
         if (BASE_SCALE_KEY !== selectedKey) {
             let semitoneOffset = keys[selectedKey].semitone - keys[BASE_SCALE_KEY].semitone;
@@ -147,7 +148,7 @@ export class GameplayNoteSelector {
             notes = transpose(notes, semitoneOffset);
         }
 
-        this.selectedScale = { name: scaleName, notes };
+        this.selectedScale = { name, notes };
     }
 
     /**
@@ -168,34 +169,19 @@ export class GameplayNoteSelector {
         const possibleNextNotes = notes.filter((note) =>
             this.isValidInterval(note, lastPlayedNote!)
         );
-        const validChordTones = this.getCommonChordTones();
+        // A key/scale change can leave no admissible interval from the previous note.
+        // Restart on the selected tonic rather than send an undefined pitch to Tone.
+        if (possibleNextNotes.length === 0) return notes[0];
+
+        const validChordTones = this.getCommonChordTones().filter(note => possibleNextNotes.includes(note));
         const nonChordTones = possibleNextNotes.filter(
             (note) => !validChordTones.includes(note)
         );
 
         const useChordTone = Math.random() > 0.5;
-        let nextNote: number;
-
-        if (useChordTone) {
-            const randomChordIndex = Math.floor(
-                Math.random() * validChordTones.length
-            );
-            nextNote = validChordTones[randomChordIndex];
-        } else {
-            const randomNonChordIndex = Math.floor(
-                Math.random() * nonChordTones.length
-            );
-            nextNote = nonChordTones[randomNonChordIndex];
-        }
-
-        if (!possibleNextNotes.includes(nextNote)) {
-            const randomIndex = Math.floor(
-                Math.random() * possibleNextNotes.length
-            );
-            nextNote = possibleNextNotes[randomIndex];
-        }
-
-        return nextNote;
+        const preferredNotes = useChordTone ? validChordTones : nonChordTones;
+        const candidates = preferredNotes.length > 0 ? preferredNotes : possibleNextNotes;
+        return candidates[Math.floor(Math.random() * candidates.length)];
     }
 
     /**
@@ -205,9 +191,9 @@ export class GameplayNoteSelector {
      * @returns Whether the interval is valid.
      */
     private isValidInterval(note: number, lastPlayedNote: number): boolean {
-        const interval = Math.abs(
-            Math.floor((note - lastPlayedNote + 12) % 12)
-        );
+        // Inputs are Hz; musical intervals are logarithmic, not frequency differences.
+        const semitones = Math.round(12 * Math.log2(note / lastPlayedNote));
+        const interval = ((semitones % 12) + 12) % 12;
 
         const { name } = this.selectedScale;
         return VALID_INTERVALS_BY_SCALE[name]?.includes(interval) || false;
