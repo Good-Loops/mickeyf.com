@@ -257,6 +257,19 @@ namespace ThreeBosses.Tests
                     .Single(candidate => candidate.panel == document.rootVisualElement.panel);
                 handler.OnPointerEnter(pointer);
                 yield return MovePointer(outside);
+                Button resume = document.rootVisualElement.Q<Button>("pause-resume");
+                Assert.That(resume.panel.focusController.focusedElement, Is.SameAs(resume));
+                Rect resumeBounds = resume.worldBound;
+                Vector2 resumeProbe = new(resumeBounds.xMin + 24f, resumeBounds.center.y);
+                float resumeFocusedAlpha = ReadAlpha(target, resumeProbe);
+                yield return MovePointer(resumeBounds.center);
+                Assert.That(ReadAlpha(target, resumeProbe), Is.GreaterThan(resumeFocusedAlpha + 0.01f),
+                    "Hover must brighten the automatically focused RESUME button.");
+                AssertUnchangedTarget(resume, resumeBounds);
+                yield return MovePointer(outside);
+                Assert.That(ReadAlpha(target, resumeProbe), Is.EqualTo(resumeFocusedAlpha).Within(0.005f));
+                AssertUnchangedTarget(resume, resumeBounds);
+
                 Button button = document.rootVisualElement.Q<Button>("pause-main-menu");
                 Rect originalBounds = button.worldBound;
                 Vector2 probe = new(originalBounds.xMin + 24f, originalBounds.center.y);
@@ -274,7 +287,7 @@ namespace ThreeBosses.Tests
                 yield return null;
                 yield return null;
                 float focusAlpha = ReadAlpha(target, probe);
-                Assert.That(focusAlpha, Is.GreaterThan(normalAlpha + 0.01f));
+                Assert.That(focusAlpha, Is.GreaterThan(normalAlpha + 0.005f));
                 AssertUnchangedTarget(button, originalBounds);
                 Capture(target, "pause-glass-focus.png");
 

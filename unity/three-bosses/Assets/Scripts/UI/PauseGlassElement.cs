@@ -69,7 +69,7 @@ public sealed class PauseGlassElement : VisualElement
         float rimWidth = glassStyle == GlassStyle.MenuPanel ? 2f : 1.5f;
         float opacity = glassStyle == GlassStyle.PauseButton ? 0.13f : glassStyle == GlassStyle.MenuPanel ? 0.26f : 0.16f;
         bool activePress = pressed && hovered;
-        float highlight = activePress ? 1f : hovered ? 0.7f : focused ? 0.85f : 0f;
+        float highlight = activePress ? 1f : hovered ? 0.85f : focused ? 0.35f : 0f;
         opacity += activePress ? 0.12f : highlight * 0.075f;
 
         AddRing(new Rect(rect.x, rect.y + 2f, rect.width, rect.height), radius, 3f, 0.24f);

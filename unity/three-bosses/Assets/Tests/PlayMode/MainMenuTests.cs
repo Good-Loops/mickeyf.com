@@ -184,6 +184,10 @@ namespace ThreeBosses.Tests
                 yield return MovePointerAndSettle(outside);
                 Vector2 captionCenter = play.worldBound.center;
                 Color restingPlayColor = play.resolvedStyle.color;
+                Assert.That(restingPlayColor, Is.EqualTo(Color.white), "Unhovered PLAY must be white.");
+                play.Focus();
+                yield return MovePointerAndSettle(outside);
+                Assert.That(play.resolvedStyle.color, Is.EqualTo(Color.white), "Keyboard focus must not tint unhovered PLAY.");
 
                 yield return MovePointerAndSettle(play.worldBound.center);
                 Assert.That(play.resolvedStyle.scale.value.x, Is.GreaterThan(1.02f), "PLAY must visibly enlarge on native hover.");

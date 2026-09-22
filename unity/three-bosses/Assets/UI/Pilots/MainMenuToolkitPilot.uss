@@ -9,7 +9,7 @@
     border-radius: 6px;
     background-color: rgba(0, 0, 0, 0);
     background-image: none;
-    color: rgb(227, 232, 240);
+    color: white;
     -unity-text-align: middle-center;
     align-items: center;
     justify-content: center;
@@ -19,14 +19,15 @@
     transition-timing-function: ease-out;
 }
 
+.main-menu-toolkit-pilot .pilot-menu-button:focus {
+    color: white;
+    text-shadow: 0 0 4px rgba(255, 255, 255, 0.4);
+}
+
 .main-menu-toolkit-pilot .pilot-menu-button:hover {
     color: rgb(255, 242, 230);
     scale: 1.045 1.045;
     text-shadow: 0 0 8px rgba(255, 81, 50, 0.85);
-}
-
-.main-menu-toolkit-pilot .pilot-menu-button:focus {
-    color: rgb(255, 184, 160);
 }
 
 .main-menu-toolkit-pilot .pilot-menu-button:focus #pilot-audio-icon {
