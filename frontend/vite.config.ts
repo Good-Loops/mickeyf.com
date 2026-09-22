@@ -42,6 +42,8 @@ export default defineConfig(({ command, mode, isPreview }) => {
                 // Forced-close upstream transfers can lose their final chunk
                 // on the local Windows stack, leaving Unity waiting indefinitely.
                 agent: new Agent({ keepAlive: true }),
+                // The agent alone does not replace an incoming Connection: close.
+                headers: { connection: "keep-alive" },
                 rewrite: (requestPath: string) =>
                   requestPath.replace(/^\/__local\/three-bosses\//, "/"),
               },
