@@ -28,7 +28,7 @@ type PitchColorPhaseState = {
     committedHueBase: number;
     committedColorBase: HslColor | null;
     committedAtMs: number;
-    hasCommittedHue: boolean;
+    colorAnchorKind: "silence" | "pitch" | null;
     holdListening: boolean;
     holdHueLfoPhase: number;
     stableLfoPhase: number;
@@ -123,7 +123,7 @@ export class PitchColorPhaseController {
             committedHueBase: 0,
             committedColorBase: null,
             committedAtMs: 0,
-            hasCommittedHue: false,
+            colorAnchorKind: null,
             holdListening: true,
             holdHueLfoPhase: 0,
             stableLfoPhase: 0,
@@ -147,7 +147,7 @@ export class PitchColorPhaseController {
             committedHueBase: 0,
             committedColorBase: null,
             committedAtMs: 0,
-            hasCommittedHue: false,
+            colorAnchorKind: null,
             holdListening: true,
             holdHueLfoPhase: 0,
             stableLfoPhase: 0,
@@ -180,7 +180,7 @@ export class PitchColorPhaseController {
     step(input: PitchColorPhaseStepInput): PitchColorPhaseStepResult {
         this.state.colorElapsedMs += input.deltaMs;
 
-        if (this.state.hasCommittedHue && !this.state.holdListening) {
+        if (this.state.colorAnchorKind !== null && !this.state.holdListening) {
             return this.handleHoldPhase(input);
         }
 
@@ -208,8 +208,13 @@ export class PitchColorPhaseController {
 
         this.updateSilence(decision, elapsedMs);
 
-        if (isCommit || !this.state.hasCommittedHue) {
-            this.startCommit(decision.color, input.nowMs);
+        // After a reset during silence, the tracker can resume the same note
+        // without a new commit, but rendering still needs a musical anchor.
+        const needsPitchAnchor =
+            decision.result.kind === "pitch" && this.state.colorAnchorKind !== "pitch";
+
+        if (isCommit || this.state.colorAnchorKind === null || needsPitchAnchor) {
+            this.startCommit(decision, input.nowMs);
         }
 
         return { color: this.renderCurrent(input), decision };
@@ -223,7 +228,7 @@ export class PitchColorPhaseController {
 
         const isBriefSilence =
             decision.result.kind === "silence" &&
-            this.state.hasCommittedHue &&
+            this.state.colorAnchorKind !== null &&
             nextLocalSilenceMs < this.deps.tuning.listenAfterSilenceMs;
 
         const effectiveKind: "silence" | "pitch" =
@@ -239,7 +244,7 @@ export class PitchColorPhaseController {
 
     private shouldStableDrift(): boolean {
         return (
-            this.state.hasCommittedHue &&
+            this.state.colorAnchorKind !== null &&
             this.state.lastKind === "pitch" &&
             this.state.lastPitchChanged === false
         );
@@ -254,23 +259,24 @@ export class PitchColorPhaseController {
         return color;
     }
 
-    private startCommit(color: HslColor, nowMs: number): void {
+    private startCommit(decision: ColorDecision, nowMs: number): void {
+        const color = decision.color;
         this.state.committedColorBase = color;
         this.state.committedHueBase = color.hue;
         this.state.committedAtMs = nowMs;
 
-        const startingColor = this.state.hasCommittedHue
+        const startingColor = this.state.colorAnchorKind !== null
             ? this.state.renderedColor
             : color;
 
         this.state.commitTransition = {
-            active: this.state.hasCommittedHue,
+            active: this.state.colorAnchorKind !== null,
             color: startingColor,
         };
 
         this.state.holdHueLfoPhase = 0;
         this.state.stableLfoPhase = 0;
-        this.state.hasCommittedHue = true;
+        this.state.colorAnchorKind = decision.result.kind;
         this.state.holdListening = false;
     }
 

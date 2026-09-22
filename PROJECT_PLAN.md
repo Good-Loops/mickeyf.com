@@ -2505,6 +2505,17 @@ example. The active branch is `improvement/clean-code-sweep`.
   cleanup. Portrait/landscape and hover captures were inspected. The follow-up
   local WebGL rebuild succeeded with only the disabled-Pipeline warning; no
   deployment or physical-device acceptance is implied.
+- [x] Three Bosses mobile layout acceptance (2026-09-22): after the final
+  Resume-hover/white-idle-PLAY corrections, the combined `ScreenUI` run passed
+  14/14 and the local WebGL preview was rebuilt. The owner subsequently confirmed
+  that the game loads in iPhone Safari and that the layout is fine. Two local
+  delivery fixes preserve upstream connections while slow downloads drain;
+  throttled payload checks matched both file hashes and the asset-server suite
+  passed 28/28. The owner reported temporary lag, then confirmed it stopped
+  without rendering/gameplay changes. This closes the requested phone layout
+  check, not an instrumented FPS benchmark or a new login/submission acceptance.
+  Touch controls remain uGUI. Publication remains separate; continue the Clean
+  Code sweep without reopening accepted game checks.
 - [x] p4-Vega entity ownership (2026-09-21): player/collectible updates now use
   their stored sprites, removing redundant sprite arguments from the game loop.
   Five entity tests, fifteen existing rule tests and frontend TypeScript passed.
@@ -2517,6 +2528,14 @@ example. The active branch is `improvement/clean-code-sweep`.
   palette, drift and timing are unchanged. Three regression cases failed before
   the fix; all nine focused color tests and frontend TypeScript pass afterward.
   See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#pitch-color-recovery-after-silence--2026-09-21).
+- [x] Phase reset during silence (2026-09-22): reproduced the remaining
+  phase-only reset case used by fractal switching/restart. Replaced the ambiguous
+  anchor-presence boolean with an explicit idle/pitch/absent state, allowing the
+  same note to recover smoothly without inventing a tracker commit. The new case
+  failed before the fix; all ten focused color tests and frontend TypeScript pass.
+  Palette, timing, drift and interpolation remain unchanged. No device retest,
+  Unity rebuild or deployment.
+  See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#pitch-color-phase-reset-during-silence--2026-09-22).
 - [x] Shared hue-distance calculation (2026-09-21): interpolation and pitch-color
   transition settling now reuse the same existing-utility function. Preserved
   wraparound, signed half-turn ties, rounding and thresholds. Four focused tests,

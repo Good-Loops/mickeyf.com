@@ -1101,8 +1101,46 @@ The first command captured the failing baseline; the combined command and
 TypeScript passed after the fix. These are deterministic logic checks using
 fixed idle-color ranges, not a browser/device or music-listening claim. No new
 dependency, production build, deployment or Unity operation was performed.
-The reset regression covers reset after pitch recovery. Resetting during ongoing
-silence remains a separate controller-lifecycle case; that behavior is unchanged.
+The reset regression covers reset after pitch recovery. The separate case of
+resetting during ongoing silence is addressed in the following checkpoint.
+
+## Pitch-color phase reset during silence — 2026-09-22
+
+The outstanding lifecycle case is reproduced: after a musical note, sustained
+silence, phase reset and another silent sample, the controller treats the idle
+color as its committed anchor. The tracker deliberately retains the note across
+the phase-only reset, so the same note returns with `changed: false`. The old
+boolean `hasCommittedHue` cannot distinguish that idle anchor from a musical
+one, and rendering remains idle. Fractal switching/restart can take this path
+through `MusicFeatureExtractor.reset()`; Circles resets its tracker too.
+
+Before, the state was `hasCommittedHue: boolean`. After, it is
+`colorAnchorKind: "silence" | "pitch" | null`. Existing presence checks use
+`!== null`, preserving their semantics. One additional condition initializes a
+musical anchor when a pitch decision arrives and the current anchor is idle.
+This is a responsibility/state-model correction, not a file move or a fake
+pitch-change event. Hold duration, smoothing, palette, drift, pitch detection
+and tracker ownership are unchanged; no extra parallel flag or dependency was
+introduced. Constructor/reset deduplication is deliberately outside this fix.
+
+The new regression failed before the fix while all five prior policy cases
+passed. Afterward, all six policy/phase cases and four hue tests passed. It checks
+unchanged tracker signals, departure from idle and gradual recovery. The final
+color assertion allows existing integer-channel interpolation rounding (one
+percentage point); this pass does not alter interpolation/settling behavior.
+
+```powershell
+node --test --test-reporter=spec frontend/ts/animations/helpers/audio/PitchColorPolicy.test.mjs
+node --test --test-reporter=spec frontend/ts/animations/helpers/audio/PitchColorPolicy.test.mjs frontend/ts/utils/hsl.test.mjs
+node frontend/node_modules/typescript/bin/tsc -p frontend/tsconfig.json --noEmit
+git diff --check
+```
+
+The first command captured the failing baseline; the combined checks and
+TypeScript passed after the fix. The shared deterministic phase fixture is reused
+by the two reset tests. No device/music-listening acceptance, Unity rebuild,
+production build or deployment is claimed. The owner's Three Bosses phone layout
+acceptance is recorded separately; its accepted gameplay checks were not repeated.
 
 ## Inventory closeout
 

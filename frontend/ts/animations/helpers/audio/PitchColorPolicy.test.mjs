@@ -76,7 +76,7 @@ test('continuous mode keeps micro drift and recomputes pitch color after silence
     assert.deepEqual(decide(445).color, drifted.color);
 });
 
-test('phase reset after same-note recovery uses pitch color, not the stale idle color', () => {
+function phaseFixture() {
     const { policy } = fixture();
     const phase = new PitchColorPhaseController({ policy, tuning: {
         colorIntervalMs: 0, listenAfterSilenceMs: 100, noteStep: true,
@@ -86,6 +86,11 @@ test('phase reset after same-note recovery uses pitch color, not the stale idle 
     } });
     let nowMs = 0;
     const step = pitchHz => phase.step({ pitchHz, clarity: 1, deltaMs: 50, nowMs: nowMs += 50 });
+    return { policy, phase, step };
+}
+
+test('phase reset after same-note recovery uses pitch color, not the stale idle color', () => {
+    const { phase, step } = phaseFixture();
     assert.deepEqual(step(440).color, aColor);
     step(440); // Leave the intentional post-commit hold phase.
     for (let i = 0; i < 3; i++) assert.deepEqual(step(0).color, aColor);
@@ -94,4 +99,27 @@ test('phase reset after same-note recovery uses pitch color, not the stale idle 
     assert.deepEqual(resumed.color, aColor, 'continuous rendering already retained the pitch anchor');
     phase.reset();
     assert.deepEqual(step(440).color, aColor, 'reset must not seed rendering from the old idle decision');
+});
+
+test('phase reset during silence restores the musical anchor when the same note returns', () => {
+    const { policy, phase, step } = phaseFixture();
+    step(440);
+    step(440); // Leave the intentional post-commit hold phase.
+    for (let i = 0; i < 3; i++) step(0);
+    assert.deepEqual(policy.lastGoodColor, idle);
+
+    phase.reset();
+    assert.deepEqual(step(0).color, idle);
+    step(0); // Leave the idle anchor's hold phase before sampling pitch again.
+    const resumed = step(440);
+    assert.equal(resumed.decision.result.changed, false, 'the tracker still remembers this note');
+    assert.deepEqual(resumed.decision.color, aColor);
+    assert.notDeepEqual(resumed.color, idle, 'rendering must leave the idle anchor');
+    assert.notDeepEqual(resumed.color, aColor, 'recovery must preserve the smooth transition');
+    let settled = resumed;
+    for (let i = 0; i < 20; i++) settled = step(440);
+    assert.ok(Math.abs(settled.color.hue - aColor.hue) < .1);
+    // Existing HSL interpolation rounds these channels to whole percentages.
+    assert.ok(Math.abs(settled.color.saturation - aColor.saturation) <= 1);
+    assert.ok(Math.abs(settled.color.lightness - aColor.lightness) <= 1);
 });

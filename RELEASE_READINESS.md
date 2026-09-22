@@ -37,6 +37,21 @@ history; the publication closeout records the final delivery checks.
 | M1 | Fixed; named scope | Named temporary-artifact cleanup and the 57-script bounded audit are complete. Recycled copies remain recoverable; intentional verification/recovery archives remain. Do not reopen an unlimited package/filesystem audit. |
 | M2 | Deferred; explicit follow-ups | Exhaustive per-weapon/per-clip listening and game-feel coverage is optional follow-up absent a specific defect or relevant change; the bounded source review below found no missing weapon/audio reference. Shared-shell device checks (landscape nav/dropdowns with browser bars; Dancing Circles aspect/color) remain distinct from Three Bosses gameplay. Also retain the large-chunk warning, Unity CLI/Pipeline compatibility follow-up and unmeasured DB instrumentation overhead. p4-Vega polish and the incremental Clean Code sweep follow this release phase. |
 
+## Local Three Bosses UI checkpoint — 2026-09-22
+
+The UI Toolkit menu/pause/outcome changes remain on the active development
+branch, not the published package. The final source correction is `148e38e0`;
+its combined `ScreenUI` run passed 14/14 and the local WebGL build succeeded.
+Local preview delivery fixes `0bc613e1` and `b0ff1efd` address truncated downloads
+under forced-close and slow-consumer conditions; full throttled payload hashes
+and 28 asset-server tests passed. These are development-server changes only.
+
+The owner now confirms successful Safari loading and accepts the phone layout.
+Reported temporary lag stopped without performance changes; no sustained-FPS
+measurement or performance improvement is claimed. Do not repeat this layout
+check or the previously accepted login/submission/gameplay checks without a
+relevant regression. Production packaging/publication remains separately scoped.
+
 ## Exact dependency interpretation
 
 The initial GitHub snapshot reported 14 default-branch alerts: nine high, five medium.
