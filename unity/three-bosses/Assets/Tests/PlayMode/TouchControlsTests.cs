@@ -25,6 +25,7 @@ namespace ThreeBosses.Tests
         };
 
         [UnityTest]
+        [Category("ScreenUI")]
         public IEnumerator BattleScenesPreserveKeyboardBindingsAndShareTouchControls()
         {
             foreach (string sceneName in BattleScenes)
@@ -89,20 +90,21 @@ namespace ThreeBosses.Tests
                     Has.Length.EqualTo(1),
                     $"{sceneName} must contain exactly one gameplay pause controller.");
 
-                FieldInfo pauseMenuField = pauseControllerType.GetField(
-                    "pauseMenu",
+                FieldInfo documentField = pauseControllerType.GetField(
+                    "document",
                     BindingFlags.Instance | BindingFlags.NonPublic);
                 FieldInfo playerInputField = pauseControllerType.GetField(
                     "playerInput",
                     BindingFlags.Instance | BindingFlags.NonPublic);
-                Assert.That(pauseMenuField, Is.Not.Null);
+                Assert.That(documentField, Is.Not.Null);
                 Assert.That(playerInputField, Is.Not.Null);
 
-                CanvasGroup pauseMenu = pauseMenuField.GetValue(pauseControllers[0]) as CanvasGroup;
+                var document = documentField.GetValue(pauseControllers[0]) as UnityEngine.UIElements.UIDocument;
+                Assert.That(document, Is.Not.Null);
+                var pauseMenu = UnityEngine.UIElements.UQueryExtensions.Q(
+                    document.rootVisualElement, "pause-overlay");
                 Assert.That(pauseMenu, Is.Not.Null);
-                Assert.That(pauseMenu.alpha, Is.EqualTo(0f));
-                Assert.That(pauseMenu.interactable, Is.False);
-                Assert.That(pauseMenu.blocksRaycasts, Is.False);
+                Assert.That(pauseMenu.resolvedStyle.display, Is.EqualTo(UnityEngine.UIElements.DisplayStyle.None));
                 Assert.That(playerInputField.GetValue(pauseControllers[0]), Is.SameAs(playerInput));
             }
         }
@@ -316,56 +318,6 @@ namespace ThreeBosses.Tests
                 new Rect(0f, 40f, 720f, 1240f),
                 new Vector2(720f, 1280f),
                 Rect.MinMaxRect(0f, 0.03125f, 1f, 1f));
-        }
-
-        [Test]
-        public void PauseButtonTracksTheSafeAreaTopRightCorner()
-        {
-            Type pauseControllerType = Type.GetType("GameplayPauseController, Assembly-CSharp");
-            Assert.That(pauseControllerType, Is.Not.Null);
-            MethodInfo applySafeArea = pauseControllerType.GetMethod(
-                "ApplyTopRightSafeArea",
-                BindingFlags.Static | BindingFlags.NonPublic);
-            Assert.That(applySafeArea, Is.Not.Null);
-
-            var button = new GameObject("Pause Button", typeof(RectTransform));
-            try
-            {
-                RectTransform rect = button.GetComponent<RectTransform>();
-                rect.pivot = Vector2.one;
-                rect.sizeDelta = new Vector2(48f, 40f);
-                rect.anchoredPosition = new Vector2(-24f, -54f);
-                var safeArea = new Rect(0f, 0f, 1200f, 680f);
-                var screenSize = new Vector2(1280f, 720f);
-                applySafeArea.Invoke(
-                    null,
-                    new object[]
-                    {
-                        rect,
-                        safeArea,
-                        screenSize
-                    });
-
-                var expected = new Vector2(0.9375f, 0.9444444f);
-                Assert.That(rect.anchorMin.x, Is.EqualTo(expected.x).Within(0.0001f));
-                Assert.That(rect.anchorMin.y, Is.EqualTo(expected.y).Within(0.0001f));
-                Assert.That(rect.anchorMax.x, Is.EqualTo(expected.x).Within(0.0001f));
-                Assert.That(rect.anchorMax.y, Is.EqualTo(expected.y).Within(0.0001f));
-                Assert.That(rect.anchoredPosition, Is.EqualTo(new Vector2(-24f, -54f)));
-
-                Vector2 anchorPoint = Vector2.Scale(rect.anchorMin, screenSize);
-                Vector2 elementMinimum = anchorPoint + rect.anchoredPosition -
-                    Vector2.Scale(rect.pivot, rect.sizeDelta);
-                Vector2 elementMaximum = elementMinimum + rect.sizeDelta;
-                Assert.That(elementMinimum.x, Is.GreaterThanOrEqualTo(safeArea.xMin));
-                Assert.That(elementMinimum.y, Is.GreaterThanOrEqualTo(safeArea.yMin));
-                Assert.That(elementMaximum.x, Is.LessThanOrEqualTo(safeArea.xMax));
-                Assert.That(elementMaximum.y, Is.LessThanOrEqualTo(safeArea.yMax));
-            }
-            finally
-            {
-                UnityEngine.Object.DestroyImmediate(button);
-            }
         }
 
         [Test]

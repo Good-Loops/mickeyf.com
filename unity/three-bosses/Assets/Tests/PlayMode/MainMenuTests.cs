@@ -12,6 +12,7 @@ using UnityEngine.UIElements;
 
 namespace ThreeBosses.Tests
 {
+    [Category("ScreenUI")]
     public sealed class MainMenuTests
     {
         private const string MenuScene = "Assets/Scenes/UI/MainMenu.unity";

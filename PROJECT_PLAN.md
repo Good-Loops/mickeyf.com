@@ -2479,6 +2479,22 @@ example. The active branch is `improvement/clean-code-sweep`.
   On 6.3 retain margins instead of imported gap and avoid unsupported blur/shadow
   assumptions. See the [pilot record](unity/three-bosses/Assets/UI/Pilots/README.md)
   for source, file ownership and remaining gates.
+- [x] Remaining Three Bosses screen migration (2026-09-22): pause in all three
+  battles, three defeat screens, two boss transitions and the final result now
+  use UI Toolkit. Existing artwork, scene GUIDs, navigation, pause/input rules,
+  ranking and score-submission states are preserved; health bars, timer,
+  countdown and touch HUD remain uGUI. Six outcome scenes share
+  `OutcomeScreenView`; presentation is owned in `Assets/UI/Screens/`. Removed
+  three obsolete scene builders and four unused presentation helpers. Retained
+  `PauseGlassGraphic` because a local Unity recovery scene still references it;
+  recovery files were not modified. Focused `ScreenUI` PlayMode checks passed
+  12/12; after visual review corrected narrow-screen caption wrapping, the three
+  outcome tests passed again. Actual portrait/landscape render captures were
+  inspected, including all submission captions fitting their painted frames
+  while invisible touch targets remain at least 48px. The single guarded local
+  WebGL rebuild succeeded; its only warning disables Pipeline tooling in the
+  player because no runtime config is included. Physical-device acceptance and
+  deployment remain separate.
 - [x] p4-Vega entity ownership (2026-09-21): player/collectible updates now use
   their stored sprites, removing redundant sprite arguments from the game loop.
   Five entity tests, fifteen existing rule tests and frontend TypeScript passed.

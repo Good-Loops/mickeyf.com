@@ -4,8 +4,9 @@ Open `Assets/Scenes/UI/MainMenu.unity` to inspect the active menu. On 2026-09-22
 the user approved replacing the old uGUI scene with the new UI Toolkit scene.
 Its original GUID is preserved and Build Settings starts with this scene.
 The legacy scene, controller implementation and menu-generation commands were
-removed; they remain recoverable from Git. No WebGL build or deployment is
-included in this source change. HUD, gameplay and outcome screens are unchanged.
+removed; they remain recoverable from Git. This source-adoption checkpoint did
+not include a WebGL build or deployment. The later remaining-screen migration
+is recorded below; gameplay HUD elements remain uGUI.
 
 The source is [MainMenuPilot in Figma](https://www.figma.com/design/hH2nXiz3n12LclUjpsPgui/?node-id=3-2)
 (file `hH2nXiz3n12LclUjpsPgui`, root `3:2`). Its actual node values were imported
@@ -61,3 +62,44 @@ existing viewport/centering checks, Play/mute, and pause-to-menu navigation.
 Before release, verify the rebuilt WebGL's rendering, browser-ready signal and
 physical phone/browser behavior in portrait and landscape. Source adoption is
 approved; release acceptance and deployment remain separate.
+
+## Remaining screens
+
+The 2026-09-22 follow-up migrates pause in all three battles, the three defeat
+screens, both boss transitions and the final results screen to UI Toolkit.
+`Assets/UI/Screens/` contains the owned UXML/USS and panel settings. Existing
+artwork and scene GUIDs are retained. The timer, health bars, countdown and
+touch HUD remain uGUI; this is a screen-presentation migration, not a gameplay
+rewrite.
+
+`OutcomeScreenView` owns layout, safe areas, typography and fading for the six
+outcome scenes. The existing controllers still own run validation, navigation,
+ranking and score-submission states. `GameplayPauseController` uses Toolkit
+controls while preserving input-gate ownership and browser-pause composition.
+Its panel renders above the touch HUD; closed decorative UI ignores picking.
+
+The obsolete outcome/pause/button scene builders and four unused presentation
+helpers were removed. `PauseGlassGraphic` is retained because an existing local
+Unity recovery scene still references it; no recovery files were modified.
+
+Focused validation command (asynchronous; inspect its final result):
+
+```powershell
+$unityProject = (Resolve-Path ./unity/three-bosses).Path
+unity command run_tests --mode playmode --filter ScreenUI --filter_type category --async_tests true --project-path $unityProject --format json
+```
+
+Tests cover actual UIDocument rendering, readout/button centering, safe areas,
+touch targets, pause/focus/input, transition splits and submission states.
+Render captures are outside the repository under
+`%TEMP%/three-bosses-outcome-toolkit/` and `%TEMP%/three-bosses-screen-ui/`.
+
+Validation: `ScreenUI` passed 12/12 tests. Visual review then found captions
+wrapping outside the painted frames at phone width; caption sizing now uses
+the artwork independently of the 48px touch target. The three outcome tests
+passed again, including natural text dimensions and the resolved Oxanium font.
+Portrait/landscape captures were inspected. `npm run three-bosses:webgl:build`
+completed one guarded local rebuild, preserving the source/settings baseline.
+Its one warning states that Pipeline is disabled in the player without a
+runtime configuration; developer remote tooling is intentionally not enabled.
+This does not constitute a deployment or physical-device acceptance.

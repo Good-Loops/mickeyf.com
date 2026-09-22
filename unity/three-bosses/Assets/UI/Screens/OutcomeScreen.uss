@@ -1,0 +1,58 @@
+.outcome-screen {
+    background-color: black;
+    color: white;
+}
+
+#outcome-artwork {
+    -unity-background-scale-mode: stretch-to-fill;
+    overflow: visible;
+}
+
+.outcome-text, .outcome-button {
+    margin: 0;
+    padding: 0;
+    -unity-text-align: middle-center;
+}
+
+.outcome-text {
+    white-space: nowrap;
+    overflow: visible;
+}
+
+.caption-backing {
+    background-color: black;
+}
+
+.outcome-screen .outcome-button {
+    border-width: 0;
+    border-radius: 0;
+    background-color: rgba(0, 0, 0, 0);
+    background-image: none;
+    color: rgb(227, 232, 240);
+    white-space: nowrap;
+    padding-left: 4px;
+    padding-right: 4px;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+
+.outcome-screen .outcome-button:hover {
+    color: white;
+}
+
+.outcome-screen .outcome-button:focus {
+    color: rgb(255, 184, 160);
+}
+
+.outcome-screen .outcome-button:active {
+    opacity: 0.8;
+}
+
+.outcome-screen .outcome-button:disabled {
+    opacity: 0.45;
+}
+
+#outcome-fade {
+    background-color: black;
+}

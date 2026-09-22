@@ -1,0 +1,18 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <ui:Style src="PauseMenu.uss" />
+    <ui:VisualElement name="pause-root" class="pause-ui" picking-mode="Ignore">
+        <ui:VisualElement name="pause-safe-area" picking-mode="Ignore">
+            <ui:Button name="pause-open" class="pause-button pause-opener" tooltip="Pause game (Escape)" focusable="false" tabindex="-1">
+                <ui:VisualElement name="pause-icon-left" class="pause-icon-bar" picking-mode="Ignore" />
+                <ui:VisualElement name="pause-icon-right" class="pause-icon-bar" picking-mode="Ignore" />
+            </ui:Button>
+        </ui:VisualElement>
+        <ui:VisualElement name="pause-overlay" class="pause-overlay" picking-mode="Position">
+            <ui:VisualElement name="pause-panel" class="pause-panel" picking-mode="Ignore">
+                <ui:Label name="pause-title" class="pause-title" text="PAUSED" picking-mode="Ignore" />
+                <ui:Button name="pause-resume" class="pause-button pause-action" text="RESUME" />
+                <ui:Button name="pause-main-menu" class="pause-button pause-action pause-secondary" text="MAIN MENU" />
+            </ui:VisualElement>
+        </ui:VisualElement>
+    </ui:VisualElement>
+</ui:UXML>
