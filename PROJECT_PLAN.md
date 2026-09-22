@@ -2439,11 +2439,34 @@ example. The active branch is `improvement/clean-code-sweep`.
   rounding mismatches in the scale catalog. Seventeen focused tests and frontend
   TypeScript passed; playback timing/range and gameplay are unchanged. No deploy.
   See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#pickup-pitch-and-missing-note-corrections--2026-09-21).
-- [ ] Three Bosses UI follow-up (owner direction, 2026-09-21): update Unity and
-  explore Figma-assisted UI Toolkit design. First verify the target Editor,
-  packages and available Figma-to-UI Toolkit workflow; support is not yet checked.
-  Keep the UI change separate from this audio fix and preserve WebGL/mobile
-  touch behavior and performance. No Editor update or UI migration performed yet.
+- [x] Three Bosses Figma/UI Toolkit compatibility review (2026-09-21): the
+  installed/pinned Editor is 6000.3.8f1 with Web support. Existing screens use
+  uGUI/TMP; there are no UI Toolkit documents/styles in Assets. Unity's official
+  `com.unity.ui.figma` 0.1.0-exp.1 supports 6000.3+, so a major Editor upgrade is
+  not required for a pilot. The connector is experimental; it requires Figma
+  desktop and Design-mode edit access. The plugin is free, including on editable
+  Starter files. See the [official announcement](https://discussions.unity.com/t/experimental-ui-toolkit-connector-for-figma-design/1736969).
+  The [Unity package registry](https://packages.unity.com/com.unity.ui.figma)
+  confirms a Pipeline 0.6.0-exp.1 dependency; this project has 0.5.0-exp.1, so
+  connector setup must include a reviewed dependency update. Read-only CLI
+  commands: `unity --version` (1.0.0-beta.10), `unity editors --installed --format
+  json`, and `unity editors upgrade 6000.3.8f1 --dry-run --format json` (offers
+  6000.3.24f1). No Editor, dependency, scene or build changed; no tests were run.
+- [ ] Recommended UI pilot: create a separate, non-build MainMenu screen with
+  Play and mute controls, retaining the existing artwork/fonts. Keep the current
+  menu, HUD, touch controls and gameplay unchanged until the pilot passes.
+  Figma owns imported hierarchy; keep gameplay wiring outside generated assets.
+  On 6.3 use margins instead of imported auto-layout gap and do not depend on
+  background blur or imported frame shadows; review the connector's import
+  report against its [documented limitations](https://docs.unity3d.com/Packages/com.unity.ui.figma@0.1/manual/index.html#known-limitations).
+  Verify Figma desktop/plugin setup and loopback Pipeline pairing without
+  exposing session tokens; no new paid Figma plan is required for a basic pilot.
+  Before integration, check WebGL rendering, portrait/landscape layout, focus,
+  mute/Play, browser-ready/run-start signals, and UI Toolkit touch ownership in
+  `WebPageTouchScroll` (currently uGUI-specific). Adapt only the affected UI tests;
+  do not invoke the broad scene builders or migrate all screens at once.
+  Consider the offered 6.3 LTS patch separately; do not adopt the 6.7 beta solely
+  for newer styling features. This recommendation does not approve a release.
 - [x] p4-Vega entity ownership (2026-09-21): player/collectible updates now use
   their stored sprites, removing redundant sprite arguments from the game loop.
   Five entity tests, fifteen existing rule tests and frontend TypeScript passed.
