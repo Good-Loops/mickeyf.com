@@ -1,8 +1,11 @@
-# Main Menu UI Toolkit pilot
+# Main Menu UI Toolkit
 
-Open `Assets/Scenes/UI/MainMenuToolkitPilot.unity` to inspect the isolated pilot.
-The scene is excluded from builds. The production Main Menu, HUD, touch controls
-and gameplay remain unchanged; this is not a production migration.
+Open `Assets/Scenes/UI/MainMenu.unity` to inspect the active menu. On 2026-09-22,
+the user approved replacing the old uGUI scene with the new UI Toolkit scene.
+Its original GUID is preserved and Build Settings starts with this scene.
+The legacy scene, controller implementation and menu-generation commands were
+removed; they remain recoverable from Git. No WebGL build or deployment is
+included in this source change. HUD, gameplay and outcome screens are unchanged.
 
 The source is [MainMenuPilot in Figma](https://www.figma.com/design/hH2nXiz3n12LclUjpsPgui/?node-id=3-2)
 (file `hH2nXiz3n12LclUjpsPgui`, root `3:2`). Its actual node values were imported
@@ -14,12 +17,15 @@ are pinned to
 
 Generated UXML/USS, images and the sync manifest live under
 `Assets/Figma/Three-Bosses---Main-Menu-UI-Toolkit-Pilot/`. Keep runtime wiring in
-`Assets/Scripts/UI/Pilots/MainMenuToolkitPilot.cs` and owned presentation in
+`Assets/Scripts/UI/MainMenuController.cs` and owned presentation in
 `Assets/UI/Pilots/MainMenuToolkitPilot.uss`; reimport must not overwrite them.
 The controller binds the existing `Assets/Art/UI/Screens/Menu.png` directly.
-Oxanium Bold intentionally replaces the production menu's Liberation Sans in
-this pilot only. PLAY uses the existing run service and loads Level 1 without
-the production fade; mute uses the existing saved global audio preference.
+The imported assets retain their pilot names to preserve Figma sync provenance.
+Oxanium Bold replaces the legacy menu's Liberation Sans. PLAY uses the existing
+run service and loads Level 1 directly; mute uses the saved global preference.
+The controller preserves the WebGL browser-ready callback after the splash.
+An EventSystem connects Toolkit controls to existing page-touch ownership;
+noninteractive artwork ignores picking so background swipes can scroll.
 
 Isolated implementation verified on 2026-09-22: the focused PlayMode run passed
 2/2 tests in 2.81 seconds. Coverage includes 360x800, 390x844, 844x390, 768x1024,
@@ -40,15 +46,18 @@ From the repository root, the portable equivalent of the verified PowerShell
 test command is below (`--project-path` was absolute in the recorded run):
 
 ```powershell
-unity command run_tests --mode playmode --filter MainMenuToolkitPilotTests --async_tests true --project-path ./unity/three-bosses --format json
+$unityProject = (Resolve-Path ./unity/three-bosses).Path
+unity command run_tests --mode playmode --filter MainMenu --async_tests true --project-path $unityProject --format json
 git diff --check -- PROJECT_PLAN.md unity/three-bosses/Assets/UI/Pilots/README.md
 ```
 
 The test command returns an asynchronous run; confirm its final result before
 claiming acceptance. The documentation diff check passed.
 
-Before any production adoption, verify WebGL rendering and the browser-ready
-signal, page/Toolkit touch ownership (`WebPageTouchScroll` currently targets
-uGUI), and physical phone/browser behavior in portrait and landscape. Preserve
-the current build scene list until those gates and a migration decision are
-complete.
+After replacement, the focused `MainMenu` PlayMode run passed 4/4 tests in
+4.89 seconds: build-entry identity, button/background touch ownership, the
+existing viewport/centering checks, Play/mute, and pause-to-menu navigation.
+
+Before release, verify the rebuilt WebGL's rendering, browser-ready signal and
+physical phone/browser behavior in portrait and landscape. Source adoption is
+approved; release acceptance and deployment remain separate.

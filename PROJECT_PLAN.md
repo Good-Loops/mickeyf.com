@@ -2452,9 +2452,9 @@ example. The active branch is `improvement/clean-code-sweep`.
   commands: `unity --version` (1.0.0-beta.10), `unity editors --installed --format
   json`, and `unity editors upgrade 6000.3.8f1 --dry-run --format json` (offers
   6000.3.24f1). No Editor, dependency, scene or build changed; no tests were run.
-- [x] Isolated Main Menu UI Toolkit pilot (2026-09-22): implementation is in
-  `Assets/Scenes/UI/MainMenuToolkitPilot.unity`, excluded from builds. Production
-  Main Menu, HUD, touch controls and gameplay remain unchanged. Actual Figma
+- [x] Isolated Main Menu UI Toolkit pilot (2026-09-22): initially implemented in
+  `Assets/Scenes/UI/MainMenuToolkitPilot.unity`, excluded from builds. At that
+  checkpoint Main Menu, HUD, touch controls and gameplay remained unchanged. Actual Figma
   values from file `hH2nXiz3n12LclUjpsPgui`, root `3:2`, were imported through
   the official `figma_import` Pipeline command, with no USS errors or notes.
   Experimental pins are `com.unity.ui.figma` 0.1.0-exp.1 and
@@ -2467,9 +2467,15 @@ example. The active branch is `improvement/clean-code-sweep`.
   mute, and PLAY starting a new run/loading Level 1. All eight actual UIDocument
   captures were visually inspected, with no clipped labels observed. Desktop
   Figma-plugin pairing was not validated; the official import command was.
-  Production adoption remains pending. Verify WebGL/browser-ready signaling,
-  page/Toolkit touch ownership in the currently uGUI-specific `WebPageTouchScroll`, and physical
-  phone/browser behavior. No production migration or release is included.
+  The subsequent user-approved source adoption replaces the old scene at
+  `Assets/Scenes/UI/MainMenu.unity`, preserving the Toolkit scene GUID and updating
+  the first build entry. The controller is now `MainMenuController`; obsolete
+  uGUI menu builders/tests are retired. Browser-ready signaling is preserved,
+  and the EventSystem supports Toolkit buttons while background swipes can scroll.
+  The focused `MainMenu` PlayMode run passed 4/4 tests, including build identity,
+  touch ownership, layout/centering, Play/mute and pause-to-menu navigation.
+  Rebuilt WebGL and physical phone/browser acceptance remain pending before release;
+  no WebGL rebuild or deployment is included in the source adoption.
   On 6.3 retain margins instead of imported gap and avoid unsupported blur/shadow
   assumptions. See the [pilot record](unity/three-bosses/Assets/UI/Pilots/README.md)
   for source, file ownership and remaining gates.

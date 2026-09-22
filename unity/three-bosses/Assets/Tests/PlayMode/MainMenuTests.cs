@@ -12,18 +12,51 @@ using UnityEngine.UIElements;
 
 namespace ThreeBosses.Tests
 {
-    public sealed class MainMenuToolkitPilotTests
+    public sealed class MainMenuTests
     {
-        private const string PilotScene = "Assets/Scenes/UI/MainMenuToolkitPilot.unity";
+        private const string MenuScene = "Assets/Scenes/UI/MainMenu.unity";
         private const BindingFlags PrivateInstance = BindingFlags.Instance | BindingFlags.NonPublic;
+
+        [UnityTest]
+        public IEnumerator BuildEntryAndTouchOwnershipUseTheReplacementMenu()
+        {
+            var entry = UnityEditor.EditorBuildSettings.scenes[0];
+            Assert.That(entry.path, Is.EqualTo(MenuScene));
+            Assert.That(entry.enabled, Is.True);
+            Assert.That(entry.guid.ToString(), Is.EqualTo(UnityEditor.AssetDatabase.AssetPathToGUID(MenuScene)));
+            Assert.That(UnityEditor.AssetDatabase.LoadAssetAtPath<UnityEditor.SceneAsset>(
+                "Assets/Scenes/UI/MainMenuToolkitPilot.unity"), Is.Null);
+            SceneManager.LoadScene("MainMenu");
+            yield return null;
+            yield return null;
+            var document = UnityEngine.Object.FindFirstObjectByType<UIDocument>();
+            Assert.That(UnityEngine.EventSystems.EventSystem.current.currentInputModule, Is.Not.Null);
+            var host = new GameObject("Menu touch ownership test");
+            var scroll = host.AddComponent(Type.GetType("WebPageTouchScroll, Assembly-CSharp"));
+            var ownsTouch = scroll.GetType().GetMethod("IsInteractiveTouchOrigin", PrivateInstance);
+            try
+            {
+                foreach (string name in new[] { "pilot-play-button", "pilot-audio-button", "pilot-artwork" })
+                {
+                    Vector2 center = document.rootVisualElement.Q(name).worldBound.center;
+                    var position = new Vector2(center.x, Screen.height - center.y);
+                    Assert.That((bool)ownsTouch.Invoke(scroll, new object[] { position }),
+                        Is.EqualTo(name != "pilot-artwork"), $"Touch ownership for {name}");
+                }
+            }
+            finally
+            {
+                UnityEngine.Object.Destroy(host);
+            }
+        }
 
         [UnityTest]
         public IEnumerator CentersArtworkAndControlsAcrossViewportAndSafeAreaChanges()
         {
-            EditorSceneManager.LoadSceneInPlayMode(PilotScene, new LoadSceneParameters(LoadSceneMode.Single));
+            EditorSceneManager.LoadSceneInPlayMode(MenuScene, new LoadSceneParameters(LoadSceneMode.Single));
             yield return null;
             var document = UnityEngine.Object.FindFirstObjectByType<UIDocument>();
-            var controller = document.GetComponent(Type.GetType("MainMenuToolkitPilot, Assembly-CSharp"));
+            var controller = document.GetComponent(Type.GetType("MainMenuController, Assembly-CSharp"));
             Assert.That(((Behaviour)controller).enabled, Is.True);
             var panel = document.panelSettings;
             var originalTarget = panel.targetTexture;
@@ -95,7 +128,7 @@ namespace ThreeBosses.Tests
         [UnityTest]
         public IEnumerator KeyboardFocusMuteAndPlayUseExistingGameServices()
         {
-            EditorSceneManager.LoadSceneInPlayMode(PilotScene, new LoadSceneParameters(LoadSceneMode.Single));
+            EditorSceneManager.LoadSceneInPlayMode(MenuScene, new LoadSceneParameters(LoadSceneMode.Single));
             yield return null;
             yield return null;
             var document = UnityEngine.Object.FindFirstObjectByType<UIDocument>();
@@ -114,7 +147,7 @@ namespace ThreeBosses.Tests
                     audio.Focus();
                     using (var submit = NavigationSubmitEvent.GetPooled()) audio.SendEvent(submit);
                     Assert.That((bool)enabled.GetValue(null), Is.EqualTo(state == 0 ? !original : original));
-                    var controller = document.GetComponent(Type.GetType("MainMenuToolkitPilot, Assembly-CSharp"));
+                    var controller = document.GetComponent(Type.GetType("MainMenuController, Assembly-CSharp"));
                     string field = (bool)enabled.GetValue(null) ? "enabledIcon" : "mutedIcon";
                     Assert.That(icon.image, Is.SameAs(controller.GetType().GetField(field, PrivateInstance).GetValue(controller)));
                     Assert.That(audio.Query<Image>().ToList().Count, Is.EqualTo(1));
