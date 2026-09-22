@@ -98,6 +98,8 @@ public sealed class MainMenuToolkitPilot : MonoBehaviour
         master.AddToClassList("main-menu-toolkit-pilot");
         playButton.AddToClassList("pilot-menu-button");
         audioButton.AddToClassList("pilot-menu-button");
+        // Let interaction styles override the imported inline caption color.
+        playButton.style.color = StyleKeyword.Null;
         artwork.style.backgroundImage = new StyleBackground(menuArtwork);
         artwork.style.overflow = Overflow.Visible;
 
@@ -173,7 +175,7 @@ public sealed class MainMenuToolkitPilot : MonoBehaviour
         SetButtonBounds(audioButton, AudioCenter, new Vector2(142f, 78f), scale, safe.size);
         playButton.style.fontSize = Mathf.Max(18f, 58f * scale);
 
-        float iconHeight = Mathf.Min(Mathf.Max(24f, 44f * scale), safe.height);
+        float iconHeight = Mathf.Min(Mathf.Max(16f, 30f * scale), safe.height);
         float iconWidth = iconHeight * 64f / 44f;
         if (iconWidth > safe.width)
         {
@@ -181,7 +183,7 @@ public sealed class MainMenuToolkitPilot : MonoBehaviour
             iconHeight = iconWidth * 44f / 64f;
         }
 
-        // Flex centering includes focus borders; absolute offsets from the outer box do not.
+        // Center the symbol independently of its larger touch target.
         audioIcon.style.width = iconWidth;
         audioIcon.style.height = iconHeight;
         audioIcon.style.flexShrink = 0f;

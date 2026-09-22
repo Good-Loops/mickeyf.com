@@ -64,6 +64,7 @@ namespace ThreeBosses.Tests
                     AssertCenter(play.worldBound.center, art.worldBound.position + new Vector2(835, 797.5f) * scale, "PLAY", size);
                     AssertCenter(audio.worldBound.center, art.worldBound.position + new Vector2(1543, 113) * scale, "audio", size);
                     AssertCenter(icon.worldBound.center, audio.worldBound.center, "audio icon", size);
+                    Assert.That(icon.worldBound.height, Is.EqualTo(Mathf.Max(16f, 30f * scale)).Within(1f));
                     audio.Focus();
                     yield return null;
                     AssertCenter(icon.worldBound.center, audio.worldBound.center, "focused audio icon", size);
@@ -72,6 +73,7 @@ namespace ThreeBosses.Tests
                     Assert.That(play.resolvedStyle.unityTextAlign, Is.EqualTo(TextAnchor.MiddleCenter));
                     foreach (var button in new[] { play, audio })
                     {
+                        Assert.That(button.resolvedStyle.borderTopWidth, Is.Zero, "Do not overlay a box on the artwork.");
                         Assert.That(button.worldBound.width, Is.GreaterThanOrEqualTo(47.5f));
                         Assert.That(button.worldBound.height, Is.GreaterThanOrEqualTo(47.5f));
                         Assert.That(button.worldBound.xMin, Is.GreaterThanOrEqualTo(safe.xMin - 1));
