@@ -61,10 +61,11 @@ namespace ThreeBosses.Tests
                     // Pixel-aligned layout can round either artwork edge by one pixel.
                     Assert.That(art.worldBound.height, Is.EqualTo(art.worldBound.width * 941f / 1672f).Within(1f));
                     float scale = art.worldBound.width / 1672f;
-                    AssertCenter(play.worldBound.center, art.worldBound.position + new Vector2(835, 797.5f) * scale, "PLAY", size);
+                    Vector2 playFrameCenter = art.worldBound.position + new Vector2(831.5f, 804f) * scale;
+                    AssertCenter(play.worldBound.center, playFrameCenter, "PLAY", size);
                     AssertCenter(audio.worldBound.center, art.worldBound.position + new Vector2(1543, 113) * scale, "audio", size);
                     AssertCenter(icon.worldBound.center, audio.worldBound.center, "audio icon", size);
-                    Assert.That(icon.worldBound.height, Is.EqualTo(Mathf.Max(16f, 30f * scale)).Within(1f));
+                    Assert.That(icon.worldBound.height, Is.EqualTo(Mathf.Max(20f, 37f * scale)).Within(1f));
                     audio.Focus();
                     yield return null;
                     AssertCenter(icon.worldBound.center, audio.worldBound.center, "focused audio icon", size);
@@ -81,7 +82,7 @@ namespace ThreeBosses.Tests
                         Assert.That(button.worldBound.xMax, Is.LessThanOrEqualTo(safe.xMax + 1));
                         Assert.That(button.worldBound.yMax, Is.LessThanOrEqualTo(safe.yMax + 1));
                     }
-                    if (index < 8) Capture(target, $"menu-{size.x}x{size.y}.png");
+                    if (index < 8) Capture(target, $"menu-{size.x}x{size.y}.png", playFrameCenter, play.resolvedStyle.fontSize);
                 }
             }
             finally
@@ -139,7 +140,7 @@ namespace ThreeBosses.Tests
             Assert.That(Vector2.Distance(actual, expected), Is.LessThanOrEqualTo(1f), $"{element} at {size}");
         }
 
-        private static void Capture(RenderTexture target, string filename)
+        private static void Capture(RenderTexture target, string filename, Vector2 captionCenter, float fontSize)
         {
             var previous = RenderTexture.active;
             var image = new Texture2D(target.width, target.height, TextureFormat.RGB24, false);
@@ -151,12 +152,33 @@ namespace ThreeBosses.Tests
                 string directory = Path.Combine(Path.GetTempPath(), "three-bosses-menu-pilot");
                 Directory.CreateDirectory(directory);
                 File.WriteAllBytes(Path.Combine(directory, filename), image.EncodeToPNG());
+                AssertCaptionInkCentered(image, captionCenter, fontSize);
             }
             finally
             {
                 RenderTexture.active = previous;
                 UnityEngine.Object.Destroy(image);
             }
+        }
+
+        private static void AssertCaptionInkCentered(Texture2D image, Vector2 expected, float fontSize)
+        {
+            int left = image.width, right = -1, top = image.height, bottom = -1;
+            // Search the dark caption interior, excluding the red frame and its glow.
+            for (int y = Mathf.FloorToInt(expected.y - fontSize / 2); y <= expected.y + fontSize / 2; y++)
+            for (int x = Mathf.FloorToInt(expected.x - fontSize * 2); x <= expected.x + fontSize * 2; x++)
+            {
+                Color pixel = image.GetPixel(x, image.height - 1 - y);
+                if (pixel.r < 0.75f || pixel.g < 0.65f || pixel.b < 0.65f) continue;
+                left = Mathf.Min(left, x);
+                right = Mathf.Max(right, x);
+                top = Mathf.Min(top, y);
+                bottom = Mathf.Max(bottom, y);
+            }
+            Assert.That(right, Is.GreaterThanOrEqualTo(left), "PLAY glyphs must be visible.");
+            Vector2 inkCenter = new((left + right + 1) / 2f, (top + bottom + 1) / 2f);
+            Assert.That(Vector2.Distance(inkCenter, expected), Is.LessThanOrEqualTo(1.5f),
+                $"Visible PLAY ink at {image.width}x{image.height}: {inkCenter}, frame: {expected}");
         }
     }
 }

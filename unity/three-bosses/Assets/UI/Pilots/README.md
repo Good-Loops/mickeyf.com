@@ -30,6 +30,12 @@ Level 1. All eight actual UIDocument RenderTexture captures in
 `%TEMP%/three-bosses-menu-pilot/` were visually inspected; no clipped labels were
 observed. These are Editor checks, not physical-device or WebGL acceptance.
 
+The visual-centering follow-up also checks PLAY's rendered glyph bounds against
+the artwork's inner frame within 1.5px. The controller compensates Oxanium's
+font-metric offset separately from the button's touch target. The audio symbol
+uses an intermediate size (37 authored pixels, minimum 20) without shrinking its
+48px minimum target; the follow-up run passed 2/2 tests.
+
 From the repository root, the portable equivalent of the verified PowerShell
 test command is below (`--project-path` was absolute in the recorded run):
 

@@ -13,7 +13,8 @@ using UnityEngine.UIElements;
 public sealed class MainMenuToolkitPilot : MonoBehaviour
 {
     private static readonly Vector2 ArtworkSize = new(1672f, 941f);
-    private static readonly Vector2 PlayCenter = new(835f, 797.5f);
+    // Center of the artwork's inner rails: x 610..1053, y 746..862.
+    private static readonly Vector2 PlayCenter = new(831.5f, 804f);
     private static readonly Vector2 AudioCenter = new(1543f, 113f);
     private const float MinimumHitSize = 48f;
     private const string FirstLevelSceneName = "Level1_BeeBoss";
@@ -173,9 +174,14 @@ public sealed class MainMenuToolkitPilot : MonoBehaviour
         SetBounds(artwork, new Rect(artRect.position - viewport.position, artRect.size));
         SetButtonBounds(playButton, PlayCenter, new Vector2(490f, 125f), scale, safe.size);
         SetButtonBounds(audioButton, AudioCenter, new Vector2(142f, 78f), scale, safe.size);
-        playButton.style.fontSize = Mathf.Max(18f, 58f * scale);
+        float captionSize = Mathf.Max(18f, 58f * scale);
+        playButton.style.fontSize = captionSize;
+        // Oxanium's PLAY ink sits 1.5px right and 3.18px high at 58px.
+        // Asymmetric padding shifts the caption, not its centered touch target.
+        playButton.style.paddingRight = captionSize * (3f / 58f);
+        playButton.style.paddingTop = captionSize * (6.36f / 58f);
 
-        float iconHeight = Mathf.Min(Mathf.Max(16f, 30f * scale), safe.height);
+        float iconHeight = Mathf.Min(Mathf.Max(20f, 37f * scale), safe.height);
         float iconWidth = iconHeight * 64f / 44f;
         if (iconWidth > safe.width)
         {
