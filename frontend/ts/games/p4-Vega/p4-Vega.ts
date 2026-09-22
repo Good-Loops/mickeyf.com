@@ -254,11 +254,11 @@ export async function p4Vega(
     const step = (): boolean => {
         if (!session.canMove || !sky || !p4 || !water) return false;
         sky.update();
-        p4.update(p4.p4Anim);
+        p4.update();
         pickupFeedback?.update();
         const pickupX = water.waterAnim.x + water.waterAnim.width / 2;
         const pickupY = water.waterAnim.y + water.waterAnim.height / 2;
-        if (water.update(water.waterAnim, p4, notesPlayingCheckbox?.checked ?? false, stage)) {
+        if (water.update(p4, notesPlayingCheckbox?.checked ?? false, stage)) {
             options.onScoreChange?.(p4.totalWater);
             pickupFeedback?.show(pickupX, pickupY);
             if (p4.totalWater >= P4_WIN_SCORE) { finishRun(p4, true); return false; }

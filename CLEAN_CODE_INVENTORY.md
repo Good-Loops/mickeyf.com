@@ -1038,6 +1038,38 @@ frontend/ts/games/helpers/gameplayNotePlayback.test.mjs`.
 and scoped `git diff --check` passed. Audio is mocked; no listening test, full
 suite, production build or deployment was performed.
 
+## p4-Vega entity sprite ownership — 2026-09-21
+
+`P4` and `Water` already store their own sprites, but their update methods also
+accepted another sprite on every tick. The only production caller always passed
+the stored sprite back. This duplicate input allowed movement/collision checks
+to target one sprite while completion or destruction targeted another.
+
+Before: `p4.update(p4.p4Anim)` and `water.update(water.waterAnim, p4, notesPlaying, stage)`.
+After: `p4.update()` and `water.update(p4, notesPlaying, stage)`.
+Each update reads its owned sprite locally. No new abstraction or object is
+introduced. Movement, faster diagonals, collision, audio preference, ten-point
+pickups, hazard spawning and 1000-point completion retain their existing rules.
+
+Verification: five entity cases and all fifteen existing rule cases passed,
+including independent entity instances, misses, optional audio and completion
+without repeated effects. Commands from the repository root:
+
+```powershell
+node --test frontend/ts/games/p4-Vega/classes/p4Entities.test.mjs
+node --experimental-strip-types --test --test-reporter=spec frontend/ts/games/p4-Vega/p4Rules.test.mjs
+node frontend/node_modules/typescript/bin/tsc -p frontend/tsconfig.json --noEmit
+git diff --check
+```
+
+Tests use plain sprite fixtures and mock the note selector/hazard spawn; no
+rendering, listening or physical-device claim. No full-suite/build run, server
+restart, dependency change, deployment or Unity operation was needed.
+
+The review also left the focused envelope/pitch helpers unchanged. A possible
+same-note color-resumption issue after sustained silence needs a separate
+policy/controller check before changing artistic behavior or timing.
+
 ## Inventory closeout
 
 Read-only Git/path enumeration, local reference reading and targeted frontend/

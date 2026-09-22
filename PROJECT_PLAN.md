@@ -2444,6 +2444,14 @@ example. The active branch is `improvement/clean-code-sweep`.
   packages and available Figma-to-UI Toolkit workflow; support is not yet checked.
   Keep the UI change separate from this audio fix and preserve WebGL/mobile
   touch behavior and performance. No Editor update or UI migration performed yet.
+- [x] p4-Vega entity ownership (2026-09-21): player/collectible updates now use
+  their stored sprites, removing redundant sprite arguments from the game loop.
+  Five entity tests, fifteen existing rule tests and frontend TypeScript passed.
+  Gameplay and audio rules are unchanged; no deployment or Unity change.
+  See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#p4-vega-entity-sprite-ownership--2026-09-21).
+- [ ] Check same-note color resumption after sustained silence across the pitch
+  policy and phase controller. Preserve existing artistic tuning; this is a
+  candidate behavior issue from inspection, not a confirmed visual regression.
 - [x] Shared hue-distance calculation (2026-09-21): interpolation and pitch-color
   transition settling now reuse the same existing-utility function. Preserved
   wraparound, signed half-turn ties, rounding and thresholds. Four focused tests,
