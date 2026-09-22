@@ -14,10 +14,15 @@
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
+    transition-property: color, scale, opacity;
+    transition-duration: 0.12s;
+    transition-timing-function: ease-out;
 }
 
 .main-menu-toolkit-pilot .pilot-menu-button:hover {
-    color: white;
+    color: rgb(255, 242, 230);
+    scale: 1.045 1.045;
+    text-shadow: 0 0 8px rgba(255, 81, 50, 0.85);
 }
 
 .main-menu-toolkit-pilot .pilot-menu-button:focus {
@@ -25,13 +30,31 @@
 }
 
 .main-menu-toolkit-pilot .pilot-menu-button:focus #pilot-audio-icon {
-    opacity: 0.7;
+    opacity: 0.85;
+}
+
+#pilot-audio-icon {
+    transition-property: scale, opacity;
+    transition-duration: 0.12s;
+    transition-timing-function: ease-out;
+}
+
+.main-menu-toolkit-pilot #pilot-audio-button:hover #pilot-audio-icon {
+    scale: 1.15 1.15;
+    opacity: 1;
 }
 
 .main-menu-toolkit-pilot .pilot-menu-button:active {
     opacity: 0.8;
+    scale: 0.98 0.98;
 }
 
 .main-menu-toolkit-pilot .pilot-menu-button:disabled {
     opacity: 0.45;
+    scale: 1 1;
+    text-shadow: 0 0 0 rgba(0, 0, 0, 0);
+}
+
+.main-menu-toolkit-pilot #pilot-audio-button:disabled #pilot-audio-icon {
+    scale: 1 1;
 }

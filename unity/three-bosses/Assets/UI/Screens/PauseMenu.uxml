@@ -10,8 +10,12 @@
         <ui:VisualElement name="pause-overlay" class="pause-overlay" picking-mode="Position">
             <ui:VisualElement name="pause-panel" class="pause-panel" picking-mode="Ignore">
                 <ui:Label name="pause-title" class="pause-title" text="PAUSED" picking-mode="Ignore" />
-                <ui:Button name="pause-resume" class="pause-button pause-action" text="RESUME" />
-                <ui:Button name="pause-main-menu" class="pause-button pause-action pause-secondary" text="MAIN MENU" />
+                <ui:VisualElement class="pause-action-frame" picking-mode="Ignore">
+                    <ui:Button name="pause-resume" class="pause-button pause-action" text="RESUME" />
+                </ui:VisualElement>
+                <ui:VisualElement class="pause-action-frame pause-secondary-frame" picking-mode="Ignore">
+                    <ui:Button name="pause-main-menu" class="pause-button pause-action pause-secondary" text="MAIN MENU" />
+                </ui:VisualElement>
             </ui:VisualElement>
         </ui:VisualElement>
     </ui:VisualElement>

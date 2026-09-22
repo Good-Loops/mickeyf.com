@@ -75,6 +75,10 @@ public sealed class GameplayPauseController : MonoBehaviour
         // The opener is pointer-only: Enter is gameplay Fire, not a way to reopen pause.
         pauseButton.focusable = false;
         pauseButton.tabIndex = -1;
+        PauseGlassElement.Install(pausePanel, "pause-panel-glass", PauseGlassElement.GlassStyle.MenuPanel);
+        PauseGlassElement.Install(pauseButton, "pause-open-glass", PauseGlassElement.GlassStyle.PauseButton, pauseButton);
+        PauseGlassElement.Install(resumeButton.parent, "pause-resume-glass", PauseGlassElement.GlassStyle.ActionButton, resumeButton);
+        PauseGlassElement.Install(mainMenuButton.parent, "pause-main-menu-glass", PauseGlassElement.GlassStyle.ActionButton, mainMenuButton);
         return true;
     }
 

@@ -2495,6 +2495,16 @@ example. The active branch is `improvement/clean-code-sweep`.
   WebGL rebuild succeeded; its only warning disables Pipeline tooling in the
   player because no runtime config is included. Physical-device acceptance and
   deployment remain separate.
+- [x] Toolkit glass and hover restoration (2026-09-22): pause uses the original
+  translucent gradient and highlighted rims through a non-picking decorative
+  element. Main-menu PLAY/audio and outcome actions have hover/pressed feedback;
+  PLAY's imported inline color no longer overrides interaction styles. The
+  original shared touch HUD and its glass/press feedback remain unchanged in all
+  three battles. Pause checks passed 4/4; the combined `ScreenUI` run passed 13/14,
+  and the remaining menu test passed in a focused 4/4 rerun after test-teardown
+  cleanup. Portrait/landscape and hover captures were inspected. The follow-up
+  local WebGL rebuild succeeded with only the disabled-Pipeline warning; no
+  deployment or physical-device acceptance is implied.
 - [x] p4-Vega entity ownership (2026-09-21): player/collectible updates now use
   their stored sprites, removing redundant sprite arguments from the game loop.
   Five entity tests, fifteen existing rule tests and frontend TypeScript passed.

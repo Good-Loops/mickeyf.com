@@ -35,10 +35,14 @@
     align-items: center;
     justify-content: center;
     flex-shrink: 0;
+    transition-property: color, opacity;
+    transition-duration: 0.12s;
+    transition-timing-function: ease-out;
 }
 
 .outcome-screen .outcome-button:hover {
-    color: white;
+    color: rgb(255, 242, 230);
+    text-shadow: 0 0 6px rgba(255, 112, 80, 0.9);
 }
 
 .outcome-screen .outcome-button:focus {
@@ -51,6 +55,7 @@
 
 .outcome-screen .outcome-button:disabled {
     opacity: 0.45;
+    text-shadow: 0 0 0 rgba(0, 0, 0, 0);
 }
 
 #outcome-fade {

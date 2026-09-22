@@ -2,10 +2,12 @@
 using System;
 using System.Collections;
 using System.IO;
+using System.Linq;
 using System.Reflection;
 using NUnit.Framework;
 using UnityEditor.SceneManagement;
 using UnityEngine;
+using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
 using UnityEngine.TestTools;
 using UnityEngine.UIElements;
@@ -127,6 +129,98 @@ namespace ThreeBosses.Tests
         }
 
         [UnityTest]
+        public IEnumerator NativePointerHoverEmphasizesControlsWithoutBordersAndClearsOnExit()
+        {
+            EditorSceneManager.LoadSceneInPlayMode(MenuScene, new LoadSceneParameters(LoadSceneMode.Single));
+            yield return null;
+            yield return null;
+            var document = UnityEngine.Object.FindFirstObjectByType<UIDocument>();
+            var productionPanel = document.panelSettings;
+            var capturePanel = UnityEngine.Object.Instantiate(productionPanel);
+            PanelEventHandler handler = null;
+            var pointer = new PointerEventData(EventSystem.current) { pointerId = -1 };
+            var target = new RenderTexture(1280, 720, 24);
+            var outside = new Vector2(-100f, -100f);
+
+            IEnumerator MovePointerAndSettle(Vector2 position)
+            {
+                // Use the public runtime bridge, which performs native picking and :hover transitions.
+                float deadline = Time.realtimeSinceStartup + 0.2f;
+                do
+                {
+                    Vector2 screenPosition = new(position.x, Screen.height - position.y);
+                    pointer.delta = screenPosition - pointer.position;
+                    pointer.position = screenPosition;
+                    handler.OnPointerMove(pointer);
+                    yield return null;
+                } while (Time.realtimeSinceStartup < deadline);
+            }
+
+            void AssertBorderless(Button button)
+            {
+                Assert.That(button.resolvedStyle.borderTopWidth, Is.Zero);
+                Assert.That(button.resolvedStyle.borderRightWidth, Is.Zero);
+                Assert.That(button.resolvedStyle.borderBottomWidth, Is.Zero);
+                Assert.That(button.resolvedStyle.borderLeftWidth, Is.Zero);
+            }
+
+            try
+            {
+                target.Create();
+                capturePanel.targetTexture = target;
+                capturePanel.SetScreenToPanelSpaceFunction(position => position);
+                document.panelSettings = capturePanel;
+                yield return null;
+                yield return null;
+                var root = document.rootVisualElement;
+                var play = root.Q<Button>("pilot-play-button");
+                var audio = root.Q<Button>("pilot-audio-button");
+                var icon = root.Q<Image>("pilot-audio-icon");
+                handler = UnityEngine.Object.FindObjectsByType<PanelEventHandler>(FindObjectsSortMode.None)
+                    .Single(candidate => candidate.panel == root.panel);
+                root.panel.focusController.focusedElement?.Blur();
+                EventSystem.current.SetSelectedGameObject(null);
+                handler.OnPointerEnter(pointer);
+                yield return MovePointerAndSettle(outside);
+                Vector2 captionCenter = play.worldBound.center;
+                Color restingPlayColor = play.resolvedStyle.color;
+
+                yield return MovePointerAndSettle(play.worldBound.center);
+                Assert.That(play.resolvedStyle.scale.value.x, Is.GreaterThan(1.02f), "PLAY must visibly enlarge on native hover.");
+                Assert.That(play.resolvedStyle.color, Is.Not.EqualTo(restingPlayColor));
+                Assert.That(audio.resolvedStyle.scale.value.x, Is.EqualTo(1f).Within(0.003f));
+                AssertBorderless(play);
+                Capture(target, "menu-hover-play.png", captionCenter, play.resolvedStyle.fontSize);
+
+                yield return MovePointerAndSettle(audio.worldBound.center);
+                Assert.That(audio.resolvedStyle.scale.value.x, Is.GreaterThan(1.02f));
+                Assert.That(icon.resolvedStyle.scale.value.x, Is.GreaterThan(1.1f), "The audio icon must visibly enlarge on native hover.");
+                Assert.That(play.resolvedStyle.scale.value.x, Is.EqualTo(1f).Within(0.003f));
+                Assert.That(play.resolvedStyle.color, Is.EqualTo(restingPlayColor));
+                AssertBorderless(audio);
+                Capture(target, "menu-hover-audio.png", captionCenter, play.resolvedStyle.fontSize);
+
+                yield return MovePointerAndSettle(outside);
+                Assert.That(audio.resolvedStyle.scale.value.x, Is.EqualTo(1f).Within(0.003f));
+                Assert.That(icon.resolvedStyle.scale.value.x, Is.EqualTo(1f).Within(0.003f));
+                Capture(target, "menu-hover-cleared.png", captionCenter, play.resolvedStyle.fontSize);
+            }
+            finally
+            {
+                try
+                {
+                    handler?.OnPointerExit(pointer);
+                }
+                finally
+                {
+                    document.panelSettings = productionPanel;
+                    UnityEngine.Object.Destroy(capturePanel);
+                    UnityEngine.Object.Destroy(target);
+                }
+            }
+        }
+
+        [UnityTest]
         public IEnumerator KeyboardFocusMuteAndPlayUseExistingGameServices()
         {
             EditorSceneManager.LoadSceneInPlayMode(MenuScene, new LoadSceneParameters(LoadSceneMode.Single));
@@ -165,6 +259,10 @@ namespace ThreeBosses.Tests
             finally
             {
                 settings.GetMethod("SetEnabled").Invoke(null, new object[] { original });
+                // Release the countdown gate while its scene objects are still alive.
+                Type countdownType = Type.GetType("RunCountdownController, Assembly-CSharp");
+                foreach (Behaviour countdown in UnityEngine.Object.FindObjectsByType(countdownType, FindObjectsSortMode.None))
+                    countdown.enabled = false;
                 SceneManager.LoadScene("MainMenu");
             }
         }

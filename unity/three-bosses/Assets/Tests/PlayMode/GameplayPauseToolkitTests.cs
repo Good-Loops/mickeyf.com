@@ -174,6 +174,8 @@ namespace ThreeBosses.Tests
                         var opener = root.Q<Button>("pause-open");
                         AssertTargetInside(opener, safe);
                         Assert.That(root.panel.Pick(opener.worldBound.center), Is.SameAs(opener));
+                        Assert.That(ReadAlpha(target, new Vector2(opener.worldBound.center.x, opener.worldBound.yMin + 36f)),
+                            Is.InRange(0.02f, 0.4f), "The opener must remain translucent glass.");
                         Vector2 clearPoint = new(8, size.y - 8);
                         VisualElement picked = root.panel.Pick(clearPoint);
                         Assert.That(picked == null || !root.Contains(picked), Is.True,
@@ -189,6 +191,14 @@ namespace ThreeBosses.Tests
                         AssertTargetInside(root.Q<Button>("pause-resume"), safe);
                         AssertTargetInside(root.Q<Button>("pause-main-menu"), safe);
                         Assert.That(root.Q("pause-title").pickingMode, Is.EqualTo(PickingMode.Ignore));
+                        Rect panelBounds = root.Q("pause-panel").worldBound;
+                        float panelAlpha = ReadAlpha(target, new Vector2(panelBounds.xMin + 24f, panelBounds.center.y));
+                        Assert.That(panelAlpha, Is.InRange(0.36f, 0.8f), "Glass must reveal the scene beneath its dimmer.");
+                        Rect actionBounds = root.Q<Button>("pause-resume").worldBound;
+                        float actionAlpha = ReadAlpha(target, new Vector2(actionBounds.xMin + 24f, actionBounds.center.y));
+                        Assert.That(actionAlpha, Is.GreaterThan(panelAlpha + 0.02f).And.LessThan(0.85f));
+                        foreach (string name in new[] { "pause-open-glass", "pause-panel-glass", "pause-resume-glass", "pause-main-menu-glass" })
+                            Assert.That(root.Q(name).pickingMode, Is.EqualTo(PickingMode.Ignore), name);
                         if (size.x == 390 || size.x == 1280)
                             Capture(target, $"{sceneName}-pause-{size.x}x{size.y}.png");
                         Invoke(controller, "ResumeGameplay");
@@ -201,6 +211,131 @@ namespace ThreeBosses.Tests
                     UnityEngine.Object.Destroy(capturePanel);
                     if (target != null) UnityEngine.Object.Destroy(target);
                 }
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator NativeHoverFocusAndPressHighlightGlassWithoutChangingTheHitTarget()
+        {
+            yield return LoadBattle(BattleScenes[0]);
+            var productionPanel = document.panelSettings;
+            var capturePanel = UnityEngine.Object.Instantiate(productionPanel);
+            capturePanel.clearColor = true;
+            capturePanel.colorClearValue = Color.clear;
+            var target = new RenderTexture(1280, 720, 24);
+            target.Create();
+            capturePanel.targetTexture = target;
+            capturePanel.SetScreenToPanelSpaceFunction(position => position);
+            document.panelSettings = capturePanel;
+            PanelEventHandler handler = null;
+            var pointer = new PointerEventData(EventSystem.current) { pointerId = -1 };
+            var outside = new Vector2(-100f, -100f);
+            bool pointerPressed = false;
+
+            IEnumerator MovePointer(Vector2 position)
+            {
+                // Use runtime picking and its native hover events, not private state or USS overrides.
+                for (int frame = 0; frame < 3; frame++)
+                {
+                    Vector2 screenPosition = new(position.x, Screen.height - position.y);
+                    pointer.delta = screenPosition - pointer.position;
+                    pointer.position = screenPosition;
+                    handler.OnPointerMove(pointer);
+                    yield return null;
+                }
+            }
+
+            try
+            {
+                yield return null;
+                yield return null;
+                Invoke(controller, "UpdateLayout", new Rect(0, 0, 1280, 720), new Rect(0, 0, 1280, 720));
+                Invoke(controller, "TogglePause");
+                yield return null;
+                yield return null;
+                handler = UnityEngine.Object.FindObjectsByType<PanelEventHandler>(FindObjectsSortMode.None)
+                    .Single(candidate => candidate.panel == document.rootVisualElement.panel);
+                handler.OnPointerEnter(pointer);
+                yield return MovePointer(outside);
+                Button button = document.rootVisualElement.Q<Button>("pause-main-menu");
+                Rect originalBounds = button.worldBound;
+                Vector2 probe = new(originalBounds.xMin + 24f, originalBounds.center.y);
+                float normalAlpha = ReadAlpha(target, probe);
+                Capture(target, "pause-glass-default.png");
+
+                yield return MovePointer(originalBounds.center);
+                float hoverAlpha = ReadAlpha(target, probe);
+                Assert.That(hoverAlpha, Is.GreaterThan(normalAlpha + 0.01f), "Hover must change the glass itself, not only its text.");
+                AssertUnchangedTarget(button, originalBounds);
+                Capture(target, "pause-glass-hover.png");
+
+                yield return MovePointer(outside);
+                button.Focus();
+                yield return null;
+                yield return null;
+                float focusAlpha = ReadAlpha(target, probe);
+                Assert.That(focusAlpha, Is.GreaterThan(normalAlpha + 0.01f));
+                AssertUnchangedTarget(button, originalBounds);
+                Capture(target, "pause-glass-focus.png");
+
+                yield return MovePointer(originalBounds.center);
+                pointerPressed = true;
+                handler.OnPointerDown(pointer);
+                yield return null;
+                yield return null;
+                Assert.That(ReadAlpha(target, probe), Is.GreaterThan(focusAlpha + 0.01f));
+                AssertUnchangedTarget(button, originalBounds);
+                Capture(target, "pause-glass-pressed.png");
+                yield return MovePointer(outside);
+                Assert.That(ReadAlpha(target, probe), Is.EqualTo(focusAlpha).Within(0.01f),
+                    "Dragging outside must release the pressed highlight while retaining keyboard focus.");
+                handler.OnPointerUp(pointer);
+                pointerPressed = false;
+                yield return null;
+                Assert.That(SceneManager.GetActiveScene().name, Is.EqualTo(BattleScenes[0]),
+                    "Releasing the press outside the button must not invoke MAIN MENU.");
+            }
+            finally
+            {
+                if (pointerPressed && handler != null)
+                {
+                    // Exit alone does not release Toolkit's shared mouse-button state.
+                    Vector2 screenPosition = new(outside.x, Screen.height - outside.y);
+                    pointer.delta = screenPosition - pointer.position;
+                    pointer.position = screenPosition;
+                    handler.OnPointerMove(pointer);
+                    handler.OnPointerUp(pointer);
+                }
+                handler?.OnPointerExit(pointer);
+                document.panelSettings = productionPanel;
+                UnityEngine.Object.Destroy(capturePanel);
+                UnityEngine.Object.Destroy(target);
+            }
+        }
+
+        private static void AssertUnchangedTarget(Button button, Rect originalBounds)
+        {
+            Assert.That(button.worldBound, Is.EqualTo(originalBounds));
+            Assert.That(button.worldBound.width, Is.GreaterThanOrEqualTo(48f));
+            Assert.That(button.worldBound.height, Is.GreaterThanOrEqualTo(48f));
+            Assert.That(button.panel.Pick(button.worldBound.center), Is.SameAs(button));
+        }
+
+        private static float ReadAlpha(RenderTexture target, Vector2 panelPoint)
+        {
+            RenderTexture previous = RenderTexture.active;
+            var pixel = new Texture2D(1, 1, TextureFormat.RGBA32, false);
+            try
+            {
+                RenderTexture.active = target;
+                pixel.ReadPixels(new Rect(Mathf.Floor(panelPoint.x), target.height - 1 - Mathf.Floor(panelPoint.y), 1, 1), 0, 0);
+                pixel.Apply();
+                return pixel.GetPixel(0, 0).a;
+            }
+            finally
+            {
+                RenderTexture.active = previous;
+                UnityEngine.Object.Destroy(pixel);
             }
         }
 

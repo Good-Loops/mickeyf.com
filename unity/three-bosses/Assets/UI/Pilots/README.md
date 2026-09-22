@@ -103,3 +103,26 @@ completed one guarded local rebuild, preserving the source/settings baseline.
 Its one warning states that Pipeline is disabled in the player without a
 runtime configuration; developer remote tooling is intentionally not enabled.
 This does not constitute a deployment or physical-device acceptance.
+
+### Glass and interaction follow-up
+
+`PauseGlassElement` restores the former pause graphics using translucent vertex
+colors, directional rims and short highlights. It is decorative and ignores
+picking; the existing Toolkit buttons retain input ownership and 48px targets.
+Native pointer/focus events brighten the glass without resizing those targets.
+The original uGUI touch HUD, its shared prefab and press feedback are unchanged.
+
+The menu and outcome styles now provide hover/pressed feedback. PLAY and audio
+enlarge gently without adding another frame over the artwork. PLAY's imported
+inline color was removed so the owned stylesheet can control its interaction
+states; keep that color out of inline UXML when reimporting the design.
+
+Validation: all four pause tests passed, including transparent rendered pixels,
+native hover/focus/press/drag-out behavior and unchanged hit targets. The full
+14-test `ScreenUI` run then passed 13 tests; its remaining menu check exposed
+countdown teardown in the test harness. After fixing that cleanup, the focused
+`ThreeBosses.Tests.MainMenuTests` run passed 4/4, including native hover, borderless
+buttons and hover reset. Hover and glass captures were inspected. The follow-up
+guarded WebGL build succeeded with only the same disabled-Pipeline warning.
+The rebuilt localhost browser preview loaded successfully; Play and pause opened
+the scene and the translucent panel correctly over the live game artwork.

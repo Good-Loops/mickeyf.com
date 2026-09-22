@@ -126,8 +126,6 @@ public sealed class MainMenuController : MonoBehaviour
         master.AddToClassList("main-menu-toolkit-pilot");
         playButton.AddToClassList("pilot-menu-button");
         audioButton.AddToClassList("pilot-menu-button");
-        // Let interaction styles override the imported inline caption color.
-        playButton.style.color = StyleKeyword.Null;
         artwork.style.backgroundImage = new StyleBackground(menuArtwork);
         artwork.style.overflow = Overflow.Visible;
 
