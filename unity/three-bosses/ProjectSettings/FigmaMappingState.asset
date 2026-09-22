@@ -1,0 +1,15 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &1
+MonoBehaviour:
+  m_ObjectHideFlags: 53
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e202e508fe47e4c91a256817d1a9f41d, type: 3}
+  m_Name:
+  m_EditorClassIdentifier: Unity.UIToolkit.Figma.Editor::Unity.UIToolkit.Figma.FigmaMappingState
+  m_ActiveMappingGuid: 085888458423f8c46aa5c34376a83cd9

@@ -15,6 +15,7 @@
     "com.unity.render-pipelines.universal": "17.3.0",
     "com.unity.test-framework": "1.6.0",
     "com.unity.timeline": "1.8.10",
+    "com.unity.ui.figma": "0.1.0-exp.1",
     "com.unity.ugui": "2.0.0",
     "com.unity.visualscripting": "1.9.9",
     "com.unity.modules.accessibility": "1.0.0",
@@ -50,6 +51,6 @@
     "com.unity.modules.vr": "1.0.0",
     "com.unity.modules.wind": "1.0.0",
     "com.unity.modules.xr": "1.0.0",
-    "com.unity.pipeline": "0.5.0-exp.1"
+    "com.unity.pipeline": "0.6.0-exp.1"
   }
 }
