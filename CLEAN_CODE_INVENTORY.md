@@ -1070,6 +1070,40 @@ The review also left the focused envelope/pitch helpers unchanged. A possible
 same-note color-resumption issue after sustained silence needs a separate
 policy/controller check before changing artistic behavior or timing.
 
+## Pitch-color recovery after silence — 2026-09-21
+
+The preceding candidate is confirmed at the policy/state boundary, not as a
+continuously stuck visible color. `lastGood` held two different concepts: the
+last committed pitch color and the most recent idle color. Sustained silence
+overwrote it. Returning to the same pitch correctly produced `changed: false`,
+but then reused the idle color indefinitely. Continuous phase rendering still
+held the pitch anchor; resetting the phase later could seed it from stale idle
+state. A real tracker/policy/phase regression reproduced that reset path.
+
+The policy now keeps `lastPitchColor` separately. A stable pitch restores that
+color; only a newly accepted pitch color updates it. Silence still chooses idle
+colors exactly as before. This separates states with different lifetimes instead
+of pretending a repeated note is a new pitch-class commit. Tracker signals,
+stabilization, color mapping, drift and phase timing remain unchanged.
+
+Three of five new cases failed before the fix. Afterward all five policy cases
+and four existing hue cases passed, including brief silence, repeated recovery,
+pending/new pitch commits, continuous micro drift and phase reset. Commands:
+
+```powershell
+node --test frontend/ts/animations/helpers/audio/PitchColorPolicy.test.mjs
+node --test --test-reporter=spec frontend/ts/animations/helpers/audio/PitchColorPolicy.test.mjs frontend/ts/utils/hsl.test.mjs
+node frontend/node_modules/typescript/bin/tsc -p frontend/tsconfig.json --noEmit
+git diff --check
+```
+
+The first command captured the failing baseline; the combined command and
+TypeScript passed after the fix. These are deterministic logic checks using
+fixed idle-color ranges, not a browser/device or music-listening claim. No new
+dependency, production build, deployment or Unity operation was performed.
+The reset regression covers reset after pitch recovery. Resetting during ongoing
+silence remains a separate controller-lifecycle case; that behavior is unchanged.
+
 ## Inventory closeout
 
 Read-only Git/path enumeration, local reference reading and targeted frontend/

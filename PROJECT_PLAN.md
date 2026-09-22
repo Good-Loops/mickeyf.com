@@ -2449,9 +2449,13 @@ example. The active branch is `improvement/clean-code-sweep`.
   Five entity tests, fifteen existing rule tests and frontend TypeScript passed.
   Gameplay and audio rules are unchanged; no deployment or Unity change.
   See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#p4-vega-entity-sprite-ownership--2026-09-21).
-- [ ] Check same-note color resumption after sustained silence across the pitch
-  policy and phase controller. Preserve existing artistic tuning; this is a
-  candidate behavior issue from inspection, not a confirmed visual regression.
+- [x] Same-note color recovery (2026-09-21): reproduced stale idle policy state
+  after sustained silence, including its effect on a subsequent phase reset.
+  Continuous rendering already retained the correct pitch anchor. The policy now
+  remembers pitch color separately from idle output; tracker commit signals,
+  palette, drift and timing are unchanged. Three regression cases failed before
+  the fix; all nine focused color tests and frontend TypeScript pass afterward.
+  See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#pitch-color-recovery-after-silence--2026-09-21).
 - [x] Shared hue-distance calculation (2026-09-21): interpolation and pitch-color
   transition settling now reuse the same existing-utility function. Preserved
   wraparound, signed half-turn ties, rounding and thresholds. Four focused tests,

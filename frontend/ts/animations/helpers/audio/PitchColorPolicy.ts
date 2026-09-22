@@ -102,6 +102,7 @@ export type ColorDecision = {
  */
 export class PitchColorPolicy {
     private lastGood: HslColor;
+    private lastPitchColor: HslColor;
 
     /**
     * @param deps - Policy dependencies and tuning. The provided pitch hysteresis tracker instance
@@ -109,6 +110,7 @@ export class PitchColorPolicy {
      */
     constructor(private deps: PitchColorPolicyDeps) {
         this.lastGood = deps.initialColor ?? { hue: 0, saturation: 50, lightness: 50 };
+        this.lastPitchColor = this.lastGood;
     }
 
     /**
@@ -119,7 +121,7 @@ export class PitchColorPolicy {
      * - Silence holds the last color; after sustained silence, picks a new idle color from `silenceRanges`.
      * - Pitch hue is anchored to the committed pitch class (`pitchClassToHue`).
      * - Micro drift offsets hue by a bounded amount based on fractional semitone distance.
-     * - If `noteStep` is enabled, color updates only on commit events (`result.changed`).
+     * - If `noteStep` is enabled, pitch color changes only on commits; returning from silence restores it.
      *
      * Determinism: given the same internal state and inputs, results are deterministic except when
      * sustained silence triggers a random idle color.
@@ -147,6 +149,8 @@ export class PitchColorPolicy {
         const finalHue = (committedBaseHue + hueOffset + 360) % 360;
 
         if (tuning.noteStep && !result.changed) {
+            // Idle colors must not replace the pitch anchor when the same note resumes.
+            this.lastGood = this.lastPitchColor;
             return {
                 color: this.lastGood,
                 result,
@@ -158,6 +162,7 @@ export class PitchColorPolicy {
             saturation: tuning.pitchSaturation,
             lightness: tuning.pitchLightness,
         };
+        this.lastPitchColor = this.lastGood;
 
         return {
             color: this.lastGood,
