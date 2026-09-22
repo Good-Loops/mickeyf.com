@@ -2536,6 +2536,17 @@ example. The active branch is `improvement/clean-code-sweep`.
   Palette, timing, drift and interpolation remain unchanged. No device retest,
   Unity rebuild or deployment.
   See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#pitch-color-phase-reset-during-silence--2026-09-22).
+- [x] Failed audio initialization (2026-09-22): current setup failures now release
+  partial track resources and reset analysis state without touching a newer upload.
+  Both animation pages return the loading promise to the shared upload control,
+  which reports failures with the existing styled alert and permits same-file
+  retry. Autoplay handling and successful playback remain unchanged. Three engine
+  and three UI regression assertions failed before their fixes; 40 focused cases,
+  frontend TypeScript and whitespace checks passed. No device retest or deployment.
+  See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#failed-audio-initialization-ownership-and-feedback--2026-09-22).
+- [ ] Next: characterize and fix the fractal auto-dispose toggle's cancellation
+  boundary if confirmed; disabling currently clears the host countdown without
+  notifying the animation's scheduled disposal. Keep fade/visual behavior intact.
 - [x] Shared hue-distance calculation (2026-09-21): interpolation and pitch-color
   transition settling now reuse the same existing-utility function. Preserved
   wraparound, signed half-turn ties, rounding and thresholds. Four focused tests,

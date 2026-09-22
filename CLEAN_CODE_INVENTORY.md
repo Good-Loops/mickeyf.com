@@ -1142,6 +1142,66 @@ by the two reset tests. No device/music-listening acceptance, Unity rebuild,
 production build or deployment is claimed. The owner's Three Bosses phone layout
 acceptance is recorded separately; its accepted gameplay checks were not repeated.
 
+## Failed audio initialization ownership and feedback — 2026-09-22
+
+This extends the earlier cancellation review to active initialization failures;
+it does not reopen accepted playback or the Safari file-picker check. A current
+`AudioContext.resume()` rejection previously escaped while retaining the object
+URL, audio element/listener and context until the next upload or page disposal.
+Construction/graph connection errors had the same cleanup gap. This was bounded
+retention of an unusable track, not evidence of resources accumulating forever.
+Both animation pages discarded the returned promise, producing an unhandled
+rejection and no user-facing explanation.
+
+Allocation and graph setup now share a failure boundary. It tears down only the
+current failed session, resets its analysis state, and rethrows the original
+error. Session checks before and after asynchronous teardown prevent an older
+failure from clearing a newer upload or showing obsolete feedback. The source
+node is recorded before connecting it, so a failed connection is owned too.
+Autoplay denial remains separate: the loaded track is retained for manual Play.
+
+Before, both pages discarded completion:
+
+```tsx
+onFileSelect={(file) => { void audioEngine.processAudio(file); }}
+```
+
+After, both return it to the shared control:
+
+```tsx
+onFileSelect={(file) => audioEngine.processAudio(file)}
+```
+
+`MusicUpload` accepts `void | Promise<void>`, awaits the callback, and reports
+loading errors through the existing styled alert. It captures the input before
+awaiting and skips the popup if that input was detached by navigation. Clearing
+the input after capturing the File allows retrying the same file. Cancellation,
+picker hints, keyboard activation, successful playback and UI styling remain
+unchanged. This keeps resource ownership in the engine and feedback in the UI,
+without a new service, hook or dependency.
+
+Three engine regression cases and three UI assertions failed before their
+respective changes; the old UI also emitted unhandled promise rejections.
+Afterward, 28 engine, nine upload-control and three existing page-mount cases
+passed (40 total), including partial graph cleanup, a new upload during failed
+cleanup, synchronous/asynchronous errors and navigation during loading.
+
+```powershell
+node --experimental-strip-types --test frontend/ts/animations/helpers/audio/AudioEngine.test.mjs
+node --test --test-reporter=spec frontend/ts/components/MusicUpload.test.mjs
+node frontend/node_modules/typescript/bin/tsc -p frontend/tsconfig.json --noEmit
+node --experimental-strip-types --test --test-reporter=spec frontend/ts/animations/helpers/audio/AudioEngine.test.mjs frontend/ts/components/MusicUpload.test.mjs frontend/ts/pages/animations/DancingCircles.test.mjs
+git diff --check
+```
+
+TypeScript passed. These are controlled failure/lifecycle and markup checks,
+not a real-device codec, alert screenshot or new Safari acceptance claim. No
+production build, deployment or Unity operation was performed.
+
+Next bounded review: the fractal host clears `remainingLifetime` when automatic
+disposal is disabled, but does not notify the animation to cancel its already
+scheduled disposal. Characterize the toggle before changing its contract.
+
 ## Inventory closeout
 
 Read-only Git/path enumeration, local reference reading and targeted frontend/

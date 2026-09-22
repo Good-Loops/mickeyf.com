@@ -40,7 +40,12 @@ async function withAudio(plans, check) {
                     return { fftSize: 0, connect() {}, getFloatTimeDomainData(input) { input.fill(0); } };
                 }
                 createMediaElementSource() {
-                    const source = { disconnectCount: 0, connect() {}, disconnect() { this.disconnectCount++; } };
+                    const connectError = this.plan.connectError;
+                    const source = {
+                        disconnectCount: 0,
+                        connect() { if (connectError) throw connectError; },
+                        disconnect() { this.disconnectCount++; },
+                    };
                     this.sources.push(source);
                     return source;
                 }
@@ -220,10 +225,10 @@ test('a late initial play promise cannot mark a disposed track as playing again'
     });
 });
 
-test('resume rejection is ignored only when that upload has already been cancelled', async () => {
+test('resume rejection releases failed resources and is ignored only for a cancelled upload', async () => {
     for (const cancelled of [false, true]) {
         const resume = deferred();
-        await withAudio([{ resume }], async ({ engine, contexts }) => {
+        await withAudio([{ resume }], async ({ engine, contexts, audios, revoked, frames }) => {
             const pending = engine.processAudio(track('resume-failed'));
             await flush();
             if (cancelled) await engine.dispose();
@@ -231,10 +236,57 @@ test('resume rejection is ignored only when that upload has already been cancell
             const settled = cancelled ? pending : assert.rejects(pending, failure);
             resume.reject(failure);
             await settled;
+            assert.equal(engine.state.hasAudio, false);
             assert.equal(engine.state.playing, false);
-            assert.equal(contexts[0].closeCount, cancelled ? 1 : 0);
+            assert.equal(contexts[0].closeCount, 1);
+            assert.equal(audios[0].endedListeners.size, 0);
+            assert.equal(audios[0].paused, true);
+            assert.deepEqual(revoked, ['blob:track-1']);
+            assert.equal(frames.size, 0);
         });
     }
+});
+
+test('a graph connection failure releases the partial track and resets the previous analysis', async () => {
+    const failure = new Error('source connection failed');
+    await withAudio([{}, { connectError: failure }], async ({ engine, contexts, audios, revoked, frames }) => {
+        await engine.processAudio(track('previous'));
+        assert.equal(engine.state.durationSec, 60);
+        await assert.rejects(engine.processAudio(track('failed')), error => error === failure);
+        assert.equal(contexts[1].closeCount, 1);
+        assert.equal(contexts[1].sources[0].disconnectCount, 1);
+        assert.equal(audios[1].endedListeners.size, 0);
+        assert.equal(audios[1].paused, true);
+        assert.deepEqual(revoked, ['blob:track-1', 'blob:track-2']);
+        assert.equal(engine.state.hasAudio, false);
+        assert.equal(engine.state.playing, false);
+        assert.equal(engine.state.durationSec, 0);
+        assert.equal(frames.size, 0);
+    });
+});
+
+test('a newer upload survives failed-track cleanup and suppresses the obsolete failure', async () => {
+    const resume = deferred();
+    const close = deferred();
+    await withAudio([{ resume, close }], async ({ engine, contexts, audios, revoked, frames }) => {
+        const previous = engine.processAudio(track('failed'));
+        const outcome = previous.then(() => undefined, error => error);
+        await flush();
+        resume.reject(new Error('old resume failed'));
+        await flush();
+        assert.equal(contexts[0].closeCount, 1, 'failure starts cleanup before another upload');
+        await engine.processAudio(track('current'));
+        close.resolve();
+        assert.equal(await outcome, undefined);
+        assert.equal(contexts[1].closeCount, 0);
+        assert.equal(audios[1].endedListeners.size, 1);
+        assert.equal(audios[1].paused, false);
+        assert.deepEqual(revoked, ['blob:track-1']);
+        assert.equal(engine.state.hasAudio, true);
+        assert.equal(engine.state.playing, true);
+        assert.equal(engine.state.durationSec, 60);
+        assert.equal(frames.size, 1);
+    });
 });
 
 for (const control of ['pause', 'stop']) {

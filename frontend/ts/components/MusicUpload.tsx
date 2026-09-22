@@ -1,4 +1,5 @@
 import React from 'react';
+import siteAlert from './siteAlert';
 
 // Files providers may identify audio by its extension rather than an audio MIME type.
 // These are picker hints, not a guarantee that the browser can decode every codec.
@@ -7,7 +8,7 @@ const AUDIO_FILE_ACCEPT = 'audio/*,.mp3,.m4a,.aac,.wav,.wave,.aif,.aiff,.flac,.o
 type MusicUploadProps = {
     id: string;
     classPrefix: string;
-    onFileSelect: (file: File) => void;
+    onFileSelect: (file: File) => void | Promise<void>;
 };
 
 /** Shared file selection UI; loading and playback belong to the caller. */
@@ -19,9 +20,24 @@ export default function MusicUpload({ id, classPrefix, onFileSelect }: MusicUplo
         event.currentTarget.control?.click();
     };
 
-    const handleChange = (event: React.ChangeEvent<HTMLInputElement>) => {
-        const file = event.currentTarget.files?.[0];
-        if (file) onFileSelect(file);
+    const handleChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const input = event.currentTarget;
+        const file = input.files?.[0];
+        if (!file) return;
+
+        // Allow selecting the same file again, including after a failed load.
+        input.value = '';
+        try {
+            await onFileSelect(file);
+        } catch (error) {
+            console.error('Music loading failed:', error);
+            if (!input.isConnected) return;
+            void siteAlert.fire({
+                icon: 'error',
+                title: 'Music could not load',
+                text: 'The browser could not prepare this audio. Please try selecting the file again.',
+            });
+        }
     };
 
     return (

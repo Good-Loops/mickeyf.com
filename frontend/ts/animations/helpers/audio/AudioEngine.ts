@@ -126,53 +126,57 @@ export class AudioEngine {
         if (currentSessionId !== this.sessionId) return;
         this.patchState({ hasAudio: false, playing: false });
 
-        const url = URL.createObjectURL(file);
-        this.objectUrl = url;
-
-        const audio = new Audio(url);
-        this.audioElement = audio;
-
-        this.endedListener = () => {
-            this.playbackRequest = null;
-            // Treat natural end like "paused at end": stop analysis, mark not playing, reset time
-            this.patchState({ playing: false });
-            this.stopAnalysisLoop();
-
-            try {
-                audio.currentTime = 0;
-            } catch {}
-        };
-
-        audio.addEventListener("ended", this.endedListener);
-
-        const audioContext = new window.AudioContext();
-        // Disposal must own these resources even while the browser is resuming audio.
-        this.audioContext = audioContext;
         try {
+            const url = URL.createObjectURL(file);
+            this.objectUrl = url;
+
+            const audio = new Audio(url);
+            this.audioElement = audio;
+
+            this.endedListener = () => {
+                this.playbackRequest = null;
+                // Treat natural end like "paused at end": stop analysis, mark not playing, reset time
+                this.patchState({ playing: false });
+                this.stopAnalysisLoop();
+
+                try {
+                    audio.currentTime = 0;
+                } catch {}
+            };
+
+            audio.addEventListener("ended", this.endedListener);
+
+            const audioContext = new window.AudioContext();
+            // Disposal must own these resources even while the browser is resuming audio.
+            this.audioContext = audioContext;
             await audioContext.resume();
+            if (currentSessionId !== this.sessionId) return;
+
+            // Analyzer provides the time-domain buffer used for pitch/volume extraction.
+            const analyser = audioContext.createAnalyser();
+            analyser.fftSize = 2048;
+            this.analyserNode = analyser;
+
+            const source = audioContext.createMediaElementSource(audio);
+            this.sourceNode = source;
+            source.connect(analyser);
+            analyser.connect(audioContext.destination);
+
+            this.patchState({ hasAudio: true });
+
+            audio.load();
+            try {
+                await this.resumePlayback(audio, request);
+            } catch {
+            }
         } catch (error) {
             if (currentSessionId !== this.sessionId) return;
+            this.playbackRequest = null;
+            await this.teardownTrack();
+            if (currentSessionId !== this.sessionId) return;
+            this.volumeHistory = [];
+            this.patchState({ ...DEFAULT_STATE, beat: { ...DEFAULT_STATE.beat } });
             throw error;
-        }
-        if (currentSessionId !== this.sessionId) return;
-
-        // Analyzer provides the time-domain buffer used for pitch/volume extraction.
-        const analyser = audioContext.createAnalyser();
-        analyser.fftSize = 2048;
-        this.analyserNode = analyser;
-
-        const source = audioContext.createMediaElementSource(audio);
-        source.connect(analyser);
-        analyser.connect(audioContext.destination);
-
-        this.sourceNode = source;
-
-        this.patchState({ hasAudio: true });
-
-        audio.load();
-        try {
-            await this.resumePlayback(audio, request);
-        } catch {
         }
     }
 

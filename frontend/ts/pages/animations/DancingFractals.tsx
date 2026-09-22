@@ -348,7 +348,7 @@ const DancingFractals: React.FC = () => {
                     <MusicUpload
                         id="fractal-music-upload"
                         classPrefix="dancing-fractals"
-                        onFileSelect={(file) => { void audioEngine.processAudio(file); }}
+                        onFileSelect={(file) => audioEngine.processAudio(file)}
                     />
                 </div>
 

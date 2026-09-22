@@ -186,7 +186,7 @@ const DancingCircles: React.FC = () => {
                 <MusicUpload
                     id="dancing-circles-file-upload"
                     classPrefix="dancing-circles"
-                    onFileSelect={(file) => { void audioEngine.processAudio(file); }}
+                    onFileSelect={(file) => audioEngine.processAudio(file)}
                 />
 
                 <div
