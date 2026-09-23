@@ -1234,8 +1234,59 @@ node --experimental-strip-types --test "ts/animations/dancing fractals/fractals/
 ```
 
 No production build, physical-device retest, Unity operation or deployment was
-performed. Next review: animation settings/default-reset flow, without reopening
-accepted audio loading, color recovery or Three Bosses layout checks.
+performed. The following checkpoint covers animation settings/default-reset flow.
+
+## Fractal settings and default-reset synchronization — 2026-09-23
+
+The page's async mount captured its original selection/configuration/lifetime.
+Controls stayed usable while startup waited, but their effects saw no host and
+returned. When startup finished it used the stale captured values, leaving the
+controls and renderer inconsistent. Reset defaults also returned early before
+host readiness. Separately, all three config handlers called `host.updateConfig`
+inside React state updater functions, so replaying an updater repeated a renderer
+side effect.
+
+Host readiness is now React state. Mount only creates and owns the host; selection
+and lifetime effects apply current settings when the host becomes ready. Cleanup
+retains its cancelled-start guard and disposes the host owned by that mount.
+Reset defaults updates UI state even during startup, and initializes the active
+host immediately when available. Slider edits still patch rather than recreate
+the animation. Before, renderer mutation lived inside `setTreeConfig(prev => ...)`.
+After, the two responsibilities are explicit:
+
+```ts
+setTreeConfig(prev => ({ ...prev, ...patch }));
+host?.updateConfig(patch);
+```
+
+The Tree had a second mismatch: every frame smoothed motion toward a baseline
+captured only by its constructor, overriding later rotation-slider values.
+`updateConfig` now applies explicit patches to both current config and `baseConfig`.
+It does not copy music-boosted runtime values into that baseline. Quiet rotation
+can remain at zero; resetting custom motion returns to defaults. Existing beat
+boosts, clamps, smoothing, palettes and geometry are unchanged. FlowerSpiral and
+Mandelbrot already forward their settings correctly and were not modified.
+
+Five page cases and two real-Tree cases failed before their respective fixes.
+All nine pass afterward: late startup, pending reset, one renderer update despite
+updater replay for all three types, reset UI/host agreement, cancelled startup,
+zero rotation, baseline reset and no accidental persistence of beat boosts.
+Page tests use controlled hook scheduling/host spies; Tree tests execute real
+frame steps with inert graphics. Neither is a real DOM/GPU/device acceptance claim.
+
+```powershell
+node --test --test-reporter=spec frontend/ts/pages/animations/DancingFractals.test.mjs
+node --test --test-reporter=spec frontend/ts/pages/animations/DancingFractals.test.mjs "frontend/ts/animations/dancing fractals/fractals/TreeConfig.test.mjs"
+node frontend/node_modules/typescript/bin/tsc -p frontend/tsconfig.json --noEmit
+git diff --check
+# Initial Tree characterization, run from frontend:
+node --experimental-strip-types --test "ts/animations/dancing fractals/fractals/TreeConfig.test.mjs"
+```
+
+TypeScript and whitespace checks passed. No new dependency, production build,
+deployment, Unity operation or repeat of accepted gameplay/audio tests. Next:
+review remaining backend controller error handling for consistency and exposure
+of internal details, preserving the established API response contracts.
 
 ## Inventory closeout
 

@@ -38,7 +38,7 @@ type FractalEntry<C> = {
 
 const DancingFractals: React.FC = () => {
     const containerRef = useRef<HTMLDivElement | null>(null);
-    const hostRef = useRef<FractalHost | null>(null);
+    const [host, setHost] = useState<FractalHost | null>(null);
     const audio = useAudioEngineState();
 
      // Which fractal is currently selected
@@ -70,64 +70,58 @@ const DancingFractals: React.FC = () => {
 
     // Create the host (PIXI app + canvas) once
     useEffect(() => {
-        if (!containerRef.current) return;
+        const container = containerRef.current;
+        if (!container) return;
 
         let cancelled = false;
+        let ownedHost: FractalHost | null = null;
 
         (async () => {
-            const host = await createFractalHost(containerRef.current!);
+            const createdHost = await createFractalHost(container);
 
             if (cancelled) {
-                host.dispose();
+                createdHost.dispose();
                 return;
             }
 
-            hostRef.current = host;
-
-            const entry = FRACTALS[fractalKind];
-            host.setFractal(entry.ctor as any, entry.getConfig());
-
-            host.setLifetime(autoDisposeEnabled ? lifetime : null);
+            ownedHost = createdHost;
+            // Read current settings in the effects below, not this mount's stale closure.
+            setHost(createdHost);
         })();
 
         return () => {
             // Must dispose on unmount to prevent leaks/duplicate loops.
             cancelled = true;
-            hostRef.current?.dispose();
-            hostRef.current = null;
+            ownedHost?.dispose();
         };
     }, []);
 
-    // Switch fractal when fractalKind changes (but reuse same canvas/app)
+    // Initialize/switch with current config; slider patches must not recreate the animation.
     useEffect(() => {
-        const host = hostRef.current;
         if (!host) return;
 
         const entry = FRACTALS[fractalKind];
         host.setFractal(entry.ctor as any, entry.getConfig());
-    }, [fractalKind]);
+    }, [host, fractalKind]);
 
     // Lifetime changes
     useEffect(() => {
-        const host = hostRef.current;
         if (!host) return;
 
         host.setLifetime(autoDisposeEnabled ? lifetime : null);
-    }, [autoDisposeEnabled, lifetime]);
+    }, [host, autoDisposeEnabled, lifetime]);
 
     // FPS + remaining lifetime monitoring loop
     useEffect(() => {
+        if (!host) return;
         let rafId: number;
 
         const loop = () => {
-            const host = hostRef.current;
-            if (host) {
-                const { fps: hostFps, remainingLifetime } = host.getStats();
-                if (!Number.isNaN(hostFps) && hostFps > 0) {
-                    setFps(hostFps);
-                }
-                setRemainingLifetime(remainingLifetime);
+            const { fps: hostFps, remainingLifetime } = host.getStats();
+            if (!Number.isNaN(hostFps) && hostFps > 0) {
+                setFps(hostFps);
             }
+            setRemainingLifetime(remainingLifetime);
             rafId = requestAnimationFrame(loop);
         };
 
@@ -136,7 +130,7 @@ const DancingFractals: React.FC = () => {
         return () => {
             cancelAnimationFrame(rafId);
         };
-    }, []);
+    }, [host]);
 
     // Stop audio on unmount
     useEffect(() => {
@@ -145,54 +139,42 @@ const DancingFractals: React.FC = () => {
         };
     }, []);
 
-    const handleRestart = () => { hostRef.current?.restart(); };
+    const handleRestart = () => { host?.restart(); };
 
     const handleResetDefaults = () => {
         if (audio.playing) return;
-        const host = hostRef.current;
-        if (!host) return;
-
         if (fractalKind === 'tree') {
             const cfg = cloneConfig(defaultTreeConfig);
             setTreeConfig(cfg);
-            host.setFractal(Tree as any, cfg);
+            host?.setFractal(Tree as any, cfg);
             return;
         }
 
         if (fractalKind === 'flower') {
             const cfg = cloneConfig(defaultFlowerSpiralConfig);
             setFlowerSpiralConfig(cfg);
-            host.setFractal(FlowerSpiral as any, cfg);
+            host?.setFractal(FlowerSpiral as any, cfg);
             return;
         }
 
         const cfg = cloneConfig(defaultMandelbrotConfig);
         setMandelbrotConfig(cfg);
-        host.setFractal(Mandelbrot as any, cfg);
+        host?.setFractal(Mandelbrot as any, cfg);
     };
 
     const handleTreeConfigChange = (patch: Partial<TreeConfig>) => {
-        setTreeConfig(prev => {
-            const next = { ...prev, ...patch };
-            hostRef.current?.updateConfig(patch);
-            return next;
-        });
+        setTreeConfig(prev => ({ ...prev, ...patch }));
+        host?.updateConfig(patch);
     };
 
     const handleFlowerConfigChange = (patch: Partial<FlowerSpiralConfig>) => {
-        setFlowerSpiralConfig(prev => {
-            const next = { ...prev, ...patch };
-            hostRef.current?.updateConfig(patch);
-            return next;
-        });
+        setFlowerSpiralConfig(prev => ({ ...prev, ...patch }));
+        host?.updateConfig(patch);
     };
 
     const handleMandelbrotConfigChange = (patch: Partial<MandelbrotConfig>) => {
-        setMandelbrotConfig(prev => {
-            const next = { ...prev, ...patch };
-            hostRef.current?.updateConfig(patch);
-            return next;
-        });
+        setMandelbrotConfig(prev => ({ ...prev, ...patch }));
+        host?.updateConfig(patch);
     };
 
     const uiClassName = 

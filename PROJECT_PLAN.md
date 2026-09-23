@@ -2551,8 +2551,17 @@ example. The active branch is `improvement/clean-code-sweep`.
   Three host and six real-class lifecycle checks, frontend TypeScript and
   whitespace checks passed. No device retest or deployment.
   See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#fractal-automatic-disposal-cancellation--2026-09-23).
-- [ ] Next: review animation settings and default-reset flow; do not reopen
-  accepted audio loading, color recovery or Three Bosses layout checks.
+- [x] Fractal settings/default reset (2026-09-23): startup now applies current
+  selection/configuration/lifetime rather than its original captured values.
+  Reset works before readiness, and renderer updates no longer occur inside
+  replayable React state updaters. Tree explicit patches also update its motion
+  baseline without preserving transient beat boosts. Five page and two Tree
+  regressions failed before the fixes; nine focused checks, frontend TypeScript
+  and whitespace checks passed afterward. No device retest or deployment.
+  See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#fractal-settings-and-default-reset-synchronization--2026-09-23).
+- [ ] Next: review remaining backend controller error handling for consistency
+  and exposure of internal details, preserving established API contracts. Do not
+  reopen accepted audio, animation or Three Bosses checks without a regression.
 - [x] Shared hue-distance calculation (2026-09-21): interpolation and pitch-color
   transition settling now reuse the same existing-utility function. Preserved
   wraparound, signed half-turn ties, rounding and thresholds. Four focused tests,
