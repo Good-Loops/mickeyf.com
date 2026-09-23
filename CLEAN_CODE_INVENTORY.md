@@ -61,22 +61,103 @@ still project content, unlike generated executable/build output. Native
 scaffolding is not automatically third-party code to discard simply because
 it started from a template.
 
-### Subsystem review queue
+## Remaining Clean Code checklist — 2026-09-23
 
-All areas are inventoried; only the named candidate below has been selected
-for implementation. Later entries remain review scopes, not a commitment to
-refactor everything in them.
+This is the canonical continuation checklist, reconciled against the dated
+checkpoints below and Phase 16 in `PROJECT_PLAN.md`. It replaces the open-ended
+subsystem queue; it is not a new claim that every file has been reviewed. The
+1,586-file classification above remains the historical baseline, not today's
+file count. Six review groups and one closeout remain, not seven mandatory
+refactors or a promise that each group fits in one turn.
 
-| Area | Review boundary | Current decision |
-| --- | --- | --- |
-| Leaderboard UI/data loading | `frontend/ts/pages/leaderboards`, hub page, transport/service boundary and route tests | First slice completed 2026-09-10: isolated the detail-state loader and its direct Node tests, described below. |
-| Shared shell/forms/services/styles | `App`, `Header`, components, context, hooks, layout, auth pages/services and `frontend/sass` | Auth transport and initial session-check lifecycle completed 2026-09-10. Owner-requested signup auto-login and shared glass alerts are recorded below; other shell/style areas remain review scopes. |
-| Games | `frontend/ts/games`, game pages, help/results and bridge modules | Inspect responsibilities and lifecycles, preserving newly accepted gameplay, 1000-point policy, faster diagonal movement and touch/scroll boundaries. No generic release retest. |
-| Animations/audio/math | `frontend/ts/animations`, music controls, shared utilities and public facades | Review ownership of renderer/audio/timing cleanup and pure calculations; retain artistic behavior. |
-| Backend | `backend/ts` configuration, controllers, routers, middleware, repositories, security, migrations and public contracts | Second slice completed 2026-09-10: consolidated the duplicated Three Bosses mutation preconditions. Ordering, DTOs, gates, credentials and persistence remain unchanged. Other backend areas are still review scopes. |
-| Unity | Custom `Assets/Scripts`, `Editor`, `Plugins/WebGL` and `Tests` | Review source responsibilities separately from serialized content. Any later scene/asset mutation uses the established Unity workflow and preserves GUIDs. |
-| Native platforms | Android/iOS entry points, resources and configuration | Inventory complete; substantive review stays aligned with the native/PWA phase and available platform checks. |
-| Tooling/configuration/docs | Root, `.github`, `.githooks`, `.vscode`, `scripts`, `docs-src`, `design`, `resources`, subsystem docs | Stale project-guidance slice completed 2026-09-10: corrected backend paths and retired the unused directory listing. Other tooling areas remain review scopes; preserve deployment boundaries and do not repeat the completed package audit. |
+### Completed evidence to carry forward
+
+| Area | Completed scope; do not restart without a relevant change or regression |
+| --- | --- |
+| Web shell/accounts | Leaderboard loaders, auth transport and stale-session protection, signup auto-login, shared alerts, lazy routes/status screens, shared hooks/dropdown interactions and frontend native-sign-in cancellation. |
+| Experiences | p4-Vega note selection/entity ownership; shared music upload and Safari Files acceptance; renderer/audio cancellation and failures; pitch-color recovery; fractal timer/settings/default-reset synchronization; Three Bosses browser-bridge teardown. |
+| Backend | Mutation preconditions, password persistence boundary, main-router injection, controller/error-response review and startup/shutdown ownership. Both score repositories were reviewed and their deliberate transaction ordering retained. |
+| Unity/delivery | UI Toolkit menu/pause/outcome migration and hover/glass/centering work; the owner accepted local Safari loading/layout on 2026-09-22. Touch HUD stays uGUI. This does not mean the new package was published. |
+| Tooling | Named temporary-artifact cleanup, bounded package-script audit, test discovery, stale-guide removal and local WebGL slow-download fixes. Generated/third-party material and applied migrations stay protected. |
+
+These are specific completed scopes, not whole-directory clearance. Existing
+tests and acceptance evidence are reused; only changed behavior or an identified
+coverage gap justifies additional checks.
+
+### Remaining review groups, in order
+
+- [ ] **C1 — Web shell, forms and shared UI.** Remaining first-party code in
+  `frontend/ts/App.tsx`, `Header.tsx`, account/general pages, context, components,
+  hooks, services/configuration and associated Sass. Review state ownership,
+  event cleanup, form feedback and keyboard/focus boundaries outside the
+  completed scopes above. Start here; do not redesign accepted layouts or
+  repeat real-account login to assess source organization.
+- [ ] **C2 — Web game/animation orchestration and utilities.** Remaining game
+  and animation pages, `frontend/ts/games`, `animations`, `utils` and public
+  facades. Review run/reset/disposal ownership, remaining helpers and tour/state
+  transitions. Preserve game feel, faster diagonal movement, score rules,
+  palettes/music behavior and touch/scroll rules. Carry forward the completed
+  renderer/audio/fractal/entity/bridge work instead of rechecking it wholesale.
+- [ ] **C3 — Remaining backend internals.** Remaining identity/session services,
+  account repositories, configuration/validation/contracts, maintenance jobs
+  and executable migration/grant/recovery tooling in `backend/ts`. Group findings
+  under this item rather than inventing another open-ended backend queue. Review
+  existing responsibilities, failure/resource ownership and explicit dependencies;
+  do not rewrite accepted score transactions, applied SQL history or policy.
+  Local fixtures only unless a separate, concrete integration need is approved.
+- [ ] **C4 — First-party Unity source.** Remaining authored runtime C#, Editor
+  utilities, WebGL plugins and adjacent tests; authored UI code/styles only where
+  not already covered by the accepted migration. Review events, coroutine/object
+  lifetimes, state ownership and duplication with a demonstrated maintenance cost.
+  Preserve scenes/GUIDs, gameplay and uGUI touch controls; do not hand-edit imported
+  Figma output or rebuild WebGL merely to record a no-change review.
+- [ ] **C5 — Native shell source/configuration.** Project-owned Android/iOS entry
+  points, custom plugins and Capacitor configuration; assess session/callback/
+  lifecycle ownership and identify template remnants before removing anything.
+  Frontend provider cancellation did not review all Swift code. Keep generated
+  wiring, icons/signing and accepted layouts intact. Record unavailable platform
+  verification honestly; missing store/provider features belong to Phase 17.
+- [ ] **C6 — Tooling, tests and documentation delta.** Remaining authored build,
+  development, CI/deployment tooling, hooks/editor configuration and documentation;
+  tests are otherwise reviewed with their owning groups. Check actual callers,
+  ownership and misleading/stale instructions, especially changes since the named
+  cleanup. Do not repeat the completed package/dependency audit without a trigger,
+  delete generated output as unused source, or run deployment/migration commands.
+- [ ] **C7 — One final closeout.** Reconcile C1–C6 findings and the reviewed Git
+  diff; run the relevant aggregate checks once for the final candidate. Complete
+  the scoped security closeout (secrets/logging, auth/data boundaries, dependency
+  exceptions and applicable deployment guards) against that candidate, carrying
+  forward unchanged accepted evidence. Record unresolved risks explicitly; a
+  blocking finding stays open, while an owner-accepted/deferred risk retains its
+  conditions. This is not store/privacy compliance or deployment approval.
+
+### Completion rule and boundaries
+
+For each group, record the paths/boundaries actually inspected, concrete findings
+or **reviewed; no change justified**, any minimal fixes, relevant verification
+and any explicitly deferred work. Group membership alone does not prove review.
+Large files and similar-looking code are not sufficient reasons to refactor.
+Do not add test files simply to increase coverage numbers or retest accepted
+gameplay/login/score flows without a specific changed path.
+
+When C1–C6 have dispositions and C7 is complete, this Clean Code pass ends.
+New features or unrelated improvements become separate proposals, not an
+automatic extension of this checklist. Keep the following tracks separate:
+
+- Phase 17 provider implementation/activation, native/store builds and outstanding
+  platform acceptance. KWS test-access/eligibility and privacy work retain their
+  own requirements; they do not block independent source cleanup.
+- Publication/packaging, live schema/grant/cloud changes and release/security
+  exceptions: use their existing runbooks and approval boundaries. Dated recorded
+  cloud state is not a fresh live readback.
+- Branch/worktree deletion and pruning: retain the separate exact-target review
+  and approval process in `PROJECT_PLAN.md`; a clean-code commit is not permission
+  to merge, delete branches or deploy.
+
+This consolidation changes only the inventory and roadmap. Tracked paths and
+existing evidence were inspected; Markdown targets/anchors and `git diff --check`
+were checked. No application tests/builds, cloud checks, source changes or new
+line-by-line subsystem review are claimed by this documentation checkpoint.
 
 ## First slice: isolate the leaderboard detail-state loader
 
@@ -1390,9 +1471,8 @@ The lifecycle tests are included in the existing `test:unit` script. No dependen
 schema, cloud setting or generated API documentation changed. No deployment or
 manual development-server restart was performed. Scope limits: tracking covers
 returned handler promises, not detached work inside existing timeout races; it
-does not change nodemon's SIGUSR2 or forced Windows restart behavior. Next: make
-the remaining Clean Code review scopes a short, finite checklist before choosing
-another implementation change.
+does not change nodemon's SIGUSR2 or forced Windows restart behavior. Continuation
+now follows the finite C1–C7 checklist near the top of this document.
 
 ## Inventory closeout
 

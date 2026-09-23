@@ -4,6 +4,13 @@ This tracked roadmap records the active continuation of the broader migration
 and game plan. Detailed implementation decisions remain subject to review at
 each phase boundary.
 
+**Current Clean Code continuation (2026-09-23):** use the
+[finite C1–C7 checklist](CLEAN_CODE_INVENTORY.md#remaining-clean-code-checklist--2026-09-23)
+as the source of remaining review scope: six groups, then one closeout. Start
+with C1 (remaining web shell/forms/shared UI). Completed checks carry forward;
+KWS/provider activation, store publication and Git deletion approvals are separate.
+The dated implementation and release history below is retained as evidence.
+
 Current release state (published 2026-09-09 local): see the
 [cumulative release/security ledger](RELEASE_READINESS.md). It supersedes stale
 pending claims in the dated history below. Named cleanup and the bounded script
@@ -2295,8 +2302,13 @@ improving the game incrementally; the owner approved extending completion to 100
 **2026-09-10 inventory checkpoint:** classified all 1,586 tracked files at
 `3af15ecb` by ownership and purpose; this is not a completed line-by-line code
 review. See [CLEAN_CODE_INVENTORY.md](CLEAN_CODE_INVENTORY.md) for the complete
-category totals, subsystem queue, protected/generated boundaries and teaching
+category totals, continuation checklist, protected/generated boundaries and teaching
 example. The active branch is `improvement/clean-code-sweep`.
+
+**Continuation reconciled 2026-09-23:** the canonical remaining work is
+[C1–C7 in the inventory](CLEAN_CODE_INVENTORY.md#remaining-clean-code-checklist--2026-09-23).
+The checked entries below retain historical evidence, not a second review queue.
+Unchanged accepted behavior is not reopened by a later cleanup step.
 
 - [x] Inventory tracked first-party, generated, native and third-party areas.
 - [x] First code slice: extract the existing leaderboard detail-state loader
@@ -2426,8 +2438,6 @@ example. The active branch is `improvement/clean-code-sweep`.
   native Swift code and disabled Apple activation flags are unchanged. This
   does not complete Apple's token-revocation lifecycle or prove device timing.
   See the [teaching checkpoint](CLEAN_CODE_INVENTORY.md#native-sign-in-cancellation-ownership--2026-09-21).
-- [ ] Complete subsequent subsystem reviews one at a time; choose actual
-  improvements from evidence, not file length or similar-looking syntax.
 - [x] Gameplay note-selector cleanup (2026-09-21): fixed lookup tables are shared
   readonly data, semitone offsets are local, and redundant C-only key history is
   explicit. Eight focused selector/playback tests and frontend TypeScript passed.
@@ -2575,9 +2585,11 @@ example. The active branch is `improvement/clean-code-sweep`.
   forced termination can still interrupt long work. Existing routes, readiness
   checks, database configuration and score transactions are unchanged.
   See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#backend-startup-and-shutdown-ownership--2026-09-23).
-- [ ] Next: consolidate remaining Clean Code review scopes into a short, finite
-  checklist before choosing another code change. Carry forward completed checks;
-  keep provider activation, privacy/KWS and release approvals separate.
+- [x] Clean Code continuation consolidated (2026-09-23): six remaining review
+  groups plus one final closeout, with explicit completion rules and preserved
+  acceptance evidence. No application code, tests/builds or live state changed.
+  The canonical task checkboxes are in the inventory, not duplicated here.
+  **Next: C1 — remaining web shell/forms/shared UI review.**
 - [x] Shared hue-distance calculation (2026-09-21): interpolation and pitch-color
   transition settling now reuse the same existing-utility function. Preserved
   wraparound, signed half-turn ties, rounding and thresholds. Four focused tests,
