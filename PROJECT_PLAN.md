@@ -2566,9 +2566,18 @@ example. The active branch is `improvement/clean-code-sweep`.
   failed before the fix; all 19 focused checks, backend TypeScript and whitespace
   checks passed afterward. No real accounts, live database calls or deployment.
   See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#backend-asynchronous-error-boundary--2026-09-23).
-- [ ] Next: review backend startup/shutdown resource ownership. Preserve current
-  configuration and deployment boundaries; do not reopen already-reviewed score
-  transactions or accepted audio, animation and Three Bosses behavior.
+- [x] Backend startup/shutdown ownership (2026-09-23): await listener readiness
+  and asynchronous bind failures; SIGINT/SIGTERM now stop accepting requests,
+  drain HTTP and tracked handlers, then close the pool, with one nine-second
+  deadline and idempotent cleanup. A stop during readiness cannot open the
+  listener afterward. Thirty focused checks, eight launcher checks, TypeScript,
+  production compilation and whitespace checks passed. No live SQL or deployment;
+  forced termination can still interrupt long work. Existing routes, readiness
+  checks, database configuration and score transactions are unchanged.
+  See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#backend-startup-and-shutdown-ownership--2026-09-23).
+- [ ] Next: consolidate remaining Clean Code review scopes into a short, finite
+  checklist before choosing another code change. Carry forward completed checks;
+  keep provider activation, privacy/KWS and release approvals separate.
 - [x] Shared hue-distance calculation (2026-09-21): interpolation and pitch-color
   transition settling now reuse the same existing-utility function. Preserved
   wraparound, signed half-turn ties, rounding and thresholds. Four focused tests,

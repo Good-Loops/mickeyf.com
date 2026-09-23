@@ -9,13 +9,15 @@ if (!(process.env.NODE_ENV === 'development' && process.env.LUDOLUME_ISOLATED_RU
 // Environment loading intentionally precedes imports whose modules construct
 // configuration-dependent resources such as the database pool.
 import express from 'express';
+import { createServer } from 'node:http';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import helmet from 'helmet';
 import { loadRuntimeConfig } from './config/runtimeConfig';
 import { closeDatabasePool, pool, verifyDatabaseConnection } from './db/dbConfig';
 import { preventSensitiveResponseCaching } from './middleware/apiResponseSecurity';
-import { notFoundHandler, requestErrorHandler } from './middleware/errorHandling';
+import { notFoundHandler, requestErrorHandler, waitForPendingHandlers } from './middleware/errorHandling';
+import { runHttpServer } from './serverLifecycle';
 import { createAuthRouter } from './routers/authRouter';
 import { createLeaderboardRouter } from './routers/leaderboardRouter';
 import { createMainRouter } from './routers/mainRouter';
@@ -93,30 +95,36 @@ app.use('/api', createMainRouter({
     allowedMutationOrigins: runtimeConfig.corsOrigins,
 }));
 async function startServer(): Promise<void> {
-    try {
-        await verifyDatabaseConnection();
-        await verifyAccountSessionReadiness(pool);
-        const providerAuth = await prepareRuntimeProviderAuth(runtimeConfig.providerAuth);
-        if (providerAuth.appleTokenLifecycle) await verifyAppleTokenReadiness(pool);
-        if (runtimeConfig.providerAuth.appleNotifications) await verifyAppleRevocationReadiness(pool);
-        if (runtimeConfig.providerAuth.signupEnabled) {
-            await verifyPasswordlessAccountSchema(pool);
-        }
-        if (runtimeConfig.providerAuth.enabled) {
-            const requiresExtendedAttempts = runtimeConfig.providerAuth.signupEnabled
-                || (runtimeConfig.accountDeletionEnabled && runtimeConfig.providerAuth.clients['google-web'] !== undefined);
-            await verifyProviderAuthReadiness(pool, requiresExtendedAttempts);
-        }
-        if (runtimeConfig.accountDeletionEnabled) {
-            await verifyAccountDeletionReadiness(pool, runtimeConfig.accountIdentityEpoch!);
-        }
-        app.use('/auth', createAuthRouter(
-            pool, runtimeConfig.sessionSecret, runtimeConfig.isProduction, runtimeConfig.corsOrigins,
-            { accountDeletionEnabled: runtimeConfig.accountDeletionEnabled, deletionJournal, providerAuth }
-        ));
-        app.use(notFoundHandler);
-        app.use(requestErrorHandler);
-        app.listen(runtimeConfig.port, () => {
+    await runHttpServer({
+        server: createServer(app),
+        port: runtimeConfig.port,
+        closeDatabase: closeDatabasePool,
+        waitForHandlers: waitForPendingHandlers,
+        prepare: async () => {
+            await verifyDatabaseConnection();
+            await verifyAccountSessionReadiness(pool);
+            const providerAuth = await prepareRuntimeProviderAuth(runtimeConfig.providerAuth);
+            if (providerAuth.appleTokenLifecycle) await verifyAppleTokenReadiness(pool);
+            if (runtimeConfig.providerAuth.appleNotifications) await verifyAppleRevocationReadiness(pool);
+            if (runtimeConfig.providerAuth.signupEnabled) {
+                await verifyPasswordlessAccountSchema(pool);
+            }
+            if (runtimeConfig.providerAuth.enabled) {
+                const requiresExtendedAttempts = runtimeConfig.providerAuth.signupEnabled
+                    || (runtimeConfig.accountDeletionEnabled && runtimeConfig.providerAuth.clients['google-web'] !== undefined);
+                await verifyProviderAuthReadiness(pool, requiresExtendedAttempts);
+            }
+            if (runtimeConfig.accountDeletionEnabled) {
+                await verifyAccountDeletionReadiness(pool, runtimeConfig.accountIdentityEpoch!);
+            }
+            app.use('/auth', createAuthRouter(
+                pool, runtimeConfig.sessionSecret, runtimeConfig.isProduction, runtimeConfig.corsOrigins,
+                { accountDeletionEnabled: runtimeConfig.accountDeletionEnabled, deletionJournal, providerAuth }
+            ));
+            app.use(notFoundHandler);
+            app.use(requestErrorHandler);
+        },
+        onListening: () => {
             console.log('Backend listening', {
                 port: runtimeConfig.port,
                 p4VegaScoreSubmissions: runtimeConfig.p4VegaScoreSubmissionsEnabled
@@ -129,18 +137,8 @@ async function startServer(): Promise<void> {
                 accountDeletion: runtimeConfig.accountDeletionEnabled ? 'enabled' : 'disabled',
                 providerAuth: runtimeConfig.providerAuth.enabled ? 'enabled' : 'disabled',
             });
-        });
-    } catch (error: unknown) {
-        console.error('Backend startup failed', {
-            name: error instanceof Error ? error.name : 'UnknownError',
-        });
-        process.exitCode = 1;
-        try {
-            await closeDatabasePool();
-        } catch {
-            // Preserve the original startup failure and avoid exposing details.
-        }
-    }
+        },
+    });
 }
 
 void startServer();

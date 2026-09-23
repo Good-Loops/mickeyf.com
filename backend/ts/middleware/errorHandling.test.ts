@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import test from 'node:test';
 import express, { NextFunction, Request, Response } from 'express';
-import { asyncHandler, requestErrorHandler } from './errorHandling';
+import { asyncHandler, requestErrorHandler, waitForPendingHandlers } from './errorHandling';
 
 function responseRecorder() {
     const state: { status?: number; body?: unknown } = {};
@@ -40,6 +40,46 @@ test('async handler preserves synchronous errors and structured status metadata'
         });
         assert.equal(await forwarded, failure);
     }
+});
+
+test('drain waits for handler work even after its response is destroyed', async () => {
+    let release!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    let completed = false;
+    asyncHandler(async () => { await pending; })(
+        {} as Request, { destroyed: true } as Response, (() => undefined) as NextFunction
+    );
+    const drain = waitForPendingHandlers().then(() => { completed = true; });
+    try {
+        await new Promise<void>(resolve => setImmediate(resolve));
+        assert.equal(completed, false);
+    } finally { release(); }
+    await drain;
+    assert.equal(completed, true);
+});
+
+test('drain follows chained middleware and removes rejected work', async () => {
+    let release!: () => void;
+    const pending = new Promise<void>(resolve => { release = resolve; });
+    const events: string[] = [];
+    const second = asyncHandler(async () => {
+        await pending;
+        events.push('second');
+        throw new Error('private detail');
+    });
+    const request = {} as Request;
+    const response = {} as Response;
+    asyncHandler((_req, _res, next) => { next(); })(request, response, (() => {
+        second(request, response, (() => { events.push('error'); }) as NextFunction);
+    }) as NextFunction);
+    const drain = waitForPendingHandlers().then(() => { events.push('drained'); });
+    try {
+        await new Promise<void>(resolve => setImmediate(resolve));
+        assert.deepEqual(events, []);
+    } finally { release(); }
+    await drain;
+    await waitForPendingHandlers();
+    assert.deepEqual(events, ['second', 'error', 'drained']);
 });
 
 test('primitive rejections reach the error response instead of continuing routing', async context => {

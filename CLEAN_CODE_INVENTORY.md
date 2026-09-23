@@ -1334,8 +1334,65 @@ git diff --check
 Tests use local ephemeral HTTP servers and fake persistence, not real accounts or
 SQL. No dependency, schema, cloud resource, running dev server or public contract
 changed; no production build, deployment or device retest. The middleware is not
-part of the generated API documentation surface. Next: review backend startup and
-shutdown resource ownership, leaving already-reviewed score transactions closed.
+part of the generated API documentation surface. The following checkpoint reviews
+backend startup/shutdown ownership without reopening score transactions.
+
+## Backend startup and shutdown ownership — 2026-09-23
+
+`app.ts` opened the listener inside a `try/catch` but did not await its listening
+event or observe asynchronous bind errors. An occupied port could bypass the
+startup cleanup path. The server handle was also discarded: SIGINT/SIGTERM had
+no application shutdown path and the pool was closed only after readiness failed.
+
+The new import-safe `serverLifecycle.ts` owns listener readiness and teardown;
+`app.ts` still owns configuration, readiness checks and route/middleware order.
+The dotenv-before-import preamble, database settings, API contracts and feature
+gates are unchanged. Listener/preparation failures close resources and exit
+unsuccessfully with fixed diagnostic messages, not raw configuration/driver data.
+
+Shutdown stops accepting connections and waits for HTTP responses, then runs:
+
+```ts
+await waitForHandlers();
+await closeDatabase();
+```
+
+Why both? A client can disconnect while its handler is still awaiting SQL or a
+provider. `asyncHandler` now tracks its returned work until settlement, independently
+of socket lifetime; the drain follows handlers entered by chained middleware too.
+This prevents orderly pool closure underneath that work. Duplicate stop signals
+share one cleanup promise. A signal during readiness waits for it without opening
+the listener afterward. Failure/timeout logs remain generic.
+
+A nine-second total shutdown deadline bounds startup waiting, HTTP/handler drain
+and pool closure, leaving margin within Cloud Run's documented ten-second SIGTERM
+window. At expiry the process closes HTTP connections and exits unsuccessfully;
+it does not pretend unfinished work succeeded. Long operations can still be
+interrupted and retain their existing transaction/receipt/reconciliation semantics.
+Sources: [Cloud Run termination contract](https://docs.cloud.google.com/run/docs/container-contract#instance-shutdown)
+and [Node HTTP close semantics](https://nodejs.org/api/http.html#serverclosecallback).
+
+Validation: 30 focused lifecycle/middleware/router tests, eight isolated-launcher
+checks, backend TypeScript, webpack production compilation and whitespace checks
+passed. Tests use ephemeral HTTP servers, fake database cleanup and simulated
+process signals; no actual Cloud Run termination or live SQL was exercised. Exact
+commands (first three from `backend`, last two from the repository root):
+
+```powershell
+node --test -r ts-node/register ts/serverLifecycle.test.ts ts/middleware/errorHandling.test.ts ts/routers/mainRouter.test.ts ts/routers/leaderboardRouter.test.ts ts/routers/threeBossesRouter.security.test.ts
+npm test
+npm run prod
+npm run test:backend-isolated
+git diff --check
+```
+
+The lifecycle tests are included in the existing `test:unit` script. No dependency,
+schema, cloud setting or generated API documentation changed. No deployment or
+manual development-server restart was performed. Scope limits: tracking covers
+returned handler promises, not detached work inside existing timeout races; it
+does not change nodemon's SIGUSR2 or forced Windows restart behavior. Next: make
+the remaining Clean Code review scopes a short, finite checklist before choosing
+another implementation change.
 
 ## Inventory closeout
 
