@@ -6,12 +6,13 @@ each phase boundary.
 
 **Current Clean Code continuation (2026-09-23):** use the
 [finite C1–C7 checklist](CLEAN_CODE_INVENTORY.md#remaining-clean-code-checklist--2026-09-23)
-as the source of remaining review scope: six groups, then one closeout. C1's
+as the source of remaining review scope. **C1 is complete**, combining the
 [account-form lifecycle checkpoint](CLEAN_CODE_INVENTORY.md#c1-account-form-lifecycle--2026-09-23)
-is complete: stale form feedback/navigation and provider-control lifecycle fixes,
-66 focused tests and TypeScript passed. Next: C1's general pages and remaining
-shared UI/service/style delta, not another account-flow retest. C1 stays open.
-Completed checks carry forward;
+with the [general/shared UI closeout](CLEAN_CODE_INVENTORY.md#c1-general-and-shared-ui-closeout--2026-09-23):
+unused sidebar Sass removed, reduced-motion/document-language corrections and
+single-owner fullscreen focus restoration verified. Next: **C2**, the remaining
+web game/animation orchestration and utilities. Five review groups and one
+closeout remain. Completed checks carry forward;
 KWS/provider activation, store publication and Git deletion approvals are separate.
 The dated implementation and release history below is retained as evidence.
 

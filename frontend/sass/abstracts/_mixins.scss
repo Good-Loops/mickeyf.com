@@ -259,22 +259,6 @@
     scale: .2;
 }
 
-// Menu button defaults
-@mixin default-menu-btn {
-    display: none;
-
-    fill: $primary-light;
-
-    background: none;
-    border: none;
-
-    position: fixed;
-    top: -2.8em;
-    left: -8.5em;
-
-    transform: scale(.35);
-}
-
 // Canvas fullscreen button positioning – bottom-right *inside* the canvas
 @mixin canvas-fullscreen-button-position($block) {
     .#{$block}__canvas-wrapper {

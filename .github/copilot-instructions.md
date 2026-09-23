@@ -40,7 +40,6 @@ Follow the existing folder boundaries. Do not introduce new top-level patterns u
   - `frontend/sass/components`
   - `frontend/sass/layout`
   - `frontend/sass/pages`
-  - `frontend/sass/themes`
 
 ### Backend
 - App entry: `backend/ts/app.ts`

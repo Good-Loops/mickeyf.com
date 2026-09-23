@@ -86,14 +86,15 @@ coverage gap justifies additional checks.
 
 ### Remaining review groups, in order
 
-- [ ] **C1 — Web shell, forms and shared UI.** Remaining first-party code in
+- [x] **C1 — Web shell, forms and shared UI.** Remaining first-party code in
   `frontend/ts/App.tsx`, `Header.tsx`, account/general pages, context, components,
   hooks, services/configuration and associated Sass. Review state ownership,
   event cleanup, form feedback and keyboard/focus boundaries outside the
   completed scopes above. The [account-form lifecycle checkpoint](#c1-account-form-lifecycle--2026-09-23)
-  covers shell/account feedback and provider controls; general pages and the
-  remaining shared UI/service/style delta are still open. Do not redesign
-  accepted layouts or repeat real-account login to assess source organization.
+  covers shell/account feedback and provider controls; the
+  [general/shared UI closeout](#c1-general-and-shared-ui-closeout--2026-09-23)
+  records the remaining review and fixes. Accepted layouts, real-account and
+  device checks carry forward; continue with C2 rather than restarting C1.
 - [ ] **C2 — Web game/animation orchestration and utilities.** Remaining game
   and animation pages, `frontend/ts/games`, `animations`, `utils` and public
   facades. Review run/reset/disposal ownership, remaining helpers and tour/state
@@ -1524,6 +1525,63 @@ git diff --check
 
 C1 remains open for general pages and the remaining shared UI/service/style delta.
 Do not reopen this account-form checkpoint without a relevant change or regression.
+
+## C1 general and shared UI closeout — 2026-09-23
+
+C1 is complete within its defined source-review boundary. The preceding account
+checkpoint and earlier completed scopes carry forward, with these remaining
+dispositions:
+
+| Scope inspected | Disposition |
+| --- | --- |
+| Home, Connect, Games, Animations; bootstrap/font loader/footer and adjacent Sass | Retained quote fitting, lifecycle cleanup, mailto/link semantics and accepted layouts. Corrected the document language from Portuguese to English to match the UI. |
+| Shared status/boundary/notice/personal-best components, dropdown, music controls/upload, hooks and styling | No further change justified; retained prior feedback, focus, file-picker, audio and route-boundary evidence. |
+| FullscreenButton, fullscreenMode, safariFullscreenPaint, useSafariBackgroundEdges and safariBackgroundEdges controller; callers and fullscreen/Safari Sass | Fixed the duplicate focus restoration described below. No other ownership defect found in listeners, observers, timers, inert isolation or paint cleanup. Rare Safari bands remain the owner's accepted limitation, not newly claimed fixed. |
+| All four configuration modules and ten service modules | Origin/protocol/feature gates, display-only public leaderboard composition, contract validation, sanitized errors and cancellation remain explicit. Prior auth/native-provider/session reviews carry forward; no new service abstraction justified. |
+| Shell/header/footer/main, account/leaderboard and shared component Sass, base/abstract modules and import wiring | Removed unused sidebar scaffolding; preserved active rules. Corrected Games/Animations reduced-motion specificity. Native platform source belongs to C5, delivery gateway/tooling to C6. |
+
+Concrete changes:
+
+- Games/Animations decorations used two-class selectors, while their reduced-motion
+  override had only one class and lost the CSS cascade. The override now has equal
+  specificity and appears later. Four reduced-motion regressions failed before
+  the fix; all eight motion/no-preference cases now pass.
+- Fullscreen exit can deliver its event before or after the awaited exit finishes.
+  Both paths previously restored focus; the second could move it from the original
+  button to the game canvas. A pending restoration snapshot is now consumed once,
+  including when the previous element is missing. Three of seven component cases
+  failed before the fix; all seven now pass.
+- Removed unused `_menu.scss`, `_menu-btn.scss`, `_close-btn.scss`, their import
+  wiring, `default-menu-btn` mixin and `$bps-menu` map. Also removed the overwritten
+  `$front-9: 9` assignment (effective value remains 8), empty `_functions.scss` and
+  `themes/_index.scss`, and their no-op imports/documentation pointer. All five
+  deleted tracked files are recoverable from Git. The shared sidebar-named gradient
+  remains because the leaderboard uses it.
+
+Tracked-reference inspection found no remaining consumer of the retired sidebar.
+Compiling the full stylesheet before/after removal and comparing normalized
+PostCSS trees proved that only its 20 unused rules disappeared: retained-tree
+SHA-256 `f23ab9a0595441619ea63d9125b8b474f12f372e9aaab9046edf325679dfc2e5`
+matched. This cleanup comparison includes the separately tested reduced-motion
+fix in both snapshots. Expanded CSS decreased by 2,375 bytes.
+
+Verification: 15 focused new cases, frontend TypeScript, production Vite build
+and whitespace checks passed. The existing 56 fullscreen/helper/Safari-controller
+cases also passed during review; their implementation was unchanged. No new
+dependency or live account/provider/cloud operation, device/browser acceptance,
+Unity build or deployment. Vite retains its informational mixed static/dynamic
+Capacitor import warning. Commands from `frontend` unless noted:
+
+```powershell
+node --experimental-strip-types --test --test-reporter=spec ts/components/FullscreenButton.test.mjs ts/pages/showcaseMotionStyles.test.mjs
+node --experimental-strip-types --test ts/components/fullscreenMode.test.mjs ts/components/canvasFullscreenStyles.test.mjs ts/layout/safariBackgroundEdges.test.mjs
+node node_modules/typescript/bin/tsc -p tsconfig.json --noEmit
+npm run build
+git diff --check # repository root
+```
+
+Next: C2's remaining web game/animation orchestration and utilities. Do not repeat
+the accepted gameplay, audio, entity, fractal or bridge checks without a changed path.
 
 ## Inventory closeout
 
