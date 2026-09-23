@@ -90,8 +90,10 @@ coverage gap justifies additional checks.
   `frontend/ts/App.tsx`, `Header.tsx`, account/general pages, context, components,
   hooks, services/configuration and associated Sass. Review state ownership,
   event cleanup, form feedback and keyboard/focus boundaries outside the
-  completed scopes above. Start here; do not redesign accepted layouts or
-  repeat real-account login to assess source organization.
+  completed scopes above. The [account-form lifecycle checkpoint](#c1-account-form-lifecycle--2026-09-23)
+  covers shell/account feedback and provider controls; general pages and the
+  remaining shared UI/service/style delta are still open. Do not redesign
+  accepted layouts or repeat real-account login to assess source organization.
 - [ ] **C2 — Web game/animation orchestration and utilities.** Remaining game
   and animation pages, `frontend/ts/games`, `animations`, `utils` and public
   facades. Review run/reset/disposal ownership, remaining helpers and tour/state
@@ -1473,6 +1475,55 @@ manual development-server restart was performed. Scope limits: tracking covers
 returned handler promises, not detached work inside existing timeout races; it
 does not change nodemon's SIGUSR2 or forced Windows restart behavior. Continuation
 now follows the finite C1–C7 checklist near the top of this document.
+
+## C1 account-form lifecycle — 2026-09-23
+
+Reviewed `App.tsx`, `Header.tsx`, `AuthContext.tsx`, `RouteHeading.tsx`,
+`routeHeadingFocus.ts`, `Login.tsx`, `SignUp.tsx`, `signupFlow.ts`,
+`ManageAccount.tsx`, `ProviderSignInControls.tsx`, `providerSignupPrompt.ts`
+and `StaySignedInCheckbox.tsx`, with adjacent tests/styles. No new change was
+needed in route-boundary reset, header listener/focus cleanup, renewal/action
+ownership, account-method discovery/deletion confirmation, checkbox semantics
+or the existing provider username prompt. These are scoped findings, not whole
+directory clearance or a reason to repeat accepted transport/gameplay checks.
+
+Fixed three concrete lifecycle problems:
+
+- Leaving signup while account creation was pending could still start automatic
+  login, open feedback and redirect the new page. Login could also redirect after
+  departure. The shared `usePageLifetime` signal now gates these follow-ups.
+- Password-login feedback belonged to the persistent auth context, not its page.
+  An optional feedback-only signal and `scopedAlert.ts` suppress stale dialogs
+  and close only their own popup, including SweetAlert's delayed `didOpen` case.
+- Google preparation did not restart when an authenticated user signed out while
+  staying on login/signup. A sign-out transition now restarts its preparation;
+  the provider's own sign-in does not abort its success callback. The linking
+  password dialog also closes if `didOpen` arrives after cancellation.
+
+The important separation is **server outcome versus page feedback**. No sent
+request is rolled back or represented as cancelled. An already-confirmed login
+still updates shared authentication unless a newer auth action owns it; a created
+account remains created. Only a not-yet-started automatic login and departed-page
+feedback/navigation are suppressed. Layout, session renewal policy, public API
+contracts, provider availability gates and persistence are unchanged.
+
+Validation passed: 66 focused tests, frontend TypeScript and whitespace checks.
+New tests use controlled promises and mocked hook scheduling; they do not claim
+real browser layout, Google/Apple SDK or device acceptance. The existing preview
+compatibility tests emit repeated Capacitor registration warnings while testing
+multiple configurations in one process; all scenarios passed. No accounts, SQL,
+cloud configuration, development servers or deployments were changed. No full
+production build was needed for these lifecycle-only edits. Commands (Node from
+`frontend`, Git from the repository root):
+
+```powershell
+node node_modules/typescript/bin/tsc -p tsconfig.json --noEmit
+node --experimental-strip-types --test ts/pages/accountPageLifetime.test.mjs ts/pages/signupFlow.test.mjs ts/components/scopedAlert.test.mjs ts/context/AuthContext.test.mjs ts/components/ProviderSignInControls.lifecycle.test.mjs ts/components/ProviderSignInControls.test.mjs ts/services/publicApiPreviewCompatibility.test.mjs
+git diff --check
+```
+
+C1 remains open for general pages and the remaining shared UI/service/style delta.
+Do not reopen this account-form checkpoint without a relevant change or regression.
 
 ## Inventory closeout
 

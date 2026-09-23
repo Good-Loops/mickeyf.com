@@ -9,6 +9,7 @@ import StaySignedInCheckbox from '@/components/StaySignedInCheckbox';
 import ProviderSignInControls from '@/components/ProviderSignInControls';
 import PublicAccountPreviewNotice from '@/components/PublicAccountPreviewNotice';
 import { LEGACY_PUBLIC_API_PREVIEW } from '@/config/apiConfig';
+import { usePageLifetime } from '@/hooks/usePageLifetime';
 
 const Login: React.FC = () => {
     const [userName, setUserName] = useState('');
@@ -20,18 +21,23 @@ const Login: React.FC = () => {
     const busy = loading || providerBusy;
     const { login } = useAuth();
     const navigate = useNavigate();
+    const pageLifetime = usePageLifetime();
 
     const handleSubmit = async (e: React.FormEvent) => {
         e.preventDefault();
-        if (operationBusy.current) return;
+        const signal = pageLifetime.current;
+        if (!signal || signal.aborted || operationBusy.current) return;
         operationBusy.current = true;
         setLoading(true);
 
         try {
-            const ok = await login(userName, userPassword, { rememberMe: !LEGACY_PUBLIC_API_PREVIEW && rememberMe });
-            if (ok) navigate('/');
+            const ok = await login(userName, userPassword, {
+                rememberMe: !LEGACY_PUBLIC_API_PREVIEW && rememberMe,
+                feedbackSignal: signal,
+            });
+            if (ok && !signal.aborted) navigate('/');
         } finally {
-            setLoading(false);
+            if (!signal.aborted) setLoading(false);
             operationBusy.current = false;
         }
     };
@@ -79,7 +85,7 @@ const Login: React.FC = () => {
                 </form>
                 {!LEGACY_PUBLIC_API_PREVIEW && <ProviderSignInControls action="login" rememberMe={rememberMe} disabled={loading}
                     operationLock={operationBusy} onBusyChange={setProviderBusy}
-                    onSuccess={() => navigate('/')} />}
+                    onSuccess={() => { if (pageLifetime.current && !pageLifetime.current.aborted) navigate('/'); }} />}
             </div>
         </section>
     );

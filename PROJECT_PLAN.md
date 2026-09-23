@@ -6,8 +6,12 @@ each phase boundary.
 
 **Current Clean Code continuation (2026-09-23):** use the
 [finite C1–C7 checklist](CLEAN_CODE_INVENTORY.md#remaining-clean-code-checklist--2026-09-23)
-as the source of remaining review scope: six groups, then one closeout. Start
-with C1 (remaining web shell/forms/shared UI). Completed checks carry forward;
+as the source of remaining review scope: six groups, then one closeout. C1's
+[account-form lifecycle checkpoint](CLEAN_CODE_INVENTORY.md#c1-account-form-lifecycle--2026-09-23)
+is complete: stale form feedback/navigation and provider-control lifecycle fixes,
+66 focused tests and TypeScript passed. Next: C1's general pages and remaining
+shared UI/service/style delta, not another account-flow retest. C1 stays open.
+Completed checks carry forward;
 KWS/provider activation, store publication and Git deletion approvals are separate.
 The dated implementation and release history below is retained as evidence.
 

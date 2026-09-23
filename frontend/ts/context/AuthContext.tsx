@@ -19,8 +19,9 @@ import type { DeleteAccountResponse, ProviderAuthenticationInput, AcquireProvide
     CompleteProviderLoginOptions, CompleteProviderLoginResult } from '@/services/authApi';
 import { watchSessionRenewalActivity } from '@/services/sessionRenewalActivity';
 import Swal from '@/components/siteAlert';
+import { showScopedAlert } from '@/components/scopedAlert';
 
-type LoginOptions = { showFeedback?: boolean; rememberMe?: boolean };
+type LoginOptions = { showFeedback?: boolean; rememberMe?: boolean; feedbackSignal?: AbortSignal };
 
 /** UI-facing auth context value owned by `AuthProvider`. */
 type AuthContextType = {
@@ -111,7 +112,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
      * Non-obvious behavior: normalizes common failure modes into user-facing alerts and resolves to a boolean success
      * result rather than throwing.
      */
-    const login = async (user: string, pass: string, { showFeedback = true, rememberMe = false }: LoginOptions = {}) => {
+    const login = async (user: string, pass: string, { showFeedback = true, rememberMe = false, feedbackSignal }: LoginOptions = {}) => {
         const actionVersion = ++authActionVersion.current;
         setLoading(false);
         try {
@@ -127,17 +128,17 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 void renewalActivity.current?.renewNow();
                 if (!showFeedback) return false;
                 if (res.error === 'AUTH_FAILED') {
-                    await Swal.fire({
+                    await showScopedAlert({
                         title: 'Authentication failed',
                         text: 'Please check your username and password',
                         icon: 'error',
-                    });
+                    }, feedbackSignal);
                 } else {
-                    await Swal.fire({
+                    await showScopedAlert({
                         title: 'Login failed',
                         text: res.message ?? 'Try again later',
                         icon: 'error',
-                    });
+                    }, feedbackSignal);
                 }
                 return false;
             }
@@ -148,10 +149,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             renewalActivity.current?.resetCooldown();
 
             if (showFeedback) {
-                await Swal.fire({
+                await showScopedAlert({
                     title: 'Welcome back!',
                     icon: 'success',
-                });
+                }, feedbackSignal);
             }
 
             return actionVersion === authActionVersion.current;
@@ -160,11 +161,11 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             void renewalActivity.current?.renewNow();
             console.error(err);
             if (showFeedback) {
-                await Swal.fire({
+                await showScopedAlert({
                     title: 'Error',
                     text: 'Could not reach the server.',
                     icon: 'error',
-                });
+                }, feedbackSignal);
             }
             return false;
         }

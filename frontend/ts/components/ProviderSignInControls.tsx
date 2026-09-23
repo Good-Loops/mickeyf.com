@@ -93,6 +93,13 @@ export function InlineGoogleSignIn({ client, action = 'login', userName = '', re
     const [retry, setRetry] = useState(0);
     const [phase, setPhase] = useState<'preparing' | 'ready' | 'completing' | 'retry'>('preparing');
     const [feedback, setFeedback] = useState<string | null>(null);
+    const previouslyAuthenticated = useRef(isAuthenticated);
+
+    useEffect(() => {
+        // Sign-out recreates the widget host. Sign-in must not cancel the completion that caused it.
+        if (previouslyAuthenticated.current && !isAuthenticated) setRetry(value => value + 1);
+        previouslyAuthenticated.current = isAuthenticated;
+    }, [isAuthenticated]);
 
     useEffect(() => {
         if (LEGACY_PUBLIC_API_PREVIEW || disabled || loading || !host.current || latest.current.isAuthenticated) return;
@@ -237,7 +244,10 @@ export default function ProviderSignInControls({ action, userName = '', remember
                     showCancelButton: true,
                     confirmButtonText: 'Continue',
                     cancelButtonText: 'Cancel',
-                    didOpen: popup => { passwordPopup.current = popup; },
+                    didOpen: popup => {
+                        passwordPopup.current = popup;
+                        if (controller.signal.aborted && Swal.getPopup() === popup) Swal.close();
+                    },
                     didDestroy: confirmPromptClosed,
                 });
                 // fire() resolves before the closing animation finishes; the provider needs a free dialog.

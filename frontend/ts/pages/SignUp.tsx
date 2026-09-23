@@ -4,7 +4,8 @@
  */
 import { useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
-import Swal from "@/components/siteAlert";
+import { showScopedAlert } from "@/components/scopedAlert";
+import { usePageLifetime } from "@/hooks/usePageLifetime";
 import StaySignedInCheckbox from "@/components/StaySignedInCheckbox";
 import ProviderSignInControls from "@/components/ProviderSignInControls";
 import { signupRequest } from "@/services/authService";
@@ -24,16 +25,19 @@ const SignUp: React.FC = () => {
     const submitting = useRef(false);
     const { login } = useAuth();
     const navigate = useNavigate();
-    const showSignupSuccess = async () => {
-        await Swal.fire({ title: "You're all set!",
+    const pageLifetime = usePageLifetime();
+    const showSignupSuccess = async (signal = pageLifetime.current) => {
+        if (!signal || signal.aborted) return;
+        await showScopedAlert({ title: "You're all set!",
             text: "Your account is ready and you're logged in. Go break some records!",
-            icon: "success", confirmButtonText: "Let's go" });
-        navigate("/");
+            icon: "success", confirmButtonText: "Let's go" }, signal);
+        if (!signal.aborted) navigate("/");
     };
 
     const handleSubmit = async (event: React.FormEvent) => {
         event.preventDefault();
-        if (submitting.current) return;
+        const signal = pageLifetime.current;
+        if (!signal || signal.aborted || submitting.current) return;
         submitting.current = true;
         setLoading(true);
 
@@ -44,33 +48,37 @@ const SignUp: React.FC = () => {
                 user_password: userPassword,
             }, {
                 signup: signupRequest,
-                login: (user, password, options) => login(user, password, { ...options, showFeedback: false }),
+                // Creation may already have reached the server. Only cancel the not-yet-started login.
+                login: (user, password, options) => signal.aborted ? Promise.resolve(false)
+                    : login(user, password, { ...options, showFeedback: false }),
             }, { rememberMe: !LEGACY_PUBLIC_API_PREVIEW && rememberMe });
+
+            if (signal.aborted) return;
 
             if (result.status === "rejected") {
                 switch (result.error) {
                 case "INVALID_EMAIL":
-                    Swal.fire({ title: "Invalid email", icon: "warning" });
+                    await showScopedAlert({ title: "Invalid email", icon: "warning" }, signal);
                     break;
                 case "INVALID_PASSWORD":
-                    Swal.fire({ title: "Invalid password", icon: "warning" });
+                    await showScopedAlert({ title: "Invalid password", icon: "warning" }, signal);
                     break;
                 case "EMPTY_FIELDS":
-                    Swal.fire({ title: "Missing required fields", icon: "warning" });
+                    await showScopedAlert({ title: "Missing required fields", icon: "warning" }, signal);
                     break;
                 case "DUPLICATE_USER":
-                    Swal.fire({
+                    await showScopedAlert({
                         title: "Duplicate user",
                         text: "This email or username is already in use",
                         icon: "warning",
-                    });
+                    }, signal);
                     break;
                 default:
-                    Swal.fire({
+                    await showScopedAlert({
                         title: "Could not sign up",
                         text: result.message || "Please try again.",
                         icon: "error",
-                    });
+                    }, signal);
                     break;
                 }
             } else {
@@ -79,28 +87,29 @@ const SignUp: React.FC = () => {
                 setUserPassword("");
 
                 if (result.status === "authenticated") {
-                    await showSignupSuccess();
+                    await showSignupSuccess(signal);
                 } else {
                     // Registration succeeded: never ask the user to create it again.
-                    await Swal.fire({
+                    await showScopedAlert({
                         title: "Account created",
                         text: "We couldn't log you in automatically. Please log in with your new account.",
                         icon: "info",
                         confirmButtonText: "Go to log in",
-                    });
-                    navigate("/login");
+                    }, signal);
+                    if (!signal.aborted) navigate("/login");
                 }
             }
         } catch (error) {
+            if (signal.aborted) return;
             console.error(error);
-            Swal.fire({
+            await showScopedAlert({
                 title: "Network/server error",
                 text: "Could not reach the server.",
                 icon: "error",
-            });
+            }, signal);
         } finally {
             submitting.current = false;
-            setLoading(false);
+            if (!signal.aborted) setLoading(false);
         }
     };
 
