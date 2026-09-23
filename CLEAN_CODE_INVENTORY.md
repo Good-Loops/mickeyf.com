@@ -67,8 +67,8 @@ This is the canonical continuation checklist, reconciled against the dated
 checkpoints below and Phase 16 in `PROJECT_PLAN.md`. It replaces the open-ended
 subsystem queue; it is not a new claim that every file has been reviewed. The
 1,586-file classification above remains the historical baseline, not today's
-file count. Six review groups and one closeout remain, not seven mandatory
-refactors or a promise that each group fits in one turn.
+file count. C1 and C2 are complete; four review groups and one closeout remain,
+not five mandatory refactors or a promise that each group fits in one turn.
 
 ### Completed evidence to carry forward
 
@@ -95,12 +95,14 @@ coverage gap justifies additional checks.
   [general/shared UI closeout](#c1-general-and-shared-ui-closeout--2026-09-23)
   records the remaining review and fixes. Accepted layouts, real-account and
   device checks carry forward; continue with C2 rather than restarting C1.
-- [ ] **C2 — Web game/animation orchestration and utilities.** Remaining game
+- [x] **C2 — Web game/animation orchestration and utilities.** Remaining game
   and animation pages, `frontend/ts/games`, `animations`, `utils` and public
   facades. Review run/reset/disposal ownership, remaining helpers and tour/state
   transitions. Preserve game feel, faster diagonal movement, score rules,
   palettes/music behavior and touch/scroll rules. Carry forward the completed
   renderer/audio/fractal/entity/bridge work instead of rechecking it wholesale.
+  The [C2 closeout](#c2-web-experience-orchestration-closeout--2026-09-23)
+  records the remaining source review, concrete fixes and verification limits.
 - [ ] **C3 — Remaining backend internals.** Remaining identity/session services,
   account repositories, configuration/validation/contracts, maintenance jobs
   and executable migration/grant/recovery tooling in `backend/ts`. Group findings
@@ -1582,6 +1584,64 @@ git diff --check # repository root
 
 Next: C2's remaining web game/animation orchestration and utilities. Do not repeat
 the accepted gameplay, audio, entity, fractal or bridge checks without a changed path.
+
+## C2 web experience orchestration closeout — 2026-09-23
+
+C2 is complete within its source-review boundary. Earlier accepted entity,
+renderer/audio, fractal, pitch recovery, upload and browser-bridge checkpoints
+carry forward; only uncovered failure/timing paths were exercised again.
+
+| Remaining scope inspected | Disposition |
+| --- | --- |
+| p4-Vega page/results/help, runner/input, pause/results/clock/restart/asset helpers, Sky/PickupFeedback and adjacent Sass/tests | Fixed lost-focus input and restart failure feedback. Preserved diagonal speed, score rules, accepted entities/note selection and layouts. |
+| Three Bosses page and unityWebGl/unityGameReady/unityVisibility/unitySubmissionBridge/unityPageScroll helpers, adjacent Sass/tests | No change justified. Startup cancellation/late-handle disposal, readiness deadlines, canonical submission retries and listener/scroll ownership remain explicit. Prior Safari acceptance carries forward. No Unity rebuild. |
+| Circles page, runner/controller/renderer/time state, Circle/CircleBounds, tuning and Sass | Fixed startup failure feedback. No simulation, palette, radius/movement tuning or style change justified in this pass. |
+| Fractals page, host/contracts, Tree/FlowerSpiral/Mandelbrot orchestration, controls/configuration, tour/state machine/sights, shader wrappers/GLSL and Sass | Fixed startup failure feedback. No additional change justified; retained earlier timer/disposal/settings/default-reset fixes. No GPU output or performance claim. |
+| Shared music extractor/factory, BeatEnvelope, pitch conversion, PaletteTween/PitchHueCommitter and phase/policy integration | Fixed stale beat triggering and elapsed-time accounting below. Retained existing AudioEngine transport and pitch-recovery behavior. |
+| Utilities and six public facades | Removed one unreferenced environment helper and five unused auth-code exports. Kept canvas dimensions, numeric/music/random helpers and intentional public API facades. No generic validation layer or API redesign. |
+
+Concrete fixes:
+
+- Circles and Fractals startup promises could reject outside React's error
+  boundary, leaving an empty canvas. Each page now catches startup failure,
+  ignores a departed mount and rethrows a safe Error on render into the existing
+  route recovery screen. No duplicate recovery UI was introduced.
+- p4-Vega now clears held keys and joystick capture on window blur/document
+  hiding, and removes those listeners on disposal. A key released outside the
+  window can no longer leave movement stuck. Visible-document events do not
+  interrupt active input.
+- Failed p4-Vega restart loading now disposes the unusable session and reports
+  through the page's existing load-error UI, instead of remaining at loading.
+  Late failure after departure is ignored; a successful restart is unchanged.
+- Paused/ended audio intentionally retains its analysis snapshot. The shared
+  extractor now gates new beat triggers on active music, allowing the existing
+  envelope to decay rather than repeatedly triggering Tree motion from an old beat.
+- The pitch policy runs each listening frame, but received the accumulated
+  color-cadence clock: four 10 ms frames counted as 100 ms instead of 40 ms.
+  It now receives only the current frame delta; color rendering cadence and
+  all tuning values remain unchanged.
+- Retired `utils/detectEnvironment.ts` and the unused `INVALID_EMAIL`,
+  `INVALID_PASSWORD`, `EMPTY_FIELDS`, `DUPLICATE_USER`, `AUTH_FAILED` exports.
+  Tracked-reference review found no consumer; independent auth API strings
+  elsewhere remain untouched. Deleted code is recoverable from Git.
+
+Controlled regressions reproduced the affected paths before their fixes.
+All 37 cases in the six focused test files passed together, followed by the
+frontend type check and production build. No full-suite replay, live account/
+score/provider operation, cloud change, browser/device acceptance or deployment.
+The existing informational mixed static/dynamic Capacitor import warning remains.
+Commands from `frontend` unless noted:
+
+```powershell
+node --experimental-strip-types --test --test-reporter=spec ts/pages/animations/DancingCircles.test.mjs ts/pages/animations/DancingFractals.test.mjs ts/games/p4-Vega/p4Input.test.mjs ts/games/p4-Vega/p4-Vega.lifecycle.test.mjs ts/animations/helpers/audio/PitchColorPolicy.test.mjs ts/animations/helpers/music/MusicFeatureExtractor.test.mjs
+node node_modules/typescript/bin/tsc -p tsconfig.json --noEmit
+npm run build
+git diff --check # repository root
+```
+
+Next: C3's remaining backend internals, using local fixtures and carrying forward
+the accepted session/score/controller/lifecycle boundaries rather than replaying
+production login or submissions.
 
 ## Inventory closeout
 

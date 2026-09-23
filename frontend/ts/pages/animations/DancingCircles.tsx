@@ -57,6 +57,7 @@ const DancingCircles: React.FC = () => {
 	const [usesAnimatedBackground, setUsesAnimatedBackground] = useState(true);
 	const [isColorPickerOpen, setIsColorPickerOpen] = useState(false);
 	const [pickerColor, setPickerColor] = useState<HsvColor>(() => hexToHsv(DEFAULT_DANCING_CIRCLES_CUSTOM_COLOR));
+	const [startupError, setStartupError] = useState<Error | null>(null);
 	const audio = useAudioEngineState();
 
 	useEffect(() => {
@@ -74,7 +75,9 @@ const DancingCircles: React.FC = () => {
 				return;
 			}
 			dispose = release;
-		})();
+		})().catch(() => {
+			if (!cancelled) setStartupError(new Error("Dancing Circles could not start."));
+		});
 
 		return () => {
             // Must dispose on unmount to prevent duplicate loops.
@@ -149,6 +152,8 @@ const DancingCircles: React.FC = () => {
         };
         applyBackgroundColor(hsvToHex(nextPickerColor), nextPickerColor);
     };
+
+    if (startupError) throw startupError;
 
     const pageStyle = {
         "--canvas-width": `${CANVAS_WIDTH}px`,

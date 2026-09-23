@@ -37,13 +37,14 @@ const { default: Page } = await server.ssrLoadModule('/ts/pages/animations/Danci
 const flush = () => new Promise(resolve => setImmediate(resolve));
 
 function fixture(t) {
-    const slots = [], pending = [], starts = [];
-    let cursor = 0, view;
+    const slots = [], pending = [], starts = [], failures = [];
+    let cursor = 0, view, stateUpdates = 0;
     const hooks = {
         state(initial) {
             const index = cursor++;
             slots[index] ??= { value: typeof initial === 'function' ? initial() : initial };
             return [slots[index].value, next => {
+                stateUpdates++;
                 const previous = slots[index].value;
                 if (typeof next === 'function') next(previous); // Deliberate updater replay.
                 slots[index].value = typeof next === 'function' ? next(previous) : next;
@@ -59,7 +60,7 @@ function fixture(t) {
                 pending.push(() => { slot.cleanup?.(); slot.cleanup = callback(); });
             }
         },
-        create: () => new Promise(resolve => starts.push(resolve)),
+        create: () => new Promise((resolve, reject) => { starts.push(resolve); failures.push(reject); }),
     };
     const unmount = () => slots.forEach(slot => slot?.cleanup?.());
     const originals = new Map();
@@ -92,7 +93,7 @@ function fixture(t) {
         dispose() { this.disposed++; }, restart() {}, getStats() { return { fps: 0, remainingLifetime: null }; },
     };
     render();
-    return { host, starts, render, unmount, find,
+    return { host, starts, failures, render, unmount, find, stateUpdates: () => stateUpdates,
         component: type => find(node => node.type === type),
         button: text => find(node => node.type === 'button' && node.props.children === text),
         ready: async () => { starts[0](host); await flush(); render(); },
@@ -148,4 +149,23 @@ test('a host finishing startup after unmount is disposed without initializing a 
     f.starts[0](f.host); await flush();
     assert.equal(f.host.disposed, 1);
     assert.equal(f.host.selections.length, 0);
+});
+
+test('host startup failure reaches the route error boundary with a safe message', async t => {
+    const f = fixture(t);
+    f.failures[0](new Error('Internal renderer diagnostic'));
+    await flush();
+    assert.throws(() => f.render(), {
+        message: 'Dancing Fractals could not start.',
+    });
+    assert.equal(f.host.selections.length, 0);
+});
+
+test('host startup rejection after unmount is handled without updating page state', async t => {
+    const f = fixture(t);
+    f.unmount();
+    const updatesBefore = f.stateUpdates();
+    f.failures[0](new Error('Renderer unavailable after navigation'));
+    await flush();
+    assert.equal(f.stateUpdates(), updatesBefore);
 });

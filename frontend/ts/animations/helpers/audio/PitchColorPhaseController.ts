@@ -188,7 +188,8 @@ export class PitchColorPhaseController {
             pitchHz: input.pitchHz,
             clarity: input.clarity,
             nowMs: input.nowMs,
-            dtMs: this.state.colorElapsedMs,
+            // The policy samples every listening frame, independently of color cadence.
+            dtMs: input.deltaMs,
         });
 
         this.updateKindFlags(decision, this.state.colorElapsedMs);

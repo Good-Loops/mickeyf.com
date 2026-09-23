@@ -9,7 +9,7 @@ const fixture = `globalThis.${fixtureKey}`;
 const mocks = {
     react: `export const useEffect = effect => ${fixture}.effects.push(effect);
         export const useRef = () => ${fixture}.ref;
-        export const useState = initial => [typeof initial === 'function' ? initial() : initial, () => {}];
+        export const useState = initial => ${fixture}.useState(initial);
         export default { createElement: () => null };`,
     'jsx-dev-runtime': 'export const jsxDEV = () => null;',
     'jsx-runtime': 'export const jsx = () => null; export const jsxs = jsx;',
@@ -45,17 +45,26 @@ function mountFixture(context) {
     const container = {};
     const starts = [];
     const effects = [];
+    const states = [];
+    const stateUpdates = [];
+    let stateCursor = 0;
     const ref = { current: container };
     Object.defineProperty(globalThis, fixtureKey, { configurable: true, value: {
-        effects, ref, start: options => new Promise(resolve => starts.push({ ...options, resolve })),
+        effects, ref,
+        start: options => new Promise((resolve, reject) => starts.push({ ...options, resolve, reject })),
+        useState(initial) {
+            const slot = states[stateCursor++] ??= { value: typeof initial === 'function' ? initial() : initial };
+            return [slot.value, value => { slot.value = value; stateUpdates.push(value); }];
+        },
     } });
     context.after(() => {
         if (original) Object.defineProperty(globalThis, fixtureKey, original);
         else delete globalThis[fixtureKey];
     });
     // Exercise the real page effect with controlled hook scheduling, not a real GPU/React DOM mount.
-    DancingCircles();
-    return { mount: effects[0], starts, ref, container };
+    const render = () => { stateCursor = 0; return DancingCircles(); };
+    render();
+    return { mount: effects[0], starts, ref, container, render, stateUpdates };
 }
 
 test('a renderer that finishes after unmount is immediately released', async context => {
@@ -92,4 +101,21 @@ test('setup-cleanup-setup keeps the new renderer when the old setup resolves lat
     assert.deepEqual(released, ['old']);
     unmountNew();
     assert.deepEqual(released, ['old', 'new']);
+});
+
+test('startup rejection becomes a sanitized render error for the existing route boundary', async context => {
+    const { mount, starts, render } = mountFixture(context);
+    const unmount = mount();
+    context.after(unmount);
+    starts[0].reject(new Error('synthetic renderer detail'));
+    await settle();
+    assert.throws(render, { message: 'Dancing Circles could not start.' });
+});
+
+test('startup rejection after departure is handled without stale feedback', async context => {
+    const { mount, starts, stateUpdates } = mountFixture(context);
+    mount()();
+    starts[0].reject(new Error('synthetic late failure'));
+    await settle();
+    assert.deepEqual(stateUpdates, []);
 });

@@ -27,7 +27,7 @@ function fixture(noteStep = true) {
     } });
     let nowMs = 0;
     const decide = (pitchHz, dtMs = 50) => policy.decide({ pitchHz, clarity: 1, dtMs, nowMs: nowMs += dtMs });
-    return { policy, decide };
+    return { policy, tracker, decide };
 }
 
 test('same-note recovery restores the pitch color after idle without inventing a pitch change', () => {
@@ -76,18 +76,42 @@ test('continuous mode keeps micro drift and recomputes pitch color after silence
     assert.deepEqual(decide(445).color, drifted.color);
 });
 
-function phaseFixture() {
-    const { policy } = fixture();
+function phaseFixture({ colorIntervalMs = 0, deltaMs = 50 } = {}) {
+    const { policy, tracker } = fixture();
     const phase = new PitchColorPhaseController({ policy, tuning: {
-        colorIntervalMs: 0, listenAfterSilenceMs: 100, noteStep: true,
+        colorIntervalMs, listenAfterSilenceMs: 100, noteStep: true,
         commit: { holdMs: 0, smoothingResponsiveness: 12 },
         holdDrift: { deg: 0, hz: .2 },
         stableDrift: { rampMs: 0, hz: .2, hueDeg: 0, satDeg: 0, lightDeg: 0 },
     } });
     let nowMs = 0;
-    const step = pitchHz => phase.step({ pitchHz, clarity: 1, deltaMs: 50, nowMs: nowMs += 50 });
-    return { policy, phase, step };
+    const step = pitchHz => phase.step({ pitchHz, clarity: 1, deltaMs, nowMs: nowMs += deltaMs });
+    return { policy, tracker, phase, step };
 }
+
+test('phase sampling counts each frame once toward the silence threshold', () => {
+    const { step } = phaseFixture({ colorIntervalMs: 40, deltaMs: 10 });
+    for (let i = 0; i < 3; i++) assert.equal(step(0).decision, undefined);
+
+    const sampled = step(0);
+    assert.equal(sampled.decision.result.silenceMs, 40);
+    assert.notDeepEqual(sampled.decision.color, idle, '40 ms must not satisfy 100 ms of silence');
+});
+
+test('phase sampling does not commit a new note before its stability duration', () => {
+    const { tracker, step } = phaseFixture({ colorIntervalMs: 40, deltaMs: 10 });
+    step(440);
+    step(440); // Leave the intentional post-commit hold phase.
+    step(493.88); // Start tracking the new candidate.
+    for (let i = 0; i < 3; i++) {
+        step(493.88);
+        assert.equal(tracker.committedPitchClass, 9, 'the new note has not been stable for 40 ms');
+    }
+
+    const committed = step(493.88);
+    assert.equal(committed.decision.result.changed, true);
+    assert.equal(tracker.committedPitchClass, 11);
+});
 
 test('phase reset after same-note recovery uses pitch color, not the stale idle color', () => {
     const { phase, step } = phaseFixture();

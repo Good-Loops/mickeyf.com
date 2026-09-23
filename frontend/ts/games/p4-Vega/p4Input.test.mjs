@@ -26,6 +26,8 @@ const eventTarget = () => {
 
 const fixture = () => {
     const keyboard = eventTarget();
+    keyboard.hidden = false;
+    const focus = eventTarget();
     const thumb = { style: { transform: '' } };
     const captures = new Set();
     const joystick = {
@@ -44,12 +46,12 @@ const fixture = () => {
     let restartReady = false;
     let restarts = 0;
     const input = bindP4Input({
-        keyboardTarget: keyboard, joysticks: [joystick], movement: () => movement,
+        keyboardTarget: keyboard, focusTarget: focus, joysticks: [joystick], movement: () => movement,
         canMove: () => running, canRestart: () => restartReady,
         restart: () => { restarts++; },
     });
     return {
-        input, keyboard, joystick, movement, captures, thumb,
+        input, keyboard, focus, joystick, movement, captures, thumb,
         setRunning: (value) => { running = value; },
         setRestartReady: (value) => { restartReady = value; },
         get restarts() { return restarts; },
@@ -134,6 +136,7 @@ test('pointer cancellation and disposal remove input ownership', () => {
     f.input.dispose();
     assert.equal(f.captures.size, 0);
     assert.equal(f.keyboard.listeners.size, 0);
+    assert.equal(f.focus.listeners.size, 0);
     assert.equal(f.joystick.listeners.size, 0);
     assert.equal(f.movement.joystickX, 0);
     assert.equal(f.movement.joystickY, 0);
@@ -196,4 +199,34 @@ test('losing pointer capture clears the analog input and centers the thumb', () 
     assert.equal(f.movement.joystickY, 0);
     assert.equal(f.thumb.style.transform, 'translate(0, 0)');
     assert.equal(f.captures.size, 0);
+});
+
+test('window blur and hiding the document release held keys and joystick capture', () => {
+    for (const event of ['blur', 'visibilitychange']) {
+        const f = fixture();
+        f.keyboard.emit('keydown', { code: 'ArrowRight' });
+        f.joystick.emit('pointerdown');
+        if (event === 'blur') f.focus.emit(event);
+        else {
+            f.keyboard.hidden = true;
+            f.keyboard.emit(event);
+        }
+        assert.equal(f.movement.isMovingRight, false, event);
+        assert.equal(f.movement.joystickX, 0, event);
+        assert.equal(f.captures.size, 0, event);
+        assert.equal(f.thumb.style.transform, 'translate(0, 0)', event);
+        f.keyboard.emit('keydown', { code: 'ArrowRight', repeat: true });
+        assert.equal(f.movement.isMovingRight, false, 'a held key must be pressed again');
+        f.input.dispose();
+        assert.equal(f.focus.listeners.size, 0);
+        assert.equal(f.keyboard.listeners.size, 0);
+    }
+});
+
+test('a visible document event does not interrupt active input', () => {
+    const f = fixture();
+    f.keyboard.emit('keydown', { code: 'ArrowRight' });
+    f.keyboard.emit('visibilitychange');
+    assert.equal(f.movement.isMovingRight, true);
+    f.input.dispose();
 });

@@ -65,6 +65,7 @@ export type P4VegaOptions = {
     onStateChange?: (state: P4VegaState) => void;
     onScoreChange?: (score: number) => void;
     onResultChange?: (result: P4RunResult | null) => void;
+    onLoadError?: (error: unknown) => void;
     signal?: AbortSignal;
 };
 
@@ -282,12 +283,17 @@ export async function p4Vega(
         try {
             await load();
         } catch (error) {
-            if (!session.disposed) console.error('P4-Vega restart failed.', error);
+            if (!session.disposed) {
+                dispose();
+                console.error('P4-Vega restart failed.', error);
+                options.onLoadError?.(error);
+            }
         }
     };
 
     input = bindP4Input({
         keyboardTarget: document,
+        focusTarget: window,
         joysticks: Array.from(root.querySelectorAll<HTMLElement>('[data-p4-joystick]')),
         movement: () => p4,
         canMove: () => session.canMove,

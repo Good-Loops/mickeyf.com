@@ -39,6 +39,7 @@ type FractalEntry<C> = {
 const DancingFractals: React.FC = () => {
     const containerRef = useRef<HTMLDivElement | null>(null);
     const [host, setHost] = useState<FractalHost | null>(null);
+    const [startupError, setStartupError] = useState<Error | null>(null);
     const audio = useAudioEngineState();
 
      // Which fractal is currently selected
@@ -77,16 +78,22 @@ const DancingFractals: React.FC = () => {
         let ownedHost: FractalHost | null = null;
 
         (async () => {
-            const createdHost = await createFractalHost(container);
+            try {
+                const createdHost = await createFractalHost(container);
 
-            if (cancelled) {
-                createdHost.dispose();
-                return;
+                if (cancelled) {
+                    createdHost.dispose();
+                    return;
+                }
+
+                ownedHost = createdHost;
+                // Read current settings in the effects below, not this mount's stale closure.
+                setHost(createdHost);
+            } catch {
+                if (!cancelled) {
+                    setStartupError(new Error('Dancing Fractals could not start.'));
+                }
             }
-
-            ownedHost = createdHost;
-            // Read current settings in the effects below, not this mount's stale closure.
-            setHost(createdHost);
         })();
 
         return () => {
@@ -188,6 +195,9 @@ const DancingFractals: React.FC = () => {
     const handlePlay = () => audioEngine.play();
     const handlePause = () => audioEngine.pause();
     const handleStop = () => audioEngine.stop();
+
+    // Async startup failures reach the route's existing recovery screen on render.
+    if (startupError) throw startupError;
 
     return (
         <section className='dancing-fractals'>

@@ -81,6 +81,9 @@ const P4Vega: React.FC = () => {
                     onResultChange: (value) => {
                         if (!abortController.signal.aborted) setResult(value);
                     },
+                    onLoadError: () => {
+                        if (!abortController.signal.aborted) setGameError(true);
+                    },
                 });
                 if (abortController.signal.aborted) controller.dispose();
                 else controllerRef.current = controller;
