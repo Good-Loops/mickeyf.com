@@ -1198,9 +1198,44 @@ TypeScript passed. These are controlled failure/lifecycle and markup checks,
 not a real-device codec, alert screenshot or new Safari acceptance claim. No
 production build, deployment or Unity operation was performed.
 
-Next bounded review: the fractal host clears `remainingLifetime` when automatic
-disposal is disabled, but does not notify the animation to cancel its already
-scheduled disposal. Characterize the toggle before changing its contract.
+The following checkpoint addresses the separate fractal timer cancellation gap.
+
+## Fractal automatic-disposal cancellation — 2026-09-23
+
+The real host with a controlled animation timer reproduced the defect: disabling
+auto-dispose changed the displayed countdown to `null`, but the animation still
+started fading at the old deadline. Before, the disabled branch only assigned
+`remainingLifetime = null`. After, `applyLifetime()` also calls
+`currentFractal.cancelScheduledDisposal()`; `setLifetime()` now reuses that same
+path instead of duplicating its enable/disable logic.
+
+The animation contract now exposes explicit cancellation. Tree and FlowerSpiral
+clear their automatic timer flag, delay and elapsed counter; Mandelbrot clears
+its pending delay. These methods deliberately preserve any fade already started,
+its progress and its resources. They do not resurrect a disposed animation.
+Re-enabling keeps the existing fresh-countdown behavior. The host still remembers
+lifetime settings made before an animation is mounted and reapplies them on
+restart/switch. No shader, palette, motion, fade rate or audio behavior changed.
+
+The host's disable regression failed before the fix while its re-enable and
+restart/swap checks passed. The three host cases now pass. Six real-class state
+checks cover cancellation, repetition, re-arming and active-fade preservation
+across all three fractals; these do not initialize a GPU or claim rendered output.
+Frontend TypeScript, the documentation rebuild and whitespace checks passed.
+Generated API documentation includes the cancellation contract. Commands:
+
+```powershell
+node --test --test-reporter=spec "frontend/ts/animations/dancing fractals/createFractalHost.test.mjs"
+node frontend/node_modules/typescript/bin/tsc -p frontend/tsconfig.json --noEmit
+npm run docs
+git diff --check
+# Real-class check, run from frontend:
+node --experimental-strip-types --test "ts/animations/dancing fractals/fractals/disposalCancellation.test.mjs"
+```
+
+No production build, physical-device retest, Unity operation or deployment was
+performed. Next review: animation settings/default-reset flow, without reopening
+accepted audio loading, color recovery or Three Bosses layout checks.
 
 ## Inventory closeout
 

@@ -460,6 +460,13 @@ export class Tree implements FractalAnimation<TreeConfig> {
 		this.isDisposing = false;
 	};
 
+	/** Cancels the countdown without changing an active shrinking animation. */
+	cancelScheduledDisposal = (): void => {
+		this.autoDispose = false;
+		this.disposalDelay = 0;
+		this.disposalTimer = 0;
+	};
+
 	/** Begins the disposal process immediately (tree shrinks until invisible, then disposes). */
 	startDisposal = (): void => {
 		if (this.isDisposing) return;

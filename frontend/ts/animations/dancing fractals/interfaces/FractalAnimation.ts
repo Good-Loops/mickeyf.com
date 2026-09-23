@@ -67,6 +67,9 @@ export interface FractalAnimation<C> {
      */
     scheduleDisposal(seconds: number): void;
 
+    /** Cancels a pending automatic countdown without reversing a fade already in progress. */
+    cancelScheduledDisposal(): void;
+
     startDisposal(): void;
 
     /**

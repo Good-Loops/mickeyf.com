@@ -2544,9 +2544,15 @@ example. The active branch is `improvement/clean-code-sweep`.
   and three UI regression assertions failed before their fixes; 40 focused cases,
   frontend TypeScript and whitespace checks passed. No device retest or deployment.
   See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#failed-audio-initialization-ownership-and-feedback--2026-09-22).
-- [ ] Next: characterize and fix the fractal auto-dispose toggle's cancellation
-  boundary if confirmed; disabling currently clears the host countdown without
-  notifying the animation's scheduled disposal. Keep fade/visual behavior intact.
+- [x] Fractal auto-dispose cancellation (2026-09-23): reproduced a fade starting
+  after the toggle was disabled. The host now explicitly cancels the animation's
+  pending timer and shares lifetime application between toggles/restarts/swaps.
+  All three fractals preserve fades already started; no visual tuning changed.
+  Three host and six real-class lifecycle checks, frontend TypeScript and
+  whitespace checks passed. No device retest or deployment.
+  See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#fractal-automatic-disposal-cancellation--2026-09-23).
+- [ ] Next: review animation settings and default-reset flow; do not reopen
+  accepted audio loading, color recovery or Three Bosses layout checks.
 - [x] Shared hue-distance calculation (2026-09-21): interpolation and pitch-color
   transition settling now reuse the same existing-utility function. Preserved
   wraparound, signed half-turn ties, rounding and thresholds. Four focused tests,

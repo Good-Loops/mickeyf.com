@@ -109,13 +109,13 @@ export async function createFractalHost(container: HTMLElement): Promise<Fractal
     app.ticker.add(onTick);
 
     const applyLifetime = () => {
+        remainingLifetime = lifetimeSeconds;
         if (!currentFractal) return;
         if (lifetimeSeconds == null) {
-            remainingLifetime = null;
+            currentFractal.cancelScheduledDisposal();
             return;
         }
 
-        remainingLifetime = lifetimeSeconds;
         // `scheduleDisposal` delay is expressed in seconds.
         currentFractal.scheduleDisposal(lifetimeSeconds);
     };
@@ -171,18 +171,7 @@ export async function createFractalHost(container: HTMLElement): Promise<Fractal
 
     const setLifetime = (seconds: number | null) => {
         lifetimeSeconds = seconds;
-         if (!currentFractal) {
-            remainingLifetime = seconds;
-            return;
-        }
-
-        if (lifetimeSeconds == null) {
-            remainingLifetime = null;
-            return;
-        }
-
-        remainingLifetime = lifetimeSeconds;
-        currentFractal.scheduleDisposal(lifetimeSeconds);
+        applyLifetime();
     };
 
     const getStats = () => ({
