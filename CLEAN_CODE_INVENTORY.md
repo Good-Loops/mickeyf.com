@@ -1284,9 +1284,58 @@ node --experimental-strip-types --test "ts/animations/dancing fractals/fractals/
 ```
 
 TypeScript and whitespace checks passed. No new dependency, production build,
-deployment, Unity operation or repeat of accepted gameplay/audio tests. Next:
-review remaining backend controller error handling for consistency and exposure
-of internal details, preserving the established API response contracts.
+deployment, Unity operation or repeat of accepted gameplay/audio tests. The
+following checkpoint covers backend controller error handling.
+
+## Backend asynchronous error boundary — 2026-09-23
+
+Reviewed the main/leaderboard controllers and routers, plus authentication,
+session renewal, logout, account deletion, provider authentication and Apple
+notification/maintenance handlers. These paths already await their work and
+return fixed public errors rather than raw SQL/provider diagnostics. Their
+different error codes and response envelopes are intentional contracts, not
+duplication to flatten into one response. No controller rewrite was warranted.
+
+One shared boundary gap was reproduced locally. `asyncHandler` previously used
+`.catch(next)`. JavaScript can reject with a primitive instead of an Error;
+Express interprets falsy values and the strings `route`/`router` as routing
+instructions. A rejection without a reason therefore reached the test's fallback
+route instead of the error handler. This is a controlled regression, not evidence
+that a production request has encountered that failure.
+
+Now the catch receives `unknown` and forwards:
+
+```ts
+next(typeof error === 'object' && error !== null
+    ? error
+    : new Error('Asynchronous request failed'));
+```
+
+Error objects and structured status/parser metadata keep their identity. Primitive
+rejections become generic errors without copying their values into logs. Explicit
+controller calls to `next('route')`/`next('router')` are unaffected. Existing
+validation, versioned leaderboard errors, status codes, cookies, feature gates
+and persistence behavior remain unchanged.
+
+The new HTTP regression failed before the fix (fallback status 418 rather than
+500 for `undefined`) and passes afterward across eight rejection values. The
+focused set passed all 19 tests; synchronous throw/metadata preservation, existing
+sanitization, main-router composition and Three Bosses parser contracts are covered.
+Backend TypeScript and whitespace checks passed. Commands (Node/npm from `backend`,
+Git from the repository root):
+
+```powershell
+node --test -r ts-node/register ts/middleware/errorHandling.test.ts
+node --test -r ts-node/register ts/middleware/errorHandling.test.ts ts/routers/mainRouter.test.ts ts/routers/leaderboardRouter.test.ts ts/routers/threeBossesRouter.security.test.ts
+npm test
+git diff --check
+```
+
+Tests use local ephemeral HTTP servers and fake persistence, not real accounts or
+SQL. No dependency, schema, cloud resource, running dev server or public contract
+changed; no production build, deployment or device retest. The middleware is not
+part of the generated API documentation surface. Next: review backend startup and
+shutdown resource ownership, leaving already-reviewed score transactions closed.
 
 ## Inventory closeout
 

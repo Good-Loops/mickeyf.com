@@ -2559,9 +2559,16 @@ example. The active branch is `improvement/clean-code-sweep`.
   regressions failed before the fixes; nine focused checks, frontend TypeScript
   and whitespace checks passed afterward. No device retest or deployment.
   See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#fractal-settings-and-default-reset-synchronization--2026-09-23).
-- [ ] Next: review remaining backend controller error handling for consistency
-  and exposure of internal details, preserving established API contracts. Do not
-  reopen accepted audio, animation or Three Bosses checks without a regression.
+- [x] Backend error handling (2026-09-23): controllers already sanitize internal
+  failures and preserve intentional endpoint-specific error contracts. Fixed the
+  shared async wrapper so primitive rejections cannot become Express routing
+  commands; error objects/status metadata remain intact. The local HTTP regression
+  failed before the fix; all 19 focused checks, backend TypeScript and whitespace
+  checks passed afterward. No real accounts, live database calls or deployment.
+  See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#backend-asynchronous-error-boundary--2026-09-23).
+- [ ] Next: review backend startup/shutdown resource ownership. Preserve current
+  configuration and deployment boundaries; do not reopen already-reviewed score
+  transactions or accepted audio, animation and Three Bosses behavior.
 - [x] Shared hue-distance calculation (2026-09-21): interpolation and pitch-color
   transition settling now reuse the same existing-utility function. Preserved
   wraparound, signed half-turn ties, rounding and thresholds. Four focused tests,

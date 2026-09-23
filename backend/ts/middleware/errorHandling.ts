@@ -16,7 +16,13 @@ export function asyncHandler(handler: AsyncRequestHandler): RequestHandler {
     return (req, res, next) => {
         void Promise.resolve()
             .then(() => handler(req, res, next))
-            .catch(next);
+            .catch((error: unknown) => {
+                // Express treats falsy values and 'route'/'router' as routing commands,
+                // not failures. Keep error objects (including parser metadata) intact.
+                next(typeof error === 'object' && error !== null
+                    ? error
+                    : new Error('Asynchronous request failed'));
+            });
     };
 }
 
