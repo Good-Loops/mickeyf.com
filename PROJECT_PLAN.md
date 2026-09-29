@@ -6,18 +6,17 @@ each phase boundary.
 
 **Current Clean Code continuation (2026-09-29):** use the
 [finite C1–C7 checklist](CLEAN_CODE_INVENTORY.md#remaining-clean-code-checklist--2026-09-23)
-as the source of remaining review scope. **C1 and C2 are complete**: see the
+as the source of remaining review scope. **C1–C3 are complete**: see the
 [C1 shared UI closeout](CLEAN_CODE_INVENTORY.md#c1-general-and-shared-ui-closeout--2026-09-23)
 and [C2 web experience closeout](CLEAN_CODE_INVENTORY.md#c2-web-experience-orchestration-closeout--2026-09-23).
 C2 fixed animation startup recovery, p4-Vega lost-focus/restart failures, stale
-paused beats and pitch timing, and removed proven-unused utility code. **C3 is
-in progress**: the [configuration and contracts checkpoint](CLEAN_CODE_INVENTORY.md#c3-configuration-validation-and-contracts--2026-09-29)
-guards startup readiness socket disposal and aligns login/logout declarations
-with existing behavior. All 16 readiness cases have passing results; TypeScript
-and an isolated-output production build passed. Configuration and policies retained
-after source review. Next within C3: executable migration/grant tooling and its
-dedicated configuration. Four review groups and one closeout
-remain. Completed checks carry forward;
+paused beats and pitch timing, and removed proven-unused utility code. The
+[C3 tooling closeout](CLEAN_CODE_INVENTORY.md#c3-migration-and-grant-tooling-closeout--2026-09-29)
+completes backend source review and bounds runtime-grant identity checks and
+connection shutdown. All 22 affected-file tests, TypeScript and an isolated-output
+production build passed. Migration history and grant policies are unchanged.
+Next: C4 first-party Unity source beyond the accepted UI migration. Three review
+groups and one closeout remain. Completed checks carry forward;
 KWS/provider activation, store publication and Git deletion approvals are separate.
 The dated implementation and release history below is retained as evidence.
 
@@ -2634,6 +2633,14 @@ Unchanged accepted behavior is not reopened by a later cleanup step.
   cases have passing results (one targeted fixture rerun), plus TypeScript and
   temporary-output production compilation. No broader test rerun or live changes.
   See the [checkpoint](CLEAN_CODE_INVENTORY.md#c3-configuration-validation-and-contracts--2026-09-29).
+- [x] C3 migration/grant tooling and backend source closeout (2026-09-29): reviewed
+  dedicated configuration, migration orchestration and grant controls; retained
+  existing SQL history and policies. Runtime-grant identity checks now share the
+  operation deadline, timeout forces socket closure and shutdown has a two-second
+  cap. All 22 affected-file tests, TypeScript and temporary-output production build
+  passed. No repeated broader suites, live SQL/cloud calls or deployment. C3 source
+  review is complete; C4–C6 and final C7 closeout remain. See the
+  [checkpoint](CLEAN_CODE_INVENTORY.md#c3-migration-and-grant-tooling-closeout--2026-09-29).
 - [x] Shared hue-distance calculation (2026-09-21): interpolation and pitch-color
   transition settling now reuse the same existing-utility function. Preserved
   wraparound, signed half-turn ties, rounding and thresholds. Four focused tests,

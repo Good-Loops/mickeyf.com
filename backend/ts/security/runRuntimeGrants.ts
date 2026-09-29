@@ -112,7 +112,7 @@ async function withOperationDeadline<T>(
     const deadline = new Promise<never>((_resolve, reject) => {
         timeout = setTimeout(() => {
             controller.abort();
-            connection.destroy();
+            disconnectImmediately(connection);
             const message = `Runtime grant operation exceeded ${timeoutMs}ms and was disconnected`;
             reject(indeterminateOnTimeout
                 ? new RuntimeGrantIndeterminateError(
@@ -127,6 +127,34 @@ async function withOperationDeadline<T>(
 
     try {
         return await Promise.race([operation(controller.signal), deadline]);
+    } finally {
+        if (timeout) clearTimeout(timeout);
+    }
+}
+
+function disconnectImmediately(connection: Connection): void {
+    try { connection.destroy(); } catch { /* Still close the underlying transport. */ }
+    try {
+        // mysql2 destroy() ends gracefully; a stalled command may still own the socket.
+        (connection as unknown as { connection?: { stream?: { destroy(): void } } }).connection?.stream?.destroy();
+    } catch { /* Teardown must not replace the operation's outcome. */ }
+}
+
+async function closeWithinDeadline(connection: Connection): Promise<void> {
+    let timeout: NodeJS.Timeout | undefined;
+    try {
+        await Promise.race([
+            connection.end(),
+            new Promise<void>(resolve => {
+                timeout = setTimeout(() => {
+                    disconnectImmediately(connection);
+                    resolve();
+                }, 2_000);
+                timeout.unref();
+            }),
+        ]);
+    } catch {
+        disconnectImmediately(connection);
     } finally {
         if (timeout) clearTimeout(timeout);
     }
@@ -229,34 +257,21 @@ export async function runRuntimeGrants(args: readonly string[]): Promise<void> {
     });
 
     try {
-        await assertConnectedTarget(
-            connection,
-            config.database,
-            confirmedMaintenanceAccount
-        );
         const plan = await withOperationDeadline(
             connection,
             isApplyCommand(command)
                 ? config.operationTimeoutMs * 2
                 : config.operationTimeoutMs,
             isApplyCommand(command),
-            (signal) => executeCommand(
-                command,
-                profile,
-                connection,
-                config,
-                confirmation,
-                maintenanceAccount,
-                signal
-            )
+            async signal => {
+                await assertConnectedTarget(connection, config.database, confirmedMaintenanceAccount);
+                signal.throwIfAborted();
+                return executeCommand(command, profile, connection, config, confirmation, maintenanceAccount, signal);
+            }
         );
         console.log(JSON.stringify({ command, plan }, null, 2));
     } finally {
-        try {
-            await connection.end();
-        } catch {
-            // A deadline intentionally destroys the connection before cleanup.
-        }
+        await closeWithinDeadline(connection);
     }
 }
 

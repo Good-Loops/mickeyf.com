@@ -67,8 +67,8 @@ This is the canonical continuation checklist, reconciled against the dated
 checkpoints below and Phase 16 in `PROJECT_PLAN.md`. It replaces the open-ended
 subsystem queue; it is not a new claim that every file has been reviewed. The
 1,586-file classification above remains the historical baseline, not today's
-file count. C1 and C2 are complete; four review groups and one closeout remain,
-not five mandatory refactors or a promise that each group fits in one turn.
+file count. C1–C3 are complete; three review groups and one closeout remain,
+not four mandatory refactors or a promise that each group fits in one turn.
 
 ### Completed evidence to carry forward
 
@@ -103,7 +103,7 @@ coverage gap justifies additional checks.
   renderer/audio/fractal/entity/bridge work instead of rechecking it wholesale.
   The [C2 closeout](#c2-web-experience-orchestration-closeout--2026-09-23)
   records the remaining source review, concrete fixes and verification limits.
-- [ ] **C3 — Remaining backend internals.** Remaining identity/session services,
+- [x] **C3 — Remaining backend internals.** Remaining identity/session services,
   account repositories, configuration/validation/contracts, maintenance jobs
   and executable migration/grant/recovery tooling in `backend/ts`. Group findings
   under this item rather than inventing another open-ended backend queue. Review
@@ -117,8 +117,9 @@ coverage gap justifies additional checks.
   [recovery and maintenance checkpoint](#c3-recovery-and-maintenance-resource-ownership--2026-09-29)
   records the subsequent resource review. The
   [configuration and contracts checkpoint](#c3-configuration-validation-and-contracts--2026-09-29)
-  closes the runtime configuration/validation/contracts review. C3 remains open
-  for executable migration/grant tooling and its dedicated configuration.
+  closes the runtime configuration/validation/contracts review. The
+  [migration and grant tooling closeout](#c3-migration-and-grant-tooling-closeout--2026-09-29)
+  completes C3 with the executable tooling and its dedicated configuration.
 - [ ] **C4 — First-party Unity source.** Remaining authored runtime C#, Editor
   utilities, WebGL plugins and adjacent tests; authored UI code/styles only where
   not already covered by the accepted migration. Review events, coroutine/object
@@ -1878,6 +1879,50 @@ startup disposal and contract accuracy, not a new global deadline or a productio
 security certification. C3 remains open only for its executable migration/grant
 tooling review, including the associated configuration; final C7 closeout remains
 separate.
+
+## C3 migration and grant tooling closeout — 2026-09-29
+
+Continued from `b9a3f4f4`. This finishes the remaining C3 source review, carrying
+forward the prior transaction, connection, recovery and readiness evidence.
+
+| Reviewed boundary | Disposition |
+| --- | --- |
+| `migrationConfig`, `receiptMigrationConfig`, `accountIdentityMigrationConfig` | Retained explicit maintenance identity, loopback connection, bounded settings, target acknowledgements, apply gates and approved plan/server pins. |
+| Migration CLI/runner/manifest, account-identity migration, receipt transition and p4-Vega reconciliation | Retained lock ownership, history/checksum enforcement, prerequisite ordering, postconditions before journaling, writer-quiescence checks, preservation digests and read-only snapshot transaction. Applied SQL files and migration history are unchanged. |
+| Runtime/receipt-cleanup grant manifests, runtime grant operations and Cloud SQL role remover | Retained exact grant inventories, identity/role checks, approved digest, staged rechecks, bounded external commands and indeterminate-outcome reporting. No grant-policy rewrite justified. |
+| `security/runRuntimeGrants` | Fixed target-identity SQL outside the operation watchdog, incomplete timeout disposal and unbounded final shutdown. Identity now shares the existing operation budget; an abort check prevents a late response from starting grant work. Timeout forces socket closure even if driver teardown throws; shutdown has a two-second cap and forces closure on failure. |
+
+Changed executable/test files: `backend/ts/security/runRuntimeGrants.ts` and
+`backend/ts/security/runRuntimeGrants.test.ts`. Kept the fix local, following the
+existing migration CLI cleanup pattern. Three new scenarios reproduced the gaps
+before the implementation fix, including both stalled and rejected shutdown.
+The initial test attempt exposed a fixture type error, corrected before the
+before-fix reproduction. All **22 affected-file tests** then passed. Backend
+TypeScript and one production build to temporary output also passed. Unchanged
+configuration, migration, grant-operation and driver suites were not rerun.
+
+Exact commands from `backend` unless noted:
+
+```powershell
+node --test --test-reporter=spec -r ts-node/register --test-name-pattern='deadline covers target|apply timeout closes|stalled or rejected connection shutdown' ts/security/runRuntimeGrants.test.ts
+node --test --test-reporter=spec -r ts-node/register ts/security/runRuntimeGrants.test.ts
+npm test
+$grantBuildPath = Join-Path $env:TEMP 'mickeyf-c3-grants-build-20260929'
+npm run prod -- --output-path $grantBuildPath
+git diff --check # repository root
+```
+
+These fixtures mock the database, cloud checks, grant operations and timers; no
+live SQL/cloud/provider calls, migration/grant execution or deployment occurred.
+Connection establishment and cloud preflight keep their separate existing
+deadlines; this is not one total CLI wall-clock bound. Forced client shutdown
+cannot undo an uncertain database/cloud change: apply timeouts still report that
+effects may have completed and require fresh plan/verification before retrying.
+
+**C3 is complete at the source-review boundary.** C4–C6 and the cumulative C7
+security/release closeout remain. Next narrow task: C4 first-party Unity source,
+carrying forward the accepted UI migration instead of repeating its checks or
+rebuilding WebGL without a relevant change.
 
 ## Inventory closeout
 

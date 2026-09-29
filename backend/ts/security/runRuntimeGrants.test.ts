@@ -39,7 +39,10 @@ function fixture(t: TestContext) {
         return [[identity], []];
     });
     const end = t.mock.fn(async () => {});
-    const connection = { query, end, destroy: t.mock.fn() } as unknown as Connection;
+    const destroy = t.mock.fn();
+    const destroySocket = t.mock.fn();
+    const connection = { query, end, destroy,
+        connection: { stream: { destroy: destroySocket } } } as unknown as Connection;
     const connect = t.mock.method(mysql, 'createConnection', async () => {
         events.push('connect');
         return connection;
@@ -53,7 +56,7 @@ function fixture(t: TestContext) {
     const verifyOperation = t.mock.method(operations, 'verifyRuntimeGrants', async () => { events.push('verify'); return plan; });
     const applyOperation = t.mock.method(operations, 'applyRuntimeGrants', async () => { events.push('apply'); return plan; });
     const output = t.mock.method(console, 'log', () => {});
-    return { identity, query, connection, connect, end, events, verifyTarget, verifyIdle, createRoleRemover,
+    return { identity, query, connection, connect, end, destroy, destroySocket, events, verifyTarget, verifyIdle, createRoleRemover,
         roleRemover, planOperation, verifyOperation, applyOperation, output };
 }
 
@@ -162,6 +165,70 @@ test('failed cloud verification or in-flight operations prevent the database con
             assert.equal(f.connect.mock.callCount(), 0);
             assert.equal(f.applyOperation.mock.callCount(), 0);
             assert.equal(f.createRoleRemover.mock.callCount(), 0);
+        });
+    }
+});
+
+test('the deadline covers target identity and prevents a late response from starting grant work', async t => {
+    const f = fixture(t);
+    process.env.MIGRATION_OPERATION_TIMEOUT_MS = '1000';
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    let completeIdentity!: (value: [typeof f.identity[], never[]]) => void;
+    f.query.mock.mockImplementation(() => new Promise(resolve => { completeIdentity = resolve; }));
+    const rejected = assert.rejects(runRuntimeGrants(['plan']), /exceeded 1000ms/u);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.equal(f.query.mock.callCount(), 1);
+    t.mock.timers.tick(1000);
+    assert.equal(f.destroy.mock.callCount(), 1);
+    assert.equal(f.destroySocket.mock.callCount(), 1);
+    await rejected;
+    completeIdentity([[f.identity], []]);
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.equal(f.planOperation.mock.callCount(), 0);
+    assert.equal(f.output.mock.callCount(), 0);
+});
+
+test('apply timeout closes the socket despite driver teardown failure and retains an indeterminate outcome', async t => {
+    const f = fixture(t);
+    process.env.MIGRATION_OPERATION_TIMEOUT_MS = '1000';
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    f.applyOperation.mock.mockImplementation(() => new Promise<never>(() => {}));
+    f.destroy.mock.mockImplementation(() => { throw new Error('private teardown failure'); });
+    const rejected = assert.rejects(runRuntimeGrants(['apply']), error => {
+        assert.ok(error instanceof operations.RuntimeGrantIndeterminateError);
+        assert.match(error.message, /may have completed/u);
+        assert.doesNotMatch(error.message, /private/u);
+        return true;
+    });
+    await new Promise<void>(resolve => setImmediate(resolve));
+    assert.equal(f.applyOperation.mock.callCount(), 1);
+    t.mock.timers.tick(2000);
+    await rejected;
+    assert.equal(f.destroySocket.mock.callCount(), 1);
+    assert.equal(f.createRoleRemover.mock.calls[0].arguments[3]?.aborted, true);
+    assert.equal(f.output.mock.callCount(), 0);
+});
+
+test('stalled or rejected connection shutdown forces socket closure without hanging', async t => {
+    for (const mode of ['stalled', 'rejected']) {
+        await t.test(mode, async t => {
+            const f = fixture(t);
+            t.mock.timers.enable({ apis: ['setTimeout'] });
+            f.end.mock.mockImplementation(() => mode === 'stalled'
+                ? new Promise(() => {}) : Promise.reject(new Error('private shutdown failure')));
+            let completed = false;
+            const running = runRuntimeGrants(['plan']).then(() => { completed = true; });
+            await new Promise<void>(resolve => setImmediate(resolve));
+            assert.equal(f.end.mock.callCount(), 1);
+            if (mode === 'stalled') {
+                assert.equal(completed, false);
+                t.mock.timers.tick(1999);
+                assert.equal(f.destroySocket.mock.callCount(), 0);
+                t.mock.timers.tick(1);
+            }
+            assert.equal(f.destroySocket.mock.callCount(), 1);
+            await running;
+            assert.equal(completed, true);
         });
     }
 });
