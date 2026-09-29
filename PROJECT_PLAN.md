@@ -22,14 +22,15 @@ Three review groups and one closeout remain. Completed checks carry forward;
 KWS/provider activation, store publication and Git deletion approvals are separate.
 The dated implementation and release history below is retained as evidence.
 
-Local backend interruption (2026-09-29): Cloud SQL connectivity succeeds, but the
-runtime sees history only through 0008 and has no session-table grants; this
-branch requires recorded 0011/0012. The owner chose to retain Cloud SQL. The
-[migration review](backend/CLOUD_SQL_SESSION_MIGRATION_REVIEW.md) proposes
-0009–0012 and additive session grants. The approved maintenance preflight passed:
-eight recorded checksums/schema checks match, the target tables are absent, and
-no partial migration needs recovery. The temporary user was deleted and a fresh
-login denied. Schema/grant execution still awaits approval; nothing was applied.
+Local backend interruption resolved (2026-09-29): the owner-approved Cloud SQL
+migrations 0009–0012 and additive session grant are complete. All 12 recorded
+checksums match; a fresh runtime connection passes session readiness. Other
+runtime grants are unchanged, and the temporary maintenance user was deleted
+with a fresh login denied. The existing VS Code backend restarted successfully;
+`GET /api/leaderboards` returned HTTP 200. The
+[migration review](backend/CLOUD_SQL_SESSION_MIGRATION_REVIEW.md) records execution
+and recovery evidence. Later migrations, provider activation and deployment
+remain outside this repair; no rebuild or broad test rerun was needed.
 
 Current release state (published 2026-09-09 local): see the
 [cumulative release/security ledger](RELEASE_READINESS.md). It supersedes stale

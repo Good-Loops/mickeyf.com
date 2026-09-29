@@ -61,18 +61,19 @@ This notice grants no new exception and is not a fresh dependency audit.
 
 ## Local Cloud SQL startup mismatch — 2026-09-29
 
-**Blocked local startup; migration preflight passed, execution pending.** Initial inspection
-confirmed the pinned Cloud SQL server, migration records only through 0008 and
-no runtime session-table grants. This branch requires recorded 0011/0012.
-Runtime metadata/checksum restrictions were resolved by the explicitly approved
-temporary maintenance preflight: all eight recorded checksums/schema checks
-passed, all three target tables are absent, and no partial migration is recoverable.
-The temporary user was deleted and a fresh login denied. The owner retains Cloud SQL.
-See the [review](backend/CLOUD_SQL_SESSION_MIGRATION_REVIEW.md) for 0009–0012,
-the proposed additive session grant and maintenance/rollback prerequisites.
-No schema/application grant was changed or deployed. Backup metadata, current
-serving-source compatibility and disabled legacy trigger were inspected; no
-restore test was repeated. Execution approval remains pending; this does not close C7.
+**Fixed local startup; approved Cloud SQL schema/grant repair complete.** Initial
+inspection found migration records only through 0008 and no session-table
+grants; this branch requires 0011/0012. Following the approved read-only preflight,
+the owner authorized migrations 0009–0012 and the additive session grant.
+All four completed, all 12 recorded checksums match, and a fresh runtime connection
+passes session readiness. Other runtime grants are unchanged. The temporary
+maintenance user was deleted, confirmed absent and a fresh login denied.
+The existing VS Code backend restarted and returned HTTP 200 from
+`/api/leaderboards`. See the [review](backend/CLOUD_SQL_SESSION_MIGRATION_REVIEW.md)
+for exact scope, commands and rollback boundaries. Migrations 0013–0018 remain
+pending; provider flags, credentials and deployed revisions are unchanged.
+Backup metadata and serving-source compatibility were checked; no restore,
+rebuild, broad suite or login/logout/renewal smoke test was run. C7 remains open.
 
 ## Local Three Bosses UI checkpoint — 2026-09-22
 

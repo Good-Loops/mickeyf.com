@@ -1,8 +1,8 @@
 # Cloud SQL session migration review — 2026-09-29
 
-Status: read-only maintenance preflight passed; migration execution awaits approval.
-No schema or application grant changes applied. The owner chose
-to keep the Cloud SQL development workflow. Do not replace it with local MySQL.
+Status: approved migrations 0009–0012 and the additive session grant completed;
+the existing VS Code backend is running again against Cloud SQL. Execution and
+cleanup evidence are recorded below. The owner retains Cloud SQL development.
 Baseline source: `8271af27` on `improvement/clean-code-sweep`.
 
 ## Initial runtime-only diagnosis
@@ -32,7 +32,7 @@ passes; `verifyAccountSessionReadiness` fails. The compiler is not the failure.
 Checks used SELECT metadata, SHOW GRANTS and the existing read-only readiness
 functions. No accounts, scores, sessions, migrations or grants were written.
 
-## Recommended minimum change
+## Approved minimum change
 
 Use the four existing migrations in order; do not edit historical SQL, skip the
 runner's prerequisites, or add Google-signup/Apple migrations for this repair.
@@ -51,9 +51,9 @@ the runner must verify its exact shape and recover its history rather than
 blindly recreate it. Existing session rows, if found, retain ordinary expiry
 and default to non-renewable under 0012.
 
-For the currently disabled provider configuration, propose only the additive
+For the currently disabled provider configuration, apply only the additive
 session permissions below, copied from the session entry in the reviewed
-`GOOGLE_RUNTIME_GRANT_MANIFEST`. This is review material, **not executed SQL**:
+`GOOGLE_RUNTIME_GRANT_MANIFEST`. This exact grant was approved and executed:
 
 ```sql
 GRANT SELECT (session_hash, account_uuid, created_at, expires_at,
@@ -91,8 +91,9 @@ separate rollout/grant review.
    Obtain explicit execution approval. Only then supply the runner's exact
    database/target write confirmations and enable its apply gate.
 
-The later approved sequence is the following, stopping on the first failed
-command; these commands have **not** been run:
+The approved sequence uses these existing migration entrypoints, stopping on
+the first failure. Execution invoked their `runMigrations` commands directly
+in one maintenance process; the equivalent npm commands are:
 
 ```powershell
 npm --prefix backend run migrations:providers:apply
@@ -177,9 +178,39 @@ The credential-free helper is outside Git at
 `node --check` on that helper, then `node` on it with the current trusted public
 CA configured for that process. No unit suite, build or deployment was needed.
 
-The concrete next approval is: recreate a temporary maintenance identity, apply
-only the four migration commands and additive session grant above, verify the
-result with a fresh runtime connection, delete the maintenance identity and
-restart the existing VS Code backend runner. Keep provider flags, application
-credentials, serving revisions and other runtime grants unchanged. Until that
-execution is approved and complete, local startup remains blocked by readiness.
+## Approved execution and startup recovery — 2026-09-29 20:49 UTC
+
+The owner approved the four migrations and session-only grant. Temporary user
+`session_migrate_20260929`@`cloudsqlproxy~%` used a random password held only in
+process memory. Exact target/account/server identity, the four source hashes
+above and a fresh plan matching 0001–0008 with no recoverable migration were
+verified before applying changes through the existing migration runner.
+
+- `provider-identities-apply`, `provider-attempts-apply`, `account-sessions-apply`
+  and `session-renewal-apply` completed in order. All 12 recorded checksums match
+  the current manifest; migrations 0013–0018 remain pending and untouched.
+- The session grant was rendered from the committed manifest and applied once.
+  Readback verified all column privileges, table DELETE and no grant option.
+  Comparing before/after grants confirmed all other runtime grants unchanged.
+- A fresh runtime connection passed `verifyAccountSessionReadiness` at
+  `2026-09-29T20:49:26.717Z`. The maintenance user was then deleted, confirmed
+  absent in Cloud SQL, and a fresh login rejected with `ER_ACCESS_DENIED_ERROR`.
+- Touching only the generated server bundle timestamp restarted the existing
+  VS Code nodemon process. Port 8080 opened; `GET /api/leaderboards` returned
+  HTTP 200, `success: true`, contract version 1 and two games.
+
+Commands run (the credential-free helper stays outside Git):
+
+```powershell
+node --check C:\Users\User\AppData\Local\Temp\mickeyf-session-migrate-20260929.cjs
+node C:\Users\User\AppData\Local\Temp\mickeyf-session-migrate-20260929.cjs
+(Get-Item -LiteralPath 'C:\Users\User\Desktop\Pastas\Code\mickeyf.com\backend\dist\server.min.js').LastWriteTimeUtc = [DateTime]::UtcNow
+node scripts/wait-for-port.mjs 127.0.0.1 8080 15000
+Invoke-WebRequest -Uri 'http://localhost:8080/api/leaderboards' -TimeoutSec 10
+```
+
+The helper's Node process used the current trusted public CA through
+`NODE_EXTRA_CA_CERTS`, restoring its previous value afterward. No credential
+was printed or saved. Provider flags, application credentials and deployed
+revisions remain unchanged. No rebuild, broad test suite, restore exercise or
+login/logout/renewal smoke test was run; readiness and HTTP startup are verified.
