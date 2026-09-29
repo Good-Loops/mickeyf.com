@@ -11,11 +11,12 @@ as the source of remaining review scope. **C1 and C2 are complete**: see the
 and [C2 web experience closeout](CLEAN_CODE_INVENTORY.md#c2-web-experience-orchestration-closeout--2026-09-23).
 C2 fixed animation startup recovery, p4-Vega lost-focus/restart failures, stale
 paused beats and pitch timing, and removed proven-unused utility code. **C3 is
-in progress**: the [deletion and stalled-query checkpoint](CLEAN_CODE_INVENTORY.md#c3-deletion-and-stalled-query-cleanup--2026-09-29)
-adds deletion transaction deadlines and discards timed-out borrowed account/auth
-connections before cleanup can stall; 218 focused tests, TypeScript and an
-isolated-output production build passed. Next within C3: recovery and maintenance
-resource ownership, then the remaining backend internals. Four review groups and one closeout
+in progress**: the [recovery and maintenance checkpoint](CLEAN_CODE_INVENTORY.md#c3-recovery-and-maintenance-resource-ownership--2026-09-29)
+extends the existing connection guard to replay/audit and removes rollback after
+uncertain replay transaction acknowledgements; 25 affected-file tests, TypeScript
+and an isolated-output production build passed. Maintenance workers retained after
+source review. Next within C3: remaining configuration/validation/contracts, then
+executable migration/grant tooling. Four review groups and one closeout
 remain. Completed checks carry forward;
 KWS/provider activation, store publication and Git deletion approvals are separate.
 The dated implementation and release history below is retained as evidence.
@@ -2620,6 +2621,13 @@ Unchanged accepted behavior is not reopened by a later cleanup step.
   No live MySQL integration or deployment; no total request deadline is claimed.
   C3 remains open for recovery/maintenance and remaining backend tooling.
   See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#c3-deletion-and-stalled-query-cleanup--2026-09-29).
+- [x] C3 recovery/maintenance resource slice (2026-09-29): guarded replay/audit
+  acquisitions and removed rollback after uncertain replay begin/commit. Existing
+  maintenance ownership retained after source review. Three targeted cases failed
+  before the fix; 25 affected-file tests, TypeScript and temporary-output build
+  passed. Prior shared-consumer/driver checks carried forward without rerunning.
+  No live database, cloud changes or deployment. See the
+  [checkpoint](CLEAN_CODE_INVENTORY.md#c3-recovery-and-maintenance-resource-ownership--2026-09-29).
 - [x] Shared hue-distance calculation (2026-09-21): interpolation and pitch-color
   transition settling now reuse the same existing-utility function. Preserved
   wraparound, signed half-turn ties, rounding and thresholds. Four focused tests,

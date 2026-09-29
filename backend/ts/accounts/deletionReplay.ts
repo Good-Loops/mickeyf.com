@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
 import type { DeletionReplaySettings } from '../config/deletionReplayConfig';
+import { guardConnectionQueries } from '../db/queryTimeoutConnection';
 import { withUserSubmissionLock } from '../leaderboards/userSubmissionLock';
 import { assertAccountIdentityEpoch, verifyAccountIdentitySchema } from '../migrations/accountIdentitySchema';
 import type { MigrationConnection } from '../migrations/leaderboardSchema';
@@ -74,7 +75,7 @@ async function inspectTarget(
 async function verifyTargetSchema(
     database: ReplayDatabase, settings: DeletionReplaySettings, budget: ReplayBudget
 ): Promise<ReplayTarget> {
-    const connection = await database.getConnection();
+    const connection = guardConnectionQueries(await database.getConnection());
     let reusable = true;
     try {
         const target = await inspectTarget(connection, settings, budget);
@@ -149,7 +150,7 @@ export async function planDeletionReplay(
 async function findUserId(
     database: ReplayDatabase, accountId: string, settings: DeletionReplaySettings, budget: ReplayBudget
 ): Promise<number | undefined> {
-    const connection = await database.getConnection();
+    const connection = guardConnectionQueries(await database.getConnection());
     let reusable = true;
     try {
         await inspectTarget(connection, settings, budget);
@@ -173,7 +174,7 @@ async function replayOneAccount(
 ): Promise<boolean> {
     const userId = await findUserId(database, accountId, settings, budget);
     if (userId === undefined) {
-        const connection = await database.getConnection();
+        const connection = guardConnectionQueries(await database.getConnection());
         let reusable = true;
         try {
             await inspectTarget(connection, settings, budget);
@@ -208,7 +209,10 @@ async function replayOneAccount(
             await connection.query({ sql: 'COMMIT', timeout: budget.remaining() });
             return rows.length === 1;
         } catch (error) {
-            if (phase !== 'active') invalidateConnection();
+            if (phase !== 'active') {
+                invalidateConnection();
+                throw error;
+            }
             try { await connection.query({ sql: 'ROLLBACK', timeout: QUERY_TIMEOUT_MS }); }
             catch (rollbackError) {
                 invalidateConnection();

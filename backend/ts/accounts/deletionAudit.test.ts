@@ -21,14 +21,18 @@ const intent = (accountId = FIRST_ID, ageMs = 1_800_000): DeletionIntent => ({
 function fixture(options: {
     intents?: unknown[]; accounts?: string[]; wrongPin?: 'databaseName' | 'currentUser' | 'serverUuid' | 'epoch';
     journalError?: boolean;
+    beforeQuery?: (sql: string) => Promise<void>;
 } = {}) {
     const queries: Array<{ sql: string; timeout: number; values?: unknown[] }> = [];
     let released = false;
     let destroyed = false;
+    let socketDestroyed = false;
     const connection = {
+        connection: { stream: { destroy() { socketDestroyed = true; } } },
         async query(input: { sql: string; timeout: number }, values?: unknown[]) {
             queries.push({ ...input, values });
             const sql = input.sql;
+            await options.beforeQuery?.(sql);
             if (sql.startsWith('SET SESSION')) return [[], []];
             if (sql.startsWith('SELECT DATABASE()')) return [[{
                 databaseName: SETTINGS.database, currentUser: SETTINGS.expectedCurrentUser,
@@ -51,7 +55,8 @@ function fixture(options: {
             return { intents: options.intents ?? [intent()], digest: 'a'.repeat(64) };
         },
     } as DeletionJournalReader;
-    return { database, reader, queries, released: () => released, destroyed: () => destroyed };
+    return { database, reader, queries, released: () => released, destroyed: () => destroyed,
+        socketDestroyed: () => socketDestroyed };
 }
 
 test('detects a durable old intent whose account remains even without a controller error log', async () => {
@@ -109,4 +114,25 @@ test('journal limits and an unresolved connection acquisition respect the operat
     await assert.rejects(auditPendingDeletions(fake.database, fake.reader, { ...SETTINGS, maxIntents: 1 }), DeletionAuditError);
     const database = { getConnection: () => new Promise<PoolConnection>(() => {}) } as Pick<Pool, 'getConnection'>;
     await assert.rejects(auditPendingDeletions(database, fake.reader, { ...SETTINGS, maxDurationMs: 5 }), DeletionAuditError);
+});
+
+test('audit closes the acquired socket on query timeout or deadline and cannot continue after a late query', async () => {
+    for (const mode of ['query-timeout', 'deadline']) {
+        let completeQuery: (() => void) | undefined;
+        const fake = fixture({ beforeQuery: async sql => {
+            if (!sql.startsWith('SELECT account_uuid')) return;
+            if (mode === 'query-timeout') throw Object.assign(new Error('private driver timeout'), { code: 'PROTOCOL_SEQUENCE_TIMEOUT' });
+            await new Promise<void>(resolve => { completeQuery = resolve; });
+        } });
+        await assert.rejects(auditPendingDeletions(fake.database, fake.reader,
+            { ...SETTINGS, maxDurationMs: mode === 'deadline' ? 25 : SETTINGS.maxDurationMs }), DeletionAuditError);
+        if (mode === 'deadline') assert.ok(completeQuery, 'the deadline must interrupt an acquired query');
+        assert.ok(fake.destroyed());
+        assert.ok(fake.socketDestroyed());
+        assert.equal(fake.released(), false);
+        const queryCount = fake.queries.length;
+        completeQuery?.();
+        await new Promise<void>(resolve => setImmediate(resolve));
+        assert.equal(fake.queries.length, queryCount);
+    }
 });

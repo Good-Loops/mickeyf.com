@@ -113,8 +113,10 @@ coverage gap justifies additional checks.
   The [provider transaction checkpoint](#c3-provider-account-transaction-boundaries--2026-09-29)
   covers the initial session/provider review and a bounded repository fix. The
   [deletion and stalled-query checkpoint](#c3-deletion-and-stalled-query-cleanup--2026-09-29)
-  closes the next transaction/disposal slice. C3 remains open for recovery,
-  maintenance, remaining configuration and executable migration/grant tooling.
+  closes the next transaction/disposal slice. The
+  [recovery and maintenance checkpoint](#c3-recovery-and-maintenance-resource-ownership--2026-09-29)
+  records the subsequent resource review. C3 remains open for remaining
+  configuration/validation/contracts and executable migration/grant tooling.
 - [ ] **C4 — First-party Unity source.** Remaining authored runtime C#, Editor
   utilities, WebGL plugins and adjacent tests; authored UI code/styles only where
   not already covered by the accepted migration. Review events, coroutine/object
@@ -1788,8 +1790,53 @@ request deadline, a pool-acquisition deadline or coverage of every direct
 `pool.query`. Remaining recovery/maintenance resource ownership, configuration
 and executable migration/grant tooling stay within C3's existing scope.
 
-Next narrow task: recovery and maintenance resource ownership, carrying forward
-the accepted score transactions and these targeted timeout checks.
+The next checkpoint covers recovery and maintenance resource ownership,
+carrying forward the accepted score transactions and these targeted timeout checks.
+
+## C3 recovery and maintenance resource ownership — 2026-09-29
+
+Continued from `159c269a`. Source review covered deletion replay/audit and their
+entrypoints, the journal HTTP adapter, Apple revocation/maintenance ownership,
+receipt cleanup/dispatch and their existing failure-path tests. Retained the
+maintenance watchdogs, bounded shutdown, late-work guards and independent job
+dispatch: no additional abstraction or maintenance-worker change was justified.
+
+The concrete gap was in replay/audit connections outside the previously guarded
+runtime acquisitions. Their failure paths called mysql2's graceful `destroy()`
+without forcing the underlying socket closed. Reused `guardConnectionQueries`
+at replay's schema inspection, account lookup and absent-account token handling,
+and at audit acquisition. Audit's existing operation deadline now uses the same
+socket disposal. Replay also stops immediately after invalidating an uncertain
+begin/commit instead of attempting rollback on that session.
+
+Production changes are limited to `accounts/deletionReplay.ts` and
+`accounts/deletionAudit.ts`, with regressions in their existing test files.
+Preserved target/schema pins, approved-plan digests, UUID rechecks, per-account
+commits, journal timestamps, audit grace periods and sanitized audit errors.
+Ordinary active-transaction failure still rolls back; healthy sessions release.
+
+Three focused cases failed before the fix. The final two-file run passed all
+**25 tests**, including all three previously unguarded replay paths, audit query
+timeout/deadline disposal and suppression of a late audit continuation.
+TypeScript and the temporary-output production build passed. Commands from
+`backend` unless noted:
+
+```powershell
+node --test -r ts-node/register --test-name-pattern='partial failure|replay closes timed-out|audit closes the acquired' ts/accounts/deletionReplay.test.ts ts/accounts/deletionAudit.test.ts
+node --test --test-reporter=spec -r ts-node/register ts/accounts/deletionReplay.test.ts ts/accounts/deletionAudit.test.ts
+npm test
+$recoveryBuildPath = Join-Path $env:TEMP 'mickeyf-c3-recovery-build-20260929'
+npm run prod -- --output-path $recoveryBuildPath
+git diff --check # repository root
+```
+
+Carried forward the prior driver regression and shared-consumer checks; neither
+was rerun. The maintenance workers received source review only. No live database,
+cloud/provider request, full-suite run or deployment. Existing CLI shutdown and
+replay budget semantics remain unchanged; this is not a new process-wide deadline.
+
+Next narrow task: remaining C3 configuration/validation/contracts, then
+executable migration/grant tooling. C3 and final security closeout remain open.
 
 ## Inventory closeout
 

@@ -1,6 +1,7 @@
 import { performance } from 'node:perf_hooks';
 import type { Pool, PoolConnection } from 'mysql2/promise';
 import type { DeletionAuditSettings } from '../config/deletionAuditConfig';
+import { guardConnectionQueries } from '../db/queryTimeoutConnection';
 import { assertAccountIdentityEpoch } from '../migrations/accountIdentitySchema';
 import type { MigrationConnection } from '../migrations/leaderboardSchema';
 import { type DeletionJournalReader, parseDeletionIntent } from './deletionJournal';
@@ -44,7 +45,7 @@ export async function auditPendingDeletions(
     };
 
     const inspect = async (): Promise<DeletionAuditResult> => {
-        const acquired = await database.getConnection();
+        const acquired = guardConnectionQueries(await database.getConnection());
         if (expired) { acquired.release(); throw new DeletionAuditError(); }
         connection = acquired;
         const timed: MigrationConnection = {

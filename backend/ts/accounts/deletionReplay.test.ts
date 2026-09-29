@@ -32,6 +32,8 @@ type FakeOptions = {
     wrongTarget?: boolean;
     changeIdentityUnderLock?: boolean;
     failAt?: string;
+    failQuery?: RegExp;
+    failureCode?: string;
     rollbackFails?: boolean;
 };
 
@@ -41,13 +43,14 @@ function fakeReplay(options: FakeOptions = {}) {
     const queries: Array<{ sql: string; values?: unknown[]; timeout: number }> = [];
     let pendingDelete: number | undefined;
     let journalReads = 0;
-    const failure = new Error('synthetic replay failure');
+    const failure = Object.assign(new Error('synthetic replay failure'), { code: options.failureCode });
     const connection = {
+        connection: { stream: { destroy() { events.push('socket-destroy'); } } },
         async query(input: { sql: string; timeout: number }, values?: unknown[]) {
             const sql = input.sql.replace(/\s+/gu, ' ').trim();
             queries.push({ ...input, sql, values });
             events.push(sql);
-            if (options.failAt === sql) throw failure;
+            if (options.failAt === sql || options.failQuery?.test(sql)) throw failure;
             if (sql === 'ROLLBACK' && options.rollbackFails) throw new Error('synthetic rollback failure');
             if (sql.startsWith('SET SESSION')) return [[], []];
             if (sql.startsWith('SELECT DATABASE()')) return [[{
@@ -327,13 +330,30 @@ test('partial failure rolls back; uncertain transaction acknowledgements destroy
     for (const failAt of ['DELETE FROM game_submission_receipts WHERE user_id = ?', 'START TRANSACTION', 'COMMIT']) {
         const fake = fakeReplay({ failAt });
         const plan = await planDeletionReplay(fake.database, fake.reader, SETTINGS);
-        await assert.rejects(applyDeletionReplay(fake.database, fake.reader, SETTINGS, plan.sha256), /synthetic replay failure/u);
-        assert.ok(fake.events.includes('ROLLBACK'));
+        await assert.rejects(applyDeletionReplay(fake.database, fake.reader, SETTINGS, plan.sha256), error => error === fake.failure);
+        const uncertain = failAt === 'START TRANSACTION' || failAt === 'COMMIT';
+        assert.equal(fake.events.includes('ROLLBACK'), !uncertain);
         assert.equal(fake.accounts.get(42), FIRST_ID);
-        if (failAt !== 'DELETE FROM game_submission_receipts WHERE user_id = ?') assert.ok(fake.events.includes('destroy'));
+        if (uncertain) assert.deepEqual(fake.events.slice(fake.events.indexOf(failAt) + 1), ['destroy', 'socket-destroy']);
     }
     const fake = fakeReplay({ failAt: 'DELETE FROM game_submission_receipts WHERE user_id = ?', rollbackFails: true });
     const plan = await planDeletionReplay(fake.database, fake.reader, SETTINGS);
     await assert.rejects(applyDeletionReplay(fake.database, fake.reader, SETTINGS, plan.sha256), /transaction and its rollback/u);
     assert.ok(fake.events.includes('destroy'));
+});
+
+test('replay closes timed-out schema, lookup and absent-account token sessions without later SQL', async () => {
+    for (const failQuery of [/^SELECT TABLE_NAME AS tableName, ENGINE AS engine/, /^SELECT user_id AS userId/, /^UPDATE apple_provider_tokens/]) {
+        const options: FakeOptions = { failureCode: 'PROTOCOL_SEQUENCE_TIMEOUT' };
+        const fake = fakeReplay(options);
+        if (failQuery.source.includes('UPDATE')) fake.accounts.delete(42);
+        const plan = await planDeletionReplay(fake.database, fake.reader, SETTINGS);
+        fake.events.length = 0;
+        options.failQuery = failQuery;
+        await assert.rejects(applyDeletionReplay(fake.database, fake.reader, SETTINGS, plan.sha256));
+        const failedQuery = fake.events.findIndex(event => failQuery.test(event));
+        assert.ok(failedQuery >= 0);
+        assert.deepEqual(fake.events.slice(failedQuery + 1), ['destroy', 'socket-destroy']);
+        assert.equal(fake.events.some(event => event.startsWith('DELETE')), false);
+    }
 });
