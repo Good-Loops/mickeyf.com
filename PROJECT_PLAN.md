@@ -11,12 +11,12 @@ as the source of remaining review scope. **C1 and C2 are complete**: see the
 and [C2 web experience closeout](CLEAN_CODE_INVENTORY.md#c2-web-experience-orchestration-closeout--2026-09-23).
 C2 fixed animation startup recovery, p4-Vega lost-focus/restart failures, stale
 paused beats and pitch timing, and removed proven-unused utility code. **C3 is
-in progress**: the [recovery and maintenance checkpoint](CLEAN_CODE_INVENTORY.md#c3-recovery-and-maintenance-resource-ownership--2026-09-29)
-extends the existing connection guard to replay/audit and removes rollback after
-uncertain replay transaction acknowledgements; 25 affected-file tests, TypeScript
-and an isolated-output production build passed. Maintenance workers retained after
-source review. Next within C3: remaining configuration/validation/contracts, then
-executable migration/grant tooling. Four review groups and one closeout
+in progress**: the [configuration and contracts checkpoint](CLEAN_CODE_INVENTORY.md#c3-configuration-validation-and-contracts--2026-09-29)
+guards startup readiness socket disposal and aligns login/logout declarations
+with existing behavior. All 16 readiness cases have passing results; TypeScript
+and an isolated-output production build passed. Configuration and policies retained
+after source review. Next within C3: executable migration/grant tooling and its
+dedicated configuration. Four review groups and one closeout
 remain. Completed checks carry forward;
 KWS/provider activation, store publication and Git deletion approvals are separate.
 The dated implementation and release history below is retained as evidence.
@@ -2628,6 +2628,12 @@ Unchanged accepted behavior is not reopened by a later cleanup step.
   passed. Prior shared-consumer/driver checks carried forward without rerunning.
   No live database, cloud changes or deployment. See the
   [checkpoint](CLEAN_CODE_INVENTORY.md#c3-recovery-and-maintenance-resource-ownership--2026-09-29).
+- [x] C3 runtime configuration/validation/contracts (2026-09-29): retained current
+  configuration and request policy; reused the existing guard for startup readiness
+  disposal and corrected login/logout contract declarations. Sixteen readiness
+  cases have passing results (one targeted fixture rerun), plus TypeScript and
+  temporary-output production compilation. No broader test rerun or live changes.
+  See the [checkpoint](CLEAN_CODE_INVENTORY.md#c3-configuration-validation-and-contracts--2026-09-29).
 - [x] Shared hue-distance calculation (2026-09-21): interpolation and pitch-color
   transition settling now reuse the same existing-utility function. Preserved
   wraparound, signed half-turn ties, rounding and thresholds. Four focused tests,

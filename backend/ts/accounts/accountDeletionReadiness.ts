@@ -1,4 +1,5 @@
 import type { Pool, PoolConnection } from 'mysql2/promise';
+import { guardConnectionQueries } from '../db/queryTimeoutConnection';
 import { assertAccountIdentityEpoch, verifyAccountIdentitySchema } from '../migrations/accountIdentitySchema';
 import type { MigrationConnection } from '../migrations/leaderboardSchema';
 import { PROVIDER_IDENTITY_MIGRATION_VERSION, verifyOptionalProviderIdentitySchema,
@@ -98,7 +99,7 @@ async function verifyAccountStorageReadiness(
     let timer: ReturnType<typeof setTimeout> | undefined;
 
     const verify = async () => {
-        const acquired = await database.getConnection();
+        const acquired = guardConnectionQueries(await database.getConnection());
         // A queued pool acquisition can finish after startup has already failed.
         if (expired) {
             acquired.release();

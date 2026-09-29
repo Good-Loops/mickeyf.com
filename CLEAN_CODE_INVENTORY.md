@@ -115,8 +115,10 @@ coverage gap justifies additional checks.
   [deletion and stalled-query checkpoint](#c3-deletion-and-stalled-query-cleanup--2026-09-29)
   closes the next transaction/disposal slice. The
   [recovery and maintenance checkpoint](#c3-recovery-and-maintenance-resource-ownership--2026-09-29)
-  records the subsequent resource review. C3 remains open for remaining
-  configuration/validation/contracts and executable migration/grant tooling.
+  records the subsequent resource review. The
+  [configuration and contracts checkpoint](#c3-configuration-validation-and-contracts--2026-09-29)
+  closes the runtime configuration/validation/contracts review. C3 remains open
+  for executable migration/grant tooling and its dedicated configuration.
 - [ ] **C4 — First-party Unity source.** Remaining authored runtime C#, Editor
   utilities, WebGL plugins and adjacent tests; authored UI code/styles only where
   not already covered by the accepted migration. Review events, coroutine/object
@@ -1837,6 +1839,45 @@ replay budget semantics remain unchanged; this is not a new process-wide deadlin
 
 Next narrow task: remaining C3 configuration/validation/contracts, then
 executable migration/grant tooling. C3 and final security closeout remain open.
+
+## C3 configuration, validation and contracts — 2026-09-29
+
+Continued from `ff3892e9`. Kept this slice to source review, one existing guard
+integration and corrections to declarations that had drifted from their handlers.
+
+| Reviewed boundary | Disposition |
+| --- | --- |
+| Runtime/database configuration; provider, Apple token/runtime-secret/notification/maintenance/revocation and receipt-cleanup configuration | Retained exact activation flags, explicit identities, existing origin/credential policy, secret-response limits and deferred Apple credential loading. Recovery configuration review carries forward from the previous slice; dedicated migration/grant configuration belongs to the remaining tooling review. |
+| User/login validation, mutation-origin/JSON checks, request authentication/rate limits, session policy/cookies and leaderboard request boundaries | Retained existing password byte limits, server-owned identity, session lifetimes, score bounds and versioned wire shapes. No policy or validator rewrite justified. |
+| Router/public contracts and shared backend types, compared with login/logout/renewal handlers | Added the already-supported optional `remember_me` login field and existing `INVALID_REQUEST`/`LOGOUT_UNAVAILABLE` logout outcomes. Corrected cookie/revocation notes. HTTP behavior is unchanged. |
+| `accounts/accountDeletionReadiness` | Reused `guardConnectionQueries` at its single acquisition boundary so failed/stalled startup checks close their socket. Preserved the existing deadline, sanitized errors, schema pins and release of a late unused acquisition. |
+
+Changed application files: `accounts/accountDeletionReadiness.ts`,
+`routers/mainRouter.contract.ts` and `routers/authRouter.contract.ts`.
+Strengthened cleanup assertions in the existing readiness test file; added no
+new test suite or framework. Three targeted cases failed before guard integration.
+All **16 readiness cases** have passing results: 15 in the affected-file run and
+one targeted rerun after correcting a remaining stale cleanup expectation.
+No application code changed after that file run. Backend TypeScript and production
+compilation passed once; prior driver, router and configuration checks were not
+repeated. Exact commands from `backend` unless noted:
+
+```powershell
+node --test --test-reporter=spec -r ts-node/register --test-name-pattern='session startup failures|query failures destroy|whole readiness operation' ts/accounts/accountDeletionReadiness.test.ts
+node --test --test-reporter=spec -r ts-node/register ts/accounts/accountDeletionReadiness.test.ts
+node --test --test-reporter=spec -r ts-node/register --test-name-pattern='provider startup rejects missing/malformed attempt storage' ts/accounts/accountDeletionReadiness.test.ts
+npm test
+$contractBuildPath = Join-Path $env:TEMP 'mickeyf-c3-contract-build-20260929'
+npm run prod -- --output-path $contractBuildPath
+git diff --check # repository root
+```
+
+No live database/provider/cloud calls, dependency changes, activation or deployment.
+Build output stayed outside the running server's `dist`. This is source-level
+startup disposal and contract accuracy, not a new global deadline or a production
+security certification. C3 remains open only for its executable migration/grant
+tooling review, including the associated configuration; final C7 closeout remains
+separate.
 
 ## Inventory closeout
 

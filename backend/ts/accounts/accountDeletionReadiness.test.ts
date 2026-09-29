@@ -19,6 +19,7 @@ function fakeDatabase(options: { epoch?: string; badColumn?: boolean; invalidCou
     const queries: Array<{ sql: string; timeout: number; values?: unknown[] }> = [];
     const cleanup: string[] = [];
     const connection = {
+        connection: { stream: { destroy() { cleanup.push('socket-destroy'); } } },
         async query(query: { sql: string; timeout: number }, values?: unknown[]) {
             queries.push({ ...query, values });
             if (options.queryError) throw options.queryError;
@@ -155,7 +156,7 @@ test('provider startup rejects missing/malformed attempt storage and sanitizes d
         assert.doesNotMatch(String(error), /secret/);
         return true;
     });
-    assert.deepEqual(failed.cleanup, ['destroy']);
+    assert.deepEqual(failed.cleanup, ['destroy', 'socket-destroy']);
 });
 
 test('deletion readiness rejects missing recorded provider storage and malformed present storage', async () => {
@@ -232,13 +233,13 @@ test('deletion readiness rejects a recorded renewal migration without session st
 });
 
 test('session startup failures are sanitized and destroy a failed query connection', async () => {
-    const fake = fakeDatabase({ queryError: new Error('driver secret') });
+    const fake = fakeDatabase({ queryError: Object.assign(new Error('driver secret'), { code: 'PROTOCOL_SEQUENCE_TIMEOUT' }) });
     await assert.rejects(verifyAccountSessionReadiness(fake.database), error => {
         assert.ok(error instanceof AccountSessionReadinessError);
         assert.doesNotMatch(String(error), /secret/);
         return true;
     });
-    assert.deepEqual(fake.cleanup, ['destroy']);
+    assert.deepEqual(fake.cleanup, ['destroy', 'socket-destroy']);
 });
 
 test('query failures destroy the connection and do not leak the driver error', async () => {
@@ -249,7 +250,7 @@ test('query failures destroy the connection and do not leak the driver error', a
         assert.equal(Object.prototype.hasOwnProperty.call(error, 'cause'), false);
         return true;
     });
-    assert.deepEqual(cleanup, ['destroy']);
+    assert.deepEqual(cleanup, ['destroy', 'socket-destroy']);
 });
 
 test('the whole readiness operation has a deadline and destroys a stuck query session', async context => {
@@ -261,7 +262,7 @@ test('the whole readiness operation has a deadline and destroys a stuck query se
     assert.equal(queries.length, 1);
     context.mock.timers.tick(10_000);
     await rejected;
-    assert.deepEqual(cleanup, ['destroy']);
+    assert.deepEqual(cleanup, ['destroy', 'socket-destroy']);
 });
 
 test('a pool acquisition completing after the deadline is released without queries', async context => {

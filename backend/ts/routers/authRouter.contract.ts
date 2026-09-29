@@ -11,7 +11,7 @@
  * Invariants:
  * - Method + path pairs are stable; changes are breaking.
  * - `verify-token` is safe/idempotent; it does not mutate server state.
- * - `logout` clears the `session` cookie (if present) and returns `{ loggedOut: true }`.
+ * - Successful `logout` revokes the current device's session before clearing web/native cookies.
  */
 
 import type { RouteContract } from './routeContract';
@@ -20,7 +20,8 @@ import type { RouteContract } from './routeContract';
  * GET /verify-token request.
  *
  * Notes:
- * - This endpoint consumes auth context from a signed cookie (`session`) or `Authorization: Bearer <token>`.
+ * - This endpoint consumes auth context from a signed web/native cookie (`__session`/`session`)
+ *   or `Authorization: Bearer <token>`, then checks live session storage.
  * - No request body is used.
  *
  * @category Backend — DTOs
@@ -51,6 +52,8 @@ export type LogoutRequest = Record<string, never>;
  */
 export type LogoutResponse = {
     loggedOut: true;
+} | {
+    error: 'INVALID_REQUEST' | 'LOGOUT_UNAVAILABLE';
 };
 
 /** Explicit same-origin cookie renewal; ordinary sessions are never upgraded. */
