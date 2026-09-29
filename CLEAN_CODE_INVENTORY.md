@@ -129,7 +129,10 @@ coverage gap justifies additional checks.
   The [run-state source checkpoint](#c4-run-state-source-review--2026-09-29)
   records the first reviewed boundary; the
   [projectile impact checkpoint](#c4-projectile-impact-and-damage-boundaries--2026-09-29)
-  fixes two reproduced repeated-hit defects. Remaining C4 source is still open.
+  fixes two reproduced repeated-hit defects. The
+  [attack lifetime checkpoint](#c4-boss-attack-lifetimes-and-player-input--2026-09-29)
+  covers boss/player source and fixes rune cancellation and missed-shot cleanup.
+  Remaining C4 source is still open.
 - [ ] **C5 — Native shell source/configuration.** Project-owned Android/iOS entry
   points, custom plugins and Capacitor configuration; assess session/callback/
   lifecycle ownership and identify template remnants before removing anything.
@@ -2007,6 +2010,58 @@ remaining player movement/input, including whether arena collision boundaries
 fully contain Stingers, whose current prefab has no timed/offscreen fallback.
 No projectile-range or lifetime tuning was changed without that caller context.
 C5–C7 remain unchanged.
+
+## C4 boss attack lifetimes and player input — 2026-09-29
+
+Continued from `5447ffb6`. Reviewed the three boss controllers, movement and
+animation-event adapters, Bee shooting, Cyborg death/teleport/transition helpers,
+Kraken missile/rune attacks and effects, and the remaining player motor,
+animation/flash/dust/trail source. Traced player pause gating and death/defeat
+disable paths as caller context. No player-input or movement rewrite was justified;
+accepted pause/touch/death behavior is carried forward rather than replayed.
+
+Two bounded lifetime repairs:
+
+- `Boss3RuneAttack`: the controller owns the executing coroutine, while the
+  attack component owned only a resettable cancellation flag and one warning
+  list. A cancelled cast could resume after a new attack cleared that flag;
+  repeated casts also left the previous warnings alive, and component disable
+  removed warnings without invalidating the external coroutine. Each execution
+  now has a version, and replacement, cancellation, pause and disable invalidate
+  earlier work. A stale continuation exits without deleting newer warnings or
+  spawning explosions. Current two-/three-anchor casts retain their behavior.
+- `StingerProjectile`: source inspection of Level 1's solid tilemap confirmed
+  side/floor containment with an open upper edge. The Bee prefab fires at 12
+  world units/second, and missed Stingers had neither timed nor offscreen cleanup.
+  Initialization now schedules destruction after five scaled seconds: 60 world
+  units at that speed, beyond the arena span. This bounds missed-shot lifetime
+  while retaining existing impact handling and gameplay pause semantics.
+
+`Boss3RuneAttackTests` creates a temporary scene and advances the warning-wait
+iterator explicitly to exercise cancellation/replacement ordering. It checks
+the resulting warning/explosion objects, including preservation of the new cast.
+This is deterministic continuation coverage, not an animation-event timing or
+complete battle replay. The Stinger fixture verifies missed-shot expiry and
+retains the preceding single-hit regression; its time scale is restored afterward.
+
+Before the fix, all four new regressions failed: cancelled and disabled casts
+continued, replacing two warnings with three left five objects, and a missed
+Stinger survived the lifetime limit. The existing single-hit case passed.
+After the fix, **5/5 focused PlayMode tests passed**, with zero failures/skips.
+Unity 6000.3.8f1 compiled the changes through its batch test runner; no live
+Editor was connected. Exact commands from the repository root:
+
+```powershell
+unity test 'C:\Users\User\Desktop\Pastas\Code\mickeyf.com\unity\three-bosses' --mode PlayMode --filter 'ThreeBosses.Tests.Boss3RuneAttackTests;ThreeBosses.Tests.ProjectileImpactTests.StingerDamagesPlayerOnceWhenTwoCollidersOverlap;ThreeBosses.Tests.ProjectileImpactTests.StingerExpiresWithoutCollisionAfterFiveActiveSeconds' --editor-version 6000.3.8f1 --output 'C:\Users\User\AppData\Local\Temp\three-bosses-attack-lifetime-before.xml' --timeout 300 --format json --no-banner -- -nographics -automated -logFile 'C:\Users\User\AppData\Local\Temp\three-bosses-attack-lifetime-before.log'
+unity test 'C:\Users\User\Desktop\Pastas\Code\mickeyf.com\unity\three-bosses' --mode PlayMode --filter 'ThreeBosses.Tests.Boss3RuneAttackTests;ThreeBosses.Tests.ProjectileImpactTests.StingerDamagesPlayerOnceWhenTwoCollidersOverlap;ThreeBosses.Tests.ProjectileImpactTests.StingerExpiresWithoutCollisionAfterFiveActiveSeconds' --editor-version 6000.3.8f1 --output 'C:\Users\User\AppData\Local\Temp\three-bosses-attack-lifetime-after.xml' --timeout 300 --format json --no-banner -- -nographics -automated -logFile 'C:\Users\User\AppData\Local\Temp\three-bosses-attack-lifetime-after.log'
+git diff --check
+```
+
+No scene/prefab/GUID changes, WebGL rebuild, broad Unity suite, browser/device
+replay or deployment. Test reports/logs remain outside Git. C4 remains open for
+audio/environment and remaining presentation helpers, authored Editor utilities,
+WebGL plugins and uncovered UI source. Next narrow review: audio/environment
+and remaining shared presentation lifetimes. C5–C7 are unchanged.
 
 ## Inventory closeout
 

@@ -20,8 +20,12 @@ retained the reviewed run/timing/submission and scene-transition boundaries.
 The [projectile impact checkpoint](CLEAN_CODE_INVENTORY.md#c4-projectile-impact-and-damage-boundaries--2026-09-29)
 fixes repeated damage from Stinger and non-attaching Phase Anchor hits: two
 physics regressions failed before the fix; all three focused PlayMode tests
-pass afterward, including normal anchor expiry. No WebGL rebuild or broad suite
-was run. Next: boss attack/effect lifetimes and remaining player movement/input.
+passed afterward, including normal anchor expiry. The
+[attack lifetime checkpoint](CLEAN_CODE_INVENTORY.md#c4-boss-attack-lifetimes-and-player-input--2026-09-29)
+fixes stale Kraken rune continuations and unbounded missed Stingers; four new
+regressions failed before the fix and all five affected cases pass afterward.
+Remaining player input/movement source required no change. No WebGL rebuild or
+broad suite was run. Next: audio/environment and shared presentation lifetimes.
 Three review groups and one closeout remain. Completed checks carry forward;
 KWS/provider activation, store publication and Git deletion approvals are separate.
 The dated implementation and release history below is retained as evidence.

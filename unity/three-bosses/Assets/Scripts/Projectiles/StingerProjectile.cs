@@ -5,6 +5,7 @@ public sealed class StingerProjectile : MonoBehaviour, IProjectile
 {
     [SerializeField] private int damage = 10;
     [SerializeField] private GameObject impactPrefab;
+    [SerializeField, Min(0.1f)] private float lifeSeconds = 5f;
 
     private Rigidbody2D rb;
     private DamageSource source;
@@ -42,6 +43,9 @@ public sealed class StingerProjectile : MonoBehaviour, IProjectile
         if (!spriteFacesRight) angle += 180f;
 
         transform.rotation = Quaternion.Euler(0f, 0f, angle);
+
+        // The arena has an open top, so missed shots cannot rely on collisions for cleanup.
+        Destroy(gameObject, lifeSeconds);
     }
 
     private void OnTriggerEnter2D(Collider2D other)

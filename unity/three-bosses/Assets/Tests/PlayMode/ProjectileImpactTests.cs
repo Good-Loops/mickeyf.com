@@ -12,10 +12,13 @@ namespace ThreeBosses.Tests
     {
         private Scene physicsScene;
         private GameObject projectile;
+        private float originalTimeScale;
 
         [SetUp]
         public void SetUp()
         {
+            originalTimeScale = Time.timeScale;
+            Time.timeScale = 1f;
             physicsScene = SceneManager.CreateScene(
                 nameof(ProjectileImpactTests),
                 new CreateSceneParameters(LocalPhysicsMode.Physics2D));
@@ -24,6 +27,7 @@ namespace ThreeBosses.Tests
         [UnityTearDown]
         public IEnumerator TearDown()
         {
+            Time.timeScale = originalTimeScale;
             if (physicsScene.IsValid() && physicsScene.isLoaded)
                 yield return SceneManager.UnloadSceneAsync(physicsScene);
         }
@@ -44,6 +48,21 @@ namespace ThreeBosses.Tests
                 "One stinger must deal its 10 damage once, even with two overlapping player colliders.");
             yield return null;
             Assert.That(projectile == null, Is.True, "The stinger must be consumed by the hit.");
+        }
+
+        [UnityTest]
+        public IEnumerator StingerExpiresWithoutCollisionAfterFiveActiveSeconds()
+        {
+            Component stinger = CreateProjectile("StingerProjectile", isTrigger: true);
+            Initialize(stinger);
+
+            Time.timeScale = 0f;
+            yield return new WaitForSecondsRealtime(0.05f);
+            Assert.That(projectile != null, Is.True, "Pausing must not consume the projectile lifetime.");
+
+            Time.timeScale = 1f;
+            yield return new WaitForSeconds(5.1f);
+            Assert.That(projectile == null, Is.True, "A missed stinger must not remain alive indefinitely.");
         }
 
         [UnityTest]
