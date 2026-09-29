@@ -24,8 +24,13 @@ passed afterward, including normal anchor expiry. The
 [attack lifetime checkpoint](CLEAN_CODE_INVENTORY.md#c4-boss-attack-lifetimes-and-player-input--2026-09-29)
 fixes stale Kraken rune continuations and unbounded missed Stingers; four new
 regressions failed before the fix and all five affected cases pass afterward.
-Remaining player input/movement source required no change. No WebGL rebuild or
-broad suite was run. Next: audio/environment and shared presentation lifetimes.
+Remaining player input/movement source required no change. The
+[audio and presentation checkpoint](CLEAN_CODE_INVENTORY.md#c4-audio-environment-and-shared-presentation--2026-09-29)
+reviews the audio/environment and shared effect helpers, and separates health-bar
+damage tint from pulse opacity. All three focused regressions failed before the
+repair and pass afterward. No WebGL rebuild or broad suite was run.
+Next: authored Editor utilities and the WebGL plugin boundary; uncovered UI
+source/styles also remain in C4.
 Three review groups and one closeout remain. Completed checks carry forward;
 KWS/provider activation, store publication and Git deletion approvals are separate.
 The dated implementation and release history below is retained as evidence.

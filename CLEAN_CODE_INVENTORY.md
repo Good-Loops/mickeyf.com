@@ -132,6 +132,9 @@ coverage gap justifies additional checks.
   fixes two reproduced repeated-hit defects. The
   [attack lifetime checkpoint](#c4-boss-attack-lifetimes-and-player-input--2026-09-29)
   covers boss/player source and fixes rune cancellation and missed-shot cleanup.
+  The [audio and presentation checkpoint](#c4-audio-environment-and-shared-presentation--2026-09-29)
+  reviews the remaining audio/environment helpers and fixes competing health-bar
+  colour writes without changing the authored assets.
   Remaining C4 source is still open.
 - [ ] **C5 — Native shell source/configuration.** Project-owned Android/iOS entry
   points, custom plugins and Capacitor configuration; assess session/callback/
@@ -2062,6 +2065,51 @@ replay or deployment. Test reports/logs remain outside Git. C4 remains open for
 audio/environment and remaining presentation helpers, authored Editor utilities,
 WebGL plugins and uncovered UI source. Next narrow review: audio/environment
 and remaining shared presentation lifetimes. C5–C7 are unchanged.
+
+## C4 audio, environment and shared presentation — 2026-09-29
+
+Continued from `371141d0`. Reviewed these remaining authored helpers and their
+immediate callers/serialized references:
+
+| Boundary | Source reviewed and disposition |
+| --- | --- |
+| Audio | `GameAudioSettings`, `SfxPlayer`, `IImpactSfxReceiver`: retained the saved global preference, static reset, lazy persistent one-shot source and existing listener pause ownership. Main-menu preference subscriptions have matching cleanup. No audio change justified. |
+| Environment | `IndustrialMalfunctionLight`, `LabLightPulse`, `BossAmbientGlowPulse`: retained the existing scaled-time light/pulse behavior and authored tuning. No environment change justified. |
+| Shared effects | `BossRemains`, `AutoDestroyAfterSeconds`, `HitFlash2D`, `DamageFlashOnHealthChange`: traced remains initialization, bounded expiry and health subscription cleanup. No additional repair justified by the current callers. |
+| Health bars and fades | `HealthBarView`, `HealthBarBinder`, `HealthBarDamageFlash`, `HealthBarLowHealthPulse`, `HealthBarSheenSweep`, `ScreenFade`, `SceneFadeInOnStart`: retained binding, sheen thresholds and unscaled fades; repaired overlapping fill-colour ownership as described below. The boss sheen mask is supplied by overrides in all three gameplay scenes, so its empty base-prefab reference does not justify an asset change. |
+
+Both player and boss health-bar prefabs assign the same fill image to the damage
+flash and low-health pulse. Both components previously wrote its entire colour:
+the pulse reset RGB even at full health, erasing an active damage tint, while the
+flash blended/restored alpha, overwriting low-health opacity. The pulse now owns
+only alpha and the flash owns only RGB on the fill. Frame flashing, thresholds,
+durations and serialized fields retain their existing behavior. No new component
+or coordinating abstraction was needed.
+
+Added `HealthBarEffectsTests` with isolated temporary UI objects using the same
+shared-image arrangement. Two cases exercise a pulse update after damage at
+normal/low health; the third checks flashing after a pulse update, actual coroutine
+completion and opacity restoration after healing. The pulse is held at a fixed
+phase to avoid timing-dependent assertions. This is effect-interaction coverage,
+not a visual screenshot or full gameplay replay.
+
+All **3 new cases failed before the repair**: the pulse erased the damage tint
+in both health states, and flashing changed the low-health alpha from 0.60 to
+approximately 0.95. Afterward **3/3 passed**, with zero failures/skips. Unity
+6000.3.8f1 compiled the source through the batch PlayMode runner; no live Editor
+was connected. Exact commands from the repository root:
+
+```powershell
+unity test 'C:\Users\User\Desktop\Pastas\Code\mickeyf.com\unity\three-bosses' --mode PlayMode --filter 'ThreeBosses.Tests.HealthBarEffectsTests' --editor-version 6000.3.8f1 --output 'C:\Users\User\AppData\Local\Temp\three-bosses-health-effects-before.xml' --timeout 300 --format json --no-banner -- -nographics -automated -logFile 'C:\Users\User\AppData\Local\Temp\three-bosses-health-effects-before.log'
+unity test 'C:\Users\User\Desktop\Pastas\Code\mickeyf.com\unity\three-bosses' --mode PlayMode --filter 'ThreeBosses.Tests.HealthBarEffectsTests' --editor-version 6000.3.8f1 --output 'C:\Users\User\AppData\Local\Temp\three-bosses-health-effects-after.xml' --timeout 300 --format json --no-banner -- -nographics -automated -logFile 'C:\Users\User\AppData\Local\Temp\three-bosses-health-effects-after.log'
+git diff --check
+```
+
+No scene/prefab or existing GUID changes, broad suite, WebGL rebuild, browser/device
+replay or deployment. Test reports/logs remain outside Git. C4 remains open for
+authored Editor utilities, WebGL plugins and uncovered UI source/styles. Next
+narrow review: the Editor utilities and WebGL plugin boundary, carrying forward
+existing submission/scroll and UI acceptance evidence. C5–C7 are unchanged.
 
 ## Inventory closeout
 
