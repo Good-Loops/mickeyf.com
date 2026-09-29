@@ -1,10 +1,11 @@
 # Cloud SQL session migration review — 2026-09-29
 
-Status: review prepared; no database or grant changes applied. The owner chose
+Status: read-only maintenance preflight passed; migration execution awaits approval.
+No schema or application grant changes applied. The owner chose
 to keep the Cloud SQL development workflow. Do not replace it with local MySQL.
 Baseline source: `8271af27` on `improvement/clean-code-sweep`.
 
-## Diagnosis and verified evidence
+## Initial runtime-only diagnosis
 
 `node dist/server.min.js` from `backend` reproduces exit code 1 with
 `Backend startup failed`. A separate read-only call to `verifyDatabaseConnection`
@@ -23,7 +24,8 @@ passes; `verifyAccountSessionReadiness` fails. The compiler is not the failure.
   The earlier initial diagnosis of absent tables must be read with that limit.
 - Reading migration `checksum` was denied with `ER_COLUMNACCESS_DENIED_ERROR`.
   The six required migration connection/account environment variables are not
-  configured in the inspected environment. No full maintenance plan was run.
+  configured in the inspected environment. No full maintenance plan had been run
+  at this initial checkpoint; the approved follow-up below resolves that limit.
 - The loaded local configuration has provider authentication and provider signup
   disabled. No environment values, credentials or feature gates were changed.
 
@@ -83,7 +85,7 @@ separate rollout/grant review.
    for 0009–0012. Inspect hidden tables with maintenance schema visibility.
 3. Confirm a usable recovery point, current serving application compatibility,
    and a short migration window with competing migration/DDL activity excluded.
-   Those cloud/recovery conditions were not inspected in this diagnosis. The
+   The cloud follow-up below records backup and serving-revision evidence. The
    runner's advisory lock does not exclude arbitrary application or admin work.
 4. Review the fresh plan and the additive session grant against the actual target.
    Obtain explicit execution approval. Only then supply the runner's exact
@@ -119,5 +121,65 @@ re-login requirements in [SESSION_AUTHENTICATION.md](SESSION_AUTHENTICATION.md).
 Database restore remains a separate operation with the established deletion
 replay and session-invalidation requirements.
 
-Next required step: maintenance-account read-only preflight. Until it passes and
-execution is approved, the local backend remains stopped by its readiness gate.
+## Access and cloud preflight follow-up
+
+The next read-only pass confirmed the instance is RUNNABLE, connector use is
+required, automated backups and binary logging are enabled, eight backups are
+retained, and transaction logs are retained for seven days. Latest reported
+successful backup: `1790625600000`, completed `2026-09-28T21:29:13.284Z`.
+This is backup metadata, not a fresh restore test. No pending Cloud SQL operation
+was reported. The incompatible `main-push-mickeyf-com` build trigger is disabled.
+
+Cloud Run serves `mickeyf-org-localhost-dbb80d4f` at 100% traffic and reports it
+Ready/Active. Its source label is `dbb80d4f701da734ea971cb25b5c02d1e5b8d6d8`;
+that source contains no references to the three proposed tables. This supports
+the additive compatibility assessment without deploying or switching traffic.
+
+Cloud SQL user inventory contains the runtime, operator, root, receipt-cleanup
+and deletion-audit accounts; the former temporary maintenance user is absent.
+Secret inventory exposes no dedicated migration password. Repository records
+describe `michel_operator` as a restricted TablePlus DML identity, not a migration
+administrator; it was not elevated or used to work around missing access.
+
+The owner approved `session_preflight_20260929` restricted to the authenticated
+proxy host pattern for read-only preflight, followed by immediate deletion.
+The password remained only in process memory. This approval did not authorize
+migration or application grant changes.
+Cloud SQL's default administrative role for newly created built-in MySQL users
+is documented in [Google's user-management guide](https://docs.cloud.google.com/sql/docs/mysql/create-manage-users).
+
+The initial Google CLI certificate failure was also resolved locally: its custom
+CA file contained the previous Norton root. That public certificate file was
+backed up and refreshed from the current Windows trusted root. TLS verification
+remains enabled; successful authenticated cloud reads verified the repair.
+No secrets, certificate material or machine-local configuration entered Git.
+
+## Approved read-only result — 2026-09-29 20:35 UTC
+
+The existing `planMigrations` implementation ran under its advisory lock through
+a query adapter accepting only SELECT and the runner's three session settings.
+The connection had pinned database, complete account and server UUID checks,
+per-query timeouts, an overall deadline and forced connection cleanup.
+
+- Applied: exactly 0001–0008. All stored checksums and existing schema
+  postconditions passed the current planner's checks.
+- Pending: 0009–0018. The execution proposal remains only 0009–0012; the
+  planner listing later migrations is not authorization to apply them.
+- Recoverable: none. Full maintenance visibility confirmed the three proposed
+  tables are absent, resolving the runtime account's visibility limitation.
+- No schema, history, grants, account data, scores or session rows were changed.
+  Temporary user creation/deletion were the only Cloud SQL access mutations.
+- Cleanup verified the user absent in Cloud SQL and rejected a fresh SQL login
+  with its former credentials. No maintenance password or access token was saved.
+
+The credential-free helper is outside Git at
+`%TEMP%/mickeyf-session-preflight-20260929.cjs`. Commands run:
+`node --check` on that helper, then `node` on it with the current trusted public
+CA configured for that process. No unit suite, build or deployment was needed.
+
+The concrete next approval is: recreate a temporary maintenance identity, apply
+only the four migration commands and additive session grant above, verify the
+result with a fresh runtime connection, delete the maintenance identity and
+restart the existing VS Code backend runner. Keep provider flags, application
+credentials, serving revisions and other runtime grants unchanged. Until that
+execution is approved and complete, local startup remains blocked by readiness.

@@ -61,15 +61,18 @@ This notice grants no new exception and is not a fresh dependency audit.
 
 ## Local Cloud SQL startup mismatch — 2026-09-29
 
-**Blocked local startup; migration review prepared.** Live read-only inspection
+**Blocked local startup; migration preflight passed, execution pending.** Initial inspection
 confirmed the pinned Cloud SQL server, migration records only through 0008 and
 no runtime session-table grants. This branch requires recorded 0011/0012.
-Restricted metadata visibility prevents proving physical table absence; stored
-checksum access is denied to the runtime account. The owner retains Cloud SQL.
+Runtime metadata/checksum restrictions were resolved by the explicitly approved
+temporary maintenance preflight: all eight recorded checksums/schema checks
+passed, all three target tables are absent, and no partial migration is recoverable.
+The temporary user was deleted and a fresh login denied. The owner retains Cloud SQL.
 See the [review](backend/CLOUD_SQL_SESSION_MIGRATION_REVIEW.md) for 0009–0012,
 the proposed additive session grant and maintenance/rollback prerequisites.
-Nothing was applied or deployed. Serving production compatibility and a recovery
-point still require inspection before execution approval; this does not close C7.
+No schema/application grant was changed or deployed. Backup metadata, current
+serving-source compatibility and disabled legacy trigger were inspected; no
+restore test was repeated. Execution approval remains pending; this does not close C7.
 
 ## Local Three Bosses UI checkpoint — 2026-09-22
 

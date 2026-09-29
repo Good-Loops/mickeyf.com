@@ -26,9 +26,10 @@ Local backend interruption (2026-09-29): Cloud SQL connectivity succeeds, but th
 runtime sees history only through 0008 and has no session-table grants; this
 branch requires recorded 0011/0012. The owner chose to retain Cloud SQL. The
 [migration review](backend/CLOUD_SQL_SESSION_MIGRATION_REVIEW.md) proposes
-0009–0012 and additive session grants, pending maintenance-account preflight and
-explicit execution approval. Runtime metadata cannot prove table absence or
-verify stored checksums. No database changes have been applied.
+0009–0012 and additive session grants. The approved maintenance preflight passed:
+eight recorded checksums/schema checks match, the target tables are absent, and
+no partial migration needs recovery. The temporary user was deleted and a fresh
+login denied. Schema/grant execution still awaits approval; nothing was applied.
 
 Current release state (published 2026-09-09 local): see the
 [cumulative release/security ledger](RELEASE_READINESS.md). It supersedes stale
