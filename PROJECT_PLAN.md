@@ -11,11 +11,11 @@ as the source of remaining review scope. **C1 and C2 are complete**: see the
 and [C2 web experience closeout](CLEAN_CODE_INVENTORY.md#c2-web-experience-orchestration-closeout--2026-09-23).
 C2 fixed animation startup recovery, p4-Vega lost-focus/restart failures, stale
 paused beats and pitch timing, and removed proven-unused utility code. **C3 is
-in progress**: the [provider transaction checkpoint](CLEAN_CODE_INVENTORY.md#c3-provider-account-transaction-boundaries--2026-09-29)
-adds bounded transaction-control queries and discards uncertain connections;
-104 focused tests, TypeScript and an isolated-output production build passed.
-Next within C3: account-deletion and queued-query timeout cleanup, then the
-remaining backend internals. Four review groups and one closeout
+in progress**: the [deletion and stalled-query checkpoint](CLEAN_CODE_INVENTORY.md#c3-deletion-and-stalled-query-cleanup--2026-09-29)
+adds deletion transaction deadlines and discards timed-out borrowed account/auth
+connections before cleanup can stall; 218 focused tests, TypeScript and an
+isolated-output production build passed. Next within C3: recovery and maintenance
+resource ownership, then the remaining backend internals. Four review groups and one closeout
 remain. Completed checks carry forward;
 KWS/provider activation, store publication and Git deletion approvals are separate.
 The dated implementation and release history below is retained as evidence.
@@ -2609,6 +2609,17 @@ Unchanged accepted behavior is not reopened by a later cleanup step.
   deletion transaction controls and queued-data-query timeout disposal; no live
   account, SQL, provider activation, schema, dependency or deployment changed.
   See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#c3-provider-account-transaction-boundaries--2026-09-29).
+- [x] C3 deletion and stalled-query slice (2026-09-29): added ten-second deletion
+  transaction deadlines and direct disposal after uncertain begin/commit. Guarded
+  borrowed account/auth connections now discard protocol timeouts before errors
+  are sanitized and reject further cleanup SQL. A real mysql2 client against a
+  scripted loopback peer reproduced stalled rollback before the fix and verified
+  socket closure and pool replacement afterward. All 218 focused tests,
+  TypeScript, temporary-output production build and whitespace checks passed.
+  Deletion-journal, session/credential and score ordering contracts are preserved.
+  No live MySQL integration or deployment; no total request deadline is claimed.
+  C3 remains open for recovery/maintenance and remaining backend tooling.
+  See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#c3-deletion-and-stalled-query-cleanup--2026-09-29).
 - [x] Shared hue-distance calculation (2026-09-21): interpolation and pitch-color
   transition settling now reuse the same existing-utility function. Preserved
   wraparound, signed half-turn ties, rounding and thresholds. Four focused tests,

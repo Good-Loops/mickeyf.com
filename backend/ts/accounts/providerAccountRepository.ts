@@ -6,6 +6,7 @@ import { withUserSubmissionLock } from '../leaderboards/userSubmissionLock';
 import { isSessionId, type SessionProof } from '../security/sessionPolicy';
 import { validateLoginRequest } from '../security/userRequestValidation';
 import { assertAccountId } from './deletionJournal';
+import { guardConnectionQueries } from '../db/queryTimeoutConnection';
 
 export type ProviderAccount = Readonly<{ userId: number; userName: string; accountId: string }>;
 export type AccountLinkTarget = Readonly<{ userId: number; accountId: string }>;
@@ -139,7 +140,7 @@ export async function createProviderAccount(
     const email = identity.email.trim().toLowerCase();
     const verifiedIdentity = { ...identity };
     try {
-        const connection = await database.getConnection();
+        const connection = guardConnectionQueries(await database.getConnection());
         let reusable = true;
         let phase: 'begin' | 'active' | 'commit' = 'begin';
         try {

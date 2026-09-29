@@ -22,6 +22,7 @@ type FixtureOptions = {
     unlock?: unknown;
     live?: boolean;
     fail?: string;
+    failureCode?: string;
     rollbackFails?: boolean;
     affectedRows?: number;
 };
@@ -29,7 +30,8 @@ type FixtureOptions = {
 function fixture(options: FixtureOptions = {}) {
     const events: string[] = [];
     const queries: Array<{ sql: string; timeout: number; values?: unknown[] }> = [];
-    const sensitiveFailure = new Error('sensitive driver credentials, identity and raw statement');
+    const sensitiveFailure = Object.assign(new Error('sensitive driver credentials, identity and raw statement'),
+        { code: options.failureCode });
     function step(name: string): void {
         events.push(name);
         if (options.fail === name) throw sensitiveFailure;
@@ -71,6 +73,14 @@ function fixture(options: FixtureOptions = {}) {
 function consume(database: Pick<Pool, 'getConnection'>, attempt = loginAttempt) {
     return consumeProviderAttempt(database, attempt.stateHash, attempt.bindingHash, attempt.clientKey, attempt.action);
 }
+
+test('timed-out attempt queries discard before rollback or named-lock release can queue', async () => {
+    for (const fail of ['count', 'select']) {
+        const f = fixture({ fail, failureCode: 'PROTOCOL_SEQUENCE_TIMEOUT' });
+        await assert.rejects(fail === 'count' ? createProviderAttempt(f.database, loginAttempt) : consume(f.database), sanitized);
+        assert.deepEqual(f.events.slice(f.events.indexOf(fail) + 1), ['destroy']);
+    }
+});
 
 function sanitized(error: unknown): boolean {
     assert(error instanceof ProviderAttemptUnavailableError);

@@ -165,14 +165,14 @@ async function deleteReauthenticatedAccount(
             async ({ connection, invalidateConnection }) => {
                 let phase: 'begin' | 'active' | 'commit' = 'begin';
                 try {
-                    await connection.beginTransaction();
+                    await connection.query({ sql: 'START TRANSACTION', timeout: DATABASE_QUERY_TIMEOUT_MS });
                     phase = 'active';
 
                     if (expectedSession !== undefined && !await readLiveSession(
                         connection, userId, expectedSession.accountId, expectedSession.sessionId
                     )) {
                         phase = 'commit';
-                        await connection.commit();
+                        await connection.query({ sql: 'COMMIT', timeout: DATABASE_QUERY_TIMEOUT_MS });
                         return 'not-found';
                     }
 
@@ -181,15 +181,18 @@ async function deleteReauthenticatedAccount(
                         recorded = true;
                     }, beforeDeletion);
                     phase = 'commit';
-                    await connection.commit();
+                    await connection.query({ sql: 'COMMIT', timeout: DATABASE_QUERY_TIMEOUT_MS });
                     return result;
                 } catch (error) {
                     // A failed begin/commit may have reached MySQL without its
                     // acknowledgement reaching us. Never reuse that session or
                     // report deletion as successful on an uncertain commit.
-                    if (phase !== 'active') invalidateConnection();
+                    if (phase !== 'active') {
+                        invalidateConnection();
+                        throw error;
+                    }
                     try {
-                        await connection.rollback();
+                        await connection.query({ sql: 'ROLLBACK', timeout: DATABASE_QUERY_TIMEOUT_MS });
                     } catch (rollbackError) {
                         invalidateConnection();
                         throw new AccountDeletionRollbackError(error, rollbackError);

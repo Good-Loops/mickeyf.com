@@ -21,6 +21,7 @@ type Call = { sql: string; values: unknown[]; connection: number };
 function fixture(options: {
     accounts?: Account[]; fail?: (call: Call) => boolean; count?: unknown; now?: number;
     lockResult?: number | null; onCall?: (call: Call) => void | Promise<void>;
+    failureCode?: string;
 } = {}) {
     const calls: Call[] = [];
     const watermarks = new Map<string, { revokedAt: number; expiresAt: number }>();
@@ -35,7 +36,8 @@ function fixture(options: {
                 const sql = query.sql;
                 const call = { sql, values, connection: id }; calls.push(call);
                 await options.onCall?.(call);
-                if (options.fail?.(call)) throw new Error('private raw JWS, subject, token and SQL details');
+                if (options.fail?.(call)) throw Object.assign(new Error('private raw JWS, subject, token and SQL details'),
+                    { code: options.failureCode });
                 if (sql.includes('GET_LOCK')) return [[{ lockResult: options.lockResult === undefined ? 1 : options.lockResult }], []];
                 if (sql.includes('RELEASE_LOCK')) return [[{ lockResult: 1 }], []];
                 if (sql.startsWith('SELECT TIMESTAMPDIFF')) return [[{ now }], []];
@@ -149,6 +151,15 @@ test('notifications first commit bounded watermark then revoke only older Apple-
     assert.equal(f.calls.some(call => /DELETE FROM (users|account_provider_identities|apple_provider_tokens|game_)/u.test(call.sql)), false);
     assert.deepEqual(f.destroyed, []);
     assert.deepEqual(f.released, [1, 2]);
+});
+
+test('a sanitized watermark cleanup timeout discards its capacity-lock connection without queuing more SQL', async () => {
+    const f = fixture({ failureCode: 'PROTOCOL_SEQUENCE_TIMEOUT',
+        fail: call => call.sql.startsWith('DELETE FROM apple_auth_revocations') });
+    await assert.rejects(applyAppleNotification(f.database, notification()), AppleSessionRevocationUnavailableError);
+    assert.match(f.calls.at(-1)!.sql, /^DELETE FROM apple_auth_revocations/);
+    assert.deepEqual(f.destroyed, [1]);
+    assert.deepEqual(f.released, []);
 });
 
 test('unknown-subject event before signup or recreation blocks still-fresh pre-event proof', async () => {

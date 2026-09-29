@@ -45,6 +45,8 @@ function createConcurrentDatabase() {
                         return [[{ lockResult: 1 }], []];
                     }
                     assert.ok(lockHeld, 'every account/score query must hold the same user lock');
+                    if (sql === 'START TRANSACTION') { transactionActive = true; return [[], []]; }
+                    if (sql === 'COMMIT') { transactionActive = false; return [[], []]; }
                     if (sql.includes('RELEASE_LOCK')) {
                         lockHeld = false;
                         releaseLock?.();

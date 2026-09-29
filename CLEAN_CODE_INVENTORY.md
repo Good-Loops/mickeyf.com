@@ -111,9 +111,10 @@ coverage gap justifies additional checks.
   do not rewrite accepted score transactions, applied SQL history or policy.
   Local fixtures only unless a separate, concrete integration need is approved.
   The [provider transaction checkpoint](#c3-provider-account-transaction-boundaries--2026-09-29)
-  covers the initial session/provider review and a bounded repository fix. C3
-  remains open for account deletion/recovery, maintenance, remaining configuration
-  and executable migration/grant tooling, including the timeout follow-up below.
+  covers the initial session/provider review and a bounded repository fix. The
+  [deletion and stalled-query checkpoint](#c3-deletion-and-stalled-query-cleanup--2026-09-29)
+  closes the next transaction/disposal slice. C3 remains open for recovery,
+  maintenance, remaining configuration and executable migration/grant tooling.
 - [ ] **C4 — First-party Unity source.** Remaining authored runtime C#, Editor
   utilities, WebGL plugins and adjacent tests; authored UI code/styles only where
   not already covered by the accepted migration. Review events, coroutine/object
@@ -1710,14 +1711,85 @@ real accounts, SQL, provider calls or cloud changes. No deployment or full-suite
 acceptance is claimed. The fixtures prove supplied deadlines and cleanup command
 ordering, not a measured network fault against MySQL.
 
-Remaining C3 failure-path follow-up: `accountDeletionRepository` still uses
-unbounded transaction convenience calls and rollback after uncertain boundaries.
+Follow-up identified at this checkpoint (addressed by the next checkpoint):
+`accountDeletionRepository` used unbounded transaction convenience calls and
+rollback after uncertain boundaries.
 Also, the installed mysql2 query timeout reports an error without removing its
 active protocol command; a rollback queued behind a stalled data query may not
-start its own timer. Review timeout propagation through sanitized repository/
-credential callbacks and disposal before claiming a request-wide bound. These
-pre-existing availability concerns are recorded in the cumulative ledger, not
-treated as accepted risk or solved by this transaction-control change.
+start its own timer. These pre-existing availability concerns were recorded in
+the cumulative ledger rather than treated as accepted risk or solved by the
+provider transaction-control change alone.
+
+## C3 deletion and stalled-query cleanup — 2026-09-29
+
+Continued from synchronized commit `d9f65c2f` with local fixtures only. This slice
+closes C3-A2 for the reviewed borrowed account/auth connections; C3 and the final
+security closeout remain open.
+
+Two related failure paths needed correction. Account deletion used unbounded
+transaction convenience methods and attempted rollback after uncertain
+begin/commit. Separately, mysql2 3.24.3 rejects a timed-out query with
+`PROTOCOL_SEQUENCE_TIMEOUT` while leaving its protocol command active. Cleanup
+queued behind that command may never start its own timeout. Checking only the
+outer repository error is insufficient: session and credential helpers sanitize
+driver errors before passing them outward.
+
+Deletion now sends `START TRANSACTION`, `COMMIT` and `ROLLBACK` with the existing
+ten-second query timeout. An uncertain begin/commit discards the connection
+directly. The new `db/queryTimeoutConnection` guard observes timeout errors at
+the borrowed connection boundary, before sanitization:
+
+```diff
+- const connection = await database.getConnection();
++ const connection = guardConnectionQueries(await database.getConnection());
+```
+
+The guard discards a timed-out session immediately, prevents further commands
+and makes release/disposal idempotent. mysql2's `destroy()` ends its stream
+gracefully; the guard also destroys the underlying socket so a silent peer
+cannot keep it open, following the existing maintenance watchdog pattern.
+Teardown failures do not replace the original query error. Ordinary duplicate-key
+and server lock-wait errors still permit normal rollback. Healthy queries retain
+their original receiver, results and physical connection.
+
+| Changed boundary | Purpose and preserved contract |
+| --- | --- |
+| `accounts/accountDeletionRepository` | Bound transaction controls and avoid SQL after uncertain boundaries. Preserve the independent deletion journal, account/session rechecks, credential handling and success only after commit. Failure before durable intent remains unavailable; failure after intent remains deletion pending. |
+| `leaderboards/userSubmissionLock` | Guard shared borrowed connections before account/session/provider/score/replay callbacks run. Retain existing named-lock ownership and score transaction ordering. |
+| `accounts/providerAccountRepository`, `auth/providerAttemptRepository`, `auth/appleSessionRevocation` | Guard standalone signup, one-use attempt and watermark-capacity acquisitions as well. Preserve sanitized public errors and existing auth policies. |
+| Adjacent repository tests, `accountDeletionScoreRace.test.ts`, new `db/queryTimeoutConnection.test.ts`, `backend/package.json` | Cover failure propagation and shared consumers, adapt the race fixture to bounded SQL controls, and register the new driver regression in the unit command. No dependency change. |
+
+Before the fix, four focused regressions reproduced missing deletion deadlines,
+rollback after uncertain boundaries, stalled cleanup and failure to discard a
+protocol timeout. The driver regression uses the installed mysql2 client and a
+scripted loopback MySQL protocol peer: the peer deliberately never answers one
+query. Before the fix, rollback remained stalled beyond 250 ms. Afterward it
+rejects promptly, the socket is closed, no rollback reaches the peer, and a
+pool limited to one connection supplies a different usable session.
+
+**218 focused tests passed**, with no failures, skips or cancellations. Backend
+TypeScript, production webpack compilation and whitespace checks passed. Exact
+commands from `backend` unless noted:
+
+```powershell
+node --test -r ts-node/register --test-name-pattern="stalled query|ordinary SQL errors|deletion transaction controls|uncertain deletion" ts/db/queryTimeoutConnection.test.ts ts/accounts/accountDeletionRepository.test.ts
+node --test --test-concurrency=4 --test-reporter=spec -r ts-node/register ts/db/queryTimeoutConnection.test.ts ts/accounts/accountDeletionRepository.test.ts ts/accounts/accountDeletionScoreRace.test.ts ts/accounts/providerAccountRepository.test.ts ts/accounts/deletionReplay.test.ts ts/auth/accountSessionRepository.test.ts ts/auth/providerAttemptRepository.test.ts ts/auth/appleSessionRevocation.test.ts ts/auth/providerSession.test.ts ts/leaderboards/userSubmissionLock.test.ts ts/leaderboards/p4VegaScoreRepository.test.ts ts/leaderboards/threeBossesRunRepository.test.ts ts/leaderboards/submissionReceiptCleanup.test.ts ts/routers/authRouter.security.test.ts ts/routers/providerAuthRouter.test.ts ts/routers/appleNotificationRouter.test.ts
+npm test
+$deletionBuildPath = Join-Path $env:TEMP 'mickeyf-c3-deletion-build-20260929'
+npm run prod -- --output-path $deletionBuildPath
+git diff --check # repository root
+```
+
+The loopback peer is not a SQL engine or a live database integration run. No
+real accounts, provider calls, schema, cloud state or deployment changed; build
+output stayed outside the running development server's `dist`. This establishes
+timeout disposal for the four guarded acquisition boundaries, not a total
+request deadline, a pool-acquisition deadline or coverage of every direct
+`pool.query`. Remaining recovery/maintenance resource ownership, configuration
+and executable migration/grant tooling stay within C3's existing scope.
+
+Next narrow task: recovery and maintenance resource ownership, carrying forward
+the accepted score transactions and these targeted timeout checks.
 
 ## Inventory closeout
 

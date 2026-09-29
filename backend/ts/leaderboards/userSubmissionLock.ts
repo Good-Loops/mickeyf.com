@@ -11,6 +11,7 @@ import {
     PoolConnection,
     RowDataPacket,
 } from 'mysql2/promise';
+import { guardConnectionQueries } from '../db/queryTimeoutConnection';
 
 type UserSubmissionLockDatabase = Pick<Pool, 'getConnection'>;
 
@@ -57,7 +58,7 @@ export async function withUserSubmissionLock<T>(
         throw new TypeError('User submission locks require a valid user ID.');
     }
 
-    const connection = await database.getConnection();
+    const connection = guardConnectionQueries(await database.getConnection());
     let connectionReusable = true;
 
     try {

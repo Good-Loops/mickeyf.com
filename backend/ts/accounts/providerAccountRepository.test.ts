@@ -22,11 +22,12 @@ function fixture(options: {
     sessionMissing?: boolean; passwordHash?: string | null;
     returningAccount?: ProviderAccount | null; lock?: () => Promise<void>;
     fail?: 'begin' | 'session' | 'insert' | 'commit' | 'unlock'; rollbackFails?: boolean;
+    failure?: Error;
 } = {}) {
     const events: string[] = [];
     const queries: Array<{ sql: string; values?: unknown[]; timeout: number }> = [];
     const transactions: Array<{ sql: string; timeout?: number }> = [];
-    const failure = new Error('sensitive database credentials/provider subject must not escape');
+    const failure = options.failure ?? new Error('sensitive database credentials/provider subject must not escape');
     function step(name: string) { events.push(name); if (options.fail === name) throw failure; }
     async function transaction(sql: string, timeout?: number) {
         transactions.push({ sql, timeout });
@@ -35,6 +36,7 @@ function fixture(options: {
         return [[]];
     }
     const connection = {
+        threadId: 7,
         beginTransaction: () => transaction('START TRANSACTION'),
         commit: () => transaction('COMMIT'),
         rollback: () => transaction('ROLLBACK'),
@@ -190,6 +192,7 @@ test('malformed identities and target UUIDs fail before database use', async () 
 
 function signupFixture(options: {
     existing?: boolean; duplicate?: 'user' | 'identity'; fail?: string; rollbackFails?: boolean;
+    failure?: Error;
     commit?: () => Promise<void>;
 } = {}) {
     const events: string[] = [];
@@ -197,7 +200,7 @@ function signupFixture(options: {
     const transactions: Array<{ sql: string; timeout?: number }> = [];
     const step = (name: string) => {
         events.push(name);
-        if (options.fail === name) throw new Error('sensitive email, identity and connection details');
+        if (options.fail === name) throw options.failure ?? new Error('sensitive email, identity and connection details');
     };
     const account = { userId: 7, userName: 'new-player', accountId };
     async function transaction(sql: string, timeout?: number) {
@@ -208,6 +211,7 @@ function signupFixture(options: {
         return [[]];
     }
     const connection = {
+        threadId: 7,
         beginTransaction: () => transaction('START TRANSACTION'),
         commit: () => transaction('COMMIT'),
         rollback: () => transaction('ROLLBACK'),
@@ -277,6 +281,22 @@ test('a failed duplicate-signup rollback is attempted once before discarding the
     const f = signupFixture({ duplicate: 'identity', rollbackFails: true });
     await assert.rejects(createProviderAccount(f.database, signupIdentity, 'new-player'), ProviderAccountUnavailableError);
     assert.deepEqual(f.events.slice(f.events.indexOf('rollback')), ['rollback', 'destroy']);
+});
+
+test('sanitized lookup, live-session and credential callback timeouts cannot return a stalled provider connection', async () => {
+    const failure = Object.assign(new Error('private SQL timeout'), { code: 'PROTOCOL_SEQUENCE_TIMEOUT' });
+    const signup = signupFixture({ fail: 'lookup', failure });
+    await assert.rejects(createProviderAccount(signup.database, signupIdentity, 'new-player'), ProviderAccountUnavailableError);
+    const link = fixture({ fail: 'session', failure });
+    await assert.rejects(linkProviderAccount(link.database, target, password, identity, sessionProof), ProviderAccountUnavailableError);
+    const credential = fixture({ fail: 'insert', failure });
+    await assert.rejects(persistProviderCredential(credential.database, target, identity, async connection => {
+        try { await connection.query({ sql: 'INSERT fixture credential', timeout: 10_000 }); }
+        catch { throw new Error('Sanitized credential storage failure'); }
+    }), ProviderAccountUnavailableError);
+    for (const [f, failedStep] of [[signup, 'lookup'], [link, 'session'], [credential, 'insert']] as const) {
+        assert.deepEqual(f.events.slice(f.events.indexOf(failedStep) + 1), ['destroy']);
+    }
 });
 
 for (const provider of ['google', 'apple'] as const) {
@@ -358,7 +378,7 @@ test('signup writes credentials on the same connection after identity creation a
         const f = signupFixture();
         const creation = createProviderAccount(f.database, { ...signupIdentity, provider: 'apple' }, 'new-player',
             async (connection, createdAccount) => {
-                assert.equal(connection, f.connection);
+                assert.equal(connection.threadId, f.connection.threadId);
                 assert.deepEqual(createdAccount, f.account);
                 assert.deepEqual(f.events, ['connect', 'begin', 'lookup', 'user', 'account', 'identity']);
                 f.events.push('credential');
@@ -389,7 +409,7 @@ test('linking saves credentials only after exact ownership and live-session proo
             const f = fixture({ duplicate });
             const linking = linkProviderAccount(f.database, target, password, appleIdentity, sessionProof,
                 async (connection, linkedAccount) => {
-                    assert.equal(connection, f.connection);
+                    assert.equal(connection.threadId, f.connection.threadId);
                     assert.deepEqual(linkedAccount, target);
                     assert.deepEqual(f.events, ['lock', 'begin', 'password', 'session', 'insert', ...(duplicate ? ['existing'] : [])]);
                     f.events.push('credential');
@@ -417,7 +437,7 @@ test('linking saves credentials only after exact ownership and live-session proo
 test('returning-login credentials are saved only under the deletion lock for the same incarnation and exact subject', async () => {
     const f = fixture();
     await persistProviderCredential(f.database, target, { ...identity, provider: 'apple' }, async (connection, matched) => {
-        assert.equal(connection, f.connection);
+        assert.equal(connection.threadId, f.connection.threadId);
         assert.deepEqual(matched, target);
         assert.deepEqual(f.events, ['lock', 'begin', 'account', 'lookup']);
         f.events.push('credential');

@@ -1,5 +1,6 @@
 import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { isAccountId } from '../accounts/deletionJournal';
+import { guardConnectionQueries } from '../db/queryTimeoutConnection';
 
 export type ProviderAttemptAction = 'login' | 'link' | 'signup' | 'delete';
 export type ProviderAttempt = Readonly<{
@@ -54,7 +55,7 @@ function assertBinding(stateHash: Buffer, bindingHash: Buffer, clientKey: string
 
 async function withConnection<T>(database: AttemptDatabase, operation: (context: ConnectionContext) => Promise<T>): Promise<T> {
     try {
-        const context: ConnectionContext = { connection: await database.getConnection(), reusable: true };
+        const context: ConnectionContext = { connection: guardConnectionQueries(await database.getConnection()), reusable: true };
         try { return await operation(context); }
         finally {
             if (context.reusable) context.connection.release();

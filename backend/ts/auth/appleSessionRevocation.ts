@@ -3,6 +3,7 @@ import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql
 import { assertAccountId, isAccountId } from '../accounts/deletionJournal';
 import { withUserSubmissionLock } from '../leaderboards/userSubmissionLock';
 import type { VerifiedAppleNotification } from './appleNotificationVerifier';
+import { guardConnectionQueries } from '../db/queryTimeoutConnection';
 
 export type AppleSessionProof = Readonly<{ clientId: string; subject: string; issuedAt: number }>;
 type RevocationDatabase = Pick<Pool, 'query' | 'getConnection'>;
@@ -148,7 +149,7 @@ async function withCapacityLock(context: ConnectionContext, operation: () => Pro
 }
 
 async function storeWatermark(database: RevocationDatabase, hash: Buffer, eventTime: number): Promise<void> {
-    const context: ConnectionContext = { connection: await database.getConnection(), reusable: true };
+    const context: ConnectionContext = { connection: guardConnectionQueries(await database.getConnection()), reusable: true };
     try {
         await withCapacityLock(context, () => transaction(context, async () => {
             const { connection } = context;

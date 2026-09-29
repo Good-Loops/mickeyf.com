@@ -19,6 +19,7 @@ type FakeOptions = {
     userExists?: boolean;
     deletedAccounts?: number;
     failAt?: string;
+    failureCode?: string;
     rollbackFails?: boolean;
     acquire?: () => Promise<void>;
     commit?: () => Promise<void>;
@@ -33,16 +34,24 @@ type FakeOptions = {
 function fakeDatabase(options: FakeOptions = {}) {
     const events: string[] = [];
     const queries: Array<{ sql: string; values?: unknown[]; timeout?: number }> = [];
-    const failure = new Error('database operation failed');
+    const transactions: Array<{ sql: string; timeout?: number }> = [];
+    const failure = Object.assign(new Error('database operation failed'), { code: options.failureCode });
     const rollbackFailure = new Error('rollback failed');
     function record(event: string) {
         events.push(event);
         if (options.failAt === event) throw failure;
     }
     const connection = {
-        async beginTransaction() { record('begin'); },
+        async beginTransaction() { transactions.push({ sql: 'START TRANSACTION' }); record('begin'); },
         async query(query: { sql: string; timeout?: number }, values?: unknown[]) {
             const sql = query.sql.replace(/\s+/g, ' ').trim();
+            if (['START TRANSACTION', 'COMMIT', 'ROLLBACK'].includes(sql)) {
+                transactions.push({ sql, timeout: query.timeout });
+                record(sql === 'START TRANSACTION' ? 'begin' : sql === 'COMMIT' ? 'commit' : 'rollback');
+                if (sql === 'COMMIT') await options.commit?.();
+                if (sql === 'ROLLBACK' && options.rollbackFails) throw rollbackFailure;
+                return [[], []];
+            }
             queries.push({ ...query, sql, values });
             if (sql.includes('GET_LOCK')) {
                 record('acquire');
@@ -79,10 +88,12 @@ function fakeDatabase(options: FakeOptions = {}) {
                 ? options.deletedAccounts ?? 1 : 2 }, []];
         },
         async commit() {
+            transactions.push({ sql: 'COMMIT' });
             record('commit');
             await options.commit?.();
         },
         async rollback() {
+            transactions.push({ sql: 'ROLLBACK' });
             record('rollback');
             if (options.rollbackFails) throw rollbackFailure;
         },
@@ -102,8 +113,34 @@ function fakeDatabase(options: FakeOptions = {}) {
             await options.journal?.();
         },
     };
-    return { database, events, queries, failure, rollbackFailure, journal };
+    return { database, events, queries, transactions, failure, rollbackFailure, journal };
 }
+
+test('deletion transaction controls are bounded on success, rejection and rollback', async () => {
+    for (const options of [{}, { sessionExists: false }, { failAt: 'journal' }]) {
+        const fake = fakeDatabase(options);
+        const deletion = deleteAccount(fake.database, 42, PASSWORD, fake.journal, SESSION);
+        if (options.failAt) await assert.rejects(deletion);
+        else assert.equal(await deletion, options.sessionExists === false ? 'not-found' : 'deleted');
+        assert.deepEqual(fake.transactions, [
+            { sql: 'START TRANSACTION', timeout: 10_000 },
+            { sql: options.failAt ? 'ROLLBACK' : 'COMMIT', timeout: 10_000 },
+        ]);
+    }
+});
+
+test('sanitized session and Apple-storage timeouts discard before cleanup and preserve deletion-pending status', async () => {
+    for (const failAt of ['read-session', 'mark-apple-tokens']) {
+        const fake = fakeDatabase({ failAt, failureCode: 'PROTOCOL_SEQUENCE_TIMEOUT' });
+        await assert.rejects(deleteAccount(fake.database, 42, PASSWORD, fake.journal, SESSION), error => {
+            assert.equal(error instanceof AccountDeletionPendingError, failAt === 'mark-apple-tokens');
+            return true;
+        });
+        assert.deepEqual(fake.events.slice(fake.events.indexOf(failAt) + 1), ['destroy']);
+        assert.equal(fake.events.includes('journal'), failAt === 'mark-apple-tokens');
+        assert.equal(fake.events.includes('DELETE FROM users WHERE user_id = ?'), false);
+    }
+});
 
 test('reauthenticates and deletes only this user and all their scores/receipts under the shared lock', async () => {
     const fake = fakeDatabase();
@@ -253,7 +290,7 @@ test('does not commit if the parent deletion count is unexpected', async () => {
     assert.equal(fake.events.includes('commit'), false);
 });
 
-test('destroys uncertain begin and commit sessions even when rollback acknowledges', async () => {
+test('destroys uncertain deletion begin and commit without queuing rollback', async () => {
     for (const failAt of ['begin', 'commit']) {
         const fake = fakeDatabase({ failAt });
         await assert.rejects(deleteAccount(fake.database, 42, PASSWORD, fake.journal), (error: unknown) => {
@@ -261,7 +298,7 @@ test('destroys uncertain begin and commit sessions even when rollback acknowledg
             assert.equal(error instanceof AccountDeletionPendingError, failAt === 'commit');
             return true;
         });
-        assert.deepEqual(fake.events.slice(-2), ['rollback', 'destroy']);
+        assert.deepEqual(fake.events.slice(fake.events.indexOf(failAt) + 1), ['destroy']);
         assert.equal(fake.events.includes('release'), false);
     }
 });
