@@ -110,6 +110,10 @@ coverage gap justifies additional checks.
   existing responsibilities, failure/resource ownership and explicit dependencies;
   do not rewrite accepted score transactions, applied SQL history or policy.
   Local fixtures only unless a separate, concrete integration need is approved.
+  The [provider transaction checkpoint](#c3-provider-account-transaction-boundaries--2026-09-29)
+  covers the initial session/provider review and a bounded repository fix. C3
+  remains open for account deletion/recovery, maintenance, remaining configuration
+  and executable migration/grant tooling, including the timeout follow-up below.
 - [ ] **C4 — First-party Unity source.** Remaining authored runtime C#, Editor
   utilities, WebGL plugins and adjacent tests; authored UI code/styles only where
   not already covered by the accepted migration. Review events, coroutine/object
@@ -1642,6 +1646,78 @@ git diff --check # repository root
 Next: C3's remaining backend internals, using local fixtures and carrying forward
 the accepted session/score/controller/lifecycle boundaries rather than replaying
 production login or submissions.
+
+## C3 provider account transaction boundaries — 2026-09-29
+
+Resumed from C2 commit `a8289d0b` after checking the previous conversation and
+the clean, synchronized checkout. This completes one C3 slice, not the full
+backend group or the final security closeout.
+
+| Source boundary inspected | Disposition |
+| --- | --- |
+| `auth/accountSessionRepository`, `providerSession`, `providerAuthContext`, `providerAuthFlow`, `providerAttemptRepository`, `providerIdentity`; `security/sessionPolicy`, `sessionCookie`, `requestAuthentication`, `activeAccount` | Retained session/cookie issuance after commit, one-use attempts, account/session binding, renewal grace and existing policy. No abstraction or policy rewrite. The broader queued-query timeout concern below remains open. |
+| `auth/providerTokenVerifier`, `appleNotificationVerifier`, `appleTokenClient`, `appleSessionRevocation`; `accounts/appleTokenRepository` | Reviewed key-cache deadlines, fixed provider endpoints, bounded response reading, token/notification verification, revocation ordering and encrypted credential boundaries. No change justified in these files; no live provider or cryptographic certification claim. |
+| `accounts/providerAccountRepository`, adjacent unit and integration tests; `passwordAccountRepository`, `db/dbConfig` and the shared user-lock owner as supporting context | Fixed transaction-control deadlines and failure cleanup for provider creation, linking and credential persistence. Preserved password persistence and lock ordering. |
+
+The provider repository's ordinary SQL queries already supplied a ten-second
+timeout, but the driver's transaction convenience methods did not. The installed
+driver implements those methods as bare SQL calls, and the pool has no default
+query timeout. A stalled transaction-control response could therefore keep its
+connection and, for linking/credential writes, the user lock occupied.
+
+Actual before/after, using the repository's existing `QUERY_TIMEOUT_MS`:
+
+```diff
+- await connection.commit();
++ await connection.query({ sql: 'COMMIT', timeout: QUERY_TIMEOUT_MS });
+```
+
+The same change applies to `START TRANSACTION` and `ROLLBACK`. Previously, each
+catch also attempted rollback after an uncertain begin/commit; now it discards
+that connection directly. An ordinary active-transaction failure still attempts
+rollback, while a failed rollback discards the connection. Failed duplicate-signup
+rollback is no longer attempted twice. This makes resource ownership explicit
+without introducing a shared transaction framework or changing account policy.
+
+Preserved: atomic user/identity/credential writes, duplicate-user and duplicate-
+identity results, exact provider subjects, password/session rechecks, account UUID
+binding, sanitized public errors and success only after acknowledged commit.
+The trade-off is that a transaction-control command taking over ten seconds now
+fails unavailable. A lost commit acknowledgement still does not prove rollback;
+the account may exist and the caller must begin a fresh authentication attempt.
+
+Three new fixture regressions failed before the fix: missing deadline options,
+rollback queued after uncertain begin/commit, and repeated failed rollback.
+All 26 repository cases then passed. The combined repository/session/flow/router
+set passed **104 tests**, backend TypeScript passed, production webpack compiled
+successfully, and `git diff --check` passed. Commands from `backend` unless noted:
+
+```powershell
+node --test -r ts-node/register --test-name-pattern="transaction boundaries|uncertain provider|failed duplicate-signup" ts/accounts/providerAccountRepository.test.ts
+node --test -r ts-node/register ts/accounts/providerAccountRepository.test.ts
+node --test -r ts-node/register ts/accounts/providerAccountRepository.test.ts ts/auth/providerSession.test.ts ts/auth/providerAuthFlow.test.ts ts/routers/providerAuthRouter.test.ts
+npm test
+$providerBuildPath = Join-Path $env:TEMP 'mickeyf-c3-provider-build-20260929'
+npm run prod -- --output-path $providerBuildPath
+git diff --check # repository root
+```
+
+Build output is outside the checkout; the running development server's `dist`
+was not replaced. The existing lost-commit integration fixture now intercepts
+the equivalent SQL `COMMIT` call; it typechecks but the disposable MySQL suite
+was **not run**. Tests here use fake persistence and local HTTP adapters, not
+real accounts, SQL, provider calls or cloud changes. No deployment or full-suite
+acceptance is claimed. The fixtures prove supplied deadlines and cleanup command
+ordering, not a measured network fault against MySQL.
+
+Remaining C3 failure-path follow-up: `accountDeletionRepository` still uses
+unbounded transaction convenience calls and rollback after uncertain boundaries.
+Also, the installed mysql2 query timeout reports an error without removing its
+active protocol command; a rollback queued behind a stalled data query may not
+start its own timer. Review timeout propagation through sanitized repository/
+credential callbacks and disposal before claiming a request-wide bound. These
+pre-existing availability concerns are recorded in the cumulative ledger, not
+treated as accepted risk or solved by this transaction-control change.
 
 ## Inventory closeout
 

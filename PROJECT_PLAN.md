@@ -4,14 +4,18 @@ This tracked roadmap records the active continuation of the broader migration
 and game plan. Detailed implementation decisions remain subject to review at
 each phase boundary.
 
-**Current Clean Code continuation (2026-09-23):** use the
+**Current Clean Code continuation (2026-09-29):** use the
 [finite C1–C7 checklist](CLEAN_CODE_INVENTORY.md#remaining-clean-code-checklist--2026-09-23)
 as the source of remaining review scope. **C1 and C2 are complete**: see the
 [C1 shared UI closeout](CLEAN_CODE_INVENTORY.md#c1-general-and-shared-ui-closeout--2026-09-23)
 and [C2 web experience closeout](CLEAN_CODE_INVENTORY.md#c2-web-experience-orchestration-closeout--2026-09-23).
 C2 fixed animation startup recovery, p4-Vega lost-focus/restart failures, stale
-paused beats and pitch timing, and removed proven-unused utility code. Next:
-**C3**, the remaining backend internals. Four review groups and one closeout
+paused beats and pitch timing, and removed proven-unused utility code. **C3 is
+in progress**: the [provider transaction checkpoint](CLEAN_CODE_INVENTORY.md#c3-provider-account-transaction-boundaries--2026-09-29)
+adds bounded transaction-control queries and discards uncertain connections;
+104 focused tests, TypeScript and an isolated-output production build passed.
+Next within C3: account-deletion and queued-query timeout cleanup, then the
+remaining backend internals. Four review groups and one closeout
 remain. Completed checks carry forward;
 KWS/provider activation, store publication and Git deletion approvals are separate.
 The dated implementation and release history below is retained as evidence.
@@ -2595,6 +2599,16 @@ Unchanged accepted behavior is not reopened by a later cleanup step.
   acceptance evidence. No application code, tests/builds or live state changed.
   The canonical task checkboxes are in the inventory, not duplicated here.
   **Next: C1 — remaining web shell/forms/shared UI review.**
+- [x] C3 provider-account transaction slice (2026-09-29): source-reviewed the
+  session/provider boundaries and added ten-second deadlines to provider signup,
+  linking and credential transaction controls. Uncertain begin/commit now discard
+  the connection immediately; failed rollback is not retried. Three regressions
+  failed before the fix; 104 focused tests, backend TypeScript, production build
+  to a temporary directory and whitespace checks passed. The adjusted MySQL
+  integration fixture typechecks but was not executed. C3 remains open, including
+  deletion transaction controls and queued-data-query timeout disposal; no live
+  account, SQL, provider activation, schema, dependency or deployment changed.
+  See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#c3-provider-account-transaction-boundaries--2026-09-29).
 - [x] Shared hue-distance calculation (2026-09-21): interpolation and pitch-color
   transition settling now reuse the same existing-utility function. Preserved
   wraparound, signed half-turn ties, rounding and thresholds. Four focused tests,

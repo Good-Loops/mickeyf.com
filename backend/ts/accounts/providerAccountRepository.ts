@@ -143,7 +143,7 @@ export async function createProviderAccount(
         let reusable = true;
         let phase: 'begin' | 'active' | 'commit' = 'begin';
         try {
-            await connection.beginTransaction();
+            await connection.query({ sql: 'START TRANSACTION', timeout: QUERY_TIMEOUT_MS });
             phase = 'active';
             let result: ProviderAccountCreationResult;
             if (await findProviderAccount(connection, verifiedIdentity)) result = { created: false, reason: 'ALREADY_LINKED' };
@@ -178,16 +178,21 @@ export async function createProviderAccount(
             }
             // A losing identity insert must roll back its newly inserted user, never leave an orphan.
             if (!result.created) {
-                try { await connection.rollback(); } catch (error) { reusable = false; throw error; }
+                try { await connection.query({ sql: 'ROLLBACK', timeout: QUERY_TIMEOUT_MS }); }
+                catch (error) { reusable = false; throw error; }
                 return result;
             }
             await writeCredential?.(connection, result.account);
             phase = 'commit';
-            await connection.commit();
+            await connection.query({ sql: 'COMMIT', timeout: QUERY_TIMEOUT_MS });
             return result;
         } catch (error) {
+            // An uncertain boundary must be discarded without queuing another command.
             if (phase !== 'active') reusable = false;
-            try { await connection.rollback(); } catch { reusable = false; }
+            else if (reusable) {
+                try { await connection.query({ sql: 'ROLLBACK', timeout: QUERY_TIMEOUT_MS }); }
+                catch { reusable = false; }
+            }
             throw error;
         } finally {
             if (reusable) connection.release();
@@ -256,7 +261,7 @@ export async function linkProviderAccount(
         return await withUserSubmissionLock(database, accountTarget.userId, async ({ connection, invalidateConnection }) => {
             let phase: 'begin' | 'active' | 'commit' = 'begin';
             try {
-                await connection.beginTransaction();
+                await connection.query({ sql: 'START TRANSACTION', timeout: QUERY_TIMEOUT_MS });
                 phase = 'active';
                 const [accounts] = await connection.query<RowDataPacket[]>({
                     sql: `SELECT user_password AS passwordHash, account_uuid AS accountId
@@ -276,12 +281,14 @@ export async function linkProviderAccount(
                     }
                 }
                 phase = 'commit';
-                await connection.commit();
+                await connection.query({ sql: 'COMMIT', timeout: QUERY_TIMEOUT_MS });
                 return result;
             } catch (error) {
                 if (phase !== 'active') invalidateConnection();
-                try { await connection.rollback(); }
-                catch { invalidateConnection(); }
+                else {
+                    try { await connection.query({ sql: 'ROLLBACK', timeout: QUERY_TIMEOUT_MS }); }
+                    catch { invalidateConnection(); }
+                }
                 throw error;
             }
         });
@@ -307,7 +314,7 @@ export async function persistProviderCredential(
         await withUserSubmissionLock(database, accountTarget.userId, async ({ connection, invalidateConnection }) => {
             let phase: 'begin' | 'active' | 'commit' = 'begin';
             try {
-                await connection.beginTransaction();
+                await connection.query({ sql: 'START TRANSACTION', timeout: QUERY_TIMEOUT_MS });
                 phase = 'active';
                 const [rows] = await connection.query<RowDataPacket[]>({
                     sql: 'SELECT account_uuid AS accountId FROM users WHERE user_id = ? LIMIT 1 FOR UPDATE',
@@ -320,10 +327,13 @@ export async function persistProviderCredential(
                 }
                 await writeCredential(connection, accountTarget);
                 phase = 'commit';
-                await connection.commit();
+                await connection.query({ sql: 'COMMIT', timeout: QUERY_TIMEOUT_MS });
             } catch (error) {
                 if (phase !== 'active') invalidateConnection();
-                try { await connection.rollback(); } catch { invalidateConnection(); }
+                else {
+                    try { await connection.query({ sql: 'ROLLBACK', timeout: QUERY_TIMEOUT_MS }); }
+                    catch { invalidateConnection(); }
+                }
                 throw error;
             }
         });

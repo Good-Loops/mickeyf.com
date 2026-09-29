@@ -37,6 +37,16 @@ history; the publication closeout records the final delivery checks.
 | M1 | Fixed; named scope | Named temporary-artifact cleanup and the 57-script bounded audit are complete. Recycled copies remain recoverable; intentional verification/recovery archives remain. Do not reopen an unlimited package/filesystem audit. |
 | M2 | Deferred; explicit follow-ups | Exhaustive per-weapon/per-clip listening and game-feel coverage is optional follow-up absent a specific defect or relevant change; the bounded source review below found no missing weapon/audio reference. Shared-shell device checks (landscape nav/dropdowns with browser bars; Dancing Circles aspect/color) remain distinct from Three Bosses gameplay. Also retain the large-chunk warning, Unity CLI/Pipeline compatibility follow-up and unmeasured DB instrumentation overhead. p4-Vega polish and the incremental Clean Code sweep follow this release phase. |
 
+## C3 source availability findings — 2026-09-29
+
+These local source dispositions supplement the dated release evidence above;
+they do not change the serving backend or close the overall security review.
+
+| ID | Status | Evidence and remaining boundary |
+| --- | --- | --- |
+| C3-A1 | Fixed in source; not deployed | Provider signup/link/credential transaction controls now use ten-second query deadlines, discard uncertain begin/commit connections without another SQL command, and avoid retrying failed rollback. Three before-fix regressions reproduced missing deadline options/cleanup ordering; 104 focused tests, backend typecheck and temporary-output production build passed. MySQL integration fixture updated and typechecked only. See the [checkpoint](CLEAN_CODE_INVENTORY.md#c3-provider-account-transaction-boundaries--2026-09-29). |
+| C3-A2 | Deferred to the next C3 slice; not risk-accepted | Account deletion still uses unbounded transaction convenience methods and rollback after uncertain boundaries. Installed mysql2 also leaves a timed-out data query active at the protocol layer, so a queued rollback may never start its own timeout. Review timeout propagation/disposal across repository and credential callbacks before claiming a request-wide deadline. This is a source/driver finding, not an observed production incident; C3 and final closeout remain open. |
+
 ## Local Three Bosses UI checkpoint — 2026-09-22
 
 The UI Toolkit menu/pause/outcome changes remain on the active development

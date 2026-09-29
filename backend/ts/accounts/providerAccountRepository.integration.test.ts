@@ -423,9 +423,18 @@ test('concurrent signup collisions leave exactly one account and identity, never
 test('lost signup commit acknowledgement remains unavailable even when the account durably exists', async () => {
     const identity = signupIdentity('signup-uncertain-commit');
     const connection = await database.getConnection();
-    const originalCommit = connection.commit.bind(connection);
-    connection.commit = async () => { await originalCommit(); throw new Error('synthetic lost acknowledgement'); };
-    await assert.rejects(createProviderAccount({ getConnection: async () => connection }, identity, 'signup-uncertain-commit'),
+    const intercepted = new Proxy(connection, {
+        get(target, property) {
+            if (property === 'query') return async (...args: unknown[]) => {
+                const result = await Reflect.apply(target.query, target, args);
+                if ((args[0] as { sql?: string }).sql === 'COMMIT') throw new Error('synthetic lost acknowledgement');
+                return result;
+            };
+            const value = Reflect.get(target, property);
+            return typeof value === 'function' ? value.bind(target) : value;
+        },
+    });
+    await assert.rejects(createProviderAccount({ getConnection: async () => intercepted }, identity, 'signup-uncertain-commit'),
         ProviderAccountUnavailableError);
     assert.ok(await findProviderAccount(database, identity));
     assert.deepEqual(await createProviderAccount(database, identity, 'signup-uncertain-retry'), { created: false, reason: 'ALREADY_LINKED' });

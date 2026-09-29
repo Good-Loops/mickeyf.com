@@ -25,15 +25,23 @@ function fixture(options: {
 } = {}) {
     const events: string[] = [];
     const queries: Array<{ sql: string; values?: unknown[]; timeout: number }> = [];
+    const transactions: Array<{ sql: string; timeout?: number }> = [];
     const failure = new Error('sensitive database credentials/provider subject must not escape');
     function step(name: string) { events.push(name); if (options.fail === name) throw failure; }
+    async function transaction(sql: string, timeout?: number) {
+        transactions.push({ sql, timeout });
+        step(sql === 'START TRANSACTION' ? 'begin' : sql === 'COMMIT' ? 'commit' : 'rollback');
+        if (sql === 'ROLLBACK' && options.rollbackFails) throw failure;
+        return [[]];
+    }
     const connection = {
-        async beginTransaction() { step('begin'); },
-        async commit() { step('commit'); },
-        async rollback() { step('rollback'); if (options.rollbackFails) throw failure; },
+        beginTransaction: () => transaction('START TRANSACTION'),
+        commit: () => transaction('COMMIT'),
+        rollback: () => transaction('ROLLBACK'),
         release() { step('release'); }, destroy() { step('destroy'); },
-        async query(query: { sql: string; timeout: number }, values: unknown[]) {
+        async query(query: { sql: string; timeout: number }, values?: unknown[]) {
             const sql = query.sql.replace(/\s+/g, ' ').trim();
+            if (['START TRANSACTION', 'COMMIT', 'ROLLBACK'].includes(sql)) return transaction(sql, query.timeout);
             queries.push({ ...query, sql, values });
             if (sql.includes('GET_LOCK')) { step('lock'); await options.lock?.(); return [[{ lockResult: 1 }]]; }
             if (sql.includes('RELEASE_LOCK')) { step('unlock'); return [[{ lockResult: 1 }]]; }
@@ -59,7 +67,7 @@ function fixture(options: {
             throw new Error('Unexpected query');
         },
     } as unknown as PoolConnection;
-    return { events, queries, connection, database: { getConnection: async () => connection } as Pick<Pool, 'getConnection'> };
+    return { events, queries, transactions, connection, database: { getConnection: async () => connection } as Pick<Pool, 'getConnection'> };
 }
 
 test('links only a password-proven matching incarnation with a live session under the existing user lock and transaction', async () => {
@@ -186,18 +194,27 @@ function signupFixture(options: {
 } = {}) {
     const events: string[] = [];
     const queries: Array<{ sql: string; values?: unknown[] }> = [];
+    const transactions: Array<{ sql: string; timeout?: number }> = [];
     const step = (name: string) => {
         events.push(name);
         if (options.fail === name) throw new Error('sensitive email, identity and connection details');
     };
     const account = { userId: 7, userName: 'new-player', accountId };
+    async function transaction(sql: string, timeout?: number) {
+        transactions.push({ sql, timeout });
+        step(sql === 'START TRANSACTION' ? 'begin' : sql === 'COMMIT' ? 'commit' : 'rollback');
+        if (sql === 'COMMIT') await options.commit?.();
+        if (sql === 'ROLLBACK' && options.rollbackFails) throw new Error('sensitive rollback');
+        return [[]];
+    }
     const connection = {
-        async beginTransaction() { step('begin'); },
-        async commit() { step('commit'); await options.commit?.(); },
-        async rollback() { step('rollback'); if (options.rollbackFails) throw new Error('sensitive rollback'); },
+        beginTransaction: () => transaction('START TRANSACTION'),
+        commit: () => transaction('COMMIT'),
+        rollback: () => transaction('ROLLBACK'),
         release() { step('release'); }, destroy() { step('destroy'); },
-        async query(query: { sql: string; timeout: number }, values: unknown[]) {
+        async query(query: { sql: string; timeout: number }, values?: unknown[]) {
             const sql = query.sql.replace(/\s+/g, ' ').trim();
+            if (['START TRANSACTION', 'COMMIT', 'ROLLBACK'].includes(sql)) return transaction(sql, query.timeout);
             assert.equal(query.timeout, 10_000);
             queries.push({ sql, values });
             if (sql.includes('INNER JOIN users')) { step('lookup'); return [options.existing ? [account] : []]; }
@@ -216,10 +233,51 @@ function signupFixture(options: {
         },
     } as unknown as PoolConnection;
     const database = { async getConnection() { step('connect'); return connection; } } as Pick<Pool, 'getConnection'>;
-    return { account, events, queries, connection, database };
+    return { account, events, queries, transactions, connection, database };
 }
 
 const signupIdentity = { ...identity, email: '  Verified@Example.test  ' } as VerifiedProviderIdentity;
+
+test('provider account transaction boundaries all carry the ten-second query deadline', async () => {
+    for (const fail of [false, true]) {
+        const signup = signupFixture(fail ? { duplicate: 'identity' } : {});
+        await createProviderAccount(signup.database, signupIdentity, 'new-player');
+        const link = fixture(fail ? { fail: 'insert' } : {});
+        const linking = linkProviderAccount(link.database, target, password, identity, sessionProof);
+        if (fail) await assert.rejects(linking, ProviderAccountUnavailableError);
+        else assert.equal(await linking, 'linked');
+        const credential = fixture(fail ? { absent: true } : {});
+        const saving = persistProviderCredential(credential.database, target, identity, async () => undefined);
+        if (fail) await assert.rejects(saving, ProviderAccountUnavailableError);
+        else await saving;
+        for (const f of [signup, link, credential]) {
+            assert.deepEqual(f.transactions, [
+                { sql: 'START TRANSACTION', timeout: 10_000 },
+                { sql: fail ? 'ROLLBACK' : 'COMMIT', timeout: 10_000 },
+            ]);
+        }
+    }
+});
+
+test('uncertain provider begin or commit discards the connection without another database command', async () => {
+    for (const fail of ['begin', 'commit'] as const) {
+        const signup = signupFixture({ fail });
+        await assert.rejects(createProviderAccount(signup.database, signupIdentity, 'new-player'), ProviderAccountUnavailableError);
+        const link = fixture({ fail });
+        await assert.rejects(linkProviderAccount(link.database, target, password, identity, sessionProof), ProviderAccountUnavailableError);
+        const credential = fixture({ fail });
+        await assert.rejects(persistProviderCredential(credential.database, target, identity, async () => undefined), ProviderAccountUnavailableError);
+        for (const f of [signup, link, credential]) {
+            assert.deepEqual(f.events.slice(f.events.indexOf(fail) + 1), ['destroy']);
+        }
+    }
+});
+
+test('a failed duplicate-signup rollback is attempted once before discarding the connection', async () => {
+    const f = signupFixture({ duplicate: 'identity', rollbackFails: true });
+    await assert.rejects(createProviderAccount(f.database, signupIdentity, 'new-player'), ProviderAccountUnavailableError);
+    assert.deepEqual(f.events.slice(f.events.indexOf('rollback')), ['rollback', 'destroy']);
+});
 
 for (const provider of ['google', 'apple'] as const) {
 test(`${provider} signup atomically inserts a NULL password and exact subject; only commit confirms creation`, async () => {
@@ -437,7 +495,7 @@ test('returning-login persistence never confirms an unacknowledged credential wr
             assert.doesNotMatch(String(error), /private|token/);
             return true;
         });
-        assert.ok(f.events.includes('rollback'));
+        assert.equal(f.events.includes('rollback'), fail === 'credential');
         if (fail === 'credential') assert.equal(f.events.includes('commit'), false);
         else assert.ok(f.events.includes('destroy'));
     }
