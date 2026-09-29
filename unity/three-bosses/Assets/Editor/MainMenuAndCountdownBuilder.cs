@@ -20,11 +20,7 @@ public static class MainMenuAndCountdownBuilder
     [MenuItem("Three Bosses/UI/Open Main Menu")]
     public static void OpenMainMenu()
     {
-        if (EditorApplication.isPlayingOrWillChangePlaymode)
-            throw new InvalidOperationException("Exit Play Mode before opening the Main Menu scene.");
-
-        if (SceneManager.GetActiveScene().isDirty)
-            throw new InvalidOperationException("Save the active scene before opening the Main Menu scene.");
+        EditorSceneWorkspace.RequireSavedScenes("opening the Main Menu scene");
 
         EditorSceneManager.OpenScene(MenuScenePath, OpenSceneMode.Single);
     }
@@ -32,27 +28,13 @@ public static class MainMenuAndCountdownBuilder
     [MenuItem("Three Bosses/UI/Rebuild Level 1 Countdown")]
     public static void RebuildLevelOneCountdown()
     {
-        if (EditorApplication.isPlayingOrWillChangePlaymode)
-            throw new InvalidOperationException("Exit Play Mode before rebuilding the Level 1 countdown.");
-
-        Scene originalScene = SceneManager.GetActiveScene();
-        if (originalScene.isDirty)
-            throw new InvalidOperationException("Save the active scene before rebuilding the Level 1 countdown.");
-
-        string originalScenePath = originalScene.path;
-
-        try
+        EditorSceneWorkspace.RunWithRestoredScenes("rebuilding the Level 1 countdown", () =>
         {
             AddOrUpdateCountdownInLevelOne(LoadCountdownFont());
             AssetDatabase.SaveAssets();
             AssetDatabase.Refresh();
             Debug.Log("Level 1 countdown was rebuilt successfully.");
-        }
-        finally
-        {
-            if (!string.IsNullOrWhiteSpace(originalScenePath))
-                EditorSceneManager.OpenScene(originalScenePath, OpenSceneMode.Single);
-        }
+        });
     }
 
     private static void AddOrUpdateCountdownInLevelOne(TMP_FontAsset countdownFont)

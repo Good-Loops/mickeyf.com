@@ -29,8 +29,11 @@ Remaining player input/movement source required no change. The
 reviews the audio/environment and shared effect helpers, and separates health-bar
 damage tint from pulse opacity. All three focused regressions failed before the
 repair and pass afterward. No WebGL rebuild or broad suite was run.
-Next: authored Editor utilities and the WebGL plugin boundary; uncovered UI
-source/styles also remain in C4.
+The [Editor and WebGL checkpoint](CLEAN_CODE_INVENTORY.md#c4-editor-utilities-and-webgl-plugins--2026-09-29)
+guards unsaved additive scenes and restores the workspace after rebuilds; one
+regression failed before the repair and all six focused Editor checks pass.
+WebGL adapters required no changes. Next: reconcile remaining authored UI
+source/styles with the accepted migration and close C4 if no source gaps remain.
 Three review groups and one closeout remain. Completed checks carry forward;
 KWS/provider activation, store publication and Git deletion approvals are separate.
 The dated implementation and release history below is retained as evidence.

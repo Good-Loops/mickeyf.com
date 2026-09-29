@@ -135,6 +135,9 @@ coverage gap justifies additional checks.
   The [audio and presentation checkpoint](#c4-audio-environment-and-shared-presentation--2026-09-29)
   reviews the remaining audio/environment helpers and fixes competing health-bar
   colour writes without changing the authored assets.
+  The [Editor and WebGL checkpoint](#c4-editor-utilities-and-webgl-plugins--2026-09-29)
+  protects unsaved additive scenes and restores rebuild workspace state; the
+  reviewed WebGL adapters required no changes.
   Remaining C4 source is still open.
 - [ ] **C5 — Native shell source/configuration.** Project-owned Android/iOS entry
   points, custom plugins and Capacitor configuration; assess session/callback/
@@ -2110,6 +2113,61 @@ replay or deployment. Test reports/logs remain outside Git. C4 remains open for
 authored Editor utilities, WebGL plugins and uncovered UI source/styles. Next
 narrow review: the Editor utilities and WebGL plugin boundary, carrying forward
 existing submission/scroll and UI acceptance evidence. C5–C7 are unchanged.
+
+## C4 Editor utilities and WebGL plugins — 2026-09-29
+
+Continued from `6e951dca`. Reviewed `RunTimerDisplayBuilder` and
+`MainMenuAndCountdownBuilder`, including scene replacement, object/reference
+validation, font/material handling, explicit scene saves and error cleanup.
+The timer/countdown construction and accepted presentation remain unchanged.
+
+All three menu commands previously guarded only the active scene's dirty state,
+although opening a scene in Single mode replaces additive scenes too. A focused
+EditMode regression reproduced `OpenMainMenu` proceeding with a clean active
+scene and unsaved work in another open scene. The initial fixture attempt hit
+Unity's restriction on creating an additive scene alongside an unsaved untitled
+scene; the corrected fixture saves a disposable initial scene before testing
+the actual command. That corrected case failed before the repair.
+
+Added the shared `EditorSceneWorkspace` boundary. All commands now reject Play
+Mode and unsaved changes in any open scene before performing work. Both rebuilds
+also require saved scene paths and restore the original scene-manager setup in
+`finally`, including the active scene and additive scene list. Restoration uses
+Unity's [scene-manager setup API](https://docs.unity3d.com/ja/6000.0/ScriptReference/SceneManagement.EditorSceneManager-sceneManagerSetupRestored.html).
+This restores the Editor workspace; it does not roll back scenes/assets already
+saved by a partially completed rebuild. Opening the main menu remains an
+intentional navigation operation rather than a temporary rebuild.
+
+The two WebGL adapters, `ThreeBossesSubmission.jslib` and
+`ThreeBossesPageScroll.jslib`, were traced to their C# callers in
+`RunSessionService`, `MainMenuController` and `WebPageTouchScroll`, and to the
+browser readiness/submission/scroll bindings. Retained the one-shot readiness
+no-op after cleanup, UTF-8 string handoff, missing-submission-bridge failure,
+guarded run-start/scroll calls and canvas-relative scroll conversion. Browser
+payload validation, ticket/cancellation ownership, callback cleanup, fullscreen
+and invalid-delta guards already live in the browser bindings. No demonstrated
+defect justified adding policy to these thin adapters or changing their contracts.
+Existing bridge tests were inspected as context, not rerun.
+
+After the repair **6/6 focused EditMode checks passed**, with zero failures/skips:
+the dirty-additive guard on all three commands, rejection of an untitled rebuild
+workspace, and restoration after both successful and failing synthetic builds.
+The fixture creates disposable scene assets in a unique test folder, restores
+the prior test-runner setup and removes that folder. It does not rebuild or save
+the authored game scenes. Unity 6000.3.8f1 compiled the source in batch mode;
+no live Editor was connected. Exact commands from the repository root:
+
+```powershell
+unity test 'C:\Users\User\Desktop\Pastas\Code\mickeyf.com\unity\three-bosses' --mode EditMode --filter 'ThreeBosses.Tests.EditorSceneWorkspaceTests.OpenMainMenuProtectsDirtyAdditiveScene' --editor-version 6000.3.8f1 --output 'C:\Users\User\AppData\Local\Temp\three-bosses-editor-workspace-before.xml' --timeout 300 --format json --no-banner -- -nographics -automated -logFile 'C:\Users\User\AppData\Local\Temp\three-bosses-editor-workspace-before.log'
+unity test 'C:\Users\User\Desktop\Pastas\Code\mickeyf.com\unity\three-bosses' --mode EditMode --filter 'ThreeBosses.Tests.EditorSceneWorkspaceTests' --editor-version 6000.3.8f1 --output 'C:\Users\User\AppData\Local\Temp\three-bosses-editor-workspace-after.xml' --timeout 300 --format json --no-banner -- -nographics -automated -logFile 'C:\Users\User\AppData\Local\Temp\three-bosses-editor-workspace-after.log'
+git diff --check
+```
+
+No runtime/game scene/prefab or existing GUID changes, broad suite, WebGL rebuild,
+browser/device replay or deployment. Test reports/logs remain outside Git.
+Next narrow review: reconcile the remaining authored UI source/styles against
+the accepted migration and these C4 checkpoints, then close C4 if no source gaps
+remain. C5–C7 are unchanged.
 
 ## Inventory closeout
 
