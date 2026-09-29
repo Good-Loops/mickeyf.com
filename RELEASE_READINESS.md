@@ -42,6 +42,12 @@ history; the publication closeout records the final delivery checks.
 These local source dispositions supplement the dated release evidence above;
 they do not change the serving backend or close the overall security review.
 
+The push of `ba80528a` on 2026-09-29 reported **four moderate default-branch
+vulnerabilities**. This supersedes the older aggregate of one for notification
+tracking only. Alert identities, current status and applicability to this branch
+were not queried; reconcile them in C7 before carrying dependency evidence forward.
+This notice grants no new exception and is not a fresh dependency audit.
+
 | ID | Status | Evidence and remaining boundary |
 | --- | --- | --- |
 | C3-A1 | Fixed in source; not deployed | Provider signup/link/credential transaction controls now use ten-second query deadlines, discard uncertain begin/commit connections without another SQL command, and avoid retrying failed rollback. Three before-fix regressions reproduced missing deadline options/cleanup ordering; 104 focused tests, backend typecheck and temporary-output production build passed. MySQL integration fixture updated and typechecked only. See the [checkpoint](CLEAN_CODE_INVENTORY.md#c3-provider-account-transaction-boundaries--2026-09-29). |
