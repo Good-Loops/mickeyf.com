@@ -45,9 +45,9 @@ The [latest tooling checkpoint](CLEAN_CODE_INVENTORY.md#c3-migration-and-grant-t
 completes C3 source review, superseding the earlier rows' pending C3 scope below.
 C4–C6 and the final C7 security/release closeout remain open.
 
-The push of `ba80528a` on 2026-09-29 reported **four moderate default-branch
-vulnerabilities**. This supersedes the older aggregate of one for notification
-tracking only. Alert identities, current status and applicability to this branch
+The push of `005706cf` on 2026-09-29 reported **five default-branch vulnerabilities:
+one high and four moderate**. This supersedes the earlier four-moderate notice
+for notification tracking only. Alert identities and applicability to this branch
 were not queried; reconcile them in C7 before carrying dependency evidence forward.
 This notice grants no new exception and is not a fresh dependency audit.
 
