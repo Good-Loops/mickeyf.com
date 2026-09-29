@@ -59,6 +59,18 @@ This notice grants no new exception and is not a fresh dependency audit.
 | C3-A4 | Fixed in source for startup readiness disposal; not deployed | Account/session/provider readiness now borrows a guarded connection, closing the underlying socket after query failure or its existing deadline. Three strengthened cleanup cases failed before the fix; all 16 readiness cases have passing results, with one targeted rerun for a stale fixture expectation. TypeScript and temporary-output production build passed. Configuration/policies retained after source review; login/logout type declarations aligned with existing handlers. Migration/grant tooling and final closeout remain open. See the [checkpoint](CLEAN_CODE_INVENTORY.md#c3-configuration-validation-and-contracts--2026-09-29). |
 | C3-A5 | Fixed in source for runtime-grant CLI lifetime; not deployed | Target-identity SQL now shares the operation watchdog; late identity responses cannot start grant work after timeout. Timeout forces socket closure even if driver teardown fails, and shutdown is capped at two seconds. Three scenarios reproduced the gaps before the fix; all 22 affected-file tests, TypeScript and temporary-output production build passed. Migration/configuration/grant-policy review is complete with no SQL or grant changes. Fixtures mocked database/cloud operations; no live execution or total CLI deadline claim. Apply timeouts retain indeterminate-outcome reporting. See the [checkpoint](CLEAN_CODE_INVENTORY.md#c3-migration-and-grant-tooling-closeout--2026-09-29). |
 
+## Local Cloud SQL startup mismatch — 2026-09-29
+
+**Blocked local startup; migration review prepared.** Live read-only inspection
+confirmed the pinned Cloud SQL server, migration records only through 0008 and
+no runtime session-table grants. This branch requires recorded 0011/0012.
+Restricted metadata visibility prevents proving physical table absence; stored
+checksum access is denied to the runtime account. The owner retains Cloud SQL.
+See the [review](backend/CLOUD_SQL_SESSION_MIGRATION_REVIEW.md) for 0009–0012,
+the proposed additive session grant and maintenance/rollback prerequisites.
+Nothing was applied or deployed. Serving production compatibility and a recovery
+point still require inspection before execution approval; this does not close C7.
+
 ## Local Three Bosses UI checkpoint — 2026-09-22
 
 The UI Toolkit menu/pause/outcome changes remain on the active development

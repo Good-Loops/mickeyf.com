@@ -126,6 +126,8 @@ coverage gap justifies additional checks.
   lifetimes, state ownership and duplication with a demonstrated maintenance cost.
   Preserve scenes/GUIDs, gameplay and uGUI touch controls; do not hand-edit imported
   Figma output or rebuild WebGL merely to record a no-change review.
+  The [run-state source checkpoint](#c4-run-state-source-review--2026-09-29)
+  records the first reviewed boundary; remaining C4 source is still open.
 - [ ] **C5 — Native shell source/configuration.** Project-owned Android/iOS entry
   points, custom plugins and Capacitor configuration; assess session/callback/
   lifecycle ownership and identify template remnants before removing anything.
@@ -1923,6 +1925,33 @@ effects may have completed and require fresh plan/verification before retrying.
 security/release closeout remain. Next narrow task: C4 first-party Unity source,
 carrying forward the accepted UI migration instead of repeating its checks or
 rebuilding WebGL without a relevant change.
+
+## C4 run-state source review — 2026-09-29
+
+Continued from `8271af27`. Reviewed these authored boundaries without changing
+runtime code, scenes, assets, GUIDs or the accepted UI migration:
+
+| Boundary | Source reviewed and disposition |
+| --- | --- |
+| Run state and results | `Run/RunSession.cs`, `PausableMonotonicClock.cs`, `RunScoreCalculator.cs`, `RunRankCalculator.cs`: retained explicit phase transitions, first terminal event, practice-run exclusion, snapshot copies and canonical millisecond score/rank boundaries. |
+| Submission and pause ownership | `Run/RunSubmissionCoordinator.cs`, `Core/RunSessionService.cs`: retained exact result matching, retry classifications, singleton/event ownership and shared visibility/user pause accounting. Traced the browser bridge's new-run cancellation and aborted-result guard; no bridge change needed. |
+| Health and scene entry/exit | `Core/HealthComponent.cs`, `BossDefeatSceneLoader.cs`, `RunPlayerDefeatSceneLoader.cs`, `RunLevelEntry.cs`, `Player/PlayerDeathHandler.cs`: retained health/death subscriptions, run-state gates, death presentation and entry coroutine/time-scale restoration. No demonstrated caller defect justified restructuring these components. |
+
+Inspected adjacent submission assertions in `RunSessionTests.cs` and the death
+freeze fixture in `BossDeathFreezeTests.cs` as context; no fresh test result is
+claimed. No Unity tests or WebGL rebuild were run for this no-code-change slice.
+Documentation validation: `git diff --check`.
+
+The owner's concurrent backend crash report was reproduced and traced to
+unrecorded session migrations and missing runtime session grants. The owner
+chose to retain Cloud SQL and requested a review before changes. The
+[migration review](backend/CLOUD_SQL_SESSION_MIGRATION_REVIEW.md) records live
+read-only evidence, limited metadata visibility, proposed scope and pending
+maintenance preflight. No migration, grant, environment or runtime code changed.
+
+C4 remains open for the remaining combat/player/projectile/audio/environment
+source, authored Editor utilities, plugins and uncovered UI source. C5–C7 are
+unchanged. Next narrow source review: combat and projectile lifetimes.
 
 ## Inventory closeout
 

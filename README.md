@@ -193,6 +193,14 @@ Default local ports are:
 If port 8080 is occupied, identify its owning process before stopping it. The
 backend start command deliberately does not kill unrelated processes.
 
+If webpack succeeds but the backend reports `Backend startup failed`, an open
+proxy port alone does not prove that Cloud SQL matches the checked-out branch.
+The current backend requires recorded session migrations 0011/0012 and their
+prerequisites, plus session-table permissions. Keep readiness enabled and review
+the target before applying migrations. See the
+[Cloud SQL session migration review](backend/CLOUD_SQL_SESSION_MIGRATION_REVIEW.md)
+for the diagnosed local startup failure and the pending maintenance preflight.
+
 ### Documentation development
 
 Run the `docs` VS Code task or:

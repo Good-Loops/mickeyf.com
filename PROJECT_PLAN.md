@@ -15,10 +15,20 @@ paused beats and pitch timing, and removed proven-unused utility code. The
 completes backend source review and bounds runtime-grant identity checks and
 connection shutdown. All 22 affected-file tests, TypeScript and an isolated-output
 production build passed. Migration history and grant policies are unchanged.
-Next: C4 first-party Unity source beyond the accepted UI migration. Three review
-groups and one closeout remain. Completed checks carry forward;
+C4 is in progress: the [run-state source review](CLEAN_CODE_INVENTORY.md#c4-run-state-source-review--2026-09-29)
+retained the reviewed run/timing/submission and scene-transition boundaries with
+no code change or test/build rerun. Next: combat and projectile lifetimes.
+Three review groups and one closeout remain. Completed checks carry forward;
 KWS/provider activation, store publication and Git deletion approvals are separate.
 The dated implementation and release history below is retained as evidence.
+
+Local backend interruption (2026-09-29): Cloud SQL connectivity succeeds, but the
+runtime sees history only through 0008 and has no session-table grants; this
+branch requires recorded 0011/0012. The owner chose to retain Cloud SQL. The
+[migration review](backend/CLOUD_SQL_SESSION_MIGRATION_REVIEW.md) proposes
+0009–0012 and additive session grants, pending maintenance-account preflight and
+explicit execution approval. Runtime metadata cannot prove table absence or
+verify stored checksums. No database changes have been applied.
 
 Current release state (published 2026-09-09 local): see the
 [cumulative release/security ledger](RELEASE_READINESS.md). It supersedes stale
