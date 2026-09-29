@@ -15,6 +15,7 @@ public sealed class StingerProjectile : MonoBehaviour, IProjectile
     [SerializeField, Min(0.01f)] private float normalProbeDistance = 0.25f;
 
     private Vector2 lastDir = Vector2.right;
+    private bool hasImpacted;
 
     private void Awake()
     {
@@ -45,6 +46,12 @@ public sealed class StingerProjectile : MonoBehaviour, IProjectile
 
     private void OnTriggerEnter2D(Collider2D other)
     {
+        if (hasImpacted)
+            return;
+
+        // Destruction is deferred, so other colliders can still report this hit.
+        hasImpacted = true;
+
         var damageable = other.GetComponentInParent<IDamageable>();
         if (damageable != null)
         {

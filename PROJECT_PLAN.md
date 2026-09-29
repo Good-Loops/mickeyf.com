@@ -16,8 +16,12 @@ completes backend source review and bounds runtime-grant identity checks and
 connection shutdown. All 22 affected-file tests, TypeScript and an isolated-output
 production build passed. Migration history and grant policies are unchanged.
 C4 is in progress: the [run-state source review](CLEAN_CODE_INVENTORY.md#c4-run-state-source-review--2026-09-29)
-retained the reviewed run/timing/submission and scene-transition boundaries with
-no code change or test/build rerun. Next: combat and projectile lifetimes.
+retained the reviewed run/timing/submission and scene-transition boundaries.
+The [projectile impact checkpoint](CLEAN_CODE_INVENTORY.md#c4-projectile-impact-and-damage-boundaries--2026-09-29)
+fixes repeated damage from Stinger and non-attaching Phase Anchor hits: two
+physics regressions failed before the fix; all three focused PlayMode tests
+pass afterward, including normal anchor expiry. No WebGL rebuild or broad suite
+was run. Next: boss attack/effect lifetimes and remaining player movement/input.
 Three review groups and one closeout remain. Completed checks carry forward;
 KWS/provider activation, store publication and Git deletion approvals are separate.
 The dated implementation and release history below is retained as evidence.

@@ -127,7 +127,9 @@ coverage gap justifies additional checks.
   Preserve scenes/GUIDs, gameplay and uGUI touch controls; do not hand-edit imported
   Figma output or rebuild WebGL merely to record a no-change review.
   The [run-state source checkpoint](#c4-run-state-source-review--2026-09-29)
-  records the first reviewed boundary; remaining C4 source is still open.
+  records the first reviewed boundary; the
+  [projectile impact checkpoint](#c4-projectile-impact-and-damage-boundaries--2026-09-29)
+  fixes two reproduced repeated-hit defects. Remaining C4 source is still open.
 - [ ] **C5 — Native shell source/configuration.** Project-owned Android/iOS entry
   points, custom plugins and Capacitor configuration; assess session/callback/
   lifecycle ownership and identify template remnants before removing anything.
@@ -1952,6 +1954,59 @@ maintenance preflight. No migration, grant, environment or runtime code changed.
 C4 remains open for the remaining combat/player/projectile/audio/environment
 source, authored Editor utilities, plugins and uncovered UI source. C5–C7 are
 unchanged. Next narrow source review: combat and projectile lifetimes.
+
+## C4 projectile impact and damage boundaries — 2026-09-29
+
+Continued from `5f888913` after the approved Cloud SQL startup repair. Reviewed
+the authored projectile implementations, their damage adapters and weapon
+spawn/equip callers. Existing weapon tuning, faction rules, serialized fields,
+scenes, prefabs and runtime GUIDs are unchanged.
+
+Two isolated PlayMode physics regressions reproduced repeated damage from a
+single projectile overlapping two target colliders in one simulation step:
+
+- `StingerProjectile` dealt 20 damage instead of 10. It now records the first
+  impact before dispatching damage or spawning effects.
+- `PhaseAnchorProjectile` dealt 50 damage instead of 25 on a surface excluded
+  from its anchor mask. Its existing stuck-only guard now records any first
+  impact before damage callbacks, covering both attaching and terminating hits.
+
+This matters because Unity defers actual object destruction; a call to
+`Destroy` does not itself make the impact handler single-use. See
+[Unity 6.3 destruction semantics](https://docs.unity3d.com/6000.3/Documentation/ScriptReference/Object.Destroy.html).
+
+The surrounding `Projectile`, `ArcaneMissileProjectile`, `PlasmaOrbProjectile`,
+`RicochetDiskProjectile`, shrapnel slug/shard, `TimeFractureBeamProjectile`,
+`VoidLanceProjectile`, `LightningArcShot`, `PhaseAnchorZone` and
+`DestroyOffscreen2D` implementations were read alongside `DamageUtils2D`,
+`DamageSource`, the player/generic/Bee damage receivers, `PlayerWeaponController`,
+`WeaponData` and weapon-crate pickup/spawner ownership. No shared projectile
+base class, pooling rewrite or damage-policy change was justified by this slice.
+Boss-controller effect methods and the existing death-freeze fixture were
+inspected as caller context, not a complete boss-controller review.
+
+Validation used Unity CLI with the installed 6000.3.8f1 Editor. No live Editor
+was connected, so the two runs used its batch PlayMode runner. The two new
+overlapping-collider cases failed before the fix with the exact damage values
+above. Afterward **3/3 tests passed**, including normal anchor attachment,
+flight-expiry cancellation and eventual anchor expiry. The fixture creates an
+isolated 2D physics scene and unloads it after each case; it does not alter game
+scenes or use player accounts.
+
+Commands from the repository root (before/after outputs stay outside Git):
+
+```powershell
+unity test 'C:\Users\User\Desktop\Pastas\Code\mickeyf.com\unity\three-bosses' --mode PlayMode --filter 'ThreeBosses.Tests.ProjectileImpactTests' --editor-version 6000.3.8f1 --output 'C:\Users\User\AppData\Local\Temp\three-bosses-projectile-impact-before.xml' --timeout 300 --format json --no-banner -- -nographics -automated -logFile 'C:\Users\User\AppData\Local\Temp\three-bosses-projectile-impact-before.log'
+unity test 'C:\Users\User\Desktop\Pastas\Code\mickeyf.com\unity\three-bosses' --mode PlayMode --filter 'ThreeBosses.Tests.ProjectileImpactTests' --editor-version 6000.3.8f1 --output 'C:\Users\User\AppData\Local\Temp\three-bosses-projectile-impact-after.xml' --timeout 300 --format json --no-banner -- -nographics -automated -logFile 'C:\Users\User\AppData\Local\Temp\three-bosses-projectile-impact-after.log'
+git diff --check
+```
+
+No full Unity suite, WebGL rebuild, browser/device gameplay replay or deployment
+was run. C4 remains open. Next narrow review: boss attack/effect lifetimes and
+remaining player movement/input, including whether arena collision boundaries
+fully contain Stingers, whose current prefab has no timed/offscreen fallback.
+No projectile-range or lifetime tuning was changed without that caller context.
+C5–C7 remain unchanged.
 
 ## Inventory closeout
 
