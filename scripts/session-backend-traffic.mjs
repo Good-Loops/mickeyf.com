@@ -88,23 +88,35 @@ export async function captureSessionBaseline(provider) {
     return baseline;
 }
 
-async function checkedRevisions(provider, pins) {
+export async function checkedSessionCandidate(provider, pins) {
     const candidate = candidatePins(pins);
-    const [baseline, target, rollback, build] = await Promise.all([
+    const [baseline, target, build] = await Promise.all([
         provider.getRevision(pins.baseline.revisionName), provider.getRevision(sessionRevisionName(candidate)),
-        provider.getRevision(rollbackRevisionName(pins)), provider.getDeployment(candidate.deploymentBuildId),
+        provider.getDeployment(candidate.deploymentBuildId),
     ]);
     validateLegacySessionRevision(baseline, pins.baseline, pins.baseline.revisionName);
     requireThat(fingerprint(revisionConfiguration(baseline)) === pins.baseline.configurationSha256, 'Baseline revision drifted');
     validateSessionRevision(target, candidate);
     validateDeploymentReceipt(build, candidate, sessionDeploymentApproval(pins.candidate.deployment));
+    return { baseline, candidate: target };
+}
+
+export function validateSessionRollback(rollback, baseline, pins) {
     validateLegacySessionRevision(rollback, { ...pins.baseline, sessionSecretVersion: pins.rollback.sessionSecretVersion }, rollbackRevisionName(pins));
     requireThat(same(rollbackRuntimeConfiguration(rollback), rollbackRuntimeConfiguration(baseline)),
         'Rollback must preserve the previous runtime exactly apart from its fresh session-secret reference');
-    return { baseline, candidate: target, rollback };
+    return rollback;
 }
 
-function checkTraffic(service, pins, operation) {
+async function checkedRevisions(provider, pins) {
+    const [revisions, rollback] = await Promise.all([
+        checkedSessionCandidate(provider, pins), provider.getRevision(rollbackRevisionName(pins)),
+    ]);
+    validateSessionRollback(rollback, revisions.baseline, pins);
+    return { ...revisions, rollback };
+}
+
+export function checkSessionTraffic(service, pins, operation) {
     const candidate = sessionRevisionName(candidatePins(pins));
     const rollback = rollbackRevisionName(pins);
     const serving = operation === 'promote' ? pins.baseline.revisionName : candidate;
@@ -124,7 +136,7 @@ export async function planSessionTraffic(provider, pins, operation, now = Date.n
     await provider.assertAutomationPaused();
     const [service, revisions] = await Promise.all([provider.getService(), checkedRevisions(provider, pins)]);
     validateService(service);
-    checkTraffic(service, pins, operation);
+    checkSessionTraffic(service, pins, operation);
     requireThat([revisions.candidate, revisions.rollback].some(revision => same(service.template.containers, revision.containers)),
         'Service template is not the reviewed candidate or rollback runtime');
     const target = operation === 'promote' ? sessionRevisionName(candidatePins(pins)) : rollbackRevisionName(pins);

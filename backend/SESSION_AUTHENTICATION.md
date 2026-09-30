@@ -305,8 +305,8 @@ version number alone does not prove a freshly generated secret payload.
 The rollback copy must exist and be Ready **before promotion**. The candidate
 deployment must come first because its existing preflight requires the original
 untagged serving baseline. Pause and drain deployment automation again before
-planning traffic. Creating that rollback revision remains a separate deployment
-step; this checkpoint did not create it or its secret.
+planning traffic. The rollback deployment command below prepares that copy as a
+separate operation. Neither preparation checkpoint created it or its secret.
 
 ```text
 node --use-system-ca scripts/session-backend-traffic.mjs plan --operation promote --pins <reviewed-traffic-pins.json> --output <new-promotion-plan.json>
@@ -341,6 +341,55 @@ passed. All 101 existing and 25 new cases therefore have passing results.
 Coverage includes promotion, fresh rollback, missing/changed fallback, secret
 and receipt drift, old tags, mixed traffic, stale plans, conflicts, ambiguous
 writes and post-write drift. No cloud write or full application rerun occurred.
+
+### Zero-traffic rollback deployment — prepared 2026-09-30
+
+`scripts/session-backend-rollback.mjs` fills the rollback-creation step using the
+same reviewed traffic pins and local authenticated-operator workflow as the
+traffic tool. The plan file contains the exact service name, etag and replacement
+revision template for review. It is executable only after the candidate is
+deployed and Ready, the original baseline still serves 100%, the rollback name
+does not exist, and all Cloud Build automation is paused and drained.
+
+```text
+node --use-system-ca scripts/session-backend-rollback.mjs plan --pins <reviewed-traffic-pins.json> --output <new-rollback-deployment-plan.json>
+node --use-system-ca scripts/session-backend-rollback.mjs apply --plan <rollback-deployment-plan.json> --confirm-plan <printed-plan-sha256> --confirm-create-zero-traffic-rollback
+```
+
+Plan is read-only and writes its local output exclusively. Apply requires the
+reviewed file's SHA256, an explicit creation flag and a fresh plan (five minutes).
+It rechecks the baseline fingerprint, candidate deployment approval and runtime,
+service state, absent rollback name and enabled signing-secret metadata. It
+reads no Secret Manager payload; fresh secret generation remains a prerequisite.
+Unknown baseline revision fields are rejected rather than silently omitted.
+
+The only cloud mutation is an etag-conditional service PATCH with
+`updateMask=template`. The immutable legacy image, source labels, runtime
+identity, container configuration and Cloud SQL attachment are copied, replacing
+the signing-secret version and revision name. Traffic is excluded from the
+update mask; no rollback tag is added. The API's explicit field mask and revision
+template behavior are documented in the official [service update reference](https://docs.cloud.google.com/run/docs/reference/rest/v2/projects.locations.services/patch)
+and [RevisionTemplate reference](https://docs.cloud.google.com/run/docs/reference/rest/v2/projects.locations.services#revisiontemplate).
+
+After creation, verification requires the exact Ready rollback revision,
+unchanged baseline/candidate, unchanged service settings and intended/observed
+traffic, and one service-generation increment. A conflict, interrupted request,
+reconciliation failure or 60-second timeout stops with instructions to inspect
+live state; it never retries creation, changes traffic or deletes a revision.
+An existing rollback revision also requires inspection instead of redeployment.
+Use the separate traffic planner afterward to review promotion.
+
+Validation: the focused deployment command retained passing results for all 126
+existing cases. The new adapter test initially used a promise-rejection assertion
+for a synchronous input rejection; only the assertion was corrected. After
+normalizing equivalent traffic ordering/zero values, all 21 rollback tests passed
+with `node --test scripts/session-backend-rollback.test.mjs` (147 total cases with
+passing results). Tests exercise exact template-only writes, drift, absent versus
+inaccessible revisions, disabled secrets, expiry, conflicts, post-write failures
+and compatibility with promotion. The current service's v2 revision-name/template
+shape was read to ground the implementation. No actual rollback plan was issued:
+the candidate and fresh rollback secret do not yet exist. No deployment, secret
+creation, SQL change, traffic update or broad application rerun was performed.
 
 ## Coordinated activation (original implementation checklist)
 

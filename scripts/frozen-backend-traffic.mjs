@@ -285,14 +285,18 @@ export function createCloudProvider(token, fetcher = fetch) {
 export function createSessionCloudProvider(token, fetcher = fetch) {
     return cloudProvider(token, fetcher, /^mickeyf-org-session-(?:rollback-)?[0-9a-f]{32}$/);
 }
-function cloudProvider(token, fetcher, allowedRevision) {
+export function createCloudRequest(token, fetcher = fetch) {
     requireThat(typeof token === 'string' && token.length >= 20 && token.length <= 8192 && !/\s/.test(token), 'Access token unavailable');
-    async function request(base, path, method = 'GET', body) {
+    return async function request(base, path, method = 'GET', body, allowNotFound = false) {
         const response = await fetcher(`${base}${path}`, {
             method, redirect: 'error', signal: AbortSignal.timeout(30_000),
             headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
             ...(body ? { body: JSON.stringify(body) } : {}),
         });
+        if (allowNotFound && method === 'GET' && response.status === 404) {
+            await response.body?.cancel();
+            return null;
+        }
         requireThat(response.ok, `Cloud API ${method} returned HTTP ${response.status}`);
         const reader = response.body.getReader();
         const chunks = [];
@@ -307,7 +311,10 @@ function cloudProvider(token, fetcher, allowedRevision) {
         const value = JSON.parse(Buffer.concat(chunks).toString('utf8'));
         requireThat(object(value), 'Cloud API returned non-object JSON');
         return value;
-    }
+    };
+}
+function cloudProvider(token, fetcher, allowedRevision) {
+    const request = createCloudRequest(token, fetcher);
     const run = (path, method, body) => request('https://run.googleapis.com/v2/', path, method, body);
     const builds = path => request('https://cloudbuild.googleapis.com/v1/', path);
     async function listAll(path, field) {
