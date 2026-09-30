@@ -49,10 +49,11 @@ RUN npm ci --omit=dev
 
 FROM node-runtime-base AS runtime
 
-# The owner chose to wait for an official patched Node binary. Shared Alpine
-# libraries do not fix Node's embedded OpenSSL; block production images until
-# that binary reaches the reviewed 3.5.9 patch level. Keep build/test stages usable.
-RUN node -e 'const version = process.versions.openssl; const match = /^3[.]5[.]([0-9]+)$/.exec(version); if (!match || Number(match[1]) < 9) { console.error("Production image blocked: embedded OpenSSL " + version + "; requires reviewed OpenSSL 3.5.9 or newer in the 3.5 series (S8)."); process.exit(1); }'
+# On 2026-09-30 the owner accepted S8 for this pinned official runtime rather
+# than delaying release. Permit its embedded 3.5.8 and patched 3.5 releases;
+# older versions and other series still require review. Remove the exception
+# when the pinned Node image incorporates the upstream fix.
+RUN node -e 'const version = process.versions.openssl; const match = /^3[.]5[.]([0-9]+)$/.exec(version); if (version !== "3.5.8" && (!match || Number(match[1]) < 9)) { console.error("Production image blocked: unreviewed embedded OpenSSL " + version + "; S8 permits 3.5.8 by owner exception or patched 3.5.9+."); process.exit(1); }'
 
 ENV NODE_ENV=production
 WORKDIR /usr/src/app/backend

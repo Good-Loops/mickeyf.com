@@ -1,8 +1,8 @@
 # Release readiness and cumulative security ledger
 
-Current dispositions refreshed 2026-09-30 against draft PR #341's reviewed source
-at `118a2b8b`, package/runtime commit `7a58c045`, and the integration-fixture
-follow-up below. Subsequent hosted results are recorded on
+Current dispositions refreshed 2026-09-30 against draft PR #341's successful
+candidate `6c28939d` and the owner-accepted S8 runtime exception below.
+The previous wait-for-upstream hold is superseded. Subsequent hosted results are recorded on
 [draft PR #341](https://github.com/Good-Loops/mickeyf.com/pull/341); checkpoint
 results below retain their exact tested revisions. The original reconciliation was 2026-09-08 local
 (2026-09-09 UTC), against `015d962e`. This is the current gate summary;
@@ -29,8 +29,8 @@ history; the publication closeout records the final delivery checks.
 | S5 | Fixed; scoped live readback | At 2026-09-09 02:12:46 UTC, read-only Monitoring API requests verified all three enabled ERROR policies, their exact filters/conditions/alert strategies and sole approved channel against the activation snapshots. The email channel is enabled and its recipient matches the owner's choice. The API resolved the readback blocker without installations or permission changes; browser/CLI repair is not claimed. This is configuration evidence, not a new incident or email-delivery test. |
 | S6 | Fixed; merged | PR #322 brought the reviewed dependency fixes into main. GitHub's post-merge push report lists only the previously accepted moderate alert #287. At the initial reconciliation, 13 of 14 alerts mapped to branch fixes: eight `fast-uri`, two `qs`, and three `xmldom`. This is distinct from the subsequent CI audit findings in S12. |
 | S7 | Fixed on PR branch; deployment pending | Firebase 15.32.0 resolves the earlier Undici/ip-address/stream-json findings. C7 also updates `@grpc/grpc-js` to 1.14.5; the local and PR locked audits are zero. Earlier CSV/Hosting tests carry forward for unchanged paths. No deployment occurred; the historical exception is not renewed. |
-| S8 | Blocked on official upstream patch; production-image gate verified | C7 retains official Node 22.23.3 and patched Alpine libcrypto3/libssl3 3.5.9-r0. Node still embeds OpenSSL 3.5.8. After a fresh official-index check, the owner chose to wait for a patched official binary and block deployment. Docker's final runtime stage now rejects embedded versions below 3.5.9 in the reviewed 3.5 series; an actual image build failed with that exact diagnostic. Build/test stages remain usable. This is a verified hold, not a vulnerability fix or risk acceptance. |
-| S9 | Fixed; tested CI checkpoint | Authorized non-deploying run `34301221560` passed both jobs on `3ea379fe`: dependency validation/audits, frontend tests/build, WebGL package/tooling checks, backend unit/MySQL integration tests/build, docs watcher tests/docs build and Unity static integrity. All reported test summaries had zero skips. This supersedes failed run `34300667096`; it is not a Unity rebuild or a browser/device test. A PR with required checks/CodeQL on its eventual merge head remains a separate gate. |
+| S8 | Accepted risk for the reviewed runtime; upstream patch remains a follow-up | On September 30, after the embedded-library risk and unknown patch date were explained, the owner explicitly chose to continue and eventually deploy without waiting. This supersedes the earlier hold. The gate now permits this pinned official Node 22.23.3 / embedded OpenSSL 3.5.8, or patched 3.5.9+ in the reviewed series, while rejecting older/other-series versions. The final image builds successfully; patched Alpine libcrypto3/libssl3 3.5.9-r0 and non-root execution are verified. This exception is not a fix, non-exploitability finding, or acceptance of unrelated vulnerabilities. |
+| S9 | Fixed; final candidate CI passed | Run `36769138253` on `6c28939d` passed frontend TypeScript/581 tests/build, backend TypeScript/807 unit tests/109 MySQL integration cases/build, package provenance, WebGL tooling, deployment guards, launchers, docs watcher/build and Unity integrity. All test summaries have zero failures/skips. All five CodeQL analyses, its security gate and independent docs build pass; docs deployment was skipped. This supersedes the earlier failed candidate runs. The runtime-exception change has separate focused image/gate validation below; required checks on the eventual merge head still apply. |
 | S10 | Historical controls retained; candidate scan dispositions verified | The earlier September 30 readback reported zero open secret-scanning alerts and CodeQL #20/#21 on main `ff9c79be`. PR #341's 32 new JavaScript/TypeScript findings and Python #20 were subsequently reviewed and dismissed as false positives with owner approval; zero open candidate CodeQL alerts remain. #21 remains open on main, with its fix confirmed on the PR. Earlier ruleset/permissions evidence remains dated. Zero secret alerts is not proof that no secret exists. |
 | S11 | On-disk mismatch resolved; running-process state unverified | September 30 readback finds installed backend `qs` 6.16.0, matching the lock; the earlier 6.15.3 disk mismatch is superseded. C7 did not refresh or restart the active backend, so cached running modules are not certified. Backend validation used a clean locked build container with no SQL connection. |
 | S12 | Fixed; deployment-only dependency patch | `3ea379fe` updates exactly four lock entries: `js-yaml` 4.3.2, `hono` 4.13.7, `morgan` 1.12.0 and Firebase-scoped `csv-parse` 7.0.2. Firebase stays 15.28.1. Fresh locked install, full production dependency-tree validation, CLI version check, eight offline CSV tests and twelve smoke-tool tests pass. Audit now has zero high/critical and only the two previously accepted stream-json/parent moderate entries. No unrelated finding was waived or threshold lowered. |
@@ -39,7 +39,7 @@ history; the publication closeout records the final delivery checks.
 | S15 | Fixed in candidate locks; local runtime installs not broadly refreshed | Fresh audit findings prompted exactly six transitive version changes: brace-expansion 5.0.12 in root/frontend/backend, backend fast-uri 3.1.8 and ip-address 10.7.2, Firebase grpc-js 1.14.5. All four final lock audits and dependency graphs pass. Running development installations were not replaced; final backend build used the patched locked tree. |
 | S16 | Fixed; local and hosted package checks pass | Fresh guarded Unity build `9b96ad8e…3241a` replaces the stale package. Certification, hashes and 1046-file source provenance match committed Unity source `118a2b8b`; release validation and a release-enabled frontend build pass. Isolated Chrome smoke reaches running with a valid 1141x642 canvas. Run `36767176434` also passes package, frontend and WebGL tooling checks on `7a58c045`; its later integration failure is tracked separately as S18. No gameplay/device replay or publication is claimed. |
 | S17 | Closed as false positives; remote disposition verified | All 32 new JavaScript/TypeScript alerts (#22–#53; two critical, 30 high) were dismissed with owner approval and the specific reasons below. Readback verifies each reason/comment; the candidate has zero open CodeQL alerts and its CodeQL gate passes. No rules were excluded or thresholds changed. This disposition is tied to the reviewed source and trust boundaries, not a blanket security exception. |
-| S18 | Two stale integration fixtures corrected; focused checks pass | Three Bosses' old JWT setup now uses current token/session APIs and existing fixture migrations; 13/13 cases pass locally and in hosted run `36768246402`. That run then exposed an Apple login assertion missing required session-proof metadata. The assertion now checks the exact verified values; all 30 provider-attempt/session/revocation cases pass locally with no skips and successful teardown. Final hosted verification is recorded on PR #341. No production authentication or migration SQL changed. |
+| S18 | Fixed; focused and final hosted checks pass | Three Bosses' old JWT setup now uses current token/session APIs and existing fixture migrations. Apple's login assertion now checks required verified session-proof metadata. All 43 affected/following cases pass locally; final run `36769138253` passes every integration suite on `6c28939d`, with no skips. No production authentication or migration SQL changed. |
 | R1 | Fixed; certified and published | Package `97daf31c…c098` contains the canvas-scroll bridge: certified build `5473694d…4ba7`, source `346491b4`, 1004-file provenance, Unity6000.3.8f1. Guarded build/settings restoration and packaged hash/provenance validation passed; Firebase verified preview startup and live payload delivery. Earlier game/device checks are carried forward. |
 | R2 | Fixed; owner phone acceptance | After opening the release-candidate mobile preview for the requested fresh-load/landscape touch check, the owner reported about 10 seconds to load and confirmed Fire/fullscreen-exit buttons behave properly. This closes the combined observation. The timing is owner-observed local Safari delivery, not an instrumented cache-miss measurement or production CDN benchmark; the exact 640x360 geometry remains covered by the earlier layout fixture. No repeat login/submission or exhaustive clip-listening pass is required. |
 | R3 | Fixed; accepted owner checks | Keep closed: owner-confirmed published-site login/submission; Android/iPhone normal routes and recorded defeat/retry/menu checks; touch controls; mute persistence; automatic/combined pause; complete outcome-centering audit; accepted fullscreen-button placement and Safari toolbar limitation; recovered desktop FPS incident. Carry acceptance forward unless relevant code/origin/configuration changes or a concrete regression invalidate it. A brief post-publication smoke check is not a new pre-release authentication campaign. |
@@ -49,13 +49,12 @@ history; the publication closeout records the final delivery checks.
 
 ## C7 security reassessment — 2026-09-30
 
-**Local remediation and aggregate checks are complete; C7 remains open.** The
-remaining security blocker is S8's upstream runtime patch, with an owner-chosen
-deployment hold enforced for new production images. S16's replacement package
-passes local validation/startup and hosted package checks. The hosted run then
-exposed S18's obsolete integration fixture; the correction is documented below.
-S14/S17's candidate CodeQL dispositions are verified. The source review does not approve release, renew an exception or
-activate providers. Exact commands and carried-forward evidence are in the
+**C7 is complete at the source/security-review boundary with S8 accepted.**
+The owner superseded the upstream-patch hold; the explicit, scoped exception and
+successful production-image build are recorded below. S16's rebuilt package,
+S18's corrected fixtures, final aggregate CI and S14/S17's CodeQL dispositions
+are verified. The coordinated backend/Hosting/session rollout and Google/Apple
+activation retain their own prerequisites. Exact commands and carried-forward evidence are in the
 [C7 inventory checkpoint](CLEAN_CODE_INVENTORY.md#c7-candidate-and-security-review--2026-09-30).
 
 ### Runtime component boundary (S8)
@@ -87,14 +86,14 @@ source observations supersede the historical pre-provider statement that the
 application had no cipher/HTTPS paths. They do not certify the deployed image,
 all transitive/native behavior, or the host's older embedded OpenSSL.
 
-The follow-up official release-index check still found no patched Node 22
+The earlier follow-up official release-index check found no patched Node 22
 binary; newer official Node majors also did not provide OpenSSL 3.5.9. The
-owner explicitly chose **keep the official runtime and block deployment until
-its patch arrives**, instead of introducing a custom runtime build. No risk
-exception was accepted. S8 stays blocked until the official tag/digest can be
-updated and its actual embedded component verified.
+owner initially chose **keep the official runtime and block deployment until
+its patch arrives**, instead of introducing a custom runtime build. That initial
+hold is superseded by the subsequent acceptance below; the component remains
+unpatched and must not be described as fixed.
 
-The Docker `runtime` stage now fails before creating a deployable image unless
+At that initial checkpoint the Docker `runtime` stage failed before creating a deployable image unless
 `process.versions.openssl` is at least 3.5.9 within the reviewed 3.5 series.
 It has no build-argument bypass. The existing development/build stages remain
 usable, and a different OpenSSL series requires review. A local
@@ -105,12 +104,68 @@ the wrapper verified that exact cause. The three existing
 test rerun was needed for this build-only gate.
 
 No custom Node build, major-version migration, exception renewal, full image
-scan or deployment was performed. The gate applies to newly built candidate
+scan or deployment was performed at that initial checkpoint. The gate applied to newly built candidate
 images; it does not modify existing images or the running service. The last
 serving-image readback remains `1ae9d489…82b1e19`, not this local candidate;
 its earlier exception is also due for advisory reassessment. Existing disabled
 build/deploy triggers were not changed. Logs are in
 `%TEMP%/mickeyf-c7-20260930/openssl-runtime-gate.log`.
+
+### Owner-accepted runtime exception and image preparation — 2026-09-30
+
+After receiving the explanation of the unpatched embedded component, unknown
+official release date and custom-runtime alternative, the owner instructed:
+“let's continue and eventually deploy independent of this patch then. I don't
+wanna have to wait”. This accepts the remaining S8 exposure for the reviewed
+candidate and supersedes the waiting policy. It does not classify the findings
+as false positives or accept unrelated future findings. Track the official fix
+as a dependency follow-up and reassess if the pinned runtime or exposed features
+change.
+
+`Dockerfile` retains the exact official base digest and Alpine library pins.
+Its final-stage gate now explicitly accepts embedded OpenSSL 3.5.8 alongside
+patched 3.5.9+ releases in the reviewed 3.5 series. No general bypass flag was
+introduced. A bounded execution of the actual gate accepts 3.5.8, 3.5.9 and
+3.5.10, and rejects 3.5.7 and 3.6.0. The three existing
+`node --test scripts/cloudbuild-candidate.test.mjs` tests pass.
+
+`docker build --target runtime --progress plain --tag mickeyf-c7-runtime:20260930-accepted .`
+succeeds, including the production backend bundles. The local image index is
+`sha256:5e0db506ef9924d7a066a2988f66a1709e3b7f46c452334e40b657e78e6b4af8`,
+with Linux manifest
+`sha256:befc78fbf039eeab36f00d85be2fb1d12e3af5977697b59fc00cbc50b1f33394`.
+This is a local build, not an Artifact Registry release or serving revision.
+A network-disabled Node probe confirms Node v22.23.3, embedded OpenSSL 3.5.8,
+`node_shared_openssl=false`, UID 1000, the server bundle present and npm absent;
+`apk info --exists libcrypto3=3.5.9-r0 libssl3=3.5.9-r0` confirms the shared pins.
+
+Docker Scout could not scan without an account login. Instead, official Trivy
+0.74.0 was downloaded into the temporary review directory; its Windows archive
+matched the GitHub asset SHA-256
+`94c40e0696e4b907a74b7b2e1438d5d72ebaca83115817407f568a002d520842`.
+No global tool installation or Docker login was performed.
+
+Commands (all outputs under `%TEMP%/mickeyf-c7-20260930`):
+
+```text
+docker image save --output <temp>/accepted-runtime-image.tar mickeyf-c7-runtime:20260930-accepted
+trivy.exe image --input <temp>/accepted-runtime-image.tar --cache-dir <temp>/trivy-cache --scanners vuln --format json --output <temp>/accepted-runtime-trivy.json --timeout 5m
+```
+
+Trivy's database was updated at `2026-09-30T19:11:21Z`; the scan completed at
+`20:23:08Z` with zero findings across 18 Alpine and 122 npm packages. It warned
+that Alpine 3.24 is absent from its EOL list. The report does not inventory or
+certify the Node binary's embedded OpenSSL; the direct runtime probe and accepted
+S8 advisory assessment remain authoritative for that component. This local scan
+also does not replace the frozen rollout's required Artifact Analysis receipt.
+Build/probe/scan work made no network connection from the candidate to Cloud SQL.
+
+The next release step is a coordinated session cutover, following
+[the rollout plan](backend/GOOGLE_SIGN_IN_ROLLOUT.md#ordered-preparation-and-activation):
+prepare the exact remote build/image, session-secret reference, compatible
+backend/Hosting/local protocol settings and rollback before changing traffic.
+Keep Google/Apple activation, production schema/grants and registration/deletion
+prerequisites explicit. The S8 exception alone does not execute that cutover.
 
 ### New dependency and scanning evidence (S7, S14, S15)
 

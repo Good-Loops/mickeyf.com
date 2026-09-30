@@ -158,8 +158,8 @@ coverage gap justifies additional checks.
   delete generated output as unused source, or run deployment/migration commands.
   The [tooling/documentation closeout](#c6-tooling-and-documentation-delta--2026-09-30)
   corrects development-target guidance and brings existing launcher tests into CI.
-  Runtime/deployment tooling required no new refactor; C7 security follow-ups remain.
-- [ ] **C7 — One final closeout.** Reconcile C1–C6 findings and the reviewed Git
+  Runtime/deployment tooling required no new refactor; C7 follow-ups are resolved below.
+- [x] **C7 — One final closeout.** Reconcile C1–C6 findings and the reviewed Git
   diff; run the relevant aggregate checks once for the final candidate. Complete
   the scoped security closeout (secrets/logging, auth/data boundaries, dependency
   exceptions and applicable deployment guards) against that candidate, carrying
@@ -167,12 +167,15 @@ coverage gap justifies additional checks.
   blocking finding stays open, while an owner-accepted/deferred risk retains its
   conditions. This is not store/privacy compliance or deployment approval.
   The [September 30 candidate review](#c7-candidate-and-security-review--2026-09-30)
-  completes the local checks and available patches. Embedded OpenSSL S8 now has
-  an owner-chosen upstream-patch hold enforced for new production images.
+  completes the local checks and available patches. The owner subsequently
+  accepted S8 for the reviewed pinned runtime and superseded the upstream wait.
+  The production image builds; focused gate checks and package scanning pass,
+  with the embedded OpenSSL limitation recorded separately.
   S16's replacement WebGL package passes local provenance/startup validation
-  and hosted package checks. S18 corrects a stale integration fixture; current
-  follow-up CI is recorded on PR #341. S14/S17's CodeQL dispositions are verified.
-  Do not restart C1–C6 to resolve the remaining gate.
+  and hosted package checks. S18's fixtures and all final candidate CI pass on
+  `6c28939d`; later PR checks cover the runtime exception. S14/S17's CodeQL
+  dispositions are verified. The finite Clean Code review is complete with S8
+  accepted; coordinated release/provider work remains separate.
 
 ### Completion rule and boundaries
 
@@ -2350,7 +2353,9 @@ documentation links and `git diff --check`.
 
 ## C7 candidate and security review — 2026-09-30
 
-**Local candidate work is complete; C7 stays open for S8's upstream patch.**
+**C7 is complete at the review boundary with owner-accepted S8 risk.**
+The later acceptance and successful runtime-image checkpoint below supersede
+the earlier wait-for-upstream hold. Release/activation prerequisites remain.
 S16's replacement package passes local and hosted checks. The later S18 fixture
 correction and exact hosted validation boundaries are recorded below.
 The original checkpoint base is `7757260d` plus the existing C4–C6 local changes and this
@@ -2529,3 +2534,30 @@ follow-up includes that suite and the two session/revocation suites not yet
 reached by CI; later PR results supersede this dated failed-run boundary.
 All 30 selected cases pass (12 provider-attempt, 12 session, six revocation),
 with zero skips and successful disposable-container/network teardown.
+
+### C7 closeout: final CI and owner-accepted runtime risk
+
+Final run `36769138253` on `6c28939d` passes frontend TypeScript/581 tests/build,
+backend TypeScript/807 unit tests/109 integration cases/build, package/tooling,
+deployment guards, launcher checks, docs watcher/build and Unity integrity.
+All five CodeQL analyses and the security gate pass with zero open candidate
+alerts; the separate docs build passes and its deployment is skipped.
+
+After the runtime risk and unknown upstream date were explained, the owner
+explicitly chose to continue toward deployment without waiting. S8 is accepted
+for the reviewed official Node 22.23.3 / OpenSSL 3.5.8 image; it is not fixed.
+`Dockerfile` now permits that exact embedded version and patched 3.5.9+ in the
+reviewed series, retaining rejection of older or other-series versions.
+The final production image builds, runs as UID 1000 and contains patched Alpine
+shared libraries. Three existing candidate-tool tests and five gate boundary
+cases pass. Trivy reports zero findings across 18 OS/122 npm packages, with no
+coverage claim for Node's embedded OpenSSL and a recorded EOL-list warning.
+Exact image identity, commands and limitations are in the
+[S8 acceptance checkpoint](RELEASE_READINESS.md#owner-accepted-runtime-exception-and-image-preparation--2026-09-30).
+
+This closes C1–C7's finite source/security review with the accepted exception and
+previously named deferrals. Continue through the existing coordinated release
+plan; do not reopen completed gameplay/source checks without a relevant change.
+No merge, deployment, Cloud SQL write, provider activation or active-server
+restart occurred in this checkpoint. Generated documentation remains outside
+the authored change set. Normal PR checks on the eventual merge head remain.
