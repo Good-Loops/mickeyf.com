@@ -2519,3 +2519,13 @@ follow-up hosted results are recorded on PR #341.
 Prior gameplay/device acceptance and unchanged source-test results carry forward;
 no deployment, Cloud SQL change or Google/Apple activation occurred. C7 remains
 open for S8 and requires the corrected fixture's hosted validation.
+
+Run `36768246402` on `02001324` confirms the Three Bosses correction and
+subsequent reconciliation/grant/account suites. A later provider-attempt
+integration assertion still omitted the Apple authentication method and
+verified session proof now required for revocation. The two-line expectation
+update checks those exact values; production behavior is unchanged. Focused
+follow-up includes that suite and the two session/revocation suites not yet
+reached by CI; later PR results supersede this dated failed-run boundary.
+All 30 selected cases pass (12 provider-attempt, 12 session, six revocation),
+with zero skips and successful disposable-container/network teardown.

@@ -39,7 +39,7 @@ history; the publication closeout records the final delivery checks.
 | S15 | Fixed in candidate locks; local runtime installs not broadly refreshed | Fresh audit findings prompted exactly six transitive version changes: brace-expansion 5.0.12 in root/frontend/backend, backend fast-uri 3.1.8 and ip-address 10.7.2, Firebase grpc-js 1.14.5. All four final lock audits and dependency graphs pass. Running development installations were not replaced; final backend build used the patched locked tree. |
 | S16 | Fixed; local and hosted package checks pass | Fresh guarded Unity build `9b96ad8e…3241a` replaces the stale package. Certification, hashes and 1046-file source provenance match committed Unity source `118a2b8b`; release validation and a release-enabled frontend build pass. Isolated Chrome smoke reaches running with a valid 1141x642 canvas. Run `36767176434` also passes package, frontend and WebGL tooling checks on `7a58c045`; its later integration failure is tracked separately as S18. No gameplay/device replay or publication is claimed. |
 | S17 | Closed as false positives; remote disposition verified | All 32 new JavaScript/TypeScript alerts (#22–#53; two critical, 30 high) were dismissed with owner approval and the specific reasons below. Readback verifies each reason/comment; the candidate has zero open CodeQL alerts and its CodeQL gate passes. No rules were excluded or thresholds changed. This disposition is tied to the reviewed source and trust boundaries, not a blanket security exception. |
-| S18 | Integration fixture corrected; 13/13 focused tests pass | Run `36767176434` passed all 807 backend unit tests but exposed a stale Three Bosses HTTP integration fixture: its legacy JWT is correctly rejected by current session authentication. The fixture now applies the existing identity/session migrations only in the disposable harness and uses the real session-token and session-repository APIs. All 13 affected integration cases pass, with no skips; its added tables and disposable resources are cleaned. Hosted verification is recorded on PR #341. No production authentication or migration SQL changed. |
+| S18 | Two stale integration fixtures corrected; focused checks pass | Three Bosses' old JWT setup now uses current token/session APIs and existing fixture migrations; 13/13 cases pass locally and in hosted run `36768246402`. That run then exposed an Apple login assertion missing required session-proof metadata. The assertion now checks the exact verified values; all 30 provider-attempt/session/revocation cases pass locally with no skips and successful teardown. Final hosted verification is recorded on PR #341. No production authentication or migration SQL changed. |
 | R1 | Fixed; certified and published | Package `97daf31c…c098` contains the canvas-scroll bridge: certified build `5473694d…4ba7`, source `346491b4`, 1004-file provenance, Unity6000.3.8f1. Guarded build/settings restoration and packaged hash/provenance validation passed; Firebase verified preview startup and live payload delivery. Earlier game/device checks are carried forward. |
 | R2 | Fixed; owner phone acceptance | After opening the release-candidate mobile preview for the requested fresh-load/landscape touch check, the owner reported about 10 seconds to load and confirmed Fire/fullscreen-exit buttons behave properly. This closes the combined observation. The timing is owner-observed local Safari delivery, not an instrumented cache-miss measurement or production CDN benchmark; the exact 640x360 geometry remains covered by the earlier layout fixture. No repeat login/submission or exhaustive clip-listening pass is required. |
 | R3 | Fixed; accepted owner checks | Keep closed: owner-confirmed published-site login/submission; Android/iPhone normal routes and recorded defeat/retry/menu checks; touch controls; mute persistence; automatic/combined pause; complete outcome-centering audit; accepted fullscreen-button placement and Safari toolbar limitation; recovered desktop FPS incident. Carry acceptance forward unless relevant code/origin/configuration changes or a concrete regression invalidate it. A brief post-publication smoke check is not a new pre-release authentication campaign. |
@@ -305,6 +305,24 @@ scrubbing and teardown guards are unchanged. The temporary runner and log are
 passed all 13 cases with zero failures/skips; container and network removal
 completed. Current follow-up CI results belong to the PR
 head reported on PR #341; this checkpoint does not claim a pass for skipped work.
+
+Run `36768246402` on fixture commit `02001324` confirms the repaired Three
+Bosses round trip and the intervening reconciliation, grants, deletion-replay
+and provider-account suites. It then exposes a second stale expectation in
+`providerAttemptRepository.integration.test.ts`: verified Apple login now
+returns `authenticationMethod: 'apple'` and the original verified subject,
+audience and issue time as `appleSessionProof`. Those fields are required by
+session establishment for Apple revocation; the assertion now checks their
+exact fixture values. Production flow/session code remains unchanged.
+
+The temporary `run-remaining-session-integrations.mjs` harness selects only
+the affected provider-attempt suite and the two not yet reached session and
+Apple-revocation suites; all existing isolation/teardown guards remain. Its log
+is `remaining-session-integrations.log` in the same temporary directory.
+`node <temp>/run-remaining-session-integrations.mjs` passes all 30 cases
+(12 provider-attempt, 12 session, six Apple-revocation), with zero failures or
+skips and confirmed disposable-container/network removal. No earlier successful
+integration groups were repeated locally.
 
 ### Carried-forward security boundaries
 

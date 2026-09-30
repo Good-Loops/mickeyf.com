@@ -506,6 +506,8 @@ test('complete flow links a locally verified provider proof, verifies anonymous 
     };
     assert.deepEqual(await flow.complete(await readContext(anonymousRequest), loginInput), {
         ok: true, type: 'account-verified', account: { ...account, userName },
+        authenticationMethod: 'apple',
+        appleSessionProof: { subject, clientId: audience, issuedAt: nowSeconds - 10 },
     });
     assert.deepEqual(await flow.complete(await readContext(anonymousRequest), loginInput), { ok: false, reason: 'INVALID_ATTEMPT' });
     assert.deepEqual(await attemptRows(), []);
