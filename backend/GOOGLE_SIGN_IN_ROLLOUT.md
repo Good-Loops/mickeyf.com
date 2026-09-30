@@ -1,10 +1,59 @@
 # Real-account Google sign-in rollout
 
-Status: preparation only, 2026-09-21. The owner approved preparing this rollout,
+Status: preparation only; local readiness refreshed 2026-09-30. The owner approved preparing this rollout,
 not activating public sign-in, modifying production SQL, rotating secrets or
 changing traffic. Preserve real public accounts and scores on localhost.
 
-## Verified now
+## September 30 local readiness and required behavior
+
+The owner reconfirmed Google and Apple sign-in as required features, including
+functional buttons on **both Log in and Sign up**, and local development against
+Cloud SQL. Keep this as an explicit acceptance requirement; a hidden capability,
+decorative button or link-only flow does not complete provider signup.
+
+Current local readback confirms `VITE_USE_PUBLIC_API=1` with the legacy protocol
+default. Provider discovery through the localhost public gateway returns 404.
+The local backend on port 8080 returns 200 with `clients: []`; the root local
+environment has no provider-enable/signup flags or Google web client ID. Both
+React pages already include the shared provider controls. Google browser client
+code is implemented; native Google and browser Apple remain separate missing
+implementations. The prepared native Apple capability is still disabled.
+
+Using only the existing runtime connection, read-only SQL confirmed recorded
+migrations 0001–0012 and no explicit grants on provider identities/attempts.
+An aggregate username query found zero duplicate groups, useful for the 0013
+unique-index prerequisite. The statements were:
+
+```sql
+SELECT version FROM schema_migrations ORDER BY version;
+SHOW GRANTS FOR CURRENT_USER();
+SELECT COUNT(*) AS duplicateGroups
+FROM (SELECT user_name FROM users GROUP BY user_name HAVING COUNT(*) > 1) AS duplicate_names;
+```
+
+No user details or credentials were printed. This runtime-only check does not
+replace maintenance visibility, recorded-checksum verification, exact grant
+planning or a migration-window duplicate check. The prior September 29 approval
+covered only 0009–0012 and session grants; 0013–0015/provider grants remain part
+of a separately reviewed change set. No flags, SQL, grants, OAuth settings or
+local servers were changed here.
+
+Google's existing web client needs to be supplied to the compatible backend;
+its [official localhost setup](https://developers.google.com/identity/gsi/web/guides/get-google-api-clientid)
+supports both bare and port-specific localhost origins. Their prior saved
+configuration below is carried forward, not a fresh console verification.
+Activating the local backend against shared Cloud SQL does not isolate real
+accounts or bypass the schema, eligibility, deletion/recovery and serving-code
+compatibility work below. Preserve the current public routing until that
+coordinated choice is ready; changing the protocol flag alone cannot enable it.
+
+Apple [web setup](https://developer.apple.com/help/account/capabilities/configure-sign-in-with-apple-for-the-web)
+requires the associated Apple app and Services ID/domain/return-URL setup.
+The project currently implements native iOS preparation only; keep its signing,
+server notifications, token retention/revocation and device acceptance gates.
+Native source review is complete, but none of these activation gaps is closed.
+
+## September 21 production/configuration snapshot
 
 - Localhost serves `VITE_USE_PUBLIC_API=1`. `VITE_PUBLIC_AUTH_PROTOCOL` is absent,
   which deliberately selects the legacy cookie protocol and hides provider UI.

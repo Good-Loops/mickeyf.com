@@ -4,9 +4,9 @@ This tracked roadmap records the active continuation of the broader migration
 and game plan. Detailed implementation decisions remain subject to review at
 each phase boundary.
 
-**Current Clean Code continuation (2026-09-29):** use the
+**Current Clean Code continuation (2026-09-30):** use the
 [finite C1–C7 checklist](CLEAN_CODE_INVENTORY.md#remaining-clean-code-checklist--2026-09-23)
-as the source of remaining review scope. **C1–C3 are complete**: see the
+as the source of remaining review scope. **C1–C6 are complete**: see the
 [C1 shared UI closeout](CLEAN_CODE_INVENTORY.md#c1-general-and-shared-ui-closeout--2026-09-23)
 and [C2 web experience closeout](CLEAN_CODE_INVENTORY.md#c2-web-experience-orchestration-closeout--2026-09-23).
 C2 fixed animation startup recovery, p4-Vega lost-focus/restart failures, stale
@@ -15,7 +15,7 @@ paused beats and pitch timing, and removed proven-unused utility code. The
 completes backend source review and bounds runtime-grant identity checks and
 connection shutdown. All 22 affected-file tests, TypeScript and an isolated-output
 production build passed. Migration history and grant policies are unchanged.
-C4 is in progress: the [run-state source review](CLEAN_CODE_INVENTORY.md#c4-run-state-source-review--2026-09-29)
+C4's [run-state source review](CLEAN_CODE_INVENTORY.md#c4-run-state-source-review--2026-09-29)
 retained the reviewed run/timing/submission and scene-transition boundaries.
 The [projectile impact checkpoint](CLEAN_CODE_INVENTORY.md#c4-projectile-impact-and-damage-boundaries--2026-09-29)
 fixes repeated damage from Stinger and non-attaching Phase Anchor hits: two
@@ -32,9 +32,31 @@ repair and pass afterward. No WebGL rebuild or broad suite was run.
 The [Editor and WebGL checkpoint](CLEAN_CODE_INVENTORY.md#c4-editor-utilities-and-webgl-plugins--2026-09-29)
 guards unsaved additive scenes and restores the workspace after rebuilds; one
 regression failed before the repair and all six focused Editor checks pass.
-WebGL adapters required no changes. Next: reconcile remaining authored UI
-source/styles with the accepted migration and close C4 if no source gaps remain.
-Three review groups and one closeout remain. Completed checks carry forward;
+WebGL adapters required no changes. The
+[UI and integrity closeout](CLEAN_CODE_INVENTORY.md#c4-ui-and-source-integrity-closeout--2026-09-30)
+completes C4: Dot's remaining UI/style review and 16/16 timer tests carry forward;
+the checker now respects Unity's hidden-file metadata rule, with six focused
+Python regressions and project integrity passing. Dot's tested Firebase tooling
+update is recorded in the [security ledger](RELEASE_READINESS.md#local-firebase-tooling-remediation--2026-09-30).
+At that September 30 checkpoint, the edits were local. The owner has since
+authorized committing the reviewed candidate, pushing the existing branch and
+opening a draft PR for non-deploying checks; merge/deployment remain separate.
+The [C5 native shell closeout](CLEAN_CODE_INVENTORY.md#c5-native-shell-and-provider-readiness--2026-09-30)
+reviews Android/iOS entry points, the native API/Apple plugins and Capacitor
+configuration; no native code change was justified. Google/Apple sign-in must
+work from both login and signup, including local development against Cloud SQL.
+Their separate [activation requirements](backend/GOOGLE_SIGN_IN_ROLLOUT.md#september-30-local-readiness-and-required-behavior)
+remain open; provider controls are already wired into both pages but are not
+operationally enabled. The
+[C6 tooling/documentation closeout](CLEAN_CODE_INVENTORY.md#c6-tooling-and-documentation-delta--2026-09-30)
+corrects misleading local-database instructions, records the isolated launcher's
+actual schema ceiling and wires 11 existing launcher tests into PR CI; all pass
+locally without Docker/database work. The
+[C7 candidate review](CLEAN_CODE_INVENTORY.md#c7-candidate-and-security-review--2026-09-30)
+adds the available runtime/dependency patches, binds Firebase MCP to the reviewed
+tooling lock and restricts the deployment preflight's input path. **C7 remains
+open for embedded OpenSSL S8 and the recorded hosted scan disposition.**
+Completed checks carry forward;
 KWS/provider activation, store publication and Git deletion approvals are separate.
 The dated implementation and release history below is retained as evidence.
 

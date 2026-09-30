@@ -282,7 +282,9 @@ def verify_exclusion(stage_a, stage_b, active_builds, deploy_build, deploy_trigg
 
 def main():
     pins_path, build_id, trigger_id, approval, phase = sys.argv[1:]
-    with open(pins_path, encoding="utf-8") as handle:
+    if pins_path != "/workspace/frozen-pins.json":
+        reject("pins must use the materialized frozen deployment path")
+    with open("/workspace/frozen-pins.json", encoding="utf-8") as handle:
         pins = json.load(handle)
     session_secret_version = validate_session_secret_version(pins)
     if (re.fullmatch(UUID, build_id) is None or re.fullmatch(UUID, trigger_id) is None

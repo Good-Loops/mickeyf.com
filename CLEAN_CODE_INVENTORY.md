@@ -67,8 +67,8 @@ This is the canonical continuation checklist, reconciled against the dated
 checkpoints below and Phase 16 in `PROJECT_PLAN.md`. It replaces the open-ended
 subsystem queue; it is not a new claim that every file has been reviewed. The
 1,586-file classification above remains the historical baseline, not today's
-file count. C1–C3 are complete; three review groups and one closeout remain,
-not four mandatory refactors or a promise that each group fits in one turn.
+file count. C1–C6 are complete; the C7 closeout remains. Completed review groups
+are not a claim of release readiness or provider activation.
 
 ### Completed evidence to carry forward
 
@@ -120,7 +120,7 @@ coverage gap justifies additional checks.
   closes the runtime configuration/validation/contracts review. The
   [migration and grant tooling closeout](#c3-migration-and-grant-tooling-closeout--2026-09-29)
   completes C3 with the executable tooling and its dedicated configuration.
-- [ ] **C4 — First-party Unity source.** Remaining authored runtime C#, Editor
+- [x] **C4 — First-party Unity source.** Remaining authored runtime C#, Editor
   utilities, WebGL plugins and adjacent tests; authored UI code/styles only where
   not already covered by the accepted migration. Review events, coroutine/object
   lifetimes, state ownership and duplication with a demonstrated maintenance cost.
@@ -138,19 +138,27 @@ coverage gap justifies additional checks.
   The [Editor and WebGL checkpoint](#c4-editor-utilities-and-webgl-plugins--2026-09-29)
   protects unsaved additive scenes and restores rebuild workspace state; the
   reviewed WebGL adapters required no changes.
-  Remaining C4 source is still open.
-- [ ] **C5 — Native shell source/configuration.** Project-owned Android/iOS entry
+  The [UI and integrity closeout](#c4-ui-and-source-integrity-closeout--2026-09-30)
+  completes the remaining authored UI review, fixes extreme timer formatting
+  and resolves the checker's false metadata requirement for hidden Figma data.
+- [x] **C5 — Native shell source/configuration.** Project-owned Android/iOS entry
   points, custom plugins and Capacitor configuration; assess session/callback/
   lifecycle ownership and identify template remnants before removing anything.
   Frontend provider cancellation did not review all Swift code. Keep generated
   wiring, icons/signing and accepted layouts intact. Record unavailable platform
   verification honestly; missing store/provider features belong to Phase 17.
-- [ ] **C6 — Tooling, tests and documentation delta.** Remaining authored build,
+  The [native shell closeout](#c5-native-shell-and-provider-readiness--2026-09-30)
+  records the source review and current provider activation gaps. No native
+  behavior change was justified; source review does not complete sign-in rollout.
+- [x] **C6 — Tooling, tests and documentation delta.** Remaining authored build,
   development, CI/deployment tooling, hooks/editor configuration and documentation;
   tests are otherwise reviewed with their owning groups. Check actual callers,
   ownership and misleading/stale instructions, especially changes since the named
   cleanup. Do not repeat the completed package/dependency audit without a trigger,
   delete generated output as unused source, or run deployment/migration commands.
+  The [tooling/documentation closeout](#c6-tooling-and-documentation-delta--2026-09-30)
+  corrects development-target guidance and brings existing launcher tests into CI.
+  Runtime/deployment tooling required no new refactor; C7 security follow-ups remain.
 - [ ] **C7 — One final closeout.** Reconcile C1–C6 findings and the reviewed Git
   diff; run the relevant aggregate checks once for the final candidate. Complete
   the scoped security closeout (secrets/logging, auth/data boundaries, dependency
@@ -158,6 +166,9 @@ coverage gap justifies additional checks.
   forward unchanged accepted evidence. Record unresolved risks explicitly; a
   blocking finding stays open, while an owner-accepted/deferred risk retains its
   conditions. This is not store/privacy compliance or deployment approval.
+  The [September 30 candidate review](#c7-candidate-and-security-review--2026-09-30)
+  completes the local checks and available patches; embedded OpenSSL S8 and
+  hosted CodeQL disposition remain open. Do not restart C1–C6 to resolve them.
 
 ### Completion rule and boundaries
 
@@ -2169,6 +2180,160 @@ Next narrow review: reconcile the remaining authored UI source/styles against
 the accepted migration and these C4 checkpoints, then close C4 if no source gaps
 remain. C5–C7 are unchanged.
 
+## C4 UI and source integrity closeout — 2026-09-30
+
+Resumed the Dot task "Review Ludolume continuation and security" on the same
+checkout at `7757260d`, preserving its five local file changes. Its remaining
+UI/style review covered menus, pause, outcomes, countdown/timer, touch
+presentation and authored styles against the existing tests and accepted
+migration. No layout or gameplay change was justified; that review and the
+September 22 Safari acceptance are carried forward, not repeated.
+
+Dot repaired `RunUiFormatter.FormatTime`: converting `long.MaxValue` through
+`double` had rounded the clamp outside the integer range and produced negative
+text for extreme finite durations. The formatter now chooses the saturated
+`long` result directly. Six additional timer cases cover the integer boundary,
+multiplication overflow, negative infinity and 24 hours. The focused Unity
+6000.3.8f1 PlayMode run changed from **13 passed / 3 failed** before repair to
+**16/16 passed, zero skips** afterward. The existing XML report was read on
+continuation; those unchanged Unity tests were not rerun.
+
+Its remaining integrity failure was a checker false positive: the tracked
+Figma `.figma-manifest.json` does not need Unity metadata. Unity's
+[hidden-asset rules](https://docs.unity3d.com/6000.0/Documentation/Manual/SpecialFolders.html#HiddenAssets)
+exclude dot-prefixed files/folders except under root `StreamingAssets`.
+`check-unity-project.py` now applies that specific rule to metadata requirements
+and GUID validation. Ordinary asset metadata, symlink rejection and all tracked
+content/security checks remain enforced. No Figma file or `.meta` was changed.
+
+Added six small Python regression tests and wired them into the existing Unity
+static CI job. The hidden-file case failed before the checker repair; all six
+pass afterward, including required visible metadata, duplicate/orphan/malformed
+GUID rejection, the `StreamingAssets` exception and hidden-file secret scanning.
+The project integrity check now passes: **1,050 tracked files, 548 filesystem
+asset entries (including the ignored manifest), 547 metas, 66 locked packages**.
+Commands run for this continuation:
+
+```powershell
+python -B -m unittest discover -s .github/scripts -p test_check_unity_project.py
+python .github/scripts/check-unity-project.py
+git diff --check
+```
+
+The reused Unity report is outside Git at
+`C:\Users\User\Documents\Codex\2026-09-30\task\formatter-review\formatter-after.xml`.
+Dot's separate Firebase tooling repair and its reused validation are recorded
+in the [security ledger](RELEASE_READINESS.md#local-firebase-tooling-remediation--2026-09-30).
+No broad suite, WebGL rebuild, browser/device replay, generated documentation
+edit, commit, push or deployment was performed in this continuation.
+
+**C4 is complete at the source-review boundary.** C5 native shell, C6 remaining
+tooling/documentation and C7 cumulative security/release closeout remain open.
+The source changes are local and are not a rebuilt or published game package.
+Next narrow review: C5's project-owned Android/iOS shell and Capacitor code,
+carrying forward the completed frontend provider-cancellation review.
+
+## C5 native shell and provider readiness — 2026-09-30
+
+Reviewed the project-owned Android entry point/manifest, Gradle configuration,
+file-provider paths and example tests; iOS app/scene delegates, custom bridge
+registration, API and Apple identity plugins, Info.plist, Xcode target settings,
+Podfile and storyboard wiring; and shared Capacitor configuration. Read adjacent
+native transport/provider tests as contract context rather than rerunning them.
+Generated Capacitor wiring, wrapper binaries, icons and signing material were
+preserved. No demonstrated defect justified changing native source in this slice.
+
+| Boundary | Disposition |
+| --- | --- |
+| Native API transport | Retained exact HTTPS host/method/path allowlist, request/response size bounds, 30-second transport limits, rejected redirects, native-only cookie ownership, serialized POST operations and cookie removal only after confirmed logout/deletion. JavaScript cancellation discards results; it does not undo server mutations. |
+| Apple identity bridge | Retained explicit capability gate, exact bundle/challenge validation, foreground presentation, strong operation ownership for weak delegates, cancellation/late-result guards, transient token/code handoff and observer cleanup. On iOS 15 the operation remains owned until the uncancellable sheet dismisses. |
+| App lifecycle and configuration | App/scene URL callbacks forward through Capacitor; the custom iOS view controller registers both plugins. Bundle/application IDs agree on `com.mickeyf.app`; installed Capacitor's iOS minimum agrees with the project's 15.0 target. Bridge payload logging remains disabled. |
+| Android scaffolding | `MainActivity` is a minimal `BridgeActivity`; there is no custom native identity plugin. The example arithmetic test and template test namespace are scaffolding, not authentication coverage. The instrumentation assertion already targets the correct app ID. No template cleanup was needed. |
+
+The owner explicitly requires Google and Apple sign-in, with functional controls
+on **both login and signup**, also in local development while retaining Cloud
+SQL. Both pages already mount the shared provider controls. Google browser
+authentication and native Apple preparation exist; native Google and browser
+Apple are not implemented. Missing provider SDKs/activation are Phase 17 feature
+work, not evidence that the C5 source review should fabricate usable buttons.
+
+Fresh bounded read-only checks explain current localhost behavior:
+
+- `frontend/.env.development.local` selects the public API; the absent protocol
+  override keeps legacy auth and hides provider controls.
+- `GET http://localhost:5173/__public-api/auth/providers/config` returns **404**.
+  The existing local backend's corresponding endpoint returns **200** with an
+  empty client list. Its provider flags and Google web client ID are unconfigured.
+- The existing runtime account reads migration versions **0001–0012** only;
+  its grants contain no explicit provider-identity/attempt-table grants. An
+  aggregate query found **zero duplicate username groups**. This is not a full
+  maintenance checksum/schema/grant preflight, and privilege-filtered visibility
+  is not proof of physical absence.
+
+The [Google rollout plan](backend/GOOGLE_SIGN_IN_ROLLOUT.md#september-30-local-readiness-and-required-behavior)
+now records this requirement and evidence. Keep real-account eligibility,
+deletion/recovery, reviewed schema/grants and coordinated API/session activation
+in that rollout. A local process writing the shared Cloud SQL database still
+needs those safeguards. Apple additionally retains its capability/signing,
+notification and token-lifecycle requirements; its web setup is separate.
+
+**C5 is complete at the source-review boundary.** No application code, flags,
+database/grants, running processes, generated docs, build or deployment changed.
+No tests were added or rerun for this no-code-change review; `git diff --check`
+is the documentation validation. Xcode/Swift and Java/adb were not available on
+PATH, and no native compilation/device acceptance is claimed. Existing accepted
+iPhone behavior carries forward. C6 and C7 remain; provider feature activation
+stays explicitly open in Phase 17 and the linked rollout plan.
+
+## C6 tooling and documentation delta — 2026-09-30
+
+Used the completed package-script audit at `1d31db47` as a usage baseline,
+compared subsequent tooling changes, and carried forward the named cleanup,
+WebGL slow-transfer acceptance, C3 migration/grant checks, C4 integrity repair
+and Dot's tested Firebase lock update. No dependency installation/audit or
+whole-project script execution was repeated.
+
+| Reviewed boundary | Disposition |
+| --- | --- |
+| Development and migration-test launchers | Read `backend/scripts/dev-isolated.cjs` and `run-migration-tests.mjs` with their existing tests: explicit environments, container identity/port checks, migration selection and process/cleanup ownership. These unit tests were absent from PR CI; the web job now runs both files before backend tests/build. No launcher behavior changed and no database was started. |
+| Deployment/build delta | Reviewed iOS workflow/helper signing, redacted diagnostics, owned cleanup and upload boundaries; frozen deployment renderer/preflight/traffic pinning and approval checks; account-feature deployment delta and Hosting/PR/Docs workflow callers. Retained exact source/image/session pins and existing operation boundaries. Unchanged build/package/provenance tools and accepted release evidence carry forward; no cloud command or native/release build ran. |
+| Shared tooling/configuration | Inspected staged Unity normalization and its hook, port waiter, docs clean/copy helpers, TypeDoc configurations, editor tasks/terminal/MCP configuration and context exclusions. Retained partial-stage protection, generated-output ownership, watcher behavior and existing editor choices. Imported installer/wrapper content was not rewritten or executed. |
+| Documentation | Reconciled current README/environment guidance and the optional isolated-backend guide against actual launchers and the completed Cloud SQL repair. Dated release/provider/security checkpoints remain historical evidence rather than newly asserted live state. |
+
+Concrete corrections:
+
+- `README.md` and `frontend/.env.example` no longer claim that
+  `VITE_USE_PUBLIC_API=0` selects an isolated database. It selects the configured
+  API; `backend:dev:local` connects through the Cloud SQL proxy, while the
+  separate isolated launcher owns its local database. Automated mutation tests
+  must not use the Cloud SQL-backed development server.
+- README setup commands now preserve existing environment files, provider work
+  links to the current rollout plan, and the startup troubleshooting link records
+  the completed maintenance repair rather than a pending preflight.
+- `backend/LOCAL_DEVELOPMENT.md` now records the actual explicit **0018** ceiling
+  and disabled-by-default providers. It makes clear that this optional workflow
+  does not replace the owner's Cloud SQL development choice.
+
+Validation: **11/11 existing launcher tests passed**, zero failures/skips:
+
+```text
+node --test backend/scripts/dev-isolated.test.cjs backend/scripts/run-migration-tests.test.mjs
+git diff --check
+```
+
+No new test file, application/Unity test rerun, TypeDoc regeneration, watcher
+change, server restart, commit, push or deployment. The workflow's new test
+command was run locally; a hosted CI run is not claimed.
+
+**C6 is complete at this review boundary.** Only C7 remains in the finite sweep.
+Its dependency scope must include the independently pinned VS Code Firebase MCP
+(`15.28.1`): the local deployment lock update to `15.32.0` does not update that
+tool. MCP was neither started nor changed; no fresh vulnerability result for
+its separately resolved dependency tree is claimed. S8's OpenSSL reassessment
+and the other dated security dispositions remain open. Google/Apple activation
+stays in the separate provider rollout with the owner's local/login/signup
+requirements preserved.
+
 ## Inventory closeout
 
 Read-only Git/path enumeration, local reference reading and targeted frontend/
@@ -2178,3 +2343,105 @@ Only this inventory and roadmap documentation change in this pass. No tests,
 builds, dependency installations or production checks were run because no
 application behavior changed. Validation is limited to inventory consistency,
 documentation links and `git diff --check`.
+
+## C7 candidate and security review — 2026-09-30
+
+**Local candidate work is complete; C7 stays open for S8 and hosted CodeQL
+resolution.** Base is `7757260d` plus the existing C4–C6 local changes and this
+checkpoint. C1–C6 dispositions and unchanged acceptance remain valid; this is
+not a new repository-wide refactor or a claim that the project is release-ready.
+
+Changes made in this checkpoint:
+
+- `Dockerfile`: official digest-pinned Node 22.23.3 and Alpine OpenSSL shared
+  libraries 3.5.9-r0. CI Node pins, Firebase engine metadata and current setup
+  documentation align with the candidate version. Embedded OpenSSL remains
+  3.5.8; see S8's explicit unresolved exposure.
+- `.vscode/mcp.json` and its guide: use the local lockfile-managed Firebase CLI,
+  retaining exactly three read-only tools and system CA trust. The tooling
+  installation was refreshed without starting an authenticated MCP server.
+- `scripts/render-frozen-backend-deploy.preflight.py`: reject alternate pins
+  paths and open only the constant materialized path. Added the relevant
+  fail-before-access regression to the existing test file.
+- `.github/scripts/test_check_unity_project.py`: added a credential-sentinel
+  check for CodeQL #20. The printer already omits values; no production
+  logging rewrite or alert suppression was justified.
+- Four npm locks: six transitive security patch entries, with versions/ranges
+  detailed in S15. Preserved unrelated frontend peer/libc metadata that npm
+  attempted to normalize; no direct package range or major version changed.
+- This inventory, `PROJECT_PLAN.md` and `RELEASE_READINESS.md`: reconcile
+  current readbacks, resolved dependency drift, source findings and blockers.
+
+The fresh Docker install exposed advisory changes that invalidate the earlier
+zero-finding dependency evidence. Targeted lock updates used npm 11.6.2:
+
+```text
+npm update brace-expansion --package-lock-only --ignore-scripts --no-audit --no-fund
+npm --prefix frontend update brace-expansion --package-lock-only --ignore-scripts --no-audit --no-fund
+npm --prefix backend update brace-expansion fast-uri ip-address --package-lock-only --ignore-scripts --no-audit --no-fund
+npm --prefix .github/firebase-deploy update @grpc/grpc-js --package-lock-only --ignore-scripts --no-audit --no-fund
+npm --prefix .github/firebase-deploy ci --ignore-scripts --no-audit --no-fund
+```
+
+The isolated npm executable was
+`C:/Users/User/Documents/Codex/2026-09-30/task/firebase-tooling-review/npm-tool/node_modules/npm/bin/npm-cli.js`;
+Windows npm network commands used process-local `NODE_OPTIONS=--use-system-ca`.
+No TLS bypass or replacement of the active backend/frontend installation was
+used. Root/frontend's shared brace-expansion patch was exercised in the clean
+backend build with normal and deeply nested patterns; no generated docs build
+or watcher changes were needed.
+
+Verification completed:
+
+| Check / command | Result and scope |
+| --- | --- |
+| `npm --prefix frontend test` | TypeScript and 581/581 tests pass, zero skips. Source unchanged afterward; the later lock-only change affects the development CLI's brace expansion. |
+| `npm --prefix frontend run build -- --outDir <temporary>/frontend-dist` with `VITE_ENABLE_THREE_BOSSES_RELEASE=1` | Pass; active output untouched. |
+| `docker build --target node-runtime-base --tag mickeyf-c7-node-base:20260930 .` | Pass; network-disabled probe confirms Node 22.23.3 / embedded OpenSSL 3.5.8 and both Alpine libraries 3.5.9-r0. |
+| `docker build --target build --tag mickeyf-c7-build:20260930 .` | Clean locked install and production webpack build pass. Repeated only after the three backend lock patches; final build passes. This is a build-stage image, not a deployed/scanned release image. |
+| `npm test`, then the package's complete `test:unit` command with `--test-concurrency=4`, inside the network-disabled build container | Backend TypeScript and 807/807 tests pass, zero skips. No database service or credentials supplied. |
+| `node --test --test-concurrency=4 -r ts-node/register ts/auth/providerTokenVerifier.test.ts ts/auth/appleTokenClient.test.ts ts/auth/appleNotificationVerifier.test.ts ts/accounts/gcsDeletionJournal.test.ts ts/migrations/migrationRunner.test.ts` in the final build container | 92/92 affected dependency-path tests pass after the lock patches, zero skips; unchanged source results above carry forward. |
+| `node --test scripts/cloudbuild-candidate.test.mjs scripts/render-frozen-backend-deploy.test.mjs scripts/frozen-backend-traffic.test.mjs .github/receipt-cleanup/templates.test.mjs` | 100/100 pass, zero skips; cloud operations mocked/offline. |
+| `python -B -m unittest discover -s .github/scripts -p test_check_unity_project.py` | 7/7 pass, including credential-output regression. |
+| `python .github/scripts/check-unity-project.py` | Pass: 1,050 tracked files, 548 asset entries, 547 metas, 66 packages. |
+| `npm --prefix <root/frontend/backend/.github/firebase-deploy> audit --json` and `ls --all --package-lock-only --json` | All four final dependency graphs validate; all four audits report zero. Later Node-engine metadata alignment does not change the package graph. |
+| Firebase CLI version and offline tool selection | 15.32.0 on Windows and candidate Linux Node 22.23.3; installed grpc-js 1.14.5 and exact configured three read-only tools verified. Selection stubs remote discovery and calls no tool body. |
+| YAML parse and Node/engine consistency checks | All four affected workflows parse; six setup-node steps target 22.23.3; Firebase package/lock engine metadata agree. Hosted workflow execution remains pending. |
+| `git diff --check` and bounded credential-payload scan | Pass; 484 changed text files inspected, no pattern matches. Pattern checks are limited evidence, not a complete secret detector. |
+
+Logs/audit/tree reports are outside Git under
+`C:/Users/User/AppData/Local/Temp/mickeyf-c7-20260930`.
+Earlier Dot CSV/Hosting tests, 16 Unity timer cases, other focused Unity checks
+and C6's 11 launcher tests are carried forward without repeating unchanged
+paths. No MySQL integration fixture, gameplay/device replay, native/WebGL
+rebuild, generated docs, authenticated provider flow, hosted CI/CodeQL,
+publication, commit or push was run. Cloud operations were scoped metadata/API
+reads only. Google/Apple activation remains its own Cloud SQL rollout.
+
+Remaining work is finite: resolve the embedded OpenSSL exposure for an exact
+candidate (patched upstream binary or explicit owner disposition), and obtain
+the hosted CodeQL disposition when delivery is authorized. Do not silently
+renew the earlier exception or restart completed C1–C6 reviews.
+
+### C7 follow-up: exact CodeQL trace and publication boundary
+
+The official release index was fetched directly again after the owner requested
+continuation: latest Node 22 is still 22.23.3 / OpenSSL 3.5.8; no Node 22 entry
+with OpenSSL 3.5.9 exists. No additional runtime update was justified.
+
+Read-only GitHub API retrieval of Python analysis `1820860201` confirms #20's
+source is the literal pattern-label dictionary, not a credential payload. The
+existing diagnostic regression now includes matched file content as well as
+setting values, covering the exact reported path; all seven checker tests pass.
+No production-code rename, suppression or remote alert dismissal was needed.
+SARIF is retained in `<temporary>/mickeyf-c7-20260930/codeql-python-main.sarif`.
+Commands were `gh api .../code-scanning/alerts/20`,
+`gh api .../code-scanning/analyses/1820860201 -H 'Accept: application/sarif+json'`
+and `python -B -m unittest discover -s .github/scripts -p test_check_unity_project.py`.
+Unchanged builds and aggregate application tests were not repeated.
+
+CodeQL default setup is configured. There is no open PR for the existing branch;
+remote `improvement/clean-code-sweep` pointed to `7757260d` at that readback.
+The owner then explicitly approved committing the reviewed changes, pushing this
+existing branch and opening a draft PR for hosted validation. Merge, deployment,
+SQL operations and security-exception acceptance remain outside that approval.

@@ -165,6 +165,13 @@ namespace ThreeBosses.Tests
         [TestCase(-1d, "00:00.000")]
         [TestCase(double.NaN, "00:00.000")]
         [TestCase(double.PositiveInfinity, "00:00.000")]
+        [TestCase(double.NegativeInfinity, "00:00.000")]
+        [TestCase(86400d, "1440:00.000")]
+        // Adjacent double values straddle the long millisecond limit.
+        [TestCase(9223372036854774d, "153722867280912:53.760", TestName = "FormatterPreservesValueBelowMillisecondLimit")]
+        [TestCase(9223372036854776d, "153722867280912:55.807", TestName = "FormatterClampsAtMillisecondLimit")]
+        [TestCase(9223372036854778d, "153722867280912:55.807", TestName = "FormatterClampsAboveMillisecondLimit")]
+        [TestCase(double.MaxValue, "153722867280912:55.807", TestName = "FormatterClampsMultiplicationOverflow")]
         public void FormatterProducesCanonicalTime(double elapsedSeconds, string expected)
         {
             Assert.That(FormatTime(elapsedSeconds), Is.EqualTo(expected));

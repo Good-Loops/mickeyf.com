@@ -1,7 +1,8 @@
 # Release readiness and cumulative security ledger
 
-Reconciled 2026-09-08 local (2026-09-09 UTC), against source checkpoint
-`015d962e3b056b6c0aa1ad306a4ca4b94a398b79`. This is the current gate summary;
+Current dispositions refreshed 2026-09-30 against `7757260d` plus the local
+candidate changes. The original reconciliation was 2026-09-08 local
+(2026-09-09 UTC), against `015d962e`. This is the current gate summary;
 dated entries in [PROJECT_PLAN.md](PROJECT_PLAN.md) and
 [RECEIPT_RETENTION.md](backend/RECEIPT_RETENTION.md) remain supporting history.
 Update this ledger instead of treating superseded historical blockers as new work.
@@ -19,17 +20,20 @@ history; the publication closeout records the final delivery checks.
 | ID | Status | Evidence and remaining boundary |
 | --- | --- | --- |
 | S1 | Fixed; dated production acceptance | Receipt migration, exact SQL runtime/operator grants, preservation checks, temporary-account removal, 64 enabled HTTP acceptance assertions and 36 promotion assertions are complete. Do not repeat migrations or synthetic-account acceptance. These are not browser-cookie tests. |
-| S2 | Fixed; scoped live readback | On 2026-09-10, final Cloud Run generation138 serves 100% traffic to `mickeyf-org-ios-origin-a1f3ea43-0910`, image `90a9bca6…646d1`, with no tags. Runtime/configuration are unchanged; `mickeyf-org-p4-1000-6c5a8859-0910` remains intact for rollback. All six live preflights and the unauthenticated session probe passed. Earlier scoped IAM/grant findings are carried forward, not re-enumerated by this CORS-only rollout. |
+| S2 | Fixed controls; current scoped live readback | September 30 readback confirms generation 146, 100% traffic to `mickeyf-org-localhost-dbb80d4f`, no tags, image `1ae9d489…82b1e19` and the dedicated runtime identity. `DB_PASS:1` and `SESSION_SECRET:2` remain Secret Manager references, without literal credential values. This supersedes the older serving-revision summary; prior IAM/grant and browser acceptance remains dated evidence, not newly repeated. |
 | S3 | Fixed; source and live control checks | Backend build contexts exclude local environment/dependency/generated files; Docker remains pinned, multistage and non-root. All four existing global backend build/deploy triggers are disabled; none are configured in `us-central1`. Reviewed frozen deployment/traffic guards remain. Do not re-enable triggers or route traffic as part of verification. |
 | S4 | Fixed; operational acceptance | Manual cleanup/retry acceptance, hourly activation and exact first natural execution `zjpfg` succeeded. One-off follow-up was deleted. Permanent bests remain independent of receipt deletion. No extra cleanup dispatch is needed. |
 | S5 | Fixed; scoped live readback | At 2026-09-09 02:12:46 UTC, read-only Monitoring API requests verified all three enabled ERROR policies, their exact filters/conditions/alert strategies and sole approved channel against the activation snapshots. The email channel is enabled and its recipient matches the owner's choice. The API resolved the readback blocker without installations or permission changes; browser/CLI repair is not claimed. This is configuration evidence, not a new incident or email-delivery test. |
 | S6 | Fixed; merged | PR #322 brought the reviewed dependency fixes into main. GitHub's post-merge push report lists only the previously accepted moderate alert #287. At the initial reconciliation, 13 of 14 alerts mapped to branch fixes: eight `fast-uri`, two `qs`, and three `xmldom`. This is distinct from the subsequent CI audit findings in S12. |
-| S7 | Accepted; bounded and expiring | Deployment-only `stream-json` 1.9.1, GHSA-528h-pc64-c93x, remains under the owner's static-Hosting-only exception through 2026-10-07 or earlier reassessment triggers. Firebase 15.28.1, locked install, high audit gate and eight-minute deployment timeout remain. No import/framework pipeline expansion or major override is accepted. |
-| S8 | Accepted; bounded and expiring | On 2026-09-10 the owner renewed the exception through 2026-10-07 for the now-deployed CORS-only image `90a9bca6…646d1`, limited to the matching unchanged-runtime/base/dependency replacement and existing earlier-reassessment triggers. Exact build/rollout evidence and historical receipt/p4-image approvals are below. This is risk acceptance, not an OpenSSL fix or blanket approval for subsequent images. Clean OS/NPM/SECRET scans do not certify the embedded component. |
+| S7 | Fixed locally; delivery pending | Firebase 15.32.0 resolves the earlier Undici/ip-address/stream-json findings. C7 also updates `@grpc/grpc-js` to 1.14.5 after a newly surfaced advisory; the final locked audit is zero. Earlier CSV/Hosting tests carry forward for unchanged paths. No commit, CI dispatch or deployment occurred; the historical exception is not renewed. |
+| S8 | Partially patched locally; blocked pending embedded-runtime disposition | C7 pins Node 22.23.3 and Alpine libcrypto3/libssl3 3.5.9-r0. The tested Node binary still embeds OpenSSL 3.5.8, affected by September 29 advisories. No supported Node 22 release with 3.5.9 was found in the official index. The old exception does not automatically cover the new candidate or new advisories. See the current component/reachability review below; no waiver or rollout occurred. |
 | S9 | Fixed; tested CI checkpoint | Authorized non-deploying run `34301221560` passed both jobs on `3ea379fe`: dependency validation/audits, frontend tests/build, WebGL package/tooling checks, backend unit/MySQL integration tests/build, docs watcher tests/docs build and Unity static integrity. All reported test summaries had zero skips. This supersedes failed run `34300667096`; it is not a Unity rebuild or a browser/device test. A PR with required checks/CodeQL on its eventual merge head remains a separate gate. |
-| S10 | Fixed controls; limited scan coverage | Main ruleset requires PR/thread resolution, strict Web/Unity checks and CodeQL errors/high-or-higher protection, with no bypass actors. Zero open code/secret-scanning alerts were observed; main CodeQL evidence covers `2bffc0db`, not this branch. Push protection is enabled; non-provider patterns and validity checks are disabled. Zero alerts is not proof that no secret exists. |
-| S11 | Deferred; local maintenance | Active backend install still has `qs` 6.15.3 versus locked 6.16.0. Isolated locked tests already passed. Refresh only during a deliberate development-stack stop; do not use the stale install as release evidence or modify running dependencies silently. |
+| S10 | Historical controls retained; current scan findings tracked | September 30 API readback reports zero open secret-scanning alerts and two high CodeQL alerts (#20/#21), both on main `ff9c79be`, now dispositioned in S14. Earlier ruleset/permissions evidence remains dated; no hosted scan certifies this uncommitted candidate. Zero secret alerts is not proof that no secret exists. |
+| S11 | On-disk mismatch resolved; running-process state unverified | September 30 readback finds installed backend `qs` 6.16.0, matching the lock; the earlier 6.15.3 disk mismatch is superseded. C7 did not refresh or restart the active backend, so cached running modules are not certified. Backend validation used a clean locked build container with no SQL connection. |
 | S12 | Fixed; deployment-only dependency patch | `3ea379fe` updates exactly four lock entries: `js-yaml` 4.3.2, `hono` 4.13.7, `morgan` 1.12.0 and Firebase-scoped `csv-parse` 7.0.2. Firebase stays 15.28.1. Fresh locked install, full production dependency-tree validation, CLI version check, eight offline CSV tests and twelve smoke-tool tests pass. Audit now has zero high/critical and only the two previously accepted stream-json/parent moderate entries. No unrelated finding was waived or threshold lowered. |
+| S13 | Fixed locally; editor restart not performed | Firebase MCP now runs the local Firebase 15.32.0 CLI from `.github/firebase-deploy`, sharing its reviewed lock and overrides instead of an independent `npx` tree. The installed tooling tree was refreshed; offline selection still exposes exactly the three named read-only tools. No authenticated MCP server or user-data tool was invoked. |
+| S14 | Preflight hardened locally; logging false-positive assessment pending hosted disposition | CodeQL #21 now reads only the literal materialized `/workspace/frozen-pins.json`; alternate arguments fail before file/cloud access. #20 points to the Unity diagnostic printer: inspected messages contain field names/path labels, not credential values; a sentinel regression confirms this. No alert was dismissed and no hosted CodeQL rerun occurred. Both remain open in GitHub until delivery/review. |
+| S15 | Fixed in candidate locks; local runtime installs not broadly refreshed | Fresh audit findings prompted exactly six transitive version changes: brace-expansion 5.0.12 in root/frontend/backend, backend fast-uri 3.1.8 and ip-address 10.7.2, Firebase grpc-js 1.14.5. All four final lock audits and dependency graphs pass. Running development installations were not replaced; final backend build used the patched locked tree. |
 | R1 | Fixed; certified and published | Package `97daf31c…c098` contains the canvas-scroll bridge: certified build `5473694d…4ba7`, source `346491b4`, 1004-file provenance, Unity6000.3.8f1. Guarded build/settings restoration and packaged hash/provenance validation passed; Firebase verified preview startup and live payload delivery. Earlier game/device checks are carried forward. |
 | R2 | Fixed; owner phone acceptance | After opening the release-candidate mobile preview for the requested fresh-load/landscape touch check, the owner reported about 10 seconds to load and confirmed Fire/fullscreen-exit buttons behave properly. This closes the combined observation. The timing is owner-observed local Safari delivery, not an instrumented cache-miss measurement or production CDN benchmark; the exact 640x360 geometry remains covered by the earlier layout fixture. No repeat login/submission or exhaustive clip-listening pass is required. |
 | R3 | Fixed; accepted owner checks | Keep closed: owner-confirmed published-site login/submission; Android/iPhone normal routes and recorded defeat/retry/menu checks; touch controls; mute persistence; automatic/combined pause; complete outcome-centering audit; accepted fullscreen-button placement and Safari toolbar limitation; recovered desktop FPS incident. Carry acceptance forward unless relevant code/origin/configuration changes or a concrete regression invalidate it. A brief post-publication smoke check is not a new pre-release authentication campaign. |
@@ -37,13 +41,141 @@ history; the publication closeout records the final delivery checks.
 | M1 | Fixed; named scope | Named temporary-artifact cleanup and the 57-script bounded audit are complete. Recycled copies remain recoverable; intentional verification/recovery archives remain. Do not reopen an unlimited package/filesystem audit. |
 | M2 | Deferred; explicit follow-ups | Exhaustive per-weapon/per-clip listening and game-feel coverage is optional follow-up absent a specific defect or relevant change; the bounded source review below found no missing weapon/audio reference. Shared-shell device checks (landscape nav/dropdowns with browser bars; Dancing Circles aspect/color) remain distinct from Three Bosses gameplay. Also retain the large-chunk warning, Unity CLI/Pipeline compatibility follow-up and unmeasured DB instrumentation overhead. p4-Vega polish and the incremental Clean Code sweep follow this release phase. |
 
+## C7 security reassessment — 2026-09-30
+
+**Local remediation and aggregate checks are complete; C7 remains open.** The
+remaining gates are S8's embedded-runtime disposition and S14's hosted CodeQL
+resolution. The source review does not approve release, renew an exception or
+activate providers. Exact commands and carried-forward evidence are in the
+[C7 inventory checkpoint](CLEAN_CODE_INVENTORY.md#c7-candidate-and-security-review--2026-09-30).
+
+### Runtime component boundary (S8)
+
+The [official Node index](https://nodejs.org/dist/index.json) and
+[22.23.3 release](https://nodejs.org/en/blog/release/v22.23.3) identify the newest
+Node 22 patch with embedded OpenSSL 3.5.8. The official Alpine image index is
+`sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402`.
+C7 uses that exact image and explicitly installs Alpine's available
+`libcrypto3=3.5.9-r0` and `libssl3=3.5.9-r0`. The local Linux base build and binary
+probe verify both shared-library pins and Node 22.23.3 / embedded OpenSSL 3.5.8.
+CI pins and the Firebase tooling engine contract now target 22.23.3 too; the
+host's installed Node and active processes were not upgraded.
+
+The [September 29 OpenSSL advisory](https://openssl-library.org/news/secadv/20260929.txt)
+and [3.5 release notes](https://openssl-library.org/news/openssl-3.5-notes/index.html)
+require a fresh assessment beyond the earlier 3.5.7 exception:
+
+| Relevant 3.5 family | Candidate source assessment; not a non-exploitability claim |
+| --- | --- |
+| DTLS CVE-2026-84782 (high) | No DTLS endpoint/caller identified in authored backend source. |
+| QUIC CVE-2026-35191 / -42772 | No OpenSSL QUIC endpoint/caller identified in authored backend source. |
+| Certificate allocation CVE-2026-35189 | Outbound HTTPS exists in provider verification, Apple token work and the deletion journal. Fixed destination URLs reduce attacker control but do not prove an unaffected TLS certificate path. Remains unresolved in Node's embedded component. |
+| Generic-curve timing CVE-2026-54872 | Inspected signing uses HMAC or Apple's ES256/P-256; no Brainpool/SM2 signing identified. |
+
+OpenSSL 4.0-only CVE-2026-84783 does not apply to this 3.5 component. Apple token
+storage uses AES-256-GCM with update/final, not the earlier CCM example. These
+source observations supersede the historical pre-provider statement that the
+application had no cipher/HTTPS paths. They do not certify the deployed image,
+all transitive/native behavior, or the host's older embedded OpenSSL.
+
+No supported Node 22 release with embedded 3.5.9 was found. Keep S8 open until a
+patched supported binary is verified or the owner explicitly accepts the
+remaining exposure for an exact image and conditions. No custom Node build,
+major-version migration, exception renewal, full image scan or deployment was
+performed. The current serving image remains `1ae9d489…82b1e19`, not this local
+build candidate; its earlier exception is also due for advisory reassessment.
+
+### New dependency and scanning evidence (S7, S14, S15)
+
+GitHub's scoped readback found 14 open default-branch dependency alerts (3 high,
+8 medium, 3 low), all in the Firebase deployment lock. Their affected versions
+are absent from the candidate. The subsequent npm audit additionally surfaced
+[brace-expansion](https://github.com/advisories/GHSA-qhr7-859c-m2p7),
+[fast-uri](https://github.com/advisories/GHSA-hrr3-gc8f-f4qj),
+[ip-address](https://github.com/advisories/GHSA-j6r3-76f7-8jcv) and
+[grpc-js](https://github.com/advisories/GHSA-m9gg-hp2v-232j) findings, which justified
+refreshing the earlier audit. All four final candidate lock audits now report
+zero findings; all four lock graphs validate. This does not close alerts on
+main or attest to old running installations.
+
+CodeQL reports #20 (Unity diagnostic logging) and #21 (preflight path) on main
+`ff9c79bedb1b3c8ca4e671ed8a9ac00739863f80`. The preflight now uses a constant
+file path and rejects alternate arguments before access. The logging finding
+is confirmed as a false positive in the retrieved SARIF trace: analysis
+`1820860201` starts at the literal `SECRET_PATTERNS` dictionary and follows its
+static `label` into the diagnostic, not matched file contents. The expanded
+regression verifies that both matched private-key content and four synthetic
+settings values stay out of stderr. All seven checker tests pass. No suppression or remote dismissal was added. Hosted scan
+confirmation/disposition remains pending on the eventual delivered candidate.
+The default CodeQL setup is configured; no open PR currently targets
+`improvement/clean-code-sweep`. Its remote head still matches local committed
+`7757260d`; the reviewed changes remain uncommitted. The owner subsequently authorized committing/pushing this candidate and opening
+a draft PR for hosted validation. That authorization does not accept S8 risk
+or authorize a merge, deployment or database change.
+
+A bounded pattern scan of 484 changed text files since the sweep baseline found
+no key/token payload match. Unity's full tracked-content checker also passes;
+GitHub reports zero open secret-scanning alerts. These checks do not prove
+absence of all secrets. Request error logging and provider/session source
+boundaries were re-inspected; unchanged C3 auth, origin, nonce, cookie and
+transaction evidence carries forward. Docker/Cloud Build context allowlists,
+non-root runtime and frozen deployment approval/traffic guards remain intact.
+Live readback confirms numeric secret references and four disabled global build
+triggers, with none in `us-central1`. Existing IAM, monitoring, SQL, scheduler,
+Unity and device acceptance remains dated evidence; no account or SQL tests were
+repeated. Development continues to use Cloud SQL.
+
+## Local Firebase tooling remediation — 2026-09-30
+
+This initial checkpoint is retained as history; C7 above supersedes its audit
+and separate-MCP disposition after the new grpc-js finding.
+
+The Dot task "Review Ludolume continuation and security" updated only
+`.github/firebase-deploy/package.json`, its lock and the Hosting workflow's
+exact CLI-version guard for this repair. Firebase 15.32.0 declares compatible
+streaming/CSV ranges itself; the old Firebase-15.28.1-specific CSV override was
+removed. The lock resolves `stream-json` 3.7.0 and `stream-chain` 4.2.6 plus
+patched transitive dependencies. Static Hosting scope, Node pins, disabled
+install lifecycle scripts, audit threshold and deployment timeout are unchanged.
+
+Dot validated an isolated candidate with Node 22.23.2/npm 11.6.2: locked install,
+full production dependency-tree check, CLI version/help, **20/20 CSV/preview
+tests**, **10/10 Hosting tests**, and audit reduction from **2 high + 5 moderate
+package findings to zero**. Process-local `--use-system-ca` used Windows trust
+without disabling TLS verification. On continuation, the three current files
+matched the recorded tested hashes and the audit/test reports were read;
+installation, audit and those tests were not repeated. Evidence remains outside
+Git in `C:\Users\User\Documents\Codex\2026-09-30\task\firebase-tooling-review`.
+
+These are local dependency results. They neither certify a deployed revision nor
+close C7. The earlier S12 checkpoint below remains historical evidence; it does
+not describe today's local Firebase version. Dot also identified upstream
+Node/OpenSSL releases as S8 reassessment triggers. S8 still requires its separate
+image/advisory review; no production readback, exception renewal, image upgrade
+or rollout was performed in this continuation.
+
+The [C4 UI/integrity closeout](CLEAN_CODE_INVENTORY.md#c4-ui-and-source-integrity-closeout--2026-09-30)
+records the timer fix and correction of a hidden-file metadata false positive.
+C1–C6 are complete at the source-review boundary; C7 remains open. The
+[C5 native/provider checkpoint](CLEAN_CODE_INVENTORY.md#c5-native-shell-and-provider-readiness--2026-09-30)
+made no application changes and does not enable Google/Apple sign-in. Both
+providers remain explicit login/signup requirements for local and released
+surfaces, with schema/grants, eligibility/deletion and platform activation open.
+The [C6 tooling checkpoint](CLEAN_CODE_INVENTORY.md#c6-tooling-and-documentation-delta--2026-09-30)
+corrects development-target documentation and adds existing launcher tests to
+PR CI: 11/11 pass locally, with no Docker, SQL, cloud or application changes.
+Hosted CI and the final cumulative security closeout have not been rerun.
+Those initial September 30 checks preceded commit/push. The owner subsequently
+authorized branch publication and a draft PR; hosted candidate checks are pending.
+
 ## C3 source availability findings — 2026-09-29
 
 These local source dispositions supplement the dated release evidence above;
 they do not change the serving backend or close the overall security review.
 The [latest tooling checkpoint](CLEAN_CODE_INVENTORY.md#c3-migration-and-grant-tooling-closeout--2026-09-29)
 completes C3 source review, superseding the earlier rows' pending C3 scope below.
-C4–C6 and the final C7 security/release closeout remain open.
+The final C7 security/release closeout remains open after the September 30
+C4–C6 source/tooling closeouts above.
 
 The push of `005706cf` on 2026-09-29 reported **five default-branch vulnerabilities:
 one high and four moderate**. This supersedes the earlier four-moderate notice
@@ -170,7 +302,10 @@ was suppressed or turned into additional unrelated work. Documentation-only
 recording after this run does not claim a new tested SHA or require repeating
 unchanged application checks merely to update this ledger.
 
-## Embedded OpenSSL: no automatic carry-forward
+## Embedded OpenSSL: historical September 9 review
+
+The C7 reassessment above supersedes the release-version and reachability
+statements in this historical exact-image review. Its approval remains bounded.
 
 The most recent historical exception covered image
 `sha256:3bba5ca29a474c6b75d92f48f93a9efc6cfa3fe32d3a4ddb7b82f2a610baaa48`.

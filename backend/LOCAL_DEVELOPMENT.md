@@ -1,5 +1,10 @@
 # Isolated local backend
 
+This is the optional isolated workflow. The project's selected development
+workflow remains `npm run backend:dev:local`, using the Cloud SQL proxy and root
+`.env`; this guide does not change that choice. Selecting `VITE_USE_PUBLIC_API=0`
+in the frontend only selects `VITE_DEV_API_URL`, not a database.
+
 From the repository root, with Docker Desktop running and port 8080 free:
 
 ```sh
@@ -15,7 +20,7 @@ An initial development build completes before the watcher/server start, so a
 fresh checkout does not need an existing backend bundle.
 
 The launcher creates the empty `ludolume_development` database baseline, applies
-the reviewed migrations through 0012, and grants the `ludolume_dev` runtime user
+the reviewed migrations through 0018, and grants the `ludolume_dev` runtime user
 only the existing runtime permissions. No website accounts are seeded: register
 ordinary dummy accounts through the local website. Account deletion is disabled
 because its production deletion journal must not be used locally.
@@ -35,6 +40,8 @@ docker stop ludolume-dev-mysql
 ```
 
 The next launch starts it again. Removing the container/volume is deliberately
-not automated. Future migrations beyond 0012 require updating and reviewing the
-launcher's explicit migration ceiling. The older `backend:dev:local` command is
-the proxy-backed workflow; it is not this isolated environment.
+not automated. Future migrations beyond 0018 require updating and reviewing the
+launcher's explicit migration ceiling. These local schema preparations do not
+enable Apple sign-in. Provider sign-in is disabled by default; the explicit
+Google-only options are described in the
+[isolated Google web check](PROVIDER_SIGN_IN.md#isolated-google-web-check).

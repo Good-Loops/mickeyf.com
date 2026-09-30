@@ -94,6 +94,24 @@ test('one reviewed version pins deployment, runtime verification, approval and r
     }
 });
 
+test('Python preflight rejects alternate pins paths before file or cloud access', () => {
+    const result = python(`
+from unittest.mock import patch
+def unexpected(*args, **kwargs):
+    raise AssertionError("untrusted path reached file or cloud access")
+for path in ["/etc/passwd", "/workspace/../etc/passwd", "frozen-pins.json", ""]:
+    with patch.dict(namespace, {"open": unexpected, "command": unexpected}), \\
+            patch.object(sys, "argv", ["preflight", path, payload["buildId"], payload["triggerId"], payload["approval"], "initial"]):
+        try:
+            namespace["main"]()
+        except SystemExit as error:
+            assert "materialized frozen deployment path" in str(error)
+        else:
+            raise AssertionError("alternate pins path accepted")
+`, { approval, buildId, triggerId: deploymentTriggerId });
+    assert.equal(result.status, 0, result.stderr);
+});
+
 test('Python preflight rejects missing, malformed or differently approved versions before cloud access', () => {
     const result = python(`
 from io import StringIO
@@ -106,7 +124,7 @@ def cloud_command(args):
 def run(candidate, approval):
     calls.clear()
     with patch.dict(namespace, {"open": lambda *args, **kwargs: StringIO(json.dumps(candidate)), "command": cloud_command}), \\
-            patch.object(sys, "argv", ["preflight", "unused", payload["buildId"], payload["triggerId"], approval, "initial"]):
+            patch.object(sys, "argv", ["preflight", "/workspace/frozen-pins.json", payload["buildId"], payload["triggerId"], approval, "initial"]):
         try:
             namespace["main"]()
         except SystemExit:

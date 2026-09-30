@@ -48,10 +48,10 @@ const expectedConfig = [
 const expectedAlpineOpenSslPatch = [
     'RUN apk update \\',
     '    && apk add --no-cache --upgrade \\',
-    '        libcrypto3=3.5.8-r0 \\',
-    '        libssl3=3.5.8-r0 \\',
-    "    && apk info --exists 'libcrypto3=3.5.8-r0' > /dev/null \\",
-    "    && apk info --exists 'libssl3=3.5.8-r0' > /dev/null \\",
+    '        libcrypto3=3.5.9-r0 \\',
+    '        libssl3=3.5.9-r0 \\',
+    "    && apk info --exists 'libcrypto3=3.5.9-r0' > /dev/null \\",
+    "    && apk info --exists 'libssl3=3.5.9-r0' > /dev/null \\",
     '    && rm -rf /var/cache/apk/*',
 ].join('\n');
 
