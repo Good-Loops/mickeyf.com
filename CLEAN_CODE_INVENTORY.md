@@ -167,8 +167,11 @@ coverage gap justifies additional checks.
   blocking finding stays open, while an owner-accepted/deferred risk retains its
   conditions. This is not store/privacy compliance or deployment approval.
   The [September 30 candidate review](#c7-candidate-and-security-review--2026-09-30)
-  completes the local checks and available patches; embedded OpenSSL S8 and
-  hosted CodeQL disposition remain open. Do not restart C1–C6 to resolve them.
+  completes the local checks and available patches. Embedded OpenSSL S8 now has
+  an owner-chosen upstream-patch hold enforced for new production images.
+  S16's replacement WebGL package passes local provenance/startup validation;
+  hosted follow-up is pending. S14/S17's CodeQL dispositions are verified.
+  Do not restart C1–C6 to resolve the remaining gate.
 
 ### Completion rule and boundaries
 
@@ -2346,8 +2349,9 @@ documentation links and `git diff --check`.
 
 ## C7 candidate and security review — 2026-09-30
 
-**Local candidate work is complete; C7 stays open for S8 and hosted CodeQL
-resolution.** Base is `7757260d` plus the existing C4–C6 local changes and this
+**Local candidate work is complete; C7 stays open for S8's upstream patch.**
+S16's replacement package passes local validation; hosted follow-up is pending.
+The original checkpoint base is `7757260d` plus the existing C4–C6 local changes and this
 checkpoint. C1–C6 dispositions and unchanged acceptance remain valid; this is
 not a new repository-wide refactor or a claim that the project is release-ready.
 
@@ -2445,3 +2449,60 @@ remote `improvement/clean-code-sweep` pointed to `7757260d` at that readback.
 The owner then explicitly approved committing the reviewed changes, pushing this
 existing branch and opening a draft PR for hosted validation. Merge, deployment,
 SQL operations and security-exception acceptance remain outside that approval.
+
+### C7 follow-up: PR #341 hosted results and CodeQL triage
+
+The authorized commit/push produced `118a2b8b9acce11a62bb2a797fae73a0d3d8d2ae`
+and [draft PR #341](https://github.com/Good-Loops/mickeyf.com/pull/341).
+Hosted dependency audits, Firebase tree validation, Unity source integrity and
+documentation build passed. The web job stopped at packaged WebGL provenance;
+its later application checks were skipped. Documentation deployment was skipped.
+
+CodeQL's five analysis jobs completed, but its security gate failed on 32 new
+JavaScript/TypeScript findings (two critical, 30 high). Exact SARIF/source review
+now recommends false-positive dispositions for #22–#53. Python #20 retains its
+previous false-positive recommendation; #21 is absent from candidate analysis.
+The [cumulative ledger](RELEASE_READINESS.md#pr-341-codeql-disposition-review-s14-s17)
+contains the per-group reasons, route review, trust assumptions and evidence.
+No alert was dismissed, rule suppressed or application code changed for triage.
+
+Read-only commands used `gh api` on analysis `1868993490` with
+`Accept: application/sarif+json`, open alerts at `refs/pull/341/head`, and the
+`ios-testflight` environment plus its deployment-branch policies; `gh pr view 341`
+confirmed the draft and exact head. Only documentation changed, and
+`git diff --check` passed. Prior tests carry forward without repeat runs.
+No SQL fixture, provider login, Unity rebuild, signing/upload or deployment ran.
+The owner subsequently approved the exact false-positive dismissals, conditional
+on confidence in the classifications. PR head and all 33 alert instances still
+matched the reviewed source. `gh api --method PATCH` recorded #20 and #22–#53
+as dismissed with specific reasons. Final list readback verified all 33 states,
+reasons and comments, zero open candidate alerts, and `gh pr checks 341` now
+reports CodeQL as passing. #21 was not dismissed and remains open on main;
+its preflight fix is confirmed in the PR analysis. No query exclusions, threshold
+changes, application edits or test/scan reruns were made for this action.
+S14/S17 are resolved for the candidate. S16 needs a reviewed WebGL package;
+S8 remains unresolved independently of these false-positive dispositions.
+
+### C7 follow-up: refreshed WebGL package and enforced runtime hold
+
+The owner chose to retain the official Node runtime and block deployment until
+its embedded OpenSSL patch arrives. `Dockerfile` now rejects a final runtime
+image below reviewed OpenSSL 3.5.9; other series require explicit review.
+An actual runtime-image build failed with the exact expected 3.5.8 diagnostic,
+and all three existing Cloud Build candidate tests passed. S8 remains an
+upstream blocker, not a fixed vulnerability or an accepted exception.
+
+The guarded Unity 6000.3.8f1 release build completed in about four minutes.
+Package `9b96ad8e…3241a` and its certified 1046-file provenance now match Unity
+source `118a2b8b`. Packaging, release validation, a release-enabled frontend
+build and the existing isolated Chrome startup smoke all passed (1141x642
+running canvas). No tracked Unity sources changed; old ignored recovery scenes
+were preserved outside Assets. The reported missing RuntimePipelineConfig
+keeps development Pipeline disabled in the Player. Task-owned Editor/preview
+processes were closed.
+
+Exact commands, hashes, logs and verification boundaries are in the
+[release ledger](RELEASE_READINESS.md#webgl-replacement-and-runtime-hold-follow-up-s8-s16).
+One hosted PR follow-up remains pending. Prior gameplay/device acceptance and
+unchanged source-test results carry forward; no deployment, database change or
+Google/Apple activation occurred. C7 remains open for S8.
