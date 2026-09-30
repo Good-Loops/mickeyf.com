@@ -148,9 +148,9 @@ needed. Existing Cloud SQL remains the development database.
    a session-only release; provider activation retains its separate review.
 4. Prepare an exact zero-traffic backend revision with both existing score
    submission flags enabled, the reviewed runtime identity/SQL connection and
-   explicit secret pins. **The current frozen renderer/traffic tool is not the
-   final release path:** it forces both score flags off. Its guards must be
-   retained in an enabled-score deployment plan, not bypassed or relabeled.
+   explicit secret pins. The dedicated session renderer below now prepares this
+   configuration. The frozen renderer/traffic tool retains its score-disabled
+   contract and is not used to promote the session revision.
 5. Use a short coordinated release window: move backend traffic to the reviewed
    compatible revision without a legacy/new traffic split, then publish the
    matching Hosting artifact/rewrites/headers. The two services cannot switch
@@ -199,6 +199,59 @@ helpers are `%TEMP%/mickeyf-session-cutover-readiness-20260930.cjs` and
 `%TEMP%/mickeyf-session-promotion-gate-test.py`; commands were `node --check`,
 `node` and `python` on those files. No broad suite, cloud build, native upload,
 secret rotation, merge, deployment or traffic change was performed.
+
+### Enabled-score deployment configuration — prepared 2026-09-30
+
+`scripts/render-session-backend-deploy.mjs` renders the zero-traffic session
+candidate offline. It shares the reviewed source/provenance, Artifact Analysis,
+execution-exclusion and exact runtime checks with the frozen renderer, while
+retaining both canonical enabled-score flags and the corresponding anonymous
+401 submission checks. It also requires anonymous renewal to return exactly
+`{"loggedIn":false}` with no-store and no cookie. Provider/deletion settings
+still default off and retain their separate explicit approvals.
+
+The reviewed input contains the original eight source/deployment fields:
+`sourceBuildId`, `sourceCommit`, `imageDigest`, `sourceTriggerId`,
+`sourceTriggerName`, `sourceRef`, `deploymentTriggerName`, `sessionSecretVersion`;
+add `previousSessionSecretVersion` for the actual serving version. Both versions
+must be explicit positive decimal strings, and the candidate version must be
+newer. The new version must still be created securely in the approved window;
+the renderer neither creates it nor proves that its payload is freshly generated.
+The deployment trigger name must start with `session-backend-`, and the
+mode-specific approval binds both versions alongside the source/build/image.
+Frozen approvals and trigger names cannot authorize this mode.
+
+The materialized preflight checks one explicit 100% serving revision with no
+previous tags, both score flags enabled and the old secret pin. It rechecks that
+baseline immediately before deployment; afterward it permits only the new
+`mickeyf-org-session-<compact-source-build-id>` revision and matching `s-...` tag
+at zero traffic, with exactly one service-generation increment. The tagged
+candidate has enabled endpoints: zero traffic does not make it private or
+prevent direct requests. Do not deploy it before the signup/privacy requirements
+are satisfied. Anonymous smoke probes carry no credentials and write no scores.
+
+With actual reviewed pins and deployment identifiers, the offline commands are:
+
+```text
+node scripts/render-session-backend-deploy.mjs <reviewed-pins.json>
+node scripts/render-session-backend-deploy.mjs --steps-sha256 <reviewed-pins.json> <deployment-build-id> <deployment-trigger-id>
+```
+
+The first prints the source-less Cloud Build JSON; the second prints the exact
+resolved-step digest for the receipt review. Neither dispatches cloud work,
+changes traffic or creates a secret. No production pins were invented for this
+checkpoint. Source builds must still meet the existing two-hour freshness
+requirement, so schedule the real image build after the other release gaps are
+closed rather than producing an unusable early receipt.
+
+Validation: `npm run test:frozen-backend` passed all 101 focused cases (95 existing
+and six new), including old-mode regression coverage, secret/approval drift,
+serving-state rejection, generated Bash syntax and embedded Python compilation.
+`git diff --check` passed. The new tests run under the existing PR deployment
+guard command. No full application suite, database probe or image rebuild was
+repeated. A reviewed session traffic-promotion/rollback operation and the other
+activation prerequisites remain separate; `frozen-backend-traffic.mjs` still
+rejects enabled-score revisions.
 
 ## Coordinated activation (original implementation checklist)
 

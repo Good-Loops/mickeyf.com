@@ -30,6 +30,12 @@ export function frozenDeploymentApproval(pins) {
         + `:session-secret:${validateSessionSecretVersion(pins.sessionSecretVersion)}`;
 }
 
+export function sessionDeploymentApproval(pins) {
+    const reviewed = validateSessionPins(pins);
+    return `session-zero-traffic:${reviewed.sourceCommit}:${reviewed.sourceBuildId}:${reviewed.imageDigest}`
+        + `:previous-session-secret:${reviewed.previousSessionSecretVersion}:session-secret:${reviewed.sessionSecretVersion}`;
+}
+
 // Omission is default-off; an explicit false requests a reviewed disable/rollback.
 export function accountDeletionEnvironment(settings) {
     if (settings === undefined) return { ACCOUNT_DELETION_ENABLED: 'false' };
@@ -75,6 +81,20 @@ function googleSignInApproval(pins) {
 }
 
 export function validateFrozenPins(value) {
+    return validateBackendPins(value, false);
+}
+
+export function validateSessionPins(value) {
+    const { previousSessionSecretVersion, ...common } = value ?? {};
+    const pins = validateBackendPins(common, true);
+    validateSessionSecretVersion(previousSessionSecretVersion);
+    if (BigInt(pins.sessionSecretVersion) <= BigInt(previousSessionSecretVersion)) {
+        throw new Error('Session cutover requires a newer signing-secret version than the reviewed serving version.');
+    }
+    return { ...pins, previousSessionSecretVersion };
+}
+
+function validateBackendPins(value, sessionCutover) {
     const keys = ['sourceBuildId', 'sourceCommit', 'imageDigest', 'sourceTriggerId', 'sourceTriggerName', 'sourceRef', 'deploymentTriggerName', 'sessionSecretVersion'];
     if (!value || Object.keys(value).filter(key => !['accountDeletion', 'googleSignIn'].includes(key)).sort().join() !== keys.sort().join()
         || keys.some((key) => typeof value[key] !== 'string')) {
@@ -86,7 +106,7 @@ export function validateFrozenPins(value) {
     if (!uuid.test(value.sourceBuildId) || !uuid.test(value.sourceTriggerId)
         || !/^[0-9a-f]{40}$/u.test(value.sourceCommit) || !/^sha256:[0-9a-f]{64}$/u.test(value.imageDigest)
         || !/^[a-z][a-z0-9-]{0,62}$/u.test(value.sourceTriggerName)
-        || !/^frozen-backend-[a-z0-9-]{1,47}$/u.test(value.deploymentTriggerName)
+        || !(sessionCutover ? /^session-backend-[a-z0-9-]{1,46}$/u : /^frozen-backend-[a-z0-9-]{1,47}$/u).test(value.deploymentTriggerName)
         || !/^refs\/heads\/(?:feature|improvement|fix)\/[a-z0-9][a-z0-9/_-]{0,100}$/u.test(value.sourceRef)
         || value.sourceRef.includes('..') || value.sourceRef.endsWith('/')) {
         throw new Error('Malformed exact candidate pins; placeholders are not deployable.');
@@ -120,6 +140,12 @@ function frozenState(block) {
     return block.replaceAll('f"c-{compact}"', 'f"f-{compact}"')
         .replaceAll('f"mickeyf-org-build-{compact}"', 'f"mickeyf-org-freeze-{compact}"')
         .replaceAll('f"build-{compact}"', 'f"freeze-{compact}"');
+}
+
+function sessionState(block) {
+    return block.replaceAll('f"c-{compact}"', 'f"s-{compact}"')
+        .replaceAll('f"mickeyf-org-build-{compact}"', 'f"mickeyf-org-session-{compact}"')
+        .replaceAll('f"build-{compact}"', 'f"session-{compact}"');
 }
 
 function yamlStep(id, args, { entrypoint = 'python3', timeout = '600s' } = {}) {
@@ -176,9 +202,20 @@ function canonicalJson(value) {
 export const frozenDeploymentStepsSha256 = (steps) => sha256(canonicalJson(steps));
 
 export function resolveFrozenDeploymentSteps(steps, { buildId, deploymentTriggerId, approval }) {
+    return resolveDeploymentSteps(steps, { buildId, deploymentTriggerId, approval }, false);
+}
+
+export function resolveSessionDeploymentSteps(steps, { buildId, deploymentTriggerId, approval }) {
+    return resolveDeploymentSteps(steps, { buildId, deploymentTriggerId, approval }, true);
+}
+
+function resolveDeploymentSteps(steps, { buildId, deploymentTriggerId, approval }, sessionCutover) {
+    const approvalPattern = sessionCutover
+        ? /^session-zero-traffic:[0-9a-f]{40}:[0-9a-f-]{36}:sha256:[0-9a-f]{64}:previous-session-secret:[1-9][0-9]*:session-secret:[1-9][0-9]*$/u
+        : /^freeze-zero-traffic:[0-9a-f]{40}:[0-9a-f-]{36}:sha256:[0-9a-f]{64}:session-secret:[1-9][0-9]*$/u;
     if (!uuid.test(buildId) || !uuid.test(deploymentTriggerId)
         || typeof approval !== 'string' || approval !== approval.trim()
-        || !/^freeze-zero-traffic:[0-9a-f]{40}:[0-9a-f-]{36}:sha256:[0-9a-f]{64}:session-secret:[1-9][0-9]*$/u.test(approval)) {
+        || !approvalPattern.test(approval)) {
         throw new Error('Resolved steps require the exact deployment build, trigger and version-bound approval.');
     }
     const replacements = { '${BUILD_ID}': buildId, '${_DEPLOY_TRIGGER_ID}': deploymentTriggerId, '${_APPROVAL}': approval, '$$': '$' };
@@ -191,16 +228,26 @@ export function resolveFrozenDeploymentSteps(steps, { buildId, deploymentTrigger
     return substitute(steps);
 }
 
-const preflightInvocation = (phase) => `python3 /workspace/frozen-preflight.py /workspace/frozen-pins.json "\${BUILD_ID}" "\${_DEPLOY_TRIGGER_ID}" "\${_APPROVAL}" ${phase}`;
-
 export function renderFrozenBackendDeployConfig({ canonical, candidate, preflight, pins: requestedPins }) {
+    return renderBackendDeployConfig({ canonical, candidate, preflight, pins: requestedPins }, false);
+}
+
+export function renderSessionBackendDeployConfig({ canonical, candidate, preflight, pins: requestedPins }) {
+    return renderBackendDeployConfig({ canonical, candidate, preflight, pins: requestedPins }, true);
+}
+
+function renderBackendDeployConfig({ canonical, candidate, preflight, pins: requestedPins }, sessionCutover) {
     canonical = normalize(canonical);
     candidate = normalize(candidate);
     preflight = normalize(preflight);
     if (sha256(canonical) !== CANONICAL_SHA256 || sha256(candidate) !== CANDIDATE_SHA256) {
         throw new Error('Reviewed canonical/image-only configuration hash changed; review before updating the renderer.');
     }
-    const pins = validateFrozenPins(requestedPins);
+    const pins = sessionCutover ? validateSessionPins(requestedPins) : validateFrozenPins(requestedPins);
+    const scope = sessionCutover ? 'session' : 'frozen';
+    const candidateState = sessionCutover ? sessionState : frozenState;
+    const preflightInvocation = (phase) => `python3 /workspace/${scope}-preflight.py /workspace/${scope}-pins.json "\${BUILD_ID}" "\${_DEPLOY_TRIGGER_ID}" "\${_APPROVAL}" ${phase}`;
+    if (sessionCutover) preflight = replaceExactly(preflight, 'SESSION_CUTOVER = False', 'SESSION_CUTOVER = True');
     const payload = Buffer.from(preflight).toString('base64');
     const chunks = payload.match(/.{1,8000}/gu);
     // Base64 avoids Cloud Build treating Python dollar signs as substitutions.
@@ -208,15 +255,15 @@ export function renderFrozenBackendDeployConfig({ canonical, candidate, prefligh
         'import base64, hashlib, os, sys',
         'payload = base64.b64decode("".join(sys.argv[3:]), validate=True)',
         'if hashlib.sha256(payload).hexdigest() != sys.argv[1]: raise SystemExit("preflight digest mismatch")',
-        'for path, data in (("/workspace/frozen-preflight.py", payload), ("/workspace/frozen-pins.json", sys.argv[2].encode())):',
+        `for path, data in (("/workspace/${scope}-preflight.py", payload), ("/workspace/${scope}-pins.json", sys.argv[2].encode())):`,
         '    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)',
         '    with os.fdopen(fd, "wb") as handle: handle.write(data)',
     ].join('\n');
-    const initial = yamlStep('Materialize reviewed frozen preflight', ['-c', materializer, sha256(preflight), JSON.stringify(pins), ...chunks])
-        + yamlStep('Validate exact frozen candidate and operational exclusion', ['-ceu', preflightInvocation('initial')], { entrypoint: 'bash' });
+    const initial = yamlStep(`Materialize reviewed ${scope} preflight`, ['-c', materializer, sha256(preflight), JSON.stringify(pins), ...chunks])
+        + yamlStep(`Validate exact ${scope} candidate and operational exclusion`, ['-ceu', preflightInvocation('initial')], { entrypoint: 'bash' });
 
-    const discovery = frozenState(stepBlock(canonical, 'Require successful Artifact Analysis scan'));
-    const severity = frozenState(stepBlock(canonical, 'Enforce Artifact Analysis severity policy'));
+    const discovery = candidateState(stepBlock(canonical, 'Require successful Artifact Analysis scan'));
+    const severity = candidateState(stepBlock(canonical, 'Enforce Artifact Analysis severity policy'));
     let deletion = stepBlock(canonical, 'Validate account-deletion deployment contract');
     const deletionEnvironment = accountDeletionEnvironment(pins.accountDeletion);
     const googleEnvironment = googleSignInEnvironment(pins.googleSignIn, pins.accountDeletion);
@@ -230,11 +277,11 @@ export function renderFrozenBackendDeployConfig({ canonical, candidate, prefligh
         _GOOGLE_WEB_CLIENT_ID: googleEnvironment.GOOGLE_WEB_CLIENT_ID ?? '',
         _GOOGLE_SIGN_IN_APPROVAL: googleSignInApproval(pins),
     })) deletion = replaceExactly(deletion, `\${${name}}`, value);
-    let deploy = frozenState(stepBlock(canonical, 'Deploy deterministic zero-traffic candidate'));
+    let deploy = candidateState(stepBlock(canonical, 'Deploy deterministic zero-traffic candidate'));
     deploy = replaceExactly(deploy, 'DB_PASS=DB_PASS:1,SESSION_SECRET=SESSION_SECRET:2',
         `DB_PASS=DB_PASS:1,SESSION_SECRET=SESSION_SECRET:${pins.sessionSecretVersion}`);
     deploy = replaceExactly(deploy, "readonly TRIGGER_ID='ef5a2981-95be-4f4d-af91-f997fde73356'", `readonly TRIGGER_ID='${pins.sourceTriggerId}'`);
-    deploy = replaceExactly(deploy, 'P4_VEGA_SCORE_SUBMISSIONS_ENABLED=true,THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=true',
+    if (!sessionCutover) deploy = replaceExactly(deploy, 'P4_VEGA_SCORE_SUBMISSIONS_ENABLED=true,THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=true',
         'P4_VEGA_SCORE_SUBMISSIONS_ENABLED=false,THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=false');
     deploy = replaceExactly(deploy, "        if [[ \"$$revision_preexisted\" == 'false' ]]; then", `        ${preflightInvocation('before-deploy')}\n\n        if [[ "$$revision_preexisted" == 'false' ]]; then`);
     // Never mistake an auth/transport error for a absent deterministic revision.
@@ -242,24 +289,43 @@ export function renderFrozenBackendDeployConfig({ canonical, candidate, prefligh
         '        revision_preexisted=false\n        deployed_here=false\n        if gcloud run revisions describe "$$REVISION_NAME" --project="$$PROJECT_ID" \\\n          --region="$$RUN_REGION" --platform=managed --format=json > "$$REVISION_JSON" 2>/dev/null; then\n          revision_preexisted=true\n        fi',
         '        revision_preexisted=false\n        deployed_here=false\n        gcloud run revisions list --service="$$SERVICE_NAME" --project="$$PROJECT_ID" \\\n          --region="$$RUN_REGION" --platform=managed --format=json > /workspace/frozen-revisions.json\n        python3 - /workspace/frozen-revisions.json "$$REVISION_NAME" <<\'PY\'\n        import json, sys\n        with open(sys.argv[1], encoding="utf-8") as handle:\n            revisions = json.load(handle)\n        if not isinstance(revisions, list) or any(item.get("metadata", {}).get("name") == sys.argv[2] for item in revisions):\n            raise SystemExit("Frozen revision already exists or inventory is malformed; inspect it instead of redeploying")\n        PY');
 
-    let verify = frozenState(stepBlock(canonical, 'Verify runtime and unchanged traffic'));
+    let verify = candidateState(stepBlock(canonical, 'Verify runtime and unchanged traffic'));
     verify = replaceExactly(verify, '"SESSION_SECRET": "2"', `"SESSION_SECRET": "${pins.sessionSecretVersion}"`);
     verify = replaceExactly(verify, "readonly TRIGGER_ID='ef5a2981-95be-4f4d-af91-f997fde73356'", `readonly TRIGGER_ID='${pins.sourceTriggerId}'`);
     verify = replaceExactly(verify, '        readonly NOTIFICATION_JSON=\'/workspace/slack-notification.json\'\n', '');
-    verify = replaceExactly(verify, '"P4_VEGA_SCORE_SUBMISSIONS_ENABLED": "true"', '"P4_VEGA_SCORE_SUBMISSIONS_ENABLED": "false"');
-    verify = replaceExactly(verify, '"THREE_BOSSES_RUN_SUBMISSIONS_ENABLED": "true"', '"THREE_BOSSES_RUN_SUBMISSIONS_ENABLED": "false"');
+    if (!sessionCutover) {
+        verify = replaceExactly(verify, '"P4_VEGA_SCORE_SUBMISSIONS_ENABLED": "true"', '"P4_VEGA_SCORE_SUBMISSIONS_ENABLED": "false"');
+        verify = replaceExactly(verify, '"THREE_BOSSES_RUN_SUBMISSIONS_ENABLED": "true"', '"THREE_BOSSES_RUN_SUBMISSIONS_ENABLED": "false"');
+    }
     const notificationStart = verify.indexOf('        duplicate="$$(python3');
     if (notificationStart < 0) throw new Error('Canonical duplicate/notifier boundary changed.');
     verify = verify.slice(0, notificationStart) + `        ${preflightInvocation('after-deploy')}\n`;
 
-    let smoke = frozenState(stepBlock(canonical, 'Smoke test tagged candidate anonymously'));
-    smoke = replaceExactly(smoke, '"submissionState": "enabled"', '"submissionState": "disabled"');
-    smoke = replaceExactly(smoke, '"/api/leaderboards/three-bosses/run-tickets", 401, {', '"/api/leaderboards/three-bosses/run-tickets", 403, {');
-    smoke = replaceExactly(smoke, '"/api/leaderboards/three-bosses/runs", 401, {', '"/api/leaderboards/three-bosses/runs", 403, {');
-    smoke = replaceExactly(smoke, '"error": "UNAUTHORIZED",', '"error": "SUBMISSION_DISABLED",', 2);
-    smoke = replaceExactly(smoke, '"/api/users", 401, {"type": "submit_score", "p4_score": 10}', '"/api/users", 503, {"type": "submit_score", "p4_score": 10}');
-    smoke = replaceExactly(smoke, '{"error": "UNAUTHORIZED"}', '{"error": "SUBMISSIONS_FROZEN"}');
-    smoke = smoke.replaceAll('enabled Three Bosses', 'frozen Three Bosses').replaceAll('enabled p4-Vega', 'frozen p4-Vega');
+    let smoke = candidateState(stepBlock(canonical, 'Smoke test tagged candidate anonymously'));
+    if (!sessionCutover) {
+        smoke = replaceExactly(smoke, '"submissionState": "enabled"', '"submissionState": "disabled"');
+        smoke = replaceExactly(smoke, '"/api/leaderboards/three-bosses/run-tickets", 401, {', '"/api/leaderboards/three-bosses/run-tickets", 403, {');
+        smoke = replaceExactly(smoke, '"/api/leaderboards/three-bosses/runs", 401, {', '"/api/leaderboards/three-bosses/runs", 403, {');
+        smoke = replaceExactly(smoke, '"error": "UNAUTHORIZED",', '"error": "SUBMISSION_DISABLED",', 2);
+        smoke = replaceExactly(smoke, '"/api/users", 401, {"type": "submit_score", "p4_score": 10}', '"/api/users", 503, {"type": "submit_score", "p4_score": 10}');
+        smoke = replaceExactly(smoke, '{"error": "UNAUTHORIZED"}', '{"error": "SUBMISSIONS_FROZEN"}');
+        smoke = smoke.replaceAll('enabled Three Bosses', 'frozen Three Bosses').replaceAll('enabled p4-Vega', 'frozen p4-Vega');
+    } else {
+        deploy = deploy.replaceAll('/workspace/frozen-revisions.json', '/workspace/session-revisions.json')
+            .replaceAll('Frozen revision already exists', 'Session revision already exists');
+        smoke = replaceExactly(smoke, '            attempt = 0',
+            '            if path == "/auth/renew":\n                headers["Origin"] = "https://mickeyf.com"\n            attempt = 0');
+        smoke = replaceExactly(smoke, '        catalog, catalog_headers = request("/api/leaderboards", 200)', [
+            '        renewal, renewal_headers = request("/auth/renew", 200, {})',
+            '        if (not isinstance(renewal, dict) or set(renewal) != {"loggedIn"}',
+            '                or renewal["loggedIn"] is not False):',
+            '            reject("anonymous renewable-session contract does not match")',
+            '        if not no_store(renewal_headers) or renewal_headers.get_all("Set-Cookie"):',
+            '            reject("anonymous renewable-session headers are unsafe")',
+            '',
+            '        catalog, catalog_headers = request("/api/leaderboards", 200)',
+        ].join('\n'));
+    }
 
     const steps = parseReviewedSteps(initial + discovery + severity + deletion + deploy + verify + smoke);
     if (steps.some((step) => step.args.some((argument) => argument.length > 10_000))) throw new Error('Rendered Cloud Build argument exceeds 10,000 characters.');

@@ -22,11 +22,13 @@ REPOSITORY = "https://github.com/Good-Loops/mickeyf.com.git"
 IMAGE = f"us-central1-docker.pkg.dev/{PROJECT}/cloud-run-source-deploy/cloud-run-source-deploy"
 BUILDER = "gcr.io/cloud-builders/docker:latest@sha256:661e95acd923514f71f47ce7b390e06a8d31b15febecf772e506babf62960528"
 STAGE_A = "ef5a2981-95be-4f4d-af91-f997fde73356"
+SESSION_CUTOVER = False  # Set only by the offline session renderer, not a CLI flag.
 UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
 
 
 def reject(message):
-    raise SystemExit(f"Frozen candidate preflight rejected: {message}")
+    scope = "Session" if SESSION_CUTOVER else "Frozen"
+    raise SystemExit(f"{scope} candidate preflight rejected: {message}")
 
 
 def validate_session_secret_version(pins):
@@ -34,6 +36,51 @@ def validate_session_secret_version(pins):
     if not isinstance(version, str) or re.fullmatch(r"[1-9][0-9]*", version) is None:
         reject("sessionSecretVersion must be an explicit positive decimal string without aliases or whitespace")
     return version
+
+
+def validate_previous_session_version(pins):
+    previous = pins.get("previousSessionSecretVersion")
+    if (not isinstance(previous, str) or re.fullmatch(r"[1-9][0-9]*", previous) is None
+            or int(validate_session_secret_version(pins)) <= int(previous)):
+        reject("session cutover requires a newer version than the explicit serving signing-secret pin")
+    return previous
+
+
+def verify_session_cutover(service, pins, phase):
+    """The enabled-score candidate may only replace the reviewed legacy state."""
+    traffic = service.get("spec", {}).get("traffic", [])
+    serving = [item for item in traffic if item.get("percent", 0) > 0]
+    if (len(serving) != 1 or serving[0].get("percent") != 100
+            or serving[0].get("latestRevision") is True or serving[0].get("tag")
+            or (phase != "after-deploy" and len(traffic) != 1)):
+        reject("session cutover requires one explicit serving revision and no previous tags")
+    revision = serving[0].get("revisionName")
+    if not isinstance(revision, str) or re.fullmatch(r"mickeyf-org-[a-z0-9-]+", revision) is None:
+        reject("session cutover serving revision is malformed")
+    previous = validate_previous_session_version(pins)
+
+    def verify_environment(spec, version):
+        containers = spec.get("containers") or []
+        if len(containers) != 1:
+            reject("session cutover expects one runtime container")
+        entries = containers[0].get("env") or []
+        values = {item.get("name"): item for item in entries}
+        if len(values) != len(entries):
+            reject("session cutover environment contains duplicate names")
+        secret = values.get("SESSION_SECRET", {})
+        if (set(secret) != {"name", "valueFrom"}
+                or secret["valueFrom"] != {"secretKeyRef": {"name": "SESSION_SECRET", "key": version}}
+                or any(values.get(flag, {}).get("value") != "true" for flag in
+                       ("P4_VEGA_SCORE_SUBMISSIONS_ENABLED", "THREE_BOSSES_RUN_SUBMISSIONS_ENABLED"))):
+            reject("serving session-secret pin or enabled-score baseline differs")
+
+    verify_environment(service.get("spec", {}).get("template", {}).get("spec", {}),
+                       pins["sessionSecretVersion"] if phase == "after-deploy" else previous)
+    record = command(["run", "revisions", "describe", revision, f"--project={PROJECT}",
+                      "--region=us-central1", "--format=json"])
+    if record.get("metadata", {}).get("name") != revision:
+        reject("session cutover serving revision identity differs")
+    verify_environment(record.get("spec", {}), previous)
 
 
 def command(arguments):
@@ -282,14 +329,24 @@ def verify_exclusion(stage_a, stage_b, active_builds, deploy_build, deploy_trigg
 
 def main():
     pins_path, build_id, trigger_id, approval, phase = sys.argv[1:]
-    if pins_path != "/workspace/frozen-pins.json":
-        reject("pins must use the materialized frozen deployment path")
-    with open("/workspace/frozen-pins.json", encoding="utf-8") as handle:
-        pins = json.load(handle)
+    if SESSION_CUTOVER:
+        if pins_path != "/workspace/session-pins.json":
+            reject("pins must use the materialized session deployment path")
+        with open("/workspace/session-pins.json", encoding="utf-8") as handle:
+            pins = json.load(handle)
+    else:
+        if pins_path != "/workspace/frozen-pins.json":
+            reject("pins must use the materialized frozen deployment path")
+        with open("/workspace/frozen-pins.json", encoding="utf-8") as handle:
+            pins = json.load(handle)
     session_secret_version = validate_session_secret_version(pins)
+    expected_approval = f"freeze-zero-traffic:{pins['sourceCommit']}:{pins['sourceBuildId']}:{pins['imageDigest']}:session-secret:{session_secret_version}"
+    if SESSION_CUTOVER:
+        previous = validate_previous_session_version(pins)
+        expected_approval = f"session-zero-traffic:{pins['sourceCommit']}:{pins['sourceBuildId']}:{pins['imageDigest']}:previous-session-secret:{previous}:session-secret:{session_secret_version}"
     if (re.fullmatch(UUID, build_id) is None or re.fullmatch(UUID, trigger_id) is None
             or trigger_id in (STAGE_A, pins["canonicalDeployTriggerId"], pins["sourceTriggerId"])
-            or approval != f"freeze-zero-traffic:{pins['sourceCommit']}:{pins['sourceBuildId']}:{pins['imageDigest']}:session-secret:{session_secret_version}"
+            or approval != expected_approval
             or phase not in ("initial", "before-deploy", "after-deploy")):
         reject("explicit one-shot approval or current deployment identity is invalid")
     def build(identifier):
@@ -321,14 +378,19 @@ def main():
                      build(build_id), trigger(trigger_id), triggers, pins, build_id, trigger_id)
     service = command(["run", "services", "describe", SERVICE, f"--project={PROJECT}", "--region=us-central1", "--format=json"])
     snapshot = stable_service(service)
-    baseline = "/workspace/frozen-before.json"
+    if SESSION_CUTOVER:
+        verify_session_cutover(service, pins, phase)
+    baseline = "/workspace/session-before.json" if SESSION_CUTOVER else "/workspace/frozen-before.json"
+    compact = pins["sourceBuildId"].replace("-", "")
+    tag = f"s-{compact}" if SESSION_CUTOVER else f"f-{compact}"
+    suffix = f"session-{compact}" if SESSION_CUTOVER else f"freeze-{compact}"
+    revision = f"mickeyf-org-{suffix}"
     if phase == "initial":
         with open(baseline, "x", encoding="utf-8") as handle:
             json.dump(snapshot, handle, sort_keys=True)
-        compact = pins["sourceBuildId"].replace("-", "")
-        state = {"build_id": pins["sourceBuildId"], "candidate_tag": f"f-{compact}", "commit": pins["sourceCommit"],
-                 "digest": pins["imageDigest"], "revision_name": f"mickeyf-org-freeze-{compact}",
-                 "revision_suffix": f"freeze-{compact}", "target_image": f"{IMAGE}@{pins['imageDigest']}"}
+        state = {"build_id": pins["sourceBuildId"], "candidate_tag": tag, "commit": pins["sourceCommit"],
+                 "digest": pins["imageDigest"], "revision_name": revision,
+                 "revision_suffix": suffix, "target_image": f"{IMAGE}@{pins['imageDigest']}"}
         with open("/workspace/verified-stage-a.json", "x", encoding="utf-8") as handle:
             json.dump(state, handle, sort_keys=True)
     else:
@@ -338,13 +400,11 @@ def main():
             if snapshot != before:
                 reject("service changed during scan/preflight; regenerate/review the one-shot deployment")
         else:
-            compact = pins["sourceBuildId"].replace("-", "")
-            revision = f"mickeyf-org-freeze-{compact}"
-            expected_traffic = sorted(before["traffic"] + [[revision, 0, f"f-{compact}"]])
+            expected_traffic = sorted(before["traffic"] + [[revision, 0, tag]])
             if (snapshot["traffic"] != expected_traffic or int(snapshot["generation"]) != int(before["generation"]) + 1
                     or snapshot["latestCreatedRevisionName"] != revision or snapshot["latestReadyRevisionName"] != revision):
-                reject("post-deploy state changed anything beyond the exact new frozen tag/revision")
-    print(f"Frozen candidate trust/exclusion preflight passed ({phase}); no production mutation performed by preflight.")
+                reject("post-deploy state changed anything beyond the exact new candidate tag/revision")
+    print(f"Candidate trust/exclusion preflight passed ({phase}); no production mutation performed by preflight.")
 
 
 if __name__ == "__main__":
