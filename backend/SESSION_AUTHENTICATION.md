@@ -249,9 +249,98 @@ and six new), including old-mode regression coverage, secret/approval drift,
 serving-state rejection, generated Bash syntax and embedded Python compilation.
 `git diff --check` passed. The new tests run under the existing PR deployment
 guard command. No full application suite, database probe or image rebuild was
-repeated. A reviewed session traffic-promotion/rollback operation and the other
-activation prerequisites remain separate; `frozen-backend-traffic.mjs` still
-rejects enabled-score revisions.
+repeated. The traffic-promotion/rollback tool is prepared below; actual candidate
+and rollback deployment and the other activation prerequisites remain separate.
+`frozen-backend-traffic.mjs` still rejects enabled-score revisions.
+
+### Session traffic promotion and rollback — prepared 2026-09-30
+
+`scripts/session-backend-traffic.mjs` provides read-only baseline/plan commands
+and an explicitly confirmed traffic-only apply command. It reuses the frozen
+tool's exact runtime/deployment-receipt checks, automation pause requirement,
+five-minute plan expiry, service etag and post-change verification. Its adapter
+can only send one 100% allocation to an exact session or session-rollback
+revision. It cannot deploy revisions, create secrets, alter SQL or publish Hosting.
+
+Before preparation, capture the serving revision while all project Cloud Build
+triggers are disabled, no builds are active and one explicit revision receives
+100% traffic without tags:
+
+```text
+node --use-system-ca scripts/session-backend-traffic.mjs baseline --output <new-baseline.json>
+```
+
+The read-only capture on September 30 matched `mickeyf-org-localhost-dbb80d4f`,
+source build `7c33d90f-281f-45e7-8751-9e9e221ee532`, commit
+`dbb80d4f701da734ea971cb25b5c02d1e5b8d6d8`, image digest
+`sha256:1ae9d4894d26be408fe807e2ae35e6b63c3975ac4d116b99a3d2554eb82b1e19`
+and `SESSION_SECRET:2`. Its revision configuration SHA256 was
+`7d7854d6f560f76ef8d506060d2d19b60629bad2e7adfaf4e75770e4dfcd67a8`.
+This is a dated baseline, not authorization to reuse it after drift. The local
+Node command needed `--use-system-ca` for the Windows trust store; certificate
+verification stayed enabled.
+
+Build the reviewed traffic-pins JSON with these fields:
+
+- `candidate.deployment`: the exact nine-field session-renderer input above.
+- `candidate.receipt`: `buildId`, `triggerId` and `stepsSha256` from the successful,
+  approved candidate deployment and its offline-reviewed resolved steps.
+- `baseline`: the complete output of the baseline command (`revisionName`,
+  `sourceBuildId`, `sourceCommit`, `imageDigest`, `sessionSecretVersion`,
+  `configurationSha256`).
+- `rollback`: an explicit `sessionSecretVersion`, newer than the candidate's.
+
+Use this order in the separately approved deployment window: capture baseline;
+create fresh signing-secret payloads; deploy the session candidate at zero
+traffic; then deploy a ready rollback copy of the captured legacy runtime at
+zero traffic. The rollback revision must be named
+`mickeyf-org-session-rollback-<compact-candidate-source-build-id>` and may have
+only the matching `r-<compact-id>` tag. Preserve its original image, source
+labels, container settings, grants, identity and Cloud SQL attachment; change
+only the session-secret reference and platform revision identity. The planner
+compares the entire revision runtime, including unknown fields, while excluding
+platform lifecycle metadata and normalizing environment ordering. A newer
+version number alone does not prove a freshly generated secret payload.
+
+The rollback copy must exist and be Ready **before promotion**. The candidate
+deployment must come first because its existing preflight requires the original
+untagged serving baseline. Pause and drain deployment automation again before
+planning traffic. Creating that rollback revision remains a separate deployment
+step; this checkpoint did not create it or its secret.
+
+```text
+node --use-system-ca scripts/session-backend-traffic.mjs plan --operation promote --pins <reviewed-traffic-pins.json> --output <new-promotion-plan.json>
+node --use-system-ca scripts/session-backend-traffic.mjs apply --plan <promotion-plan.json> --confirm-plan <printed-plan-sha256> --confirm-session-promotion
+```
+
+Review the plan and its pins before apply. Starting traffic must still be 100%
+on the exact baseline, with only the optional candidate/rollback tags. Apply
+removes every tag and sends 100% to the candidate. The operation requires
+provider sign-in and account deletion to remain disabled: a legacy fallback is
+not reviewed for newly created passwordless identities or deletion activity.
+Their later activation requires a compatible rollback review.
+
+For rollback, generate and review a **new** plan while the candidate is serving:
+
+```text
+node --use-system-ca scripts/session-backend-traffic.mjs plan --operation rollback --pins <reviewed-traffic-pins.json> --output <new-rollback-plan.json>
+node --use-system-ca scripts/session-backend-traffic.mjs apply --plan <rollback-plan.json> --confirm-plan <printed-plan-sha256> --confirm-session-rollback
+```
+
+Rollback sends 100% to the prepared legacy copy with its fresh secret, removes
+all tags and requires fresh sign-in. Restore the recorded compatible Hosting
+release separately. Never route directly back to the original version-2
+revision. Neither operation retries a failed/ambiguous write or automatically
+rolls back; inspect actual Cloud Run state before generating another plan.
+
+Validation: `npm run test:frozen-backend` passed 125 of 126 cases initially.
+The only failure was an undersized fake access token in the new adapter test;
+after correcting that fixture, the targeted command
+`node --test --test-name-pattern="session adapter" scripts/session-backend-traffic.test.mjs`
+passed. All 101 existing and 25 new cases therefore have passing results.
+Coverage includes promotion, fresh rollback, missing/changed fallback, secret
+and receipt drift, old tags, mixed traffic, stale plans, conflicts, ambiguous
+writes and post-write drift. No cloud write or full application rerun occurred.
 
 ## Coordinated activation (original implementation checklist)
 

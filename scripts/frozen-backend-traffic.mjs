@@ -53,6 +53,9 @@ export function deploymentStepsFingerprint(steps) {
         Object.entries(step).filter(([key]) => !outputFields.has(key)))));
 }
 export function validateDeployment(build, pins) {
+    return validateDeploymentReceipt(build, pins, frozenDeploymentApproval(pins));
+}
+export function validateDeploymentReceipt(build, pins, expectedApproval) {
     requireThat(build.id === pins.deploymentBuildId && build.projectId === PROJECT
         && build.buildTriggerId === pins.deploymentTriggerId
         && [DEPLOY_SA, DEPLOY_SA.replace(`projects/${PROJECT}/`, 'projects/-/')].includes(build.serviceAccount)
@@ -70,7 +73,7 @@ export function validateDeployment(build, pins) {
         && (options.pool === undefined || same(options.pool, {})) && build.timeout === '2400s',
     'Unreviewed deployment execution options');
     requireThat(build.substitutions?._DEPLOY_TRIGGER_ID === pins.deploymentTriggerId
-        && build.substitutions?._APPROVAL === frozenDeploymentApproval(pins),
+        && build.substitutions?._APPROVAL === expectedApproval,
     'Deployment substitution approval differs from the pinned source, image or session-secret version');
     requireThat(deploymentStepsFingerprint(build.steps) === pins.deploymentStepsSha256
         && build.steps.every(step => step.status === 'SUCCESS' && (step.exitCode ?? 0) === 0
@@ -78,8 +81,18 @@ export function validateDeployment(build, pins) {
 }
 
 export function validateFrozenRevision(revision, pins) {
+    return validateRuntimeRevision(revision, pins, revisionName(pins), false);
+}
+export const sessionRevisionName = pins => `mickeyf-org-session-${pins.sourceBuildId.replaceAll('-', '')}`;
+export function validateSessionRevision(revision, pins) {
+    return validateRuntimeRevision(revision, pins, sessionRevisionName(pins), true);
+}
+export function validateLegacySessionRevision(revision, pins, expectedName) {
+    return validateRuntimeRevision(revision, pins, expectedName, true, true);
+}
+function validateRuntimeRevision(revision, pins, expectedName, scoringEnabled, legacy = false) {
     const sessionSecretVersion = validateSessionSecretVersion(pins.sessionSecretVersion);
-    requireThat(revision.name === `${SERVICE}/revisions/${revisionName(pins)}`
+    requireThat(revision.name === `${SERVICE}/revisions/${expectedName}`
         && revision.service === 'mickeyf-org' && revision.uid && !revision.deleteTime && !revision.reconciling
         && revision.conditions?.some(c => c.type === 'Ready' && c.state === 'CONDITION_SUCCEEDED'), 'Frozen revision is not Ready');
     requireThat(revision.labels?.['source-build-id'] === pins.sourceBuildId
@@ -100,10 +113,14 @@ export function validateFrozenRevision(revision, pins) {
     const expectedPlain = {
         NODE_ENV: 'production', CLOUD_SQL_CONNECTION_NAME: `${PROJECT}:${REGION}:cms-mickeyf`,
         DB_USER: 'cms_mickeyf', DB_NAME: 'cms',
-        P4_VEGA_SCORE_SUBMISSIONS_ENABLED: 'false', THREE_BOSSES_RUN_SUBMISSIONS_ENABLED: 'false',
+        P4_VEGA_SCORE_SUBMISSIONS_ENABLED: String(scoringEnabled), THREE_BOSSES_RUN_SUBMISSIONS_ENABLED: String(scoringEnabled),
         ...accountDeletionEnvironment(pins.accountDeletion),
         ...googleSignInEnvironment(pins.googleSignIn, pins.accountDeletion),
     };
+    // The recorded legacy runtime predates these default-off feature variables.
+    if (legacy) for (const name of ['ACCOUNT_DELETION_ENABLED', 'PROVIDER_AUTH_ENABLED', 'PROVIDER_GOOGLE_SIGNUP_ENABLED']) {
+        if (!container.env?.some(entry => entry.name === name)) delete expectedPlain[name];
+    }
     const expectedCount = Object.keys(expectedPlain).length + 2;
     requireThat(container.env?.length === expectedCount && new Set(container.env.map(e => e.name)).size === expectedCount, 'Unexpected environment variables');
     for (const [name, value] of Object.entries(expectedPlain)) {
@@ -126,7 +143,7 @@ export function validateFrozenRevision(revision, pins) {
     return revision;
 }
 
-function trafficShape(items, statuses = false) {
+export function trafficShape(items, statuses = false) {
     requireThat(Array.isArray(items) && items.length > 0, 'Missing explicit traffic');
     const tags = new Set();
     const result = items.map(item => {
@@ -153,12 +170,12 @@ export function validateService(service) {
 }
 
 // Output-only fields can settle after a traffic PATCH; all configuration must stay unchanged.
-function serviceConfiguration(service) {
+export function serviceConfiguration(service) {
     const volatile = new Set(['generation', 'observedGeneration', 'etag', 'updateTime', 'lastModifier', 'traffic',
         'trafficStatuses', 'conditions', 'terminalCondition', 'reconciling', 'urls']);
     return Object.fromEntries(Object.entries(service).filter(([key]) => !volatile.has(key)));
 }
-function revisionConfiguration(revision) {
+export function revisionConfiguration(revision) {
     return Object.fromEntries(Object.entries(revision).filter(([key]) =>
         !['scalingStatus', 'conditions', 'observedGeneration', 'etag', 'updateTime', 'reconciling'].includes(key)));
 }
@@ -263,6 +280,12 @@ export async function applyFrozenTraffic(provider, plan, confirmation, now = Dat
 }
 
 export function createCloudProvider(token, fetcher = fetch) {
+    return cloudProvider(token, fetcher, /^mickeyf-org-freeze-[0-9a-f]{32}$/);
+}
+export function createSessionCloudProvider(token, fetcher = fetch) {
+    return cloudProvider(token, fetcher, /^mickeyf-org-session-(?:rollback-)?[0-9a-f]{32}$/);
+}
+function cloudProvider(token, fetcher, allowedRevision) {
     requireThat(typeof token === 'string' && token.length >= 20 && token.length <= 8192 && !/\s/.test(token), 'Access token unavailable');
     async function request(base, path, method = 'GET', body) {
         const response = await fetcher(`${base}${path}`, {
@@ -328,7 +351,7 @@ export function createCloudProvider(token, fetcher = fetch) {
             keys(body, ['name', 'etag', 'traffic'], 'Traffic patch');
             requireThat(body.name === SERVICE && body.etag && body.traffic.length === 1
                 && body.traffic[0].percent === 100 && body.traffic[0].type === REVISION_TYPE
-                && /^mickeyf-org-freeze-[0-9a-f]{32}$/.test(body.traffic[0].revision)
+                && allowedRevision.test(body.traffic[0].revision)
                 && Object.keys(body.traffic[0]).length === 3, 'Patch exceeds frozen traffic-only authority');
             const operation = await run(`${SERVICE}?updateMask=traffic`, 'PATCH', body);
             requireThat(new RegExp(`^projects/(?:${PROJECT}|1012884798546)/locations/${REGION}/operations/[^/]+$`).test(operation.name)
@@ -353,7 +376,7 @@ export function createCloudProvider(token, fetcher = fetch) {
     };
 }
 
-function accessToken() {
+export function accessToken() {
     try {
         // Fixed command only; no user data is passed through a shell.
         return process.platform === 'win32'
@@ -361,7 +384,7 @@ function accessToken() {
             : execFileSync('gcloud', ['auth', 'print-access-token'], { encoding: 'utf8', timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
     } catch { fail('Could not obtain a short-lived gcloud access token'); }
 }
-async function readJson(path) {
+export async function readJson(path) {
     const raw = await readFile(path, 'utf8');
     requireThat(raw.length <= 1024 * 1024, 'Input JSON exceeds size limit');
     return JSON.parse(raw);
