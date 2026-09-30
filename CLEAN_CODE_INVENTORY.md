@@ -169,8 +169,9 @@ coverage gap justifies additional checks.
   The [September 30 candidate review](#c7-candidate-and-security-review--2026-09-30)
   completes the local checks and available patches. Embedded OpenSSL S8 now has
   an owner-chosen upstream-patch hold enforced for new production images.
-  S16's replacement WebGL package passes local provenance/startup validation;
-  hosted follow-up is pending. S14/S17's CodeQL dispositions are verified.
+  S16's replacement WebGL package passes local provenance/startup validation
+  and hosted package checks. S18 corrects a stale integration fixture; current
+  follow-up CI is recorded on PR #341. S14/S17's CodeQL dispositions are verified.
   Do not restart C1–C6 to resolve the remaining gate.
 
 ### Completion rule and boundaries
@@ -2350,7 +2351,8 @@ documentation links and `git diff --check`.
 ## C7 candidate and security review — 2026-09-30
 
 **Local candidate work is complete; C7 stays open for S8's upstream patch.**
-S16's replacement package passes local validation; hosted follow-up is pending.
+S16's replacement package passes local and hosted checks. The later S18 fixture
+correction and exact hosted validation boundaries are recorded below.
 The original checkpoint base is `7757260d` plus the existing C4–C6 local changes and this
 checkpoint. C1–C6 dispositions and unchanged acceptance remain valid; this is
 not a new repository-wide refactor or a claim that the project is release-ready.
@@ -2503,6 +2505,17 @@ processes were closed.
 
 Exact commands, hashes, logs and verification boundaries are in the
 [release ledger](RELEASE_READINESS.md#webgl-replacement-and-runtime-hold-follow-up-s8-s16).
-One hosted PR follow-up remains pending. Prior gameplay/device acceptance and
-unchanged source-test results carry forward; no deployment, database change or
-Google/Apple activation occurred. C7 remains open for S8.
+Hosted run `36767176434` on `7a58c045` confirms package/frontend/tooling and all
+807 backend unit checks. Its Three Bosses HTTP integration test exposed a legacy
+token fixture (`401` instead of `201`); later backend checks were skipped.
+Independent docs, Unity integrity and all CodeQL checks pass. The fixture now
+uses the real v2 token/session APIs and existing session migrations in the
+disposable test harness, retaining the HTTP submission/replay assertions.
+All 13 affected integration cases pass locally, with no skips; disposable
+container/network teardown completed. Production authentication and SQL
+migrations are unchanged. Exact evidence is
+in [S18's ledger entry](RELEASE_READINESS.md#hosted-follow-up-and-session-fixture-correction-s18);
+follow-up hosted results are recorded on PR #341.
+Prior gameplay/device acceptance and unchanged source-test results carry forward;
+no deployment, Cloud SQL change or Google/Apple activation occurred. C7 remains
+open for S8 and requires the corrected fixture's hosted validation.

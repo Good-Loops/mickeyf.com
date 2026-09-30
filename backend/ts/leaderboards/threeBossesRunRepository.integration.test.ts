@@ -4,7 +4,6 @@ import { AddressInfo } from 'node:net';
 import { randomUUID } from 'node:crypto';
 import { after, before, beforeEach, test } from 'node:test';
 import express from 'express';
-import jwt from 'jsonwebtoken';
 import mysql, {
     Connection,
     Pool,
@@ -15,7 +14,9 @@ import { loadMigrationConfig } from '../config/migrationConfig';
 import type { MigrationConnection } from '../migrations/leaderboardSchema';
 import { loadMigrationManifest } from '../migrations/migrationManifest';
 import { applyMigrations } from '../migrations/migrationRunner';
+import { createAccountSession } from '../auth/accountSessionRepository';
 import { createLeaderboardRouter } from '../routers/leaderboardRouter';
+import { issueSessionToken } from '../security/sessionPolicy';
 import { calculateThreeBossesScore } from './leaderboardContract';
 import { cleanupSubmissionReceipts } from './submissionReceiptCleanup';
 import {
@@ -171,6 +172,9 @@ async function resetFixture(): Promise<void> {
                 game_personal_bests,
                 game_submission_receipts,
                 game_runs,
+                account_sessions,
+                provider_auth_attempts,
+                account_provider_identities,
                 schema_migrations,
                 users
         `);
@@ -256,7 +260,12 @@ beforeEach(resetFixture);
 
 after(async () => {
     if (applicationPool) await applicationPool.end();
-    if (observer) await observer.end();
+    if (observer) {
+        try {
+            // Later integration suites own their historical schema fixtures.
+            await observer.query('DROP TABLE IF EXISTS account_sessions, provider_auth_attempts, account_provider_identities');
+        } finally { await observer.end(); }
+    }
 });
 
 test('reads the ten current-rule personal bests in deterministic completion order', async () => {
@@ -606,11 +615,17 @@ test('signed-in HTTP ticket, submission, replay, and leaderboard form one round 
 }, async () => {
     const sessionSecret = 'isolated-three-bosses-round-trip-secret';
     const runId = randomUUID();
-    const bearerToken = jwt.sign(
-        { user_id: 1, user_name: 'player-1' },
-        sessionSecret,
-        { algorithm: 'HS256', expiresIn: '5m' }
+    await applyMigrations(asMigrationConnection(observer), migrations, config, {
+        allowedEffectKinds: ['add-account-identity', 'add-provider-identities',
+            'add-provider-attempts', 'add-account-sessions', 'add-session-renewal'],
+    });
+    const [accounts] = await observer.query<Array<RowDataPacket & { accountId: string }>>(
+        'SELECT account_uuid AS accountId FROM users WHERE user_id = 1'
     );
+    const account = { userId: 1, userName: 'player-1', accountId: accounts[0].accountId };
+    const session = issueSessionToken(account, sessionSecret);
+    assert.equal(await createAccountSession(applicationPool, account, session.sessionId, session.expiresAt), true);
+    const bearerToken = session.token;
     const app = express();
     app.use('/api/leaderboards', createLeaderboardRouter(applicationPool, {
         sessionSecret,

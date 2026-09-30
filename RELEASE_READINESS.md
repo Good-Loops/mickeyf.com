@@ -1,9 +1,10 @@
 # Release readiness and cumulative security ledger
 
 Current dispositions refreshed 2026-09-30 against draft PR #341's reviewed source
-at `118a2b8b` and the subsequent WebGL package/runtime-gate checkpoint below.
-Hosted validation of that follow-up is pending; prior hosted results and CodeQL
-source review remain dated evidence. The original reconciliation was 2026-09-08 local
+at `118a2b8b`, package/runtime commit `7a58c045`, and the integration-fixture
+follow-up below. Subsequent hosted results are recorded on
+[draft PR #341](https://github.com/Good-Loops/mickeyf.com/pull/341); checkpoint
+results below retain their exact tested revisions. The original reconciliation was 2026-09-08 local
 (2026-09-09 UTC), against `015d962e`. This is the current gate summary;
 dated entries in [PROJECT_PLAN.md](PROJECT_PLAN.md) and
 [RECEIPT_RETENTION.md](backend/RECEIPT_RETENTION.md) remain supporting history.
@@ -36,8 +37,9 @@ history; the publication closeout records the final delivery checks.
 | S13 | Fixed locally; editor restart not performed | Firebase MCP now runs the local Firebase 15.32.0 CLI from `.github/firebase-deploy`, sharing its reviewed lock and overrides instead of an independent `npx` tree. The installed tooling tree was refreshed; offline selection still exposes exactly the three named read-only tools. No authenticated MCP server or user-data tool was invoked. |
 | S14 | Resolved on candidate; main preflight fix awaits merge | CodeQL #21 is absent from the PR's Python analysis after restricting preflight to the literal `/workspace/frozen-pins.json`. Owner-authorized false-positive dismissal of #20 is verified: its traced diagnostic uses static pattern labels, not credential contents, with the existing sentinel regression. #21 was not dismissed and remains open on main. |
 | S15 | Fixed in candidate locks; local runtime installs not broadly refreshed | Fresh audit findings prompted exactly six transitive version changes: brace-expansion 5.0.12 in root/frontend/backend, backend fast-uri 3.1.8 and ip-address 10.7.2, Firebase grpc-js 1.14.5. All four final lock audits and dependency graphs pass. Running development installations were not replaced; final backend build used the patched locked tree. |
-| S16 | Fixed in candidate; hosted follow-up pending | Fresh guarded Unity build `9b96ad8e…3241a` replaces the stale package. Certification, hashes and 1046-file source provenance match committed Unity source `118a2b8b`; release validation and a release-enabled frontend build pass. Isolated Chrome smoke reaches running with a valid 1141x642 canvas. This resolves the mismatch from run `36761083045`; the updated PR still needs hosted validation. No gameplay/device replay or publication is claimed. |
+| S16 | Fixed; local and hosted package checks pass | Fresh guarded Unity build `9b96ad8e…3241a` replaces the stale package. Certification, hashes and 1046-file source provenance match committed Unity source `118a2b8b`; release validation and a release-enabled frontend build pass. Isolated Chrome smoke reaches running with a valid 1141x642 canvas. Run `36767176434` also passes package, frontend and WebGL tooling checks on `7a58c045`; its later integration failure is tracked separately as S18. No gameplay/device replay or publication is claimed. |
 | S17 | Closed as false positives; remote disposition verified | All 32 new JavaScript/TypeScript alerts (#22–#53; two critical, 30 high) were dismissed with owner approval and the specific reasons below. Readback verifies each reason/comment; the candidate has zero open CodeQL alerts and its CodeQL gate passes. No rules were excluded or thresholds changed. This disposition is tied to the reviewed source and trust boundaries, not a blanket security exception. |
+| S18 | Integration fixture corrected; 13/13 focused tests pass | Run `36767176434` passed all 807 backend unit tests but exposed a stale Three Bosses HTTP integration fixture: its legacy JWT is correctly rejected by current session authentication. The fixture now applies the existing identity/session migrations only in the disposable harness and uses the real session-token and session-repository APIs. All 13 affected integration cases pass, with no skips; its added tables and disposable resources are cleaned. Hosted verification is recorded on PR #341. No production authentication or migration SQL changed. |
 | R1 | Fixed; certified and published | Package `97daf31c…c098` contains the canvas-scroll bridge: certified build `5473694d…4ba7`, source `346491b4`, 1004-file provenance, Unity6000.3.8f1. Guarded build/settings restoration and packaged hash/provenance validation passed; Firebase verified preview startup and live payload delivery. Earlier game/device checks are carried forward. |
 | R2 | Fixed; owner phone acceptance | After opening the release-candidate mobile preview for the requested fresh-load/landscape touch check, the owner reported about 10 seconds to load and confirmed Fire/fullscreen-exit buttons behave properly. This closes the combined observation. The timing is owner-observed local Safari delivery, not an instrumented cache-miss measurement or production CDN benchmark; the exact 640x360 geometry remains covered by the earlier layout fixture. No repeat login/submission or exhaustive clip-listening pass is required. |
 | R3 | Fixed; accepted owner checks | Keep closed: owner-confirmed published-site login/submission; Android/iPhone normal routes and recorded defeat/retry/menu checks; touch controls; mute persistence; automatic/combined pause; complete outcome-centering audit; accepted fullscreen-button placement and Safari toolbar limitation; recovered desktop FPS incident. Carry acceptance forward unless relevant code/origin/configuration changes or a concrete regression invalidate it. A brief post-publication smoke check is not a new pre-release authentication campaign. |
@@ -50,7 +52,8 @@ history; the publication closeout records the final delivery checks.
 **Local remediation and aggregate checks are complete; C7 remains open.** The
 remaining security blocker is S8's upstream runtime patch, with an owner-chosen
 deployment hold enforced for new production images. S16's replacement package
-passes local validation and startup; its hosted follow-up is pending.
+passes local validation/startup and hosted package checks. The hosted run then
+exposed S18's obsolete integration fixture; the correction is documented below.
 S14/S17's candidate CodeQL dispositions are verified. The source review does not approve release, renew an exception or
 activate providers. Exact commands and carried-forward evidence are in the
 [C7 inventory checkpoint](CLEAN_CODE_INVENTORY.md#c7-candidate-and-security-review--2026-09-30).
@@ -269,9 +272,39 @@ Commands and results (Windows paths abbreviated):
   described above. No custom Node binary or OpenSSL exception was introduced.
 
 Build logs and preview output are outside Git under
-`%TEMP%/mickeyf-c7-20260930`. The package and gate changes are ready for one hosted
-PR validation; no merge, deployment, Cloud SQL change or provider activation is
-part of this checkpoint.
+`%TEMP%/mickeyf-c7-20260930`. Package/runtime commit `7a58c045` was pushed to the
+existing draft PR. No merge, deployment, Cloud SQL change or provider activation
+is part of this checkpoint.
+
+### Hosted follow-up and session fixture correction (S18)
+
+Run `36767176434` on `7a58c045` passes locked installs/audits, package provenance,
+frontend tests/build, WebGL tooling, deployment guards, development/migration
+launchers, backend TypeScript and all 807 unit tests. Its first two MySQL suites
+pass 25 and six cases. Three Bosses repository integration passes 12 cases but
+fails its HTTP round trip (`401` instead of `201`): the test still signs an old
+JWT directly and prepares only the pre-session schema. Later integration suites,
+backend production build and this job's documentation steps were skipped.
+The independent docs build, Unity integrity, all five CodeQL analyses and the
+CodeQL security gate pass. Documentation deployment remains skipped.
+
+Only `threeBossesRunRepository.integration.test.ts` changes to repair the fixture:
+apply the existing migrations through session renewal in the guarded test
+database, read its generated account UUID, issue the current v2 token and
+persist the live session using `createAccountSession`. The real HTTP routes,
+authorization, ticket timing and submission/replay assertions remain intact.
+Additional session/provider fixture tables are cleaned before later suites.
+No production code, SQL migration file or Cloud SQL state changes.
+
+Focused validation uses a temporary copy of the existing migration-test launcher
+with only its source directory fixed and command selection narrowed to
+`THREE_BOSSES_RUN_INTEGRATION_TEST_COMMAND`. Container identity, environment
+scrubbing and teardown guards are unchanged. The temporary runner and log are
+`%TEMP%/mickeyf-c7-20260930/run-three-bosses-integration.mjs` and
+`three-bosses-integration-fix.log`. Running `node <temp>/run-three-bosses-integration.mjs`
+passed all 13 cases with zero failures/skips; container and network removal
+completed. Current follow-up CI results belong to the PR
+head reported on PR #341; this checkpoint does not claim a pass for skipped work.
 
 ### Carried-forward security boundaries
 
