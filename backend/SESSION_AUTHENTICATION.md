@@ -103,7 +103,108 @@ Development retains its configured API endpoint. `vite preview` alone does not
 implement Firebase rewrites: use a separately configured local test backend or
 a reviewed Hosting preview for built-browser authentication testing.
 
-## Coordinated activation (not executed by this checkpoint)
+## Cutover review — 2026-09-30
+
+Preparation is complete for this checkpoint; activation is still pending. The
+owner accepted the reviewed OpenSSL risk, not unrelated release gaps. The source
+baseline is `6efbab08295ef1f79d256ef43086585e1c9b6335`, whose PR checks and CodeQL
+passed. The following readbacks are current, not assumptions from the earlier
+migration proposal.
+
+| Surface | Verified baseline / rollback reference |
+| --- | --- |
+| Cloud Run | Project `noted-reef-387021`, service `mickeyf-org`, region `us-central1`; generation 146, 100% traffic to `mickeyf-org-localhost-dbb80d4f`, no traffic tags; Ready/Active |
+| Serving image | `us-central1-docker.pkg.dev/noted-reef-387021/cloud-run-source-deploy/cloud-run-source-deploy@sha256:1ae9d4894d26be408fe807e2ae35e6b63c3975ac4d116b99a3d2554eb82b1e19` |
+| Runtime secrets | `DB_PASS:1`, `SESSION_SECRET:2`; session version 2 enabled, version 1 disabled. Only metadata/references were read; no new version exists from this preparation |
+| Hosting | `sites/noted-reef-387021/versions/aa252183c0ed4b85`, live release `1789045977054000` from `b6888bc2`; only the SPA rewrite, no API/auth rewrites or matching no-store path headers |
+| Cloud SQL | Runtime identity/server pin matched; migrations exactly 0001–0012, renewable session schema and direct session column/table grants match the committed manifest; no grant option |
+| Build controls | All four global Cloud Build triggers disabled; none in `us-central1`; no Cloud Build image receipt for source `6efbab08` |
+| Native build evidence | Latest successful `ios-build.yml` run is `34542319206`, source `39fcfd74` (September 10). No later signed build is established by this check; current source includes renewal and server-first logout |
+
+The runtime-only database check completed at `2026-09-30T20:39:30.691Z`.
+Stored checksum verification is carried forward from the approved September 29
+maintenance execution: this restricted runtime account cannot read checksums.
+No temporary administrator, migration, grant, user, score or session write was
+needed. Existing Cloud SQL remains the development database.
+
+### Concrete release order
+
+1. Resolve the existing registration and native compatibility requirements
+   before public activation. The approved adult-only, server-validated signup
+   eligibility flow is still unimplemented, including password signup; disabled
+   Google/Apple flags do not close that gap. Do not silently change that policy
+   or close registration. Deliver a compatible iPhone build before claiming
+   renewable sessions and server-enforced logout on the installed app. These are
+   separate from the accepted OpenSSL risk.
+2. Build the final reviewed source with the image-only candidate configuration,
+   record its actual Cloud Build ID, source identity and registry digest, and
+   obtain Artifact Analysis evidence. The local C7 image/scan is supporting
+   evidence, not a substitute for those deployment pins. Prepare a dedicated
+   manual candidate configuration; preserve the disabled legacy triggers.
+3. In the approved release window, create a fresh signing-secret version and
+   bind its returned numeric version to the candidate and approval. Do not
+   assume the next version number, use `latest`, or rotate the currently serving
+   revision during preparation. Database migrations/grants are not repeated for
+   a session-only release; provider activation retains its separate review.
+4. Prepare an exact zero-traffic backend revision with both existing score
+   submission flags enabled, the reviewed runtime identity/SQL connection and
+   explicit secret pins. **The current frozen renderer/traffic tool is not the
+   final release path:** it forces both score flags off. Its guards must be
+   retained in an enabled-score deployment plan, not bypassed or relabeled.
+5. Use a short coordinated release window: move backend traffic to the reviewed
+   compatible revision without a legacy/new traffic split, then publish the
+   matching Hosting artifact/rewrites/headers. The two services cannot switch
+   atomically; old web/native clients may require refresh or update and fresh
+   sign-in during the transition. Do not merge PR #341 first: main automatically
+   starts the Hosting release workflow. Keep Google/Apple disabled until their
+   own activation requirements are met.
+6. After the compatible public release, retain `VITE_USE_PUBLIC_API=1`, set
+   `VITE_PUBLIC_AUTH_PROTOCOL=renewable`, restart only the local frontend and
+   sign in again. One focused browser/iPhone check covers remembered reopen,
+   renewal and revoked-session rejection after logout. Use an explicitly
+   designated test account; no broad gameplay replay or migration rerun.
+
+### Promotion guard and rollback
+
+The existing Firebase promotion step now probes anonymous `POST /auth/renew`
+with empty JSON and the approved website Origin against both the direct backend
+and the Hosting preview. It requires HTTP 200, exactly `{"loggedIn":false}`,
+JSON, no-store and no Set-Cookie before promoting the frontend. No credentials
+are sent and no authenticated session is renewed. Existing enabled-score checks
+remain. This detects a legacy backend or missing preview rewrite; it does not
+prove authenticated cookie forwarding, real renewal, native persistence or
+prevent another operator changing backend traffic after the check.
+
+The live legacy backend returned 404/`NOT_FOUND`; the existing local backend
+returned the required anonymous response with no cookie and no-store. Both
+probes used no credentials. Thus the new gate intentionally blocks publishing
+this frontend against today's serving backend.
+
+Rollback restores the recorded Hosting version and the old backend image with
+compatible settings, while preserving migrated tables, accounts and scores.
+Prepare a rollback revision using a fresh, explicitly pinned signing-secret
+version before changing traffic. Simply restoring the untouched old revision
+would also restore secret version 2 and could revive old login cookies; a
+written instruction to sign in again does not invalidate them. Do not destroy
+the active secret or drop session storage as a rollback shortcut. Rollback and
+retry both require fresh sign-in and coordinated configuration.
+
+Validation: seven offline cases against the actual embedded promotion script
+passed (compatible responses, legacy 404, missing rewrite/HTML, unexpected
+authenticated result, numeric false substitute, Set-Cookie, cacheable response);
+workflow YAML parsed.
+Read-only Cloud Run/secret/trigger/Hosting metadata, the scoped SQL readiness
+probe and the two anonymous HTTP probes are recorded above. The credential-free
+helpers are `%TEMP%/mickeyf-session-cutover-readiness-20260930.cjs` and
+`%TEMP%/mickeyf-session-promotion-gate-test.py`; commands were `node --check`,
+`node` and `python` on those files. No broad suite, cloud build, native upload,
+secret rotation, merge, deployment or traffic change was performed.
+
+## Coordinated activation (original implementation checklist)
+
+Steps 1–2 below were completed for the session-only schema/grants on September
+29 and rechecked above. They document the implementation order, not work to
+repeat. The September 30 cutover review records the remaining release work.
 
 1. Review the actual target and migration plan using the existing maintenance
    identity and explicit write confirmations. Migration 0011 requires recorded

@@ -649,13 +649,14 @@ jobs:
           retention-days: 7
           overwrite: false
 
-      - name: Require enabled production Three Bosses submissions
+      - name: Require renewable sessions and enabled production submissions
         timeout-minutes: 2
         env:
           PRODUCTION_API_URL: https://mickeyf-org-j7yuum4tiq-uc.a.run.app
+          PREVIEW_URL: ${{ steps.preview.outputs.url }}
         run: |
           set -euo pipefail
-          python3 - "$PRODUCTION_API_URL" <<'PY'
+          python3 - "$PRODUCTION_API_URL" "$PREVIEW_URL" <<'PY'
           import json
           import sys
           import urllib.error
@@ -681,7 +682,7 @@ jobs:
 
           opener = urllib.request.build_opener(urllib.request.ProxyHandler({}), NoRedirect())
 
-          def request(path, expected_status, payload=None):
+          def request(path, expected_status, payload=None, *, base_url=origin, request_origin=None):
               data = None if payload is None else json.dumps(payload, separators=(",", ":")).encode("ascii")
               headers = {
                   "Accept": "application/json",
@@ -690,8 +691,10 @@ jobs:
               }
               if data is not None:
                   headers["Content-Type"] = "application/json"
+              if request_origin is not None:
+                  headers["Origin"] = request_origin
               req = urllib.request.Request(
-                  origin + path,
+                  base_url + path,
                   data=data,
                   headers=headers,
                   method="POST" if data is not None else "GET",
@@ -721,6 +724,15 @@ jobs:
                   return json.loads(body.decode("utf-8"))
               except (UnicodeError, json.JSONDecodeError) as error:
                   raise SystemExit(f"{path} returned malformed JSON.") from error
+
+          # No credentials are sent: renewal must reject anonymous access without
+          # changing sessions. Checking the preview also verifies Hosting's rewrite.
+          for base_url in (origin, sys.argv[2]):
+              anonymous_session = request("/auth/renew", 200, {},
+                                          base_url=base_url, request_origin="https://mickeyf.com")
+              if (not isinstance(anonymous_session, dict) or set(anonymous_session) != {"loggedIn"}
+                      or anonymous_session["loggedIn"] is not False):
+                  raise SystemExit("Renewable session contract is unavailable; do not publish the frontend.")
 
           catalog = request("/api/leaderboards", 200)
           if not isinstance(catalog, dict) or catalog.get("success") is not True:
@@ -762,7 +774,7 @@ jobs:
           }:
               raise SystemExit("Production Three Bosses anonymous submission gate is not open.")
 
-          print("Production Three Bosses ticket and submission gates are ranked, enabled, and write-safe.")
+          print("Renewable-session routing passed; Three Bosses ticket and submission gates are ranked, enabled, and write-safe.")
           PY
 
       - name: Refresh Google Cloud access token for promotion
