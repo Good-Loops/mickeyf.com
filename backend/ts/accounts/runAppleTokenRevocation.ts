@@ -184,6 +184,10 @@ async function executeMaintenance(options: MaintenanceOptions, execution: Mainte
                 clientId: lifecycle.clientId,
                 vault: { decrypt(row) { assertRunning(); return lifecycle.repository.decrypt(row); } },
                 appleTokens: { async revoke(token) { assertRunning(); await lifecycle.client.revoke(token); } },
+                additionalClients: lifecycle.web ? [{ clientId: lifecycle.web.clientId,
+                    vault: { decrypt(row) { assertRunning(); return lifecycle.web!.repository.decrypt(row); } },
+                    appleTokens: { async revoke(token) { assertRunning(); await lifecycle.web!.client.revoke(token); } },
+                }] : [],
                 database: { async getConnection() { assertRunning(); return guarded; } },
             });
             const result = await worker.drain();

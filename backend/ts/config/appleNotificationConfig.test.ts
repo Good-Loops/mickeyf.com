@@ -39,7 +39,8 @@ test('enabled configuration binds verification to the captured native bundle, no
     const keys = generateKeyPairSync('rsa', { modulusLength: 2_048 });
     const now = 1_800_000_000;
     let fetches = 0;
-    const environment = { APPLE_NOTIFICATIONS_ENABLED: 'true', APPLE_IOS_BUNDLE_ID: bundleId };
+    const environment = { APPLE_NOTIFICATIONS_ENABLED: 'true', APPLE_IOS_BUNDLE_ID: bundleId,
+        APPLE_WEB_AUTH_ENABLED: 'false', APPLE_WEB_SERVICES_ID: 'com.example.web', APPLE_WEB_REDIRECT_URI: 'https://example.test/login' };
     const verifier = loadAppleNotificationConfig(environment, { now: () => now * 1_000,
         fetch: async url => {
             fetches++;
@@ -49,11 +50,11 @@ test('enabled configuration binds verification to the captured native bundle, no
         } })!;
     assert.equal(fetches, 0);
     environment.APPLE_IOS_BUNDLE_ID = 'com.other.app';
-    for (const aud of [bundleId, 'com.other.app']) {
+    for (const aud of [bundleId, 'com.example.web', 'com.other.app']) {
         const token = jwt.sign({ iss: 'https://appleid.apple.com', aud, iat: now - 1, jti: 'notification-id',
             events: { type: 'consent-revoked', sub: 'synthetic-subject', event_time: now - 2 } },
         keys.privateKey, { algorithm: 'RS256', keyid: 'synthetic-key' });
-        assert.equal((await verifier.verify(token)).verified, aud === bundleId);
+        assert.equal((await verifier.verify(token)).verified, aud === bundleId || aud === 'com.example.web');
     }
     assert.equal(fetches, 1);
 });

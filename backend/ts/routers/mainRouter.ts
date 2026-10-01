@@ -21,6 +21,7 @@ import {
     createLoginAccountRateLimiter,
 } from '../security/requestRateLimits';
 import { handleGetUsersNotSupported } from './mainRouter.handlers';
+import type { RegistrationAuthorization } from '../accounts/registrationAuthorization';
 
 type MainRouterDependencies = {
     database: Pick<Pool, 'getConnection' | 'query'>;
@@ -28,6 +29,7 @@ type MainRouterDependencies = {
     isProduction: boolean;
     p4VegaScoreSubmissionsEnabled: boolean;
     allowedMutationOrigins: readonly string[];
+    registration?: RegistrationAuthorization;
 };
 
 export function createMainRouter({
@@ -36,6 +38,7 @@ export function createMainRouter({
     isProduction,
     p4VegaScoreSubmissionsEnabled,
     allowedMutationOrigins,
+    registration,
 }: MainRouterDependencies): Router {
     /**
      * Configured Express router for core API routes.
@@ -50,6 +53,7 @@ export function createMainRouter({
         isProduction,
         p4VegaScoreSubmissionsEnabled,
         allowedMutationOrigins,
+        registration,
     });
 
     /** POST /users — core API request multiplexer (mutating/command-style). */

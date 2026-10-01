@@ -4,7 +4,7 @@ import path from 'node:path';
 import { createServer } from 'vite';
 
 /** SSR tests must never replace the dependency cache of a running dev server. */
-export async function createViteTestServer(config) {
+export async function createViteTestServer(config, { browser = false } = {}) {
     const temporaryRoot = path.resolve(tmpdir());
     const cachePrefix = 'mickeyf-vite-test-';
     const cacheDirectory = await mkdtemp(path.join(temporaryRoot, cachePrefix));
@@ -26,6 +26,7 @@ export async function createViteTestServer(config) {
             plugins: [...(config.plugins ?? []), {
                 name: 'isolated-ssr-test-cache',
                 configResolved(resolved) {
+                    if (browser) return;
                     // SSR tests need no browser prebundling. Disable it after
                     // plugins such as React have added their dependency includes.
                     for (const environment of Object.values(resolved.environments)) {

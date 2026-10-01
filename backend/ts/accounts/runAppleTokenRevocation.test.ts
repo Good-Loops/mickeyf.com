@@ -111,6 +111,26 @@ test('activation or target rejection opens no pool and logs no credential or raw
     }
 });
 
+test('maintenance sends a queued web token only to its configured web client', async () => {
+    const f = fixture(0, 0, 1);
+    let webCalls = 0;
+    f.overrideQuery(sql => {
+        if (!sql.startsWith('SELECT token_id')) return undefined;
+        return Promise.resolve([[{ token_id: '12345678-1234-4234-8234-123456789abc', account_uuid: '12345678-1234-4234-8234-123456789abd',
+            client_id: 'com.example.web', encrypted_token: Buffer.from('synthetic-web'), attempt_count: 0 }], []]);
+    });
+    const native = f.dependencies.loadLifecycle();
+    const lifecycle = { ...native, web: { clientId: 'com.example.web', redirectUri: 'https://example.test/login',
+        repository: { decrypt(row: { client_id: string }) { assert.equal(row.client_id, 'com.example.web'); return 'synthetic-web-refresh'; } },
+        client: { async revoke(token: string) { assert.equal(token, 'synthetic-web-refresh'); webCalls++; } },
+    } } as unknown as AppleTokenLifecycle;
+    assert.equal(await runAppleTokenRevocation(['apply'], { ...f.dependencies, loadLifecycle: () => lifecycle }), 0);
+    assert.equal(webCalls, 1);
+    assert.equal(f.state.appleCalls, 0);
+    assert.equal(f.state.due, 0);
+    assert.doesNotMatch(JSON.stringify(f.logs), /synthetic-web-refresh|com.example.web/);
+});
+
 test('identity/schema rejection precedes cleanup and retry configuration and destroys the borrowed session', async () => {
     const f = fixture(1, 1, 1);
     assert.equal(await runAppleTokenRevocation(['apply'], { ...f.dependencies,

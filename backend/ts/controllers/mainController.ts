@@ -11,10 +11,12 @@ import {
     submitP4VegaScore,
 } from '../leaderboards/p4VegaScoreRepository';
 import {
-    createPasswordAccount,
     findPasswordLoginAccount,
     isAccountIdentifierTaken,
 } from '../accounts/passwordAccountRepository';
+import { createRegisteredPasswordAccount } from '../accounts/registeredPasswordAccount';
+import { createRegistrationAuthorization, RegistrationRequiredError, type RegistrationAuthorization } from '../accounts/registrationAuthorization';
+import { createProviderAuthContextReader } from '../auth/providerAuthContext';
 import { authorizeScoreSubmission } from '../security/scoreSubmissionAuthorization';
 import { clearAuthenticationCookies, NATIVE_SESSION_COOKIE, WEB_SESSION_COOKIE, sessionCookieOptions } from '../security/sessionCookie';
 import { issueSessionToken } from '../security/sessionPolicy';
@@ -33,6 +35,7 @@ type ControllerDependencies = {
     isProduction: boolean;
     p4VegaScoreSubmissionsEnabled: boolean;
     allowedMutationOrigins: readonly string[];
+    registration?: RegistrationAuthorization;
 };
 
 // A fixed, valid bcrypt hash keeps nonexistent-account checks on the same
@@ -46,11 +49,20 @@ export function createMainController({
     isProduction,
     p4VegaScoreSubmissionsEnabled,
     allowedMutationOrigins,
+    registration = createRegistrationAuthorization(database),
 }: ControllerDependencies) {
+    const readRegistrationContext = createProviderAuthContextReader({ database, sessionSecret, allowedOrigins: allowedMutationOrigins });
     async function addUser(req: Request, res: Response) {
         const validation = validateSignupRequest(req.body);
         if (!validation.valid) {
             return res.json({ error: validation.error });
+        }
+
+        const context = await readRegistrationContext(req);
+        try { await registration.assertAvailable(context); }
+        catch (error) {
+            if (error instanceof RegistrationRequiredError) return res.status(403).json({ error: 'REGISTRATION_REQUIRED' });
+            throw error;
         }
 
         const { userName, email, password } = validation.input;
@@ -61,7 +73,14 @@ export function createMainController({
         }
 
         const passwordHash = await bcrypt.hash(password, PASSWORD_HASH_COST);
-        const result = await createPasswordAccount(database, { userName, email, passwordHash });
+        let result: 'created' | 'duplicate';
+        try {
+            result = await createRegisteredPasswordAccount(database, { userName, email, passwordHash },
+                (connection, accountId) => registration.consume(connection, context, accountId));
+        } catch (error) {
+            if (error instanceof RegistrationRequiredError) return res.status(403).json({ error: 'REGISTRATION_REQUIRED' });
+            throw error;
+        }
         if (result === 'duplicate') {
             return res.json({ error: 'DUPLICATE_USER', status: 409 });
         }

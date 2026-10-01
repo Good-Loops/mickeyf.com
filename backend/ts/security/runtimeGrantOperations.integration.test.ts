@@ -73,6 +73,7 @@ async function createSchema(): Promise<void> {
     try {
         await administrator.query(`
             DROP TABLE IF EXISTS
+                account_registration_profiles, registration_authorizations,
                 apple_auth_revocations,
                 apple_provider_tokens,
                 account_sessions,
@@ -114,7 +115,7 @@ async function createSchema(): Promise<void> {
     });
     await applyMigrations(asMigrationConnection(administrator), migrations, config, {
         allowedEffectKinds: ['add-unique-user-names', 'allow-passwordless-accounts', 'extend-provider-attempt-actions', 'add-apple-tokens',
-            'add-apple-revocations', 'add-apple-session-provenance'],
+            'add-apple-revocations', 'add-apple-session-provenance', 'add-registration-authorization', 'add-registration-profile'],
     });
 }
 
@@ -258,7 +259,10 @@ after(async () => {
         await dropFixtureAccounts();
         await root.end();
     }
-    if (administrator) await administrator.end();
+    if (administrator) {
+        try { await administrator.query('DROP TABLE IF EXISTS account_registration_profiles, registration_authorizations'); }
+        finally { await administrator.end(); }
+    }
 });
 
 test('active runtime sessions block role removal, then a drained rerun converges', async () => {
@@ -279,7 +283,7 @@ test('active runtime sessions block role removal, then a drained rerun converges
         );
         assert.equal(initialPlan.state, 'broad');
         assert.deepEqual(initialPlan.blockers, []);
-        assert.equal(initialPlan.operations.ensureRequiredPrivileges.length, 9);
+        assert.equal(initialPlan.operations.ensureRequiredPrivileges.length, 11);
         assert.equal(
             initialPlan.operations.removeApprovedRole?.approvedRole,
             'mock_cloudsqlsuperuser@%'
@@ -305,7 +309,7 @@ test('active runtime sessions block role removal, then a drained rerun converges
             RUNTIME_ACCOUNT
         );
         assert.equal(preparedPlan.state, 'broad');
-        assert.equal(preparedPlan.operations.ensureRequiredPrivileges.length, 9);
+        assert.equal(preparedPlan.operations.ensureRequiredPrivileges.length, 11);
     } finally {
         await openRuntimeConnection.end();
         await waitForFixtureSessionToClose(openRuntimeConnection.threadId);

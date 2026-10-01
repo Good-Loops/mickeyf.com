@@ -139,7 +139,7 @@ test('reads the bounded current p4-Vega leaderboard from generic storage', async
     assert.equal(fake.queries[0].timeout, 10_000);
     assert.equal(
         fake.queries[0].sql,
-        'SELECT users.user_name AS userName, game_personal_bests.score AS score FROM game_personal_bests INNER JOIN users ON users.user_id = game_personal_bests.user_id WHERE game_personal_bests.game_id = ? AND game_personal_bests.rules_version = ? ORDER BY game_personal_bests.score DESC, game_personal_bests.recorded_at ASC, game_personal_bests.user_id ASC LIMIT 10'
+        'SELECT users.user_name AS userName, game_personal_bests.score AS score FROM game_personal_bests INNER JOIN users ON users.user_id = game_personal_bests.user_id LEFT JOIN account_registration_profiles AS registration ON registration.account_uuid = users.account_uuid WHERE (registration.account_uuid IS NULL OR registration.score_visibility = \'public\') AND game_personal_bests.game_id = ? AND game_personal_bests.rules_version = ? ORDER BY game_personal_bests.score DESC, game_personal_bests.recorded_at ASC, game_personal_bests.user_id ASC LIMIT 10'
     );
     assert.deepEqual(fake.queries[0].values, ['p4-vega', 1]);
 });

@@ -33,7 +33,7 @@ const server = await createViteTestServer({
 });
 after(() => server.close());
 const { default: Login } = await server.ssrLoadModule('/ts/pages/Login.tsx');
-const { default: SignUp } = await server.ssrLoadModule('/ts/pages/SignUp.tsx');
+const { SignupCredentials: SignUp } = await server.ssrLoadModule('/ts/pages/SignUp.tsx');
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const deferred = () => {
     let resolve, reject;
@@ -68,7 +68,7 @@ function fixture(t, Page) {
         },
     };
     globalThis[key] = hooks;
-    const render = () => { cursor = 0; view = Page(); };
+    const render = () => { cursor = 0; view = Page({ reset() {}, scoreVisibility: 'private' }); };
     render();
     let cleanups = effects.map(effect => effect());
     const unmount = () => { mounted = false; cleanups.forEach(cleanup => cleanup?.()); };

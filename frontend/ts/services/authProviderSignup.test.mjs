@@ -7,8 +7,8 @@ const challenge = { state: Buffer.alloc(32, 3).toString('base64url'),
     nonce: Buffer.alloc(32, 4).toString('base64url'), expiresInSeconds: 300 };
 const idToken = 'synthetic.header.signature';
 const appleCredential = { idToken, authorizationCode: 'synthetic-one-time-code' };
-const credentialFor = clientKey => clientKey === 'apple-ios' ? appleCredential : idToken;
-const proofFor = clientKey => clientKey === 'apple-ios' ? appleCredential : { idToken };
+const credentialFor = clientKey => ['apple-ios', 'apple-web'].includes(clientKey) ? appleCredential : idToken;
+const proofFor = clientKey => ['apple-ios', 'apple-web'].includes(clientKey) ? appleCredential : { idToken };
 const signup = { action: 'signup', clientKey: 'google-web', userName: 'New Player' };
 const deletion = { action: 'delete', clientKey: 'google-web', confirmation: 'DELETE' };
 const nextTurn = () => new Promise(resolve => setImmediate(resolve));
@@ -27,7 +27,7 @@ function fixture({ completion = { success: true, user_name: 'New Player' },
     return { api, calls };
 }
 
-for (const clientKey of ['google-web', 'google-ios', 'google-android', 'apple-ios']) {
+for (const clientKey of ['google-web', 'google-ios', 'google-android', 'apple-ios', 'apple-web']) {
 test(`prepared ${clientKey} signup binds its action and challenge before choosing a username and stay-signed-in option`, async () => {
     for (const [rememberMe, expected] of [[undefined, false], [false, false], [true, true]]) {
         const { api, calls } = fixture();
@@ -56,7 +56,7 @@ test('signup validates username and rejects caller-provided email, password, acc
     const acquire = async () => assert.fail('invalid signup must not open a provider');
     const invalid = [
         ...[undefined, null, '', '   ', 'x'.repeat(65), 'bad\u0000name', 'bad\nname', 4].map(userName => ({ ...signup, userName })),
-        ...['apple-web', 'google-native', 'unknown'].map(clientKey => ({ ...signup, clientKey })),
+        ...['apple-android', 'google-native', 'unknown'].map(clientKey => ({ ...signup, clientKey })),
         { ...signup, email: 'caller@example.test' }, { ...signup, password: 'fake-password' },
         { ...signup, accountId: 'caller-account' }, { ...signup, userId: 42 },
         { ...signup, nonce: challenge.nonce }, { ...signup, state: challenge.state },
@@ -65,7 +65,7 @@ test('signup validates username and rejects caller-provided email, password, acc
     for (const input of invalid) {
         assert.deepEqual(await api.runProviderAuthentication(input, acquire), { error: 'INVALID_REQUEST' });
     }
-    for (const clientKey of ['apple-web', 'google-native']) {
+    for (const clientKey of ['apple-android', 'google-native']) {
         assert.deepEqual(await api.prepareProviderLogin(clientKey, {}, 'signup'), { error: 'INVALID_REQUEST' });
     }
     for (const action of ['delete', 'link', 'SIGNUP', null]) {
@@ -92,7 +92,7 @@ test('prepared signup cannot become login/delete, and a validated completion con
         { error: 'INVALID_REQUEST' }, 'login does not silently become signup');
 });
 
-for (const clientKey of ['google-web', 'google-ios', 'google-android', 'apple-ios']) {
+for (const clientKey of ['google-web', 'google-ios', 'google-android', 'apple-ios', 'apple-web']) {
 test(`direct ${clientKey} signup sends no password or email and needs exact matching cookie-session proof`, async () => {
     const signup = { action: 'signup', clientKey, userName: 'New Player' };
     const sessions = [
@@ -132,7 +132,7 @@ test('signup collision and email-authority failures are accepted only with their
     }
 });
 
-for (const clientKey of ['google-web', 'google-ios', 'google-android', 'apple-ios']) {
+for (const clientKey of ['google-web', 'google-ios', 'google-android', 'apple-ios', 'apple-web']) {
 test(`${clientKey} deletion posts only its fresh server challenge, token and literal destructive confirmation`, async () => {
     const deletion = { action: 'delete', clientKey, confirmation: 'DELETE' };
     const { api, calls } = fixture({ completion: { success: true, deleted: true } });
@@ -155,7 +155,7 @@ test('deletion rejects missing confirmation and every login/signup/link or calle
     const acquire = async () => assert.fail('invalid deletion cannot open Google');
     for (const input of [
         ...[undefined, null, true, 'delete', ' DELETE '].map(confirmation => ({ ...deletion, confirmation })),
-        { ...deletion, clientKey: 'apple-web' }, { ...deletion, rememberMe: false },
+        { ...deletion, clientKey: 'apple-android' }, { ...deletion, rememberMe: false },
         { ...deletion, password: 'private' }, { ...deletion, userName: 'New Player' },
         { ...deletion, accountId: 'caller-account' }, { ...deletion, userId: 42 },
         { ...deletion, nonce: challenge.nonce }, { ...deletion, state: challenge.state },

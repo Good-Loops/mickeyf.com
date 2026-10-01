@@ -14,7 +14,9 @@ import { signupAndLogin } from "./signupFlow.ts";
 import PublicAccountPreviewNotice from '@/components/PublicAccountPreviewNotice';
 import { LEGACY_PUBLIC_API_PREVIEW } from '@/config/apiConfig';
 
-const SignUp: React.FC = () => {
+import RegistrationGate from '@/components/RegistrationGate';
+
+export const SignupCredentials: React.FC<{ reset: () => void; scoreVisibility: 'private' | 'public' }> = ({ reset, scoreVisibility }) => {
     const [userName, setUserName] = useState("");
     const [email, setEmail] = useState("");
     const [userPassword, setUserPassword] = useState("");
@@ -57,6 +59,9 @@ const SignUp: React.FC = () => {
 
             if (result.status === "rejected") {
                 switch (result.error) {
+                case "REGISTRATION_REQUIRED":
+                    reset();
+                    return;
                 case "INVALID_EMAIL":
                     await showScopedAlert({ title: "Invalid email", icon: "warning" }, signal);
                     break;
@@ -101,7 +106,7 @@ const SignUp: React.FC = () => {
             }
         } catch (error) {
             if (signal.aborted) return;
-            console.error(error);
+            // Do not log a transport error that may include submitted credentials.
             await showScopedAlert({
                 title: "Network/server error",
                 text: "Could not reach the server.",
@@ -118,6 +123,8 @@ const SignUp: React.FC = () => {
             <h1 id="signup-title" className="u-visually-hidden">Sign up</h1>
             <div className="signup__form-wrapper">
                 <PublicAccountPreviewNotice />
+                <p>{scoreVisibility === 'private' ? 'Your scores will stay off public leaderboards.' : 'Your scores can appear on public leaderboards.'}</p>
+                <button type="button" disabled={busy} onClick={reset}>Back to country and age range</button>
                 <form className="signup__form" onSubmit={handleSubmit} aria-busy={busy}>
                     <label className="signup__field" htmlFor="signup-username">
                         <span className="signup__label">Username</span>
@@ -178,5 +185,8 @@ const SignUp: React.FC = () => {
         </section>
     );
 };
+
+const SignUp: React.FC = () => <RegistrationGate>{(reset, scoreVisibility) =>
+    <SignupCredentials reset={reset} scoreVisibility={scoreVisibility} />}</RegistrationGate>;
 
 export default SignUp;

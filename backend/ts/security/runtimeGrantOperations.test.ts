@@ -196,8 +196,8 @@ test('missing account deletion grants produce an additive repair plan, not compl
         assert.equal(plan.state, 'repair');
         assert.equal(plan.compliant, false);
         assert.deepEqual(plan.blockers, []);
-        assert.equal(plan.operations.ensureRequiredPrivileges.length, 9);
-        assert.equal(plan.operations.ensureRequiredPrivileges.filter((sql) => /, DELETE ON /u.test(sql)).length, 7);
+        assert.equal(plan.operations.ensureRequiredPrivileges.length, 11);
+        assert.equal(plan.operations.ensureRequiredPrivileges.filter((sql) => /, DELETE ON /u.test(sql)).length, 8);
         assert.equal(plan.operations.removeApprovedRole, null);
     }
 });
@@ -285,7 +285,7 @@ test('provider grants require both migrated tables and cannot permit identity re
         const repair = createRuntimeGrantPlan({ ...current, columnPrivileges: oldGrants }, SETTINGS, RUNTIME_ACCOUNT);
         assert.equal(repair.state, 'repair');
         assert.deepEqual(repair.blockers, []);
-        assert.equal(repair.operations.ensureRequiredPrivileges.length, 9);
+        assert.equal(repair.operations.ensureRequiredPrivileges.length, 11);
         const unmigrated = createRuntimeGrantPlan({ ...current,
             availableColumns: current.availableColumns.filter(withoutTable), columnPrivileges: oldGrants,
         }, SETTINGS, RUNTIME_ACCOUNT);
@@ -363,7 +363,7 @@ test('the exact broad role produces only additive grants and one reviewed remova
     assert.equal(plan.state, 'broad');
     assert.equal(plan.compliant, false);
     assert.deepEqual(plan.blockers, []);
-    assert.equal(plan.operations.ensureRequiredPrivileges.length, 9);
+    assert.equal(plan.operations.ensureRequiredPrivileges.length, 11);
     assert.deepEqual(plan.operations.clearDefaultRoles, [
         "SET DEFAULT ROLE NONE TO 'runtime_test'@'%'",
     ]);
@@ -599,7 +599,7 @@ test('verification fails without DELETE and an approved fake apply installs the 
         connection, SETTINGS, RUNTIME_ACCOUNT, approved.sha256, SERVER_UUID
     );
     assert.equal(applied.compliant, true);
-    assert.equal(connection.calls.filter((sql) => /^GRANT /u.test(sql)).length, 9);
+    assert.equal(connection.calls.filter((sql) => /^GRANT /u.test(sql)).length, 11);
     const verified = await verifyRuntimeGrants(connection, SETTINGS, RUNTIME_ACCOUNT);
     assert.equal(verified.compliant, true);
     assert.equal(connection.calls.some((sql) => /^REVOKE|^SET DEFAULT ROLE/u.test(sql)), false);

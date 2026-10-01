@@ -47,11 +47,11 @@ test('provider configuration requires exact opt-in and ignores unused identifier
     }
 });
 
-test('enabled configuration requires a supported client and rejects premature Apple web setup', () => {
+test('enabled configuration requires a supported client and rejects incomplete Apple web setup', () => {
     assert.throws(() => loadProviderAuthConfig({ PROVIDER_AUTH_ENABLED: 'true' }), /requires GOOGLE_WEB_CLIENT_ID or APPLE_IOS_BUNDLE_ID/);
     for (const extra of [{ APPLE_WEB_CLIENT_ID: 'com.example.web' },
         { APPLE_WEB_SERVICES_ID: 'com.example.web' }]) {
-        assert.throws(() => loadProviderAuthConfig({ ...enabledEnvironment, ...extra }), /unsupported/);
+        assert.throws(() => loadProviderAuthConfig({ ...enabledEnvironment, ...extra }), /Apple web/);
     }
     const googleOnly = loadProviderAuthConfig({ PROVIDER_AUTH_ENABLED: 'true', GOOGLE_WEB_CLIENT_ID: googleWebId });
     assert.deepEqual(Object.keys(googleOnly.clients), ['google-web']);

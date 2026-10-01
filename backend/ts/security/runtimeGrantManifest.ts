@@ -20,7 +20,8 @@ export type RuntimeColumnGrant = Readonly<{
 
 export type RuntimeTableGrant = Readonly<{
     table: 'users' | 'game_submission_receipts' | 'game_personal_bests' | 'schema_migrations' | 'account_sessions'
-        | 'account_provider_identities' | 'provider_auth_attempts' | 'apple_provider_tokens' | 'apple_auth_revocations';
+        | 'account_provider_identities' | 'provider_auth_attempts' | 'apple_provider_tokens' | 'apple_auth_revocations'
+        | 'registration_authorizations' | 'account_registration_profiles';
     grants: readonly RuntimeColumnGrant[];
     tablePrivileges: readonly 'DELETE'[];
 }>;
@@ -216,6 +217,21 @@ export const GOOGLE_RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Objec
                     'recorded_at',
                 ]),
             }),
+        ]),
+    }),
+    Object.freeze({
+        table: 'registration_authorizations' as const, tablePrivileges: Object.freeze(['DELETE' as const]),
+        grants: Object.freeze([
+            Object.freeze({ privilege: 'SELECT' as const, columns: Object.freeze(['binding_hash', 'policy_digest', 'country_code', 'age_band', 'expires_at', 'consumed_at']) }),
+            Object.freeze({ privilege: 'INSERT' as const, columns: Object.freeze(['binding_hash', 'policy_digest', 'country_code', 'age_band', 'expires_at']) }),
+            Object.freeze({ privilege: 'UPDATE' as const, columns: Object.freeze(['consumed_at']) }),
+        ]),
+    }),
+    Object.freeze({
+        table: 'account_registration_profiles' as const, tablePrivileges: Object.freeze([]),
+        grants: Object.freeze([
+            Object.freeze({ privilege: 'SELECT' as const, columns: Object.freeze(['account_uuid', 'score_visibility']) }),
+            Object.freeze({ privilege: 'INSERT' as const, columns: Object.freeze(['account_uuid', 'country_code', 'age_band', 'policy_version', 'score_visibility']) }),
         ]),
     }),
 ]);

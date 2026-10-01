@@ -86,8 +86,14 @@ for (const scenario of scenarios) {
                     React.createElement(AuthProvider, null, React.createElement(Component, props)))
             );
             for (const page of ['Login', 'SignUp']) {
-                const { default: Page } = await server.ssrLoadModule(`/ts/pages/${page}.tsx`);
-                const markup = render(Page);
+                const module = await server.ssrLoadModule(`/ts/pages/${page}.tsx`);
+                if (page === 'SignUp') {
+                    const entry = render(module.default);
+                    assert.match(entry, /Checking registration availability/);
+                    assert.doesNotMatch(entry, /type="password"|signup-email|Continue with Apple/);
+                }
+                const markup = render(page === 'SignUp' ? module.SignupCredentials : module.default,
+                    { reset() {}, scoreVisibility: 'private' });
                 assert.equal(markup.includes('name="remember_me"'), !scenario.legacy);
                 assert.equal(markup.includes('sessions expire after four hours and do not renew.'), scenario.legacy === true);
                 assert.equal(markup.includes('Accounts and scores are saved to the live service.'), scenario.preview);

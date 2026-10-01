@@ -103,7 +103,10 @@ export async function readThreeBossesLeaderboard(
                 FROM game_personal_bests
                 INNER JOIN users
                     ON users.user_id = game_personal_bests.user_id
-                WHERE game_personal_bests.game_id = ?
+                LEFT JOIN account_registration_profiles AS registration
+                    ON registration.account_uuid = users.account_uuid
+                WHERE (registration.account_uuid IS NULL OR registration.score_visibility = 'public')
+                  AND game_personal_bests.game_id = ?
                   AND game_personal_bests.rules_version = ?
                   AND game_personal_bests.completion_time_ms IS NOT NULL
                 ORDER BY

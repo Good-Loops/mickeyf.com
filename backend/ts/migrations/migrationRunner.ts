@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { verifyRegistrationSchema } from './registrationSchema';
 import {
     inspectAccountIdentityStage,
     accountIdentityBackfillComplete,
@@ -92,6 +93,7 @@ function requiresCompleteEarlierHistory(migration: MigrationDefinition): boolean
     return migration.effect === 'add-provider-identities' || migration.effect === 'add-provider-attempts'
         || migration.effect === 'add-account-sessions' || migration.effect === 'add-session-renewal'
         || migration.effect === 'add-apple-tokens' || migration.effect === 'add-apple-revocations'
+        || migration.effect === 'add-registration-authorization' || migration.effect === 'add-registration-profile'
         || migration.effect === 'add-apple-session-provenance' || isPasswordlessMigration(migration);
 }
 
@@ -371,6 +373,11 @@ async function verifyMigrationPrecondition(
     connection: MigrationConnection,
     migration: MigrationDefinition
 ): Promise<void> {
+    if (migration.effect === 'add-registration-authorization' || migration.effect === 'add-registration-profile') {
+        await verifyAccountIdentitySchema(connection);
+        if (await tableExists(connection, migration.tableName)) throw new Error('Registration migration requires its table to be absent');
+        return;
+    }
     if (migration.effect === 'add-apple-revocations') {
         await verifyAppleTokenSchema(connection);
         if (await tableExists(connection, migration.tableName)) throw new Error('Apple revocation migration requires its table to be absent');
@@ -468,6 +475,10 @@ async function verifyMigrationPostcondition(
     stage: LeaderboardSchemaStage = 'original',
     attemptStage: ProviderAttemptSchemaStage = 'legacy'
 ): Promise<void> {
+    if (migration.effect === 'add-registration-authorization' || migration.effect === 'add-registration-profile') {
+        await verifyRegistrationSchema(connection, migration.tableName);
+        return;
+    }
     if (migration.effect === 'add-apple-revocations') {
         await verifyAppleRevocationSchema(connection);
         return;

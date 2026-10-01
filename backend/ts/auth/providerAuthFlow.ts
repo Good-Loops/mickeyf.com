@@ -9,6 +9,7 @@ import type { IdentityProvider, VerifiedProviderIdentity } from './providerIdent
 import { type ProviderTokenVerifier, PROVIDER_TOKEN_MAX_LENGTH } from './providerTokenVerifier';
 import { AppleTokenClientError, type AppleTokenClient } from './appleTokenClient';
 import type { AppleSessionProof } from './appleSessionRevocation';
+import { RegistrationRequiredError, type RegistrationAuthorization } from '../accounts/registrationAuthorization';
 
 export type ProviderAuthClient = Readonly<{
     provider: IdentityProvider;
@@ -21,7 +22,7 @@ export type ProviderAuthClient = Readonly<{
 type Failure = { ok: false; reason: 'UNAVAILABLE' | 'INVALID_REQUEST' | 'INVALID_CONTEXT'
     | 'BUSY' | 'INVALID_ATTEMPT' | 'INVALID_PROVIDER_TOKEN' | 'NOT_LINKED' | 'INVALID_PASSWORD'
     | 'LINK_CONFLICT' | 'ACCOUNT_GONE' | 'DUPLICATE_USER' | 'ALREADY_LINKED' | 'INVALID_USERNAME' | 'INVALID_EMAIL'
-    | 'ACCOUNT_DELETION_UNAVAILABLE' | 'ACCOUNT_DELETION_PENDING' };
+    | 'ACCOUNT_DELETION_UNAVAILABLE' | 'ACCOUNT_DELETION_PENDING' | 'REGISTRATION_REQUIRED' };
 export type ProviderChallengeResult = Failure | { ok: true; state: string; nonce: string; expiresInSeconds: number };
 export type ProviderCompletionResult = Failure
     | { ok: true; type: 'account-verified'; account: ProviderAccount; authenticationMethod?: 'apple'; appleSessionProof?: AppleSessionProof }
@@ -37,7 +38,8 @@ export type ProviderAuthFlowDependencies = {
     accounts: {
         find(identity: VerifiedProviderIdentity): Promise<ProviderAccount | null>;
         link(target: AccountLinkTarget, password: string, identity: VerifiedProviderIdentity, session: SessionProof, appleRefreshToken?: string): Promise<ProviderLinkResult>;
-        create?(identity: VerifiedProviderIdentity, userName: string, appleRefreshToken?: string): Promise<ProviderAccountCreationResult>;
+        create?(identity: VerifiedProviderIdentity, userName: string, appleRefreshToken: string | undefined,
+            context: ProviderAuthContext): Promise<ProviderAccountCreationResult>;
         delete?(target: AccountLinkTarget, identity: VerifiedProviderIdentity, session: SessionProof, appleRefreshToken?: string): Promise<AccountDeletionResult>;
         saveAppleToken?(account: ProviderAccount, identity: VerifiedProviderIdentity, refreshToken: string): Promise<void>;
     };
@@ -45,6 +47,7 @@ export type ProviderAuthFlowDependencies = {
     enabled?: boolean;
     signupEnabled?: boolean;
     deletionEnabled?: boolean;
+    registration?: Pick<RegistrationAuthorization, 'assertAvailable'>;
 };
 
 function inputClient(input: unknown, clients: ReadonlyMap<string, ProviderAuthClient>) {
@@ -58,7 +61,7 @@ function inputClient(input: unknown, clients: ReadonlyMap<string, ProviderAuthCl
 
 function supportsPasswordlessAccounts(clientKey: string, client: ProviderAuthClient | undefined): boolean {
     return ['google-web', 'google-ios', 'google-android'].includes(clientKey) && client?.provider === 'google'
-        || clientKey === 'apple-ios' && client?.provider === 'apple';
+        || ['apple-ios', 'apple-web'].includes(clientKey) && client?.provider === 'apple';
 }
 
 function matchesContext(context: ProviderAuthContext | null, action: ProviderAttemptAction): context is ProviderAuthContext {
@@ -81,7 +84,7 @@ function verifiedAccountResult(account: ProviderAccount, identity: VerifiedProvi
  * `account-verified` is an internal decision, NOT a login session or browser proof.
  */
 export function createProviderAuthFlow({ attempts, accounts, clients, enabled = false,
-    signupEnabled = false, deletionEnabled = false }: ProviderAuthFlowDependencies) {
+    signupEnabled = false, deletionEnabled = false, registration }: ProviderAuthFlowDependencies) {
     // A Map excludes inherited names such as __proto__, and captures server configuration once.
     const configuredClients = new Map(Object.entries(clients).map(([key, client]) => {
         if (!/^[a-z0-9_-]{1,64}$/.test(key) || !['google', 'apple'].includes(client.provider)
@@ -94,6 +97,10 @@ export function createProviderAuthFlow({ attempts, accounts, clients, enabled = 
     function signupAvailable(clientKey: string, client: ProviderAuthClient): boolean {
         return signupEnabled && client.signupEnabled !== false && !!accounts.create && supportsPasswordlessAccounts(clientKey, client)
             && (client.provider !== 'apple' || client.signupEnabled === true);
+    }
+    async function authorizeRegistration(context: ProviderAuthContext): Promise<void> {
+        if (!registration) throw new RegistrationRequiredError();
+        await registration.assertAvailable(context);
     }
     function unavailableAction(action: ProviderAttemptAction, clientKey: string, client: ProviderAuthClient): Failure | null {
         if (client.provider === 'apple' && (!client.appleTokens || !accounts.saveAppleToken)) {
@@ -119,6 +126,7 @@ export function createProviderAuthFlow({ attempts, accounts, clients, enabled = 
             const state = randomBytes(32).toString('base64url');
             const nonce = randomBytes(32).toString('base64url');
             try {
+                if (selection.action === 'signup') await authorizeRegistration(context);
                 const created = await attempts.create({
                     stateHash: createHash('sha256').update(state).digest(), bindingHash: context.bindingHash,
                     nonce, clientKey: selection.clientKey, action: selection.action,
@@ -128,7 +136,7 @@ export function createProviderAuthFlow({ attempts, accounts, clients, enabled = 
                     : Math.min(300, Math.floor((context.bindingExpiresAt - Date.now()) / 1000));
                 return created === 'created' && expiresInSeconds > 0 ? { ok: true, state, nonce, expiresInSeconds }
                     : { ok: false, reason: 'BUSY' };
-            } catch { return { ok: false, reason: 'UNAVAILABLE' }; }
+            } catch (error) { return { ok: false, reason: error instanceof RegistrationRequiredError ? 'REGISTRATION_REQUIRED' : 'UNAVAILABLE' }; }
         },
         async complete(context: ProviderAuthContext | null, input: unknown): Promise<ProviderCompletionResult> {
             if (!enabled) return { ok: false, reason: 'UNAVAILABLE' };
@@ -157,6 +165,7 @@ export function createProviderAuthFlow({ attempts, accounts, clients, enabled = 
                 ? validateLoginRequest({ user_name: 'link', user_password: input.password }) : null;
             if (password && !password.valid) return { ok: false, reason: 'INVALID_REQUEST' };
             try {
+                if (selection.action === 'signup') await authorizeRegistration(context);
                 // Consumption must commit BEFORE any provider lookup or account work.
                 // Failure/cancellation requires a fresh challenge, never replay of this one.
                 const attempt = await attempts.consume(
@@ -196,6 +205,7 @@ export function createProviderAuthFlow({ attempts, accounts, clients, enabled = 
                     if (!signupAvailable(selection.clientKey, selection.client)) {
                         return { ok: false, reason: 'NOT_LINKED' };
                     }
+                    await authorizeRegistration(context);
                     if (verified.identity.email === undefined) return { ok: false, reason: 'INVALID_EMAIL' };
                     // This is an explicit server-authorized transition, not reuse of
                     // the consumed login state. The original cookie still expires
@@ -215,8 +225,7 @@ export function createProviderAuthFlow({ attempts, accounts, clients, enabled = 
                 if (selection.action === 'signup') {
                     if (verified.identity.email === undefined) return { ok: false, reason: 'INVALID_EMAIL' };
                     const token = await exchangeAppleToken();
-                    const result = await accounts.create!(verified.identity, (input.userName as string).trim(),
-                        ...(token === undefined ? [] : [token]));
+                    const result = await accounts.create!(verified.identity, (input.userName as string).trim(), token, context);
                     if (!result.created && (result.reason === 'ALREADY_LINKED' || result.reason === 'DUPLICATE_USER')) {
                         // Another tab may have finished registration meanwhile.
                         // Only this verified provider subject, never its email,
@@ -248,6 +257,7 @@ export function createProviderAuthFlow({ attempts, accounts, clients, enabled = 
                     case 'not-found': return { ok: false, reason: 'ACCOUNT_GONE' };
                 }
             } catch (error) {
+                if (error instanceof RegistrationRequiredError) return { ok: false, reason: 'REGISTRATION_REQUIRED' };
                 if (error instanceof AppleTokenClientError && error.code === 'INVALID_GRANT') {
                     return { ok: false, reason: 'INVALID_PROVIDER_TOKEN' };
                 }

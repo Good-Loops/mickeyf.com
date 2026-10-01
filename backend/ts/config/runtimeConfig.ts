@@ -1,3 +1,4 @@
+import { loadRegistrationPolicy, type RegistrationPolicy } from './registrationPolicy';
 import { DELETION_JOURNAL_BUCKET } from '../accounts/gcsDeletionJournal';
 import { loadProviderAuthConfig, type ProviderAuthConfig } from './providerAuthConfig';
 import { loadAppleMaintenanceConfig, type AppleMaintenanceConfig } from './appleMaintenanceConfig';
@@ -7,6 +8,7 @@ export type RuntimeEnvironment = 'development' | 'test' | 'production';
 type Environment = Readonly<Record<string, string | undefined>>;
 
 export type RuntimeConfig = {
+    registrationPolicy: RegistrationPolicy | undefined;
     nodeEnv: RuntimeEnvironment;
     isProduction: boolean;
     port: number;
@@ -113,6 +115,7 @@ export function loadRuntimeConfig(env: Environment = process.env): RuntimeConfig
     }
 
     return Object.freeze({
+        registrationPolicy: loadRegistrationPolicy(env),
         nodeEnv,
         isProduction: nodeEnv === 'production',
         port: parsePort(env.BACKEND_PORT, 'BACKEND_PORT', 8080),

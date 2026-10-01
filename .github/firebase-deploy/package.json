@@ -8,6 +8,7 @@
   },
   "packageManager": "npm@11.6.2",
   "scripts": {
+    "test:auth-browser": "node --test --test-concurrency=1 registration-browser.test.mjs apple-web-browser.test.mjs",
     "three-bosses:webgl:preview:smoke": "node smoke-three-bosses-webgl-preview.mjs",
     "test:three-bosses-webgl-smoke": "node --test smoke-three-bosses-webgl-preview.test.mjs"
   },

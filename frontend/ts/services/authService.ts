@@ -13,6 +13,9 @@ export const watchAppleCredentialChanges = appleSession.subscribe;
 export const {
     loginRequest,
     signupRequest,
+    registrationConfigRequest,
+    beginRegistration,
+    cancelRegistration,
     verifyRequest,
     logoutRequest,
     deleteAccountRequest,

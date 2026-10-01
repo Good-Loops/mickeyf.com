@@ -23,6 +23,7 @@ export function providerSignInErrorMessage(error: string, action: ProviderAction
     const providerName = provider === 'apple' ? 'Apple' : 'Google';
     switch (error) {
         case 'CANCELLED': return null;
+        case 'REGISTRATION_REQUIRED': return 'To create an account, open Sign up and complete the country and age-range step. Existing accounts can still log in.';
         case 'NOT_LINKED': return `New ${providerName} accounts are not available on this server yet. Existing password accounts can sign in normally; linking ${providerName} in Manage account is optional.`;
         case 'ALREADY_LINKED': return `This ${providerName} account already has a Ludolume account. Go to Log in and continue with ${providerName}.`;
         case 'DUPLICATE_USER': return `That username or email is already in use. Choose another username, or log in to your existing account to link ${providerName}.`;
@@ -122,9 +123,8 @@ export function InlineGoogleSignIn({ client, action = 'login', userName = '', re
         setFeedback(null);
         void (async () => {
             try {
-                // Login and Sign up are the same Google entry: first identify
-                // the account, then ask a username only for a new registration.
-                const prepared = await latest.current.prepareProviderLogin(client.clientKey, { signal: controller.signal });
+                // Signup preserves the registration preflight cookie; ordinary login retains its existing flow.
+                const prepared = await latest.current.prepareProviderLogin(client.clientKey, { signal: controller.signal }, action);
                 if (!active()) return;
                 if ('error' in prepared) { fail(prepared.error); return; }
                 const idToken = await acquireGoogleCredentialInline(client, prepared.challenge, element,
@@ -139,8 +139,13 @@ export function InlineGoogleSignIn({ client, action = 'login', userName = '', re
                 ownsOperation = true;
                 setPhase('completing');
                 latest.current.onBusyChange?.(true);
+                const signupName = action === 'signup'
+                    ? await requestProviderUsername(latest.current.userName, controller.signal, client.provider) : undefined;
+                if (!active()) return;
+                if (signupName === null) { fail('CANCELLED'); controller.abort(); return; }
                 let result = await latest.current.completeProviderLogin(prepared.handle, idToken,
-                    { rememberMe: latest.current.rememberMe, signal: controller.signal });
+                    { rememberMe: latest.current.rememberMe, signal: controller.signal,
+                        ...(signupName === undefined ? {} : { userName: signupName }) });
                 if (!active()) return;
                 if ('signupRequired' in result) {
                     const chosenName = await requestProviderUsername(latest.current.userName, controller.signal, client.provider);
@@ -269,15 +274,19 @@ export default function ProviderSignInControls({ action, userName = '', remember
                 password = undefined;
                 result = await pending;
             } else {
-                // Login and Sign up share one identity check. Only an unknown
-                // identity receives a bound, single-use username continuation.
-                const prepared = await prepareProviderLogin(client.clientKey, { signal: controller.signal });
+                // Explicit signup keeps its reviewed age/country grant; login remains available without preflight.
+                const prepared = await prepareProviderLogin(client.clientKey, { signal: controller.signal }, action);
                 if (!mounted.current || controller.signal.aborted) return;
                 if ('error' in prepared) result = prepared;
                 else {
                     const credential = await acquireProviderCredential(client, prepared.challenge, controller.signal);
                     if (!mounted.current || controller.signal.aborted) return;
-                    result = await completeProviderLogin(prepared.handle, credential, { rememberMe, signal: controller.signal });
+                    const signupName = action === 'signup'
+                        ? await requestProviderUsername(userName, controller.signal, client.provider) : undefined;
+                    if (!mounted.current || controller.signal.aborted) return;
+                    if (signupName === null) { controller.abort(); return; }
+                    result = await completeProviderLogin(prepared.handle, credential, { rememberMe, signal: controller.signal,
+                        ...(signupName === undefined ? {} : { userName: signupName }) });
                     if (!mounted.current || controller.signal.aborted) return;
                     if ('signupRequired' in result) {
                         const chosenName = await requestProviderUsername(userName, controller.signal, client.provider);
@@ -321,7 +330,7 @@ export default function ProviderSignInControls({ action, userName = '', remember
     };
 
     if (LEGACY_PUBLIC_API_PREVIEW || clients.length === 0) return null;
-    const inlineGoogle = action !== 'link' ? clients.find(client => client.clientKey === 'google-web') : undefined;
+    const inlineGoogle = action !== 'link' ? clients.find(client => client.clientKey === 'google-web' && (action !== 'signup' || client.signup === true)) : undefined;
     return (
         <div className="provider-sign-in">
             {inlineGoogle && <InlineGoogleSignIn client={inlineGoogle} action={action === 'signup' ? 'signup' : 'login'}

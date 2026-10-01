@@ -70,6 +70,34 @@ test('native code exchange uses a fixed form endpoint and returns only the two r
     assert.equal(form.has('redirect_uri'), false, 'native authorization supplied no redirect URI');
 });
 
+test('web exchange binds the configured return URL and Services ID while revocation omits the URL', async () => {
+    const clientId = 'com.example.synthetic.web';
+    const redirectUri = 'https://example.test/login';
+    const forms: URLSearchParams[] = [];
+    const client = createAppleTokenClient({ ...configuration, clientId, redirectUri }, {
+        now: () => nowSeconds * 1000,
+        fetchRequest: async (url, options) => {
+            const form = new URLSearchParams(options!.body as string);
+            forms.push(form);
+            assert.equal(form.get('client_id'), clientId);
+            assert.equal((jwt.verify(form.get('client_secret')!, key.publicKey, {
+                algorithms: ['ES256'], audience: 'https://appleid.apple.com', issuer: configuration.teamId,
+                clockTimestamp: nowSeconds,
+            }) as jwt.JwtPayload).sub, clientId);
+            return String(url).endsWith('/token') ? tokenResponse() : new Response('', { status: 200 });
+        },
+    });
+    await client.exchangeCode(authorizationCode);
+    await client.revoke(refreshToken);
+    assert.equal(forms[0].get('redirect_uri'), redirectUri);
+    assert.equal(forms[1].has('redirect_uri'), false);
+    for (const redirectUri of ['http://example.test/login', 'https://127.0.0.1/login', 'https://localhost/login',
+        'https://user@example.test/login', 'https://example.test/login#fragment', 'https://example.test/login?return=other',
+        'https://example.test:8443/login', 'https://example.test/login\n']) {
+        assert.throws(() => createAppleTokenClient({ ...configuration, redirectUri }), safeError('INVALID_CONFIGURATION'));
+    }
+});
+
 test('each request signs an ES256 client secret with exact audience, issuer, subject and five-minute expiry', async () => {
     const f = fixture();
     for (const offset of [0, 1_000]) {

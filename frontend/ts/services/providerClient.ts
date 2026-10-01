@@ -1,11 +1,13 @@
 import type { SweetAlertOptions } from 'sweetalert2';
 import type { ProviderAuthenticationChallenge, ProviderCredential } from './authApi.ts';
+import { createAppleWebCredential, type AppleWebIdentity } from './appleWebCredential.ts';
 
 export type PublicProviderClient = Readonly<
     | { clientKey: 'google-web'; provider: 'google'; platform: 'web'; clientId: string; signup?: true }
     | { clientKey: 'google-ios'; provider: 'google'; platform: 'ios'; clientId: string; signup?: true }
     | { clientKey: 'google-android'; provider: 'google'; platform: 'android'; clientId: string; signup?: true }
     | { clientKey: 'apple-ios'; provider: 'apple'; platform: 'ios'; clientId: string; signup?: true }
+    | { clientKey: 'apple-web'; provider: 'apple'; platform: 'web'; clientId: string; redirectUri: string; signup?: true }
 >;
 
 type NativeIdentity = {
@@ -27,6 +29,7 @@ type ProviderClientDependencies = {
     identity: NativeIdentity;
     document: Pick<Document, 'createElement' | 'head'>;
     google(): GoogleIdentity | undefined;
+    apple?(): AppleWebIdentity | undefined;
     alert: { fire(options: SweetAlertOptions): Promise<unknown>; getPopup(): HTMLElement | null;
         isVisible(): boolean; close(): void };
 };
@@ -49,7 +52,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 function readClient(value: unknown): PublicProviderClient | null {
-    if (!isRecord(value) || !['clientId,clientKey,platform,provider', 'clientId,clientKey,platform,provider,signup'].includes(Object.keys(value).sort().join(','))
+    if (!isRecord(value)) return null;
+    const keys = value.clientKey === 'apple-web'
+        ? ['clientId,clientKey,platform,provider,redirectUri', 'clientId,clientKey,platform,provider,redirectUri,signup']
+        : ['clientId,clientKey,platform,provider', 'clientId,clientKey,platform,provider,signup'];
+    if (!keys.includes(Object.keys(value).sort().join(','))
         || ('signup' in value && value.signup !== true)
         || typeof value.clientId !== 'string' || !/^[\x21-\x7e]{1,255}$/.test(value.clientId)) return null;
     if (value.provider === 'google' && ((value.clientKey === 'google-web' && value.platform === 'web')
@@ -61,6 +68,17 @@ function readClient(value: unknown): PublicProviderClient | null {
     if (value.clientKey === 'apple-ios' && value.provider === 'apple' && value.platform === 'ios') {
         return Object.freeze({ clientKey: value.clientKey, provider: value.provider, platform: value.platform, clientId: value.clientId,
             ...(value.signup === true ? { signup: true as const } : {}) });
+    }
+    if (value.clientKey === 'apple-web' && value.provider === 'apple' && value.platform === 'web'
+        && typeof value.redirectUri === 'string' && value.redirectUri.length <= 2048) {
+        try {
+            const url = new URL(value.redirectUri);
+            if (url.protocol !== 'https:' || !url.hostname.includes('.') || /^[\d.]+$/.test(url.hostname)
+                || url.hostname.endsWith('.localhost') || url.username || url.password || url.port || url.search || url.hash
+                || url.href !== value.redirectUri) return null;
+            return Object.freeze({ clientKey: value.clientKey, provider: value.provider, platform: value.platform,
+                clientId: value.clientId, redirectUri: value.redirectUri, ...(value.signup === true ? { signup: true as const } : {}) });
+        } catch { return null; }
     }
     return null;
 }
@@ -104,6 +122,7 @@ async function cancellable<Result>(operation: (signal: AbortSignal) => Promise<R
 /** Browser/bridge seams keep credential lifecycle tests independent of real providers. */
 export function createProviderClient(dependencies: ProviderClientDependencies) {
     const { apiBase, fetchRequest, identity, alert, document: dom } = dependencies;
+    const appleCredential = createAppleWebCredential({ document: dom, alert, apple: dependencies.apple ?? (() => undefined) });
     const web = !dependencies.isNative && dependencies.platform === 'web';
     const native = dependencies.isNative && ['ios', 'android'].includes(dependencies.platform);
     let googleLoad: Promise<GoogleIdentity> | undefined;
@@ -120,7 +139,7 @@ export function createProviderClient(dependencies: ProviderClientDependencies) {
                 if (!response.ok) return [];
                 const result: unknown = await response.json();
                 if (!isRecord(result) || Object.keys(result).join(',') !== 'clients'
-                    || !Array.isArray(result.clients) || result.clients.length > 4) return [];
+                    || !Array.isArray(result.clients) || result.clients.length > 5) return [];
                 const clients = result.clients.map(readClient);
                 if (clients.some(client => client === null)
                     || new Set(clients.map(client => client?.clientKey)).size !== clients.length) return [];
@@ -296,7 +315,8 @@ export function createProviderClient(dependencies: ProviderClientDependencies) {
             return await cancellable<ProviderCredential>(activeSignal => inline
                 ? renderGoogleCredential(selected, challenge, inline.host, activeSignal, inline.onReady)
                 : selected.platform === 'web'
-                ? googleCredential(selected, challenge, activeSignal) : nativeCredential(selected, challenge, activeSignal),
+                ? selected.clientKey === 'apple-web' ? appleCredential(selected, challenge, activeSignal)
+                    : googleCredential(selected, challenge, activeSignal) : nativeCredential(selected, challenge, activeSignal),
             challenge.expiresInSeconds * 1000, signal);
         } catch (error) { throw sanitizedError(error); }
         finally { acquiring = false; }
@@ -322,6 +342,10 @@ function configuredClient() {
             google: () => {
                 const sdk = (window as Window & { google?: { accounts?: { id?: GoogleIdentity } } }).google?.accounts?.id;
                 return sdk && typeof sdk.initialize === 'function' && typeof sdk.renderButton === 'function' ? sdk : undefined;
+            },
+            apple: () => {
+                const sdk = (window as Window & { AppleID?: AppleWebIdentity }).AppleID;
+                return sdk && typeof sdk.auth?.init === 'function' && typeof sdk.auth?.signIn === 'function' ? sdk : undefined;
             },
         });
     }).catch(error => { configured = undefined; throw error; });

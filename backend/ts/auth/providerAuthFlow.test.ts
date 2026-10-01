@@ -53,7 +53,7 @@ async function trustedContext(currentAccount?: ProviderAccount, bindingByte = 1)
     return context;
 }
 
-async function fixture(currentAccount?: ProviderAccount, newActions = false, appleActions = false) {
+async function fixture(currentAccount?: ProviderAccount, newActions = false, appleActions = false, appleClientKey = 'apple-ios') {
     const context = await trustedContext(currentAccount);
     const events: string[] = [];
     const pending = new Map<string, ProviderAttempt>();
@@ -111,6 +111,7 @@ async function fixture(currentAccount?: ProviderAccount, newActions = false, app
         'google-ios': { provider: 'google', verifier },
         'google-android': { provider: 'google', verifier },
         'apple-ios': { provider: 'apple', verifier, appleTokens, signupEnabled: appleActions, deletionEnabled: appleActions },
+        'apple-web': { provider: 'apple', verifier, appleTokens, signupEnabled: appleActions, deletionEnabled: appleActions },
     };
     Object.setPrototypeOf(clients, { inherited: clients['google-native'] });
     const dependencies: ProviderAuthFlowDependencies = {
@@ -165,7 +166,7 @@ async function fixture(currentAccount?: ProviderAccount, newActions = false, app
             },
         },
     };
-    const flow = createProviderAuthFlow({ ...dependencies, enabled: true, signupEnabled: newActions, deletionEnabled: newActions });
+    const flow = createProviderAuthFlow({ registration: { assertAvailable: async () => undefined }, ...dependencies, enabled: true, signupEnabled: newActions, deletionEnabled: newActions });
     async function challenge(action: ProviderAttemptAction = currentAccount ? 'link' : 'login') {
         const clientKey = action === 'signup' || action === 'delete' ? 'google-web' : 'google-native';
         const result = await flow.begin(context, { clientKey, action });
@@ -178,9 +179,9 @@ async function fixture(currentAccount?: ProviderAccount, newActions = false, app
         return { result, input };
     }
     async function appleChallenge(action: ProviderAttemptAction = currentAccount ? 'link' : 'login') {
-        const result = await flow.begin(context, { clientKey: 'apple-ios', action });
+        const result = await flow.begin(context, { clientKey: appleClientKey, action });
         assert.ok(result.ok);
-        const input = { clientKey: 'apple-ios', action, state: result.state, authorizationCode: appleCode,
+        const input = { clientKey: appleClientKey, action, state: result.state, authorizationCode: appleCode,
             idToken: signedToken(result.nonce, 'apple', action === 'signup'
                 ? { email: 'new-player@privaterelay.appleid.com', email_verified: true } : {}),
             ...(action === 'link' ? { password } : {}), ...(action === 'signup' ? { userName: ' new-player ' } : {}),
@@ -423,7 +424,7 @@ test('client configuration captures own keys and is unaffected by later entry re
     assert.deepEqual(await f.flow.begin(f.context, { clientKey: 'inherited', action: 'login' }), { ok: false, reason: 'INVALID_REQUEST' });
     const { input } = await f.challenge();
     assert.deepEqual(await f.flow.complete(f.context, input), { ok: true, type: 'account-verified', account });
-    assert.throws(() => createProviderAuthFlow({ ...f.dependencies, clients: { 'Bad.Client': replacement } }), /Invalid provider client configuration/);
+    assert.throws(() => createProviderAuthFlow({ registration: { assertAvailable: async () => undefined }, ...f.dependencies, clients: { 'Bad.Client': replacement } }), /Invalid provider client configuration/);
 });
 
 test('signup and deletion require their separate opt-ins and exact Google web client before attempt work', async () => {
@@ -464,7 +465,7 @@ test('explicit signup creates only after purpose-bound consumption and verified 
 test('an explicit Google signup denial survives another enabled provider and blocks old signup challenges', async () => {
     const f = await fixture(undefined, true, true);
     const { input } = await f.challenge('signup');
-    const flow = createProviderAuthFlow({ ...f.dependencies, enabled: true, signupEnabled: true,
+    const flow = createProviderAuthFlow({ registration: { assertAvailable: async () => undefined }, ...f.dependencies, enabled: true, signupEnabled: true,
         clients: { ...f.clients, 'google-web': { ...f.clients['google-web'], signupEnabled: false } } });
     f.events.length = 0;
     assert.deepEqual(await flow.begin(f.context, { clientKey: 'google-web', action: 'signup' }),
@@ -479,7 +480,7 @@ test('Google signup denial preserves returning login but cannot turn an unknown 
     for (const known of [false, true]) {
         const f = await fixture(undefined, true, true);
         f.controls.foundAccount = known ? account : null;
-        const flow = createProviderAuthFlow({ ...f.dependencies, enabled: true, signupEnabled: true,
+        const flow = createProviderAuthFlow({ registration: { assertAvailable: async () => undefined }, ...f.dependencies, enabled: true, signupEnabled: true,
             clients: { ...f.clients, 'google-web': { ...f.clients['google-web'], signupEnabled: false } } });
         const challenge = await flow.begin(f.context, { clientKey: 'google-web', action: 'login' });
         assert.ok(challenge.ok);
@@ -737,7 +738,7 @@ test('every Apple action stays unavailable without both token exchange and crede
             const clients = { ...f.clients, 'apple-ios': { ...f.clients['apple-ios'],
                 ...(missing === 'exchange' ? { appleTokens: undefined } : {}) } };
             const accounts = { ...f.dependencies.accounts, ...(missing === 'persistence' ? { saveAppleToken: undefined } : {}) };
-            const flow = createProviderAuthFlow({ ...f.dependencies, clients, accounts, enabled: true,
+            const flow = createProviderAuthFlow({ registration: { assertAvailable: async () => undefined }, ...f.dependencies, clients, accounts, enabled: true,
                 signupEnabled: true, deletionEnabled: true });
             assert.deepEqual(await flow.begin(f.context, { clientKey: 'apple-ios', action }), { ok: false, reason: 'UNAVAILABLE' });
             assert.deepEqual(await flow.complete(f.context, input), { ok: false, reason: 'UNAVAILABLE' });
@@ -907,5 +908,79 @@ test('native Google signup never merges an existing email or retries an occupied
         assert.deepEqual(await f.flow.complete(f.context, input), { ok: false, reason: 'DUPLICATE_USER' });
         assert.deepEqual(f.linkedTargets, []);
         assert.deepEqual(await f.flow.complete(f.context, input), { ok: false, reason: 'INVALID_ATTEMPT' });
+    }
+});
+
+
+test('missing registration service rejects explicit signup before any account or provider port', async () => {
+    const f = await fixture(undefined, true);
+    const { input } = await f.challenge('signup');
+    const flow = createProviderAuthFlow({ ...f.dependencies, enabled: true, signupEnabled: true });
+    assert.deepEqual(await flow.begin(f.context, { clientKey: 'google-web', action: 'signup' }),
+        { ok: false, reason: 'REGISTRATION_REQUIRED' });
+    assert.deepEqual(await flow.complete(f.context, input), { ok: false, reason: 'REGISTRATION_REQUIRED' });
+    assert.deepEqual(f.events, []);
+});
+
+test('closed registration preserves existing provider login but refuses unknown-identity signup continuation', async () => {
+    for (const existing of [true, false]) {
+        const f = await fixture(undefined, true);
+        f.controls.foundAccount = existing ? account : null;
+        const flow = createProviderAuthFlow({ ...f.dependencies, enabled: true, signupEnabled: true });
+        const beginning = await flow.begin(f.context, { clientKey: 'google-web', action: 'login' });
+        assert.ok(beginning.ok);
+        const result = await flow.complete(f.context, { clientKey: 'google-web', action: 'login', state: beginning.state,
+            idToken: signedToken(beginning.nonce, 'google', { email: 'synthetic@gmail.com', email_verified: true }) });
+        assert.deepEqual(result, existing ? { ok: true, type: 'account-verified', account }
+            : { ok: false, reason: 'REGISTRATION_REQUIRED' });
+        assert.deepEqual(f.createdAccounts, []);
+        assert.equal(f.created.length, 1, 'no signup continuation was created');
+    }
+});
+
+for (const action of ['login', 'signup', 'link', 'delete'] as const) {
+    test(`browser Apple ${action} consumes state once and binds both ID tokens to the server nonce`, async () => {
+        const f = await fixture(action === 'link' || action === 'delete' ? account : undefined, true, true, 'apple-web');
+        const { result, input } = await f.appleChallenge(action);
+        const completed = await f.flow.complete(f.context, input);
+        assert.equal(completed.ok, true);
+        assert.deepEqual(f.verifiedNonces, [result.nonce, result.nonce]);
+        assert.deepEqual(f.exchangedCodes, [appleCode]);
+        assert.deepEqual(await f.flow.complete(f.context, input), { ok: false, reason: 'INVALID_ATTEMPT' });
+        assert.equal(f.exchangedCodes.length, 1);
+    });
+}
+
+test('browser Apple rejects cross-client state, request-selected redirect and wrong signed nonce/audience before storage', async () => {
+    for (const failure of ['client', 'redirect', 'nonce', 'audience', 'exchange-subject', 'exchange-nonce', 'exchange-audience']) {
+        const f = await fixture(undefined, true, true, 'apple-web');
+        const { result, input } = await f.appleChallenge('login');
+        if (failure.startsWith('exchange-')) f.controls.exchangeResponse = async () => ({
+            idToken: signedToken(failure === 'exchange-nonce' ? 'wrong-nonce' : result.nonce, 'apple',
+                failure === 'exchange-subject' ? { sub: 'other-subject' } : failure === 'exchange-audience' ? { aud: 'native-other-client' } : {}),
+            refreshToken: appleRefreshToken,
+        });
+        const changed = failure === 'client' ? { ...input, clientKey: 'apple-ios' }
+            : failure === 'redirect' ? { ...input, redirectUri: 'https://attacker.test/login' }
+            : failure === 'nonce' ? { ...input, idToken: signedToken('wrong-nonce', 'apple') }
+            : failure === 'audience' ? { ...input, idToken: signedToken(result.nonce, 'apple', { aud: 'native-other-client' }) } : input;
+        assert.deepEqual(await f.flow.complete(f.context, changed), { ok: false,
+            reason: failure === 'client' ? 'INVALID_ATTEMPT' : failure === 'redirect' ? 'INVALID_REQUEST' : 'INVALID_PROVIDER_TOKEN' });
+        assert.deepEqual(f.savedAppleTokens, []);
+        assert.deepEqual(f.createdAccounts, []);
+    }
+});
+
+test('browser Apple account collisions never link by email and only an existing verified subject can resolve the race', async () => {
+    for (const foundAccount of [null, account]) {
+        const f = await fixture(undefined, true, true, 'apple-web');
+        f.controls.creation = { created: false, reason: 'DUPLICATE_USER' };
+        f.controls.foundAccount = foundAccount;
+        const { input } = await f.appleChallenge('signup');
+        const result = await f.flow.complete(f.context, input);
+        assert.deepEqual(result, foundAccount ? { ok: true, type: 'account-verified', account, ...appleSession }
+            : { ok: false, reason: 'DUPLICATE_USER' });
+        assert.deepEqual(f.linkedTargets, []);
+        assert.equal(f.savedAppleTokens.length, foundAccount ? 1 : 0);
     }
 });

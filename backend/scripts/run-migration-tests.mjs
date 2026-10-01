@@ -75,6 +75,9 @@ export const APPLE_REVOCATION_INTEGRATION_TEST_COMMAND = Object.freeze({
   ]),
 });
 
+export const REGISTRATION_INTEGRATION_TEST_COMMAND = Object.freeze({ executable: process.execPath,
+  args: Object.freeze(["--test", "-r", "ts-node/register", "ts/accounts/registrationAuthorization.integration.test.ts"]) });
+
 const INTEGRATION_TEST_COMMANDS = Object.freeze([
   MIGRATION_INTEGRATION_TEST_COMMAND,
   P4_VEGA_REPOSITORY_INTEGRATION_TEST_COMMAND,
@@ -111,6 +114,7 @@ const INTEGRATION_TEST_COMMANDS = Object.freeze([
     ]),
   }),
   APPLE_REVOCATION_INTEGRATION_TEST_COMMAND,
+  REGISTRATION_INTEGRATION_TEST_COMMAND,
 ]);
 
 const MYSQL_SERVICE = "mysql";
@@ -308,10 +312,11 @@ const cleanup = () => {
 };
 
 export const selectMigrationTestCommands = ({ providerIdentitiesOnly = false,
-  runtimeGrantsOnly = false, appleRevocationOnly = false } = {}) => {
-  if ([providerIdentitiesOnly, runtimeGrantsOnly, appleRevocationOnly].filter(Boolean).length > 1) {
+  runtimeGrantsOnly = false, appleRevocationOnly = false, registrationOnly = false } = {}) => {
+  if ([providerIdentitiesOnly, runtimeGrantsOnly, appleRevocationOnly, registrationOnly].filter(Boolean).length > 1) {
     throw new Error("Select only one focused migration-test group.");
   }
+  if (registrationOnly) return [REGISTRATION_INTEGRATION_TEST_COMMAND];
   if (appleRevocationOnly) return [APPLE_REVOCATION_INTEGRATION_TEST_COMMAND];
   if (runtimeGrantsOnly) return [RUNTIME_GRANT_INTEGRATION_TEST_COMMAND, RUNTIME_GRANT_OPERATIONS_INTEGRATION_TEST_COMMAND];
   if (providerIdentitiesOnly) return INTEGRATION_TEST_COMMANDS.filter(command => command.args.some(argument =>
@@ -372,8 +377,8 @@ const isMainModule = process.argv[1]
 
 if (isMainModule) {
   const arguments_ = process.argv.slice(2);
-  if (arguments_.length > 1 || arguments_.some(argument => !["--provider-identities", "--runtime-grants", "--apple-revocation"].includes(argument))) {
-    throw new Error("Usage: run-migration-tests.mjs [--provider-identities|--runtime-grants|--apple-revocation]");
+  if (arguments_.length > 1 || arguments_.some(argument => !["--provider-identities", "--runtime-grants", "--apple-revocation", "--registration"].includes(argument))) {
+    throw new Error("Usage: run-migration-tests.mjs [--provider-identities|--runtime-grants|--apple-revocation|--registration]");
   }
   let shuttingDown = false;
   const handleSignal = async (exitCode) => {
@@ -397,7 +402,8 @@ if (isMainModule) {
 
   runMigrationTests({ providerIdentitiesOnly: arguments_.includes("--provider-identities"),
     runtimeGrantsOnly: arguments_.includes("--runtime-grants"),
-    appleRevocationOnly: arguments_.includes("--apple-revocation") })
+    appleRevocationOnly: arguments_.includes("--apple-revocation"),
+    registrationOnly: arguments_.includes("--registration") })
     .catch((error) => {
       console.error(error.message);
       process.exitCode = 1;

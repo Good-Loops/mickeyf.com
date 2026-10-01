@@ -2,6 +2,10 @@ import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { after, before, beforeEach, test } from 'node:test';
 import bcrypt from 'bcryptjs';
+import { createRegistrationAuthorization, cleanupRegistrationAuthorizations } from '../accounts/registrationAuthorization';
+import { createRegisteredPasswordAccount } from '../accounts/registeredPasswordAccount';
+import { loadRegistrationPolicy } from '../config/registrationPolicy';
+import type { ProviderAuthContext } from '../auth/providerAuthContext';
 import mysql, {
     Connection,
     Pool,
@@ -118,6 +122,7 @@ async function createSchema(): Promise<void> {
     try {
         await administrator.query(`
             DROP TABLE IF EXISTS
+                account_registration_profiles, registration_authorizations,
                 apple_auth_revocations,
                 apple_provider_tokens,
                 account_sessions,
@@ -160,13 +165,15 @@ async function createSchema(): Promise<void> {
     });
     await applyMigrations(asMigrationConnection(administrator), migrations, config, {
         allowedEffectKinds: ['add-unique-user-names', 'allow-passwordless-accounts', 'extend-provider-attempt-actions', 'add-apple-tokens',
-            'add-apple-revocations', 'add-apple-session-provenance'],
+            'add-apple-revocations', 'add-apple-session-provenance', 'add-registration-authorization', 'add-registration-profile'],
     });
 }
 
 async function resetData(): Promise<void> {
     await administrator.query('SET FOREIGN_KEY_CHECKS = 0');
     try {
+        await administrator.query('TRUNCATE TABLE account_registration_profiles');
+        await administrator.query('TRUNCATE TABLE registration_authorizations');
         await administrator.query('TRUNCATE TABLE apple_auth_revocations');
         await administrator.query('TRUNCATE TABLE apple_provider_tokens');
         await administrator.query('TRUNCATE TABLE account_sessions');
@@ -273,7 +280,10 @@ after(async () => {
         await root.query(`DROP USER IF EXISTS ${TEST_CLEANUP_GRANTEE}`);
         await root.end();
     }
-    if (administrator) await administrator.end();
+    if (administrator) {
+        try { await administrator.query('DROP TABLE IF EXISTS account_registration_profiles, registration_authorizations'); }
+        finally { await administrator.end(); }
+    }
 });
 
 test('runtime Apple watermark and provenance grants enforce exact schema, bounded purge and immutable attribution', async () => {
@@ -668,4 +678,40 @@ test('cleanup identity deletes receipts without reading gameplay or changing per
     })));
     const [roles] = await cleanupPool.query<RowDataPacket[]>('SELECT CURRENT_ROLE() AS currentRole');
     assert.equal(roles[0].currentRole, 'NONE');
+});
+
+
+test('least-privilege runtime creates a private minor account, consumes once, cancels and removes expired grants', async () => {
+    const policy = loadRegistrationPolicy({ REGISTRATION_ENABLED: 'true', REGISTRATION_POLICY_REVIEWED: 'true',
+        REGISTRATION_POLICY_VERSION: 'synthetic-grants', REGISTRATION_COUNTRY_RULES: '{"ZZ":{"parentRequiredBelow":15}}' })!;
+    const registration = createRegistrationAuthorization(runtimePool, policy);
+    const context = () => ({ bindingHash: randomBytes(32), account: null, session: null,
+        bindingExpiresAt: Date.now() + 300_000, anonymousCookie: null }) as ProviderAuthContext;
+    const input = { country: 'ZZ', ageBand: 'minor', policyVersion: policy.version };
+    const binding = context();
+    await registration.begin(binding, input);
+    await registration.assertAvailable(binding);
+    assert.equal(await createRegisteredPasswordAccount(runtimePool,
+        { userName: 'registered-minor', email: 'registered-minor@example.test', passwordHash: 'synthetic-only' },
+        (connection, id) => registration.consume(connection, binding, id)), 'created');
+    await assert.rejects(registration.assertAvailable(binding));
+    const [profiles] = await runtimePool.query<RowDataPacket[]>('SELECT account_uuid, score_visibility FROM account_registration_profiles');
+    assert.equal(profiles.length, 1);
+    assert.equal(profiles[0].score_visibility, 'private');
+    const abandoned = context();
+    await registration.begin(abandoned, input);
+    await registration.cancel(abandoned);
+    await registration.cancel(abandoned);
+    await assert.rejects(registration.assertAvailable(abandoned));
+    const expired = context();
+    await registration.begin(expired, input);
+    await administrator.query('UPDATE registration_authorizations SET expires_at=UTC_TIMESTAMP(6) WHERE binding_hash=?', [expired.bindingHash]);
+    assert.deepEqual(await cleanupRegistrationAuthorizations(runtimePool), { deleted: 1, backlog: false });
+    for (const sql of [
+        'SELECT country_code FROM account_registration_profiles',
+        'SELECT age_band FROM account_registration_profiles',
+        "UPDATE account_registration_profiles SET score_visibility='public' WHERE 1=0",
+        "UPDATE registration_authorizations SET expires_at=UTC_TIMESTAMP(6) WHERE 1=0",
+        'DELETE FROM account_registration_profiles WHERE 1=0',
+    ]) await assertPrivilegeDenied(() => runtimePool.query(sql));
 });

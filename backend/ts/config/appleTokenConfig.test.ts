@@ -27,6 +27,20 @@ test('dedicated signing and rotation keyring construct a usable encrypted vault 
     assert.equal(Object.isFrozen(lifecycle), true);
 });
 
+test('web tokens keep their Services ID through encryption and cannot be opened by the native vault', () => {
+    const lifecycle = loadAppleTokenConfig({ ...environment, APPLE_WEB_AUTH_ENABLED: 'false',
+        APPLE_WEB_SERVICES_ID: 'com.example.web', APPLE_WEB_REDIRECT_URI: 'https://example.test/login' })!;
+    const account = '12345678-1234-4234-8234-123456789abc';
+    const native = lifecycle.repository.prepare('synthetic-native-refresh', account);
+    const web = lifecycle.web!.repository.prepare('synthetic-web-refresh', account);
+    assert.equal(web.client_id, 'com.example.web');
+    assert.equal(lifecycle.web!.repository.decrypt(web), 'synthetic-web-refresh');
+    assert.throws(() => lifecycle.repository.decrypt(web));
+    assert.throws(() => lifecycle.web!.repository.decrypt(native));
+    assert.throws(() => lifecycle.web!.repository.decrypt({ ...web, client_id: native.client_id }));
+    assert.equal(lifecycle.web!.redirectUri, 'https://example.test/login');
+});
+
 test('missing or malformed secret material fails closed without leaking input or causes', () => {
     const invalid = [
         { APPLE_TOKEN_ENCRYPTION_KEYS: 'secret-invalid-json' },

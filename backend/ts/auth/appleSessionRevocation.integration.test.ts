@@ -51,7 +51,8 @@ before(async () => {
     // Only the harness-pinned disposable database reaches these fixture resets.
     await administrator.query('SET FOREIGN_KEY_CHECKS = 0');
     try {
-        await administrator.query(`DROP TABLE IF EXISTS apple_auth_revocations, apple_provider_tokens,
+        await administrator.query(`DROP TABLE IF EXISTS account_registration_profiles, registration_authorizations,
+            apple_auth_revocations, apple_provider_tokens,
             account_sessions, provider_auth_attempts, account_provider_identities,
             game_personal_bests, game_runs, game_submission_receipts, schema_migrations, users`);
     } finally { await administrator.query('SET FOREIGN_KEY_CHECKS = 1'); }
@@ -67,7 +68,8 @@ before(async () => {
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['detach-best-source', 'retain-receipts'] });
     for (const effect of ['add-account-identity', 'add-provider-identities', 'add-provider-attempts',
         'add-account-sessions', 'add-session-renewal', 'add-unique-user-names', 'allow-passwordless-accounts',
-        'extend-provider-attempt-actions', 'add-apple-tokens', 'add-apple-revocations', 'add-apple-session-provenance'] as const) {
+        'extend-provider-attempt-actions', 'add-apple-tokens', 'add-apple-revocations', 'add-apple-session-provenance',
+        'add-registration-authorization', 'add-registration-profile'] as const) {
         await applyMigrations(connection, migrations, config, { allowedEffectKinds: [effect] });
     }
     assert.deepEqual((await planMigrations(connection, migrations, config)).pending, []);

@@ -1,3 +1,4 @@
+import { createRegistrationApi, type RegistrationInput } from './registrationApi.ts';
 /** Auth HTTP transport, independent of React and environment configuration. */
 import type { AppleSessionState } from './nativeAppleSession.ts';
 type AccountCredentials = {
@@ -58,7 +59,7 @@ const PROVIDER_FAILURE_STATUSES: Readonly<Record<string, number>> = {
     INVALID_ATTEMPT: 400, INVALID_PROVIDER_TOKEN: 401, NOT_LINKED: 403,
     INVALID_PASSWORD: 403, LINK_CONFLICT: 409, ACCOUNT_GONE: 401, RATE_LIMITED: 429,
     ALREADY_LINKED: 409, DUPLICATE_USER: 409, INVALID_USERNAME: 400, INVALID_EMAIL: 400,
-    ACCOUNT_DELETION_UNAVAILABLE: 503, ACCOUNT_DELETION_PENDING: 503,
+    ACCOUNT_DELETION_UNAVAILABLE: 503, ACCOUNT_DELETION_PENDING: 503, REGISTRATION_REQUIRED: 403,
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -97,7 +98,7 @@ function validProviderInput(input: unknown): input is ProviderAuthenticationInpu
 }
 
 function supportsProviderSignup(clientKey: string): boolean {
-    return ['google-web', 'google-ios', 'google-android', 'apple-ios'].includes(clientKey);
+    return ['google-web', 'google-ios', 'google-android', 'apple-ios', 'apple-web'].includes(clientKey);
 }
 
 function validProviderUserName(value: unknown): value is string {
@@ -125,7 +126,7 @@ function validProviderToken(idToken: unknown): idToken is string {
 }
 
 function readProviderCredential(clientKey: string, value: unknown): { idToken: string; authorizationCode?: string } | null {
-    if (clientKey !== 'apple-ios') return validProviderToken(value) ? { idToken: value } : null;
+    if (!['apple-ios', 'apple-web'].includes(clientKey)) return validProviderToken(value) ? { idToken: value } : null;
     if (!isRecord(value) || !hasKeys(value, 'authorizationCode,idToken') || !validProviderToken(value.idToken)
         || typeof value.authorizationCode !== 'string' || value.authorizationCode.length < 1
         || value.authorizationCode.length > 4096 || /[^\x21-\x7e]/.test(value.authorizationCode)) return null;
@@ -417,7 +418,7 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
         // if UI cancellation arrives. Cancelling cannot undo a server-side login.
         const completion = await postProviderOperation('complete', {
             action: input.action, clientKey: input.clientKey, state, idToken: credential.idToken,
-            ...(input.clientKey === 'apple-ios' ? { authorizationCode: credential.authorizationCode } : {}),
+            ...(['apple-ios', 'apple-web'].includes(input.clientKey) ? { authorizationCode: credential.authorizationCode } : {}),
             ...(input.action === 'login' || input.action === 'signup' ? { rememberMe: input.rememberMe === true }
                 : input.action === 'link' ? { password: input.password } : { confirmation: 'DELETE' }),
             ...(input.action === 'signup' ? { userName: input.userName } : {}),
@@ -524,7 +525,18 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
         });
     }
 
+    const registration = createRegistrationApi(apiBase, fetchRequest);
     return {
+        registrationConfigRequest: registration.config,
+        beginRegistration: (input: RegistrationInput) => {
+            invalidatePreparedLogins();
+            const request = { ...input };
+            return enqueueMutation(() => registration.begin(request));
+        },
+        cancelRegistration: () => {
+            invalidatePreparedLogins();
+            return enqueueMutation(registration.cancel);
+        },
         loginRequest: (payload: LoginPayload) => {
             invalidatePreparedLogins();
             const request = { ...payload };

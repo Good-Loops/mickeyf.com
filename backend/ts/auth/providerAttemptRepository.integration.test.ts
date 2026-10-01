@@ -28,6 +28,9 @@ import { createProviderAuthFlow } from './providerAuthFlow';
 import { createProviderTokenVerifier } from './providerTokenVerifier';
 import type { VerifiedProviderIdentity } from './providerIdentity';
 import { createProviderAuthRouter } from '../routers/providerAuthRouter';
+import { createRegistrationRouter } from '../routers/registrationRouter';
+import { createRegistrationAuthorization } from '../accounts/registrationAuthorization';
+import { loadRegistrationPolicy } from '../config/registrationPolicy';
 
 const config = loadMigrationConfig();
 const testPort = Number(process.env.MIGRATION_TEST_PORT);
@@ -76,7 +79,8 @@ before(async () => {
     assert.doesNotMatch(identity[0].versionComment, /Google/iu);
     await administrator.query('SET FOREIGN_KEY_CHECKS = 0');
     try {
-        await administrator.query(`DROP TABLE IF EXISTS apple_auth_revocations, apple_provider_tokens, account_sessions, provider_auth_attempts, account_provider_identities,
+        await administrator.query(`DROP TABLE IF EXISTS account_registration_profiles, registration_authorizations,
+            apple_auth_revocations, apple_provider_tokens, account_sessions, provider_auth_attempts, account_provider_identities,
             game_personal_bests, game_runs, game_submission_receipts, schema_migrations, users`);
     } finally { await administrator.query('SET FOREIGN_KEY_CHECKS = 1'); }
     await administrator.query(`CREATE TABLE users (
@@ -98,6 +102,8 @@ before(async () => {
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['allow-passwordless-accounts'] });
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['extend-provider-attempt-actions'] });
     await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-apple-tokens'] });
+    await applyMigrations(connection, migrations, config, { allowedEffectKinds: ['add-apple-revocations', 'add-apple-session-provenance',
+        'add-registration-authorization', 'add-registration-profile'] });
     database = mysql.createPool({
         host: config.host, port: config.port, database: config.database, user: config.user, password: config.password,
         connectTimeout: 10000, multipleStatements: false, connectionLimit: 2, dateStrings: true, timezone: 'Z',
@@ -181,20 +187,23 @@ test('stores hashed bindings with database-clock expiry and preserves every acco
     assert.deepEqual(await snapshotAccountData(), original);
 });
 
-test('real HTTP and SQL create a passwordless Google account, establish its session, then require fresh Google proof for deletion', async () => {
+for (const provider of ['google', 'apple'] as const) {
+test(`real HTTP and SQL register ${provider} after preflight and require fresh proof for deletion`, async () => {
+    const clientKey = provider === 'apple' ? 'apple-web' : 'google-web';
     const original = await snapshotAccountData();
     const sessionSecret = randomBytes(32).toString('base64url');
     const origin = 'https://synthetic-provider-http.example.test';
-    const audience = 'synthetic-google-http-client';
+    const audience = provider === 'apple' ? 'com.example.web' : 'synthetic-google-http-client';
+    const webVault = createAppleTokenRepository({ clientId: 'com.example.web', activeKeyId: 'test', encryptionKeys: { test: randomBytes(32) } });
     const subject = 'SyntheticGoogleSignupAndDeletionSubject';
-    const userName = 'provider-http-passwordless-fixture';
+    const userName = `provider-http-${provider}-fixture`;
     const key = generateKeyPairSync('rsa', { modulusLength: 2048 });
-    const nowSeconds = 1_800_000_000;
+    const nowSeconds = Math.floor(Date.now() / 1000);
     const journaled: string[] = [];
-    const verifier = createProviderTokenVerifier({ googleAudience: audience }, {
+    const verifier = createProviderTokenVerifier(provider === 'apple' ? { appleAudience: audience } : { googleAudience: audience }, {
         now: () => nowSeconds * 1000,
         fetch: async input => {
-            assert.equal(String(input), 'https://www.googleapis.com/oauth2/v3/certs');
+            assert.equal(String(input), provider === 'apple' ? 'https://appleid.apple.com/auth/keys' : 'https://www.googleapis.com/oauth2/v3/certs');
             return Response.json({ keys: [{ ...key.publicKey.export({ format: 'jwk' }),
                 kid: 'synthetic-http-key', alg: 'RS256', use: 'sig' }] });
         },
@@ -202,12 +211,19 @@ test('real HTTP and SQL create a passwordless Google account, establish its sess
     const signProof = (nonce: string, selectedSubject = subject) => jwt.sign({
         sub: selectedSubject, nonce, iat: nowSeconds - 10, exp: nowSeconds + 300,
         email: 'synthetic-provider-http@gmail.com', email_verified: true,
-    }, key.privateKey, { algorithm: 'RS256', keyid: 'synthetic-http-key', audience, issuer: 'https://accounts.google.com' });
+    }, key.privateKey, { algorithm: 'RS256', keyid: 'synthetic-http-key', audience, issuer: provider === 'apple' ? 'https://appleid.apple.com' : 'https://accounts.google.com' });
     const app = express();
     app.use(cookieParser(sessionSecret));
+    const registration = createRegistrationAuthorization(database, loadRegistrationPolicy({ REGISTRATION_ENABLED: 'true',
+        REGISTRATION_POLICY_REVIEWED: 'true', REGISTRATION_POLICY_VERSION: 'synthetic-http',
+        REGISTRATION_COUNTRY_RULES: '{"ZZ":{"parentRequiredBelow":15}}' }));
+    app.use('/auth/registration', createRegistrationRouter(registration,
+        createProviderAuthContextReader({ database, sessionSecret, allowedOrigins: [origin] }), false));
     app.use('/auth/providers', createProviderAuthRouter({ database, sessionSecret, isProduction: false,
-        allowedOrigins: [origin], clients: { 'google-web': { provider: 'google', verifier } },
-        enabled: true, signupEnabled: true, accountDeletionEnabled: true,
+        allowedOrigins: [origin], clients: { [clientKey]: { provider, verifier, signupEnabled: true, deletionEnabled: true,
+            ...(provider === 'apple' ? { appleTokens: localAppleTokens } : {}) } },
+        appleTokenRepositories: { 'com.example.web': webVault, 'com.example.disposable': tokenVault },
+        enabled: true, signupEnabled: true, accountDeletionEnabled: true, registration,
         deletionJournal: { async recordAccountDeletion(accountId) { journaled.push(accountId); } },
     }));
     const server = app.listen(0, '127.0.0.1');
@@ -218,12 +234,20 @@ test('real HTTP and SQL create a passwordless Google account, establish its sess
         body: JSON.stringify(body),
     });
     try {
-        const begin = await post('begin', { action: 'signup', clientKey: 'google-web' });
+        assert.equal((await post('begin', { action: 'signup', clientKey })).status, 403);
+        const preflight = await fetch(base.replace('/providers', '/registration/begin'), {
+            method: 'POST', headers: { origin, 'content-type': 'application/json' },
+            body: JSON.stringify({ country: 'ZZ', ageBand: 'minor', policyVersion: 'synthetic-http' }),
+        });
+        assert.equal(preflight.status, 200);
+        assert.equal((await preflight.json() as { scoreVisibility: string }).scoreVisibility, 'private');
+        const bindingCookie = preflight.headers.getSetCookie()[0].split(';')[0];
+        const begin = await post('begin', { action: 'signup', clientKey }, bindingCookie);
         assert.equal(begin.status, 200);
         const challenge = await begin.json() as { state: string; nonce: string };
-        const bindingCookie = begin.headers.getSetCookie()[0].split(';')[0];
-        const signup = await post('complete', { action: 'signup', clientKey: 'google-web', userName,
-            state: challenge.state, idToken: signProof(challenge.nonce), rememberMe: true }, bindingCookie);
+        const signup = await post('complete', { action: 'signup', clientKey, userName,
+            state: challenge.state, idToken: signProof(challenge.nonce),
+            ...(provider === 'apple' ? { authorizationCode: signProof(challenge.nonce) } : {}), rememberMe: true }, bindingCookie);
         assert.equal(signup.status, 200);
         assert.deepEqual(await signup.json(), { success: true, user_name: userName });
         // The session writer clears old cookies first; the last same-name cookie
@@ -231,18 +255,30 @@ test('real HTTP and SQL create a passwordless Google account, establish its sess
         const sessionCookie = signup.headers.getSetCookie().filter(value => value.startsWith('__session=')).at(-1)!.split(';')[0];
         const methods = await fetch(`${base}/account`, { headers: { cookie: sessionCookie } });
         assert.equal(methods.status, 200);
-        assert.deepEqual(await methods.json(), { hasPassword: false, googleLinked: true, googleDeletionEnabled: true,
-            appleLinked: false, appleDeletionEnabled: false });
+        assert.deepEqual(await methods.json(), { hasPassword: false,
+            googleLinked: provider === 'google', googleDeletionEnabled: provider === 'google',
+            appleLinked: provider === 'apple', appleDeletionEnabled: provider === 'apple' });
         const [users] = await administrator.query<RowDataPacket[]>('SELECT account_uuid, user_password FROM users WHERE user_name = ?', [userName]);
         assert.equal(users.length, 1);
         assert.equal(users[0].user_password, null);
+        const [profiles] = await administrator.query<RowDataPacket[]>('SELECT age_band, score_visibility FROM account_registration_profiles WHERE account_uuid = ?', [users[0].account_uuid]);
+        assert.deepEqual(profiles.map(row => [row.age_band, row.score_visibility]), [['minor', 'private']]);
+        if (provider === 'apple') {
+            const [tokens] = await administrator.query<(RowDataPacket & StoredAppleToken)[]>('SELECT * FROM apple_provider_tokens WHERE account_uuid = ?', [users[0].account_uuid]);
+            assert.equal(tokens.length, 1);
+            assert.equal(tokens[0].client_id, audience);
+            assert.equal(webVault.decrypt(tokens[0]), 'isolated-composed-refresh-token');
+            assert.throws(() => tokenVault.decrypt(tokens[0]));
+        }
         assert.deepEqual(journaled, []);
         for (const wrongSubject of [true, false]) {
-            const beginning = await post('begin', { action: 'delete', clientKey: 'google-web' }, sessionCookie);
+            const beginning = await post('begin', { action: 'delete', clientKey }, sessionCookie);
             assert.equal(beginning.status, 200);
             const deletion = await beginning.json() as { state: string; nonce: string };
-            const response = await post('complete', { action: 'delete', clientKey: 'google-web', state: deletion.state,
-                idToken: signProof(deletion.nonce, wrongSubject ? 'AnotherGoogleSubject' : subject), confirmation: 'DELETE' }, sessionCookie);
+            const response = await post('complete', { action: 'delete', clientKey, state: deletion.state,
+                idToken: signProof(deletion.nonce, wrongSubject ? 'AnotherProviderSubject' : subject),
+                ...(provider === 'apple' ? { authorizationCode: signProof(deletion.nonce, wrongSubject ? 'AnotherProviderSubject' : subject) } : {}),
+                confirmation: 'DELETE' }, sessionCookie);
             assert.equal(response.status, wrongSubject ? 401 : 200);
             assert.deepEqual(await response.json(), wrongSubject ? { error: 'INVALID_PROVIDER_TOKEN' } : { success: true, deleted: true });
             if (wrongSubject) {
@@ -254,9 +290,17 @@ test('real HTTP and SQL create a passwordless Google account, establish its sess
             }
         }
         assert.equal((await fetch(`${base}/account`, { headers: { cookie: sessionCookie } })).status, 401);
+        const [remainingProfiles] = await administrator.query<RowDataPacket[]>('SELECT account_uuid FROM account_registration_profiles WHERE account_uuid = ?', [users[0].account_uuid]);
+        assert.deepEqual(remainingProfiles, []);
+        if (provider === 'apple') {
+            const [retained] = await administrator.query<RowDataPacket[]>('SELECT client_id, revocation_requested_at, retention_deadline FROM apple_provider_tokens WHERE account_uuid = ?', [users[0].account_uuid]);
+            assert.equal(retained.length, 2, 'signup and fresh deletion credentials remain queued for bounded revocation');
+            assert(retained.every(row => row.client_id === audience && row.revocation_requested_at && row.retention_deadline));
+        }
         assert.deepEqual(await snapshotAccountData(), original);
     } finally { await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); }
 });
+}
 
 test('wrong browser binding, state, provider client, client case and action cannot consume a valid row', async () => {
     const value = attempt();

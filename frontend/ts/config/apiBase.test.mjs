@@ -63,7 +63,7 @@ test('API no-store headers override the global cache policy without changing ass
         && rule.headers.some((header) => header.value === 'public, max-age=31536000, immutable')));
 });
 
-test('one global document policy permits only the required Google GIS resources across SPA navigation', async () => {
+test('one global document policy permits only the required Google GIS and Apple SDK resources across SPA navigation', async () => {
     const { hosting } = JSON.parse(await readFile(new URL('../../../firebase.json', import.meta.url), 'utf8'));
     const policyRules = hosting.headers.filter(rule => rule.headers.some(header =>
         ['Content-Security-Policy', 'Cross-Origin-Opener-Policy'].includes(header.key)));
@@ -89,7 +89,8 @@ test('one global document policy permits only the required Google GIS resources 
         'manifest-src': ["'self'"],
         'media-src': ["'self'", 'blob:'],
         'object-src': ["'none'"],
-        'script-src': ["'self'", "'wasm-unsafe-eval'", 'https://accounts.google.com/gsi/client'],
+        'script-src': ["'self'", "'wasm-unsafe-eval'", 'https://accounts.google.com/gsi/client',
+            'https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js'],
         'script-src-attr': ["'none'"],
         'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://accounts.google.com/gsi/style'],
         'worker-src': ["'self'", 'blob:'],

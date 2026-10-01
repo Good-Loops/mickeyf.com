@@ -58,6 +58,7 @@ export function createAppleTokenRepository(settings: AppleTokenEncryptionSetting
 
     function decrypt(row: StoredAppleToken): string {
         try {
+            if (row.client_id !== clientId) throw new AppleTokenStorageError();
             const envelope = row.encrypted_token;
             if (!Buffer.isBuffer(envelope) || envelope.length > 8192 || envelope[0] !== VERSION
                 || envelope[1] < 1 || envelope[1] > 64 || envelope.length <= 30 + envelope[1]) throw new AppleTokenStorageError();

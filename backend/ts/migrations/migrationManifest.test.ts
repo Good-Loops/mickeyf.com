@@ -38,6 +38,8 @@ test('migration manifest preserves lexical order and hashes exact LF bytes', () 
             '0016_create_apple_provider_tokens',
             '0017_create_apple_auth_revocations',
             '0018_add_apple_session_provenance',
+            '0019_create_registration_authorizations',
+            '0020_create_account_registration_profiles',
         ]
     );
     assert.deepEqual(
@@ -46,7 +48,7 @@ test('migration manifest preserves lexical order and hashes exact LF bytes', () 
             'add-account-identity', 'add-account-identity', 'add-account-identity', 'add-provider-identities',
             'add-provider-attempts', 'add-account-sessions', 'add-session-renewal', 'add-unique-user-names',
             'allow-passwordless-accounts', 'extend-provider-attempt-actions', 'add-apple-tokens',
-            'add-apple-revocations', 'add-apple-session-provenance']
+            'add-apple-revocations', 'add-apple-session-provenance', 'add-registration-authorization', 'add-registration-profile']
     );
     assert.deepEqual(migrations.slice(0, 10).map(({ checksum }) => checksum.toString('hex')), [
         '9a797edd514dfc946783cf66cf80ee8dfa774210a0d100946c3a9a822596ca00',

@@ -63,6 +63,7 @@ private enum LudolumeApiPolicy {
     static let maximumRequestBytes = 32 * 1024
     static let maximumResponseBytes = 1024 * 1024
     static let routes: Set<String> = [
+        "GET /auth/registration/config", "POST /auth/registration/begin", "POST /auth/registration/cancel",
         "POST /api/users",
         "GET /auth/verify-token",
         "POST /auth/logout",

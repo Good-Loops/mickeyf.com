@@ -7,6 +7,17 @@ import okhttp3.HttpUrl;
 import okhttp3.Request;
 
 public class LudolumeApiPolicyTest {
+    @Test public void registrationAllowsOnlyItsThreeExactMethodPaths() {
+        String origin = LudolumeApiPolicy.ORIGIN;
+        assertNotNull(LudolumeApiPolicy.request(origin + "/auth/registration/config", "GET", null));
+        for (String route : new String[] { "begin", "cancel" }) {
+            assertNotNull(LudolumeApiPolicy.request(origin + "/auth/registration/" + route, "POST", "{}"));
+            assertNull(LudolumeApiPolicy.request(origin + "/auth/registration/" + route, "GET", null));
+            assertNull(LudolumeApiPolicy.request(origin + "/auth/registration/" + route + "?extra=1", "POST", "{}"));
+        }
+        assertNull(LudolumeApiPolicy.request(origin + "/auth/registration/config", "POST", "{}"));
+        assertNull(LudolumeApiPolicy.request(origin + "/auth/registration/approve", "POST", "{}"));
+    }
     @Test public void permitsOnlyExactSessionApiRoutesAndNativeHeaders() {
         Request request = LudolumeApiPolicy.request(LudolumeApiPolicy.ORIGIN + "/auth/providers/begin", "POST", "{}");
         assertNotNull(request);

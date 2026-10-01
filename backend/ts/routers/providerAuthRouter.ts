@@ -5,6 +5,7 @@ import { createProviderAccount, findProviderAccount, linkProviderAccount,
     persistProviderCredential, readAppleCredentialSubject, readProviderAccountMethods,
     type ProviderCredentialWriter } from '../accounts/providerAccountRepository';
 import type { AppleTokenLifecycle } from '../config/appleTokenConfig';
+import type { VerifiedProviderIdentity } from '../auth/providerIdentity';
 import { deleteProviderAccount } from '../accounts/accountDeletionRepository';
 import { attemptAppleAccountRevocation, type AppleAccountRevocation } from '../accounts/attemptAppleAccountRevocation';
 import type { AccountDeletionJournal } from '../accounts/deletionJournal';
@@ -19,6 +20,7 @@ import { authenticateRequest } from '../security/requestAuthentication';
 import { clearAuthenticationCookies, NATIVE_SESSION_COOKIE, WEB_SESSION_COOKIE, SESSION_COOKIE_NAMES,
     sessionCookieOptions } from '../security/sessionCookie';
 import { isRecord } from '../security/userRequestValidation';
+import { createRegistrationAuthorization, type RegistrationAuthorization } from '../accounts/registrationAuthorization';
 
 export const PROVIDER_BEGIN_IP_LIMIT = 30;
 export const PROVIDER_COMPLETE_IP_LIMIT = 50;
@@ -31,6 +33,7 @@ const failureStatuses: Readonly<Record<ProviderFailureReason, number>> = {
     INVALID_PASSWORD: 403, LINK_CONFLICT: 409, ACCOUNT_GONE: 401,
     DUPLICATE_USER: 409, ALREADY_LINKED: 409, INVALID_USERNAME: 400, INVALID_EMAIL: 400,
     ACCOUNT_DELETION_UNAVAILABLE: 503, ACCOUNT_DELETION_PENDING: 503,
+    REGISTRATION_REQUIRED: 403,
 };
 
 /** One composition seam keeps HTTP tests independent of external providers and SQL. */
@@ -52,21 +55,28 @@ export type ProviderAuthRouterOptions = Readonly<{
     accountDeletionEnabled?: boolean;
     deletionJournal?: AccountDeletionJournal;
     appleTokenRepository?: AppleTokenLifecycle['repository'];
+    appleTokenRepositories?: Readonly<Record<string, AppleTokenLifecycle['repository']>>;
     appleAccountRevocation?: AppleAccountRevocation;
     services?: ProviderAuthRouterServices;
+    registration?: RegistrationAuthorization;
 }>;
 
 function createServices(options: ProviderAuthRouterOptions): ProviderAuthRouterServices {
     const { database, sessionSecret, allowedOrigins, clients } = options;
-    const credentialWriter = (refreshToken?: string): ProviderCredentialWriter | undefined => {
+    const registration = options.registration ?? createRegistrationAuthorization(database);
+    const credentialWriter = (refreshToken: string | undefined, identity: VerifiedProviderIdentity): ProviderCredentialWriter | undefined => {
         if (refreshToken === undefined) return undefined;
-        if (!options.appleTokenRepository) throw new Error('Apple token storage is unavailable.');
-        const repository = options.appleTokenRepository;
+        const repositories = options.appleTokenRepositories;
+        const repository = repositories
+            ? identity.provider === 'apple' && identity.appleClientId && Object.prototype.hasOwnProperty.call(repositories, identity.appleClientId)
+                ? repositories[identity.appleClientId] : undefined
+            : options.appleTokenRepository;
+        if (!repository) throw new Error('Apple token storage is unavailable.');
         return async (connection, account) => repository.save(connection, repository.prepare(refreshToken, account.accountId));
     };
     return {
         readContext: createProviderAuthContextReader({ database, sessionSecret, allowedOrigins }),
-        flow: createProviderAuthFlow({ enabled: true, clients, signupEnabled: options.signupEnabled,
+        flow: createProviderAuthFlow({ enabled: true, clients, signupEnabled: options.signupEnabled, registration,
             deletionEnabled: options.accountDeletionEnabled === true && options.deletionJournal !== undefined,
             attempts: {
                 create: attempt => createProviderAttempt(database, attempt),
@@ -75,14 +85,18 @@ function createServices(options: ProviderAuthRouterOptions): ProviderAuthRouterS
             accounts: {
                 find: identity => findProviderAccount(database, identity),
                 link: (target, password, identity, session, token) => linkProviderAccount(database, target, password, identity, session,
-                    credentialWriter(token)),
-                create: (identity, userName, token) => createProviderAccount(database, identity, userName, credentialWriter(token)),
-                ...(options.appleTokenRepository ? {
-                    saveAppleToken: (account, identity, token) => persistProviderCredential(database, account, identity, credentialWriter(token)!),
+                    credentialWriter(token, identity)),
+                create: (identity, userName, token, context) => createProviderAccount(database, identity, userName,
+                    async (connection, account) => {
+                        await registration.consume(connection, context, account.accountId);
+                        await credentialWriter(token, identity)?.(connection, account);
+                    }),
+                ...(options.appleTokenRepository || options.appleTokenRepositories ? {
+                    saveAppleToken: (account, identity, token) => persistProviderCredential(database, account, identity, credentialWriter(token, identity)!),
                 } satisfies Pick<ProviderAuthFlowDependencies['accounts'], 'saveAppleToken'> : {}),
                 ...(options.deletionJournal ? {
                     delete: (target, identity, session, token) => {
-                        const writer = credentialWriter(token);
+                        const writer = credentialWriter(token, identity);
                         return deleteProviderAccount(database, target.userId, identity, options.deletionJournal!, session,
                             writer ? (connection, accountId) => writer(connection, { userId: target.userId, accountId }) : undefined);
                     },
@@ -105,14 +119,16 @@ export function createProviderAuthRouter(options: ProviderAuthRouterOptions): Ro
     const deletionAvailable = options.enabled === true && options.accountDeletionEnabled === true && options.deletionJournal !== undefined;
     const googleDeletionEnabled = deletionAvailable
         && Object.prototype.hasOwnProperty.call(options.clients, 'google-web') && options.clients['google-web'].provider === 'google';
-    const appleDeletionEnabled = deletionAvailable
-        && Object.prototype.hasOwnProperty.call(options.clients, 'apple-ios') && options.clients['apple-ios'].provider === 'apple'
-        && options.clients['apple-ios'].deletionEnabled === true
-        && options.clients['apple-ios'].appleTokens !== undefined && options.appleTokenRepository !== undefined;
+    const canDeleteWithApple = (key: unknown) => typeof key === 'string' && ['apple-ios', 'apple-web'].includes(key)
+        && deletionAvailable && Object.prototype.hasOwnProperty.call(options.clients, key)
+        && options.clients[key].provider === 'apple' && options.clients[key].deletionEnabled === true
+        && options.clients[key].appleTokens !== undefined
+        && (options.appleTokenRepository !== undefined || options.appleTokenRepositories !== undefined);
+    const appleDeletionEnabled = ['apple-ios', 'apple-web'].some(canDeleteWithApple);
     const canDeleteWith = (clientKey: unknown) => typeof clientKey === 'string'
         && ['google-web', 'google-ios', 'google-android'].includes(clientKey)
         ? googleDeletionEnabled && Object.prototype.hasOwnProperty.call(options.clients, clientKey) && options.clients[clientKey].provider === 'google'
-        : clientKey === 'apple-ios' && appleDeletionEnabled;
+        : canDeleteWithApple(clientKey);
     const limiterOptions = {
         windowMs: 15 * 60 * 1000, standardHeaders: 'draft-8' as const,
         legacyHeaders: false, message: { error: 'RATE_LIMITED' }, passOnStoreError: false,
@@ -191,7 +207,8 @@ export function createProviderAuthRouter(options: ProviderAuthRouterOptions): Ro
             if (isRecord(req.body) && req.body.action === 'signup' && !options.signupEnabled) return fail(res, 'UNAVAILABLE');
             if (isRecord(req.body) && req.body.action === 'delete' && !canDeleteWith(req.body.clientKey)) return fail(res, 'ACCOUNT_DELETION_UNAVAILABLE');
             try {
-                const context = await services.readContext(req, 'begin');
+                // Signup retains the cookie that authorized age/country preflight. Login still rotates its binding.
+                const context = await services.readContext(req, isRecord(req.body) && req.body.action === 'signup' ? 'complete' : 'begin');
                 const result = await services.flow.begin(context, req.body);
                 if (!result.ok) return fail(res, result.reason);
                 const cookie = context?.anonymousCookie;

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createRegistrationAuthorization } from '../accounts/registrationAuthorization';
 import { spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { resolve } from 'node:path';
@@ -44,6 +45,7 @@ async function withServer(
         isProduction: false,
         p4VegaScoreSubmissionsEnabled: false,
         allowedMutationOrigins: [allowedOrigin],
+        registration: { ...createRegistrationAuthorization(fake.database), assertAvailable: async () => undefined },
     });
     assert.equal(fake.queries.length, 0);
 

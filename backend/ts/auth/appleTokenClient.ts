@@ -1,5 +1,6 @@
 import { createPrivateKey, type KeyObject } from 'node:crypto';
 import jwt from 'jsonwebtoken';
+import { validAppleRedirectUri } from '../config/appleWebConfig';
 
 export const APPLE_TOKEN_REQUEST_TIMEOUT_MS = 5_000;
 export const APPLE_OPAQUE_TOKEN_MAX_LENGTH = 4_096;
@@ -17,6 +18,7 @@ export type AppleTokenClientConfiguration = Readonly<{
     teamId: string;
     keyId: string;
     privateKey: string;
+    redirectUri?: string;
 }>;
 
 export type AppleTokenClient = Readonly<{
@@ -26,7 +28,7 @@ export type AppleTokenClient = Readonly<{
 }>;
 
 type Dependencies = { fetchRequest?: typeof globalThis.fetch; now?: () => number };
-type ClientCredentials = Readonly<{ clientId: string; teamId: string; keyId: string; privateKey: KeyObject }>;
+type ClientCredentials = Readonly<{ clientId: string; teamId: string; keyId: string; privateKey: KeyObject; redirectUri?: string }>;
 type FailureCode = 'INVALID_CONFIGURATION' | 'INVALID_REQUEST' | 'INVALID_GRANT' | 'UNAVAILABLE';
 
 /** Deliberately carries no provider payload, credential, upstream error or cause. */
@@ -48,13 +50,14 @@ function isOpaqueToken(value: unknown): value is string {
 
 function readCredentials(configuration: AppleTokenClientConfiguration): ClientCredentials {
     try {
-        const { clientId, teamId, keyId, privateKey } = configuration;
+        const { clientId, teamId, keyId, privateKey, redirectUri } = configuration;
         if (typeof clientId !== 'string' || clientId.length > 255 || clientId !== clientId.trim()
             || !/^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/u.test(clientId)
             || typeof teamId !== 'string' || teamId !== teamId.trim() || !/^[A-Z0-9]{10}$/u.test(teamId)
             || typeof keyId !== 'string' || keyId !== keyId.trim() || !/^[A-Z0-9]{10}$/u.test(keyId)
             || clientId.startsWith(`${teamId}.`)
-            || typeof privateKey !== 'string' || privateKey.length === 0 || privateKey.length > 16_384) {
+            || typeof privateKey !== 'string' || privateKey.length === 0 || privateKey.length > 16_384
+            || (redirectUri !== undefined && !validAppleRedirectUri(redirectUri))) {
             throw new AppleTokenClientError('INVALID_CONFIGURATION');
         }
         const key = createPrivateKey(privateKey);
@@ -62,7 +65,7 @@ function readCredentials(configuration: AppleTokenClientConfiguration): ClientCr
             || key.asymmetricKeyDetails?.namedCurve !== 'prime256v1') {
             throw new AppleTokenClientError('INVALID_CONFIGURATION');
         }
-        return Object.freeze({ clientId, teamId, keyId, privateKey: key });
+        return Object.freeze({ clientId, teamId, keyId, privateKey: key, ...(redirectUri ? { redirectUri } : {}) });
     } catch { throw new AppleTokenClientError('INVALID_CONFIGURATION'); }
 }
 
@@ -111,7 +114,7 @@ function readResponseDocument(body: string): Record<string, unknown> {
     return value;
 }
 
-/** Native Apple authorization only: no redirect URI was used, and none is inferred here. */
+/** The server owns the exact web return URL; native exchanges continue to omit it. */
 export function createAppleTokenClient(configuration: AppleTokenClientConfiguration,
     { fetchRequest = globalThis.fetch, now = Date.now }: Dependencies = {}): AppleTokenClient {
     const credentials = readCredentials(configuration);
@@ -133,6 +136,7 @@ export function createAppleTokenClient(configuration: AppleTokenClientConfigurat
             return await Promise.race([deadline, (async () => {
                 const form = new URLSearchParams({ client_id: credentials.clientId,
                     client_secret: createClientSecret(credentials, now),
+                    ...(operation === 'exchange' && credentials.redirectUri ? { redirect_uri: credentials.redirectUri } : {}),
                     ...(operation === 'exchange' ? { code: token, grant_type: 'authorization_code' }
                         : { token, token_type_hint: 'refresh_token' }),
                 });

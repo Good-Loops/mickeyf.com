@@ -19,6 +19,7 @@ type Options = {
     decrypt?: (row: StoredAppleToken) => string; revoke?: (token: string) => Promise<void>;
     immediateTimeoutMs?: number; acquireWait?: () => Promise<void>;
     queryWait?: (sql: string) => Promise<void>; selectedRows?: (rows: Row[]) => Row[];
+    additionalClients?: Parameters<typeof createAppleTokenRevocationWorker>[0]['additionalClients'];
 };
 
 function fixture(initial: Row[], options: Options = {}) {
@@ -93,6 +94,7 @@ function fixture(initial: Row[], options: Options = {}) {
         return connection;
     } } as Pick<Pool, 'getConnection'>;
     const worker = createAppleTokenRevocationWorker({ database, clientId, immediateTimeoutMs: options.immediateTimeoutMs,
+        additionalClients: options.additionalClients,
         vault: { decrypt(item) { events.push('decrypt'); return options.decrypt?.(item) ?? 'synthetic-refresh-token'; } },
         appleTokens: { async revoke(token) { events.push('revoke'); await options.revoke?.(token); } },
     });
@@ -113,6 +115,41 @@ test('construction is inert; explicit drain serializes revocation outside transa
     assert.ok(f.queries.every(({ sql }) => !/START TRANSACTION|COMMIT|ROLLBACK|users|account_provider_identities/u.test(sql)));
     assert.match(f.queries[0].sql, /GET_LOCK\(CONCAT\('mickeyf:apple-revocation:', LEFT\(SHA2\(DATABASE\(\), 256\), 16\)\), 0\)/u);
     assert.ok(f.queries.every(({ values }) => !values.includes('synthetic-refresh-token')));
+});
+
+test('mixed native/web queues route each credential only to its exact client and retain unknown audiences', async () => {
+    const webId = 'com.example.web';
+    const nativeTokens: string[] = [];
+    const webTokens: string[] = [];
+    const f = fixture([row(), row({ client_id: webId }), row({ client_id: 'com.unknown.web' })], {
+        decrypt: item => { assert.equal(item.client_id, clientId); return 'synthetic-native'; },
+        revoke: async token => { nativeTokens.push(token); },
+        additionalClients: [{ clientId: webId,
+            vault: { decrypt(item) { assert.equal(item.client_id, webId); return 'synthetic-web'; } },
+            appleTokens: { async revoke(token) { webTokens.push(token); } },
+        }],
+    });
+    assert.deepEqual(await f.worker.drain(), { status: 'completed', selected: 3, revoked: 2, retried: 1, expired: 0 });
+    assert.deepEqual(nativeTokens, ['synthetic-native']);
+    assert.deepEqual(webTokens, ['synthetic-web']);
+    assert.equal(f.rows[0].client_id, 'com.unknown.web');
+    assert.equal(f.rows[0].deadline, 7 * DAY);
+    f.clock.now = 6 * DAY + 1;
+    assert.equal((await f.worker.drain()).expired, 1, 'unknown audience cannot prevent SQL-only expiry purging');
+});
+
+test('immediate deletion selects the account and uses web revocation without touching another account', async () => {
+    const own = row({ client_id: 'com.example.web' });
+    const other = row();
+    let revoked = 0;
+    const f = fixture([own, other], { revoke: async () => assert.fail('Not the selected native account'),
+        additionalClients: [{ clientId: own.client_id, vault: { decrypt(item) {
+            assert.equal(item.account_uuid, own.account_uuid); return 'synthetic-web';
+        } }, appleTokens: { async revoke() { revoked++; } } }],
+    });
+    assert.equal((await f.worker.revokeForAccount(own.account_uuid)).revoked, 1);
+    assert.equal(revoked, 1);
+    assert.deepEqual(f.rows.map(item => item.account_uuid), [other.account_uuid]);
 });
 
 test('unavailable and invalid-grant responses retry with bounded exponential backoff without extending retention', async () => {

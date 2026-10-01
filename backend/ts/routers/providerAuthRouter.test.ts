@@ -87,7 +87,7 @@ function fixture(features: Features = {}) {
         }, async revoke() {} } } : {}),
         verifier: { async verify(_provider, token) { return token === 'accepted-token'
             ? { verified: true, identity: appleIdentity } : { verified: false, reason: 'INVALID_PROVIDER_TOKEN' }; } } };
-    const flow = createProviderAuthFlow({ enabled: true, clients, signupEnabled: features.signupEnabled,
+    const flow = createProviderAuthFlow({ registration: { assertAvailable: async () => undefined }, enabled: true, clients, signupEnabled: features.signupEnabled,
         deletionEnabled: features.accountDeletionEnabled && features.withJournal, attempts: {
         async create(attempt) { state.events.push('create'); attempts.set(attempt.stateHash.toString('hex'), attempt); return 'created'; },
         async consume(hash, binding, client, action) {
@@ -195,6 +195,10 @@ async function post(base: string, path: string, body: unknown, headers: Record<s
 }
 
 async function challenge(base: string, action = 'login', headers: Record<string, string> = {}) {
+    if (action === 'signup' && !headers.cookie) {
+        // Synthetic previously authorized preflight cookie; eligibility itself has separate HTTP/SQL tests.
+        headers = { ...headers, cookie: signedCookie(['provider', 'v1', Date.now(), Buffer.alloc(32, 9).toString('base64url')].join(':')) };
+    }
     const response = await post(base, 'begin', { ...beginInput, action,
         ...(action === 'signup' || action === 'delete' ? { clientKey: 'google-web' } : {}) }, headers);
     assert.equal(response.status, 200);
@@ -473,7 +477,7 @@ test('all flow failures have fixed HTTP mappings and never leak internal result 
             BUSY: 503, INVALID_ATTEMPT: 400, INVALID_PROVIDER_TOKEN: 401, NOT_LINKED: 403,
             INVALID_PASSWORD: 403, LINK_CONFLICT: 409, ACCOUNT_GONE: 401,
             DUPLICATE_USER: 409, ALREADY_LINKED: 409, INVALID_USERNAME: 400, INVALID_EMAIL: 400,
-            ACCOUNT_DELETION_UNAVAILABLE: 503, ACCOUNT_DELETION_PENDING: 503 };
+            ACCOUNT_DELETION_UNAVAILABLE: 503, ACCOUNT_DELETION_PENDING: 503, REGISTRATION_REQUIRED: 403 };
         for (const [reason, status] of Object.entries(statuses)) {
             state.completionFailure = reason as FailureReason;
             const response = await post(base, 'complete', beginInput);

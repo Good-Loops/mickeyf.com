@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { createRegistrationAuthorization } from '../accounts/registrationAuthorization';
 import test from 'node:test';
 import { createHash } from 'node:crypto';
 import bcrypt from 'bcryptjs';
@@ -56,6 +57,7 @@ function createTestController(
         isProduction: false,
         p4VegaScoreSubmissionsEnabled,
         allowedMutationOrigins: origins,
+        registration: { ...createRegistrationAuthorization(database), assertAvailable: async () => undefined },
     });
 }
 
@@ -113,7 +115,8 @@ test('a concurrent signup unique-key collision retains the existing duplicate re
     const database = { async query() {
         if (++queryCount === 1) return [[]];
         throw Object.assign(new Error('synthetic duplicate'), { errno: 1062 });
-    } } as unknown as Pool;
+    }, async getConnection() { return { query: async (options: { sql: string }) => options.sql.startsWith('INSERT')
+        ? database.query(options) : [[]], release() {}, destroy() {} }; } } as unknown as Pool;
     const { response, state } = responseRecorder();
     await createTestController(database)(request({ type: 'signup', user_name: 'player',
         email: 'player@example.test', user_password: 'long-password-123' }), response);
@@ -516,7 +519,7 @@ test('legacy leaderboard operation adapts the bounded generic read', async () =>
     assert.equal(options.timeout, 10_000);
     assert.equal(
         options.sql?.replace(/\s+/g, ' ').trim(),
-        'SELECT users.user_name AS userName, game_personal_bests.score AS score FROM game_personal_bests INNER JOIN users ON users.user_id = game_personal_bests.user_id WHERE game_personal_bests.game_id = ? AND game_personal_bests.rules_version = ? ORDER BY game_personal_bests.score DESC, game_personal_bests.recorded_at ASC, game_personal_bests.user_id ASC LIMIT 10'
+        'SELECT users.user_name AS userName, game_personal_bests.score AS score FROM game_personal_bests INNER JOIN users ON users.user_id = game_personal_bests.user_id LEFT JOIN account_registration_profiles AS registration ON registration.account_uuid = users.account_uuid WHERE (registration.account_uuid IS NULL OR registration.score_visibility = \'public\') AND game_personal_bests.game_id = ? AND game_personal_bests.rules_version = ? ORDER BY game_personal_bests.score DESC, game_personal_bests.recorded_at ASC, game_personal_bests.user_id ASC LIMIT 10'
     );
     assert.deepEqual(state.body, {
         success: true,

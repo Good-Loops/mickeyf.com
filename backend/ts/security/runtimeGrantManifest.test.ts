@@ -16,6 +16,7 @@ test('Google profile excludes Apple storage and provenance without changing shar
     assert.deepEqual(GOOGLE_RUNTIME_GRANT_MANIFEST.map(({ table }) => table), [
         'account_sessions', 'account_provider_identities', 'provider_auth_attempts',
         'schema_migrations', 'users', 'game_submission_receipts', 'game_personal_bests',
+        'registration_authorizations', 'account_registration_profiles',
     ]);
     const columns = runtimeColumnPrivilegeInventory('google');
     assert.deepEqual(columns, runtimeColumnPrivilegeInventory('google-apple').filter(
@@ -27,9 +28,10 @@ test('Google profile excludes Apple storage and provenance without changing shar
         { tableName: 'users', privilegeType: 'DELETE' },
         { tableName: 'game_submission_receipts', privilegeType: 'DELETE' },
         { tableName: 'game_personal_bests', privilegeType: 'DELETE' },
+        { tableName: 'registration_authorizations', privilegeType: 'DELETE' },
     ]);
     const statements = renderRuntimeGrantStatements('cms', PRODUCTION_RUNTIME_DATABASE_ACCOUNT, 'google');
-    assert.equal(statements.length, 7);
+    assert.equal(statements.length, 9);
     assert.ok(statements.every(statement => !statement.includes('apple_')));
     assert.equal(statements[0],
         "GRANT SELECT (`session_hash`, `account_uuid`, `created_at`, `expires_at`, `remembered`, `renewed_at`, `previous_session_hash`, `previous_valid_until`), INSERT (`session_hash`, `account_uuid`, `created_at`, `expires_at`, `remembered`, `renewed_at`), UPDATE (`session_hash`, `expires_at`, `renewed_at`, `previous_session_hash`, `previous_valid_until`), DELETE ON `cms`.`account_sessions` TO 'cms_mickeyf'@'%';");
@@ -66,7 +68,7 @@ test('defines only runtime DML and read-only identity-epoch metadata', () => {
     assert.deepEqual(
         RUNTIME_GRANT_MANIFEST.map(({ table }) => table),
         ['apple_auth_revocations', 'apple_provider_tokens', 'account_sessions', 'account_provider_identities', 'provider_auth_attempts',
-            'schema_migrations', 'users', 'game_submission_receipts', 'game_personal_bests']
+            'schema_migrations', 'users', 'game_submission_receipts', 'game_personal_bests', 'registration_authorizations', 'account_registration_profiles']
     );
     assert.deepEqual(runtimeColumnPrivilegeInventory().filter(({ tableName }) => tableName === 'schema_migrations'), [
         { tableName: 'schema_migrations', columnName: 'version', privilegeType: 'SELECT' },
@@ -90,6 +92,7 @@ test('defines only runtime DML and read-only identity-epoch metadata', () => {
         { tableName: 'users', privilegeType: 'DELETE' },
         { tableName: 'game_submission_receipts', privilegeType: 'DELETE' },
         { tableName: 'game_personal_bests', privilegeType: 'DELETE' },
+        { tableName: 'registration_authorizations', privilegeType: 'DELETE' },
     ]);
 });
 
@@ -164,6 +167,8 @@ test('renders the exact production grant statements without applying them', () =
             "GRANT SELECT (`user_id`, `account_uuid`, `user_name`, `email`, `user_password`), INSERT (`user_name`, `email`, `user_password`), DELETE ON `cms`.`users` TO 'cms_mickeyf'@'%';",
             "GRANT SELECT (`game_id`, `rules_version`, `user_id`, `run_id`, `score`, `completion_time_ms`, `payload_fingerprint`, `improved_personal_best`, `submitted_at`), INSERT (`game_id`, `rules_version`, `user_id`, `run_id`, `score`, `completion_time_ms`, `payload_fingerprint`, `improved_personal_best`, `submitted_at`), DELETE ON `cms`.`game_submission_receipts` TO 'cms_mickeyf'@'%';",
             "GRANT SELECT (`game_id`, `rules_version`, `user_id`, `score`, `completion_time_ms`, `recorded_at`), INSERT (`game_id`, `rules_version`, `user_id`, `score`, `completion_time_ms`, `recorded_at`), UPDATE (`score`, `completion_time_ms`, `recorded_at`), DELETE ON `cms`.`game_personal_bests` TO 'cms_mickeyf'@'%';",
+            "GRANT SELECT (`binding_hash`, `policy_digest`, `country_code`, `age_band`, `expires_at`, `consumed_at`), INSERT (`binding_hash`, `policy_digest`, `country_code`, `age_band`, `expires_at`), UPDATE (`consumed_at`), DELETE ON `cms`.`registration_authorizations` TO 'cms_mickeyf'@'%';",
+            "GRANT SELECT (`account_uuid`, `score_visibility`), INSERT (`account_uuid`, `country_code`, `age_band`, `policy_version`, `score_visibility`) ON `cms`.`account_registration_profiles` TO 'cms_mickeyf'@'%';",
         ]
     );
 });

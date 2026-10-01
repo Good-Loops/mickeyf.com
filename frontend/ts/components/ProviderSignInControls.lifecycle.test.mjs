@@ -63,9 +63,9 @@ function mount(t, Component = InlineGoogleSignIn, overrides = {}) {
     const hooks = {
         auth: {
             loading: false, isAuthenticated: false,
-            prepareProviderLogin: (clientKey, options) => {
+            prepareProviderLogin: (clientKey, options, action) => {
                 const response = deferred();
-                preparation.push({ clientKey, ...options, ...response });
+                preparation.push({ clientKey, action, ...options, ...response });
                 return response.promise;
             },
             completeProviderLogin: (handle, credential, options) => {
@@ -176,10 +176,9 @@ for (const action of ['login', 'signup']) {
         view.render();
         await view.giveCredential();
         if (action === 'signup') {
-            view.completions[0].resolve({ signupRequired: true, handle: {} });
-            await view.settle();
+            assert.equal(view.preparation[0].action, 'signup');
             assert.equal(view.hooks.username.mock.callCount(), 1);
-            assert.equal(view.completions[1].userName, 'New Player');
+            assert.equal(view.completions[0].userName, 'New Player');
         }
         const completion = view.completions.at(-1);
         // AuthContext can publish the new session before the awaited completion resumes.

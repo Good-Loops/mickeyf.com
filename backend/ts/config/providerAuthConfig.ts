@@ -4,6 +4,7 @@ import { loadAppleTokenConfig, type AppleTokenLifecycle } from './appleTokenConf
 import { loadAppleNotificationConfig } from './appleNotificationConfig';
 import type { AppleNotificationVerifier } from '../auth/appleNotificationVerifier';
 import { loadAppleRuntimeLifecycle } from './appleRuntimeSecrets';
+import { loadAppleWebConfig } from './appleWebConfig';
 
 type Environment = Readonly<Record<string, string | undefined>>;
 type VerifierDependencies = Parameters<typeof createProviderTokenVerifier>[1];
@@ -13,6 +14,7 @@ export type PublicProviderAuthClient = Readonly<
     | { clientKey: 'google-ios'; provider: 'google'; platform: 'ios'; clientId: string; signup?: true }
     | { clientKey: 'google-android'; provider: 'google'; platform: 'android'; clientId: string; signup?: true }
     | { clientKey: 'apple-ios'; provider: 'apple'; platform: 'ios'; clientId: string; signup?: true }
+    | { clientKey: 'apple-web'; provider: 'apple'; platform: 'web'; clientId: string; redirectUri: string; signup?: true }
 >;
 
 export type ProviderAuthConfig = Readonly<{
@@ -46,9 +48,8 @@ export function loadProviderAuthConfig(
     const appleNotifications = loadAppleNotificationConfig(env, verifierDependencies);
     if (env.PROVIDER_AUTH_ENABLED !== 'true') return appleNotifications
         ? Object.freeze({ ...disabledConfig, appleNotifications }) : disabledConfig;
-    if (env.APPLE_WEB_CLIENT_ID !== undefined || env.APPLE_WEB_SERVICES_ID !== undefined) {
-        throw new Error('Apple web sign-in is unsupported until its prerequisites and callback flow are configured');
-    }
+    const appleWeb = loadAppleWebConfig(env);
+    const appleWebEnabled = env.APPLE_WEB_AUTH_ENABLED === 'true';
     const googleWebId = optionalClientId(env, 'GOOGLE_WEB_CLIENT_ID', /^[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/);
     const googleIosId = optionalClientId(env, 'GOOGLE_IOS_CLIENT_ID', /^[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/);
     const googleAndroidId = optionalClientId(env, 'GOOGLE_ANDROID_CLIENT_ID', /^[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/);
@@ -62,7 +63,7 @@ export function loadProviderAuthConfig(
     const appleSignupRequested = env.PROVIDER_APPLE_SIGNUP_ENABLED === 'true';
     const appleDeletionRequested = env.PROVIDER_APPLE_DELETION_ENABLED === 'true';
     const runtimeSecrets = env.APPLE_TOKEN_RUNTIME_SECRETS_ENABLED === 'true';
-    if (appleSignupRequested || appleDeletionRequested) {
+    if (appleSignupRequested || appleDeletionRequested || appleWebEnabled) {
         if (!appleIosId || !runtimeSecrets || env.APPLE_TOKEN_LIFECYCLE_ENABLED !== 'true'
             || env.APPLE_NOTIFICATIONS_ENABLED !== 'true' || env.APPLE_MAINTENANCE_HTTP_ENABLED !== 'true'
             || env.ACCOUNT_DELETION_ENABLED !== 'true') {
@@ -76,6 +77,10 @@ export function loadProviderAuthConfig(
     const appleTokenLifecycle = runtimeSecrets ? runtimeLifecycle : loadAppleTokenConfig(env);
     if (appleTokenLifecycle && appleTokenLifecycle.clientId !== appleIosId) {
         throw new Error('Apple lifecycle audience does not match the configured client.');
+    }
+    if (appleTokenLifecycle && (appleTokenLifecycle.web?.clientId !== appleWeb?.clientId
+        || appleTokenLifecycle.web?.redirectUri !== appleWeb?.redirectUri)) {
+        throw new Error('Apple web lifecycle does not match the configured Services ID and return URL.');
     }
     if (appleTokenLifecycle && !appleNotifications) throw new Error('Apple sign-in requires enabled server notifications.');
     if (googleSignupEnabled && !googleWebId) throw new Error('Google signup requires GOOGLE_WEB_CLIENT_ID');
@@ -113,6 +118,16 @@ export function loadProviderAuthConfig(
             publicClients.push(Object.freeze({ clientKey: 'apple-ios', provider: 'apple', platform: 'ios', clientId: appleIosId,
                 ...(appleSignupRequested && appleTokenLifecycle ? { signup: true as const } : {}) }));
         }
+    }
+    if (appleWebEnabled && appleWeb) {
+        clients['apple-web'] = Object.freeze({ provider: 'apple',
+            ...(appleTokenLifecycle?.web ? { appleTokens: appleTokenLifecycle.web.client } : {}),
+            signupEnabled: appleSignupRequested && !!appleTokenLifecycle?.web,
+            deletionEnabled: appleDeletionRequested && !!appleTokenLifecycle?.web,
+            verifier: createProviderTokenVerifier({ appleAudience: appleWeb.clientId }, verifierDependencies) });
+        if (appleTokenLifecycle?.web) publicClients.push(Object.freeze({ clientKey: 'apple-web', provider: 'apple',
+            platform: 'web', clientId: appleWeb.clientId, redirectUri: appleWeb.redirectUri,
+            ...(appleSignupRequested ? { signup: true as const } : {}) }));
     }
     return Object.freeze({ enabled: true, signupEnabled: googleSignupEnabled || appleSignupRequested,
         clients: Object.freeze(clients), publicClients: Object.freeze(publicClients),

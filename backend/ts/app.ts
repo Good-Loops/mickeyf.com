@@ -34,7 +34,11 @@ import { runAppleMaintenance } from './accounts/runAppleTokenRevocation';
 import { loadAppleRuntimeLifecycle } from './config/appleRuntimeSecrets';
 import { prepareRuntimeProviderAuth } from './config/providerAuthConfig';
 
+import { createRegistrationAuthorization, cleanupRegistrationAuthorizations } from './accounts/registrationAuthorization';
+import { verifyRegistrationReadiness } from './migrations/registrationSchema';
+
 const runtimeConfig = loadRuntimeConfig();
+const registration = createRegistrationAuthorization(pool, runtimeConfig.registrationPolicy);
 const deletionJournal = runtimeConfig.accountDeletionEnabled
     ? createGcsDeletionJournal({ bucket: runtimeConfig.journalBucket }) : undefined;
 const app = express();
@@ -61,9 +65,16 @@ app.use(helmet({
 
 // This endpoint accepts only a pinned workload identity, never browser cookies.
 // Mount before CORS/preflight and body parsers so they cannot bypass its checks.
-app.use(APPLE_MAINTENANCE_PATH, createAppleMaintenanceRouter(runtimeConfig.appleMaintenance, () =>
-    runAppleMaintenance({ database: pool, expectedServerUuid: runtimeConfig.appleMaintenance!.expectedServerUuid,
-        loadLifecycle: () => loadAppleRuntimeLifecycle() })));
+app.use(APPLE_MAINTENANCE_PATH, createAppleMaintenanceRouter(runtimeConfig.appleMaintenance, async () => {
+    // Independent cleanup must still run if Apple's provider request fails.
+    const [apple, registrationCleanup] = await Promise.allSettled([
+        runAppleMaintenance({ database: pool, expectedServerUuid: runtimeConfig.appleMaintenance!.expectedServerUuid,
+            loadLifecycle: () => loadAppleRuntimeLifecycle() }),
+        cleanupRegistrationAuthorizations(pool),
+    ]);
+    return apple.status === 'fulfilled' && apple.value === 0
+        && registrationCleanup.status === 'fulfilled' && !registrationCleanup.value.backlog ? 0 : 1;
+}));
 
 app.use(cors({
     origin: [...runtimeConfig.corsOrigins],
@@ -89,6 +100,7 @@ app.use('/api/leaderboards', createLeaderboardRouter(pool, {
 app.use(express.json({ limit: '32kb', strict: true }));
 app.use('/api', createMainRouter({
     database: pool,
+    registration,
     sessionSecret: runtimeConfig.sessionSecret,
     isProduction: runtimeConfig.isProduction,
     p4VegaScoreSubmissionsEnabled: runtimeConfig.p4VegaScoreSubmissionsEnabled,
@@ -103,6 +115,7 @@ async function startServer(): Promise<void> {
         prepare: async () => {
             await verifyDatabaseConnection();
             await verifyAccountSessionReadiness(pool);
+            await verifyRegistrationReadiness(pool);
             const providerAuth = await prepareRuntimeProviderAuth(runtimeConfig.providerAuth);
             if (providerAuth.appleTokenLifecycle) await verifyAppleTokenReadiness(pool);
             if (runtimeConfig.providerAuth.appleNotifications) await verifyAppleRevocationReadiness(pool);
@@ -120,7 +133,7 @@ async function startServer(): Promise<void> {
             }
             app.use('/auth', createAuthRouter(
                 pool, runtimeConfig.sessionSecret, runtimeConfig.isProduction, runtimeConfig.corsOrigins,
-                { accountDeletionEnabled: runtimeConfig.accountDeletionEnabled, deletionJournal, providerAuth }
+                { accountDeletionEnabled: runtimeConfig.accountDeletionEnabled, deletionJournal, providerAuth, registration }
             ));
             app.use(notFoundHandler);
             app.use(requestErrorHandler);

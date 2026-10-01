@@ -4,7 +4,7 @@ import path from 'node:path';
 
 export type LeaderboardTableName = 'game_runs' | 'game_personal_bests';
 
-export type MigrationEffectKind = 'create-table' | 'drop-column' | 'detach-best-source' | 'retain-receipts' | 'add-account-identity' | 'add-provider-identities' | 'add-provider-attempts' | 'add-account-sessions' | 'add-session-renewal' | 'add-unique-user-names' | 'allow-passwordless-accounts' | 'extend-provider-attempt-actions' | 'add-apple-tokens' | 'add-apple-revocations' | 'add-apple-session-provenance';
+export type MigrationEffectKind = 'create-table' | 'drop-column' | 'detach-best-source' | 'retain-receipts' | 'add-account-identity' | 'add-provider-identities' | 'add-provider-attempts' | 'add-account-sessions' | 'add-session-renewal' | 'add-unique-user-names' | 'allow-passwordless-accounts' | 'extend-provider-attempt-actions' | 'add-apple-tokens' | 'add-apple-revocations' | 'add-apple-session-provenance' | 'add-registration-authorization' | 'add-registration-profile';
 
 type MigrationMetadata = Readonly<{
     version: string;
@@ -35,6 +35,8 @@ export type MigrationDefinition = MigrationMetadata & Readonly<
     | { effect: 'add-apple-tokens'; tableName: 'apple_provider_tokens' }
     | { effect: 'add-apple-revocations'; tableName: 'apple_auth_revocations' }
     | { effect: 'add-apple-session-provenance'; tableName: 'account_sessions' }
+    | { effect: 'add-registration-authorization'; tableName: 'registration_authorizations' }
+    | { effect: 'add-registration-profile'; tableName: 'account_registration_profiles' }
 >;
 
 const MIGRATION_SPECS = Object.freeze([
@@ -132,6 +134,8 @@ const MIGRATION_SPECS = Object.freeze([
         effect: 'add-apple-session-provenance' as const,
         tableName: 'account_sessions' as const,
     }),
+    Object.freeze({ fileName: '0019_create_registration_authorizations.sql', effect: 'add-registration-authorization' as const, tableName: 'registration_authorizations' as const }),
+    Object.freeze({ fileName: '0020_create_account_registration_profiles.sql', effect: 'add-registration-profile' as const, tableName: 'account_registration_profiles' as const }),
 ]);
 
 const MIGRATION_FILE_NAME = /^\d{4}_[a-z0-9]+(?:_[a-z0-9]+)*\.sql$/;

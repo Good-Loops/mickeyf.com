@@ -30,6 +30,9 @@ import type { AppleNotificationVerifier } from '../auth/appleNotificationVerifie
 import { applyAppleNotification } from '../auth/appleSessionRevocation';
 import { createAppleNotificationRouter } from './appleNotificationRouter';
 import { createAppleTokenRevocationWorker } from '../accounts/appleTokenRevocation';
+import { createRegistrationAuthorization, type RegistrationAuthorization } from '../accounts/registrationAuthorization';
+import { createProviderAuthContextReader } from '../auth/providerAuthContext';
+import { createRegistrationRouter } from './registrationRouter';
 
 export { authRoutesContract } from './authRouter.contract';
 
@@ -38,7 +41,8 @@ export function createAuthRouter(
     sessionSecret: string,
     isProduction: boolean,
     allowedMutationOrigins: readonly string[],
-    { accountDeletionEnabled = false, deletionJournal, providerAuth }: {
+    { accountDeletionEnabled = false, deletionJournal, providerAuth, registration = createRegistrationAuthorization(database) }: {
+        registration?: RegistrationAuthorization;
         accountDeletionEnabled?: boolean;
         deletionJournal?: AccountDeletionJournal;
         providerAuth?: {
@@ -61,10 +65,14 @@ export function createAuthRouter(
      * - None beyond Express route registration.
      */
     const router: Router = Router();
+    router.use('/registration', createRegistrationRouter(registration,
+        createProviderAuthContextReader({ database, sessionSecret, allowedOrigins: allowedMutationOrigins }), isProduction));
     const appleLifecycle = providerAuth?.appleTokenLifecycle;
     const appleAccountRevocation = appleLifecycle ? createAppleTokenRevocationWorker({
         database, clientId: appleLifecycle.clientId,
         vault: appleLifecycle.repository, appleTokens: appleLifecycle.client,
+        additionalClients: appleLifecycle.web ? [{ clientId: appleLifecycle.web.clientId,
+            vault: appleLifecycle.web.repository, appleTokens: appleLifecycle.web.client }] : [],
     }) : undefined;
     router.use('/providers/apple-notifications', createAppleNotificationRouter(providerAuth?.appleNotifications,
         notification => applyAppleNotification(database, notification)));
@@ -72,7 +80,8 @@ export function createAuthRouter(
     // Only public identifiers are exposed, never verifier configuration or credentials.
     router.get('/providers/config', (_request, response) => {
         response.setHeader('Cache-Control', 'no-store');
-        response.json({ clients: providerAuth?.enabled ? providerAuth.publicClients ?? [] : [] });
+        response.json({ clients: providerAuth?.enabled ? (providerAuth.publicClients ?? []).map(({ signup, ...client }) => ({ ...client,
+            ...(signup === true && registration.policy !== undefined ? { signup: true } : {}) })) : [] });
     });
 
     router.use('/providers', createProviderAuthRouter({
@@ -80,7 +89,9 @@ export function createAuthRouter(
         clients: providerAuth?.clients ?? {}, enabled: providerAuth?.enabled === true,
         signupEnabled: providerAuth?.signupEnabled, accountDeletionEnabled, deletionJournal,
         appleTokenRepository: providerAuth?.appleTokenLifecycle?.repository,
-        appleAccountRevocation,
+        appleTokenRepositories: appleLifecycle ? Object.freeze({ [appleLifecycle.clientId]: appleLifecycle.repository,
+            ...(appleLifecycle.web ? { [appleLifecycle.web.clientId]: appleLifecycle.web.repository } : {}) }) : undefined,
+        appleAccountRevocation, registration,
     }));
 
     /** GET /verify-token — validates auth context for the current request. */

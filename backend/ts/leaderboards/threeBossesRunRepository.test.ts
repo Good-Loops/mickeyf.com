@@ -81,7 +81,7 @@ test('reads only current Three Bosses rows in deterministic ascending order', as
     assert.equal(queryOptions?.timeout, 10_000);
     assert.equal(
         queryOptions?.sql?.replace(/\s+/g, ' ').trim(),
-        'SELECT users.user_name AS userName, game_personal_bests.score AS score, game_personal_bests.completion_time_ms AS completionTimeMs FROM game_personal_bests INNER JOIN users ON users.user_id = game_personal_bests.user_id WHERE game_personal_bests.game_id = ? AND game_personal_bests.rules_version = ? AND game_personal_bests.completion_time_ms IS NOT NULL ORDER BY game_personal_bests.completion_time_ms ASC, game_personal_bests.recorded_at ASC, game_personal_bests.user_id ASC LIMIT 10'
+        'SELECT users.user_name AS userName, game_personal_bests.score AS score, game_personal_bests.completion_time_ms AS completionTimeMs FROM game_personal_bests INNER JOIN users ON users.user_id = game_personal_bests.user_id LEFT JOIN account_registration_profiles AS registration ON registration.account_uuid = users.account_uuid WHERE (registration.account_uuid IS NULL OR registration.score_visibility = \'public\') AND game_personal_bests.game_id = ? AND game_personal_bests.rules_version = ? AND game_personal_bests.completion_time_ms IS NOT NULL ORDER BY game_personal_bests.completion_time_ms ASC, game_personal_bests.recorded_at ASC, game_personal_bests.user_id ASC LIMIT 10'
     );
 });
 

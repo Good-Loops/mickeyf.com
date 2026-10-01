@@ -20,6 +20,9 @@ type Dependencies = Readonly<{
     vault: { decrypt(row: StoredAppleToken): string };
     appleTokens: Pick<AppleTokenClient, 'revoke'>;
     clientId: string;
+    additionalClients?: readonly Readonly<{
+        clientId: string; vault: { decrypt(row: StoredAppleToken): string }; appleTokens: Pick<AppleTokenClient, 'revoke'>;
+    }>[];
     immediateTimeoutMs?: number;
 }>;
 type PendingToken = RowDataPacket & StoredAppleToken & { attempt_count: number };
@@ -52,13 +55,21 @@ function destroyConnection(connection: PoolConnection): void {
 }
 
 /** Constructing this worker starts no SQL, timer or network work. */
-export function createAppleTokenRevocationWorker({ database, vault, appleTokens, clientId,
+export function createAppleTokenRevocationWorker({ database, vault, appleTokens, clientId, additionalClients = [],
     immediateTimeoutMs = APPLE_IMMEDIATE_REVOCATION_TIMEOUT_MS }: Dependencies) {
     if (typeof clientId !== 'string' || clientId.length > 255 || !/^[A-Za-z0-9]/u.test(clientId)
         || /[^A-Za-z0-9.-]/u.test(clientId)
         || !Number.isSafeInteger(immediateTimeoutMs) || immediateTimeoutMs < 1
         || immediateTimeoutMs > APPLE_IMMEDIATE_REVOCATION_TIMEOUT_MS) {
         throw new AppleTokenRevocationError('INVALID_CONFIGURATION');
+    }
+    const clients = new Map([[clientId, { vault, appleTokens }]]);
+    if (additionalClients.length > 1) throw new AppleTokenRevocationError('INVALID_CONFIGURATION');
+    for (const client of additionalClients) {
+        if (!/^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/u.test(client.clientId) || client.clientId.length > 255
+            || clients.has(client.clientId) || typeof client.vault?.decrypt !== 'function'
+            || typeof client.appleTokens?.revoke !== 'function') throw new AppleTokenRevocationError('INVALID_CONFIGURATION');
+        clients.set(client.clientId, { vault: client.vault, appleTokens: client.appleTokens });
     }
 
     async function purgeExpired(connection: PoolConnection, batchSize: number, accountId?: string): Promise<number> {
@@ -99,10 +110,11 @@ export function createAppleTokenRevocationWorker({ database, vault, appleTokens,
             if (affectedRows(claim, 1) === 0) continue;
             try {
                 assertActive();
-                if (row.client_id !== clientId) throw new AppleTokenRevocationError('INVALID_RESULT');
-                const token = vault.decrypt(row);
+                const client = clients.get(row.client_id);
+                if (!client) throw new AppleTokenRevocationError('INVALID_RESULT');
+                const token = client.vault.decrypt(row);
                 assertActive();
-                await appleTokens.revoke(token);
+                await client.appleTokens.revoke(token);
                 assertActive();
             } catch {
                 assertActive();

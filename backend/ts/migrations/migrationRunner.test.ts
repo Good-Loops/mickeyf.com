@@ -30,6 +30,8 @@ class FakeConnection implements MigrationConnection {
 
     async query(sql: string, values: unknown[] = []): Promise<[unknown, unknown]> {
         this.calls.push({ sql, values });
+        if (sql.includes('COUNT(*)') && sql.includes('information_schema.TABLES')
+            && ['registration_authorizations', 'account_registration_profiles'].includes(String(values[0]))) return [[{ tableCount: 0 }], []];
         return [this.resultFactory(sql, values), []];
     }
 
@@ -210,6 +212,8 @@ test('plan is read-only, configures short waits, and releases its advisory lock'
             '0016_create_apple_provider_tokens',
             '0017_create_apple_auth_revocations',
             '0018_add_apple_session_provenance',
+            '0019_create_registration_authorizations',
+            '0020_create_account_registration_profiles',
         ],
         recoverable: [],
     });
@@ -828,9 +832,9 @@ test('Apple revocation applies only its two explicit effects in order and accept
     const result = await applyMigrations(connection, migrations, settings, {
         allowedEffectKinds: ['add-apple-revocations', 'add-apple-session-provenance'],
     });
-    assert.deepEqual(result.pending, []);
+    assert.deepEqual(result.pending, migrations.slice(18).map(({ version }) => version));
     assert.deepEqual(connection.calls.filter(({ sql }) => sql === migrations[16].sql || sql === migrations[17].sql)
-        .map(({ sql }) => sql), migrations.slice(16).map(({ sql }) => sql));
+        .map(({ sql }) => sql), migrations.slice(16, 18).map(({ sql }) => sql));
     assert.ok(revocations.verifications.includes('watermark'));
     assert.ok(revocations.verifications.includes('provenance'));
 });
