@@ -226,15 +226,9 @@ export function createProviderAuthFlow({ attempts, accounts, clients, enabled = 
                     if (verified.identity.email === undefined) return { ok: false, reason: 'INVALID_EMAIL' };
                     const token = await exchangeAppleToken();
                     const result = await accounts.create!(verified.identity, (input.userName as string).trim(), token, context);
-                    if (!result.created && (result.reason === 'ALREADY_LINKED' || result.reason === 'DUPLICATE_USER')) {
-                        // Another tab may have finished registration meanwhile.
-                        // Only this verified provider subject, never its email,
-                        // can resolve that race to the existing account.
-                        const account = await accounts.find(verified.identity);
-                        if (account && token !== undefined) await accounts.saveAppleToken!(account, verified.identity, token);
-                        return account ? verifiedAccountResult(account, verified.identity)
-                            : { ok: false, reason: result.reason };
-                    }
+                    // Only creation commits this preflight's privacy profile. A collision,
+                    // including another tab's successful signup, must use a fresh login;
+                    // resolving it here could return an existing public account instead.
                     return result.created ? verifiedAccountResult(result.account, verified.identity)
                         : { ok: false, reason: result.reason };
                 }

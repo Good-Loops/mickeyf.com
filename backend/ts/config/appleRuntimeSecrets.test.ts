@@ -171,11 +171,20 @@ test('the overall deadline stops an uncooperative metadata fetch and prevents se
     assert.equal(f.calls[0].options?.signal?.aborted, true);
 });
 
-test('the overall deadline includes a stalled response stream and never returns a lifecycle after late completion', async () => {
+test('the overall deadline includes a stalled response stream and never returns a lifecycle after late completion', async context => {
+    context.mock.timers.enable({ apis: ['setTimeout'] });
     let cancelled = false;
-    const body = new ReadableStream<Uint8Array>({ cancel() { cancelled = true; } });
+    const reading = deferred<void>();
+    const body = new ReadableStream<Uint8Array>({
+        pull() { reading.resolve(); return new Promise<void>(() => {}); },
+        cancel() { cancelled = true; },
+    }, { highWaterMark: 0 });
     const f = fixture(url => url.includes('apple-signing') ? new Response(body, { headers: { 'content-type': 'application/json' } }) : undefined);
-    await assert.rejects(loadAppleRuntimeLifecycle(environment, { ...f, timeoutMs: 15 }), failure);
+    const rejected = assert.rejects(loadAppleRuntimeLifecycle(environment, { ...f, timeoutMs: 10_000 }), failure);
+    // Expire the deadline during the stalled read without racing CI scheduling to reach it in 15 ms.
+    await reading.promise;
+    context.mock.timers.tick(10_000);
+    await rejected;
     assert.equal(cancelled, true);
     assert.equal(f.calls.length, 3);
     assert.equal(f.calls[0].options?.signal?.aborted, true);

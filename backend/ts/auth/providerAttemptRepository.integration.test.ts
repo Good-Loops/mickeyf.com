@@ -12,7 +12,7 @@ import { WEB_SESSION_COOKIE } from '../security/sessionCookie';
 import { createAccountSession, revokeAccountSession } from './accountSessionRepository';
 import mysql, { type Connection, type Pool, type PoolConnection, type QueryOptions, type ResultSetHeader, type RowDataPacket } from 'mysql2/promise';
 import { deleteAccount } from '../accounts/accountDeletionRepository';
-import { findProviderAccount, linkProviderAccount, persistProviderCredential } from '../accounts/providerAccountRepository';
+import { createProviderAccount, findProviderAccount, linkProviderAccount, persistProviderCredential } from '../accounts/providerAccountRepository';
 import { createAppleTokenRepository, type StoredAppleToken } from '../accounts/appleTokenRepository';
 import { loadMigrationConfig } from '../config/migrationConfig';
 import { submitP4VegaScore } from '../leaderboards/p4VegaScoreRepository';
@@ -186,6 +186,81 @@ test('stores hashed bindings with database-clock expiry and preserves every acco
     }
     assert.deepEqual(await snapshotAccountData(), original);
 });
+
+for (const timing of ['before-preflight', 'during-proof'] as const) {
+test(`minor signup rejects a public legacy account created ${timing}, including competing completion`, async () => {
+    const userName = `minor-collision-${timing}`;
+    let existing = timing === 'before-preflight' ? await createAccount(userName) : undefined;
+    const origin = 'https://minor-signup.example.test';
+    const context = await createProviderAuthContextReader({ database,
+        sessionSecret: randomBytes(32).toString('base64url'), allowedOrigins: [origin] })({
+        method: 'POST', headers: { origin, 'content-type': 'application/json' }, signedCookies: {},
+    }, 'begin');
+    assert.ok(context);
+    const registration = createRegistrationAuthorization(database, loadRegistrationPolicy({
+        REGISTRATION_ENABLED: 'true', REGISTRATION_POLICY_REVIEWED: 'true',
+        REGISTRATION_POLICY_VERSION: 'synthetic-collision',
+        REGISTRATION_COUNTRY_RULES: '{"ZZ":{"parentRequiredBelow":15}}',
+    }));
+    const decision = await registration.begin(context, { country: 'ZZ', ageBand: 'minor', policyVersion: 'synthetic-collision' });
+    assert.equal(decision.allowed, true);
+    const key = generateKeyPairSync('rsa', { modulusLength: 2048 });
+    const audience = 'synthetic-minor-collision';
+    const nowSeconds = Math.floor(Date.now() / 1000);
+    const verifier = createProviderTokenVerifier({ googleAudience: audience }, {
+        now: () => nowSeconds * 1000,
+        fetch: async () => new Response(JSON.stringify({ keys: [{
+            ...key.publicKey.export({ format: 'jwk' }), kid: 'minor-collision-key', alg: 'RS256', use: 'sig',
+        }] })),
+    });
+    let releaseProof!: () => void;
+    let proofStarted!: () => void;
+    const proofGate = new Promise<void>(resolve => { releaseProof = resolve; });
+    const started = new Promise<void>(resolve => { proofStarted = resolve; });
+    let profileWrites = 0;
+    const flow = createProviderAuthFlow({ enabled: true, signupEnabled: true, registration,
+        clients: { 'google-web': { provider: 'google', verifier: { async verify(...args) {
+            proofStarted(); await proofGate; return verifier.verify(...args);
+        } } } },
+        attempts: { create: value => createProviderAttempt(database, value),
+            consume: (state, binding, client, action) => consumeProviderAttempt(database, state, binding, client, action) },
+        accounts: { find: identity => findProviderAccount(database, identity),
+            link: async () => { assert.fail('signup must not link an existing account'); },
+            create: (identity, name, _token, value) => createProviderAccount(database, identity, name,
+                async (connection, created) => { profileWrites++; await registration.consume(connection, value!, created.accountId); }),
+        },
+    });
+    const sign = (nonce: string) => jwt.sign({ sub: userName, nonce, iat: nowSeconds - 10, exp: nowSeconds + 300,
+        email: `${userName}@gmail.com`, email_verified: true }, key.privateKey,
+    { algorithm: 'RS256', keyid: 'minor-collision-key', audience, issuer: 'https://accounts.google.com' });
+    const challenge = await flow.begin(context, { clientKey: 'google-web', action: 'signup' });
+    assert.ok(challenge.ok);
+    const input = { clientKey: 'google-web', action: 'signup', state: challenge.state,
+        idToken: sign(challenge.nonce), userName: `${userName}-new` };
+    const completions = Promise.all([flow.complete(context, input), flow.complete(context, input)]);
+    await Promise.race([started, completions.then(() => { throw new Error('Expected provider proof before completion'); })]);
+    let original: Record<string, RowDataPacket[]>;
+    try {
+        if (!existing) existing = await createAccount(userName);
+        original = await snapshotAccountData();
+    } finally { releaseProof(); }
+    const results = await completions;
+    assert.deepEqual(results.map(result => result.ok ? result.type : result.reason).sort(), ['ALREADY_LINKED', 'INVALID_ATTEMPT']);
+    assert.equal(profileWrites, 0, 'signup cannot claim that it applied the minor privacy profile');
+    assert.deepEqual(await snapshotAccountData(), original!);
+    assert.deepEqual((await administrator.query<RowDataPacket[]>(
+        'SELECT * FROM account_registration_profiles WHERE account_uuid = ?', [existing!.accountId]))[0], [],
+    'unverified preflight must not silently reclassify the existing account');
+    assert.deepEqual((await administrator.query<RowDataPacket[]>(
+        'SELECT * FROM account_sessions WHERE account_uuid = ?', [existing!.accountId]))[0], []);
+    await registration.assertAvailable(context);
+    const login = await flow.begin(context, { clientKey: 'google-web', action: 'login' });
+    assert.ok(login.ok);
+    assert.deepEqual(await flow.complete(context, { clientKey: 'google-web', action: 'login', state: login.state,
+        idToken: sign(login.nonce) }), { ok: true, type: 'account-verified', account: { ...existing!, userName } },
+    'a fresh ordinary login remains independent of the rejected signup promise');
+});
+}
 
 for (const provider of ['google', 'apple'] as const) {
 test(`real HTTP and SQL register ${provider} after preflight and require fresh proof for deletion`, async () => {

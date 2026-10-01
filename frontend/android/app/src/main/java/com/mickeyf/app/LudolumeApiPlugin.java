@@ -1,19 +1,18 @@
 package com.mickeyf.app;
 
+import android.app.Activity;
+import android.app.AlertDialog;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
 import com.getcapacitor.PluginMethod;
 import com.getcapacitor.annotation.CapacitorPlugin;
-import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
-import java.nio.ByteBuffer;
-import java.nio.charset.CodingErrorAction;
-import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import okhttp3.Cookie;
 import okhttp3.OkHttpClient;
 import okhttp3.Request;
@@ -27,6 +26,8 @@ public final class LudolumeApiPlugin extends Plugin {
     private static final OkHttpClient client = new OkHttpClient.Builder().followRedirects(false).followSslRedirects(false)
         .retryOnConnectionFailure(false).callTimeout(30, TimeUnit.SECONDS).build();
     private static LudolumeSessionStore sessions;
+    private static final AtomicLong sessionGeneration = new AtomicLong();
+    private boolean recoveryDialogShowing;
 
     @PluginMethod
     public void nativeRequest(PluginCall call) {
@@ -36,7 +37,12 @@ public final class LudolumeApiPlugin extends Plugin {
             call.reject("Unsupported native API request.", "INVALID_REQUEST");
             return;
         }
+        long generation = sessionGeneration.get();
         requests.execute(() -> {
+            if (generation != sessionGeneration.get()) {
+                call.reject("Saved sign-in changed. Please try again.", "CANCELLED");
+                return;
+            }
             try {
                 if (sessions == null) sessions = new LudolumeSessionStore(getContext().getApplicationContext());
                 Request.Builder authenticated = request.newBuilder();
@@ -45,31 +51,60 @@ public final class LudolumeApiPlugin extends Plugin {
                 try (Response response = client.newCall(authenticated.build()).execute()) {
                     if (response.code() >= 300 && response.code() < 400 || response.body() == null
                         || response.body().contentLength() > LudolumeApiPolicy.MAX_RESPONSE) throw new IOException();
-                    ByteArrayOutputStream bytes = new ByteArrayOutputStream();
+                    String text;
                     try (InputStream input = response.body().byteStream()) {
-                        byte[] chunk = new byte[8192];
-                        for (int count; (count = input.read(chunk)) != -1;) {
-                            if (count > LudolumeApiPolicy.MAX_RESPONSE - bytes.size()) throw new IOException();
-                            bytes.write(chunk, 0, count);
-                        }
+                        text = LudolumeResponseBody.read(input, response.body().contentLength());
                     }
-                    String text = StandardCharsets.UTF_8.newDecoder().onMalformedInput(CodingErrorAction.REPORT)
-                        .decode(ByteBuffer.wrap(bytes.toByteArray())).toString();
                     // Only a fully received response may change the private session.
-                    for (Cookie updated : Cookie.parseAll(request.url(), response.headers())) sessions.update(updated);
                     if (confirmedSignOut(request.url().encodedPath(), response.code(), text)) {
                         sessions.clear();
                         LudolumeIdentityPlugin.clearCredentialState(getContext());
-                    }
+                    } else sessions.updateFromResponse(Cookie.parseAll(request.url(), response.headers()));
                     JSObject result = new JSObject();
                     result.put("status", response.code());
                     result.put("body", text);
                     call.resolve(result);
                 }
+            } catch (LudolumeSessionStore.CorruptSessionException ignored) {
+                sessions = null;
+                call.reject("Saved sign-in needs local recovery.", "SESSION_RECOVERY_REQUIRED");
+                offerLocalSessionRecovery();
             } catch (Exception ignored) {
                 // No request, provider, cookie, key or transport diagnostics reach JavaScript/logs.
                 call.reject("Unable to complete the native API request.", "UNAVAILABLE");
             }
+        });
+    }
+
+    private void offerLocalSessionRecovery() {
+        Activity activity = getActivity();
+        if (activity == null) return;
+        activity.runOnUiThread(() -> {
+            if (activity.isFinishing() || activity.isDestroyed() || recoveryDialogShowing) return;
+            recoveryDialogShowing = true;
+            new AlertDialog.Builder(activity).setTitle("Reset saved sign-in?")
+                .setMessage("Saved sign-in on this device cannot be read. Reset it and sign in again. "
+                    + "This does not confirm server logout. Unsaved form entries will be cleared.")
+                .setNegativeButton("Cancel", (dialog, which) -> recoveryDialogShowing = false)
+                .setOnCancelListener(dialog -> recoveryDialogShowing = false)
+                .setPositiveButton("Reset saved sign-in", (dialog, which) -> requests.execute(() -> {
+                    boolean recovered = false;
+                    try {
+                        sessions = LudolumeSessionStore.resetCorrupt(getContext().getApplicationContext());
+                        sessionGeneration.incrementAndGet();
+                        LudolumeIdentityPlugin.clearCredentialState(getContext());
+                        recovered = true;
+                    } catch (Exception ignored) { /* A transient failure never authorizes erasing saved data. */ }
+                    final boolean success = recovered;
+                    activity.runOnUiThread(() -> {
+                        recoveryDialogShowing = false;
+                        if (activity.isFinishing() || activity.isDestroyed()) return;
+                        if (success) getBridge().getWebView().reload();
+                        else new AlertDialog.Builder(activity).setTitle("Saved sign-in unavailable")
+                            .setMessage("Recovery could not be confirmed. Please try again later.")
+                            .setPositiveButton("OK", null).show();
+                    });
+                })).show();
         });
     }
 

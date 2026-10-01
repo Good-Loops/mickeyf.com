@@ -513,7 +513,7 @@ test('signup email and username conflicts never become implicit login or linking
         f.controls.creation = { created: false, reason };
         const { input } = await f.challenge('signup');
         assert.deepEqual(await f.flow.complete(f.context, input), { ok: false, reason });
-        assert.deepEqual(f.events, ['consume', 'committed', 'verify', 'signup', ...(reason === 'DUPLICATE_USER' ? ['find'] : [])]);
+        assert.deepEqual(f.events, ['consume', 'committed', 'verify', 'signup']);
         assert.equal(f.linkedTargets.length, 0);
     }
     const f = await fixture(undefined, true);
@@ -578,14 +578,15 @@ test('Google continuation fails closed for disabled signup, missing email, exhau
     }
 });
 
-test('concurrent signup resolves only the already-created verified subject, never an email match', async () => {
+test('signup collisions cannot substitute an existing account for the preflight privacy profile', async () => {
     for (const reason of ['ALREADY_LINKED', 'DUPLICATE_USER'] as const) {
         const f = await fixture(undefined, true);
         f.controls.creation = { created: false, reason };
         const { input } = await f.challenge('signup');
-        assert.deepEqual(await f.flow.complete(f.context, input), { ok: true, type: 'account-verified', account });
-        assert.deepEqual(f.events, ['consume', 'committed', 'verify', 'signup', 'find']);
+        assert.deepEqual(await f.flow.complete(f.context, input), { ok: false, reason });
+        assert.deepEqual(f.events, ['consume', 'committed', 'verify', 'signup']);
         assert.equal(f.linkedTargets.length, 0);
+        assert.deepEqual(await f.flow.complete(f.context, input), { ok: false, reason: 'INVALID_ATTEMPT' });
         const missing = await f.challenge('signup');
         f.controls.foundAccount = null;
         assert.deepEqual(await f.flow.complete(f.context, missing.input), { ok: false, reason });
@@ -861,17 +862,15 @@ test('Apple signup, link and deletion hand the exchanged token to their atomic r
     }
 });
 
-test('a concurrent Apple signup can log in only after saving its newly exchanged token to the resolved subject', async () => {
+test('a concurrent Apple signup cannot log in or save credentials to an existing account', async () => {
     for (const foundAccount of [null, account]) {
         const f = await fixture(undefined, true, true);
         f.controls.creation = { created: false, reason: 'ALREADY_LINKED' };
         f.controls.foundAccount = foundAccount;
         const { input } = await f.appleChallenge('signup');
-        assert.deepEqual(await f.flow.complete(f.context, input), foundAccount
-            ? { ok: true, type: 'account-verified', account, ...appleSession } : { ok: false, reason: 'ALREADY_LINKED' });
-        assert.deepEqual(f.events, ['consume', 'committed', 'verify', 'exchange', 'verify', 'signup', 'find',
-            ...(foundAccount ? ['save-token'] : [])]);
-        assert.equal(f.savedAppleTokens.length, foundAccount ? 1 : 0);
+        assert.deepEqual(await f.flow.complete(f.context, input), { ok: false, reason: 'ALREADY_LINKED' });
+        assert.deepEqual(f.events, ['consume', 'committed', 'verify', 'exchange', 'verify', 'signup']);
+        assert.equal(f.savedAppleTokens.length, 0);
         assert.deepEqual(f.linkedTargets, []);
     }
 });
@@ -971,16 +970,15 @@ test('browser Apple rejects cross-client state, request-selected redirect and wr
     }
 });
 
-test('browser Apple account collisions never link by email and only an existing verified subject can resolve the race', async () => {
+test('browser Apple account collisions reject signup even when the verified subject already exists', async () => {
     for (const foundAccount of [null, account]) {
         const f = await fixture(undefined, true, true, 'apple-web');
         f.controls.creation = { created: false, reason: 'DUPLICATE_USER' };
         f.controls.foundAccount = foundAccount;
         const { input } = await f.appleChallenge('signup');
         const result = await f.flow.complete(f.context, input);
-        assert.deepEqual(result, foundAccount ? { ok: true, type: 'account-verified', account, ...appleSession }
-            : { ok: false, reason: 'DUPLICATE_USER' });
+        assert.deepEqual(result, { ok: false, reason: 'DUPLICATE_USER' });
         assert.deepEqual(f.linkedTargets, []);
-        assert.equal(f.savedAppleTokens.length, foundAccount ? 1 : 0);
+        assert.equal(f.savedAppleTokens.length, 0);
     }
 });
