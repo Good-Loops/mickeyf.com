@@ -78,6 +78,8 @@ function fixture(features: Features = {}) {
         } },
     } };
     clients['google-web'] = clients['google-test'];
+    clients['google-ios'] = clients['google-test'];
+    clients['google-android'] = clients['google-test'];
     clients['apple-ios'] = { provider: 'apple', deletionEnabled: features.appleDeletionEnabled,
         ...(features.appleTokens ? { appleTokens: { async exchangeCode(code: string) {
             assert.equal(code, 'accepted-code');
@@ -779,5 +781,30 @@ test('old-schema metadata works only for verified password users with provider a
                     appleLinked: false, appleDeletionEnabled: false } : { error: 'UNAVAILABLE' });
             assert.equal(response.headers.get('set-cookie'), null);
         }, enabled, { missingProviderTable: true });
+    }
+});
+
+
+test('native Google deletion uses the configured client and preserves the global deletion gate', async () => {
+    for (const clientKey of ['google-ios', 'google-android']) {
+        for (const enabled of [false, true]) {
+            await withServer(async (base, { state }) => {
+                const headers = { origin: 'capacitor://localhost', cookie: signedCookie(issueSessionToken(account, secret).token, 'session') };
+                const begin = await post(base, 'begin', { action: 'delete', clientKey }, headers);
+                assert.equal(begin.status, enabled ? 200 : 503);
+                if (!enabled) { assert.deepEqual(state.events, []); return; }
+                const challenge = await begin.json();
+                const input = { action: 'delete', clientKey, state: challenge.state, idToken: 'accepted-token', confirmation: 'DELETE' };
+                const complete = await post(base, 'complete', input, headers);
+                assert.equal(complete.status, 200);
+                assert.deepEqual(await complete.json(), { success: true, deleted: true });
+                assert.ok(complete.headers.getSetCookie().some(value => value.startsWith('session=')
+                    && value.includes('Expires=Thu, 01 Jan 1970')));
+                assert.deepEqual(state.rememberMe, []);
+                const replay = await post(base, 'complete', input, headers);
+                assert.equal(replay.status, 400);
+                assert.equal(replay.headers.get('set-cookie'), null);
+            }, true, { accountDeletionEnabled: enabled, withJournal: true });
+        }
     }
 });

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test, { after } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { createViteTestServer } from '../testSupport/createViteTestServer.mjs';
+import { createAuthApi } from '../services/authApi.ts';
 
 const frontendRoot = fileURLToPath(new URL('../../', import.meta.url));
 const key = '__authFeedbackFixture';
@@ -85,6 +86,29 @@ test('ordinary login still displays success feedback without a lifetime signal',
     assert.equal(f.render().isAuthenticated, true);
     assert.equal(f.feedback.length, 1);
     assert.equal(f.feedback[0].title, 'Welcome back!');
+});
+
+for (const [label, session, remainsAuthenticated] of [
+    ['malformed', {}, true],
+    ['confirmed anonymous', { loggedIn: false }, false],
+]) test(`failed logout with a ${label} session check preserves the last confirmed state`, async t => {
+    let logoutAttempted = false;
+    t.mock.method(console, 'error', () => {});
+    const api = createAuthApi('https://api.example.test', async url => {
+        if (url.endsWith('/api/users')) return Response.json({ success: true, user_name: 'Player' });
+        if (url.endsWith('/auth/logout')) {
+            logoutAttempted = true;
+            return new Response(null, { status: 503 });
+        }
+        assert.ok(url.endsWith('/auth/verify-token'));
+        return Response.json(logoutAttempted ? session : { loggedIn: true, user_name: 'Player' });
+    });
+    const f = fixture(t, (operation, args) => api[operation](...args));
+    assert.equal(await f.render().login('Player', 'synthetic', { showFeedback: false }), true);
+    await f.render().logout();
+    assert.equal(f.render().isAuthenticated, remainsAuthenticated);
+    assert.equal(f.render().userName, remainsAuthenticated ? 'Player' : null);
+    assert.equal(f.feedback.at(-1).title, 'Sign-out could not be confirmed');
 });
 
 test('a newer logout still owns authentication when old login feedback is cancelled', async t => {

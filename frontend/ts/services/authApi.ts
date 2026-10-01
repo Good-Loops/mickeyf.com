@@ -69,6 +69,16 @@ function hasKeys(value: Record<string, unknown>, keys: string): boolean {
     return Object.keys(value).sort().join(',') === keys;
 }
 
+function readSessionResponse(value: unknown): VerificationResponse | null {
+    if (!isRecord(value)) return null;
+    if (value.loggedIn === false && hasKeys(value, 'loggedIn')) return { loggedIn: false };
+    if (value.loggedIn === true && hasKeys(value, 'loggedIn,user_name')
+        && typeof value.user_name === 'string' && value.user_name.length > 0) {
+        return { loggedIn: true, user_name: value.user_name };
+    }
+    return null;
+}
+
 function validProviderInput(input: unknown): input is ProviderAuthenticationInput {
     if (!isRecord(input) || Object.keys(input).some(key => !['action', 'clientKey', 'rememberMe', 'password', 'userName', 'confirmation'].includes(key))
         || typeof input.clientKey !== 'string' || !/^[a-z0-9_-]{1,64}$/.test(input.clientKey)) return false;
@@ -87,7 +97,7 @@ function validProviderInput(input: unknown): input is ProviderAuthenticationInpu
 }
 
 function supportsProviderSignup(clientKey: string): boolean {
-    return clientKey === 'google-web' || clientKey === 'apple-ios';
+    return ['google-web', 'google-ios', 'google-android', 'apple-ios'].includes(clientKey);
 }
 
 function validProviderUserName(value: unknown): value is string {
@@ -263,7 +273,9 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
         if (!response.ok) {
             throw new Error(`HTTP error ${response.status}`);
         }
-        return response.json();
+        const session = readSessionResponse(await response.json());
+        if (!session) throw new Error('Could not confirm the session.');
+        return session;
     }
 
     async function invalidateRevokedAppleSession(): Promise<VerificationResponse | null> {
@@ -314,16 +326,9 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
         });
         if (!response.ok) throw new Error(`HTTP error ${response.status}`);
 
-        const result: unknown = await response.json();
-        if (result && typeof result === 'object' && 'loggedIn' in result) {
-            if (result.loggedIn === false && Object.keys(result).length === 1) return { loggedIn: false };
-            if (result.loggedIn === true && 'user_name' in result
-                && typeof result.user_name === 'string' && result.user_name.length > 0
-                && Object.keys(result).length === 2) {
-                return { loggedIn: true, user_name: result.user_name };
-            }
-        }
-        throw new Error('Could not confirm the renewed session.');
+        const session = readSessionResponse(await response.json());
+        if (!session) throw new Error('Could not confirm the renewed session.');
+        return session;
     }
 
     async function logoutRequest(): Promise<void> {

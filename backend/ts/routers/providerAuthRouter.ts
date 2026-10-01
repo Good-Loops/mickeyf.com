@@ -109,7 +109,9 @@ export function createProviderAuthRouter(options: ProviderAuthRouterOptions): Ro
         && Object.prototype.hasOwnProperty.call(options.clients, 'apple-ios') && options.clients['apple-ios'].provider === 'apple'
         && options.clients['apple-ios'].deletionEnabled === true
         && options.clients['apple-ios'].appleTokens !== undefined && options.appleTokenRepository !== undefined;
-    const canDeleteWith = (clientKey: unknown) => clientKey === 'google-web' ? googleDeletionEnabled
+    const canDeleteWith = (clientKey: unknown) => typeof clientKey === 'string'
+        && ['google-web', 'google-ios', 'google-android'].includes(clientKey)
+        ? googleDeletionEnabled && Object.prototype.hasOwnProperty.call(options.clients, clientKey) && options.clients[clientKey].provider === 'google'
         : clientKey === 'apple-ios' && appleDeletionEnabled;
     const limiterOptions = {
         windowMs: 15 * 60 * 1000, standardHeaders: 'draft-8' as const,

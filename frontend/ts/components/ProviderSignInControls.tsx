@@ -66,10 +66,13 @@ export function ProviderSignInButtons({ clients, action, busyClient, disabled, o
             {action === 'link' && <h2 className="provider-sign-in__heading" id={headingId}>Link a sign-in method</h2>}
             <div className="provider-sign-in__buttons">
                 {choices.map(client => (
-                    <button className="provider-sign-in__button" type="button" key={client.clientKey}
+                    <button className={`provider-sign-in__button${client.provider === 'google' && client.platform !== 'web' ? ' provider-sign-in__button--native-google' : ''}`}
+                        type="button" key={client.clientKey}
                         disabled={disabled || busyClient !== null} onClick={() => onSelect(client)}>
                         {busyClient === client.clientKey ? 'Please wait…'
-                            : client.provider === 'google' ? 'google'
+                            : client.provider === 'google' ? (client.platform === 'web' ? 'google'
+                                : <img src={`/images/google-sign-in-${client.platform}.png`} alt="Sign in with Google"
+                                    height="44" width={client.platform === 'ios' ? 188 : 198} />)
                                 : action === 'link' ? 'Apple account' : 'Continue with Apple'}
                     </button>
                 ))}

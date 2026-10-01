@@ -39,9 +39,23 @@ test('workflow keeps the default and protected branch gate for both upload modes
     const workflow = await readFile(new URL('../.github/workflows/ios-build.yml', import.meta.url), 'utf8');
     assert.match(workflow, /upload_testflight:[\s\S]*?type: boolean\s+required: false\s+default: false/);
     assert.match(workflow, /upload_distribution:[\s\S]*?type: choice\s+required: true\s+default: internal-only\s+options:\s+- internal-only\s+- app-store-draft/);
-    assert.match(workflow, /if: \$\{\{ inputs\.upload_testflight && github\.ref == 'refs\/heads\/improvement\/clean-code-sweep' \}\}/);
+    assert.match(workflow, /if: \$\{\{ !inputs\.compile_only && inputs\.upload_testflight && github\.ref == 'refs\/heads\/improvement\/clean-code-sweep' \}\}/);
     assert.match(workflow, /environment: ios-testflight/);
     assert.match(workflow, /IOS_UPLOAD_DISTRIBUTION: \$\{\{ inputs\.upload_distribution \|\| 'internal-only' \}\}/);
     assert.match(workflow, /node --test \.\.\/scripts\/ios-testflight\.test\.mjs/);
     assert.match(workflow, /Remove signing material and signed outputs\s+if: \$\{\{ always\(\) \}\}\s+run: node \.\.\/scripts\/ios-testflight\.mjs cleanup/);
+});
+
+
+test('compile-only workflow uses existing hosted tools and never signs or uploads app artifacts', async () => {
+    const workflow = await readFile(new URL('../.github/workflows/ios-build.yml', import.meta.url), 'utf8');
+    assert.match(workflow, /compile_only:[\s\S]*?type: boolean\s+required: false\s+default: false/);
+    assert.match(workflow, /Package simulator app\s+if: \$\{\{ !inputs\.compile_only \}\}/);
+    assert.match(workflow, /Upload simulator app\s+if: \$\{\{ !inputs\.compile_only \}\}/);
+    const android = workflow.slice(workflow.indexOf('  android:'));
+    assert.match(android, /inputs\.compile_only && !inputs\.upload_testflight/);
+    assert.match(android, /runs-on: ubuntu-24.04/);
+    assert.match(android, /licenses\/android-sdk-license/);
+    assert.doesNotMatch(android, /^\s*sdkmanager\s|secrets\.|upload-artifact@|setup-gradle@|actions\/cache@/m);
+    assert.match(android, /:app:testReleaseUnitTest :app:lintRelease :app:assembleRelease/);
 });

@@ -108,6 +108,8 @@ async function fixture(currentAccount?: ProviderAccount, newActions = false, app
     const clients: Record<string, ProviderAuthClient> = {
         'google-native': { provider: 'google', verifier }, 'apple-native': { provider: 'apple', verifier, appleTokens },
         'google-web': { provider: 'google', verifier },
+        'google-ios': { provider: 'google', verifier },
+        'google-android': { provider: 'google', verifier },
         'apple-ios': { provider: 'apple', verifier, appleTokens, signupEnabled: appleActions, deletionEnabled: appleActions },
     };
     Object.setPrototypeOf(clients, { inherited: clients['google-native'] });
@@ -457,6 +459,35 @@ test('explicit signup creates only after purpose-bound consumption and verified 
     assert.equal(f.created[0].accountId, null);
     assert.deepEqual(f.verifiedNonces, [result.nonce]);
     assert.deepEqual(await f.flow.complete(f.context, input), { ok: false, reason: 'INVALID_ATTEMPT' });
+});
+
+test('an explicit Google signup denial survives another enabled provider and blocks old signup challenges', async () => {
+    const f = await fixture(undefined, true, true);
+    const { input } = await f.challenge('signup');
+    const flow = createProviderAuthFlow({ ...f.dependencies, enabled: true, signupEnabled: true,
+        clients: { ...f.clients, 'google-web': { ...f.clients['google-web'], signupEnabled: false } } });
+    f.events.length = 0;
+    assert.deepEqual(await flow.begin(f.context, { clientKey: 'google-web', action: 'signup' }),
+        { ok: false, reason: 'UNAVAILABLE' });
+    assert.deepEqual(await flow.complete(f.context, input), { ok: false, reason: 'UNAVAILABLE' });
+    assert.deepEqual(f.events, []);
+    assert.deepEqual(f.createdAccounts, []);
+    assert.ok((await flow.begin(f.context, { clientKey: 'apple-ios', action: 'signup' })).ok);
+});
+
+test('Google signup denial preserves returning login but cannot turn an unknown login into signup', async () => {
+    for (const known of [false, true]) {
+        const f = await fixture(undefined, true, true);
+        f.controls.foundAccount = known ? account : null;
+        const flow = createProviderAuthFlow({ ...f.dependencies, enabled: true, signupEnabled: true,
+            clients: { ...f.clients, 'google-web': { ...f.clients['google-web'], signupEnabled: false } } });
+        const challenge = await flow.begin(f.context, { clientKey: 'google-web', action: 'login' });
+        assert.ok(challenge.ok);
+        const result = await flow.complete(f.context, { clientKey: 'google-web', action: 'login', state: challenge.state,
+            idToken: signedToken(challenge.nonce, 'google', { email: 'new-player@gmail.com', email_verified: true }) });
+        assert.deepEqual(result, known ? { ok: true, type: 'account-verified', account } : { ok: false, reason: 'NOT_LINKED' });
+        assert.deepEqual(f.createdAccounts, []);
+    }
 });
 
 test('signup rejects malformed metadata and never accepts email, password or account proof from the client', async () => {
@@ -841,5 +872,40 @@ test('a concurrent Apple signup can log in only after saving its newly exchanged
             ...(foundAccount ? ['save-token'] : [])]);
         assert.equal(f.savedAppleTokens.length, foundAccount ? 1 : 0);
         assert.deepEqual(f.linkedTargets, []);
+    }
+});
+
+
+test('native Google signup and deletion retain single-use actions and explicit account-policy opt-ins', async () => {
+    for (const clientKey of ['google-ios', 'google-android']) {
+        const disabled = await fixture();
+        assert.deepEqual(await disabled.flow.begin(disabled.context, { clientKey, action: 'signup' }), { ok: false, reason: 'UNAVAILABLE' });
+        for (const action of ['signup', 'delete'] as const) {
+            const f = await fixture(action === 'delete' ? account : undefined, true);
+            const started = await f.flow.begin(f.context, { clientKey, action });
+            assert.ok(started.ok);
+            const input = { clientKey, action, state: started.state,
+                idToken: signedToken(started.nonce, 'google', { email: 'new-player@gmail.com', email_verified: true }),
+                ...(action === 'signup' ? { userName: 'new-player' } : { confirmation: 'DELETE' }) };
+            assert.deepEqual(await f.flow.complete(f.context, input), action === 'signup'
+                ? { ok: true, type: 'account-verified', account } : { ok: true, type: 'deleted' });
+            assert.deepEqual(await f.flow.complete(f.context, input), { ok: false, reason: 'INVALID_ATTEMPT' });
+            assert.equal((action === 'signup' ? f.createdAccounts : f.deletedAccounts).length, 1);
+        }
+    }
+});
+
+test('native Google signup never merges an existing email or retries an occupied username implicitly', async () => {
+    for (const clientKey of ['google-ios', 'google-android']) {
+        const f = await fixture(undefined, true);
+        f.controls.creation = { created: false, reason: 'DUPLICATE_USER' };
+        f.controls.foundAccount = null;
+        const started = await f.flow.begin(f.context, { clientKey, action: 'signup' });
+        assert.ok(started.ok);
+        const input = { clientKey, action: 'signup', state: started.state, userName: 'new-player',
+            idToken: signedToken(started.nonce, 'google', { email: 'new-player@gmail.com', email_verified: true }) };
+        assert.deepEqual(await f.flow.complete(f.context, input), { ok: false, reason: 'DUPLICATE_USER' });
+        assert.deepEqual(f.linkedTargets, []);
+        assert.deepEqual(await f.flow.complete(f.context, input), { ok: false, reason: 'INVALID_ATTEMPT' });
     }
 });

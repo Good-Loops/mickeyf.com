@@ -1,14 +1,16 @@
 import type { SweetAlertOptions } from 'sweetalert2';
-import type { AppleProviderCredential, ProviderAuthenticationChallenge, ProviderCredential } from './authApi.ts';
+import type { ProviderAuthenticationChallenge, ProviderCredential } from './authApi.ts';
 
 export type PublicProviderClient = Readonly<
     | { clientKey: 'google-web'; provider: 'google'; platform: 'web'; clientId: string; signup?: true }
+    | { clientKey: 'google-ios'; provider: 'google'; platform: 'ios'; clientId: string; signup?: true }
+    | { clientKey: 'google-android'; provider: 'google'; platform: 'android'; clientId: string; signup?: true }
     | { clientKey: 'apple-ios'; provider: 'apple'; platform: 'ios'; clientId: string; signup?: true }
 >;
 
 type NativeIdentity = {
     getCapabilities(): Promise<unknown>;
-    signIn(input: { provider: 'apple'; clientId: string; nonce: string; state: string }): Promise<unknown>;
+    signIn(input: { provider: 'apple' | 'google'; clientId: string; nonce: string; state: string }): Promise<unknown>;
     cancel(): Promise<unknown>;
 };
 type GoogleIdentity = {
@@ -50,9 +52,11 @@ function readClient(value: unknown): PublicProviderClient | null {
     if (!isRecord(value) || !['clientId,clientKey,platform,provider', 'clientId,clientKey,platform,provider,signup'].includes(Object.keys(value).sort().join(','))
         || ('signup' in value && value.signup !== true)
         || typeof value.clientId !== 'string' || !/^[\x21-\x7e]{1,255}$/.test(value.clientId)) return null;
-    if (value.clientKey === 'google-web' && value.provider === 'google' && value.platform === 'web') {
+    if (value.provider === 'google' && ((value.clientKey === 'google-web' && value.platform === 'web')
+        || (value.clientKey === 'google-ios' && value.platform === 'ios')
+        || (value.clientKey === 'google-android' && value.platform === 'android'))) {
         return Object.freeze({ clientKey: value.clientKey, provider: value.provider, platform: value.platform, clientId: value.clientId,
-            ...(value.signup === true ? { signup: true as const } : {}) });
+            ...(value.signup === true ? { signup: true as const } : {}) }) as PublicProviderClient;
     }
     if (value.clientKey === 'apple-ios' && value.provider === 'apple' && value.platform === 'ios') {
         return Object.freeze({ clientKey: value.clientKey, provider: value.provider, platform: value.platform, clientId: value.clientId,
@@ -101,13 +105,13 @@ async function cancellable<Result>(operation: (signal: AbortSignal) => Promise<R
 export function createProviderClient(dependencies: ProviderClientDependencies) {
     const { apiBase, fetchRequest, identity, alert, document: dom } = dependencies;
     const web = !dependencies.isNative && dependencies.platform === 'web';
-    const ios = dependencies.isNative && dependencies.platform === 'ios';
+    const native = dependencies.isNative && ['ios', 'android'].includes(dependencies.platform);
     let googleLoad: Promise<GoogleIdentity> | undefined;
     let acquiring = false;
     let nativeCancellationUnconfirmed = false;
 
     async function getAvailableProviderClients(): Promise<PublicProviderClient[]> {
-        if (!web && !ios) return [];
+        if (!web && !native) return [];
         try {
             return await cancellable(async signal => {
                 const response = await fetchRequest(`${apiBase}/auth/providers/config`, {
@@ -116,14 +120,15 @@ export function createProviderClient(dependencies: ProviderClientDependencies) {
                 if (!response.ok) return [];
                 const result: unknown = await response.json();
                 if (!isRecord(result) || Object.keys(result).join(',') !== 'clients'
-                    || !Array.isArray(result.clients) || result.clients.length > 2) return [];
+                    || !Array.isArray(result.clients) || result.clients.length > 4) return [];
                 const clients = result.clients.map(readClient);
                 if (clients.some(client => client === null)
                     || new Set(clients.map(client => client?.clientKey)).size !== clients.length) return [];
                 if (web) return clients.filter((client): client is PublicProviderClient => client?.platform === 'web');
                 const capabilities = await identity.getCapabilities();
-                return isRecord(capabilities) && capabilities.apple === true
-                    ? clients.filter((client): client is PublicProviderClient => client?.platform === 'ios') : [];
+                return isRecord(capabilities)
+                    ? clients.filter((client): client is PublicProviderClient => client !== null
+                        && client.platform === dependencies.platform && capabilities[client.provider] === true) : [];
             }, IO_TIMEOUT_MS);
         } catch { return []; }
     }
@@ -239,10 +244,10 @@ export function createProviderClient(dependencies: ProviderClientDependencies) {
         });
     }
 
-    async function nativeCredential(client: PublicProviderClient, challenge: ProviderAuthenticationChallenge, signal: AbortSignal): Promise<AppleProviderCredential> {
+    async function nativeCredential(client: PublicProviderClient, challenge: ProviderAuthenticationChallenge, signal: AbortSignal): Promise<ProviderCredential> {
         const capabilities = await identity.getCapabilities();
         if (signal.aborted) throw new ProviderCredentialError('CANCELLED');
-        if (!isRecord(capabilities) || capabilities.apple !== true) throw new ProviderCredentialError('UNAVAILABLE');
+        if (!isRecord(capabilities) || capabilities[client.provider] !== true) throw new ProviderCredentialError('UNAVAILABLE');
         const abort = () => {
             // cancel() has no request ID: its delayed effect must not reach a newer sign-in.
             nativeCancellationUnconfirmed = true;
@@ -254,9 +259,13 @@ export function createProviderClient(dependencies: ProviderClientDependencies) {
         };
         signal.addEventListener('abort', abort, { once: true });
         try {
-            const result = await identity.signIn({ provider: 'apple', clientId: client.clientId,
+            const result = await identity.signIn({ provider: client.provider, clientId: client.clientId,
                 nonce: challenge.nonce, state: challenge.state });
             if (signal.aborted) throw new ProviderCredentialError('CANCELLED');
+            if (client.provider === 'google') {
+                if (!isRecord(result) || Object.keys(result).join(',') !== 'identityToken') throw new ProviderCredentialError('UNAVAILABLE');
+                return readToken(result.identityToken);
+            }
             if (!isRecord(result) || Object.keys(result).sort().join(',') !== 'authorizationCode,identityToken'
                 || typeof result.authorizationCode !== 'string' || result.authorizationCode.length < 1
                 || result.authorizationCode.length > 4096 || /[^\x21-\x7e]/.test(result.authorizationCode)) {
@@ -273,8 +282,8 @@ export function createProviderClient(dependencies: ProviderClientDependencies) {
     async function acquireProviderCredential(client: PublicProviderClient, challenge: ProviderAuthenticationChallenge,
         signal: AbortSignal, inline?: { host: HTMLElement; onReady?: () => void }): Promise<ProviderCredential> {
         const selected = readClient(client);
-        if (!selected || acquiring || (selected.platform === 'web' ? !web : !ios)
-            || (selected.platform === 'ios' && nativeCancellationUnconfirmed)
+        if (!selected || acquiring || (selected.platform === 'web' ? !web : !native || selected.platform !== dependencies.platform)
+            || (selected.platform !== 'web' && nativeCancellationUnconfirmed)
             || (inline && selected.clientKey !== 'google-web')
             || !isRecord(challenge) || Object.keys(challenge).sort().join(',') !== 'expiresInSeconds,nonce,state'
             || typeof challenge.state !== 'string' || !RANDOM_VALUE.test(challenge.state)

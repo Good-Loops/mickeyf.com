@@ -153,3 +153,13 @@ test('cancellation is quiet and unknown errors cannot inject provider details or
     assert.match(providerSignInErrorMessage('INVALID_ATTEMPT', 'login'), /start again/);
     assert.match(providerSignInErrorMessage('RATE_LIMITED', 'link'), /15 minutes/);
 });
+
+
+test('native Google uses an explicit button and signup stays capability gated on both platforms', () => {
+    for (const platform of ['ios', 'android']) {
+        const client = { ...google, clientKey: `google-${platform}`, platform };
+        assert.match(markup({ clients: [client] }), /alt="Sign in with Google"/);
+        assert.equal(markup({ clients: [client], action: 'signup' }), '');
+        assert.match(markup({ clients: [{ ...client, signup: true }], action: 'signup' }), /alt="Sign in with Google"/);
+    }
+});

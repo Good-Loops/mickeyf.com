@@ -40,7 +40,7 @@ export default function ManageAccount() {
             .then(([availableMethods, clients]) => {
                 if (!active) return;
                 setMethods(availableMethods);
-                setDeletionClient(clients.find(client => client.clientKey === 'google-web'
+                setDeletionClient(clients.find(client => client.provider === 'google'
                     ? availableMethods?.googleLinked && availableMethods.googleDeletionEnabled
                     : client.clientKey === 'apple-ios' && availableMethods?.appleLinked && availableMethods.appleDeletionEnabled));
                 setMethodsLoading(false);

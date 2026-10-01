@@ -86,13 +86,13 @@ test('discovery selects only server-configured web Google or capability-enabled 
         assert.equal(f.scripts.length, 0);
         assert.equal(f.controls.popup, null);
         const request = f.calls.find(call => Array.isArray(call));
-        if (expected.length) {
+        if (platform !== 'web' || !isNative) {
             assert.equal(request[1], 'https://api.example.test/auth/providers/config');
             assert.equal(request[2].method, 'GET');
             assert.equal(request[2].credentials, 'include');
             assert.equal(request[2].body, undefined);
         } else assert.deepEqual(f.calls, []);
-        assert.equal(f.calls.includes('capabilities'), platform === 'ios');
+        assert.equal(f.calls.includes('capabilities'), platform === 'ios' || platform === 'android');
     }
 });
 
@@ -476,3 +476,47 @@ test('unsupported platform, malformed client/challenge and pre-abort never start
     assert.equal(f.scripts.length, 0);
     assert.equal(f.controls.popup, null);
 });
+
+
+for (const platform of ['ios', 'android']) {
+    const nativeGoogle = { ...google, clientKey: `google-${platform}`, platform };
+    const nativeFixture = (identity = {}) => fixture({ platform, isNative: true,
+        fetchRequest: async () => Response.json({ clients: [google, apple,
+            { ...google, clientKey: 'google-ios', platform: 'ios' },
+            { ...google, clientKey: 'google-android', platform: 'android' }] }),
+        identity: { getCapabilities: async () => ({ google: true, apple: false }),
+            signIn: async () => ({ identityToken: token }), ...identity } });
+    test(`${platform} Google discovery and acquisition use only the matching native capability`, async () => {
+        let received;
+        const f = nativeFixture({ signIn: async input => { received = input; return { identityToken: token }; } });
+        assert.deepEqual(await f.client.getAvailableProviderClients(), [nativeGoogle]);
+        assert.equal(await f.client.acquireProviderCredential(nativeGoogle, challenge, signal()), token);
+        assert.deepEqual(received, { provider: 'google', clientId: google.clientId, nonce: challenge.nonce, state: challenge.state });
+        assert.deepEqual(f.scripts, []);
+        await rejectsCode(f.client.acquireProviderCredential({ ...nativeGoogle, platform: platform === 'ios' ? 'android' : 'ios' }, challenge, signal()), 'UNAVAILABLE');
+    });
+    test(`${platform} Google rejects capability loss and malformed or over-disclosing bridge responses`, async () => {
+        for (const result of [null, {}, { identityToken: '' }, { identityToken: token, authorizationCode },
+            { identityToken: token, email: 'private@example.test' }]) {
+            await rejectsCode(nativeFixture({ signIn: async () => result }).client.acquireProviderCredential(nativeGoogle, challenge, signal()), 'UNAVAILABLE');
+        }
+        await rejectsCode(nativeFixture({ getCapabilities: async () => ({ google: false }) })
+            .client.acquireProviderCredential(nativeGoogle, challenge, signal()), 'UNAVAILABLE');
+    });
+    test(`${platform} Google blocks retry until cancellation acknowledgement and discards late credentials`, async () => {
+        let finish, acknowledge;
+        const f = nativeFixture({ signIn: () => new Promise(resolve => { finish = resolve; }),
+            cancel: () => new Promise(resolve => { acknowledge = resolve; }) });
+        const controller = new AbortController();
+        const pending = f.client.acquireProviderCredential(nativeGoogle, challenge, controller.signal);
+        await nextTurn(); controller.abort();
+        await rejectsCode(pending, 'CANCELLED');
+        await rejectsCode(f.client.acquireProviderCredential(nativeGoogle, challenge, signal()), 'UNAVAILABLE');
+        finish({ identityToken: token }); await nextTurn();
+        await rejectsCode(f.client.acquireProviderCredential(nativeGoogle, challenge, signal()), 'UNAVAILABLE');
+        acknowledge(); await nextTurn();
+        const retry = f.client.acquireProviderCredential(nativeGoogle, challenge, signal());
+        await nextTurn(); finish({ identityToken: token });
+        assert.equal(await retry, token);
+    });
+}

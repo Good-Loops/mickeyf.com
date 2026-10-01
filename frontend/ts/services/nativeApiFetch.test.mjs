@@ -164,7 +164,8 @@ test('Apple identity bridge is registered in the App target but remains explicit
     assert.match(native, /registerPluginInstance\(LudolumeIdentityPlugin\(\)\)/);
     assert.match(info, /<key>LudolumeAppleSignInEnabled<\/key>\s*<false\/>/);
     assert.match(identity, /forInfoDictionaryKey: "LudolumeAppleSignInEnabled"\) as\? Bool == true/);
-    assert.match(identity, /call\.resolve\(\["apple": appleSignInEnabled, "google": false\]\)/);
+    assert.match(identity, /call\.resolve\(\["apple": appleSignInEnabled, "google": googleConfiguration != nil\]\)/);
+    assert.match(info, /<key>LudolumeGoogleSignInEnabled<\/key>\s*<false\/>/);
     for (const method of ['getCapabilities', 'getCredentialState', 'signIn', 'cancel']) {
         assert.ok(identity.includes(`CAPPluginMethod(name: "${method}", returnType: CAPPluginReturnPromise)`));
     }
@@ -180,7 +181,7 @@ test('Apple identity bridge is registered in the App target but remains explicit
 test('Apple credential state remains gated, bounded and separate from sign-in', async () => {
     // Structural contract only; these checks do not compile or exercise AuthenticationServices.
     const identity = await readFile(new URL('../../ios/App/App/LudolumeIdentityPlugin.swift', import.meta.url), 'utf8');
-    const method = identity.slice(identity.indexOf('@objc func getCredentialState('), identity.indexOf('@objc func signIn('));
+    const method = identity.slice(identity.indexOf('@objc func getCredentialState('), identity.indexOf('private var googleConfiguration:'));
     assert.match(method, /guard appleSignInEnabled else/);
     assert.match(method, /let userId = call\.getString\("userId"\), !userId\.isEmpty/);
     assert.match(method, /userId\.utf8\.count <= 255/);

@@ -2,6 +2,7 @@ import AuthenticationServices
 import Capacitor
 import Foundation
 import UIKit
+import GoogleSignIn
 
 @objc(LudolumeIdentityPlugin)
 public class LudolumeIdentityPlugin: CAPPlugin, CAPBridgedPlugin {
@@ -14,6 +15,7 @@ public class LudolumeIdentityPlugin: CAPPlugin, CAPBridgedPlugin {
         CAPPluginMethod(name: "cancel", returnType: CAPPluginReturnPromise)
     ]
     private var pendingRequest: LudolumeAppleAuthorization?
+    private var pendingGoogle: LudolumeGoogleAuthorization?
     private var credentialObservers: [NSObjectProtocol] = []
 
     private var appleSignInEnabled: Bool {
@@ -39,7 +41,7 @@ public class LudolumeIdentityPlugin: CAPPlugin, CAPBridgedPlugin {
     }
 
     @objc func getCapabilities(_ call: CAPPluginCall) {
-        call.resolve(["apple": appleSignInEnabled, "google": false])
+        call.resolve(["apple": appleSignInEnabled, "google": googleConfiguration != nil])
     }
 
     @objc func getCredentialState(_ call: CAPPluginCall) {
@@ -74,8 +76,48 @@ public class LudolumeIdentityPlugin: CAPPlugin, CAPBridgedPlugin {
         }
     }
 
+    private var googleConfiguration: GIDConfiguration? {
+        guard Bundle.main.object(forInfoDictionaryKey: "LudolumeGoogleSignInEnabled") as? Bool == true,
+              let clientId = Bundle.main.object(forInfoDictionaryKey: "GIDClientID") as? String,
+              let serverId = Bundle.main.object(forInfoDictionaryKey: "GIDServerClientID") as? String,
+              Self.isGoogleClientId(clientId), Self.isGoogleClientId(serverId), clientId != serverId,
+              let urlTypes = Bundle.main.object(forInfoDictionaryKey: "CFBundleURLTypes") as? [[String: Any]],
+              urlTypes.contains(where: { ($0["CFBundleURLSchemes"] as? [String])?.contains(
+                clientId.split(separator: ".").reversed().joined(separator: ".")) == true }) else { return nil }
+        return GIDConfiguration(clientID: clientId, serverClientID: serverId)
+    }
+
+    private static func isGoogleClientId(_ value: String) -> Bool {
+        value.utf8.count <= 255 && value.range(of: "^[A-Za-z0-9_-]+\\.apps\\.googleusercontent\\.com$",
+                                               options: .regularExpression) != nil
+    }
+
+    private func signInWithGoogle(_ call: CAPPluginCall) {
+        guard let configuration = googleConfiguration, call.getString("clientId") == configuration.serverClientID,
+              let nonce = call.getString("nonce"), Self.isChallengeValue(nonce),
+              let state = call.getString("state"), Self.isChallengeValue(state) else {
+            call.reject("Native Google sign-in is unavailable.", "UNAVAILABLE")
+            return
+        }
+        guard pendingRequest == nil, pendingGoogle == nil else {
+            call.reject("A native sign-in request is already active.", "BUSY")
+            return
+        }
+        guard let presenter = bridge?.viewController, presenter.presentedViewController == nil,
+              presenter.viewIfLoaded?.window?.windowScene?.activationState == .foregroundActive else {
+            call.reject("Native sign-in cannot be presented.", "UNAVAILABLE")
+            return
+        }
+        let operation = LudolumeGoogleAuthorization(call: call) { [weak self] completed in
+            if self?.pendingGoogle === completed { self?.pendingGoogle = nil }
+        }
+        pendingGoogle = operation
+        operation.start(presenter: presenter, configuration: configuration, nonce: nonce)
+    }
+
     @objc func signIn(_ call: CAPPluginCall) {
         DispatchQueue.main.async {
+            if call.getString("provider") == "google" { self.signInWithGoogle(call); return }
             guard self.appleSignInEnabled else {
                 call.reject("Native provider sign-in is unavailable.", "UNAVAILABLE")
                 return
@@ -88,7 +130,7 @@ public class LudolumeIdentityPlugin: CAPPlugin, CAPBridgedPlugin {
                 call.reject("Invalid native sign-in request.", "INVALID_REQUEST")
                 return
             }
-            guard self.pendingRequest == nil else {
+            guard self.pendingRequest == nil, self.pendingGoogle == nil else {
                 call.reject("A native sign-in request is already active.", "BUSY")
                 return
             }
@@ -108,6 +150,7 @@ public class LudolumeIdentityPlugin: CAPPlugin, CAPBridgedPlugin {
 
     @objc func cancel(_ call: CAPPluginCall) {
         DispatchQueue.main.async {
+            if let google = self.pendingGoogle { google.cancel(acknowledgement: call); return }
             self.pendingRequest?.cancel()
             call.resolve()
         }
@@ -207,5 +250,54 @@ private final class LudolumeAppleAuthorization: NSObject, ASAuthorizationControl
         controller.delegate = nil
         controller.presentationContextProvider = nil
         onComplete(self)
+    }
+}
+
+
+// Google's SDK owns OAuth state/PKCE; the backend binds the ID token to its nonce.
+// The SDK has no cancellation API: hold the lock until its sheet actually finishes.
+private final class LudolumeGoogleAuthorization {
+    private var call: CAPPluginCall?
+    private var cancellations: [CAPPluginCall] = []
+    private let onComplete: (LudolumeGoogleAuthorization) -> Void
+
+    init(call: CAPPluginCall, onComplete: @escaping (LudolumeGoogleAuthorization) -> Void) {
+        self.call = call
+        self.onComplete = onComplete
+    }
+
+    func start(presenter: UIViewController, configuration: GIDConfiguration, nonce: String) {
+        let sdk = GIDSignIn.sharedInstance
+        sdk.configuration = configuration
+        // Always request a fresh nonce-bound identity; never restore a cached Google session.
+        sdk.signOut()
+        sdk.signIn(withPresenting: presenter, hint: nil, additionalScopes: nil, nonce: nonce) { [self] result, error in
+            defer {
+                // Ludolume needs only the ID token; retain no Google access/refresh credentials.
+                sdk.signOut()
+                self.call = nil
+                onComplete(self)
+                cancellations.forEach { $0.resolve() }
+                cancellations.removeAll()
+            }
+            guard let call = self.call else { return }
+            if let error = error as NSError? {
+                let cancelled = error.domain == kGIDSignInErrorDomain && error.code == GIDSignInErrorCode.canceled.rawValue
+                call.reject(cancelled ? "Native sign-in was cancelled." : "Native sign-in failed.",
+                            cancelled ? "CANCELLED" : "UNAVAILABLE")
+                return
+            }
+            guard let token = result?.user.idToken?.tokenString, !token.isEmpty, token.utf8.count <= 16_384 else {
+                call.reject("Invalid native sign-in response.", "INVALID_RESPONSE")
+                return
+            }
+            call.resolve(["identityToken": token])
+        }
+    }
+
+    func cancel(acknowledgement: CAPPluginCall) {
+        call?.reject("Native sign-in was cancelled.", "CANCELLED")
+        call = nil
+        cancellations.append(acknowledgement)
     }
 }

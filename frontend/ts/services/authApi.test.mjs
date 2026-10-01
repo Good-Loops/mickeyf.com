@@ -111,12 +111,28 @@ for (const result of [{ loggedIn: false }, { loggedIn: true, user_name: 'Player'
     });
 }
 
-test('renewal never converts an unexpected response into authentication or sign-out', async () => {
-    for (const result of [null, {}, [], { loggedIn: true }, { loggedIn: true, user_name: '' },
-        { loggedIn: false, error: 'UNAVAILABLE' }, { loggedIn: true, user_name: 'Player', token: 'not-allowed' }]) {
+for (const [method, message] of [
+    ['verifyRequest', 'Could not confirm the session.'],
+    ['renewRequest', 'Could not confirm the renewed session.'],
+]) test(`${method} never converts an unexpected response into authentication or sign-out`, async () => {
+    for (const result of [null, {}, [], true, 'signed out', { loggedIn: true }, { loggedIn: true, user_name: '' },
+        { loggedIn: 'false', user_name: 'Player' }, { loggedIn: 1, user_name: 'Player' },
+        { loggedIn: true, user_name: null }, { loggedIn: false, user_name: 'Player' },
+        { loggedIn: false, error: 'UNAVAILABLE' }, { loggedIn: false, revocationPending: true },
+        { loggedIn: true, user_name: 'Player', token: 'not-allowed' }]) {
         const api = createAuthApi(apiBase, async () => Response.json(result));
-        await assert.rejects(api.renewRequest(), { message: 'Could not confirm the renewed session.' });
+        await assert.rejects(api[method](), { message });
     }
+});
+
+test('a malformed session proof cannot confirm password login, and a later valid login can recover', async () => {
+    let malformed = true;
+    const api = createAuthApi(apiBase, async url => Response.json(url.endsWith('/api/users')
+        ? { success: true, user_name: 'Player' }
+        : { loggedIn: malformed ? 'false' : true, user_name: 'Player' }));
+    await assert.rejects(api.loginRequest(credentials), { message: 'Could not confirm the session.' });
+    malformed = false;
+    assert.deepEqual(await api.loginRequest(credentials), { success: true, user_name: 'Player' });
 });
 
 test('login cannot report success when the next request has no matching session', async () => {
@@ -642,12 +658,17 @@ test('provider completion requires the exact success shape for the requested act
 });
 
 test('provider login never succeeds without an exact matching saved-cookie verification', async () => {
-    for (const session of [null, {}, [], { loggedIn: false }, { loggedIn: true, user_name: 'Other' },
-        { loggedIn: true, user_name: 'Player', token: 'private' }]) {
+    for (const [session, error] of [
+        [null, 'UNAVAILABLE'], [{}, 'UNAVAILABLE'], [[], 'UNAVAILABLE'],
+        [{ loggedIn: 'false', user_name: 'Player' }, 'UNAVAILABLE'],
+        [{ loggedIn: false }, 'SESSION_NOT_ESTABLISHED'],
+        [{ loggedIn: true, user_name: 'Other' }, 'SESSION_NOT_ESTABLISHED'],
+        [{ loggedIn: true, user_name: 'Player', token: 'private' }, 'UNAVAILABLE'],
+    ]) {
         const api = createAuthApi(apiBase, async url => Response.json(url.endsWith('/begin') ? providerChallenge
             : url.endsWith('/complete') ? { success: true, user_name: 'Player' } : session));
         assert.deepEqual(await api.runProviderAuthentication(providerInput, async () => providerToken),
-            { error: 'SESSION_NOT_ESTABLISHED' });
+            { error });
     }
     for (const failureAt of ['/begin', '/complete', '/auth/verify-token']) {
         for (const malformedJson of [false, true]) {

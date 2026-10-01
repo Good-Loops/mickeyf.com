@@ -13,9 +13,9 @@ const nowMs = Date.UTC(2026, 8, 14);
 const nonce = 'n'.repeat(43);
 const key = generateKeyPairSync('rsa', { modulusLength: 2048 });
 
-function verifierFixture() {
+function verifierFixture(environment: Record<string, string | undefined> = enabledEnvironment) {
     const calls: string[] = [];
-    const config = loadProviderAuthConfig(enabledEnvironment, {
+    const config = loadProviderAuthConfig(environment, {
         now: () => nowMs,
         fetch: async url => {
             calls.push(String(url));
@@ -47,9 +47,9 @@ test('provider configuration requires exact opt-in and ignores unused identifier
     }
 });
 
-test('enabled configuration requires a supported client and rejects premature native Google or Apple web setup', () => {
+test('enabled configuration requires a supported client and rejects premature Apple web setup', () => {
     assert.throws(() => loadProviderAuthConfig({ PROVIDER_AUTH_ENABLED: 'true' }), /requires GOOGLE_WEB_CLIENT_ID or APPLE_IOS_BUNDLE_ID/);
-    for (const extra of [{ GOOGLE_IOS_CLIENT_ID: googleWebId }, { APPLE_WEB_CLIENT_ID: 'com.example.web' },
+    for (const extra of [{ APPLE_WEB_CLIENT_ID: 'com.example.web' },
         { APPLE_WEB_SERVICES_ID: 'com.example.web' }]) {
         assert.throws(() => loadProviderAuthConfig({ ...enabledEnvironment, ...extra }), /unsupported/);
     }
@@ -174,6 +174,71 @@ test('successfully loaded lifecycle advertises Apple without enabling signup or 
     assert.equal(config.appleTokenLifecycle, undefined);
 });
 
+const appleAccountEnvironment = { ...runtimeEnvironment, PROVIDER_APPLE_SIGNUP_ENABLED: 'true',
+    PROVIDER_APPLE_DELETION_ENABLED: 'true', ACCOUNT_DELETION_ENABLED: 'true',
+    APPLE_MAINTENANCE_HTTP_ENABLED: 'true' };
+
+test('Apple account opt-ins require every lifecycle prerequisite and deletion before signup', () => {
+    for (const name of ['APPLE_IOS_BUNDLE_ID', 'APPLE_TOKEN_RUNTIME_SECRETS_ENABLED', 'APPLE_TOKEN_LIFECYCLE_ENABLED',
+        'APPLE_NOTIFICATIONS_ENABLED', 'APPLE_MAINTENANCE_HTTP_ENABLED', 'ACCOUNT_DELETION_ENABLED',
+        'PROVIDER_APPLE_DELETION_ENABLED']) {
+        assert.throws(() => loadProviderAuthConfig({ ...appleAccountEnvironment, [name]: undefined }), /Apple/);
+    }
+});
+
+test('Apple signup becomes available only after runtime credentials load and never enables Google signup', async () => {
+    for (const googleConfigured of [false, true]) {
+        const env = { ...appleAccountEnvironment, GOOGLE_WEB_CLIENT_ID: googleConfigured ? googleWebId : undefined };
+        const config = loadProviderAuthConfig(env);
+        assert.equal(config.signupEnabled, true, 'requested signup requires the schema gate even before secrets load');
+        assert.equal(config.clients['apple-ios'].signupEnabled, false);
+        assert.equal(config.clients['apple-ios'].deletionEnabled, false);
+        assert.equal(config.publicClients.some(client => client.provider === 'apple'), false);
+        const lifecycle = { clientId: appleIosId, client: {}, repository: {} } as AppleTokenLifecycle;
+        const prepared = await prepareRuntimeProviderAuth(config, env, { loadLifecycle: async () => lifecycle });
+        assert.equal(prepared.clients['apple-ios'].signupEnabled, true);
+        assert.equal(prepared.clients['apple-ios'].deletionEnabled, true);
+        assert.deepEqual(prepared.publicClients.find(client => client.provider === 'apple'),
+            { clientKey: 'apple-ios', provider: 'apple', platform: 'ios', clientId: appleIosId, signup: true });
+        if (googleConfigured) {
+            assert.equal(prepared.clients['google-web'].signupEnabled, false);
+            assert.equal('signup' in prepared.publicClients.find(client => client.provider === 'google')!, false);
+        }
+    }
+});
+
+test('Apple deletion can remain enabled while signup is off and non-exact opt-ins remain off', async () => {
+    const lifecycle = { clientId: appleIosId, client: {}, repository: {} } as AppleTokenLifecycle;
+    for (const value of [undefined, '', 'false', 'TRUE', '1', ' true ']) {
+        const env = { ...appleAccountEnvironment, PROVIDER_APPLE_SIGNUP_ENABLED: value };
+        const prepared = await prepareRuntimeProviderAuth(loadProviderAuthConfig(env), env, { loadLifecycle: async () => lifecycle });
+        assert.equal(prepared.signupEnabled, false);
+        assert.equal(prepared.clients['apple-ios'].signupEnabled, false);
+        assert.equal(prepared.clients['apple-ios'].deletionEnabled, true);
+        assert.equal('signup' in prepared.publicClients.find(client => client.provider === 'apple')!, false);
+        const disabledEnv = { ...env, PROVIDER_APPLE_DELETION_ENABLED: value };
+        const disabled = await prepareRuntimeProviderAuth(loadProviderAuthConfig(disabledEnv), disabledEnv,
+            { loadLifecycle: async () => lifecycle });
+        assert.equal(disabled.clients['apple-ios'].deletionEnabled, false);
+    }
+});
+
+test('failed Apple credentials cannot advertise requested signup or disturb independently enabled Google signup', async () => {
+    const env = { ...appleAccountEnvironment, PROVIDER_GOOGLE_SIGNUP_ENABLED: 'true' };
+    const config = loadProviderAuthConfig(env);
+    let reports = 0;
+    const prepared = await prepareRuntimeProviderAuth(config, env, {
+        loadLifecycle: async () => { throw new Error('synthetic private failure'); },
+        reportUnavailable: () => { reports++; },
+    });
+    assert.equal(reports, 1);
+    assert.equal(prepared.clients['apple-ios'].signupEnabled, false);
+    assert.equal(prepared.clients['apple-ios'].deletionEnabled, false);
+    assert.deepEqual(prepared.publicClients, [
+        { clientKey: 'google-web', provider: 'google', platform: 'web', clientId: googleWebId, signup: true },
+    ]);
+});
+
 test('runtime hydration rejects wrong audiences or missing notifications without losing Google', async () => {
     for (const env of [runtimeEnvironment, { ...runtimeEnvironment, APPLE_NOTIFICATIONS_ENABLED: 'false' }]) {
         const config = loadProviderAuthConfig(env);
@@ -195,5 +260,43 @@ test('ordinary or disabled provider startup performs no runtime secret fetch', a
         assert.equal(await prepareRuntimeProviderAuth(config, env, {
             loadLifecycle: async () => { assert.fail('Unexpected secret access'); },
         }), config);
+    }
+});
+
+
+const googleIosId = 'syntheticIos.apps.googleusercontent.com';
+const googleAndroidId = 'syntheticAndroid.apps.googleusercontent.com';
+test('native Google discovery requires distinct configured presenters and a server audience', () => {
+    const env = { ...enabledEnvironment, GOOGLE_IOS_CLIENT_ID: googleIosId, GOOGLE_ANDROID_CLIENT_ID: googleAndroidId };
+    for (const name of ['GOOGLE_IOS_CLIENT_ID', 'GOOGLE_ANDROID_CLIENT_ID']) {
+        for (const value of ['', 'bad client', googleWebId]) {
+            assert.throws(() => loadProviderAuthConfig({ ...env, [name]: value }), /Google|GOOGLE/);
+        }
+    }
+    assert.throws(() => loadProviderAuthConfig({ ...env, GOOGLE_WEB_CLIENT_ID: undefined }), /server audience/);
+    assert.throws(() => loadProviderAuthConfig({ ...env, GOOGLE_ANDROID_CLIENT_ID: googleIosId }), /distinct/);
+    const config = loadProviderAuthConfig(env);
+    assert.deepEqual(config.publicClients.slice(1, 3), [
+        { clientKey: 'google-ios', platform: 'ios', provider: 'google', clientId: googleWebId },
+        { clientKey: 'google-android', platform: 'android', provider: 'google', clientId: googleWebId },
+    ]);
+    assert.equal(config.signupEnabled, false);
+    for (const name of ['google-ios', 'google-android']) assert.equal(config.clients[name].signupEnabled, false);
+    const signup = loadProviderAuthConfig({ ...env, PROVIDER_GOOGLE_SIGNUP_ENABLED: 'true' });
+    assert.deepEqual(signup.publicClients.filter(client => client.provider === 'google').map(client => client.signup), [true, true, true]);
+});
+
+test('native Google verifies exact audience, presenter and nonce with cross-platform substitution rejected', async () => {
+    const { config, token } = verifierFixture({ ...enabledEnvironment,
+        GOOGLE_IOS_CLIENT_ID: googleIosId, GOOGLE_ANDROID_CLIENT_ID: googleAndroidId });
+    for (const [name, presenter, other] of [['google-ios', googleIosId, googleAndroidId], ['google-android', googleAndroidId, googleIosId]]) {
+        const verifier = config.clients[name].verifier;
+        assert.equal((await verifier.verify('google', token('google', { azp: presenter }), nonce)).verified, true);
+        for (const claims of [{}, { azp: googleWebId }, { azp: other }, { azp: presenter, aud: presenter },
+            { azp: presenter, aud: [googleWebId] }, { azp: presenter, nonce: 'different' }]) {
+            assert.deepEqual(await verifier.verify('google', token('google', claims), nonce),
+                { verified: false, reason: 'INVALID_PROVIDER_TOKEN' });
+        }
+        assert.equal((await config.clients['google-web'].verifier.verify('google', token('google', { azp: presenter }), nonce)).verified, false);
     }
 });

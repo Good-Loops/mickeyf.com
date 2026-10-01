@@ -57,7 +57,7 @@ function inputClient(input: unknown, clients: ReadonlyMap<string, ProviderAuthCl
 }
 
 function supportsPasswordlessAccounts(clientKey: string, client: ProviderAuthClient | undefined): boolean {
-    return clientKey === 'google-web' && client?.provider === 'google'
+    return ['google-web', 'google-ios', 'google-android'].includes(clientKey) && client?.provider === 'google'
         || clientKey === 'apple-ios' && client?.provider === 'apple';
 }
 
@@ -92,7 +92,7 @@ export function createProviderAuthFlow({ attempts, accounts, clients, enabled = 
         return [key, Object.freeze({ ...client })] as const;
     }));
     function signupAvailable(clientKey: string, client: ProviderAuthClient): boolean {
-        return signupEnabled && !!accounts.create && supportsPasswordlessAccounts(clientKey, client)
+        return signupEnabled && client.signupEnabled !== false && !!accounts.create && supportsPasswordlessAccounts(clientKey, client)
             && (client.provider !== 'apple' || client.signupEnabled === true);
     }
     function unavailableAction(action: ProviderAttemptAction, clientKey: string, client: ProviderAuthClient): Failure | null {

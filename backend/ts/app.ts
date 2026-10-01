@@ -110,8 +110,9 @@ async function startServer(): Promise<void> {
                 await verifyPasswordlessAccountSchema(pool);
             }
             if (runtimeConfig.providerAuth.enabled) {
-                const requiresExtendedAttempts = runtimeConfig.providerAuth.signupEnabled
-                    || (runtimeConfig.accountDeletionEnabled && runtimeConfig.providerAuth.clients['google-web'] !== undefined);
+                const requiresExtendedAttempts = providerAuth.signupEnabled
+                    || (runtimeConfig.accountDeletionEnabled && (providerAuth.clients['google-web'] !== undefined
+                        || providerAuth.clients['apple-ios']?.deletionEnabled === true));
                 await verifyProviderAuthReadiness(pool, requiresExtendedAttempts);
             }
             if (runtimeConfig.accountDeletionEnabled) {

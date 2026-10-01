@@ -46,6 +46,18 @@
         &:disabled { opacity: .55; cursor: wait; }
     }
 
+    // Preserve the aspect ratio and colors of Google's supplied platform artwork.
+    &__button--native-google {
+        flex: 0 1 auto;
+        padding: 0;
+        border: 0;
+        background: transparent;
+        min-width: 188px;
+
+        img { display: block; max-width: 100%; height: auto; }
+        &:hover:not(:disabled) { background: transparent; }
+    }
+
     &__feedback {
         margin-top: 1.2rem;
         overflow-wrap: anywhere;

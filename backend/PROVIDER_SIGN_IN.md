@@ -1,6 +1,38 @@
 # Google and Apple sign-in foundation
 
-## Status — 2026-09-21
+## October 1 continuation: audience and guarded Apple activation
+
+The owner now permits under-18 accounts and has withdrawn KWS as the selected
+provider. This supersedes the historical adult-only/KWS decision below. The
+minimal-data age-range, guardian authorization and minor-privacy flow still needs
+its concrete policy and implementation; a Google/Apple token is not evidence of
+age or parental consent. Keep public registration activation gated on that work.
+
+Source now supports separate, default-off `PROVIDER_APPLE_SIGNUP_ENABLED` and
+`PROVIDER_APPLE_DELETION_ENABLED` switches. Both accept only literal `true`.
+Apple account actions require the configured native bundle ID and enabled
+runtime-secret loading, token lifecycle, notifications, HTTP maintenance and
+account deletion. Signup additionally requires Apple deletion. Actual Apple
+signup/deletion capability remains false until runtime credentials load
+successfully; a credential outage leaves Google independently available.
+The existing maintenance configuration, SQL/journal readiness, pinned secret
+references and exact workload-identity checks still apply. Configuration is not
+proof that the deployed maintenance or notification path works.
+
+`PROVIDER_GOOGLE_SIGNUP_ENABLED` controls Google alone. Enabling Apple signup
+does not enable Google signup, including unknown-account login continuations or
+already-issued signup challenges. Apple deletion may stay available after new
+Apple signup is paused. Startup checks extended provider-attempt schema for an
+Apple-only deletion configuration as well as signup.
+
+No live flags, credentials, grants, SQL, provider console settings or native
+capabilities were changed. Native Google, Apple web and native Android provider
+support remain separate missing implementations; the existing source adapters
+are Google browser and Apple iOS. The native Info.plist capability remains off.
+Before activation, complete the agreed signup/privacy design, operational
+deletion/retention/notification acceptance and compatible signed-device checks.
+
+## Status - 2026-09-21
 
 Implemented backend identity verification, one-use attempts and an opt-in HTTP
 adapter connected to shared sessions; **not an enabled sign-in feature**.

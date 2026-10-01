@@ -27,7 +27,7 @@ function fixture({ completion = { success: true, user_name: 'New Player' },
     return { api, calls };
 }
 
-for (const clientKey of ['google-web', 'apple-ios']) {
+for (const clientKey of ['google-web', 'google-ios', 'google-android', 'apple-ios']) {
 test(`prepared ${clientKey} signup binds its action and challenge before choosing a username and stay-signed-in option`, async () => {
     for (const [rememberMe, expected] of [[undefined, false], [false, false], [true, true]]) {
         const { api, calls } = fixture();
@@ -92,17 +92,20 @@ test('prepared signup cannot become login/delete, and a validated completion con
         { error: 'INVALID_REQUEST' }, 'login does not silently become signup');
 });
 
-for (const clientKey of ['google-web', 'apple-ios']) {
+for (const clientKey of ['google-web', 'google-ios', 'google-android', 'apple-ios']) {
 test(`direct ${clientKey} signup sends no password or email and needs exact matching cookie-session proof`, async () => {
     const signup = { action: 'signup', clientKey, userName: 'New Player' };
-    const sessions = [null, {}, [], { loggedIn: false }, { loggedIn: true },
-        { loggedIn: true, user_name: 'Other Player' },
-        { loggedIn: true, user_name: 'New Player', token: 'private-token' },
-        { loggedIn: true, user_name: 'New Player', accountId: 'caller-account' }];
-    for (const session of sessions) {
+    const sessions = [
+        [null, 'UNAVAILABLE'], [{}, 'UNAVAILABLE'], [[], 'UNAVAILABLE'],
+        [{ loggedIn: false }, 'SESSION_NOT_ESTABLISHED'], [{ loggedIn: true }, 'UNAVAILABLE'],
+        [{ loggedIn: true, user_name: 'Other Player' }, 'SESSION_NOT_ESTABLISHED'],
+        [{ loggedIn: true, user_name: 'New Player', token: 'private-token' }, 'UNAVAILABLE'],
+        [{ loggedIn: true, user_name: 'New Player', accountId: 'caller-account' }, 'UNAVAILABLE'],
+    ];
+    for (const [session, error] of sessions) {
         const { api, calls } = fixture({ session });
         assert.deepEqual(await api.runProviderAuthentication({ ...signup, rememberMe: true }, async () => credentialFor(clientKey)),
-            { error: 'SESSION_NOT_ESTABLISHED' });
+            { error });
         assert.deepEqual(calls[0].body, { action: 'signup', clientKey });
         assert.deepEqual(calls[1].body, { ...signup, rememberMe: true, state: challenge.state, ...proofFor(clientKey) });
         assert.equal(calls.length, 3);
@@ -129,7 +132,7 @@ test('signup collision and email-authority failures are accepted only with their
     }
 });
 
-for (const clientKey of ['google-web', 'apple-ios']) {
+for (const clientKey of ['google-web', 'google-ios', 'google-android', 'apple-ios']) {
 test(`${clientKey} deletion posts only its fresh server challenge, token and literal destructive confirmation`, async () => {
     const deletion = { action: 'delete', clientKey, confirmation: 'DELETE' };
     const { api, calls } = fixture({ completion: { success: true, deleted: true } });
