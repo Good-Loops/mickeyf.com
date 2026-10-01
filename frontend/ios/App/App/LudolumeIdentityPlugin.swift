@@ -282,7 +282,7 @@ private final class LudolumeGoogleAuthorization {
             }
             guard let call = self.call else { return }
             if let error = error as NSError? {
-                let cancelled = error.domain == kGIDSignInErrorDomain && error.code == GIDSignInErrorCode.canceled.rawValue
+                let cancelled = error.domain == kGIDSignInErrorDomain && error.code == GIDSignInError.canceled.rawValue
                 call.reject(cancelled ? "Native sign-in was cancelled." : "Native sign-in failed.",
                             cancelled ? "CANCELLED" : "UNAVAILABLE")
                 return

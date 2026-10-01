@@ -12,6 +12,7 @@ import androidx.credentials.GetCredentialResponse;
 import androidx.credentials.exceptions.ClearCredentialException;
 import androidx.credentials.exceptions.GetCredentialCancellationException;
 import androidx.credentials.exceptions.GetCredentialException;
+import androidx.credentials.exceptions.NoCredentialException;
 import com.getcapacitor.JSObject;
 import com.getcapacitor.Plugin;
 import com.getcapacitor.PluginCall;
@@ -84,8 +85,10 @@ public final class LudolumeIdentityPlugin extends Plugin {
                             if (pending != operation) return;
                             if (operation.call != null) {
                                 boolean cancelled = error instanceof GetCredentialCancellationException;
-                                operation.call.reject(cancelled ? "Native sign-in was cancelled." : "Native sign-in failed.",
-                                    cancelled ? "CANCELLED" : "UNAVAILABLE");
+                                String message = cancelled ? "Native sign-in was cancelled."
+                                    : error instanceof NoCredentialException ? "No Google sign-in account is available."
+                                    : "Native sign-in failed.";
+                                operation.call.reject(message, cancelled ? "CANCELLED" : "UNAVAILABLE");
                             }
                             finish(operation);
                         }
