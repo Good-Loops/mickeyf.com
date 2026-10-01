@@ -31,7 +31,7 @@ Use the manual `ios-build.yml` compile-only mode on the existing GitHub-hosted m
 
 ## Android
 
-The app pins Credential Manager and its Play Services adapter to 1.6.0, Google ID to 1.2.1 and OkHttp to 5.5.0. The explicit Google button uses `GetSignInWithGoogleOption` with the server nonce. It does not use automatic sign-in, request extra authorization scopes or embed a client secret. Cancellation targets its own `CancellationSignal`; late callbacks cannot complete a later operation.
+The app pins Credential Manager and its Play Services adapter to 1.6.0, Google ID to 1.2.1 and OkHttp to 5.4.0. The 5.5.0 Android artifact requires compile SDK 37; 5.4.0 retains this project's API 36 / AGP 8.13 toolchain. The 5.5.0 hostname-canonicalization fix concerns malformed IP hosts, which the exact DNS-host allowlist rejects. The transport also retains its whole-call timeout, bounded responses, no redirects and no automatic retries. This compatibility pin requires ongoing advisory review; it is not a security exception or release acceptance. The explicit Google button uses `GetSignInWithGoogleOption` with the server nonce. It does not use automatic sign-in, request extra authorization scopes or embed a client secret. Cancellation targets its own `CancellationSignal`; late callbacks cannot complete a later operation.
 
 Verify or reuse a real Android OAuth client bound to `com.mickeyf.app` and the exact signing certificate. Configure its ID on the server. Set the public web audience in `res/values/provider_identity.xml` as `google_server_client_id`, then review enabling `ludolume_google_sign_in_enabled`. Both are currently empty/off. Debug, upload and Play signing certificates are distinct; never assume one client proves another build's presenter.
 

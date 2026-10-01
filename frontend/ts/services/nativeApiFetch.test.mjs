@@ -92,7 +92,7 @@ test('auth reconstruction and logout reuse the native store, never JS credential
     assert.equal(urls.filter((url) => url.endsWith('/api/users')).length, 1);
 });
 
-test('the native origin matches both build jobs and the plugin is included in the iOS target', async () => {
+test('the native origin matches all three build jobs and the plugin is included in the iOS target', async () => {
     const [native, workflow, project, scene] = await Promise.all([
         '../../ios/App/App/LudolumeApiPlugin.swift',
         '../../../.github/workflows/ios-build.yml',
@@ -102,7 +102,7 @@ test('the native origin matches both build jobs and the plugin is included in th
     const host = native.match(/static let host = "([^"]+)"/)?.[1];
     assert.ok(host, 'native origin must stay explicit');
     const buildOrigins = [...workflow.matchAll(/VITE_PROD_API_URL: (\S+)/g)].map((match) => match[1]);
-    assert.equal(buildOrigins.length, 2);
+    assert.equal(buildOrigins.length, 3);
     assert.ok(buildOrigins.every((origin) => origin === `https://${host}`));
     assert.match(native, /registerPluginInstance\(LudolumeApiPlugin\(\)\)/);
     assert.match(scene, /rootViewController = LudolumeBridgeViewController\(\)/);
