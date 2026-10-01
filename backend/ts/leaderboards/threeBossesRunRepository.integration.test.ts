@@ -169,7 +169,7 @@ async function resetFixture(): Promise<void> {
     try {
         await observer.query(`
             DROP TABLE IF EXISTS
-                account_registration_profiles, registration_authorizations, apple_auth_revocations, apple_provider_tokens,
+                parent_child_consents, parent_registration_attempts, account_registration_profiles, registration_authorizations, apple_auth_revocations, apple_provider_tokens,
                 game_personal_bests,
                 game_submission_receipts,
                 game_runs,
@@ -267,7 +267,7 @@ after(async () => {
     if (observer) {
         try {
             // Later integration suites own their historical schema fixtures.
-            await observer.query('DROP TABLE IF EXISTS account_registration_profiles, registration_authorizations, apple_auth_revocations, apple_provider_tokens, account_sessions, provider_auth_attempts, account_provider_identities');
+            await observer.query('DROP TABLE IF EXISTS parent_child_consents, parent_registration_attempts, account_registration_profiles, registration_authorizations, apple_auth_revocations, apple_provider_tokens, account_sessions, provider_auth_attempts, account_provider_identities');
         } finally { await observer.end(); }
     }
 });

@@ -6,7 +6,7 @@ import type { RegistrationAgeBand, RegistrationConfig } from '@/services/registr
 export function ParentRegistrationUnavailable() {
     return <div role="status">
         <h2>A parent or guardian needs to lead this step</h2>
-        <p>Parent-led registration is not available yet. We cannot create a child account until the parent verification and consent process is ready.</p>
+        <p><Link to="/parent-accounts">Continue to parent-led registration</Link> to check availability and sign in to your own parent account.</p>
         <p>No child name, email, password or identity document is needed here. Please do not enter an adult age range for a child.</p>
     </div>;
 }

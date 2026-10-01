@@ -43,7 +43,7 @@ type MigrationCommand =
     | 'google-signup-apply'
     | 'apple-tokens-apply'
     | 'apple-revocation-apply'
-    | 'registration-apply'
+    | 'registration-apply' | 'parent-registration-apply'
     | 'account-identity-plan'
     | 'account-identity-apply'
     | 'account-identity-verify'
@@ -81,7 +81,7 @@ function parseCommand(args: readonly string[]): MigrationCommand {
     if (args.length !== 1) {
         throw new Error(
             'Usage: runMigrations.ts '
-            + '<plan|apply|provider-identities-apply|provider-attempts-apply|account-sessions-apply|session-renewal-apply|google-signup-apply|apple-tokens-apply|apple-revocation-apply|registration-apply|'
+            + '<plan|apply|provider-identities-apply|provider-attempts-apply|account-sessions-apply|session-renewal-apply|google-signup-apply|apple-tokens-apply|apple-revocation-apply|registration-apply|parent-registration-apply|'
             + 'account-identity-plan|account-identity-apply|account-identity-verify|'
             + 'receipts-plan|receipts-apply|receipts-verify|'
             + 'p4-score-drop-plan|p4-score-drop-apply|p4-score-drop-verify>'
@@ -98,7 +98,7 @@ function parseCommand(args: readonly string[]): MigrationCommand {
         && command !== 'google-signup-apply'
         && command !== 'apple-tokens-apply'
         && command !== 'apple-revocation-apply'
-        && command !== 'registration-apply'
+        && command !== 'registration-apply' && command !== 'parent-registration-apply'
         && command !== 'account-identity-plan'
         && command !== 'account-identity-apply'
         && command !== 'account-identity-verify'
@@ -360,10 +360,11 @@ async function executeCommand(
 
     if (command === 'provider-identities-apply' || command === 'provider-attempts-apply'
         || command === 'account-sessions-apply' || command === 'session-renewal-apply' || command === 'apple-tokens-apply'
-        || command === 'registration-apply' || command === 'apple-revocation-apply') {
+        || command === 'parent-registration-apply' || command === 'registration-apply' || command === 'apple-revocation-apply') {
         // Separate selection keeps ordinary legacy-table commands from enabling new auth storage.
         printPlan(await applyMigrations(migrationConnection, migrations, config, {
-            allowedEffectKinds: command === 'registration-apply' ? ['add-registration-authorization', 'add-registration-profile']
+            allowedEffectKinds: command === 'parent-registration-apply' ? ['allow-parent-managed-contact', 'add-parent-attempts', 'add-parent-consents']
+                : command === 'registration-apply' ? ['add-registration-authorization', 'add-registration-profile']
                 : command === 'apple-revocation-apply'
                 ? ['add-apple-revocations', 'add-apple-session-provenance'] : [command === 'provider-identities-apply'
                 ? 'add-provider-identities' : command === 'provider-attempts-apply'
@@ -459,7 +460,7 @@ export async function runMigrations(args: readonly string[]): Promise<void> {
     let confirmation: RuntimeGrantConfirmation = Object.freeze({});
     if (command === 'apply' || command === 'provider-identities-apply' || command === 'provider-attempts-apply'
         || command === 'account-sessions-apply' || command === 'session-renewal-apply' || command === 'apple-tokens-apply'
-        || command === 'registration-apply' || command === 'apple-revocation-apply' || command === 'google-signup-apply') {
+        || command === 'parent-registration-apply' || command === 'registration-apply' || command === 'apple-revocation-apply' || command === 'google-signup-apply') {
         // Refuse before opening a socket, not merely before the first DDL.
         assertMutationAuthorized(config);
     } else if (command.startsWith('account-identity-')) {

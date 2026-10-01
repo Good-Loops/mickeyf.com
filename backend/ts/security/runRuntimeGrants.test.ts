@@ -62,7 +62,7 @@ function fixture(t: TestContext) {
 
 test('plan, verify and apply pass the explicit profile or compatible default to the grant operations', async t => {
     for (const command of ['plan', 'verify', 'apply'] as const) {
-        for (const profile of [undefined, 'google', 'google-apple'] as const) {
+        for (const profile of [undefined, 'google', 'google-apple', 'google-apple-parent'] as const) {
             await t.test(`${command}: ${profile ?? 'default'}`, async t => {
                 const f = fixture(t);
                 await runRuntimeGrants(profile === undefined ? [command] : [command, `--profile=${profile}`]);

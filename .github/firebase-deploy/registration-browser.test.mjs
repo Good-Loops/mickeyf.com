@@ -73,7 +73,7 @@ test('unsupported country and both parent-led entry paths never request authoriz
     await noCredentials(page);
     await select(page, 'parent-required');
     await page.getByRole('button', { name: 'Continue to parent-led registration' }).click();
-    await page.getByText('Parent-led registration is not available yet.', { exact: false }).waitFor();
+    await page.getByRole('link', { name: 'Continue to parent-led registration' }).waitFor();
     await noCredentials(page);
     await page.getByRole('button', { name: 'Back to registration' }).click();
     await page.locator('#registration-for').selectOption('child');

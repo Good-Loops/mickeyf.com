@@ -139,6 +139,7 @@ export default function ManageAccount() {
                     Manage account
                 </RouteHeading>
                 <PublicAccountPreviewNotice />
+                {!LEGACY_PUBLIC_API_PREVIEW && isAuthenticated && <p><Link to="/parent-accounts">Manage parent and child accounts</Link>. Delete managed child accounts before deleting your parent account.</p>}
                 {LEGACY_PUBLIC_API_PREVIEW ? <>
                     {loading ? <p role="status">Checking your session…</p> : isAuthenticated
                         ? <p className="manage-account__identity">Signed in as <strong>{userName}</strong></p>

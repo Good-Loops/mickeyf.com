@@ -6,7 +6,7 @@ import { createProviderAccount, findProviderAccount, linkProviderAccount,
     type ProviderCredentialWriter } from '../accounts/providerAccountRepository';
 import type { AppleTokenLifecycle } from '../config/appleTokenConfig';
 import type { VerifiedProviderIdentity } from '../auth/providerIdentity';
-import { deleteProviderAccount } from '../accounts/accountDeletionRepository';
+import { deleteProviderAccount, type BeforeAccountDeletion } from '../accounts/accountDeletionRepository';
 import { attemptAppleAccountRevocation, type AppleAccountRevocation } from '../accounts/attemptAppleAccountRevocation';
 import type { AccountDeletionJournal } from '../accounts/deletionJournal';
 import { readLiveSession } from '../auth/accountSessionRepository';
@@ -59,6 +59,7 @@ export type ProviderAuthRouterOptions = Readonly<{
     appleAccountRevocation?: AppleAccountRevocation;
     services?: ProviderAuthRouterServices;
     registration?: RegistrationAuthorization;
+    beforeAccountDeletion?: BeforeAccountDeletion;
 }>;
 
 function createServices(options: ProviderAuthRouterOptions): ProviderAuthRouterServices {
@@ -98,7 +99,10 @@ function createServices(options: ProviderAuthRouterOptions): ProviderAuthRouterS
                     delete: (target, identity, session, token) => {
                         const writer = credentialWriter(token, identity);
                         return deleteProviderAccount(database, target.userId, identity, options.deletionJournal!, session,
-                            writer ? (connection, accountId) => writer(connection, { userId: target.userId, accountId }) : undefined);
+                            async (connection, accountId) => {
+                                await options.beforeAccountDeletion?.(connection, accountId);
+                                await writer?.(connection, { userId: target.userId, accountId });
+                            });
                     },
                 } satisfies Pick<ProviderAuthFlowDependencies['accounts'], 'delete'> : {}),
             },

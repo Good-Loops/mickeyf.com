@@ -1,4 +1,6 @@
 import { loadRegistrationPolicy, type RegistrationPolicy } from './registrationPolicy';
+import { loadParentRegistrationPolicy } from './parentRegistrationPolicy';
+import type { ParentRegistrationPolicy } from '../accounts/parentRegistrationFlow';
 import { DELETION_JOURNAL_BUCKET } from '../accounts/gcsDeletionJournal';
 import { loadProviderAuthConfig, type ProviderAuthConfig } from './providerAuthConfig';
 import { loadAppleMaintenanceConfig, type AppleMaintenanceConfig } from './appleMaintenanceConfig';
@@ -9,6 +11,7 @@ type Environment = Readonly<Record<string, string | undefined>>;
 
 export type RuntimeConfig = {
     registrationPolicy: RegistrationPolicy | undefined;
+    parentRegistrationPolicy: ParentRegistrationPolicy | undefined;
     nodeEnv: RuntimeEnvironment;
     isProduction: boolean;
     port: number;
@@ -114,8 +117,10 @@ export function loadRuntimeConfig(env: Environment = process.env): RuntimeConfig
         throw new Error('Google signup requires account deletion to be enabled in production');
     }
 
+    const registrationPolicy = loadRegistrationPolicy(env);
     return Object.freeze({
-        registrationPolicy: loadRegistrationPolicy(env),
+        registrationPolicy,
+        parentRegistrationPolicy: loadParentRegistrationPolicy(env, registrationPolicy),
         nodeEnv,
         isProduction: nodeEnv === 'production',
         port: parsePort(env.BACKEND_PORT, 'BACKEND_PORT', 8080),

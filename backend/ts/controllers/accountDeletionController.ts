@@ -1,6 +1,8 @@
 import { Request, Response } from 'express';
 import { Pool } from 'mysql2/promise';
 import { AccountDeletionPendingError, deleteAccount } from '../accounts/accountDeletionRepository';
+import type { BeforeAccountDeletion } from '../accounts/accountDeletionRepository';
+import { ManagedChildrenError } from '../accounts/parentRegistrationRepository';
 import { attemptAppleAccountRevocation, type AppleAccountRevocation } from '../accounts/attemptAppleAccountRevocation';
 import type { AccountDeletionJournal } from '../accounts/deletionJournal';
 import { hasAllowedMutationOrigin, isJsonMutationRequest } from '../security/mutationRequest';
@@ -16,6 +18,7 @@ type AccountDeletionDependencies = {
     accountDeletionEnabled?: boolean;
     deletionJournal?: AccountDeletionJournal;
     appleAccountRevocation?: AppleAccountRevocation;
+    beforeAccountDeletion?: BeforeAccountDeletion;
 };
 
 export function createAccountDeletionController({
@@ -23,6 +26,7 @@ export function createAccountDeletionController({
     accountDeletionEnabled = false,
     deletionJournal,
     appleAccountRevocation,
+    beforeAccountDeletion,
 }: AccountDeletionDependencies) {
     return async function deleteCurrentAccount(req: Request, res: Response) {
         // Keep destructive account operations unavailable until recovery protection
@@ -54,7 +58,7 @@ export function createAccountDeletionController({
         try {
             // Ownership comes exclusively from the verified token, never the request body.
             const result = await deleteAccount(
-                database, authentication.identity.userId, validation.input.password, deletionJournal, authentication.identity
+                database, authentication.identity.userId, validation.input.password, deletionJournal, authentication.identity, beforeAccountDeletion
             );
             if (result === 'invalid-password') {
                 return res.status(403).json({ error: 'INVALID_PASSWORD' });
@@ -66,6 +70,7 @@ export function createAccountDeletionController({
             await attemptAppleAccountRevocation(authentication.identity.accountId, appleAccountRevocation);
             return res.json({ deleted: true });
         } catch (error) {
+            if (error instanceof ManagedChildrenError) return res.status(409).json({ error: 'MANAGED_CHILDREN' });
             if (error instanceof AccountDeletionPendingError) {
                 console.error('Account deletion pending reconciliation');
                 return res.status(503).json({ error: 'ACCOUNT_DELETION_PENDING' });

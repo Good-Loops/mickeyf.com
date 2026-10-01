@@ -105,13 +105,14 @@ export async function deleteAccount(
     password: string,
     journal: AccountDeletionJournal,
     expectedSession?: SessionProof,
+    beforeDeletion?: BeforeAccountDeletion,
 ): Promise<AccountDeletionResult> {
     if (typeof password !== 'string') {
         throw new TypeError('Account deletion requires a password string.');
     }
     return deleteReauthenticatedAccount(database, userId, journal, expectedSession, async (_connection, account) =>
         typeof account.passwordHash === 'string' && await bcrypt.compare(password, account.passwordHash)
-            ? 'authenticated' : 'invalid-password');
+            ? 'authenticated' : 'invalid-password', beforeDeletion);
 }
 
 /** Fresh provider verification is bound to the exact linked subject, incarnation and live device session. */

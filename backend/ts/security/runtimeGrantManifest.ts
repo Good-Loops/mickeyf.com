@@ -5,12 +5,12 @@ export type RuntimeDatabaseAccount = Readonly<{
 
 export type RuntimeDmlPrivilege = 'SELECT' | 'INSERT' | 'UPDATE';
 
-export type RuntimeGrantProfile = 'google' | 'google-apple';
+export type RuntimeGrantProfile = 'google' | 'google-apple' | 'google-apple-parent';
 
 export function parseRuntimeGrantProfile(value: string | undefined): RuntimeGrantProfile {
     if (value === undefined) return 'google-apple';
-    if (value === 'google' || value === 'google-apple') return value;
-    throw new Error('Runtime grant profile must be google or google-apple');
+    if (value === 'google' || value === 'google-apple' || value === 'google-apple-parent') return value;
+    throw new Error('Runtime grant profile must be google, google-apple or google-apple-parent');
 }
 
 export type RuntimeColumnGrant = Readonly<{
@@ -21,7 +21,7 @@ export type RuntimeColumnGrant = Readonly<{
 export type RuntimeTableGrant = Readonly<{
     table: 'users' | 'game_submission_receipts' | 'game_personal_bests' | 'schema_migrations' | 'account_sessions'
         | 'account_provider_identities' | 'provider_auth_attempts' | 'apple_provider_tokens' | 'apple_auth_revocations'
-        | 'registration_authorizations' | 'account_registration_profiles';
+        | 'registration_authorizations' | 'account_registration_profiles' | 'parent_registration_attempts' | 'parent_child_consents';
     grants: readonly RuntimeColumnGrant[];
     tablePrivileges: readonly 'DELETE'[];
 }>;
@@ -234,6 +234,7 @@ export const GOOGLE_RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Objec
             Object.freeze({ privilege: 'INSERT' as const, columns: Object.freeze(['account_uuid', 'country_code', 'age_band', 'policy_version', 'score_visibility']) }),
         ]),
     }),
+
 ]);
 
 /**
@@ -256,7 +257,32 @@ export const RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freez
     }),
 ]);
 
+export const PARENT_RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freeze([
+    ...RUNTIME_GRANT_MANIFEST.map(table => table.table !== 'account_registration_profiles' ? table : Object.freeze({
+        ...table, grants: Object.freeze(table.grants.map(grant => grant.privilege !== 'SELECT' ? grant : Object.freeze({
+            ...grant, columns: Object.freeze([...grant.columns, 'age_band']),
+        }))),
+    })),
+    Object.freeze({
+        table: 'parent_registration_attempts' as const, tablePrivileges: Object.freeze(['DELETE' as const]),
+        grants: Object.freeze([
+            Object.freeze({ privilege: 'SELECT' as const, columns: Object.freeze(['state_hash', 'binding_hash', 'parent_uuid', 'parent_user_id', 'client_key', 'nonce', 'policy_digest', 'purpose', 'country_code', 'child_uuid', 'expires_at', 'phase', 'grant_hash', 'provider', 'subject', 'consent_version', 'policy_version']) }),
+            Object.freeze({ privilege: 'INSERT' as const, columns: Object.freeze(['state_hash', 'binding_hash', 'parent_uuid', 'parent_user_id', 'client_key', 'nonce', 'policy_digest', 'purpose', 'country_code', 'child_uuid', 'expires_at', 'phase']) }),
+            Object.freeze({ privilege: 'UPDATE' as const, columns: Object.freeze(['phase', 'grant_hash', 'provider', 'subject', 'consent_version', 'policy_version']) }),
+        ]),
+    }),
+    Object.freeze({
+        table: 'parent_child_consents' as const, tablePrivileges: Object.freeze([]),
+        grants: Object.freeze([
+            Object.freeze({ privilege: 'SELECT' as const, columns: Object.freeze(['child_uuid', 'parent_uuid', 'country_code', 'policy_digest', 'consent_version', 'consented_at']) }),
+            Object.freeze({ privilege: 'INSERT' as const, columns: Object.freeze(['child_uuid', 'parent_uuid', 'country_code', 'policy_digest', 'consent_version', 'consented_at']) }),
+        ]),
+    }),
+
+]);
+
 function manifestForProfile(profile: RuntimeGrantProfile | undefined): readonly RuntimeTableGrant[] {
+    if (profile === 'google-apple-parent') return PARENT_RUNTIME_GRANT_MANIFEST;
     return parseRuntimeGrantProfile(profile) === 'google'
         ? GOOGLE_RUNTIME_GRANT_MANIFEST
         : RUNTIME_GRANT_MANIFEST;

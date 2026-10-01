@@ -36,6 +36,8 @@ import { prepareRuntimeProviderAuth } from './config/providerAuthConfig';
 
 import { createRegistrationAuthorization, cleanupRegistrationAuthorizations } from './accounts/registrationAuthorization';
 import { verifyRegistrationReadiness } from './migrations/registrationSchema';
+import { verifyParentRegistrationReadiness } from './migrations/parentRegistrationSchema';
+import { cleanupParentRegistrationAttempts } from './accounts/parentRegistrationRepository';
 
 const runtimeConfig = loadRuntimeConfig();
 const registration = createRegistrationAuthorization(pool, runtimeConfig.registrationPolicy);
@@ -67,13 +69,15 @@ app.use(helmet({
 // Mount before CORS/preflight and body parsers so they cannot bypass its checks.
 app.use(APPLE_MAINTENANCE_PATH, createAppleMaintenanceRouter(runtimeConfig.appleMaintenance, async () => {
     // Independent cleanup must still run if Apple's provider request fails.
-    const [apple, registrationCleanup] = await Promise.allSettled([
+    const [apple, registrationCleanup, parentCleanup] = await Promise.allSettled([
         runAppleMaintenance({ database: pool, expectedServerUuid: runtimeConfig.appleMaintenance!.expectedServerUuid,
             loadLifecycle: () => loadAppleRuntimeLifecycle() }),
         cleanupRegistrationAuthorizations(pool),
+        cleanupParentRegistrationAttempts(pool),
     ]);
     return apple.status === 'fulfilled' && apple.value === 0
-        && registrationCleanup.status === 'fulfilled' && !registrationCleanup.value.backlog ? 0 : 1;
+        && registrationCleanup.status === 'fulfilled' && !registrationCleanup.value.backlog
+        && parentCleanup.status === 'fulfilled' && !parentCleanup.value.backlog ? 0 : 1;
 }));
 
 app.use(cors({
@@ -116,6 +120,7 @@ async function startServer(): Promise<void> {
             await verifyDatabaseConnection();
             await verifyAccountSessionReadiness(pool);
             await verifyRegistrationReadiness(pool);
+            await verifyParentRegistrationReadiness(pool);
             const providerAuth = await prepareRuntimeProviderAuth(runtimeConfig.providerAuth);
             if (providerAuth.appleTokenLifecycle) await verifyAppleTokenReadiness(pool);
             if (runtimeConfig.providerAuth.appleNotifications) await verifyAppleRevocationReadiness(pool);
@@ -133,7 +138,8 @@ async function startServer(): Promise<void> {
             }
             app.use('/auth', createAuthRouter(
                 pool, runtimeConfig.sessionSecret, runtimeConfig.isProduction, runtimeConfig.corsOrigins,
-                { accountDeletionEnabled: runtimeConfig.accountDeletionEnabled, deletionJournal, providerAuth, registration }
+                { accountDeletionEnabled: runtimeConfig.accountDeletionEnabled, deletionJournal, providerAuth, registration,
+                    parentRegistrationStorageReady: true, parentRegistrationPolicy: runtimeConfig.parentRegistrationPolicy }
             ));
             app.use(notFoundHandler);
             app.use(requestErrorHandler);

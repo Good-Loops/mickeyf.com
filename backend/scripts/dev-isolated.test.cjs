@@ -1,9 +1,9 @@
 const assert = require('node:assert/strict');
 const test = require('node:test');
-const { readFileSync } = require('node:fs');
+const { readFileSync, readdirSync } = require('node:fs');
 const path = require('node:path');
 const { runInNewContext } = require('node:vm');
-const { runtimeEnvironment, validateContainer, parseArguments, localProviderGrantStatements } = require('./dev-isolated.cjs');
+const { runtimeEnvironment, validateContainer, parseArguments, localProviderGrantStatements, assertReviewedMigrationBoundary } = require('./dev-isolated.cjs');
 
 const credentials = { instanceId: 'local-instance', runtimePassword: 'local-runtime', sessionSecret: 'local-session' };
 const googleWebClientId = 'isolated-test.apps.googleusercontent.com';
@@ -30,6 +30,8 @@ test('runtime explicitly targets development and removes inherited production cr
         APPLE_IOS_BUNDLE_ID: 'inherited.apple', APPLE_WEB_CLIENT_ID: 'inherited-apple-web',
         APPLE_WEB_SERVICES_ID: 'inherited-services', APPLE_PRIVATE_KEY: 'inherited-key',
         APPLE_NOTIFICATIONS_ENABLED: 'true', APPLE_TOKEN_LIFECYCLE_ENABLED: 'true',
+        REGISTRATION_ENABLED: 'true', REGISTRATION_COUNTRY_RULES: 'production-policy',
+        PARENT_REGISTRATION_ENABLED: 'true', PARENT_REGISTRATION_CREATION_ENABLED: 'true', PARENT_CONSENT_TEXT: 'production-consent',
         LUDOLUME_ISOLATED_RUNTIME: 'false',
         ACCOUNT_DELETION_ENABLED: 'true', PROVIDER_AUTH_ENABLED: 'true', NODE_OPTIONS: '--require injected',
     });
@@ -50,7 +52,16 @@ test('runtime explicitly targets development and removes inherited production cr
     for (const key of ['CLOUD_SQL_CONNECTION_NAME', 'GOOGLE_APPLICATION_CREDENTIALS', 'MIGRATION_DB_PASS',
         'GOOGLE_WEB_CLIENT_ID', 'GOOGLE_IOS_CLIENT_ID', 'APPLE_IOS_BUNDLE_ID', 'APPLE_WEB_CLIENT_ID',
         'APPLE_WEB_SERVICES_ID', 'APPLE_PRIVATE_KEY', 'APPLE_NOTIFICATIONS_ENABLED',
-        'APPLE_TOKEN_LIFECYCLE_ENABLED', 'NODE_OPTIONS']) assert.equal(env[key], undefined, key);
+        'APPLE_TOKEN_LIFECYCLE_ENABLED', 'NODE_OPTIONS', 'REGISTRATION_ENABLED', 'REGISTRATION_COUNTRY_RULES',
+        'PARENT_REGISTRATION_ENABLED', 'PARENT_REGISTRATION_CREATION_ENABLED', 'PARENT_CONSENT_TEXT']) assert.equal(env[key], undefined, key);
+});
+
+test('local bootstrap accepts the reviewed manifest but blocks missing or future migrations before database connection', () => {
+    const migrations = readdirSync(path.join(__dirname, '../migrations')).filter(name => name.endsWith('.sql')).sort()
+        .map(name => ({ version: name.slice(0, -4) }));
+    assert.doesNotThrow(() => assertReviewedMigrationBoundary(migrations));
+    assert.throws(() => assertReviewedMigrationBoundary(migrations.slice(0, -1)), /must be reviewed/u);
+    assert.throws(() => assertReviewedMigrationBoundary([...migrations, { version: '0024_unreviewed' }]), /must be reviewed/u);
 });
 
 test('provider CLI opt-in requires one exact bounded Google web client ID', () => {

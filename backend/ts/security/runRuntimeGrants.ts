@@ -41,7 +41,7 @@ function parseCommand(args: readonly string[]): Readonly<{
 }> {
     if (args.length < 1 || args.length > 2) {
         throw new Error(
-            'Usage: runRuntimeGrants.ts <plan|verify|apply> [--profile=google|google-apple]'
+            'Usage: runRuntimeGrants.ts <plan|verify|apply> [--profile=google|google-apple|google-apple-parent]'
         );
     }
     const [command, profileArgument] = args;
@@ -53,7 +53,7 @@ function parseCommand(args: readonly string[]): Readonly<{
         throw new Error('Unknown runtime grant command');
     }
     if (profileArgument !== undefined && !profileArgument.startsWith('--profile=')) {
-        throw new Error('Expected --profile=google or --profile=google-apple after the command');
+        throw new Error('Expected --profile=google, --profile=google-apple or --profile=google-apple-parent after the command');
     }
     return {
         command,

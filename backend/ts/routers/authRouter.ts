@@ -33,6 +33,9 @@ import { createAppleTokenRevocationWorker } from '../accounts/appleTokenRevocati
 import { createRegistrationAuthorization, type RegistrationAuthorization } from '../accounts/registrationAuthorization';
 import { createProviderAuthContextReader } from '../auth/providerAuthContext';
 import { createRegistrationRouter } from './registrationRouter';
+import { createParentRegistrationFlow, type ParentRegistrationPolicy } from '../accounts/parentRegistrationFlow';
+import { assertNoManagedChildren, createParentRegistrationRepository } from '../accounts/parentRegistrationRepository';
+import { createParentRegistrationRouter } from './parentRegistrationRouter';
 
 export { authRoutesContract } from './authRouter.contract';
 
@@ -41,7 +44,10 @@ export function createAuthRouter(
     sessionSecret: string,
     isProduction: boolean,
     allowedMutationOrigins: readonly string[],
-    { accountDeletionEnabled = false, deletionJournal, providerAuth, registration = createRegistrationAuthorization(database) }: {
+    { accountDeletionEnabled = false, deletionJournal, providerAuth, registration = createRegistrationAuthorization(database),
+        parentRegistrationStorageReady = false, parentRegistrationPolicy }: {
+        parentRegistrationStorageReady?: boolean;
+        parentRegistrationPolicy?: ParentRegistrationPolicy;
         registration?: RegistrationAuthorization;
         accountDeletionEnabled?: boolean;
         deletionJournal?: AccountDeletionJournal;
@@ -65,6 +71,18 @@ export function createAuthRouter(
      * - None beyond Express route registration.
      */
     const router: Router = Router();
+    const beforeAccountDeletion = parentRegistrationStorageReady ? assertNoManagedChildren : undefined;
+    if (parentRegistrationPolicy && (!parentRegistrationStorageReady || !deletionJournal || !providerAuth?.enabled)) {
+        throw new Error('Parent registration dependencies are not ready.');
+    }
+    if (parentRegistrationStorageReady && deletionJournal) {
+        router.use('/parent-registration', createParentRegistrationRouter(createParentRegistrationFlow({
+            policy: parentRegistrationPolicy, clients: providerAuth?.clients ?? {},
+            store: createParentRegistrationRepository(database, deletionJournal),
+        }), createProviderAuthContextReader({ database, sessionSecret, allowedOrigins: allowedMutationOrigins })));
+    } else router.get('/parent-registration/config', (_req, res) => {
+        res.setHeader('Cache-Control', 'no-store'); return res.json({ enabled: false });
+    });
     router.use('/registration', createRegistrationRouter(registration,
         createProviderAuthContextReader({ database, sessionSecret, allowedOrigins: allowedMutationOrigins }), isProduction));
     const appleLifecycle = providerAuth?.appleTokenLifecycle;
@@ -91,7 +109,7 @@ export function createAuthRouter(
         appleTokenRepository: providerAuth?.appleTokenLifecycle?.repository,
         appleTokenRepositories: appleLifecycle ? Object.freeze({ [appleLifecycle.clientId]: appleLifecycle.repository,
             ...(appleLifecycle.web ? { [appleLifecycle.web.clientId]: appleLifecycle.web.repository } : {}) }) : undefined,
-        appleAccountRevocation, registration,
+        appleAccountRevocation, registration, beforeAccountDeletion,
     }));
 
     /** GET /verify-token — validates auth context for the current request. */
@@ -107,6 +125,7 @@ export function createAuthRouter(
             accountDeletionEnabled,
             deletionJournal,
             appleAccountRevocation,
+            beforeAccountDeletion,
         })));
 
     /** POST /logout — revokes this device's session before clearing its cookies. */

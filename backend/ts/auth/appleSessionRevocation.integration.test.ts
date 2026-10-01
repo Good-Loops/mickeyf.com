@@ -72,7 +72,10 @@ before(async () => {
         'add-registration-authorization', 'add-registration-profile'] as const) {
         await applyMigrations(connection, migrations, config, { allowedEffectKinds: [effect] });
     }
-    assert.deepEqual((await planMigrations(connection, migrations, config)).pending, []);
+    // This fixture intentionally applies only the existing Apple/self-registration schema.
+    assert.deepEqual((await planMigrations(connection, migrations, config)).pending, [
+        '0021_allow_parent_managed_contact', '0022_create_parent_registration_attempts', '0023_create_parent_child_consents',
+    ]);
     await verifyAppleRevocationReadiness(connection);
     database = mysql.createPool({ ...options, connectionLimit: 4 });
 });

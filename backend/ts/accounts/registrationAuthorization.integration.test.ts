@@ -49,7 +49,7 @@ before(async () => {
     assert.doesNotMatch(target[0].vendor, /Google/iu);
     await administrator.query('SET FOREIGN_KEY_CHECKS = 0');
     try {
-        await administrator.query(`DROP TABLE IF EXISTS account_registration_profiles, registration_authorizations,
+        await administrator.query(`DROP TABLE IF EXISTS parent_child_consents, parent_registration_attempts, account_registration_profiles, registration_authorizations,
             apple_auth_revocations, apple_provider_tokens, account_sessions, provider_auth_attempts, account_provider_identities,
             game_personal_bests, game_runs, game_submission_receipts, schema_migrations, users`);
     } finally { await administrator.query('SET FOREIGN_KEY_CHECKS = 1'); }
@@ -84,7 +84,7 @@ function passwordInput(name: string) { return { userName: name, email: `${name}@
 
 test('fresh schema records all migrations and enforces the private-minor database constraint', async () => {
     const plan = await planMigrations(administrator as unknown as MigrationConnection, loadMigrationManifest(), config);
-    assert.equal(plan.applied.length, 20);
+    assert.equal(plan.applied.length, 23);
     assert.deepEqual(plan.pending, []);
     const g = await grant();
     await createRegisteredPasswordAccount(database, passwordInput('constraint-minor'), g.consume);

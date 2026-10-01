@@ -33,6 +33,7 @@ const Connect = lazy(() => import('@/pages/Connect'));
 const Login = lazy(() => import('@/pages/Login'));
 const SignUp = lazy(() => import('@/pages/SignUp'));
 const ManageAccount = lazy(() => import('@/pages/ManageAccount'));
+const ParentAccounts = lazy(() => import('@/pages/ParentAccounts'));
 
 const App: React.FC = () => {
 	const shellRef = useRef<HTMLDivElement>(null);
@@ -85,6 +86,7 @@ const App: React.FC = () => {
 					<Route path="/login" element={<Login />} />
 					<Route path="/signup" element={<SignUp />} />
 					<Route path="/account" element={<ManageAccount />} />
+                    <Route path="/parent-accounts" element={<ParentAccounts />} />
 					<Route path="*" element={<NotFound />} />
 				</Routes>
 			</RouteContentBoundary>

@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import {
     GOOGLE_RUNTIME_GRANT_MANIFEST,
+    PARENT_RUNTIME_GRANT_MANIFEST,
     parseRuntimeGrantProfile,
     PRODUCTION_RUNTIME_DATABASE_ACCOUNT,
     PRODUCTION_RUNTIME_DATABASE_ROLE,
@@ -47,6 +48,24 @@ test('omitting the profile preserves the existing full manifest', () => {
     assert.deepEqual(runtimeTablePrivilegeInventory(), runtimeTablePrivilegeInventory('google-apple'));
     assert.deepEqual(renderRuntimeGrantStatements('cms', PRODUCTION_RUNTIME_DATABASE_ACCOUNT),
         renderRuntimeGrantStatements('cms', PRODUCTION_RUNTIME_DATABASE_ACCOUNT, 'google-apple'));
+});
+
+test('parent grants require explicit selection and cannot reassign consent, identity or policy binding', () => {
+    assert.equal(parseRuntimeGrantProfile('google-apple-parent'), 'google-apple-parent');
+    const columns = runtimeColumnPrivilegeInventory('google-apple-parent');
+    assert.deepEqual(columns.filter(({ tableName, columnName, privilegeType }) => !tableName.startsWith('parent_')
+        && !(tableName === 'account_registration_profiles' && columnName === 'age_band' && privilegeType === 'SELECT')),
+    runtimeColumnPrivilegeInventory());
+    const consent = PARENT_RUNTIME_GRANT_MANIFEST.find(row => row.table === 'parent_child_consents')!;
+    assert.deepEqual(consent.tablePrivileges, []);
+    assert.deepEqual(consent.grants.map(row => row.privilege), ['SELECT', 'INSERT']);
+    const attempt = PARENT_RUNTIME_GRANT_MANIFEST.find(row => row.table === 'parent_registration_attempts')!;
+    assert.deepEqual(attempt.grants.find(row => row.privilege === 'UPDATE')!.columns,
+        ['phase', 'grant_hash', 'provider', 'subject', 'consent_version', 'policy_version']);
+    assert.deepEqual(runtimeTablePrivilegeInventory('google-apple-parent'), [
+        ...runtimeTablePrivilegeInventory(), { tableName: 'parent_registration_attempts', privilegeType: 'DELETE' },
+    ]);
+    assert.equal(renderRuntimeGrantStatements('cms', PRODUCTION_RUNTIME_DATABASE_ACCOUNT, 'google-apple-parent').length, 13);
 });
 
 test('unknown grant profiles fail closed rather than falling back to broader grants', () => {

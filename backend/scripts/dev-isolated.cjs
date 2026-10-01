@@ -55,7 +55,7 @@ function parseArguments(args) {
 
 function runtimeEnvironment(credentials, inherited = process.env, options = {}) {
     const env = Object.fromEntries(Object.entries(inherited).filter(([key]) =>
-        !/^(?:DB_|MIGRATION_|SESSION_|ACCOUNT_|PROVIDER_|GOOGLE_|APPLE_|GCLOUD_|CLOUD_|FIREBASE_|P4_|THREE_|NODE_OPTIONS$)/i.test(key)));
+        !/^(?:DB_|MIGRATION_|SESSION_|ACCOUNT_|PROVIDER_|REGISTRATION_|PARENT_|GOOGLE_|APPLE_|GCLOUD_|CLOUD_|FIREBASE_|P4_|THREE_|NODE_OPTIONS$)/i.test(key)));
     return { ...env, NODE_ENV: 'development', LUDOLUME_ISOLATED_RUNTIME: 'true',
         BACKEND_PORT: '8080', DB_HOST: host, DB_PORT: String(port),
         DB_NAME: databaseName, DB_USER: runtimeUser, DB_PASS: credentials.runtimePassword,
@@ -144,6 +144,11 @@ async function prepareContainer() {
     return { credentials, context, containerId: container.Id };
 }
 
+function assertReviewedMigrationBoundary(migrations) {
+    requireLocal(migrations.length === 23 && migrations.at(-1).version === '0023_create_parent_child_consents',
+        'The local bootstrap must be reviewed before applying migrations beyond 0023.');
+}
+
 async function prepareDatabase({ credentials, context, containerId }, options) {
     require('ts-node').register({ project: path.join(backend, 'tsconfig.json') });
     const mysql = require('mysql2/promise');
@@ -151,8 +156,7 @@ async function prepareDatabase({ credentials, context, containerId }, options) {
     const { applyMigrations, planMigrations } = require('../ts/migrations/migrationRunner');
     const { renderRuntimeGrantStatements } = require('../ts/security/runtimeGrantManifest');
     const migrations = loadMigrationManifest(path.join(backend, 'migrations'));
-    requireLocal(migrations.length === 18 && migrations.at(-1).version === '0018_add_apple_session_provenance',
-        'The local bootstrap must be reviewed before applying migrations beyond 0018.');
+    assertReviewedMigrationBoundary(migrations);
     const connectionOptions = { host, port, user: 'root', password: credentials.rootPassword, database: databaseName,
         connectTimeout: 2000, multipleStatements: false, dateStrings: true, timezone: 'Z' };
     let connection;
@@ -179,14 +183,16 @@ async function prepareDatabase({ credentials, context, containerId }, options) {
         for (const allowedEffectKinds of [['create-table'], ['drop-column'], ['detach-best-source', 'retain-receipts'],
             ['add-account-identity'], ['add-provider-identities'], ['add-provider-attempts'], ['add-account-sessions'], ['add-session-renewal'],
             ['add-unique-user-names'], ['allow-passwordless-accounts'], ['extend-provider-attempt-actions'],
-            ['add-apple-tokens'], ['add-apple-revocations', 'add-apple-session-provenance']]) {
+            ['add-apple-tokens'], ['add-apple-revocations', 'add-apple-session-provenance'],
+            ['add-registration-authorization', 'add-registration-profile'],
+            ['allow-parent-managed-contact', 'add-parent-attempts', 'add-parent-consents']]) {
             await applyMigrations(connection, migrations, settings, { allowedEffectKinds });
         }
         requireLocal((await planMigrations(connection, migrations, settings)).pending.length === 0, 'Local schema setup is incomplete.');
         await connection.query(`CREATE USER IF NOT EXISTS '${runtimeUser}'@'%' IDENTIFIED BY ?`, [credentials.runtimePassword]);
-        for (const sql of renderRuntimeGrantStatements(databaseName, { user: runtimeUser, host: '%' })) await connection.query(sql);
+        for (const sql of renderRuntimeGrantStatements(databaseName, { user: runtimeUser, host: '%' }, 'google-apple-parent')) await connection.query(sql);
         for (const sql of localProviderGrantStatements(options)) await connection.query(sql);
-        console.log(`Verified local database ${databaseName}; migrations 0001–0018 and restricted runtime grants are ready.`);
+        console.log(`Verified local database ${databaseName}; migrations 0001-0023 and restricted runtime grants are ready. Registration and parent capabilities remain closed.`);
     } finally { await connection.end(); }
 }
 
@@ -231,4 +237,4 @@ if (require.main === module) main().catch(error => {
     process.exitCode = 1;
 });
 
-module.exports = { validateContainer, runtimeEnvironment, parseArguments, localProviderGrantStatements };
+module.exports = { validateContainer, runtimeEnvironment, parseArguments, localProviderGrantStatements, assertReviewedMigrationBoundary };

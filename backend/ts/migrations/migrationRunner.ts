@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { inspectParentManagedContact, verifyParentRegistrationTable } from './parentRegistrationSchema';
 import { verifyRegistrationSchema } from './registrationSchema';
 import {
     inspectAccountIdentityStage,
@@ -90,7 +91,8 @@ function isPasswordlessMigration(migration: MigrationDefinition): boolean {
 }
 
 function requiresCompleteEarlierHistory(migration: MigrationDefinition): boolean {
-    return migration.effect === 'add-provider-identities' || migration.effect === 'add-provider-attempts'
+    return migration.effect === 'allow-parent-managed-contact' || migration.effect === 'add-parent-attempts' || migration.effect === 'add-parent-consents'
+        || migration.effect === 'add-provider-identities' || migration.effect === 'add-provider-attempts'
         || migration.effect === 'add-account-sessions' || migration.effect === 'add-session-renewal'
         || migration.effect === 'add-apple-tokens' || migration.effect === 'add-apple-revocations'
         || migration.effect === 'add-registration-authorization' || migration.effect === 'add-registration-profile'
@@ -281,6 +283,13 @@ async function inspectMigrationState(
         }
 
         pending.push(migration.version);
+        if (migration.effect === 'allow-parent-managed-contact') {
+            if (await inspectParentManagedContact(connection)) {
+                assertProviderMigrationHistory(migrations, migration, appliedByVersion);
+                recoverable.push(migration.version);
+            }
+            continue;
+        }
         if (migration.effect === 'add-apple-session-provenance') {
             if (await tableExists(connection, migration.tableName)) {
                 if (await inspectAppleSessionProvenance(connection)) {
@@ -373,6 +382,15 @@ async function verifyMigrationPrecondition(
     connection: MigrationConnection,
     migration: MigrationDefinition
 ): Promise<void> {
+    if (migration.effect === 'allow-parent-managed-contact') {
+        await verifyRegistrationSchema(connection, 'account_registration_profiles');
+        if (await inspectParentManagedContact(connection)) throw new Error('Parent contact column already nullable');
+        return;
+    }
+    if (migration.effect === 'add-parent-attempts' || migration.effect === 'add-parent-consents') {
+        if (!await inspectParentManagedContact(connection) || await tableExists(connection, migration.tableName)) throw new Error('Invalid parent table precondition');
+        return;
+    }
     if (migration.effect === 'add-registration-authorization' || migration.effect === 'add-registration-profile') {
         await verifyAccountIdentitySchema(connection);
         if (await tableExists(connection, migration.tableName)) throw new Error('Registration migration requires its table to be absent');
@@ -475,6 +493,13 @@ async function verifyMigrationPostcondition(
     stage: LeaderboardSchemaStage = 'original',
     attemptStage: ProviderAttemptSchemaStage = 'legacy'
 ): Promise<void> {
+    if (migration.effect === 'allow-parent-managed-contact') {
+        if (!await inspectParentManagedContact(connection)) throw new Error('Parent contact column must be nullable');
+        return;
+    }
+    if (migration.effect === 'add-parent-attempts' || migration.effect === 'add-parent-consents') {
+        await verifyParentRegistrationTable(connection, migration.tableName); return;
+    }
     if (migration.effect === 'add-registration-authorization' || migration.effect === 'add-registration-profile') {
         await verifyRegistrationSchema(connection, migration.tableName);
         return;
