@@ -28,6 +28,8 @@ type AuthContextType = {
     userName: string | null;
     isAuthenticated: boolean;
     loading: boolean;
+    /** Invalidates cookie-bound operations after a completed or uncertain renewal. */
+    sessionGeneration: number;
     login: (user: string, pass: string, options?: LoginOptions) => Promise<boolean>;
     logout: () => Promise<void>;
     deleteAccount: (password: string) => Promise<DeleteAccountResponse>;
@@ -52,6 +54,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const [userName, setUserName] = useState<string | null>(null);
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [loading, setLoading] = useState(true);
+    const [sessionGeneration, setSessionGeneration] = useState(0);
     const authActionVersion = useRef(0);
     const preparedLoginVersions = useRef(new WeakMap<PreparedProviderLogin, number>());
     const sessionMayExist = useRef(true);
@@ -79,6 +82,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 // An outage is not evidence of sign-out. Later activity can retry quietly.
                 return !canApply();
             } finally {
+                // An HttpOnly cookie may rotate even if the response cannot be confirmed.
+                if (active) setSessionGeneration(value => value + 1);
                 if (canApply()) setLoading(false);
             }
         };
@@ -284,7 +289,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     return (
         <AuthContext.Provider
-            value={{ userName, isAuthenticated, loading, login, logout, deleteAccount, authenticateWithProvider,
+            value={{ userName, isAuthenticated, loading, sessionGeneration, login, logout, deleteAccount, authenticateWithProvider,
                 prepareProviderLogin, completeProviderLogin }}
         >
             {children}

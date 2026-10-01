@@ -9,7 +9,7 @@ import { API_BASE, LEGACY_PUBLIC_API_PREVIEW } from '@/config/apiConfig';
 
 const api = createParentRegistrationApi(API_BASE, apiFetch);
 export default function ParentAccounts() {
-    const { isAuthenticated, userName, loading } = useAuth();
+    const { isAuthenticated, userName, loading, sessionGeneration } = useAuth();
     const [clients, setClients] = useState<PublicProviderClient[]>([]);
     const [config, setConfig] = useState<ParentConfig | null>(null);
     const [children, setChildren] = useState<{ accountId: string; userName: string }[]>([]);
@@ -20,10 +20,20 @@ export default function ParentAccounts() {
     const [busy, setBusy] = useState(false);
     const operation = useRef<AbortController | null>(null);
     const pendingState = useRef<string | null>(null);
+    const previousSession = useRef(sessionGeneration);
     useEffect(() => { setFeedback(''); }, [isAuthenticated, userName]);
     useEffect(() => {
-        const controller = new AbortController();
         setChildren([]); setConfig(null); setSelected(''); setConfirmation(''); setBusy(false);
+        if (previousSession.current !== sessionGeneration) {
+            previousSession.current = sessionGeneration;
+            setFeedback('Your session was refreshed. Restart parent approval. Any submitted deletion may still complete; refresh the child list before retrying.');
+        }
+        return () => { operation.current?.abort(); operation.current = null;
+            const state = pendingState.current; pendingState.current = null;
+            if (state) void api.cancel(state).catch(() => undefined); };
+    }, [isAuthenticated, userName, loading, sessionGeneration]);
+    useEffect(() => {
+        const controller = new AbortController();
         if (!LEGACY_PUBLIC_API_PREVIEW && isAuthenticated && !loading) {
             void Promise.all([api.config(controller.signal), getAvailableProviderClients()]).then(async ([policy, available]) => {
                 if (controller.signal.aborted) return;
@@ -34,10 +44,9 @@ export default function ParentAccounts() {
                 }
             }).catch(() => { if (!controller.signal.aborted) setFeedback('Child accounts could not be loaded. Please retry.'); });
         }
-        return () => { controller.abort(); operation.current?.abort(); operation.current = null;
-            const state = pendingState.current; pendingState.current = null;
-            if (state) void api.cancel(state).catch(() => undefined); };
-    }, [isAuthenticated, userName, loading, retry]);
+        // Refreshing the list must not cancel an independent in-flight withdrawal.
+        return () => controller.abort();
+    }, [isAuthenticated, userName, loading, sessionGeneration, retry]);
     async function withdraw(client: PublicProviderClient) {
         if (operation.current || !isAuthenticated || !config?.enabled || confirmation !== 'WITHDRAW AND DELETE'
             || !children.some(child => child.accountId === selected)) return;
@@ -63,7 +72,7 @@ export default function ParentAccounts() {
     return <section className="manage-account"><div className="manage-account__form-wrapper">
         <h1>Parent and child accounts</h1>
         {loading ? <p>Checking your session.</p> : <ParentRegistration api={api} authenticated={isAuthenticated}
-            accountKey={userName ?? ''} clients={clients} acquire={acquireProviderCredential} onCreated={() => setRetry(value => value + 1)} />}
+            accountKey={userName ?? ''} sessionGeneration={sessionGeneration} clients={clients} acquire={acquireProviderCredential} onCreated={() => setRetry(value => value + 1)} />}
         {isAuthenticated && config?.enabled && <section aria-label="Manage child accounts">
             <h2>Your child accounts</h2>
             <p>Child scores are private. Keep the child's password safe. This release has no email recovery for children; you can withdraw consent and delete their account here.</p>

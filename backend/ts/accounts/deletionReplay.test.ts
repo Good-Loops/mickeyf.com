@@ -83,6 +83,7 @@ function fakeReplay(options: FakeOptions = {}) {
             }
             if (values?.[0] === 'apple_provider_tokens') return [[{ tableCount: 0 }], []];
             if (values?.[0] === 'apple_auth_revocations') return [[{ tableCount: 0 }], []];
+            if (values?.[0] === 'parent_child_consents') return [[{ tableCount: 0 }], []];
             if (sql.startsWith('UPDATE apple_provider_tokens')) return [{ affectedRows: 1 }, []];
             if (sql.includes('information_schema.COLUMNS')) return [options.missingIdentity ? [] : [{
                 type: 'char(36)', nullable: 'NO', characterSet: 'ascii', collation: 'ascii_bin',

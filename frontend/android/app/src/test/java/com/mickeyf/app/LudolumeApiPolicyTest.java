@@ -7,6 +7,21 @@ import okhttp3.HttpUrl;
 import okhttp3.Request;
 
 public class LudolumeApiPolicyTest {
+    @Test public void parentRegistrationAllowsOnlyItsSevenExactMethodPaths() {
+        String base = LudolumeApiPolicy.ORIGIN + "/auth/parent-registration/";
+        assertNotNull(LudolumeApiPolicy.request(base + "config", "GET", null));
+        assertNull(LudolumeApiPolicy.request(base + "config", "GET", "{}"));
+        assertNull(LudolumeApiPolicy.request(base + "config", "POST", "{}"));
+        for (String route : new String[] { "begin", "complete", "cancel", "children", "withdraw", "children/list" }) {
+            assertNotNull(route, LudolumeApiPolicy.request(base + route, "POST", "{}"));
+            assertNull(route, LudolumeApiPolicy.request(base + route, "GET", null));
+            assertNull(route, LudolumeApiPolicy.request(base + route + "?extra=1", "POST", "{}"));
+            assertNull(route, LudolumeApiPolicy.request(base + route + "/", "POST", "{}"));
+        }
+        assertNull(LudolumeApiPolicy.request(base + "children/delete", "POST", "{}"));
+        assertNull(LudolumeApiPolicy.request("https://attacker.test/auth/parent-registration/children", "POST", "{}"));
+    }
+
     @Test public void registrationAllowsOnlyItsThreeExactMethodPaths() {
         String origin = LudolumeApiPolicy.ORIGIN;
         assertNotNull(LudolumeApiPolicy.request(origin + "/auth/registration/config", "GET", null));

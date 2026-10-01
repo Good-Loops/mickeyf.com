@@ -11,7 +11,9 @@ import { verifyParentRegistrationReadiness, verifyParentRegistrationTable } from
 import type { MigrationConnection } from '../migrations/leaderboardSchema';
 import type { ProviderAuthContext } from '../auth/providerAuthContext';
 import type { VerifiedProviderIdentity } from '../auth/providerIdentity';
-import { createAccountSession, readLiveSession, revokeAccountSession } from '../auth/accountSessionRepository';
+import { createAccountSession, readLiveSession, revokeAccountSession, renewAccountSession } from '../auth/accountSessionRepository';
+import { createProviderAuthContextReader } from '../auth/providerAuthContext';
+import { deriveRenewedSessionId, issueSessionToken, issueRenewedSessionToken } from '../security/sessionPolicy';
 import { createParentRegistrationFlow, type ParentRegistrationPolicy } from './parentRegistrationFlow';
 import { createParentRegistrationRepository, assertNoManagedChildren, ManagedChildrenError, cleanupParentRegistrationAttempts } from './parentRegistrationRepository';
 import { deleteAccount } from './accountDeletionRepository';
@@ -19,6 +21,8 @@ import { findPasswordLoginAccount } from './passwordAccountRepository';
 import { renderRuntimeGrantStatements } from '../security/runtimeGrantManifest';
 import { readP4VegaLeaderboard, submitP4VegaScore } from '../leaderboards/p4VegaScoreRepository';
 import { withUserSubmissionLock } from '../leaderboards/userSubmissionLock';
+import { applyDeletionReplay, planDeletionReplay } from './deletionReplay';
+import type { DeletionReplaySettings } from '../config/deletionReplayConfig';
 
 const config = loadMigrationConfig();
 let admin: Connection; let database: Pool; let passwordHash: string;
@@ -61,9 +65,9 @@ before(async () => {
 });
 after(async () => { if (database) await database.end(); if (admin) await admin.end(); });
 
-async function parent() {
+async function parent(accountId = randomUUID()) {
     const name = `parent-${randomUUID()}`;
-    const [insert] = await admin.query<ResultSetHeader>('INSERT INTO users (user_name, email, user_password) VALUES (?, ?, ?)', [name, `${name}@example.test`, passwordHash]);
+    const [insert] = await admin.query<ResultSetHeader>('INSERT INTO users (user_name, email, user_password, account_uuid) VALUES (?, ?, ?, ?)', [name, `${name}@example.test`, passwordHash, accountId]);
     const [accounts] = await admin.query<RowDataPacket[]>('SELECT account_uuid FROM users WHERE user_id = ?', [insert.insertId]);
     const account = { userId: insert.insertId, accountId: String(accounts[0].account_uuid) };
     const sessionId = randomBytes(32).toString('base64url');
@@ -86,6 +90,110 @@ async function child(p: Awaited<ReturnType<typeof parent>>, name = `child-${rand
     assert.ok('created' in result, JSON.stringify(result)); return { ...a, child: result.child };
 }
 const withdrawal = (id: string) => ({ purpose: 'withdraw-child', childAccountId: id, clientKey: 'google-web', policyVersion: policy.version, confirmation: 'WITHDRAW AND DELETE' });
+
+test('rotating a remembered session rejects old proof/grants and fresh parent approval recovers', async () => {
+    for (const phase of ['provider-proof', 'child-credentials']) {
+        const p = await parent(); const secret = 'synthetic-renewal-parent-test'; const origin = 'https://parent.example.test';
+        const identity = { ...p.account, userName: p.identity.subject };
+        const initial = issueSessionToken(identity, secret, true);
+        assert.equal(await createAccountSession(database, p.account, initial.sessionId, initial.expiresAt, passwordHash, true), true);
+        const reader = createProviderAuthContextReader({ database, sessionSecret: secret, allowedOrigins: [origin] });
+        const context = async (token: string) => {
+            const result = await reader({ method: 'POST', headers: { origin, 'content-type': 'application/json' }, signedCookies: { __session: token }, cookies: {} });
+            assert.ok(result); return result;
+        };
+        const before = await context(initial.token);
+        const challenge = await p.flow.begin(before, input); assert.ok('state' in challenge);
+        const approval = phase === 'child-credentials' ? await p.flow.complete(before, { state: challenge.state, idToken: 'synthetic-proof' }) : null;
+        await admin.query('UPDATE account_sessions SET renewed_at=UTC_TIMESTAMP(6)-INTERVAL 16 MINUTE WHERE account_uuid=? AND remembered=1', [p.account.accountId]);
+        const renewed = await renewAccountSession(database, p.account.userId, p.account.accountId, initial.sessionId, id => deriveRenewedSessionId(id, secret));
+        assert.ok(renewed?.renewal);
+        const after = await context(issueRenewedSessionToken(identity, secret, renewed.renewal));
+        assert.ok(!before.bindingHash.equals(after.bindingHash));
+        if (phase === 'provider-proof') assert.ok('error' in await p.flow.complete(after, { state: challenge.state, idToken: 'synthetic-proof' }));
+        else { assert.ok(approval && 'grant' in approval);
+            assert.ok('error' in await p.flow.createChild(after, { grant: approval.grant, userName: `stale-${randomUUID()}`, password })); }
+        assert.deepEqual(await p.store.listChildren(after), []);
+        const fresh = await p.flow.begin(after, input); assert.ok('state' in fresh);
+        const proof = await p.flow.complete(after, { state: fresh.state, idToken: 'synthetic-proof' }); assert.ok('grant' in proof);
+        assert.ok('created' in await p.flow.createChild(after, { grant: proof.grant, userName: `fresh-${randomUUID()}`, password }));
+    }
+});
+
+test('ten simultaneous withdrawals complete when all ten pool connections hold their parent lock', async () => {
+    const cases = [];
+    for (let i = 0; i < 10; i++) {
+        const p = await parent(); const c = await child(p); const a = await approve(p, withdrawal(c.child.accountId));
+        cases.push({ p, c, a });
+    }
+    let acquisitions = 0, targets = 0; let releaseTargets!: () => void;
+    const allTargets = new Promise<void>(resolve => { releaseTargets = resolve; });
+    const bounded = { query: database.query.bind(database), async getConnection() {
+        acquisitions++;
+        // Bound the test's wait, including an implementation that queues for a second connection.
+        const connection = await new Promise<Awaited<ReturnType<Pool['getConnection']>>>((resolve, reject) => {
+            let expired = false;
+            const timer = setTimeout(() => { expired = true; reject(new Error('pool acquisition budget exhausted')); }, 2000);
+            void database.getConnection().then(value => { clearTimeout(timer); if (expired) value.release(); else resolve(value); }, error => { clearTimeout(timer); reject(error); });
+        });
+        return new Proxy(connection, { get(target, key) {
+            const value = Reflect.get(target, key);
+            if (key === 'query') return async (...args: unknown[]) => {
+                const result = await Reflect.apply(value, target, args);
+                if (typeof args[0] === 'object' && args[0] && 'sql' in args[0]
+                    && String(args[0].sql).includes('SELECT u.user_id, u.account_uuid FROM parent_registration_attempts')) {
+                    if (++targets === 10) releaseTargets();
+                    await allTargets;
+                }
+                return result;
+            };
+            return typeof value === 'function' ? value.bind(target) : value;
+        } });
+    } } as Pick<Pool, 'query' | 'getConnection'>;
+    const results = await Promise.all(cases.map(({ p, a }) => createParentRegistrationFlow({
+        store: createParentRegistrationRepository(bounded, journal), clients: p.clients, policy,
+    }).withdrawChild(p.context, { grant: a.proof.grant, confirmation: 'WITHDRAW AND DELETE' })));
+    assert.equal(targets, 10); assert.equal(acquisitions, 10);
+    assert.ok(results.every(result => 'deleted' in result), JSON.stringify(results));
+    for (const { p, c } of cases) {
+        assert.deepEqual(await p.store.listChildren(p.context), []);
+        assert.ok(intents.includes(c.child.accountId));
+    }
+    assert.equal((await database.query<RowDataPacket[]>('SELECT 1 AS available'))[0][0].available, 1);
+});
+
+test('restored parent and child journal intents replay child first even when the parent UUID sorts first', async () => {
+    const p = await parent('00000000-0000-4000-8000-000000000001'); const c = await child(p);
+    assert.ok(p.account.accountId.localeCompare(c.child.accountId) < 0);
+    const savedUsers = (await admin.query<RowDataPacket[]>('SELECT * FROM users WHERE account_uuid IN (?, ?)', [p.account.accountId, c.child.accountId]))[0];
+    const consent = (await admin.query<RowDataPacket[]>('SELECT * FROM parent_child_consents WHERE child_uuid=?', [c.child.accountId]))[0][0];
+    const a = await approve(p, withdrawal(c.child.accountId));
+    assert.deepEqual(await p.flow.withdrawChild(p.context, { grant: a.proof.grant, confirmation: 'WITHDRAW AND DELETE' }), { deleted: true });
+    assert.equal(await deleteAccount(database, p.account.userId, password, journal, p.context.session!, assertNoManagedChildren), 'deleted');
+    assert.ok(intents.includes(c.child.accountId) && intents.includes(p.account.accountId));
+    for (const row of savedUsers) await admin.query('INSERT INTO users SET ?', [row]);
+    await admin.query('INSERT INTO parent_child_consents SET ?', [consent]);
+    const replayPool = mysql.createPool({ host: config.host, port: config.port, database: config.database, user: 'root',
+        password: 'migration-test-root-only', connectionLimit: 1, multipleStatements: false, dateStrings: true, timezone: 'Z' });
+    try {
+        const [identity] = await admin.query<RowDataPacket[]>('SELECT CURRENT_USER() AS currentUser, @@GLOBAL.server_uuid AS serverUuid');
+        const [epochs] = await admin.query<RowDataPacket[]>("SELECT DATE_FORMAT(applied_at, '%Y-%m-%d %H:%i:%s.%f') AS epoch FROM schema_migrations WHERE version='0008_finalize_account_identity'");
+        const settings: DeletionReplaySettings = { mode: 'recovery', database: config.database,
+            expectedCurrentUser: identity[0].currentUser, expectedServerUuid: identity[0].serverUuid,
+            expectedIdentityEpoch: epochs[0].epoch, sourceServerUuid: '11111111-2222-4333-8444-555555555555', maxIntents: 10, maxDurationMs: 60000 };
+        const entry = (accountId: string) => ({ version: 1 as const, action: 'delete-account' as const, accountId, requestedAt: '2026-09-30T00:00:00.000Z' });
+        const parentOnly = { async readDeletionIntents() { return { digest: 'a'.repeat(64), intents: [entry(p.account.accountId)] }; } };
+        const blocked = await planDeletionReplay(replayPool, parentOnly, settings);
+        await assert.rejects(applyDeletionReplay(replayPool, parentOnly, settings, blocked.sha256));
+        assert.equal((await admin.query<RowDataPacket[]>('SELECT account_uuid FROM users WHERE account_uuid IN (?, ?)', [p.account.accountId, c.child.accountId]))[0].length, 2);
+        const complete = { async readDeletionIntents() { return { digest: 'b'.repeat(64), intents: [entry(p.account.accountId), entry(c.child.accountId)] }; } };
+        const approved = await planDeletionReplay(replayPool, complete, settings);
+        const result = await applyDeletionReplay(replayPool, complete, settings, approved.sha256);
+        assert.equal(result.deletedAccounts, 2);
+        assert.equal((await admin.query<RowDataPacket[]>('SELECT account_uuid FROM users WHERE account_uuid IN (?, ?)', [p.account.accountId, c.child.accountId]))[0].length, 0);
+        assert.equal((await applyDeletionReplay(replayPool, complete, settings, approved.sha256)).absentAccounts, 2);
+    } finally { await replayPool.end(); }
+});
 
 test('all 23 migrations, exact runtime grants and private child creation work without child email or parent session replacement', async () => {
     const plan = await planMigrations(admin as unknown as MigrationConnection, loadMigrationManifest(), config);

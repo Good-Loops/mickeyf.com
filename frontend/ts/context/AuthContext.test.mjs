@@ -15,11 +15,11 @@ const mocks = {
         export const useContext = () => undefined;
         export const useState = initial => ${scope}.state(initial);
         export const useRef = initial => ${scope}.ref(initial);
-        export const useEffect = () => {};`,
+        export const useEffect = callback => ${scope}.effect(callback);`,
     'jsx-runtime': 'export const jsx = (type, props) => ({ type, props }); export const jsxs = jsx;',
     'jsx-dev-runtime': 'export const jsxDEV = (type, props) => ({ type, props });',
     authService: authOperations.map(name => `export const ${name} = (...args) => ${scope}.request('${name}', args);`).join('\n'),
-    sessionRenewalActivity: 'export const watchSessionRenewalActivity = () => {};',
+    sessionRenewalActivity: `export const watchSessionRenewalActivity = options => ${scope}.activity?.(options);`,
     siteAlert: `export default { fire: (...args) => ${scope}.feedback(...args) };`,
 };
 const server = await createViteTestServer({
@@ -36,18 +36,20 @@ const server = await createViteTestServer({
 after(() => server.close());
 const { AuthProvider } = await server.ssrLoadModule('/ts/context/AuthContext.tsx');
 
-function fixture(t, request) {
-    const slots = [], feedback = [];
+function fixture(t, request, activity) {
+    const slots = [], feedback = [], effects = [];
     let cursor = 0;
     const original = Object.getOwnPropertyDescriptor(globalThis, key);
     Object.defineProperty(globalThis, key, { configurable: true, value: {
         state(initial) {
             const index = cursor++;
             slots[index] ??= { value: initial };
-            return [slots[index].value, value => { slots[index].value = value; }];
+            return [slots[index].value, value => { slots[index].value = typeof value === 'function' ? value(slots[index].value) : value; }];
         },
         ref(initial) { return slots[cursor++] ??= { current: initial }; },
         request,
+        activity,
+        effect(callback) { effects.push(callback); },
         feedback: async options => { feedback.push(options); return { isConfirmed: true }; },
     } });
     t.after(() => {
@@ -55,8 +57,29 @@ function fixture(t, request) {
         else delete globalThis[key];
     });
     const render = () => { cursor = 0; return AuthProvider({ children: null }).props.value; };
-    return { render, feedback };
+    return { render, feedback, startEffects() { effects.splice(0).forEach(callback => { const cleanup = callback(); if (cleanup) t.after(cleanup); }); } };
 }
+
+test('successful and uncertain same-account renewals advance the parent-operation generation', async t => {
+    for (const name of ['window', 'document']) {
+        const previous = Object.getOwnPropertyDescriptor(globalThis, name);
+        Object.defineProperty(globalThis, name, { configurable: true, value: name === 'document' ? { visibilityState: 'visible' } : {} });
+        t.after(() => { if (previous) Object.defineProperty(globalThis, name, previous); else delete globalThis[name]; });
+    }
+    const renewals = []; let activity;
+    const f = fixture(t, operation => {
+        if (operation === 'watchAppleCredentialChanges') return Promise.resolve(() => {});
+        assert.equal(operation, 'renewRequest');
+        return new Promise((resolve, reject) => renewals.push({ resolve, reject }));
+    }, options => activity = { renewNow: options.renew, stop() {} });
+    assert.equal(f.render().sessionGeneration, 0); f.startEffects();
+    renewals[0].resolve({ loggedIn: true, user_name: 'Same parent' });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.render().sessionGeneration, 1); assert.equal(f.render().userName, 'Same parent');
+    const uncertain = activity.renewNow(); renewals[1].reject(new Error('response lost after cookie rotation')); await uncertain;
+    assert.equal(f.render().sessionGeneration, 2); assert.equal(f.render().userName, 'Same parent');
+    assert.equal(f.render().isAuthenticated, true);
+});
 
 test('page departure suppresses login feedback while retaining confirmed authentication', async t => {
     let finish;

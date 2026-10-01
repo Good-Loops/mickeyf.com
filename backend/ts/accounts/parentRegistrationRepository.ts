@@ -178,7 +178,7 @@ export function createParentRegistrationRepository(database: Database, journal: 
                         AND a.purpose = 'withdraw-child' AND a.phase = 'approved' AND a.expires_at > UTC_TIMESTAMP(6) LIMIT 1`,
                     [grantHash, context.bindingHash, context.account!.accountId]);
                     if (target.length !== 1 || target[0].user_id === context.account!.userId) throw new Error('Child account unavailable.');
-                    await withUserSubmissionLock(database, target[0].user_id, childLock => transaction(childLock, async connection => {
+                    await parentLock.withAdditionalLock(target[0].user_id, childLock => transaction(childLock, async connection => {
                         const approval = await grant(connection, grantHash, context, digest, 'withdraw-child');
                         const own = await rows(connection, 'SELECT user_id, account_uuid FROM users WHERE account_uuid = ? LIMIT 1 FOR UPDATE', [approval.child_uuid]);
                         const relation = await rows(connection, 'SELECT child_uuid FROM parent_child_consents WHERE parent_uuid = ? AND child_uuid = ? LIMIT 1',

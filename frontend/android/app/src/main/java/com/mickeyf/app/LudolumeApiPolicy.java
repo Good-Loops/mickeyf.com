@@ -15,6 +15,10 @@ final class LudolumeApiPolicy {
     static final int MAX_REQUEST = 32 * 1024;
     static final int MAX_RESPONSE = 1024 * 1024;
     private static final Set<String> ROUTES = new HashSet<>(Arrays.asList(
+        "GET /auth/parent-registration/config", "POST /auth/parent-registration/begin",
+        "POST /auth/parent-registration/complete", "POST /auth/parent-registration/cancel",
+        "POST /auth/parent-registration/children", "POST /auth/parent-registration/withdraw",
+        "POST /auth/parent-registration/children/list",
         "GET /auth/registration/config", "POST /auth/registration/begin", "POST /auth/registration/cancel",
         "POST /api/users", "GET /auth/verify-token", "POST /auth/logout", "POST /auth/renew",
         "POST /auth/delete-account", "GET /auth/providers/config", "GET /auth/providers/account",

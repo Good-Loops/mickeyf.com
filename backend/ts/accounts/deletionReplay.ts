@@ -11,6 +11,7 @@ import { verifyOptionalProviderAttemptSchema } from '../migrations/providerAttem
 import { verifyOptionalAccountSessionSchema } from '../migrations/accountSessionSchema';
 import { verifyOptionalAppleTokenSchema } from '../migrations/appleTokenSchema';
 import { verifyOptionalAppleRevocationSchema } from '../migrations/appleRevocationSchema';
+import { PARENT_MIGRATIONS, verifyParentRegistrationTable } from '../migrations/parentRegistrationSchema';
 import { markAppleTokensForRevocation } from './appleTokenRepository';
 import { AccountDeletionRollbackError, deleteOwnedAccountRows } from './accountDeletionRepository';
 import { type DeletionJournalReader, parseDeletionIntent } from './deletionJournal';
@@ -147,6 +148,47 @@ export async function planDeletionReplay(
     return (await prepareReplay(database, reader, settings, new ReplayBudget(settings.maxDurationMs))).plan;
 }
 
+/** Restored relationships affect order, never which identities the approved journal permits deleting. */
+async function childFirstReplayOrder(database: ReplayDatabase, accountIds: readonly string[],
+    settings: DeletionReplaySettings, budget: ReplayBudget): Promise<string[]> {
+    const connection = guardConnectionQueries(await database.getConnection());
+    let reusable = true;
+    try {
+        await inspectTarget(connection, settings, budget);
+        const timed = timedConnection(connection, budget);
+        const [tables] = await timed.query(`SELECT COUNT(*) AS tableCount FROM information_schema.TABLES
+            WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`, ['parent_child_consents']);
+        const [history] = await timed.query('SELECT version FROM schema_migrations WHERE version = ?', [PARENT_MIGRATIONS[2]]);
+        if (Number((tables as RowDataPacket[])[0]?.tableCount) === 0) {
+            if ((history as RowDataPacket[]).length) throw new Error('Parent consent migration is missing its table');
+            return [...accountIds];
+        }
+        // In particular, retain the parent RESTRICT and child CASCADE definitions during recovery.
+        await verifyParentRegistrationTable(timed, 'parent_child_consents');
+        if (!accountIds.length) return [];
+        const [relations] = await timed.query(`SELECT parent_uuid AS parentId, child_uuid AS childId
+            FROM parent_child_consents WHERE parent_uuid IN (?) ORDER BY parent_uuid, child_uuid LIMIT ?`,
+        [[...accountIds], accountIds.length + 1]);
+        const children = new Map(accountIds.map(id => [id, new Set<string>()]));
+        const parents = new Map<string, string>();
+        for (const row of relations as Array<{ parentId: string; childId: string }>) {
+            if (!children.has(row.parentId) || !children.has(row.childId)) {
+                throw new Error('Deletion replay requires an approved journal intent for every managed child');
+            }
+            children.get(row.parentId)!.add(row.childId); parents.set(row.childId, row.parentId);
+        }
+        const ordered = accountIds.filter(id => children.get(id)!.size === 0);
+        for (let index = 0; index < ordered.length; index++) {
+            budget.remaining();
+            const parent = parents.get(ordered[index]);
+            if (parent && children.get(parent)!.delete(ordered[index]) && children.get(parent)!.size === 0) ordered.push(parent);
+        }
+        if (ordered.length !== accountIds.length) throw new Error('Deletion replay found cyclic parent relationships');
+        return ordered;
+    } catch (error) { reusable = false; connection.destroy(); throw error; }
+    finally { if (reusable) connection.release(); }
+}
+
 async function findUserId(
     database: ReplayDatabase, accountId: string, settings: DeletionReplaySettings, budget: ReplayBudget
 ): Promise<number | undefined> {
@@ -234,7 +276,7 @@ export async function applyDeletionReplay(
         throw new Error('Deletion replay plan changed; review a fresh plan before applying');
     }
     let deletedAccounts = 0;
-    for (const accountId of accountIds) {
+    for (const accountId of await childFirstReplayOrder(database, accountIds, settings, budget)) {
         budget.remaining();
         if (await replayOneAccount(database, accountId, requestedAt.get(accountId)!, settings, budget)) deletedAccounts++;
     }

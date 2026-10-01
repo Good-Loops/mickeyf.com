@@ -103,6 +103,26 @@ test('account change discards the old parent grant and clears entered child cred
     assert.equal(view.find(node => node.type === 'form'), undefined); assert.deepEqual(view.cancellations, [state]);
 });
 
+test('cookie renewal during provider proof aborts it and explains how to restart without reusing stale approval', async t => {
+    const view = mount(t, { sessionGeneration: 1 }); await view.prepare(); const state = random();
+    view.begins[0].resolve({ state, nonce: random(), expiresInSeconds: 300 }); await view.settle();
+    view.render({ sessionGeneration: 2 }); await view.settle();
+    assert.equal(view.acquisitions[0].args[2].aborted, true);
+    assert.deepEqual(view.cancellations, [state]);
+    view.acquisitions[0].resolve('late-token'); await view.settle();
+    assert.equal(view.proofs.length, 0); assert.equal(view.find(node => node.type === 'form'), undefined);
+    assert.match(view.text(), /session was refreshed.*Restart parent approval/u);
+});
+
+test('cookie renewal after approval clears child credentials and retains uncertain-creation guidance', async t => {
+    const view = mount(t, { sessionGeneration: 1 }); const state = await view.authorize();
+    view.find(node => node.type === 'input' && node.props.type === 'password').props.onChange({ target: { value: 'synthetic-secret' } });
+    view.render({ sessionGeneration: 2 }); await view.settle();
+    assert.equal(view.find(node => node.type === 'form'), undefined); assert.deepEqual(view.cancellations, [state]);
+    assert.equal(view.creations.length, 0); assert.doesNotMatch(view.text(), /synthetic-secret/u);
+    assert.match(view.text(), /account creation may still complete/u);
+});
+
 test('unmount aborts provider acquisition and cancels the exact pending challenge', async t => {
     const view = mount(t); await view.prepare(); const state = random();
     view.begins[0].resolve({ state, nonce: random(), expiresInSeconds: 300 }); await view.settle(); view.unmount();

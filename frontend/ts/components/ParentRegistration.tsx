@@ -9,13 +9,14 @@ type Props = {
     authenticated: boolean;
     /** Changes whenever the current account changes; never inferred from provider email. */
     accountKey: string;
+    sessionGeneration?: number;
     clients: readonly PublicProviderClient[];
     acquire(client: PublicProviderClient, challenge: ProviderAuthenticationChallenge, signal: AbortSignal): Promise<ProviderCredential>;
     onCreated?(): void;
 };
 
 /** Child credentials are collected only after a fresh, consent-bound parent approval. */
-export default function ParentRegistration({ api, authenticated, accountKey, clients, acquire, onCreated }: Props) {
+export default function ParentRegistration({ api, authenticated, accountKey, sessionGeneration = 0, clients, acquire, onCreated }: Props) {
     const [config, setConfig] = useState<ParentConfig | null>(null);
     const [retry, setRetry] = useState(0);
     const [country, setCountry] = useState('');
@@ -30,6 +31,7 @@ export default function ParentRegistration({ api, authenticated, accountKey, cli
     const operation = useRef<AbortController | null>(null);
     const challengeState = useRef<string | null>(null);
     const generation = useRef(0);
+    const previousSession = useRef(sessionGeneration);
 
     const discard = () => {
         generation.current++;
@@ -52,6 +54,12 @@ export default function ParentRegistration({ api, authenticated, accountKey, cli
         setGrant(null); setPassword(''); setUserName(''); setBusy(false); setFeedback(''); setCountry('');
         setAdult(false); setGuardian(false); setConsent(false);
     }, [api, authenticated, accountKey]);
+    useEffect(() => {
+        if (previousSession.current === sessionGeneration) return;
+        previousSession.current = sessionGeneration;
+        discard(); setGrant(null); setPassword(''); setUserName(''); setBusy(false);
+        setFeedback('Your session was refreshed. Restart parent approval. If you submitted child details, refresh the child list first: account creation may still complete.');
+    }, [sessionGeneration]);
     useEffect(() => {
         if (!grant) return;
         const timer = setTimeout(() => { discard(); setGrant(null); setPassword(''); setBusy(false);
