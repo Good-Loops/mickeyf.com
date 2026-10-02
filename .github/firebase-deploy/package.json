@@ -18,6 +18,9 @@
     "playwright-core": "1.62.1"
   },
   "overrides": {
+    "get-uri": {
+      "basic-ftp": "6.2.1"
+    },
     "qs": "6.16.0",
     "re2": "1.26.1",
     "@opentelemetry/core": "2.8.0",

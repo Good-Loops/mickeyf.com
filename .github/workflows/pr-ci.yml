@@ -49,7 +49,7 @@ jobs:
       - name: Validate Firebase deploy dependency tree
         run: |
           npm --prefix .github/firebase-deploy ls --omit=dev
-          node --test .github/firebase-deploy/csv-parse-compat.test.mjs
+          node --test .github/firebase-deploy/csv-parse-compat.test.mjs .github/firebase-deploy/basic-ftp-compat.test.mjs
 
       - name: Audit npm dependencies
         run: |
