@@ -52,11 +52,16 @@ async function fixture(t) {
 }
 test('closed account entry links to the approved local notice without configuration or authentication', async t => {
     const { page } = await fixture(t); await page.goto(`${origin}/account`);
-    const link = page.getByRole('contentinfo').getByRole('link', { name: 'Privacy notice', exact: true });
+    const link = page.getByRole('contentinfo').getByRole('link', { name: 'Privacy notice (opens in a new tab)', exact: true });
     await link.waitFor(); assert.equal(await link.getAttribute('href'), '/privacy');
     assert.equal(await page.locator('input[type=password]').count(), 0);
-    await link.click(); await page.getByRole('heading', { name: 'Ludolume privacy notice', exact: true }).waitFor();
-    assert.equal(new URL(page.url()).pathname, '/privacy');
+    const opened = page.waitForEvent('popup'); await link.click(); const popup = await opened;
+    await popup.getByRole('heading', { name: 'Ludolume privacy notice', exact: true }).waitFor();
+    assert.equal(new URL(popup.url()).pathname, '/privacy');
+    assert.equal(new URL(page.url()).pathname, '/account');
+    assert.equal(await popup.evaluate(() => window.opener), null);
+    assert.equal(await popup.evaluate(() => document.referrer), '');
+    await popup.close();
 });
 test('direct notice route renders full approved wording with separate permissions and fits a narrow viewport', async t => {
     const { page } = await fixture(t);

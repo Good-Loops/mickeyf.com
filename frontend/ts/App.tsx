@@ -5,7 +5,7 @@
  */
 import React, { lazy, useRef } from "react";
 import { useSafariBackgroundEdges } from '@/hooks/useSafariBackgroundEdges';
-import { Routes, Route, Link, useLocation } from "react-router-dom";
+import { Routes, Route, useLocation } from "react-router-dom";
 import RouteContentBoundary from '@/components/RouteContentBoundary';
 import PrivacyNoticeLink from '@/components/PrivacyNoticeLink';
 import { parsePrivacyNoticeUrl } from '@/config/privacyNoticeUrl';
@@ -99,7 +99,10 @@ const App: React.FC = () => {
 		<footer className="footer">
 			<p className="footer__text">
 			© 2024 Michel Fingergut {/* · Portfolio */}
-			<> · {privacyNoticeUrl ? <PrivacyNoticeLink url={privacyNoticeUrl} /> : <Link to="/privacy">Privacy notice</Link>}</>
+			<> · {privacyNoticeUrl ? <PrivacyNoticeLink url={privacyNoticeUrl} />
+				: <a href="/privacy" target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">
+					Privacy notice <span>(opens in a new tab)</span>
+				</a>}</>
 			</p>
 		</footer>
     </div>

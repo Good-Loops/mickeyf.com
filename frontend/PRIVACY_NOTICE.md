@@ -6,6 +6,8 @@ at `/privacy` without authentication. The footer links to that local page when n
 retains the existing external-link behavior. A nonempty invalid override still
 fails Vite startup/build. Legal name/email are approved; postal address and
 telephone details are not authorized for publication.
+The local footer link also opens an isolated new tab with no referrer, preserving
+any account form already open in the original tab.
 
 The page presents account permission and optional public-leaderboard permission
 separately. Reading it grants neither. Actual account controls continue to display
