@@ -603,3 +603,39 @@ test('stale plans and unsupported privilege state refuse before mutation', async
         await root.query("DROP ROLE IF EXISTS 'mandatory_runtime_test'@'%'");
     }
 });
+
+test('parent runtime grants inspect and verify score participation columns', async () => {
+    await installBroadFixture();
+    const parentSettings: RuntimeGrantSettings = { ...settings, profile: 'google-apple-parent' };
+    try {
+        await applyMigrations(asMigrationConnection(administrator), migrations, config, {
+            allowedEffectKinds: ['allow-parent-managed-contact', 'add-parent-attempts',
+                'add-parent-consents', 'extend-parent-family', 'add-score-participation'],
+        });
+        const connection = asRuntimeGrantConnection(root);
+        const plan = await planRuntimeGrants(connection, parentSettings, RUNTIME_ACCOUNT);
+        assert.deepEqual(plan.blockers, []);
+        assert.deepEqual(plan.observed.availableColumns
+            .filter(({ tableName }) => tableName === 'account_score_permissions')
+            .map(({ columnName }) => columnName).sort(), [
+            'account_uuid', 'age_band', 'authorizer_uuid', 'confirmed_at', 'country_code',
+            'policy_digest', 'registration_policy_version', 'visibility',
+        ]);
+        const applied = await applyRuntimeGrants(connection, parentSettings, RUNTIME_ACCOUNT,
+            plan.sha256, plan.server.uuid, createSqlRoleRemover());
+        assert.equal(applied.compliant, true);
+        const verified = await verifyRuntimeGrants(connection, parentSettings, RUNTIME_ACCOUNT);
+        assert.equal(verified.compliant, true);
+        const runtime = await createRuntimeConnection();
+        try {
+            await runtime.query('SELECT account_uuid, visibility FROM account_score_permissions LIMIT 1');
+            await assert.rejects(() => runtime.query('DELETE FROM account_score_permissions WHERE 1 = 0'),
+                (error: unknown) => (error as { code?: string }).code === 'ER_TABLEACCESS_DENIED_ERROR');
+        } finally {
+            await runtime.end();
+            await waitForFixtureSessionToClose(runtime.threadId);
+        }
+    } finally {
+        await administrator.query('DROP TABLE IF EXISTS account_score_permissions, parent_child_consents, parent_registration_attempts');
+    }
+});
