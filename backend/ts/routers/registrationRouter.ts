@@ -43,7 +43,7 @@ export function createRegistrationRouter(registration: RegistrationAuthorization
             const cookie = context.anonymousCookie;
             res.cookie(cookie.name, cookie.value, { ...sessionCookieOptions(isProduction, cookie.name), maxAge: cookie.maxAge });
             return res.json({ authorized: true, expiresInSeconds: Math.floor(cookie.maxAge / 1000),
-                scoreVisibility: result.ageBand === 'minor' ? 'private' : 'public' });
+                scoreVisibility: 'private' });
         } catch (error) {
             return res.status(error instanceof RegistrationRequiredError ? 403 : 503)
                 .json({ error: error instanceof RegistrationRequiredError ? 'REGISTRATION_REQUIRED' : 'UNAVAILABLE' });

@@ -55,14 +55,16 @@ test('parent-required, unconfigured country and untrusted origin stop before SQL
     }
     assert.deepEqual(queries, []);
 }));
-test('authorized minor preflight uses the canonical signed HttpOnly cookie and declares private scores', async () => fixture(async (url, queries) => {
-    const response = await begin(url, { country: 'ZZ', ageBand: 'minor', policyVersion: 'synthetic' });
+for (const ageBand of ['minor', 'adult'] as const) {
+test(`authorized ${ageBand} preflight uses the canonical signed HttpOnly cookie and declares private scores`, async () => fixture(async (url, queries) => {
+    const response = await begin(url, { country: 'ZZ', ageBand, policyVersion: 'synthetic' });
     assert.equal(response.status, 200);
     assert.deepEqual(await response.json(), { authorized: true, expiresInSeconds: 300, scoreVisibility: 'private' });
     assert.match(response.headers.get('set-cookie')!, /^__session=/u);
     assert.match(response.headers.get('set-cookie')!, /HttpOnly; Secure/u);
     assert.equal(queries.length, 2);
 }));
+}
 test('password signup cannot bypass missing preflight with an age claim in its credential body', async () => fixture(async (url, queries) => {
     const response = await fetch(`${url}/api/users`, { method: 'POST', headers: { origin, 'content-type': 'application/json' },
         body: JSON.stringify({ type: 'signup', user_name: 'synthetic', email: 'synthetic@example.test', user_password: 'synthetic-long-password',
