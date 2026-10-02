@@ -103,10 +103,10 @@ export function createGcsDeletionJournal(
         }
     }
 
-    async function recordAccountDeletion(accountId: string): Promise<void> {
+    async function recordIntent(accountId: string, action: DeletionIntent['action']): Promise<void> {
         assertAccountId(accountId);
         const intent = parseDeletionIntent({
-            version: 1, accountId, action: 'delete-account',
+            version: 1, accountId, action,
             requestedAt: (options.now ?? (() => new Date()))().toISOString(),
         });
         const name = `v1/intents/${(options.requestId ?? randomUUID)()}.json`;
@@ -194,7 +194,8 @@ export function createGcsDeletionJournal(
         }
     }
 
-    return { recordAccountDeletion, readDeletionIntents };
+    return { recordAccountDeletion: accountId => recordIntent(accountId, 'delete-account'),
+        recordPublicScoreWithdrawal: accountId => recordIntent(accountId, 'withdraw-public-scores'), readDeletionIntents };
 }
 
 function createAuthenticatedClient(): JournalHttpClient {

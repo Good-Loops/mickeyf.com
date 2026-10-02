@@ -23,7 +23,7 @@ const server = await createViteTestServer({ root, configFile: `${root}/vite.conf
 });
 after(() => server.close());
 const { default: Component } = await server.ssrLoadModule('/ts/components/ParentRegistration.tsx');
-const config = { enabled: true, creationEnabled: true, policyVersion: 'test', consentVersion: 'consent-test', consentText: 'Synthetic consent.', countries: ['ZZ'] };
+const config = { enabled: true, creationEnabled: true, policyVersion: 'test', consentVersion: 'consent-test', consentText: 'Synthetic consent.', privacyNoticeUrl: 'https://notice.example.test/privacy', countries: ['ZZ'] };
 const random = () => randomBytes(32).toString('base64url');
 const deferred = () => { let resolve; let reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { resolve, reject, promise }; };
 const nodes = value => !value || typeof value !== 'object' ? [] : [value, ...[value.props?.children].flat(Infinity).flatMap(nodes)];

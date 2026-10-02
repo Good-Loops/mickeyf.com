@@ -18,6 +18,7 @@ const token = issueSessionToken(account, secret).token;
 const signature = createHmac('sha256', secret).update(token).digest('base64').replace(/=+$/u, '');
 const cookie = `__session=${encodeURIComponent(`s:${token}.${signature}`)}`;
 const input = { purpose: 'create-child', clientKey: 'google-web', policyVersion: 'test', consentVersion: 'test',
+    privacyNoticeUrl: 'https://notice.example.test/privacy',
     country: 'ZZ', adultAttestation: true, guardianAttestation: true, consent: true };
 
 async function fixture(run: (url: string, calls: string[]) => Promise<void>, enabled = true, liveSession = true) {
@@ -28,7 +29,7 @@ async function fixture(run: (url: string, calls: string[]) => Promise<void>, ena
         async createChild() { assert.fail('unexpected create'); }, async withdrawChild() { assert.fail('unexpected delete'); } };
     const database = { async query() { return [liveSession ? [{ userName: account.userName }] : []]; } } as unknown as Pool;
     const flow = createParentRegistrationFlow({ store, clients: { 'google-web': { provider: 'google', verifier: { async verify() { assert.fail('unexpected provider'); } } } },
-        policy: enabled ? { version: 'test', consentVersion: 'test', consentText: 'Synthetic reviewed text.', countries: ['ZZ'] } : undefined });
+        policy: enabled ? { version: 'test', consentVersion: 'test', consentText: 'Synthetic reviewed text.', privacyNoticeUrl: 'https://notice.example.test/privacy', countries: ['ZZ'] } : undefined });
     const app = express(); app.use(cookieParser(secret));
     app.use('/parent', createParentRegistrationRouter(flow,
         createProviderAuthContextReader({ database, sessionSecret: secret, allowedOrigins: [origin] })));

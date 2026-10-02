@@ -76,6 +76,8 @@ export async function auditPendingDeletions(
         // Parse every record before querying accounts; retries must not renew the grace period.
         for (const value of snapshot.intents) {
             const intent = parseDeletionIntent(value);
+            // Score withdrawal intentionally retains the account; it is not a pending deletion.
+            if (intent.action !== 'delete-account') continue;
             const requestedAt = Date.parse(intent.requestedAt);
             requestedAtByAccount.set(intent.accountId,
                 Math.min(requestedAtByAccount.get(intent.accountId) ?? requestedAt, requestedAt));

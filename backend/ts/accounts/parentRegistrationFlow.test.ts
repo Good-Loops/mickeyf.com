@@ -7,13 +7,14 @@ import { createParentRegistrationFlow, type ParentChallenge, type ParentGrant, t
     type ParentRegistrationStore } from './parentRegistrationFlow';
 
 const policy: ParentRegistrationPolicy = { version: 'synthetic-1', consentVersion: 'consent-1',
-    consentText: 'Synthetic test consent only.', countries: ['ZZ'] };
+    consentText: 'Synthetic test consent only.', privacyNoticeUrl: 'https://notice.example.test/privacy', countries: ['ZZ'] };
 const hash = (value: string) => createHash('sha256').update(value).digest('hex');
 const ctx = () => { const accountId = randomUUID(); return { bindingHash: randomBytes(32),
     account: { accountId, userId: 42 }, session: { accountId, sessionId: randomBytes(32).toString('base64url') },
     bindingExpiresAt: null, anonymousCookie: null } as ProviderAuthContext; };
 const beginInput = { purpose: 'create-child', clientKey: 'google-web', policyVersion: policy.version,
-    consentVersion: policy.consentVersion, country: 'ZZ', adultAttestation: true, guardianAttestation: true, consent: true };
+    consentVersion: policy.consentVersion, privacyNoticeUrl: policy.privacyNoticeUrl,
+    country: 'ZZ', adultAttestation: true, guardianAttestation: true, consent: true };
 
 function fixture(selectedPolicy: ParentRegistrationPolicy | undefined = policy) {
     let clock = 1_800_000_000_000;
@@ -152,6 +153,21 @@ test('changing consent text invalidates a pending attempt even when its version 
     const f = fixture(); const challenge = await f.flow.begin(f.context, beginInput); assert.ok('state' in challenge);
     const changed = createParentRegistrationFlow({ policy: { ...policy, consentText: 'Changed reviewed text.' }, clients: f.clients, store: f.store });
     assert.deepEqual(await changed.complete(f.context, { state: challenge.state, idToken: 'token' }), { error: 'INVALID_ATTEMPT' });
+});
+
+test('notice URL is exposed with consent and binds both pending proof and approved grant', async () => {
+    const f = fixture();
+    assert.equal(f.flow.config().privacyNoticeUrl, policy.privacyNoticeUrl);
+    const approved = await f.approve();
+    const pending = await f.flow.begin(f.context, beginInput); assert.ok('state' in pending);
+    const changed = createParentRegistrationFlow({ policy: { ...policy, privacyNoticeUrl: 'https://notice.example.test/privacy-v2' },
+        clients: f.clients, store: f.store });
+    assert.deepEqual(await changed.begin(f.context, beginInput), { error: 'INVALID_REQUEST' }, 'stale displayed notice cannot begin a new approval');
+    assert.deepEqual(await changed.complete(f.context, { state: pending.state, idToken: 'token' }), { error: 'INVALID_ATTEMPT' });
+    assert.deepEqual(await changed.createChild(f.context, { grant: approved.result.grant, userName: 'nick', password: 'synthetic-password' }), { error: 'UNAVAILABLE' });
+    assert.equal(f.children.size, 0);
+    assert.throws(() => createParentRegistrationFlow({ policy: { ...policy, privacyNoticeUrl: 'javascript:alert(1)' },
+        clients: f.clients, store: f.store }), /Invalid reviewed/u);
 });
 
 test('cancelling an approved grant blocks creation; cancelling a consumed grant does not delete its child', async () => {

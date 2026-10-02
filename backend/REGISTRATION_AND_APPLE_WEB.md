@@ -10,7 +10,7 @@ The page collects country and a coarse age range before email, password or provi
 
 One signed anonymous cookie binds a five-minute SQL authorization shared by password and provider signup. A changed policy digest, expiry, reuse or different cookie rejects it. Profile insertion and grant consumption commit in the account-creation transaction. Duplicate account failures roll back consumption. Provider identities match verified provider subjects; matching email does not automatically link accounts.
 
-New minor profiles have private scores. Public leaderboard filtering happens before ordering/limits. Existing unclassified accounts retain their previous visibility. Profile rows cascade on account deletion. Registration pause does not hide existing provider login or disable password login.
+New profiles have private scores regardless of age. The later [public participation contract](FAMILY_AND_PUBLIC_SCORES.md) requires a separate reviewed choice before publication. Public leaderboard filtering happens before ordering/limits. Existing unclassified accounts retain their previous visibility. Profile rows cascade on account deletion. Registration pause does not hide existing provider login or disable password login.
 
 `0019_create_registration_authorizations.sql` and `0020_create_account_registration_profiles.sql` require explicit migration approval and scoped runtime grants. Startup verifies their exact schema/history even while registration is paused because leaderboards read the profile table. The separate `registration-apply` migration command selects only these effects; ordinary migration commands do not implicitly activate them. Never repeat previously applied migrations; obtain a fresh checksum and target plan first.
 

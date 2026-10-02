@@ -1,12 +1,13 @@
 export interface DeletionIntent {
     version: 1;
     accountId: string;
-    action: 'delete-account';
+    action: 'delete-account' | 'withdraw-public-scores';
     requestedAt: string;
 }
 
 export interface AccountDeletionJournal {
     recordAccountDeletion(accountId: string): Promise<void>;
+    recordPublicScoreWithdrawal?(accountId: string): Promise<void>;
 }
 
 export interface DeletionJournalSnapshot {
@@ -35,14 +36,14 @@ export function parseDeletionIntent(value: unknown): DeletionIntent {
     }
     const intent = value as Record<string, unknown>;
     if (Object.keys(intent).sort().join(',') !== 'accountId,action,requestedAt,version'
-        || intent.version !== 1 || intent.action !== 'delete-account'
+        || intent.version !== 1 || (intent.action !== 'delete-account' && intent.action !== 'withdraw-public-scores')
         || !isAccountId(intent.accountId) || !isUtcTimestamp(intent.requestedAt)) {
         throw new Error('Invalid deletion intent');
     }
     return {
         version: 1,
         accountId: intent.accountId,
-        action: 'delete-account',
+        action: intent.action,
         requestedAt: intent.requestedAt,
     };
 }

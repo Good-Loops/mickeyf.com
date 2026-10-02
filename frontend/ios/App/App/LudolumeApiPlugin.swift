@@ -67,6 +67,11 @@ private enum LudolumeApiPolicy {
         "POST /auth/parent-registration/complete", "POST /auth/parent-registration/cancel",
         "POST /auth/parent-registration/children", "POST /auth/parent-registration/withdraw",
         "POST /auth/parent-registration/children/list",
+        "POST /auth/parent-registration/family/delete",
+        "GET /auth/parent-registration/scores/config",
+        "POST /auth/parent-registration/scores/status",
+        "POST /auth/parent-registration/scores/publish",
+        "POST /auth/parent-registration/scores/withdraw",
         "GET /auth/registration/config", "POST /auth/registration/begin", "POST /auth/registration/cancel",
         "POST /api/users",
         "GET /auth/verify-token",
@@ -227,7 +232,7 @@ private final class LudolumeApiRequest: NSObject, URLSessionDataDelegate, @unche
         // Preserve credentials on network/server failure so the user can retry revocation.
         if response.statusCode == 200,
            let result = try? JSONDecoder().decode([String: Bool].self, from: body),
-           (request.url?.path == "/auth/delete-account" && result == ["deleted": true])
+           (["/auth/delete-account", "/auth/parent-registration/family/delete"].contains(request.url?.path ?? "") && result == ["deleted": true])
             || (request.url?.path == "/auth/logout" && result == ["loggedOut": true]) {
             LudolumeApiPolicy.clearSessionCookie(completion: finish)
         } else {

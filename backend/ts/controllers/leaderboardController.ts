@@ -42,6 +42,8 @@ import { readActiveAccount } from '../security/activeAccount';
 
 type LeaderboardControllerDependencies = {
     database: Pick<Pool, 'getConnection' | 'query'>;
+    scorePublicationDigest?: Buffer;
+    scoreParticipationReady?: boolean;
     sessionSecret: string;
     allowedMutationOrigins: readonly string[];
     threeBossesRunSubmissionsEnabled: boolean;
@@ -107,7 +109,7 @@ export function leaderboardCatalogResponse(
 }
 
 export function createLeaderboardController({
-    database,
+    database, scorePublicationDigest, scoreParticipationReady = false,
     sessionSecret,
     allowedMutationOrigins,
     threeBossesRunSubmissionsEnabled,
@@ -138,7 +140,7 @@ export function createLeaderboardController({
         }
 
         if (gameId === 'three-bosses') {
-            const rows = await readThreeBossesLeaderboard(database);
+            const rows = await readThreeBossesLeaderboard(database, scorePublicationDigest, scoreParticipationReady);
             return res.json({
                 success: true,
                 contractVersion: LEADERBOARD_CONTRACT_VERSION,
@@ -157,7 +159,7 @@ export function createLeaderboardController({
             });
         }
 
-        const rows = await readP4VegaLeaderboard(database);
+        const rows = await readP4VegaLeaderboard(database, scorePublicationDigest, scoreParticipationReady);
         return res.json({
             success: true,
             contractVersion: LEADERBOARD_CONTRACT_VERSION,

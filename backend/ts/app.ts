@@ -36,6 +36,7 @@ import { prepareRuntimeProviderAuth } from './config/providerAuthConfig';
 
 import { createRegistrationAuthorization, cleanupRegistrationAuthorizations } from './accounts/registrationAuthorization';
 import { verifyRegistrationReadiness } from './migrations/registrationSchema';
+import { verifyScoreParticipationReadiness } from './migrations/scoreParticipationSchema';
 import { verifyParentRegistrationReadiness } from './migrations/parentRegistrationSchema';
 import { cleanupParentRegistrationAttempts } from './accounts/parentRegistrationRepository';
 
@@ -94,6 +95,7 @@ app.use(cookieParser(runtimeConfig.sessionSecret));
 const generalApiRateLimiter = createGeneralApiRateLimiter();
 app.use(['/api', '/auth'], generalApiRateLimiter);
 app.use('/api/leaderboards', createLeaderboardRouter(pool, {
+    scorePublicationDigest: runtimeConfig.scoreParticipationPolicy?.digest, scoreParticipationReady: true,
     sessionSecret: runtimeConfig.sessionSecret,
     allowedMutationOrigins: runtimeConfig.corsOrigins,
     threeBossesRunSubmissionsEnabled:
@@ -104,6 +106,7 @@ app.use('/api/leaderboards', createLeaderboardRouter(pool, {
 app.use(express.json({ limit: '32kb', strict: true }));
 app.use('/api', createMainRouter({
     database: pool,
+    scorePublicationDigest: runtimeConfig.scoreParticipationPolicy?.digest, scoreParticipationReady: true,
     registration,
     sessionSecret: runtimeConfig.sessionSecret,
     isProduction: runtimeConfig.isProduction,
@@ -121,6 +124,7 @@ async function startServer(): Promise<void> {
             await verifyAccountSessionReadiness(pool);
             await verifyRegistrationReadiness(pool);
             await verifyParentRegistrationReadiness(pool);
+            await verifyScoreParticipationReadiness(pool);
             const providerAuth = await prepareRuntimeProviderAuth(runtimeConfig.providerAuth);
             if (providerAuth.appleTokenLifecycle) await verifyAppleTokenReadiness(pool);
             if (runtimeConfig.providerAuth.appleNotifications) await verifyAppleRevocationReadiness(pool);
@@ -139,7 +143,8 @@ async function startServer(): Promise<void> {
             app.use('/auth', createAuthRouter(
                 pool, runtimeConfig.sessionSecret, runtimeConfig.isProduction, runtimeConfig.corsOrigins,
                 { accountDeletionEnabled: runtimeConfig.accountDeletionEnabled, deletionJournal, providerAuth, registration,
-                    parentRegistrationStorageReady: true, parentRegistrationPolicy: runtimeConfig.parentRegistrationPolicy }
+                    parentRegistrationStorageReady: true, parentRegistrationPolicy: runtimeConfig.parentRegistrationPolicy,
+                    scoreParticipationPolicy: runtimeConfig.scoreParticipationPolicy }
             ));
             app.use(notFoundHandler);
             app.use(requestErrorHandler);

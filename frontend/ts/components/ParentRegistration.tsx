@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import type { ProviderCredential, ProviderAuthenticationChallenge } from '@/services/authApi';
 import type { PublicProviderClient } from '@/services/providerClient';
 import { ParentRegistrationError, type ParentRegistrationApi, type ParentConfig } from '@/services/parentRegistrationApi';
+import PrivacyNoticeLink from '@/components/PrivacyNoticeLink';
 
 type Props = {
     api: ParentRegistrationApi;
@@ -117,6 +118,7 @@ export default function ParentRegistration({ api, authenticated, accountKey, ses
     return <section aria-label="Parent-led registration">
         <h2>Create a private child account</h2>
         <p>Google or Apple confirms your provider account and may confirm your email. Your adult and guardian declarations are separate; provider sign-in does not verify guardianship.</p>
+        {config?.enabled && <p><PrivacyNoticeLink url={config.privacyNoticeUrl} /></p>}
         {!authenticated ? <p><Link to="/login">Log in to your own Ludolume account with Google or Apple</Link>, then return here.</p>
             : !config ? <button type="button" onClick={() => setRetry(value => value + 1)}>Retry loading parent registration</button>
             : !config.enabled ? <p>Parent registration is not available on this server.</p>

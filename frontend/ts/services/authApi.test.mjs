@@ -1181,3 +1181,18 @@ test(`${clientKey} continuation inherits original expiry and is invalidated by l
     }
 });
 }
+
+test('family cookie mutation settles in the auth queue before a newer login and copies confirmed IDs',async()=>{
+    let finish;const seen=[];const ids=['123e4567-e89b-42d3-a456-426614174000'];
+    const api=createAuthApi(apiBase,async(url,init)=>{seen.push({url,init});
+        if(url.endsWith('/family/delete'))return new Promise(resolve=>{finish=resolve;});
+        if(url.endsWith('/verify-token'))return Response.json({loggedIn:true,user_name:'New account'});
+        return Response.json({success:true,user_name:'New account'});});
+    const deletion=api.deleteFamilyRequest('synthetic-grant',ids);ids.length=0;
+    const login=api.loginRequest({user_name:'New account',user_password:'synthetic'});
+    await new Promise(resolve=>setImmediate(resolve));assert.equal(seen.length,1);
+    assert.equal(seen[0].init.signal,undefined,'cookie mutation must settle even if its page unmounts');
+    assert.deepEqual(JSON.parse(seen[0].init.body),{grant:'synthetic-grant',childAccountIds:['123e4567-e89b-42d3-a456-426614174000'],confirmation:'DELETE MY FAMILY'});
+    finish(Response.json({deleted:true}));await deletion;await login;
+    assert.equal(seen[1].url,apiBase+'/api/users');
+});

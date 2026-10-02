@@ -4,6 +4,9 @@ import type { ProviderAuthClient } from '../auth/providerAuthFlow';
 import type { VerifiedProviderIdentity } from '../auth/providerIdentity';
 import { PROVIDER_TOKEN_MAX_LENGTH } from '../auth/providerTokenVerifier';
 import { isRecord } from '../security/userRequestValidation';
+import type { ScoreParticipationPolicy } from '../config/scoreParticipationPolicy';
+import { familySelectionDigest } from './familyDeletionSelection';
+import { parsePrivacyNoticeUrl } from '../config/privacyNoticeUrl';
 
 const LIFETIME_MS = 5 * 60 * 1000;
 const TOKEN = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/u;
@@ -16,11 +19,14 @@ export type ParentRegistrationPolicy = Readonly<{
     version: string;
     consentVersion: string;
     consentText: string;
+    privacyNoticeUrl: string;
     countries: readonly string[];
     creationEnabled?: boolean;
 }>;
 export type ParentOperation = Readonly<{ purpose: 'create-child'; country: string }>
-    | Readonly<{ purpose: 'withdraw-child'; childAccountId: string }>;
+    | Readonly<{ purpose: 'withdraw-child'; childAccountId: string }>
+    | Readonly<{ purpose: 'delete-family'; familyDigest: Buffer }>
+    | Readonly<{ purpose: 'publish-scores'; childAccountId: string }>;
 export type ParentChallenge = Readonly<{
     stateHash: Buffer; bindingHash: Buffer; parentAccountId: string; parentUserId: number;
     clientKey: string; nonce: string; policyDigest: Buffer; expiresAt: number;
@@ -53,6 +59,10 @@ export type ParentRegistrationStore = {
     createChild(grantHash: Buffer, context: ProviderAuthContext, policyDigest: Buffer,
         credentials: ParentCredentials): Promise<ParentChild>;
     withdrawChild(grantHash: Buffer, context: ProviderAuthContext, policyDigest: Buffer): Promise<void>;
+    publishScores?(grantHash: Buffer, context: ProviderAuthContext, policyDigest: Buffer): Promise<void>;
+    withdrawScores?(context: ProviderAuthContext, targetAccountId: string): Promise<void>;
+    scoreStatus?(context: ProviderAuthContext, targetAccountId: string): Promise<{ visibility: 'public' | 'private'; canPublish: boolean }>;
+    deleteFamily?(grantHash: Buffer, context: ProviderAuthContext, policyDigest: Buffer, familyDigest: Buffer): Promise<void>;
     listChildren(context: ProviderAuthContext): Promise<ParentChild[]>;
 };
 
@@ -65,30 +75,37 @@ function authenticated(context: ProviderAuthContext | null): context is Provider
 
 function readPolicy(policy: ParentRegistrationPolicy | undefined) {
     if (!policy) return undefined;
+    const privacyNoticeUrl = parsePrivacyNoticeUrl(policy.privacyNoticeUrl);
     if (![policy.version, policy.consentVersion].every(value => /^[A-Za-z0-9._-]{1,64}$/u.test(value))
-        || typeof policy.consentText !== 'string' || policy.consentText.trim().length < 1 || policy.consentText.length > 8000
+        || !privacyNoticeUrl || typeof policy.consentText !== 'string' || policy.consentText.trim().length < 1 || policy.consentText.length > 8000
         || !Array.isArray(policy.countries) || policy.countries.length < 1 || policy.countries.length > 249
         || policy.countries.some(value => !/^[A-Z]{2}$/u.test(value))
         || new Set(policy.countries).size !== policy.countries.length) throw new TypeError('Invalid reviewed parent registration policy.');
-    const copy = Object.freeze({ ...policy, countries: Object.freeze([...policy.countries].sort()) });
-    return { ...copy, digest: hash(JSON.stringify([copy.version, copy.consentVersion, copy.consentText, copy.countries])) };
+    const copy = Object.freeze({ ...policy, privacyNoticeUrl, countries: Object.freeze([...policy.countries].sort()) });
+    return { ...copy, digest: hash(JSON.stringify([copy.version, copy.consentVersion, copy.consentText, copy.privacyNoticeUrl, copy.countries])) };
 }
 
 function readOperation(input: Record<string, unknown>, policy: ParentRegistrationPolicy): ParentOperation | null {
+    if (input.purpose === 'delete-family') {
+        const digest = familySelectionDigest(input.childAccountIds);
+        return keys(input, 'childAccountIds,clientKey,confirmation,policyVersion,purpose')
+            && input.confirmation === 'DELETE MY FAMILY' && digest ? { purpose: 'delete-family', familyDigest: digest } : null;
+    }
     if (input.purpose === 'withdraw-child') {
         return keys(input, 'childAccountId,clientKey,confirmation,policyVersion,purpose')
             && input.confirmation === 'WITHDRAW AND DELETE' && typeof input.childAccountId === 'string'
             && ACCOUNT.test(input.childAccountId) ? { purpose: 'withdraw-child', childAccountId: input.childAccountId } : null;
     }
-    if (input.purpose !== 'create-child' || !keys(input, 'adultAttestation,clientKey,consent,consentVersion,country,guardianAttestation,policyVersion,purpose')
+    if (input.purpose !== 'create-child' || !keys(input, 'adultAttestation,clientKey,consent,consentVersion,country,guardianAttestation,policyVersion,privacyNoticeUrl,purpose')
         || input.adultAttestation !== true || input.guardianAttestation !== true || input.consent !== true
-        || input.consentVersion !== policy.consentVersion || typeof input.country !== 'string'
+        || input.consentVersion !== policy.consentVersion || input.privacyNoticeUrl !== policy.privacyNoticeUrl || typeof input.country !== 'string'
         || !policy.countries.includes(input.country)) return null;
     return { purpose: 'create-child', country: input.country };
 }
 
-export function createParentRegistrationFlow({ policy: inputPolicy, clients, store, now = Date.now }: {
+export function createParentRegistrationFlow({ policy: inputPolicy, publicationPolicy, clients, store, now = Date.now }: {
     policy?: ParentRegistrationPolicy;
+    publicationPolicy?: ScoreParticipationPolicy;
     clients: Readonly<Record<string, ProviderAuthClient>>;
     store: ParentRegistrationStore;
     now?: () => number;
@@ -101,15 +118,24 @@ export function createParentRegistrationFlow({ policy: inputPolicy, clients, sto
     return {
         config() {
             return policy ? { enabled: true as const, policyVersion: policy.version, consentVersion: policy.consentVersion,
-                consentText: policy.consentText, countries: [...policy.countries], creationEnabled: policy.creationEnabled !== false } : { enabled: false as const };
+                consentText: policy.consentText, privacyNoticeUrl: policy.privacyNoticeUrl,
+                countries: [...policy.countries], creationEnabled: policy.creationEnabled !== false } : { enabled: false as const };
         },
         async begin(context: ProviderAuthContext | null, input: unknown) {
-            if (!policy) return failure('CLOSED');
+            const publishing = isRecord(input) && input.purpose === 'publish-scores';
+            const operationPolicy = publishing ? publicationPolicy : policy;
+            if (!operationPolicy) return failure('CLOSED');
             if (!authenticated(context)) return failure('INVALID_CONTEXT');
-            if (!isRecord(input) || input.policyVersion !== policy.version || typeof input.clientKey !== 'string'
+            if (!isRecord(input) || input.policyVersion !== operationPolicy.version || typeof input.clientKey !== 'string'
                 || !configuredClients.has(input.clientKey)) return failure('INVALID_REQUEST');
-            const operation = readOperation(input, policy);
-            if (operation?.purpose === 'create-child' && policy.creationEnabled === false) return failure('CLOSED');
+            const operation: ParentOperation | null = publishing
+                ? keys(input, 'childAccountId,clientKey,consentText,consentVersion,participation,policyVersion,privacyNoticeUrl,purpose')
+                    && input.participation === true && input.consentText === publicationPolicy!.consentText && input.consentVersion === publicationPolicy!.consentVersion
+                    && input.privacyNoticeUrl === publicationPolicy!.privacyNoticeUrl
+                    && (input.childAccountId === null || typeof input.childAccountId === 'string' && ACCOUNT.test(input.childAccountId))
+                    ? { purpose: 'publish-scores', childAccountId: input.childAccountId as string | null ?? context.account!.accountId } : null
+                : readOperation(input, policy!);
+            if (operation?.purpose === 'create-child' && policy?.creationEnabled === false) return failure('CLOSED');
             if (!operation || (operation.purpose === 'withdraw-child' && operation.childAccountId === context.account!.accountId)) {
                 return failure('INVALID_REQUEST');
             }
@@ -118,12 +144,12 @@ export function createParentRegistrationFlow({ policy: inputPolicy, clients, sto
             try {
                 const saved = await store.begin({ stateHash: hash(state), nonce, bindingHash: context.bindingHash,
                     parentAccountId: context.account!.accountId, parentUserId: context.account!.userId,
-                    clientKey: input.clientKey, policyDigest: policy.digest, expiresAt: now() + LIFETIME_MS, operation }, context);
+                    clientKey: input.clientKey, policyDigest: operationPolicy.digest, expiresAt: now() + LIFETIME_MS, operation }, context);
                 return saved ? { state, nonce, expiresInSeconds: 300 } : failure('UNAVAILABLE');
             } catch { return failure('UNAVAILABLE'); }
         },
         async complete(context: ProviderAuthContext | null, input: unknown) {
-            if (!policy) return failure('CLOSED');
+            if (!policy && !publicationPolicy) return failure('CLOSED');
             if (!authenticated(context)) return failure('INVALID_CONTEXT');
             if (!isRecord(input) || !keys(input, 'idToken,state') || typeof input.state !== 'string' || !TOKEN.test(input.state)
                 || typeof input.idToken !== 'string' || !input.idToken || input.idToken.length > PROVIDER_TOKEN_MAX_LENGTH) {
@@ -131,7 +157,8 @@ export function createParentRegistrationFlow({ policy: inputPolicy, clients, sto
             }
             try {
                 const attempt = await store.consumeChallenge(hash(input.state), context);
-                if (!attempt || !attempt.bindingHash.equals(context.bindingHash) || !attempt.policyDigest.equals(policy.digest)
+                const operationPolicy = attempt?.operation.purpose === 'publish-scores' ? publicationPolicy : policy;
+                if (!attempt || !operationPolicy || !attempt.bindingHash.equals(context.bindingHash) || !attempt.policyDigest.equals(operationPolicy.digest)
                     || attempt.parentAccountId !== context.account!.accountId || attempt.parentUserId !== context.account!.userId
                     || attempt.expiresAt <= now()) return failure('INVALID_ATTEMPT');
                 const client = configuredClients.get(attempt.clientKey);
@@ -146,7 +173,7 @@ export function createParentRegistrationFlow({ policy: inputPolicy, clients, sto
                 if (attempt.expiresAt <= now()) return failure('INVALID_ATTEMPT');
                 const grant = randomBytes(32).toString('base64url');
                 const approved = await store.approve({ ...attempt, grantHash: hash(grant), identity: proof.identity,
-                    consentVersion: policy.consentVersion, policyVersion: policy.version }, context);
+                    consentVersion: operationPolicy.consentVersion, policyVersion: operationPolicy.version }, context);
                 const remaining = Math.floor((attempt.expiresAt - now()) / 1000);
                 return approved && remaining > 0 ? { grant, purpose: attempt.operation.purpose, expiresInSeconds: remaining }
                     : failure('INVALID_ATTEMPT');
@@ -159,7 +186,7 @@ export function createParentRegistrationFlow({ policy: inputPolicy, clients, sto
             catch { return failure('UNAVAILABLE'); }
         },
         async createChild(context: ProviderAuthContext | null, input: unknown) {
-            if (!policy || policy.creationEnabled === false) return failure('CLOSED');
+            if (!policy || policy?.creationEnabled === false) return failure('CLOSED');
             if (!authenticated(context)) return failure('INVALID_CONTEXT');
             if (!isRecord(input) || !keys(input, 'grant,password,userName') || typeof input.grant !== 'string' || !TOKEN.test(input.grant)
                 || typeof input.userName !== 'string' || !input.userName.trim() || input.userName.trim().length > 64
@@ -180,6 +207,45 @@ export function createParentRegistrationFlow({ policy: inputPolicy, clients, sto
             if (!isRecord(input) || !keys(input, 'confirmation,grant') || input.confirmation !== 'WITHDRAW AND DELETE'
                 || typeof input.grant !== 'string' || !TOKEN.test(input.grant)) return failure('INVALID_REQUEST');
             try { await store.withdrawChild(hash(input.grant), context, policy.digest); return { deleted: true as const }; }
+            catch { return failure('UNAVAILABLE'); }
+        },
+        scoreConfig() {
+            return publicationPolicy ? { enabled: true as const, policyVersion: publicationPolicy.version,
+                consentVersion: publicationPolicy.consentVersion, consentText: publicationPolicy.consentText,
+                privacyNoticeUrl: publicationPolicy.privacyNoticeUrl } : { enabled: false as const };
+        },
+        async publishScores(context: ProviderAuthContext | null, input: unknown) {
+            if (!publicationPolicy || !store.publishScores) return failure('CLOSED');
+            if (!authenticated(context)) return failure('INVALID_CONTEXT');
+            if (!isRecord(input) || !keys(input, 'grant') || typeof input.grant !== 'string' || !TOKEN.test(input.grant)) return failure('INVALID_REQUEST');
+            try { await store.publishScores(hash(input.grant), context, publicationPolicy.digest); return { visibility: 'public' as const }; }
+            catch { return failure('UNAVAILABLE'); }
+        },
+        async withdrawScores(context: ProviderAuthContext | null, input: unknown) {
+            if (!store.withdrawScores) return failure('CLOSED');
+            if (!authenticated(context)) return failure('INVALID_CONTEXT');
+            if (!isRecord(input) || !keys(input, 'childAccountId') || !(input.childAccountId === null
+                || typeof input.childAccountId === 'string' && ACCOUNT.test(input.childAccountId))) return failure('INVALID_REQUEST');
+            try { await store.withdrawScores(context, input.childAccountId as string | null ?? context.account!.accountId); return { visibility: 'private' as const }; }
+            catch { return failure('UNAVAILABLE'); }
+        },
+        async scoreStatus(context: ProviderAuthContext | null, input: unknown) {
+            if (!store.scoreStatus) return failure('CLOSED');
+            if (!authenticated(context)) return failure('INVALID_CONTEXT');
+            if (!isRecord(input) || !keys(input, 'childAccountId') || !(input.childAccountId === null
+                || typeof input.childAccountId === 'string' && ACCOUNT.test(input.childAccountId))) return failure('INVALID_REQUEST');
+            try { return await store.scoreStatus(context, input.childAccountId as string | null ?? context.account!.accountId); }
+            catch { return failure('UNAVAILABLE'); }
+        },
+        async deleteFamily(context: ProviderAuthContext | null, input: unknown) {
+            if (!policy || !store.deleteFamily) return failure('CLOSED');
+            if (!authenticated(context)) return failure('INVALID_CONTEXT');
+            const digest = isRecord(input) ? familySelectionDigest(input.childAccountIds) : null;
+            if (!isRecord(input) || !keys(input, 'childAccountIds,confirmation,grant') || !digest
+                || input.confirmation !== 'DELETE MY FAMILY' || typeof input.grant !== 'string' || !TOKEN.test(input.grant)) {
+                return failure('INVALID_REQUEST');
+            }
+            try { await store.deleteFamily(hash(input.grant), context, policy.digest, digest); return { deleted: true as const }; }
             catch { return failure('UNAVAILABLE'); }
         },
         async listChildren(context: ProviderAuthContext | null, input: unknown) {

@@ -5,9 +5,13 @@ import { Agent } from "node:http";
 import { publicLeaderboardsPlugin } from "./dev/publicLeaderboards";
 import { publicApiPlugin } from "./dev/publicApi";
 import { parsePublicAuthProtocol } from "./ts/config/publicAuthProtocol";
+import { parsePrivacyNoticeUrl } from "./ts/config/privacyNoticeUrl";
 
 export default defineConfig(({ command, mode, isPreview }) => {
   const env = loadEnv(mode, process.cwd(), "VITE_");
+  if (env.VITE_PRIVACY_NOTICE_URL && !parsePrivacyNoticeUrl(env.VITE_PRIVACY_NOTICE_URL)) {
+    throw new Error('VITE_PRIVACY_NOTICE_URL must be a public HTTPS notice URL without credentials or query parameters.');
+  }
   const developmentServer = command === "serve" && mode === "development" && !isPreview;
   const publicApiPreview = developmentServer && env.VITE_USE_PUBLIC_API === "1";
   const enableThreeBossesLocal =

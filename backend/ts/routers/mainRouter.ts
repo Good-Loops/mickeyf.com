@@ -25,6 +25,8 @@ import type { RegistrationAuthorization } from '../accounts/registrationAuthoriz
 
 type MainRouterDependencies = {
     database: Pick<Pool, 'getConnection' | 'query'>;
+    scorePublicationDigest?: Buffer;
+    scoreParticipationReady?: boolean;
     sessionSecret: string;
     isProduction: boolean;
     p4VegaScoreSubmissionsEnabled: boolean;
@@ -33,7 +35,7 @@ type MainRouterDependencies = {
 };
 
 export function createMainRouter({
-    database,
+    database, scorePublicationDigest, scoreParticipationReady,
     sessionSecret,
     isProduction,
     p4VegaScoreSubmissionsEnabled,
@@ -48,7 +50,7 @@ export function createMainRouter({
      */
     const router = Router();
     const mainController = createMainController({
-        database,
+        database, scorePublicationDigest, scoreParticipationReady,
         sessionSecret,
         isProduction,
         p4VegaScoreSubmissionsEnabled,

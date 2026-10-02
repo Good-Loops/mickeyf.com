@@ -115,7 +115,7 @@ public final class LudolumeApiPlugin extends Plugin {
             if (path.equals("/auth/providers/complete")) return result.length() == 2
                 && Boolean.TRUE.equals(result.opt("success")) && Boolean.TRUE.equals(result.opt("deleted"));
             return result.length() == 1 && ((path.equals("/auth/logout") && Boolean.TRUE.equals(result.opt("loggedOut")))
-                || (path.equals("/auth/delete-account") && Boolean.TRUE.equals(result.opt("deleted"))));
+                || ((path.equals("/auth/delete-account") || path.equals("/auth/parent-registration/family/delete")) && Boolean.TRUE.equals(result.opt("deleted"))));
         } catch (Exception ignored) { return false; }
     }
 

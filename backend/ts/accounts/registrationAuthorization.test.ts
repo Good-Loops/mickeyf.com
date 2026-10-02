@@ -51,13 +51,13 @@ test('invalid, authenticated and expired contexts cannot issue or consume grants
     assert.deepEqual(f.calls, []);
 });
 
-test('consumption locks the current unused grant and always assigns private scores to a new minor', async () => {
+test('consumption locks the current unused grant and keeps all new scores private until a separate choice', async () => {
     for (const band of ['minor', 'adult'] as const) {
         const f = fixture(band);
         await f.service.consume(f.connection, context(), accountId);
         assert.equal(f.calls.length, 3);
         assert.match(f.calls[0].sql, /policy_digest = \? AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP\(6\) LIMIT 2 FOR UPDATE$/u);
-        assert.deepEqual(f.calls[1].values, [accountId, 'ZZ', band, 'synthetic', band === 'minor' ? 'private' : 'public']);
+        assert.deepEqual(f.calls[1].values, [accountId, 'ZZ', band, 'synthetic', 'private']);
         assert.match(f.calls[2].sql, /consumed_at IS NULL AND expires_at > UTC_TIMESTAMP\(6\)$/u);
     }
 });

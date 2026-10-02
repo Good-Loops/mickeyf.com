@@ -1,3 +1,4 @@
+import { loadScoreParticipationPolicy, type ScoreParticipationPolicy } from './scoreParticipationPolicy';
 import { loadRegistrationPolicy, type RegistrationPolicy } from './registrationPolicy';
 import { loadParentRegistrationPolicy } from './parentRegistrationPolicy';
 import type { ParentRegistrationPolicy } from '../accounts/parentRegistrationFlow';
@@ -11,6 +12,7 @@ type Environment = Readonly<Record<string, string | undefined>>;
 
 export type RuntimeConfig = {
     registrationPolicy: RegistrationPolicy | undefined;
+    scoreParticipationPolicy: ScoreParticipationPolicy | undefined;
     parentRegistrationPolicy: ParentRegistrationPolicy | undefined;
     nodeEnv: RuntimeEnvironment;
     isProduction: boolean;
@@ -120,6 +122,7 @@ export function loadRuntimeConfig(env: Environment = process.env): RuntimeConfig
     const registrationPolicy = loadRegistrationPolicy(env);
     return Object.freeze({
         registrationPolicy,
+        scoreParticipationPolicy: loadScoreParticipationPolicy(env, registrationPolicy),
         parentRegistrationPolicy: loadParentRegistrationPolicy(env, registrationPolicy),
         nodeEnv,
         isProduction: nodeEnv === 'production',

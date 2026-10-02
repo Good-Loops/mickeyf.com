@@ -1,3 +1,5 @@
+import { verifyScoreParticipationReadiness } from '../migrations/scoreParticipationSchema';
+import { removePublicScoreParticipation } from './scoreParticipationRepository';
 import { createHash } from 'node:crypto';
 import { performance } from 'node:perf_hooks';
 import type { Pool, PoolConnection, RowDataPacket } from 'mysql2/promise';
@@ -128,9 +130,14 @@ async function prepareReplay(
     // The sorted first intent is authoritative; replay must never restart retention.
     const requestedAt = new Map<string, string>();
     for (const intent of snapshot.intents) {
-        if (!requestedAt.has(intent.accountId)) requestedAt.set(intent.accountId, intent.requestedAt);
+        if (intent.action === 'delete-account' && !requestedAt.has(intent.accountId)) requestedAt.set(intent.accountId, intent.requestedAt);
     }
     const accountIds = [...requestedAt.keys()];
+    const scoreWithdrawals = [...new Set(snapshot.intents.filter(intent => intent.action === 'withdraw-public-scores').map(intent => intent.accountId))].sort();
+    if (scoreWithdrawals.length) {
+        const connection = guardConnectionQueries(await database.getConnection());
+        try { await verifyScoreParticipationReadiness(timedConnection(connection, budget)); } finally { connection.release(); }
+    }
     const sha256 = createHash('sha256').update(JSON.stringify({
         formatVersion: 1, target, journalDigest: snapshot.digest, intents: snapshot.intents,
         maxIntents: settings.maxIntents, maxDurationMs: settings.maxDurationMs,
@@ -139,7 +146,7 @@ async function prepareReplay(
         formatVersion: 1, sha256, target, journalDigest: snapshot.digest,
         intentCount: snapshot.intents.length, accountCount: accountIds.length,
     });
-    return { plan, accountIds, requestedAt };
+    return { plan, accountIds, requestedAt, scoreWithdrawals };
 }
 
 export async function planDeletionReplay(
@@ -271,12 +278,34 @@ export async function applyDeletionReplay(
     approvedPlanSha256: string
 ): Promise<DeletionReplayResult> {
     const budget = new ReplayBudget(settings.maxDurationMs);
-    const { plan, accountIds, requestedAt } = await prepareReplay(database, reader, settings, budget);
+    const { plan, accountIds, requestedAt, scoreWithdrawals } = await prepareReplay(database, reader, settings, budget);
     if (!/^[0-9a-f]{64}$/u.test(approvedPlanSha256) || plan.sha256 !== approvedPlanSha256) {
         throw new Error('Deletion replay plan changed; review a fresh plan before applying');
     }
+    const orderedAccounts = await childFirstReplayOrder(database, accountIds, settings, budget);
+    // Reconciliation is deliberately privacy preserving: a restored publication needs a new explicit choice.
+    // Parse, schema-check and authorize the complete plan before either withdrawal or deletion writes.
+    for (const accountId of scoreWithdrawals) {
+        const userId = await findUserId(database, accountId, settings, budget);
+        if (userId === undefined) continue;
+        await withUserSubmissionLock(database, userId, async lock => {
+            let active = false;
+            try {
+                await inspectTarget(lock.connection, settings, budget);
+                await lock.connection.query({ sql: 'START TRANSACTION', timeout: budget.remaining() }); active = true;
+                const [found] = await lock.connection.query<RowDataPacket[]>({ sql: 'SELECT account_uuid FROM users WHERE user_id=? AND account_uuid=? FOR UPDATE', timeout: budget.remaining() }, [userId, accountId]);
+                if (found.length === 1) await removePublicScoreParticipation(lock.connection, accountId);
+                active = false;
+                await lock.connection.query({ sql: 'COMMIT', timeout: budget.remaining() });
+            } catch (error) {
+                if (active) { try { await lock.connection.query({ sql: 'ROLLBACK', timeout: budget.remaining() }); } catch { lock.invalidateConnection(); } }
+                else lock.invalidateConnection();
+                throw error;
+            }
+        });
+    }
     let deletedAccounts = 0;
-    for (const accountId of await childFirstReplayOrder(database, accountIds, settings, budget)) {
+    for (const accountId of orderedAccounts) {
         budget.remaining();
         if (await replayOneAccount(database, accountId, requestedAt.get(accountId)!, settings, budget)) deletedAccounts++;
     }

@@ -3,7 +3,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { createParentRegistrationApi } from './parentRegistrationApi.ts';
 const response = (value, status = 200) => new Response(JSON.stringify(value), { status });
-const config = { enabled: true, creationEnabled: true, policyVersion: 'test-policy', consentVersion: 'test-consent', consentText: 'Synthetic consent.', countries: ['ZZ'] };
+const config = { enabled: true, creationEnabled: true, policyVersion: 'test-policy', consentVersion: 'test-consent', consentText: 'Synthetic consent.', privacyNoticeUrl: 'https://notice.example.test/privacy', countries: ['ZZ'] };
 const random = () => randomBytes(32).toString('base64url');
 const challenge = { state: random(), nonce: random(), expiresInSeconds: 300 };
 const consent = { country: 'ZZ', adultAttestation: true, guardianAttestation: true, consent: true };
@@ -13,7 +13,7 @@ test('parent consent request contains only reviewed coarse fields, never child c
         assert.equal(url, 'https://api.example.test/auth/parent-registration/begin');
         assert.equal(options.credentials, 'include'); assert.equal(options.method, 'POST');
         assert.deepEqual(JSON.parse(options.body), { purpose: 'create-child', policyVersion: config.policyVersion,
-            consentVersion: config.consentVersion, clientKey: 'google-web', ...consent });
+            consentVersion: config.consentVersion, privacyNoticeUrl: config.privacyNoticeUrl, clientKey: 'google-web', ...consent });
         return response(challenge);
     });
     assert.deepEqual(await api.begin(config, 'google-web', { ...consent, parentAccountId: randomUUID(), email: 'child@example.test', password: 'never-send' }), challenge);
@@ -25,6 +25,13 @@ test('parent configuration rejects undeclared fields, duplicate countries and em
     for (const value of [{ ...config, countries: ['ZZ', 'ZZ'] }, { ...config, countries: [] }, { ...config, consentText: '' },
         { ...config, legalAssurance: 'global' }, { ...config, policyVersion: '' }]) {
         await assert.rejects(createParentRegistrationApi('', async () => response(value)).config(), { code: 'UNAVAILABLE' });
+    }
+});
+
+test('a missing or unsafe server notice prevents parent consent configuration from being accepted', async () => {
+    for (const privacyNoticeUrl of [undefined, '', '/privacy', 'javascript:alert(1)', 'http://notice.example.test/privacy',
+        'https://u:p@notice.example.test/privacy', 'https://notice.example.test/privacy?child=123']) {
+        await assert.rejects(createParentRegistrationApi('', async () => response({ ...config, privacyNoticeUrl })).config(), { code: 'UNAVAILABLE' });
     }
 });
 

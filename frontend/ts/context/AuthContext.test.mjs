@@ -8,7 +8,7 @@ const frontendRoot = fileURLToPath(new URL('../../', import.meta.url));
 const key = '__authFeedbackFixture';
 const scope = `globalThis.${key}`;
 const authOperations = ['loginRequest', 'logoutRequest', 'verifyRequest', 'renewRequest',
-    'deleteAccountRequest', 'runProviderAuthentication', 'watchAppleCredentialChanges',
+    'deleteAccountRequest', 'deleteFamilyRequest', 'runProviderAuthentication', 'watchAppleCredentialChanges',
     'prepareProviderLogin', 'completeProviderLogin'];
 const mocks = {
     react: `export const createContext = () => ({ Provider: 'AuthProvider' });
@@ -168,3 +168,43 @@ for (const outcome of ['AUTH_FAILED', 'SESSION_NOT_ESTABLISHED', 'network-failur
         assert.deepEqual(f.feedback, []);
     });
 }
+
+test('confirmed family deletion clears authentication without any later network call', async t => {
+    const calls=[];
+    const f=fixture(t, async operation=>{calls.push(operation);if(operation==='loginRequest')return {user_name:'Parent'};
+        if(operation==='deleteFamilyRequest')return;throw new Error('Network unavailable after deletion');});
+    await f.render().login('Parent','synthetic'); const auth=f.render();
+    f.feedback.length = 0;
+    await auth.deleteFamily('synthetic-grant',[],auth.captureAccountAction());
+    assert.equal(f.render().isAuthenticated,false);assert.equal(f.render().userName,null);
+    assert.deepEqual(calls,['loginRequest','deleteFamilyRequest']);assert.deepEqual(f.feedback,[]);
+});
+
+test('sign-out starting during family approval owns authentication and prevents a late family request', async t => {
+    let finishLogout; const calls=[];
+    const f=fixture(t,operation=>{calls.push(operation);if(operation==='loginRequest')return Promise.resolve({user_name:'Parent'});
+        if(operation==='logoutRequest')return new Promise(resolve=>{finishLogout=resolve;});assert.fail('Stale family approval sent');});
+    await f.render().login('Parent','synthetic');const auth=f.render(); const approvalOwner=auth.captureAccountAction();
+    const logout=auth.logout(); await assert.rejects(auth.deleteFamily('synthetic-grant',[],approvalOwner),/earlier authentication/u);
+    finishLogout();await logout;assert.equal(f.render().isAuthenticated,false);assert.deepEqual(calls,['loginRequest','logoutRequest']);
+});
+
+test('a late family response does not clear a newer login', async t => {
+    let finishFamily; const f=fixture(t,operation=>operation==='deleteFamilyRequest'
+        ? new Promise(resolve=>{finishFamily=resolve;}) : Promise.resolve({user_name:'New account'}));
+    const auth=f.render();const deletion=auth.deleteFamily('grant',[],auth.captureAccountAction());
+    await auth.login('New account','synthetic');finishFamily();await deletion;
+    assert.equal(f.render().isAuthenticated,true);assert.equal(f.render().userName,'New account');
+});
+
+test('an uncertain family deletion preserves current authentication', async t => {
+    const f = fixture(t, async operation => {
+        if (operation === 'loginRequest') return { user_name: 'Parent' };
+        throw new Error('Deletion outcome unavailable');
+    });
+    await f.render().login('Parent', 'synthetic');
+    const auth = f.render();
+    await assert.rejects(auth.deleteFamily('grant', [], auth.captureAccountAction()), /Deletion outcome unavailable/u);
+    assert.equal(f.render().isAuthenticated, true);
+    assert.equal(f.render().userName, 'Parent');
+});

@@ -1,3 +1,4 @@
+import { PUBLIC_SCORE_JOIN, PUBLIC_SCORE_FILTER } from './publicScoreVisibility';
 import { createHash } from 'node:crypto';
 import {
     Pool,
@@ -92,7 +93,7 @@ export function createThreeBossesPayloadFingerprint(
 }
 
 export async function readThreeBossesLeaderboard(
-    database: ThreeBossesReadDatabase
+    database: ThreeBossesReadDatabase, publicationDigest?: Buffer, participationReady = false
 ): Promise<ThreeBossesLeaderboardRow[]> {
     const [rows] = await database.query<Array<RowDataPacket & ThreeBossesLeaderboardRow>>(
         {
@@ -105,7 +106,8 @@ export async function readThreeBossesLeaderboard(
                     ON users.user_id = game_personal_bests.user_id
                 LEFT JOIN account_registration_profiles AS registration
                     ON registration.account_uuid = users.account_uuid
-                WHERE (registration.account_uuid IS NULL OR registration.score_visibility = 'public')
+                ${participationReady ? PUBLIC_SCORE_JOIN : ''}
+                WHERE ${participationReady ? PUBLIC_SCORE_FILTER : "(registration.account_uuid IS NULL OR registration.score_visibility = 'public')"}
                   AND game_personal_bests.game_id = ?
                   AND game_personal_bests.rules_version = ?
                   AND game_personal_bests.completion_time_ms IS NOT NULL
@@ -116,7 +118,7 @@ export async function readThreeBossesLeaderboard(
                 LIMIT ${LEADERBOARD_PAGE_SIZE}`,
             timeout: DATABASE_QUERY_TIMEOUT_MS,
         },
-        [THREE_BOSSES.gameId, THREE_BOSSES.rulesVersion]
+        [...(participationReady ? [publicationDigest ?? null] : []), THREE_BOSSES.gameId, THREE_BOSSES.rulesVersion]
     );
 
     return rows.map(({ userName, score, completionTimeMs }) => ({

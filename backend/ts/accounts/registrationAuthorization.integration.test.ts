@@ -49,7 +49,7 @@ before(async () => {
     assert.doesNotMatch(target[0].vendor, /Google/iu);
     await administrator.query('SET FOREIGN_KEY_CHECKS = 0');
     try {
-        await administrator.query(`DROP TABLE IF EXISTS parent_child_consents, parent_registration_attempts, account_registration_profiles, registration_authorizations,
+        await administrator.query(`DROP TABLE IF EXISTS account_score_permissions, parent_child_consents, parent_registration_attempts, account_registration_profiles, registration_authorizations,
             apple_auth_revocations, apple_provider_tokens, account_sessions, provider_auth_attempts, account_provider_identities,
             game_personal_bests, game_runs, game_submission_receipts, schema_migrations, users`);
     } finally { await administrator.query('SET FOREIGN_KEY_CHECKS = 1'); }
@@ -84,7 +84,7 @@ function passwordInput(name: string) { return { userName: name, email: `${name}@
 
 test('fresh schema records all migrations and enforces the private-minor database constraint', async () => {
     const plan = await planMigrations(administrator as unknown as MigrationConnection, loadMigrationManifest(), config);
-    assert.equal(plan.applied.length, 23);
+    assert.equal(plan.applied.length, 25);
     assert.deepEqual(plan.pending, []);
     const g = await grant();
     await createRegisteredPasswordAccount(database, passwordInput('constraint-minor'), g.consume);
@@ -129,7 +129,7 @@ test('expiry, another browser and a changed reviewed policy cannot authorize acc
     assert.equal((await administrator.query<RowDataPacket[]>("SELECT user_id FROM users WHERE user_name='expired-password'"))[0].length, 0);
 });
 
-test('both public leaderboards exclude newly classified minors and preserve adult and unclassified legacy scores', async () => {
+test('both public leaderboards keep new minor and adult profiles private and preserve unclassified legacy scores', async () => {
     for (const age of ['minor', 'adult'] as const) {
         const g = await grant(age);
         await createRegisteredPasswordAccount(database, passwordInput(`leaderboard-${age}`), g.consume);
@@ -142,7 +142,7 @@ test('both public leaderboards exclude newly classified minors and preserve adul
         await submitThreeBossesRun(database, user.userId, randomUUID(), 60_000);
     }
     for (const rows of [await readP4VegaLeaderboard(database), await readThreeBossesLeaderboard(database)]) {
-        assert.deepEqual(rows.map(row => row.userName).sort(), ['leaderboard-adult', 'leaderboard-legacy']);
+        assert.deepEqual(rows.map(row => row.userName).sort(), ['leaderboard-legacy']);
     }
 });
 

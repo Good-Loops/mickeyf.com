@@ -12,6 +12,7 @@
  * Invariants:
  * - Route path + method pairs form a stable external contract.
  */
+import type { ScoreParticipationPolicy } from '../config/scoreParticipationPolicy';
 import { Router } from 'express';
 import { createAuthController } from '../controllers/authController';
 import { createSessionRenewalController } from '../controllers/sessionRenewalController';
@@ -45,7 +46,8 @@ export function createAuthRouter(
     isProduction: boolean,
     allowedMutationOrigins: readonly string[],
     { accountDeletionEnabled = false, deletionJournal, providerAuth, registration = createRegistrationAuthorization(database),
-        parentRegistrationStorageReady = false, parentRegistrationPolicy }: {
+        parentRegistrationStorageReady = false, parentRegistrationPolicy, scoreParticipationPolicy }: {
+        scoreParticipationPolicy?: ScoreParticipationPolicy;
         parentRegistrationStorageReady?: boolean;
         parentRegistrationPolicy?: ParentRegistrationPolicy;
         registration?: RegistrationAuthorization;
@@ -72,14 +74,14 @@ export function createAuthRouter(
      */
     const router: Router = Router();
     const beforeAccountDeletion = parentRegistrationStorageReady ? assertNoManagedChildren : undefined;
-    if (parentRegistrationPolicy && (!parentRegistrationStorageReady || !deletionJournal || !providerAuth?.enabled)) {
+    if ((parentRegistrationPolicy || scoreParticipationPolicy) && (!parentRegistrationStorageReady || !deletionJournal || !providerAuth?.enabled)) {
         throw new Error('Parent registration dependencies are not ready.');
     }
     if (parentRegistrationStorageReady && deletionJournal) {
         router.use('/parent-registration', createParentRegistrationRouter(createParentRegistrationFlow({
-            policy: parentRegistrationPolicy, clients: providerAuth?.clients ?? {},
-            store: createParentRegistrationRepository(database, deletionJournal),
-        }), createProviderAuthContextReader({ database, sessionSecret, allowedOrigins: allowedMutationOrigins })));
+            policy: parentRegistrationPolicy, publicationPolicy: scoreParticipationPolicy, clients: providerAuth?.clients ?? {},
+            store: createParentRegistrationRepository(database, deletionJournal, scoreParticipationPolicy),
+        }), createProviderAuthContextReader({ database, sessionSecret, allowedOrigins: allowedMutationOrigins }), isProduction));
     } else router.get('/parent-registration/config', (_req, res) => {
         res.setHeader('Cache-Control', 'no-store'); return res.json({ enabled: false });
     });

@@ -1,3 +1,4 @@
+import { PUBLIC_SCORE_JOIN, PUBLIC_SCORE_FILTER } from './publicScoreVisibility';
 /**
  * p4-Vega persistence in the generic personal-best store.
  *
@@ -48,7 +49,7 @@ export class P4VegaScoreRollbackError extends Error {
  * response shape.
  */
 export async function readP4VegaLeaderboard(
-    database: P4VegaLeaderboardDatabase
+    database: P4VegaLeaderboardDatabase, publicationDigest?: Buffer, participationReady = false
 ): Promise<P4VegaLeaderboardRow[]> {
     const [rows] = await database.query<Array<RowDataPacket & P4VegaLeaderboardRow>>(
         {
@@ -60,7 +61,8 @@ export async function readP4VegaLeaderboard(
                     ON users.user_id = game_personal_bests.user_id
                 LEFT JOIN account_registration_profiles AS registration
                     ON registration.account_uuid = users.account_uuid
-                WHERE (registration.account_uuid IS NULL OR registration.score_visibility = 'public')
+                ${participationReady ? PUBLIC_SCORE_JOIN : ''}
+                WHERE ${participationReady ? PUBLIC_SCORE_FILTER : "(registration.account_uuid IS NULL OR registration.score_visibility = 'public')"}
                   AND game_personal_bests.game_id = ?
                   AND game_personal_bests.rules_version = ?
                 ORDER BY
@@ -70,7 +72,7 @@ export async function readP4VegaLeaderboard(
                 LIMIT ${LEADERBOARD_PAGE_SIZE}`,
             timeout: DATABASE_QUERY_TIMEOUT_MS,
         },
-        [P4_VEGA.gameId, P4_VEGA.rulesVersion]
+        [...(participationReady ? [publicationDigest ?? null] : []), P4_VEGA.gameId, P4_VEGA.rulesVersion]
     );
 
     return rows.map(({ userName, score }) => ({ userName, score }));

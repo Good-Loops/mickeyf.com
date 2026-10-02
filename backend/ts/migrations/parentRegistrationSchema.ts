@@ -2,6 +2,7 @@ import { isDeepStrictEqual } from 'node:util';
 import type { MigrationConnection } from './leaderboardSchema';
 
 export const PARENT_MIGRATIONS = ['0021_allow_parent_managed_contact', '0022_create_parent_registration_attempts', '0023_create_parent_child_consents'] as const;
+export const FAMILY_MIGRATION = '0024_extend_parent_family_deletion';
 export type ParentTable = 'parent_registration_attempts' | 'parent_child_consents';
 const ascii = (name: string, type: string, nullable = 'NO') => ({ name, type, nullable, charset: 'ascii', collation: 'ascii_bin', defaultValue: null, extra: '', comment: '' });
 const binary = (name: string, type = 'binary(32)', nullable = 'NO') => ({ name, type, nullable, charset: null, collation: null, defaultValue: null, extra: '', comment: '' });
@@ -34,12 +35,22 @@ export async function inspectParentManagedContact(connection: MigrationConnectio
     exact(values, [{ type: 'varchar(255)', nullable, charset: 'utf8mb4', collation: 'utf8mb4_unicode_ci', defaultValue: null, extra: '', comment: '', generationExpression: '' }]);
     return nullable === 'YES';
 }
-export async function verifyParentRegistrationTable(connection: MigrationConnection, table: ParentTable): Promise<void> {
+export async function inspectFamilyDeletionSchema(connection: MigrationConnection): Promise<boolean> {
+    const found = await read(connection, `SELECT COLUMN_NAME AS name FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='parent_registration_attempts' AND COLUMN_NAME='family_digest'`);
+    exact(found, found.length ? [{ name: 'family_digest' }] : []);
+    return found.length === 1;
+}
+export async function verifyParentRegistrationTable(connection: MigrationConnection, table: ParentTable,
+    family = false): Promise<void> {
     exact(await read(connection, `SELECT ENGINE AS engine, TABLE_COLLATION AS collation, TABLE_TYPE AS type FROM information_schema.TABLES
         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?`, [table]), [{ engine: 'InnoDB', collation: 'utf8mb4_unicode_ci', type: 'BASE TABLE' }]);
     exact(await read(connection, `SELECT COLUMN_NAME AS name, COLUMN_TYPE AS type, IS_NULLABLE AS nullable, CHARACTER_SET_NAME AS charset,
         COLLATION_NAME AS collation, COLUMN_DEFAULT AS defaultValue, EXTRA AS extra, COLUMN_COMMENT AS comment
-        FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION`, [table]), PARENT_COLUMNS[table]);
+        FROM information_schema.COLUMNS WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? ORDER BY ORDINAL_POSITION`, [table]), family && table === 'parent_registration_attempts'
+        ? [...PARENT_COLUMNS[table].map(column => column.name === 'purpose'
+            ? ascii('purpose', "enum('create-child','withdraw-child','delete-family','publish-scores')") : column), binary('family_digest', 'binary(32)', 'YES'), binary('profile_digest', 'binary(32)', 'YES')]
+        : PARENT_COLUMNS[table]);
     const index = (name: string, column: string, nonUnique: number) => ({ name, column, nonUnique, sequence: 1, subPart: null, visible: 'YES', indexType: 'BTREE', indexOrder: 'A' });
     exact(await read(connection, `SELECT INDEX_NAME AS name, COLUMN_NAME AS \`column\`, NON_UNIQUE AS nonUnique, SEQ_IN_INDEX AS sequence,
         SUB_PART AS subPart, IS_VISIBLE AS visible, INDEX_TYPE AS indexType, COLLATION AS indexOrder FROM information_schema.STATISTICS
@@ -61,7 +72,7 @@ export async function verifyParentRegistrationTable(connection: MigrationConnect
     // Preserve grouping: stripping parentheses would also accept differently grouped AND/OR constraints.
     const normalized = checks.map(row => ({ ...row, clause: String(row.clause).replace(/[`\s\\]/gu, '').replace(/_(?:ascii|utf8mb4)/gu, '') }));
     exact(normalized, table === 'parent_registration_attempts' ? [{ name: 'chk_parent_attempt_purpose', enforced: 'YES',
-        clause: "(((purpose='create-child')and(country_codeisnotnull)and(child_uuidisnull))or((purpose='withdraw-child')and(country_codeisnull)and(child_uuidisnotnull)))" }]
+        clause: family ? "(((purpose='create-child')and(country_codeisnotnull)and(child_uuidisnull)and(family_digestisnull)and(profile_digestisnull))or((purpose='withdraw-child')and(country_codeisnull)and(child_uuidisnotnull)and(family_digestisnull)and(profile_digestisnull))or((purpose='publish-scores')and(country_codeisnull)and(child_uuidisnotnull)and(family_digestisnull)and(profile_digestisnotnull))or((purpose='delete-family')and(country_codeisnull)and(child_uuidisnull)and(family_digestisnotnull)and(profile_digestisnull)))" : "(((purpose='create-child')and(country_codeisnotnull)and(child_uuidisnull))or((purpose='withdraw-child')and(country_codeisnull)and(child_uuidisnotnull)))" }]
         : [{ name: 'chk_distinct_parent_child', enforced: 'YES', clause: '(parent_uuid<>child_uuid)' }]);
     exact(await read(connection, 'SELECT TRIGGER_NAME AS name FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA=DATABASE() AND EVENT_OBJECT_TABLE=?', [table]), []);
     exact(await read(connection, `SELECT COLUMN_NAME AS name FROM information_schema.COLUMNS WHERE TABLE_SCHEMA=DATABASE()
@@ -70,6 +81,7 @@ export async function verifyParentRegistrationTable(connection: MigrationConnect
 export async function verifyParentRegistrationReadiness(connection: MigrationConnection): Promise<void> {
     exact(await read(connection, 'SELECT version FROM schema_migrations WHERE version IN (?, ?, ?) ORDER BY version', [...PARENT_MIGRATIONS]), PARENT_MIGRATIONS.map(version => ({ version })));
     if (!await inspectParentManagedContact(connection)) throw new Error('Parent-managed contact migration is missing.');
-    await verifyParentRegistrationTable(connection, 'parent_registration_attempts');
+    exact(await read(connection, 'SELECT version FROM schema_migrations WHERE version = ?', [FAMILY_MIGRATION]), [{ version: FAMILY_MIGRATION }]);
+    await verifyParentRegistrationTable(connection, 'parent_registration_attempts', true);
     await verifyParentRegistrationTable(connection, 'parent_child_consents');
 }

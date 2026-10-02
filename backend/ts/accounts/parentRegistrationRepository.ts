@@ -1,4 +1,7 @@
 import bcrypt from 'bcryptjs';
+import type { ScoreParticipationPolicy } from '../config/scoreParticipationPolicy';
+import { scoreParticipationTarget, scoreProfileDigest, canAuthorizePublication, approveScoreParticipation, readScoreParticipation, removePublicScoreParticipation } from './scoreParticipationRepository';
+import { familySelectionDigest } from './familyDeletionSelection';
 import type { Pool, PoolConnection, RowDataPacket, ResultSetHeader } from 'mysql2/promise';
 import type { ProviderAuthContext } from '../auth/providerAuthContext';
 import type { VerifiedProviderIdentity } from '../auth/providerIdentity';
@@ -48,7 +51,7 @@ async function transaction<T>(lock: UserSubmissionLockContext, operation: (conne
 }
 
 /** Only short-lived proof metadata and the minimal current consent relationship are persisted. */
-export function createParentRegistrationRepository(database: Database, journal: AccountDeletionJournal): ParentRegistrationStore {
+export function createParentRegistrationRepository(database: Database, journal: AccountDeletionJournal, publicationPolicy?: ScoreParticipationPolicy): ParentRegistrationStore {
     if (!journal || typeof journal.recordAccountDeletion !== 'function') throw new TypeError('Parent registration requires deletion journaling.');
     async function currentParent(connection: PoolConnection, context: ProviderAuthContext, creation = false) {
         const parent = context.account; const session = context.session;
@@ -70,6 +73,15 @@ export function createParentRegistrationRepository(database: Database, journal: 
         if (!context.account) throw new Error('Parent account required.');
         return withUserSubmissionLock(database, context.account.userId, lock => transaction(lock, operation));
     };
+    async function targetLocked<T>(context: ProviderAuthContext, targetId: string,
+        operation: (connection: PoolConnection) => Promise<T>): Promise<T> {
+        return withUserSubmissionLock(database, context.account!.userId, async lock => {
+            const target = (await rows(lock.connection, 'SELECT user_id FROM users WHERE account_uuid=? LIMIT 1', [targetId]))[0];
+            if (!target) throw new Error('Score account unavailable.');
+            return target.user_id === context.account!.userId ? transaction(lock, operation)
+                : lock.withAdditionalLock(target.user_id, childLock => transaction(childLock, operation));
+        });
+    }
     async function linked(connection: Pick<PoolConnection, 'query'>, context: ProviderAuthContext, identity: Pick<VerifiedProviderIdentity, 'provider' | 'subject'>) {
         const links = await rows(connection, 'SELECT account_uuid FROM account_provider_identities WHERE provider = ? AND subject = ? AND account_uuid = ? LIMIT 1',
             [identity.provider, Buffer.from(identity.subject, 'ascii'), context.account!.accountId]);
@@ -79,11 +91,13 @@ export function createParentRegistrationRepository(database: Database, journal: 
         return { stateHash: row.state_hash, bindingHash: row.binding_hash, parentAccountId: row.parent_uuid,
             parentUserId: row.parent_user_id, clientKey: row.client_key, nonce: row.nonce, policyDigest: row.policy_digest,
             expiresAt: Number(row.expiresAt), operation: row.purpose === 'create-child'
-                ? { purpose: 'create-child', country: row.country_code } : { purpose: 'withdraw-child', childAccountId: row.child_uuid } };
+                ? { purpose: 'create-child', country: row.country_code } : row.purpose === 'delete-family'
+                    ? { purpose: 'delete-family', familyDigest: row.family_digest }
+                    : { purpose: row.purpose === 'publish-scores' ? 'publish-scores' : 'withdraw-child', childAccountId: row.child_uuid } };
     }
     async function grant(connection: PoolConnection, grantHash: Buffer, context: ProviderAuthContext, digest: Buffer, purpose: string) {
         await currentParent(connection, context, purpose === 'create-child');
-        const found = await rows(connection, `SELECT state_hash, parent_uuid, purpose, country_code, child_uuid, consent_version, policy_version, provider, subject
+        const found = await rows(connection, `SELECT state_hash, parent_uuid, purpose, country_code, child_uuid, family_digest, profile_digest, consent_version, policy_version, provider, subject
             FROM parent_registration_attempts WHERE grant_hash = ? AND binding_hash = ? AND parent_uuid = ?
             AND policy_digest = ? AND purpose = ? AND phase = 'approved' AND expires_at > UTC_TIMESTAMP(6) LIMIT 1 FOR UPDATE`,
         [grantHash, context.bindingHash, context.account!.accountId, digest, purpose]);
@@ -105,6 +119,17 @@ export function createParentRegistrationRepository(database: Database, journal: 
             await command(database, 'DELETE FROM parent_registration_attempts WHERE expires_at <= UTC_TIMESTAMP(6) LIMIT 100');
             return locked(context, async connection => {
                 await currentParent(connection, context, attempt.operation.purpose === 'create-child');
+                let profileDigest: Buffer | null = null;
+                if (attempt.operation.purpose === 'publish-scores') {
+                    const target = await scoreParticipationTarget(connection, context, attempt.operation.childAccountId);
+                    if (!journal.recordPublicScoreWithdrawal || !canAuthorizePublication(target, context.account!.accountId, publicationPolicy)) throw new Error('Publication policy is closed.');
+                    profileDigest = scoreProfileDigest(target);
+                }
+                if (attempt.operation.purpose === 'delete-family') {
+                    const ids = (await rows(connection, 'SELECT child_uuid FROM parent_child_consents WHERE parent_uuid = ? ORDER BY child_uuid LIMIT 51', [context.account!.accountId])).map(row => row.child_uuid);
+                    const digest = familySelectionDigest(ids);
+                    if (!digest?.equals(attempt.operation.familyDigest)) throw new Error('Family confirmation is stale.');
+                }
                 if (attempt.operation.purpose === 'withdraw-child') {
                     const own = await rows(connection, 'SELECT child_uuid FROM parent_child_consents WHERE parent_uuid = ? AND child_uuid = ? LIMIT 1',
                         [context.account!.accountId, attempt.operation.childAccountId]);
@@ -112,17 +137,18 @@ export function createParentRegistrationRepository(database: Database, journal: 
                 }
                 await command(connection, `INSERT INTO parent_registration_attempts
                     (state_hash, binding_hash, parent_uuid, parent_user_id, client_key, nonce, policy_digest, purpose,
-                    country_code, child_uuid, expires_at, phase) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, LEAST(?, UTC_TIMESTAMP(6) + INTERVAL 5 MINUTE), 'pending')`,
+                    country_code, child_uuid, family_digest, profile_digest, expires_at, phase) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, LEAST(?, UTC_TIMESTAMP(6) + INTERVAL 5 MINUTE), 'pending')`,
                 [attempt.stateHash, attempt.bindingHash, attempt.parentAccountId, attempt.parentUserId, attempt.clientKey, attempt.nonce,
                     attempt.policyDigest, attempt.operation.purpose, attempt.operation.purpose === 'create-child' ? attempt.operation.country : null,
-                    attempt.operation.purpose === 'withdraw-child' ? attempt.operation.childAccountId : null, utc(attempt.expiresAt)]);
+                    ['withdraw-child', 'publish-scores'].includes(attempt.operation.purpose) && 'childAccountId' in attempt.operation ? attempt.operation.childAccountId : null,
+                    attempt.operation.purpose === 'delete-family' ? attempt.operation.familyDigest : null, profileDigest, utc(attempt.expiresAt)]);
                 return true;
             });
         },
         consumeChallenge: (stateHash, context) => locked(context, async connection => {
             await currentParent(connection, context);
             const found = await rows(connection, `SELECT state_hash, binding_hash, parent_uuid, parent_user_id, client_key, nonce, policy_digest,
-                purpose, country_code, child_uuid, ROUND(TIMESTAMPDIFF(MICROSECOND, '1970-01-01', expires_at) / 1000) AS expiresAt FROM parent_registration_attempts
+                purpose, country_code, child_uuid, family_digest, ROUND(TIMESTAMPDIFF(MICROSECOND, '1970-01-01', expires_at) / 1000) AS expiresAt FROM parent_registration_attempts
                 WHERE state_hash = ? AND binding_hash = ? AND parent_uuid = ? AND phase = 'pending' AND expires_at > UTC_TIMESTAMP(6) LIMIT 1 FOR UPDATE`,
             [stateHash, context.bindingHash, context.account!.accountId]);
             if (found.length !== 1) return null;
@@ -188,6 +214,60 @@ export function createParentRegistrationRepository(database: Database, journal: 
                         await journal.recordAccountDeletion(own[0].account_uuid); recorded = true;
                         await deleteOwnedAccountRows(connection, own[0].user_id, own[0].account_uuid, new Date().toISOString());
                     }));
+                });
+            } catch (error) { if (recorded) throw new AccountDeletionPendingError(error); throw error; }
+        },
+        async publishScores(grantHash, context, digest) {
+            if (!publicationPolicy || !journal.recordPublicScoreWithdrawal || !digest.equals(publicationPolicy.digest)) throw new Error('Publication closed.');
+            const target = (await rows(database, `SELECT child_uuid FROM parent_registration_attempts WHERE grant_hash=?
+                AND binding_hash=? AND parent_uuid=? AND purpose='publish-scores' AND phase='approved' LIMIT 1`,
+                [grantHash, context.bindingHash, context.account!.accountId]))[0];
+            if (!target) throw new Error('Publication grant unavailable.');
+            await targetLocked(context, target.child_uuid, async connection => {
+                const approval = await grant(connection, grantHash, context, digest, 'publish-scores');
+                await approveScoreParticipation(connection, context, approval.child_uuid, publicationPolicy, approval.profile_digest);
+                await consume(connection, approval.state_hash, context);
+            });
+        },
+        withdrawScores: (context, targetId) => targetLocked(context, targetId, async connection => {
+            await currentParent(connection, context);
+            if (!journal.recordPublicScoreWithdrawal) throw new Error('Withdrawal journal unavailable.');
+            await scoreParticipationTarget(connection, context, targetId);
+            await journal.recordPublicScoreWithdrawal(targetId);
+            await removePublicScoreParticipation(connection, targetId);
+        }),
+        scoreStatus: (context, targetId) => locked(context, async connection => {
+            await currentParent(connection, context);
+            return readScoreParticipation(connection, context, targetId, publicationPolicy);
+        }),
+        async deleteFamily(grantHash, context, digest, confirmedFamily) {
+            let recorded = false;
+            try {
+                await withUserSubmissionLock(database, context.account!.userId, async parentLock => {
+                    const targets = await rows(parentLock.connection, `SELECT u.user_id, u.account_uuid FROM parent_child_consents c
+                        INNER JOIN users u ON u.account_uuid = c.child_uuid WHERE c.parent_uuid = ? ORDER BY u.user_id LIMIT 51`, [context.account!.accountId]);
+                    const selected = familySelectionDigest(targets.map(row => row.account_uuid));
+                    if (!selected?.equals(confirmedFamily) || targets.some(row => row.user_id === context.account!.userId)) throw new Error('Family confirmation is stale.');
+                    const lockChildren = (index: number): Promise<void> => index < targets.length
+                        ? parentLock.withAdditionalLock(targets[index].user_id, () => lockChildren(index + 1))
+                        : transaction(parentLock, async connection => {
+                            const approval = await grant(connection, grantHash, context, digest, 'delete-family');
+                            if (!Buffer.isBuffer(approval.family_digest) || !approval.family_digest.equals(confirmedFamily)) throw new Error('Family grant mismatch.');
+                            const current = await rows(connection, `SELECT u.user_id, u.account_uuid FROM parent_child_consents c
+                                INNER JOIN users u ON u.account_uuid = c.child_uuid WHERE c.parent_uuid = ? ORDER BY u.user_id LIMIT 51`, [context.account!.accountId]);
+                            if (!familySelectionDigest(current.map(row => row.account_uuid))?.equals(confirmedFamily)
+                                || current.some((row, index) => row.user_id !== targets[index]?.user_id)) throw new Error('Family changed.');
+                            for (const target of current) await rows(connection, 'SELECT account_uuid FROM users WHERE user_id=? AND account_uuid=? FOR UPDATE', [target.user_id, target.account_uuid]);
+                            await consume(connection, approval.state_hash, context);
+                            // Child intents first: recovery must never see a parent-only intent for a retained family.
+                            for (const target of [...current, { account_uuid: context.account!.accountId }]) {
+                                recorded = true;
+                                await journal.recordAccountDeletion(target.account_uuid);
+                            }
+                            for (const target of current) await deleteOwnedAccountRows(connection, target.user_id, target.account_uuid);
+                            await deleteOwnedAccountRows(connection, context.account!.userId, context.account!.accountId);
+                        });
+                    await lockChildren(0);
                 });
             } catch (error) { if (recorded) throw new AccountDeletionPendingError(error); throw error; }
         },

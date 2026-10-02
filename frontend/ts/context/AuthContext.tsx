@@ -12,7 +12,7 @@
  * - The service layer (`services/authService.ts`) owns network/provider calls.
  */
 import { createContext, useContext, useState, ReactNode, useEffect, useRef } from 'react';
-import { loginRequest, logoutRequest, verifyRequest, renewRequest, deleteAccountRequest, runProviderAuthentication, watchAppleCredentialChanges,
+import { loginRequest, logoutRequest, verifyRequest, renewRequest, deleteAccountRequest, deleteFamilyRequest, runProviderAuthentication, watchAppleCredentialChanges,
     prepareProviderLogin as prepareProviderLoginRequest, completeProviderLogin as completeProviderLoginRequest } from '@/services/authService';
 import type { DeleteAccountResponse, ProviderAuthenticationInput, AcquireProviderCredential, ProviderCredential,
     ProviderAuthenticationOptions, ProviderAuthenticationResult, PreparedProviderLogin, PrepareProviderLoginResult,
@@ -32,6 +32,8 @@ type AuthContextType = {
     sessionGeneration: number;
     login: (user: string, pass: string, options?: LoginOptions) => Promise<boolean>;
     logout: () => Promise<void>;
+    captureAccountAction: () => number;
+    deleteFamily: (grant: string, childAccountIds: readonly string[], expectedAction: number) => Promise<void>;
     deleteAccount: (password: string) => Promise<DeleteAccountResponse>;
     authenticateWithProvider: (input: ProviderAuthenticationInput, acquireCredential: AcquireProviderCredential,
         options?: ProviderAuthenticationOptions) => Promise<ProviderAuthenticationResult>;
@@ -272,6 +274,16 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         }
     };
 
+    const captureAccountAction = () => authActionVersion.current;
+    const deleteFamily = async (grant: string, childAccountIds: readonly string[], expectedAction: number): Promise<void> => {
+        if (expectedAction !== authActionVersion.current) throw new Error('Family approval belongs to an earlier authentication action.');
+        const actionVersion = ++authActionVersion.current;
+        await deleteFamilyRequest(grant, childAccountIds);
+        if (actionVersion === authActionVersion.current) {
+            setIsAuthenticated(false); setUserName(null); setLoading(false); sessionMayExist.current = false;
+        }
+    };
+
     const deleteAccount = async (password: string): Promise<DeleteAccountResponse> => {
         const actionVersion = ++authActionVersion.current;
         const result = await deleteAccountRequest(password);
@@ -289,7 +301,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     return (
         <AuthContext.Provider
-            value={{ userName, isAuthenticated, loading, sessionGeneration, login, logout, deleteAccount, authenticateWithProvider,
+            value={{ userName, isAuthenticated, loading, sessionGeneration, login, logout, deleteAccount, deleteFamily, captureAccountAction, authenticateWithProvider,
                 prepareProviderLogin, completeProviderLogin }}
         >
             {children}

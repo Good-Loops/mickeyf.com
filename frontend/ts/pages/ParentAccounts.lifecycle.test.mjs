@@ -6,6 +6,7 @@ import { createViteTestServer } from '../testSupport/createViteTestServer.mjs';
 
 const key = '__parentAccountsLifecycle'; const scope = `globalThis.${key}`;
 const mocks = {
+    ScoreParticipation: 'export default "ScoreParticipation";',
     react: `export const useState = v => ${scope}.state(v); export const useRef = v => ${scope}.ref(v); export const useEffect = (fn, deps) => ${scope}.effect(fn, deps);`,
     'jsx-runtime': 'export const jsx = (type, props) => ({type, props}); export const jsxs = jsx;',
     'jsx-dev-runtime': 'export const jsxDEV = (type, props) => ({type, props});',
@@ -41,7 +42,7 @@ function mount(t) {
         ref(initial){return slots[cursor++]??={current:initial};},
         effect(callback,deps){const index=cursor++;const before=slots[index];if(!before||deps.some((v,i)=>!Object.is(v,before.deps[i]))){const slot=slots[index]={deps,cleanup:before?.cleanup};effects.push(()=>{slot.cleanup?.();slot.cleanup=callback();});}},
         acquire(...args){acquisition.args=args;return acquisition.promise;},
-        api:{config:async()=>({enabled:true,creationEnabled:true,policyVersion:'test',consentVersion:'test',consentText:'Synthetic.',countries:['ZZ']}),
+        api:{config:async()=>({enabled:true,creationEnabled:true,policyVersion:'test',consentVersion:'test',consentText:'Synthetic.',privacyNoticeUrl:'https://notice.example.test/privacy',countries:['ZZ']}),
             listChildren:async()=>{lists++;return [child];},beginWithdrawal:async()=>challenge,
             complete(...args){const d=deferred();proofs.push({...d,args});return d.promise;},
             withdraw(...args){const d=deferred();withdrawals.push({...d,args});return d.promise;},cancel:async state=>{cancellations.push(state);}},

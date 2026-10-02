@@ -34,6 +34,7 @@ function responseRecorder() {
             return this;
         },
         clearCookie() { return this; },
+        setHeader(name: string, value: string) { assert.equal(name, 'Cache-Control'); assert.equal(value, 'no-store'); return this; },
     } as unknown as Response;
     return { response, state };
 }

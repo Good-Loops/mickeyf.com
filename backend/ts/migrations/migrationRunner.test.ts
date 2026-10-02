@@ -32,7 +32,7 @@ class FakeConnection implements MigrationConnection {
         this.calls.push({ sql, values });
         if (sql.includes("COLUMN_NAME = 'email'") && sql.includes('information_schema.COLUMNS')) return [[{ type: 'varchar(255)', nullable: 'NO', charset: 'utf8mb4', collation: 'utf8mb4_unicode_ci', defaultValue: null, extra: '', comment: '', generationExpression: '' }], []];
         if (sql.includes('COUNT(*)') && sql.includes('information_schema.TABLES')
-            && ['registration_authorizations', 'account_registration_profiles', 'parent_registration_attempts', 'parent_child_consents'].includes(String(values[0]))) return [[{ tableCount: 0 }], []];
+            && ['registration_authorizations', 'account_registration_profiles', 'parent_registration_attempts', 'parent_child_consents', 'account_score_permissions'].includes(String(values[0]))) return [[{ tableCount: 0 }], []];
         return [this.resultFactory(sql, values), []];
     }
 
@@ -218,6 +218,8 @@ test('plan is read-only, configures short waits, and releases its advisory lock'
             '0021_allow_parent_managed_contact',
             '0022_create_parent_registration_attempts',
             '0023_create_parent_child_consents',
+            '0024_extend_parent_family_deletion',
+            '0025_create_score_participation',
         ],
         recoverable: [],
     });

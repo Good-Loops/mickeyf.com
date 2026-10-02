@@ -18,6 +18,17 @@ const intent = (accountId = FIRST_ID, ageMs = 1_800_000): DeletionIntent => ({
     version: 1, action: 'delete-account', accountId, requestedAt: new Date(NOW - ageMs).toISOString(),
 });
 
+test('score-only withdrawals do not report retained accounts as pending deletion; mixed intents retain deletion checks', async () => {
+    const withdrawal: DeletionIntent = { ...intent(), action: 'withdraw-public-scores' };
+    const only = fixture({ intents: [withdrawal], accounts: [FIRST_ID] });
+    const clear = await auditPendingDeletions(only.database, only.reader, SETTINGS);
+    assert.equal(clear.status, 'clear'); assert.equal(clear.accountCount, 0); assert.equal(clear.checkedAccounts, 0);
+    const mixed = fixture({ intents: [withdrawal, intent(SECOND_ID)], accounts: [FIRST_ID, SECOND_ID] });
+    const pending = await auditPendingDeletions(mixed.database, mixed.reader, SETTINGS);
+    assert.equal(pending.status, 'pending'); assert.equal(pending.accountCount, 1); assert.equal(pending.pendingAccounts, 1);
+    assert.deepEqual(mixed.queries.find(query => query.sql.startsWith('SELECT account_uuid'))?.values, [SECOND_ID]);
+});
+
 function fixture(options: {
     intents?: unknown[]; accounts?: string[]; wrongPin?: 'databaseName' | 'currentUser' | 'serverUuid' | 'epoch';
     journalError?: boolean;

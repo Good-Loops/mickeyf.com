@@ -21,7 +21,7 @@ export type RuntimeColumnGrant = Readonly<{
 export type RuntimeTableGrant = Readonly<{
     table: 'users' | 'game_submission_receipts' | 'game_personal_bests' | 'schema_migrations' | 'account_sessions'
         | 'account_provider_identities' | 'provider_auth_attempts' | 'apple_provider_tokens' | 'apple_auth_revocations'
-        | 'registration_authorizations' | 'account_registration_profiles' | 'parent_registration_attempts' | 'parent_child_consents';
+        | 'registration_authorizations' | 'account_registration_profiles' | 'parent_registration_attempts' | 'parent_child_consents' | 'account_score_permissions';
     grants: readonly RuntimeColumnGrant[];
     tablePrivileges: readonly 'DELETE'[];
 }>;
@@ -257,17 +257,24 @@ export const RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freez
     }),
 ]);
 
+const SCORE_PERMISSION_COLUMNS = Object.freeze(['account_uuid', 'visibility', 'policy_digest', 'registration_policy_version',
+    'country_code', 'age_band', 'authorizer_uuid', 'confirmed_at']);
 export const PARENT_RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freeze([
+    Object.freeze({ table: 'account_score_permissions' as const, tablePrivileges: Object.freeze([]), grants: Object.freeze([
+        Object.freeze({ privilege: 'SELECT' as const, columns: SCORE_PERMISSION_COLUMNS }),
+        Object.freeze({ privilege: 'INSERT' as const, columns: SCORE_PERMISSION_COLUMNS }),
+        Object.freeze({ privilege: 'UPDATE' as const, columns: Object.freeze(SCORE_PERMISSION_COLUMNS.filter(column => column !== 'account_uuid')) }),
+    ]) }),
     ...RUNTIME_GRANT_MANIFEST.map(table => table.table !== 'account_registration_profiles' ? table : Object.freeze({
         ...table, grants: Object.freeze(table.grants.map(grant => grant.privilege !== 'SELECT' ? grant : Object.freeze({
-            ...grant, columns: Object.freeze([...grant.columns, 'age_band']),
+            ...grant, columns: Object.freeze([...grant.columns, 'age_band', 'country_code', 'policy_version']),
         }))),
     })),
     Object.freeze({
         table: 'parent_registration_attempts' as const, tablePrivileges: Object.freeze(['DELETE' as const]),
         grants: Object.freeze([
-            Object.freeze({ privilege: 'SELECT' as const, columns: Object.freeze(['state_hash', 'binding_hash', 'parent_uuid', 'parent_user_id', 'client_key', 'nonce', 'policy_digest', 'purpose', 'country_code', 'child_uuid', 'expires_at', 'phase', 'grant_hash', 'provider', 'subject', 'consent_version', 'policy_version']) }),
-            Object.freeze({ privilege: 'INSERT' as const, columns: Object.freeze(['state_hash', 'binding_hash', 'parent_uuid', 'parent_user_id', 'client_key', 'nonce', 'policy_digest', 'purpose', 'country_code', 'child_uuid', 'expires_at', 'phase']) }),
+            Object.freeze({ privilege: 'SELECT' as const, columns: Object.freeze(['state_hash', 'binding_hash', 'parent_uuid', 'parent_user_id', 'client_key', 'nonce', 'policy_digest', 'purpose', 'country_code', 'child_uuid', 'family_digest', 'profile_digest', 'expires_at', 'phase', 'grant_hash', 'provider', 'subject', 'consent_version', 'policy_version']) }),
+            Object.freeze({ privilege: 'INSERT' as const, columns: Object.freeze(['state_hash', 'binding_hash', 'parent_uuid', 'parent_user_id', 'client_key', 'nonce', 'policy_digest', 'purpose', 'country_code', 'child_uuid', 'family_digest', 'profile_digest', 'expires_at', 'phase']) }),
             Object.freeze({ privilege: 'UPDATE' as const, columns: Object.freeze(['phase', 'grant_hash', 'provider', 'subject', 'consent_version', 'policy_version']) }),
         ]),
     }),

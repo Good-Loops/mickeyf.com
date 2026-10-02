@@ -32,6 +32,8 @@ test('runtime explicitly targets development and removes inherited production cr
         APPLE_NOTIFICATIONS_ENABLED: 'true', APPLE_TOKEN_LIFECYCLE_ENABLED: 'true',
         REGISTRATION_ENABLED: 'true', REGISTRATION_COUNTRY_RULES: 'production-policy',
         PARENT_REGISTRATION_ENABLED: 'true', PARENT_REGISTRATION_CREATION_ENABLED: 'true', PARENT_CONSENT_TEXT: 'production-consent',
+        PUBLIC_SCORE_PARTICIPATION_ENABLED: 'true', PUBLIC_SCORE_ASSURANCE_REVIEWED: 'true',
+        PUBLIC_SCORE_COUNTRY_RULES: 'production-rules',
         LUDOLUME_ISOLATED_RUNTIME: 'false',
         ACCOUNT_DELETION_ENABLED: 'true', PROVIDER_AUTH_ENABLED: 'true', NODE_OPTIONS: '--require injected',
     });
@@ -53,7 +55,8 @@ test('runtime explicitly targets development and removes inherited production cr
         'GOOGLE_WEB_CLIENT_ID', 'GOOGLE_IOS_CLIENT_ID', 'APPLE_IOS_BUNDLE_ID', 'APPLE_WEB_CLIENT_ID',
         'APPLE_WEB_SERVICES_ID', 'APPLE_PRIVATE_KEY', 'APPLE_NOTIFICATIONS_ENABLED',
         'APPLE_TOKEN_LIFECYCLE_ENABLED', 'NODE_OPTIONS', 'REGISTRATION_ENABLED', 'REGISTRATION_COUNTRY_RULES',
-        'PARENT_REGISTRATION_ENABLED', 'PARENT_REGISTRATION_CREATION_ENABLED', 'PARENT_CONSENT_TEXT']) assert.equal(env[key], undefined, key);
+        'PARENT_REGISTRATION_ENABLED', 'PARENT_REGISTRATION_CREATION_ENABLED', 'PARENT_CONSENT_TEXT',
+        'PUBLIC_SCORE_PARTICIPATION_ENABLED', 'PUBLIC_SCORE_ASSURANCE_REVIEWED', 'PUBLIC_SCORE_COUNTRY_RULES']) assert.equal(env[key], undefined, key);
 });
 
 test('local bootstrap accepts the reviewed manifest but blocks missing or future migrations before database connection', () => {
@@ -61,7 +64,7 @@ test('local bootstrap accepts the reviewed manifest but blocks missing or future
         .map(name => ({ version: name.slice(0, -4) }));
     assert.doesNotThrow(() => assertReviewedMigrationBoundary(migrations));
     assert.throws(() => assertReviewedMigrationBoundary(migrations.slice(0, -1)), /must be reviewed/u);
-    assert.throws(() => assertReviewedMigrationBoundary([...migrations, { version: '0024_unreviewed' }]), /must be reviewed/u);
+    assert.throws(() => assertReviewedMigrationBoundary([...migrations, { version: '0026_unreviewed' }]), /must be reviewed/u);
 });
 
 test('provider CLI opt-in requires one exact bounded Google web client ID', () => {

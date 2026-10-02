@@ -567,6 +567,22 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
             invalidatePreparedLogins();
             return enqueueMutation(logoutRequest);
         },
+        deleteFamilyRequest: (grant: string, childAccountIds: readonly string[]) => {
+            invalidatePreparedLogins();
+            const ids = [...childAccountIds];
+            // A cookie mutation must settle before another login/renewal, even after UI cancellation.
+            return enqueueMutation(async (): Promise<void> => {
+                const response = await fetchRequest(`${apiBase}/auth/parent-registration/family/delete`, {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+                    body: JSON.stringify({ grant, childAccountIds: ids, confirmation: 'DELETE MY FAMILY' }),
+                });
+                const value: unknown = await response.json();
+                if (response.status !== 200 || !isRecord(value) || !hasKeys(value, 'deleted') || value.deleted !== true) {
+                    throw new Error('Family deletion could not be confirmed.');
+                }
+                appleRevocationPending = false;
+            });
+        },
         deleteAccountRequest: (password: string) => {
             invalidatePreparedLogins();
             return enqueueMutation(() => deleteAccountRequest(password));

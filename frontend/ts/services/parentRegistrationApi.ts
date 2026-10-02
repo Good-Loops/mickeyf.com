@@ -1,9 +1,12 @@
 import type { ProviderAuthenticationChallenge } from './authApi.ts';
+import { parsePrivacyNoticeUrl } from '../config/privacyNoticeUrl.ts';
 
 export type ParentConfig = Readonly<{ enabled: false }> | Readonly<{ enabled: true; policyVersion: string;
-    consentVersion: string; consentText: string; countries: readonly string[]; creationEnabled: boolean }>;
+    consentVersion: string; consentText: string; privacyNoticeUrl: string; countries: readonly string[]; creationEnabled: boolean }>;
+export type ScoreParticipationConfig = Readonly<{ enabled: false }> | Readonly<{ enabled: true; policyVersion: string;
+    consentVersion: string; consentText: string; privacyNoticeUrl: string }>;
 export type ParentConsent = Readonly<{ country: string; adultAttestation: true; guardianAttestation: true; consent: true }>;
-export type ParentApproval = Readonly<{ grant: string; purpose: 'create-child' | 'withdraw-child'; expiresInSeconds: number }>;
+export type ParentApproval = Readonly<{ grant: string; purpose: 'create-child' | 'withdraw-child' | 'delete-family' | 'publish-scores'; expiresInSeconds: number }>;
 export class ParentRegistrationError extends Error {
     readonly code: string;
     constructor(code: string) { super('The parent operation could not be confirmed.'); this.code = code; }
@@ -49,9 +52,9 @@ export function createParentRegistrationApi(apiBase: string, fetchRequest: typeo
         async config(signal?: AbortSignal): Promise<ParentConfig> {
             const value = await request('/config', undefined, signal);
             if (keys(value, 'enabled') && value.enabled === false) return { enabled: false };
-            if (!keys(value, 'consentText,consentVersion,countries,creationEnabled,enabled,policyVersion') || value.enabled !== true || typeof value.creationEnabled !== 'boolean'
+            if (!keys(value, 'consentText,consentVersion,countries,creationEnabled,enabled,policyVersion,privacyNoticeUrl') || value.enabled !== true || typeof value.creationEnabled !== 'boolean'
                 || !version(value.policyVersion) || !version(value.consentVersion) || typeof value.consentText !== 'string'
-                || !value.consentText.trim() || value.consentText.length > 8000 || !Array.isArray(value.countries)
+                || !parsePrivacyNoticeUrl(value.privacyNoticeUrl) || !value.consentText.trim() || value.consentText.length > 8000 || !Array.isArray(value.countries)
                 || value.countries.length < 1 || value.countries.length > 249
                 || value.countries.some(country => typeof country !== 'string' || !/^[A-Z]{2}$/u.test(country))
                 || new Set(value.countries).size !== value.countries.length) throw new ParentRegistrationError('UNAVAILABLE');
@@ -60,7 +63,7 @@ export function createParentRegistrationApi(apiBase: string, fetchRequest: typeo
         async begin(config: Extract<ParentConfig, { enabled: true }>, clientKey: string, consent: ParentConsent,
             signal?: AbortSignal): Promise<ProviderAuthenticationChallenge> {
             const value = await request('/begin', { purpose: 'create-child', policyVersion: config.policyVersion,
-                consentVersion: config.consentVersion, clientKey, country: consent.country,
+                consentVersion: config.consentVersion, privacyNoticeUrl: config.privacyNoticeUrl, clientKey, country: consent.country,
                 adultAttestation: consent.adultAttestation, guardianAttestation: consent.guardianAttestation, consent: consent.consent }, signal);
             if (!keys(value, 'expiresInSeconds,nonce,state') || !token(value.state) || !token(value.nonce)
                 || !expiry(value.expiresInSeconds)) throw new ParentRegistrationError('UNAVAILABLE');
@@ -69,7 +72,7 @@ export function createParentRegistrationApi(apiBase: string, fetchRequest: typeo
         async complete(state: string, idToken: string, signal?: AbortSignal): Promise<ParentApproval> {
             const value = await request('/complete', { state, idToken }, signal);
             if (!keys(value, 'expiresInSeconds,grant,purpose') || !token(value.grant) || !expiry(value.expiresInSeconds)
-                || !['create-child', 'withdraw-child'].includes(String(value.purpose))) throw new ParentRegistrationError('UNAVAILABLE');
+                || !['create-child', 'withdraw-child', 'delete-family', 'publish-scores'].includes(String(value.purpose))) throw new ParentRegistrationError('UNAVAILABLE');
             return value as ParentApproval;
         },
         async cancel(state: string): Promise<void> {
@@ -99,6 +102,42 @@ export function createParentRegistrationApi(apiBase: string, fetchRequest: typeo
         async beginWithdrawal(config: Extract<ParentConfig, { enabled: true }>, clientKey: string, childAccountId: string, signal?: AbortSignal): Promise<ProviderAuthenticationChallenge> {
             const value = await request('/begin', { purpose: 'withdraw-child', policyVersion: config.policyVersion,
                 clientKey, childAccountId, confirmation: 'WITHDRAW AND DELETE' }, signal);
+            if (!keys(value, 'expiresInSeconds,nonce,state') || !token(value.state) || !token(value.nonce) || !expiry(value.expiresInSeconds)) throw new ParentRegistrationError('UNAVAILABLE');
+            return value as ProviderAuthenticationChallenge;
+        },
+        async scoreConfig(signal?: AbortSignal): Promise<ScoreParticipationConfig> {
+            const value = await request('/scores/config', undefined, signal);
+            if (keys(value, 'enabled') && value.enabled === false) return { enabled: false };
+            if (!keys(value, 'consentText,consentVersion,enabled,policyVersion,privacyNoticeUrl') || value.enabled !== true
+                || !version(value.policyVersion) || !version(value.consentVersion) || !parsePrivacyNoticeUrl(value.privacyNoticeUrl)
+                || typeof value.consentText !== 'string' || !value.consentText.trim() || value.consentText.length > 8000) throw new ParentRegistrationError('UNAVAILABLE');
+            return value as ScoreParticipationConfig;
+        },
+        async scoreStatus(childAccountId: string | null, signal?: AbortSignal) {
+            const value = await request('/scores/status', { childAccountId }, signal);
+            if (!keys(value, 'canPublish,visibility') || !['private', 'public'].includes(String(value.visibility))
+                || typeof value.canPublish !== 'boolean') throw new ParentRegistrationError('UNAVAILABLE');
+            return { visibility: value.visibility as 'private' | 'public', canPublish: value.canPublish };
+        },
+        async beginScorePublication(config: Extract<ScoreParticipationConfig, { enabled: true }>, clientKey: string,
+            childAccountId: string | null, signal?: AbortSignal): Promise<ProviderAuthenticationChallenge> {
+            const value = await request('/begin', { purpose: 'publish-scores', childAccountId, clientKey,
+                policyVersion: config.policyVersion, consentVersion: config.consentVersion, consentText: config.consentText,
+                privacyNoticeUrl: config.privacyNoticeUrl, participation: true }, signal);
+            if (!keys(value, 'expiresInSeconds,nonce,state') || !token(value.state) || !token(value.nonce) || !expiry(value.expiresInSeconds)) throw new ParentRegistrationError('UNAVAILABLE');
+            return value as ProviderAuthenticationChallenge;
+        },
+        async publishScores(grant: string, signal?: AbortSignal): Promise<void> {
+            const value = await request('/scores/publish', { grant }, signal);
+            if (!keys(value, 'visibility') || value.visibility !== 'public') throw new ParentRegistrationError('UNAVAILABLE');
+        },
+        async withdrawScores(childAccountId: string | null, signal?: AbortSignal): Promise<void> {
+            const value = await request('/scores/withdraw', { childAccountId }, signal);
+            if (!keys(value, 'visibility') || value.visibility !== 'private') throw new ParentRegistrationError('UNAVAILABLE');
+        },
+        async beginFamilyDeletion(config: Extract<ParentConfig, { enabled: true }>, clientKey: string, childAccountIds: readonly string[], signal?: AbortSignal): Promise<ProviderAuthenticationChallenge> {
+            const value = await request('/begin', { purpose: 'delete-family', policyVersion: config.policyVersion,
+                clientKey, childAccountIds, confirmation: 'DELETE MY FAMILY' }, signal);
             if (!keys(value, 'expiresInSeconds,nonce,state') || !token(value.state) || !token(value.nonce) || !expiry(value.expiresInSeconds)) throw new ParentRegistrationError('UNAVAILABLE');
             return value as ProviderAuthenticationChallenge;
         },

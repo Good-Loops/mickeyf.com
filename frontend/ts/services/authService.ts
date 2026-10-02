@@ -19,6 +19,7 @@ export const {
     verifyRequest,
     logoutRequest,
     deleteAccountRequest,
+    deleteFamilyRequest,
     runProviderAuthentication,
     prepareProviderLogin,
     completeProviderLogin,

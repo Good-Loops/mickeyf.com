@@ -31,6 +31,8 @@ import {
 
 type ControllerDependencies = {
     database: Pick<Pool, 'getConnection' | 'query'>;
+    scorePublicationDigest?: Buffer;
+    scoreParticipationReady?: boolean;
     sessionSecret: string;
     isProduction: boolean;
     p4VegaScoreSubmissionsEnabled: boolean;
@@ -44,7 +46,7 @@ const DUMMY_PASSWORD_HASH = '$2a$10$b3R9u5f4ObGVED5kC8jxp.xvN3FnQzuhcXzAa9iSYcQB
 const PASSWORD_HASH_COST = 10;
 
 export function createMainController({
-    database,
+    database, scorePublicationDigest, scoreParticipationReady = false,
     sessionSecret,
     isProduction,
     p4VegaScoreSubmissionsEnabled,
@@ -160,7 +162,8 @@ export function createMainController({
     }
 
     async function getLeaderboard(_req: Request, res: Response) {
-        const rows = await readP4VegaLeaderboard(database);
+        res.setHeader('Cache-Control', 'no-store');
+        const rows = await readP4VegaLeaderboard(database, scorePublicationDigest, scoreParticipationReady);
         return res.json({
             success: true,
             leaderboard: rows.map(({ userName, score }) => ({

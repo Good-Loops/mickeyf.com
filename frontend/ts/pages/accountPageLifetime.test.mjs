@@ -7,6 +7,7 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 const key = '__accountPageLifetimeTest';
 const scope = `globalThis.${key}`;
 const mocks = {
+    ScoreParticipation: 'export default "ScoreParticipation";',
     react: `export const useState = initial => ${scope}.state(initial);
         export const useRef = initial => ${scope}.ref(initial);
         export const useEffect = callback => ${scope}.effect(callback); export default {};`,

@@ -80,7 +80,7 @@ export function createRegistrationAuthorization(database: Pick<Pool, 'query'>, p
                 sql: `INSERT INTO account_registration_profiles
                     (account_uuid, country_code, age_band, policy_version, score_visibility)
                     VALUES (?, ?, ?, ?, ?)`, timeout: TIMEOUT_MS,
-            }, [accountId, decision.country, decision.ageBand, policy!.version, decision.ageBand === 'minor' ? 'private' : 'public']);
+            }, [accountId, decision.country, decision.ageBand, policy!.version, 'private']);
             if (profile.affectedRows !== 1) throw new RegistrationRequiredError();
             const [consumed] = await connection.query<ResultSetHeader>({
                 sql: `UPDATE registration_authorizations SET consumed_at = UTC_TIMESTAMP(6)

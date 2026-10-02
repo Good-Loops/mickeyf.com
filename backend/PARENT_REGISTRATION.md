@@ -4,7 +4,9 @@ This implementation uses an existing live parent account and fresh Google/Apple 
 
 ## Activation and pause
 
-`PARENT_REGISTRATION_ENABLED` must explicitly enable the management capability. It additionally requires `PARENT_REGISTRATION_POLICY_REVIEWED`, the existing reviewed registration policy, provider authentication and journaled account deletion. Configuration must supply `PARENT_REGISTRATION_POLICY_VERSION`, `PARENT_CONSENT_VERSION`, `PARENT_CONSENT_TEXT`, and `PARENT_REGISTRATION_COUNTRIES`. Countries must be a reviewed subset of the existing registration policy. No real configuration values are provided here.
+`PARENT_REGISTRATION_ENABLED` must explicitly enable the management capability. It additionally requires `PARENT_REGISTRATION_POLICY_REVIEWED`, the existing reviewed registration policy, provider authentication and journaled account deletion. Configuration must supply `PARENT_REGISTRATION_POLICY_VERSION`, `PARENT_CONSENT_VERSION`, `PARENT_CONSENT_TEXT`, `PARENT_PRIVACY_NOTICE_URL`, and `PARENT_REGISTRATION_COUNTRIES`. Countries must be a reviewed subset of the existing registration policy. No real configuration values are provided here.
+
+The public HTTPS notice URL is validated and bound to the approval digest; changing it invalidates old proofs/grants. The frontend retains a clickable notice during consent and child-detail collection. The separate `VITE_PRIVACY_NOTICE_URL` supplies the app footer without enabling parent registration. See [notice linkage](../frontend/PRIVACY_NOTICE.md) for configuration, versioning and publication boundaries. Worldwide audience and the approved provider-plus-guardian-attestation product route remain unchanged; no jurisdiction is declared reviewed by adding this link.
 
 `PARENT_REGISTRATION_CREATION_ENABLED` is a separate explicit switch and defaults closed. Pause new child creation with this switch while retaining the reviewed management policy so existing parents can list children and withdraw consent. Removing all management configuration would disable that recovery path; it is not the normal pause procedure.
 
@@ -30,4 +32,6 @@ Rollback is a reviewed compatibility decision after child creation: old code may
 
 Tests use a pinned disposable MySQL 8.0.31 instance and synthetic credentials. The browser flow uses a new headless Chrome profile, real HTTP/session/persistence paths and a synthetic provider-verifier seam; it does not exercise live Google/Apple accounts or establish jurisdictional legal sufficiency. Production migrations, grants, provider configuration, traffic and deployments require their separately reviewed rollout and action-time authorization.
 
-The isolated development bootstrap recognizes the reviewed schema through 0023 and its explicit parent grant profile. It strips inherited registration/parent policy and keeps those capabilities closed. Its normal retained development database was not changed by this review; automated persistence tests use a separate disposable database.
+The isolated development bootstrap recognizes the reviewed schema through 0025 and its explicit parent grant profile. It strips inherited registration/parent/public-participation policy and keeps those capabilities closed. Its normal retained development database was not changed by this review; automated persistence tests use a separate disposable database.
+
+The subsequent [family deletion and public participation contract](FAMILY_AND_PUBLIC_SCORES.md) documents migrations 0024/0025, exact-family confirmation, separate score permission, privacy-preserving withdrawal and the required operator transition/recovery boundary. Child creation alone never grants public participation.

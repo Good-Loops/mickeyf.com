@@ -53,8 +53,8 @@ test('omitting the profile preserves the existing full manifest', () => {
 test('parent grants require explicit selection and cannot reassign consent, identity or policy binding', () => {
     assert.equal(parseRuntimeGrantProfile('google-apple-parent'), 'google-apple-parent');
     const columns = runtimeColumnPrivilegeInventory('google-apple-parent');
-    assert.deepEqual(columns.filter(({ tableName, columnName, privilegeType }) => !tableName.startsWith('parent_')
-        && !(tableName === 'account_registration_profiles' && columnName === 'age_band' && privilegeType === 'SELECT')),
+    assert.deepEqual(columns.filter(({ tableName, columnName, privilegeType }) => !tableName.startsWith('parent_') && tableName !== 'account_score_permissions'
+        && !(tableName === 'account_registration_profiles' && ['age_band', 'country_code', 'policy_version'].includes(columnName) && privilegeType === 'SELECT')),
     runtimeColumnPrivilegeInventory());
     const consent = PARENT_RUNTIME_GRANT_MANIFEST.find(row => row.table === 'parent_child_consents')!;
     assert.deepEqual(consent.tablePrivileges, []);
@@ -65,7 +65,7 @@ test('parent grants require explicit selection and cannot reassign consent, iden
     assert.deepEqual(runtimeTablePrivilegeInventory('google-apple-parent'), [
         ...runtimeTablePrivilegeInventory(), { tableName: 'parent_registration_attempts', privilegeType: 'DELETE' },
     ]);
-    assert.equal(renderRuntimeGrantStatements('cms', PRODUCTION_RUNTIME_DATABASE_ACCOUNT, 'google-apple-parent').length, 13);
+    assert.equal(renderRuntimeGrantStatements('cms', PRODUCTION_RUNTIME_DATABASE_ACCOUNT, 'google-apple-parent').length, 14);
 });
 
 test('unknown grant profiles fail closed rather than falling back to broader grants', () => {

@@ -8,10 +8,11 @@ import { acquireProviderCredential, getAvailableProviderClients, type PublicProv
 import Swal from '@/components/siteAlert';
 import { useAuth } from '@/context/AuthContext';
 import { LEGACY_PUBLIC_API_PREVIEW } from '@/config/apiConfig';
+import ScoreParticipation from '@/components/ScoreParticipation';
 import PublicAccountPreviewNotice from '@/components/PublicAccountPreviewNotice';
 
 export default function ManageAccount() {
-    const { userName, isAuthenticated, loading, deleteAccount, authenticateWithProvider } = useAuth();
+    const { userName, isAuthenticated, loading, sessionGeneration, deleteAccount, authenticateWithProvider } = useAuth();
     const [methods, setMethods] = useState<ProviderAccountMethods | null>(null);
     const [deletionClient, setDeletionClient] = useState<PublicProviderClient | undefined>();
     const [methodsLoading, setMethodsLoading] = useState(true);
@@ -139,7 +140,7 @@ export default function ManageAccount() {
                     Manage account
                 </RouteHeading>
                 <PublicAccountPreviewNotice />
-                {!LEGACY_PUBLIC_API_PREVIEW && isAuthenticated && <p><Link to="/parent-accounts">Manage parent and child accounts</Link>. Delete managed child accounts before deleting your parent account.</p>}
+                {!LEGACY_PUBLIC_API_PREVIEW && isAuthenticated && <p><Link to="/parent-accounts">Manage parent and child accounts</Link>. You can review and delete your parent account together with its linked child accounts there.</p>}
                 {LEGACY_PUBLIC_API_PREVIEW ? <>
                     {loading ? <p role="status">Checking your session…</p> : isAuthenticated
                         ? <p className="manage-account__identity">Signed in as <strong>{userName}</strong></p>
@@ -154,6 +155,7 @@ export default function ManageAccount() {
                         {methods?.hasPassword && <ProviderSignInControls action="link" disabled={busy}
                             operationLock={submitting} onBusyChange={setProviderBusy}
                             onSuccess={() => setMethodsRetry(value => value + 1)} />}
+                        <ScoreParticipation authenticated={isAuthenticated} accountKey={userName ?? ''} sessionGeneration={sessionGeneration} />
                         <h2 className="manage-account__subtitle">Delete account</h2>
                         <p id="deletion-consequences">
                             Permanently remove your username, account details, personal bests,
