@@ -1,12 +1,23 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { decideRegistration, loadRegistrationPolicy } from './registrationPolicy';
+import { decideRegistration, loadRegistrationPolicy, registrationPolicyForCreation } from './registrationPolicy';
 
 // ZZ/XY are synthetic fixtures, not legal rules or enabled territories.
 const env = { REGISTRATION_ENABLED: 'true', REGISTRATION_POLICY_REVIEWED: 'true',
     REGISTRATION_POLICY_VERSION: 'synthetic-test-v1',
     REGISTRATION_COUNTRY_RULES: JSON.stringify({ ZZ: { parentRequiredBelow: 15 }, XY: { parentRequiredBelow: 18 } }) };
 const input = { country: 'ZZ', ageBand: 'minor', policyVersion: env.REGISTRATION_POLICY_VERSION };
+
+test('creation switch preserves existing defaults and rejects misspelled deployment flags', () => {
+    const policy = loadRegistrationPolicy(env)!;
+    assert.equal(registrationPolicyForCreation(policy, {}), policy);
+    assert.equal(registrationPolicyForCreation(policy, { REGISTRATION_CREATION_ENABLED: 'true' }), policy);
+    assert.equal(registrationPolicyForCreation(policy, { REGISTRATION_CREATION_ENABLED: 'false' }), undefined);
+    assert.equal(registrationPolicyForCreation(undefined, { REGISTRATION_CREATION_ENABLED: 'true' }), undefined);
+    for (const value of ['', 'FALSE', '0', 'false ']) {
+        assert.throws(() => registrationPolicyForCreation(policy, { REGISTRATION_CREATION_ENABLED: value }), /must be true or false/);
+    }
+});
 
 test('registration stays closed by default and requires exact reviewed activation', () => {
     for (const enabled of [undefined, 'false', 'TRUE', '1']) {

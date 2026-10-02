@@ -5,6 +5,7 @@ The Artifact Registry response is read through authenticated Google APIs. Envelo
 metadata is checked here; this is not an independent cryptographic key verifier.
 """
 import base64
+import hashlib
 import json
 import os
 import re
@@ -23,6 +24,7 @@ IMAGE = f"us-central1-docker.pkg.dev/{PROJECT}/cloud-run-source-deploy/cloud-run
 BUILDER = "gcr.io/cloud-builders/docker:latest@sha256:661e95acd923514f71f47ce7b390e06a8d31b15febecf772e506babf62960528"
 STAGE_A = "ef5a2981-95be-4f4d-af91-f997fde73356"
 SESSION_CUTOVER = False  # Set only by the offline session renderer, not a CLI flag.
+PROVIDER_RELEASE = False  # Set only by the offline provider renderer.
 UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
 
 
@@ -344,6 +346,12 @@ def main():
     if SESSION_CUTOVER:
         previous = validate_previous_session_version(pins)
         expected_approval = f"session-zero-traffic:{pins['sourceCommit']}:{pins['sourceBuildId']}:{pins['imageDigest']}:previous-session-secret:{previous}:session-secret:{session_secret_version}"
+    if PROVIDER_RELEASE:
+        configuration = pins.get("providerRelease")
+        if not isinstance(configuration, dict) or set(configuration) != {"phase", "environment"}:
+            reject("missing exact provider configuration")
+        digest = hashlib.sha256(json.dumps({"current": configuration, "previous": pins.get("previousProviderRelease")}, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+        expected_approval = expected_approval.replace("session-zero-traffic:", "provider-zero-traffic:", 1) + f":configuration:{digest}"
     if (re.fullmatch(UUID, build_id) is None or re.fullmatch(UUID, trigger_id) is None
             or trigger_id in (STAGE_A, pins["canonicalDeployTriggerId"], pins["sourceTriggerId"])
             or approval != expected_approval

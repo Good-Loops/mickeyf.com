@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { providerReleaseEnvironment, providerConfigurationSha256 } from './provider-release-config.mjs';
 import { readFile } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -78,6 +79,25 @@ export function googleSignInEnvironment(settings, accountDeletion) {
 function googleSignInApproval(pins) {
     if (pins.googleSignIn === undefined) return 'DISABLED';
     return `${pins.googleSignIn.enabled ? 'enable' : 'disable'}-google-sign-in:${pins.sourceCommit}:${pins.sourceBuildId}:${pins.imageDigest}`;
+}
+
+export function validateProviderPins(value) {
+    const { providerRelease, previousProviderRelease, ...session } = value ?? {};
+    if (session.accountDeletion !== undefined || session.googleSignIn !== undefined) {
+        throw new Error('Provider release owns the complete account/provider environment; do not combine legacy options.');
+    }
+    providerReleaseEnvironment(providerRelease);
+    if (previousProviderRelease !== undefined) providerReleaseEnvironment(previousProviderRelease);
+    return { ...validateSessionPins({ ...session, accountDeletion: { enabled: true,
+        journalBucket: ACCOUNT_DELETION_JOURNAL_BUCKET, identityEpoch: ORIGINAL_ACCOUNT_IDENTITY_EPOCH } }), providerRelease,
+        ...(previousProviderRelease === undefined ? {} : { previousProviderRelease }) };
+}
+
+export function providerDeploymentApproval(pins) {
+    const reviewed = validateProviderPins(pins);
+    return `provider-zero-traffic:${reviewed.sourceCommit}:${reviewed.sourceBuildId}:${reviewed.imageDigest}`
+        + `:previous-session-secret:${reviewed.previousSessionSecretVersion}:session-secret:${reviewed.sessionSecretVersion}`
+        + `:configuration:${providerConfigurationSha256({ current: reviewed.providerRelease, previous: reviewed.previousProviderRelease ?? null })}`;
 }
 
 export function validateFrozenPins(value) {
@@ -209,8 +229,14 @@ export function resolveSessionDeploymentSteps(steps, { buildId, deploymentTrigge
     return resolveDeploymentSteps(steps, { buildId, deploymentTriggerId, approval }, true);
 }
 
-function resolveDeploymentSteps(steps, { buildId, deploymentTriggerId, approval }, sessionCutover) {
-    const approvalPattern = sessionCutover
+export function resolveProviderDeploymentSteps(steps, options) {
+    return resolveDeploymentSteps(steps, options, true, true);
+}
+
+function resolveDeploymentSteps(steps, { buildId, deploymentTriggerId, approval }, sessionCutover, providerCutover = false) {
+    const approvalPattern = providerCutover
+        ? /^provider-zero-traffic:[0-9a-f]{40}:[0-9a-f-]{36}:sha256:[0-9a-f]{64}:previous-session-secret:[1-9][0-9]*:session-secret:[1-9][0-9]*:configuration:[0-9a-f]{64}$/u
+        : sessionCutover
         ? /^session-zero-traffic:[0-9a-f]{40}:[0-9a-f-]{36}:sha256:[0-9a-f]{64}:previous-session-secret:[1-9][0-9]*:session-secret:[1-9][0-9]*$/u
         : /^freeze-zero-traffic:[0-9a-f]{40}:[0-9a-f-]{36}:sha256:[0-9a-f]{64}:session-secret:[1-9][0-9]*$/u;
     if (!uuid.test(buildId) || !uuid.test(deploymentTriggerId)
@@ -236,18 +262,23 @@ export function renderSessionBackendDeployConfig({ canonical, candidate, preflig
     return renderBackendDeployConfig({ canonical, candidate, preflight, pins: requestedPins }, true);
 }
 
-function renderBackendDeployConfig({ canonical, candidate, preflight, pins: requestedPins }, sessionCutover) {
+export function renderProviderBackendDeployConfig(input) {
+    return renderBackendDeployConfig(input, true, true);
+}
+
+function renderBackendDeployConfig({ canonical, candidate, preflight, pins: requestedPins }, sessionCutover, providerCutover = false) {
     canonical = normalize(canonical);
     candidate = normalize(candidate);
     preflight = normalize(preflight);
     if (sha256(canonical) !== CANONICAL_SHA256 || sha256(candidate) !== CANDIDATE_SHA256) {
         throw new Error('Reviewed canonical/image-only configuration hash changed; review before updating the renderer.');
     }
-    const pins = sessionCutover ? validateSessionPins(requestedPins) : validateFrozenPins(requestedPins);
+    const pins = providerCutover ? validateProviderPins(requestedPins) : sessionCutover ? validateSessionPins(requestedPins) : validateFrozenPins(requestedPins);
     const scope = sessionCutover ? 'session' : 'frozen';
     const candidateState = sessionCutover ? sessionState : frozenState;
     const preflightInvocation = (phase) => `python3 /workspace/${scope}-preflight.py /workspace/${scope}-pins.json "\${BUILD_ID}" "\${_DEPLOY_TRIGGER_ID}" "\${_APPROVAL}" ${phase}`;
     if (sessionCutover) preflight = replaceExactly(preflight, 'SESSION_CUTOVER = False', 'SESSION_CUTOVER = True');
+    if (providerCutover) preflight = replaceExactly(preflight, 'PROVIDER_RELEASE = False', 'PROVIDER_RELEASE = True');
     const payload = Buffer.from(preflight).toString('base64');
     const chunks = payload.match(/.{1,8000}/gu);
     // Base64 avoids Cloud Build treating Python dollar signs as substitutions.
@@ -259,8 +290,27 @@ function renderBackendDeployConfig({ canonical, candidate, preflight, pins: requ
         '    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)',
         '    with os.fdopen(fd, "wb") as handle: handle.write(data)',
     ].join('\n');
-    const initial = yamlStep(`Materialize reviewed ${scope} preflight`, ['-c', materializer, sha256(preflight), JSON.stringify(pins), ...chunks])
+    let initial = yamlStep(`Materialize reviewed ${scope} preflight`, ['-c', materializer, sha256(preflight), JSON.stringify(pins), ...chunks])
         + yamlStep(`Validate exact ${scope} candidate and operational exclusion`, ['-ceu', preflightInvocation('initial')], { entrypoint: 'bash' });
+
+    if (providerCutover) {
+        // Policy/consent text is data, never a shell argument or Cloud Build substitution.
+        // Chunk the entire materialization bundle so a worldwide policy cannot exceed the API argument limit.
+        const bundle = Buffer.from(JSON.stringify({ preflight, pins })).toString('base64');
+        const materialize = [
+            'import base64, hashlib, json, os, sys',
+            'payload = base64.b64decode("".join(sys.argv[2:]), validate=True)',
+            'if hashlib.sha256(payload).hexdigest() != sys.argv[1]: raise SystemExit("bundle digest mismatch")',
+            'bundle = json.loads(payload)',
+            'for path, data in (("/workspace/session-preflight.py", bundle["preflight"]), ("/workspace/session-pins.json", json.dumps(bundle["pins"]))):',
+            '    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)',
+            '    with os.fdopen(fd, "w", encoding="utf-8") as handle: handle.write(data)',
+        ].join('\n');
+        const bytes = Buffer.from(bundle, 'base64');
+        initial = yamlStep('Materialize reviewed provider preflight', ['-c', materialize,
+            createHash('sha256').update(bytes).digest('hex'), ...bundle.match(/.{1,8000}/gu)])
+            + yamlStep('Validate exact provider candidate and operational exclusion', ['-ceu', preflightInvocation('initial')], { entrypoint: 'bash' });
+    }
 
     const discovery = candidateState(stepBlock(canonical, 'Require successful Artifact Analysis scan'));
     const severity = candidateState(stepBlock(canonical, 'Enforce Artifact Analysis severity policy'));
@@ -328,6 +378,78 @@ function renderBackendDeployConfig({ canonical, candidate, preflight, pins: requ
     }
 
     const steps = parseReviewedSteps(initial + discovery + severity + deletion + deploy + verify + smoke);
+    if (providerCutover) {
+        // The canonical deletion guard still validates the journal, identity epoch and old runtime first.
+        // The provider-bound preflight authorizes the whole additional configuration, not just Google flags.
+        const providerContract = [
+            'def check_provider_baseline(container):',
+            '    with open("/workspace/session-pins.json", encoding="utf-8") as handle: pins = json.load(handle)',
+            '    previous = pins.get("previousProviderRelease")',
+            '    expected = previous["environment"] if previous else {}',
+            '    observed = [item for item in container.get("env", []) if item.get("name") not in {"NODE_ENV", "CLOUD_SQL_CONNECTION_NAME", "DB_USER", "DB_NAME", "P4_VEGA_SCORE_SUBMISSIONS_ENABLED", "THREE_BOSSES_RUN_SUBMISSIONS_ENABLED", "DB_PASS", "SESSION_SECRET"}]',
+            '    if not previous:',
+            '        if any(item != {"name": item.get("name"), "value": "false"} or item.get("name") not in {"ACCOUNT_DELETION_ENABLED", "PROVIDER_AUTH_ENABLED", "PROVIDER_GOOGLE_SIGNUP_ENABLED"} for item in observed): reject("unreviewed previous provider settings")',
+            '        if len({item["name"] for item in observed}) != len(observed): reject("duplicate previous provider settings")',
+            '    elif sorted(observed, key=lambda item:item.get("name", "")) != [{"name": name, "value": value} for name, value in sorted(expected.items())]:',
+            '        reject("previous provider configuration differs from the reviewed transition")',
+            '',
+        ].join('\n');
+        const contractSource = steps[4].args[1];
+        const guardName = /def (check_google_[a-z_]+)\(container,/u.exec(contractSource)?.[1];
+        if (!guardName) throw new Error('Canonical prior-provider guard changed');
+        const start = contractSource.indexOf(`def ${guardName}(`);
+        const end = contractSource.indexOf('\ndef ', start + 1);
+        if (end < 0) throw new Error('Canonical provider guard boundary changed');
+        steps[4].args[1] = contractSource.slice(0, start) + providerContract
+            + `def ${guardName}(container, *args):\n    check_provider_baseline(container)\n` + contractSource.slice(end);
+        steps[4].args[1] += [
+            '', 'if __name__ == "__main__":',
+            '    with open("/workspace/session-pins.json", encoding="utf-8") as handle: provider = json.load(handle)["providerRelease"]',
+            '    with open("/workspace/account-deletion-contract.json", encoding="utf-8") as handle: contract = json.load(handle)',
+            '    contract["environment"].update(provider["environment"])',
+            '    with open("/workspace/account-deletion-contract.json", "w", encoding="utf-8") as handle: json.dump(contract, handle)',
+            '    environment = dict(contract["environment"], NODE_ENV="production", CLOUD_SQL_CONNECTION_NAME="noted-reef-387021:us-central1:cms-mickeyf", DB_USER="cms_mickeyf", DB_NAME="cms", P4_VEGA_SCORE_SUBMISSIONS_ENABLED="true", THREE_BOSSES_RUN_SUBMISSIONS_ENABLED="true")',
+            '    with open("/workspace/provider-environment.json", "x", encoding="utf-8") as handle: json.dump(environment, handle)',
+        ].join('\n');
+        steps[5].args[1] = replaceExactly(steps[5].args[1],
+            '--set-env-vars="NODE_ENV=production,CLOUD_SQL_CONNECTION_NAME=$$CLOUD_SQL,DB_USER=cms_mickeyf,DB_NAME=cms,P4_VEGA_SCORE_SUBMISSIONS_ENABLED=true,THREE_BOSSES_RUN_SUBMISSIONS_ENABLED=true,$$DELETION_ENV"',
+            '--env-vars-file=/workspace/provider-environment.json');
+        // Do not interpolate arbitrary consent text into the shell, even into an unused variable.
+        steps[5].args[1] = replaceExactly(steps[5].args[1],
+            'print(",".join(f"{key}={value}" for key, value in sorted(contract["environment"].items())))',
+            'print("provider-environment-file-verified")');
+        const publicProbe = [
+            'with open("/workspace/session-pins.json", encoding="utf-8") as handle: provider = json.load(handle)["providerRelease"]',
+            'active = provider["phase"] == "active"',
+            'settings = provider["environment"]',
+            'expected_clients = []',
+            'if active:',
+            '    expected_clients = [',
+            '        {"clientKey":"google-web","provider":"google","platform":"web","clientId":settings["GOOGLE_WEB_CLIENT_ID"],"signup":True},',
+            '        {"clientKey":"google-ios","provider":"google","platform":"ios","clientId":settings["GOOGLE_WEB_CLIENT_ID"],"signup":True},',
+            '        {"clientKey":"apple-ios","provider":"apple","platform":"ios","clientId":settings["APPLE_IOS_BUNDLE_ID"],"signup":True},',
+            '        {"clientKey":"apple-web","provider":"apple","platform":"web","clientId":settings["APPLE_WEB_SERVICES_ID"],"redirectUri":settings["APPLE_WEB_REDIRECT_URI"],"signup":True},',
+            '    ]',
+            'providers, provider_headers = request("/auth/providers/config", 200)',
+            'if (not isinstance(providers, dict) or set(providers) != {"clients"} or not isinstance(providers["clients"], list)',
+            '        or sorted(providers["clients"], key=lambda client:client.get("clientKey", "")) != sorted(expected_clients, key=lambda client:client["clientKey"])):',
+            '    reject("provider capability/configuration differs; runtime credential loading may be unavailable")',
+            'registration, registration_headers = request("/auth/registration/config", 200)',
+            'expected_registration = {"enabled":False}',
+            'if active:',
+            '    expected_registration = {"enabled":True,"policyVersion":settings["REGISTRATION_POLICY_VERSION"],"parentRegistrationAvailable":False,',
+            '        "countries":[{"country":country,"parentRequiredBelow":rule["parentRequiredBelow"],"adultFrom":18}',
+            '            for country,rule in sorted(json.loads(settings["REGISTRATION_COUNTRY_RULES"]).items())]}',
+            'if registration != expected_registration: reject("registration policy differs from the reviewed release")',
+            'for headers in (provider_headers, registration_headers):',
+            '    if not no_store(headers) or headers.get_all("Set-Cookie"): reject("public auth configuration has unsafe headers")',
+        ].join('\n');
+        const smokeSource = replaceExactly(steps[7].args.slice(3).join(''),
+            'print("Tagged candidate anonymous HTTP and database-read smoke tests passed.")',
+            publicProbe + '\nprint("Tagged candidate anonymous HTTP and public capability checks passed; real provider acceptance is separate.")');
+        steps[7].args[1] = replaceExactly(steps[7].args[1], 'printf \'%s%s\' "$$1" "$$2"', 'printf \'%s%s%s\' "$$1" "$$2" "$$3"');
+        steps[7].args.splice(3, steps[7].args.length - 3, smokeSource.slice(0, 8000), smokeSource.slice(8000, 16000), smokeSource.slice(16000));
+    }
     if (steps.some((step) => step.args.some((argument) => argument.length > 10_000))) throw new Error('Rendered Cloud Build argument exceeds 10,000 characters.');
     return { steps, serviceAccount: deployIdentity,
         substitutions: { _DEPLOY_TRIGGER_ID: 'INVALID', _APPROVAL: 'INVALID' },

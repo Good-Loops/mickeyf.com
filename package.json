@@ -26,7 +26,7 @@
 		"test:three-bosses-webgl-hosting": "node --test scripts/verify-three-bosses-webgl-hosting.test.mjs",
 		"test:three-bosses-webgl-smoke": "npm --prefix .github/firebase-deploy run test:three-bosses-webgl-smoke",
 		"test:cloudbuild-candidate": "node --test scripts/cloudbuild-candidate.test.mjs",
-		"test:frozen-backend": "node --test scripts/render-frozen-backend-deploy.test.mjs scripts/frozen-backend-traffic.test.mjs scripts/render-session-backend-deploy.test.mjs scripts/session-backend-traffic.test.mjs scripts/session-backend-rollback.test.mjs",
+		"test:frozen-backend": "node --test scripts/render-frozen-backend-deploy.test.mjs scripts/frozen-backend-traffic.test.mjs scripts/render-session-backend-deploy.test.mjs scripts/session-backend-traffic.test.mjs scripts/session-backend-rollback.test.mjs scripts/provider-backend-release.test.mjs",
 		"test:receipt-cleanup": "node --test .github/receipt-cleanup/templates.test.mjs",
 		"docs:clean": "node scripts/clean-docs.mjs",
 		"docs:json:frontend": "typedoc --options frontend/typedoc.json --tsconfig frontend/tsconfig.typedoc.json --json .typedoc-tmp/frontend.json",

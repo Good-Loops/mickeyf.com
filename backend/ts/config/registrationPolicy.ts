@@ -34,6 +34,16 @@ export function loadRegistrationPolicy(env: Readonly<Record<string, string | und
     } catch { throw new Error('Registration policy requires an explicit version and valid country rules.'); }
 }
 
+/** Pause new self-service accounts without discarding policy needed by existing family management. */
+export function registrationPolicyForCreation(policy: RegistrationPolicy | undefined,
+    env: Readonly<Record<string, string | undefined>> = process.env): RegistrationPolicy | undefined {
+    const enabled = env.REGISTRATION_CREATION_ENABLED;
+    if (enabled !== undefined && enabled !== 'true' && enabled !== 'false') {
+        throw new Error('REGISTRATION_CREATION_ENABLED must be true or false when supplied.');
+    }
+    return enabled === 'false' ? undefined : policy;
+}
+
 export function decideRegistration(policy: RegistrationPolicy | undefined, input: unknown): RegistrationDecision {
     if (!policy) return { allowed: false, reason: 'REGISTRATION_CLOSED' };
     if (!isRecord(input) || Object.keys(input).sort().join(',') !== 'ageBand,country,policyVersion'

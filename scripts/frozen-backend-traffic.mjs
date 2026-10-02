@@ -1,5 +1,6 @@
 // Deliberately separate from the enabled main-branch deployment path.
 import { createHash } from 'node:crypto';
+import { providerReleaseEnvironment } from './provider-release-config.mjs';
 import { execFileSync } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
@@ -90,7 +91,11 @@ export function validateSessionRevision(revision, pins) {
 export function validateLegacySessionRevision(revision, pins, expectedName) {
     return validateRuntimeRevision(revision, pins, expectedName, true, true);
 }
-function validateRuntimeRevision(revision, pins, expectedName, scoringEnabled, legacy = false) {
+export function validateProviderRevision(revision, pins, expectedName = sessionRevisionName(pins), rollback = false) {
+    return validateRuntimeRevision(revision, pins, expectedName, true, false,
+        providerReleaseEnvironment(pins.providerRelease, rollback));
+}
+function validateRuntimeRevision(revision, pins, expectedName, scoringEnabled, legacy = false, providerEnvironment) {
     const sessionSecretVersion = validateSessionSecretVersion(pins.sessionSecretVersion);
     requireThat(revision.name === `${SERVICE}/revisions/${expectedName}`
         && revision.service === 'mickeyf-org' && revision.uid && !revision.deleteTime && !revision.reconciling
@@ -114,8 +119,8 @@ function validateRuntimeRevision(revision, pins, expectedName, scoringEnabled, l
         NODE_ENV: 'production', CLOUD_SQL_CONNECTION_NAME: `${PROJECT}:${REGION}:cms-mickeyf`,
         DB_USER: 'cms_mickeyf', DB_NAME: 'cms',
         P4_VEGA_SCORE_SUBMISSIONS_ENABLED: String(scoringEnabled), THREE_BOSSES_RUN_SUBMISSIONS_ENABLED: String(scoringEnabled),
-        ...accountDeletionEnvironment(pins.accountDeletion),
-        ...googleSignInEnvironment(pins.googleSignIn, pins.accountDeletion),
+        ...providerEnvironment ?? { ...accountDeletionEnvironment(pins.accountDeletion),
+            ...googleSignInEnvironment(pins.googleSignIn, pins.accountDeletion) },
     };
     // The recorded legacy runtime predates these default-off feature variables.
     if (legacy) for (const name of ['ACCOUNT_DELETION_ENABLED', 'PROVIDER_AUTH_ENABLED', 'PROVIDER_GOOGLE_SIGNUP_ENABLED']) {

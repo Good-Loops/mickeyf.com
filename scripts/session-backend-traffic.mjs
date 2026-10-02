@@ -1,9 +1,10 @@
 // Session-only cutover. SQL, Hosting, secret creation and revision deployment are separate operations.
 import { writeFile } from 'node:fs/promises';
+import { providerReleaseEnvironment } from './provider-release-config.mjs';
 import { pathToFileURL } from 'node:url';
-import { sessionDeploymentApproval, validateSessionPins, validateSessionSecretVersion } from './render-frozen-backend-deploy.mjs';
+import { sessionDeploymentApproval, validateSessionPins, validateSessionSecretVersion, providerDeploymentApproval, validateProviderPins } from './render-frozen-backend-deploy.mjs';
 import { SERVICE, IMAGE, REVISION_TYPE, fingerprint, validatePins, validateDeploymentReceipt,
-    validateService, validateSessionRevision, validateLegacySessionRevision, sessionRevisionName,
+    validateService, validateSessionRevision, validateProviderRevision, validateLegacySessionRevision, sessionRevisionName,
     serviceConfiguration, revisionConfiguration, trafficShape, createSessionCloudProvider,
     accessToken, readJson } from './frozen-backend-traffic.mjs';
 
@@ -26,15 +27,20 @@ function candidatePins(pins) {
         deploymentTriggerId: pins.candidate.receipt.triggerId, deploymentStepsSha256: pins.candidate.receipt.stepsSha256 };
 }
 
-export function validateSessionTrafficPins(pins) {
+export function validateSessionTrafficPins(pins) { return validateTrafficPins(pins, false); }
+export function validateProviderTrafficPins(pins) { return validateTrafficPins(pins, true); }
+function validateTrafficPins(pins, providerRelease) {
     keys(pins, ['candidate', 'baseline', 'rollback'], 'Session traffic pins');
     keys(pins.candidate, ['deployment', 'receipt'], 'Candidate');
     keys(pins.candidate.receipt, ['buildId', 'triggerId', 'stepsSha256'], 'Deployment receipt');
-    validateSessionPins(pins.candidate.deployment);
-    requireThat(!pins.candidate.deployment.accountDeletion?.enabled && !pins.candidate.deployment.googleSignIn?.enabled,
+    (providerRelease ? validateProviderPins : validateSessionPins)(pins.candidate.deployment);
+    requireThat(providerRelease || !pins.candidate.deployment.accountDeletion?.enabled && !pins.candidate.deployment.googleSignIn?.enabled,
         'This legacy rollback is only reviewed for a session-only release with providers/deletion disabled');
     const candidate = validatePins(candidatePins(pins));
-    keys(pins.baseline, ['revisionName', 'sourceBuildId', 'sourceCommit', 'imageDigest', 'sessionSecretVersion', 'configurationSha256'], 'Baseline');
+    keys(pins.baseline, ['revisionName', 'sourceBuildId', 'sourceCommit', 'imageDigest', 'sessionSecretVersion', 'configurationSha256',
+        ...(providerRelease && pins.baseline.providerRelease !== undefined ? ['providerRelease'] : [])], 'Baseline');
+    if (providerRelease) requireThat(same(pins.baseline.providerRelease ?? null, pins.candidate.deployment.previousProviderRelease ?? null),
+        'Candidate transition and captured previous provider configuration differ');
     keys(pins.rollback, ['sessionSecretVersion'], 'Rollback');
     validatePins({ ...candidate, sourceBuildId: pins.baseline.sourceBuildId, sourceCommit: pins.baseline.sourceCommit,
         imageDigest: pins.baseline.imageDigest, sessionSecretVersion: pins.baseline.sessionSecretVersion });
@@ -68,7 +74,16 @@ export function rollbackRuntimeConfiguration(revision) {
     return runtime;
 }
 
-export async function captureSessionBaseline(provider) {
+export async function captureSessionBaseline(provider) { return captureBaseline(provider); }
+export async function captureProviderBaseline(provider, previousProviderRelease) {
+    if (previousProviderRelease !== undefined) providerReleaseEnvironment(previousProviderRelease);
+    return captureBaseline(provider, previousProviderRelease);
+}
+function validateBaseline(revision, baseline) {
+    if (baseline.providerRelease) validateProviderRevision(revision, baseline, baseline.revisionName);
+    else validateLegacySessionRevision(revision, baseline, baseline.revisionName);
+}
+async function captureBaseline(provider, previousProviderRelease) {
     await provider.assertAutomationPaused();
     const service = await provider.getService();
     validateService(service);
@@ -83,21 +98,25 @@ export async function captureSessionBaseline(provider) {
     requireThat(typeof baseline.sourceBuildId === 'string' && UUID.test(baseline.sourceBuildId)
         && /^[0-9a-f]{40}$/u.test(baseline.sourceCommit) && /^sha256:[0-9a-f]{64}$/u.test(baseline.imageDigest),
     'Baseline must have exact source/image provenance');
-    validateLegacySessionRevision(revision, baseline, baseline.revisionName);
+    if (previousProviderRelease !== undefined) baseline.providerRelease = previousProviderRelease;
+    validateBaseline(revision, baseline);
     requireThat(same(service, await provider.getService()), 'Serving state changed while capturing the baseline');
     return baseline;
 }
 
-export async function checkedSessionCandidate(provider, pins) {
+export async function checkedSessionCandidate(provider, pins) { return checkedCandidate(provider, pins, false); }
+export async function checkedProviderCandidate(provider, pins) { return checkedCandidate(provider, pins, true); }
+async function checkedCandidate(provider, pins, providerRelease) {
     const candidate = candidatePins(pins);
     const [baseline, target, build] = await Promise.all([
         provider.getRevision(pins.baseline.revisionName), provider.getRevision(sessionRevisionName(candidate)),
         provider.getDeployment(candidate.deploymentBuildId),
     ]);
-    validateLegacySessionRevision(baseline, pins.baseline, pins.baseline.revisionName);
+    validateBaseline(baseline, pins.baseline);
     requireThat(fingerprint(revisionConfiguration(baseline)) === pins.baseline.configurationSha256, 'Baseline revision drifted');
-    validateSessionRevision(target, candidate);
-    validateDeploymentReceipt(build, candidate, sessionDeploymentApproval(pins.candidate.deployment));
+    if (providerRelease) validateProviderRevision(target, { ...candidate, providerRelease: pins.candidate.deployment.providerRelease });
+    else validateSessionRevision(target, candidate);
+    validateDeploymentReceipt(build, candidate, (providerRelease ? providerDeploymentApproval : sessionDeploymentApproval)(pins.candidate.deployment));
     return { baseline, candidate: target };
 }
 
@@ -108,11 +127,25 @@ export function validateSessionRollback(rollback, baseline, pins) {
     return rollback;
 }
 
-async function checkedRevisions(provider, pins) {
+export function validateProviderRollback(rollback, candidate, pins) {
+    const source = { ...candidatePins(pins), sessionSecretVersion: pins.rollback.sessionSecretVersion,
+        providerRelease: pins.candidate.deployment.providerRelease };
+    validateProviderRevision(rollback, source, rollbackRevisionName(pins), true);
+    const expected = structuredClone(candidate);
+    const environment = providerReleaseEnvironment(source.providerRelease, true);
+    expected.containers[0].env = expected.containers[0].env.map(entry => Object.hasOwn(environment, entry.name)
+        ? { name: entry.name, value: environment[entry.name] } : entry);
+    requireThat(same(rollbackRuntimeConfiguration(rollback), rollbackRuntimeConfiguration(expected)),
+        'Provider rollback must preserve the candidate image/runtime with only reviewed creation pauses and a fresh signing secret');
+    return rollback;
+}
+
+async function checkedRevisions(provider, pins, providerRelease = false) {
     const [revisions, rollback] = await Promise.all([
-        checkedSessionCandidate(provider, pins), provider.getRevision(rollbackRevisionName(pins)),
+        checkedCandidate(provider, pins, providerRelease), provider.getRevision(rollbackRevisionName(pins)),
     ]);
-    validateSessionRollback(rollback, revisions.baseline, pins);
+    if (providerRelease) validateProviderRollback(rollback, revisions.candidate, pins);
+    else validateSessionRollback(rollback, revisions.baseline, pins);
     return { ...revisions, rollback };
 }
 
@@ -130,18 +163,20 @@ export function checkSessionTraffic(service, pins, operation) {
         'Traffic contains an unreviewed revision or tag');
 }
 
-export async function planSessionTraffic(provider, pins, operation, now = Date.now()) {
-    validateSessionTrafficPins(pins);
+export async function planSessionTraffic(provider, pins, operation, now = Date.now()) { return planTraffic(provider, pins, operation, now, false); }
+export async function planProviderTraffic(provider, pins, operation, now = Date.now()) { return planTraffic(provider, pins, operation, now, true); }
+async function planTraffic(provider, pins, operation, now, providerRelease) {
+    validateTrafficPins(pins, providerRelease);
     requireThat(['promote', 'rollback'].includes(operation), 'Choose promote or rollback explicitly');
     await provider.assertAutomationPaused();
-    const [service, revisions] = await Promise.all([provider.getService(), checkedRevisions(provider, pins)]);
+    const [service, revisions] = await Promise.all([provider.getService(), checkedRevisions(provider, pins, providerRelease)]);
     validateService(service);
     checkSessionTraffic(service, pins, operation);
     requireThat([revisions.candidate, revisions.rollback].some(revision => same(service.template.containers, revision.containers)),
         'Service template is not the reviewed candidate or rollback runtime');
     const target = operation === 'promote' ? sessionRevisionName(candidatePins(pins)) : rollbackRevisionName(pins);
     return {
-        schemaVersion: 1, operation, createdAt: new Date(now).toISOString(), pins: structuredClone(pins),
+        schemaVersion: providerRelease ? 2 : 1, operation, createdAt: new Date(now).toISOString(), pins: structuredClone(pins),
         before: { etag: service.etag, generation: service.generation, sha256: fingerprint(service),
             configurationSha256: fingerprint(serviceConfiguration(service)), traffic: service.traffic },
         revisionSha256: Object.fromEntries(Object.entries(revisions).map(([key, revision]) => [key, fingerprint(revisionConfiguration(revision))])),
@@ -150,13 +185,15 @@ export async function planSessionTraffic(provider, pins, operation, now = Date.n
     };
 }
 
-export async function applySessionTraffic(provider, plan, confirmation, now = Date.now()) {
+export async function applySessionTraffic(provider, plan, confirmation, now = Date.now()) { return applyTraffic(provider, plan, confirmation, now, false); }
+export async function applyProviderTraffic(provider, plan, confirmation, now = Date.now()) { return applyTraffic(provider, plan, confirmation, now, true); }
+async function applyTraffic(provider, plan, confirmation, now, providerRelease) {
     const started = performance.now();
     requireThat(SHA.test(confirmation) && fingerprint(plan) === confirmation, 'Plan SHA256 confirmation differs');
     keys(plan, ['schemaVersion', 'operation', 'createdAt', 'pins', 'before', 'revisionSha256', 'desiredTraffic', 'removeTags'], 'Session plan');
     const age = now - Date.parse(plan.createdAt);
-    requireThat(plan.schemaVersion === 1 && Number.isFinite(age) && age >= 0 && age <= MAX_PLAN_AGE, 'Plan is stale or future-dated');
-    const fresh = await planSessionTraffic(provider, plan.pins, plan.operation, Date.parse(plan.createdAt));
+    requireThat(plan.schemaVersion === (providerRelease ? 2 : 1) && Number.isFinite(age) && age >= 0 && age <= MAX_PLAN_AGE, 'Plan is stale or future-dated');
+    const fresh = await planTraffic(provider, plan.pins, plan.operation, Date.parse(plan.createdAt), providerRelease);
     requireThat(same(plan, fresh), 'Plan drift detected; generate and review a new plan');
     await provider.assertAutomationPaused();
     requireThat(age + performance.now() - started <= MAX_PLAN_AGE, 'Plan expired during preflight');
@@ -168,7 +205,7 @@ export async function applySessionTraffic(provider, plan, confirmation, now = Da
         requireThat(BigInt(service.generation) === BigInt(plan.before.generation) + 1n && service.etag !== plan.before.etag
             && fingerprint(serviceConfiguration(service)) === plan.before.configurationSha256
             && same(trafficShape(service.traffic), trafficShape(plan.desiredTraffic)), 'Unexpected state after traffic change');
-        const revisions = await checkedRevisions(provider, plan.pins);
+        const revisions = await checkedRevisions(provider, plan.pins, providerRelease);
         requireThat(Object.entries(revisions).every(([key, revision]) =>
             fingerprint(revisionConfiguration(revision)) === plan.revisionSha256[key]), 'Revision drift after traffic change');
         await provider.assertAutomationPaused();

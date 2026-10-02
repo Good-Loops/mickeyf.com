@@ -1,12 +1,13 @@
 // Prepare a legacy rollback copy. Traffic promotion is a separate command.
 import { writeFile } from 'node:fs/promises';
+import { providerReleaseEnvironment } from './provider-release-config.mjs';
 import { pathToFileURL } from 'node:url';
 import { validateSessionSecretVersion } from './render-frozen-backend-deploy.mjs';
 import { PROJECT, REGION, SERVICE, fingerprint, revisionConfiguration, serviceConfiguration,
     sessionRevisionName, trafficShape, validateService, validateLegacySessionRevision, createSessionCloudProvider, createCloudRequest,
     readJson, accessToken } from './frozen-backend-traffic.mjs';
 import { validateSessionTrafficPins, rollbackRevisionName, checkedSessionCandidate,
-    checkSessionTraffic, validateSessionRollback } from './session-backend-traffic.mjs';
+    checkSessionTraffic, validateSessionRollback, validateProviderTrafficPins, checkedProviderCandidate, validateProviderRollback } from './session-backend-traffic.mjs';
 
 const MAX_PLAN_AGE = 5 * 60_000;
 const SHA = /^[0-9a-f]{64}$/u;
@@ -21,13 +22,18 @@ function keys(value, expected, label) {
         && same(Object.keys(value).sort(), [...expected].sort()), `${label}: unexpected fields`);
 }
 
-export function rollbackTemplate(baseline, pins) {
+export function rollbackTemplate(baseline, pins, providerRelease = false) {
     requireThat(Object.keys(baseline).every(key => [...TEMPLATE_FIELDS, ...REVISION_METADATA].includes(key)),
         'Baseline has an unreviewed revision field; do not silently discard it');
     const template = structuredClone(Object.fromEntries(Object.entries(baseline).filter(([key]) => TEMPLATE_FIELDS.includes(key))));
     template.revision = rollbackRevisionName(pins);
     const secret = template.containers[0].env.find(entry => entry.name === 'SESSION_SECRET');
     secret.valueSource.secretKeyRef.version = pins.rollback.sessionSecretVersion;
+    if (providerRelease) {
+        const environment = providerReleaseEnvironment(pins.candidate.deployment.providerRelease, true);
+        template.containers[0].env = template.containers[0].env.map(entry => Object.hasOwn(environment, entry.name)
+            ? { name: entry.name, value: environment[entry.name] } : entry);
+    }
     return template;
 }
 
@@ -46,11 +52,13 @@ async function checkedSecret(provider, version) {
     return secret;
 }
 
-export async function planRollbackDeployment(provider, pins, now = Date.now()) {
-    validateSessionTrafficPins(pins);
+export async function planRollbackDeployment(provider, pins, now = Date.now()) { return planDeployment(provider, pins, now, false); }
+export async function planProviderRollbackDeployment(provider, pins, now = Date.now()) { return planDeployment(provider, pins, now, true); }
+async function planDeployment(provider, pins, now, providerRelease) {
+    (providerRelease ? validateProviderTrafficPins : validateSessionTrafficPins)(pins);
     await provider.assertAutomationPaused();
     const [service, revisions, existing, secret] = await Promise.all([
-        provider.getService(), checkedSessionCandidate(provider, pins),
+        provider.getService(), (providerRelease ? checkedProviderCandidate : checkedSessionCandidate)(provider, pins),
         provider.getRollbackIfExists(rollbackRevisionName(pins)), checkedSecret(provider, pins.rollback.sessionSecretVersion),
     ]);
     validateService(service);
@@ -63,9 +71,9 @@ export async function planRollbackDeployment(provider, pins, now = Date.now()) {
         && service.latestCreatedRevision === service.latestReadyRevision
         && same(service.template.containers, revisions.candidate.containers), 'Deploy the exact reviewed candidate first');
     requireThat(service.launchStage === revisions.baseline.launchStage, 'Service and baseline launch stages differ');
-    const template = rollbackTemplate(revisions.baseline, pins);
+    const template = rollbackTemplate(providerRelease ? revisions.candidate : revisions.baseline, pins, providerRelease);
     requireThat(same(service, await provider.getService()), 'Service changed during rollback planning');
-    return { schemaVersion: 1, operation: 'prepare-rollback', createdAt: new Date(now).toISOString(), pins: structuredClone(pins),
+    return { schemaVersion: providerRelease ? 2 : 1, operation: 'prepare-rollback', createdAt: new Date(now).toISOString(), pins: structuredClone(pins),
         before: { sha256: fingerprint(service), generation: service.generation,
             configurationSha256: fingerprint(unchangedServiceConfiguration(service)), traffic: service.traffic },
         revisionSha256: Object.fromEntries(Object.entries(revisions).map(([name, revision]) => [name, fingerprint(revisionConfiguration(revision))])),
@@ -87,14 +95,16 @@ export function verifyRollbackService(service, plan, settled = false) {
     'Rollback revision did not become the exact Ready template');
 }
 
-export async function applyRollbackDeployment(provider, plan, confirmation, now = Date.now()) {
+export async function applyRollbackDeployment(provider, plan, confirmation, now = Date.now()) { return applyDeployment(provider, plan, confirmation, now, false); }
+export async function applyProviderRollbackDeployment(provider, plan, confirmation, now = Date.now()) { return applyDeployment(provider, plan, confirmation, now, true); }
+async function applyDeployment(provider, plan, confirmation, now, providerRelease) {
     const started = performance.now();
     requireThat(SHA.test(confirmation) && fingerprint(plan) === confirmation, 'Plan SHA256 confirmation differs');
     keys(plan, ['schemaVersion', 'operation', 'createdAt', 'pins', 'before', 'revisionSha256', 'secretSha256', 'request'], 'Rollback plan');
     const age = now - Date.parse(plan.createdAt);
-    requireThat(plan.schemaVersion === 1 && plan.operation === 'prepare-rollback'
+    requireThat(plan.schemaVersion === (providerRelease ? 2 : 1) && plan.operation === 'prepare-rollback'
         && Number.isFinite(age) && age >= 0 && age <= MAX_PLAN_AGE, 'Plan is stale, future-dated or for another operation');
-    const fresh = await planRollbackDeployment(provider, plan.pins, Date.parse(plan.createdAt));
+    const fresh = await planDeployment(provider, plan.pins, Date.parse(plan.createdAt), providerRelease);
     requireThat(same(plan, fresh), 'Rollback plan drifted; generate and review a new plan');
     await provider.assertAutomationPaused();
     requireThat(age + performance.now() - started <= MAX_PLAN_AGE, 'Rollback plan expired during preflight');
@@ -104,11 +114,12 @@ export async function applyRollbackDeployment(provider, plan, confirmation, now 
         const service = await provider.waitForRollback(plan);
         verifyRollbackService(service, plan, true);
         const [revisions, rollback] = await Promise.all([
-            checkedSessionCandidate(provider, plan.pins), provider.getRevision(rollbackRevisionName(plan.pins)),
+            (providerRelease ? checkedProviderCandidate : checkedSessionCandidate)(provider, plan.pins), provider.getRevision(rollbackRevisionName(plan.pins)),
         ]);
         requireThat(Object.entries(revisions).every(([name, revision]) =>
             fingerprint(revisionConfiguration(revision)) === plan.revisionSha256[name]), 'Existing revision changed during deployment');
-        validateSessionRollback(rollback, revisions.baseline, plan.pins);
+        if (providerRelease) validateProviderRollback(rollback, revisions.candidate, plan.pins);
+        else validateSessionRollback(rollback, revisions.baseline, plan.pins);
         await checkedSecret(provider, plan.pins.rollback.sessionSecretVersion);
         await provider.assertAutomationPaused();
         return { revision: rollbackRevisionName(plan.pins), ready: true, percent: 0, tagged: false,
@@ -118,7 +129,9 @@ export async function applyRollbackDeployment(provider, plan, confirmation, now 
     }
 }
 
-export function createRollbackDeploymentProvider(token, fetcher = fetch) {
+export function createRollbackDeploymentProvider(token, fetcher = fetch) { return rollbackProvider(token, fetcher, false); }
+export function createProviderRollbackDeploymentProvider(token, fetcher = fetch) { return rollbackProvider(token, fetcher, true); }
+function rollbackProvider(token, fetcher, providerRelease) {
     const reads = createSessionCloudProvider(token, fetcher);
     const request = createCloudRequest(token, fetcher);
     const run = (path, method, body, missing) => request('https://run.googleapis.com/v2/', path, method, body, missing);
@@ -132,16 +145,18 @@ export function createRollbackDeploymentProvider(token, fetcher = fetch) {
             return request('https://secretmanager.googleapis.com/v1/', `projects/${PROJECT}/secrets/SESSION_SECRET/versions/${version}`);
         },
         async patchRollbackTemplate(body, pins, expiresAt) {
-            validateSessionTrafficPins(pins);
+            (providerRelease ? validateProviderTrafficPins : validateSessionTrafficPins)(pins);
             keys(body, ['name', 'etag', 'template'], 'Rollback patch');
             requireThat(body.name === SERVICE && typeof body.etag === 'string' && body.etag
                 && body.template?.revision === rollbackRevisionName(pins)
                 && Object.keys(body.template).every(key => ['revision', ...TEMPLATE_FIELDS].includes(key)), 'Patch exceeds rollback-template authority');
             // Re-read the immutable baseline at the adapter boundary; accept no independently supplied runtime.
             const baseline = await reads.getRevision(pins.baseline.revisionName);
-            validateLegacySessionRevision(baseline, pins.baseline, pins.baseline.revisionName);
+            if (!providerRelease || !pins.baseline.providerRelease) validateLegacySessionRevision(baseline, pins.baseline, pins.baseline.revisionName);
+            // checkedProviderCandidate below independently validates the complete provider-aware baseline.
             requireThat(fingerprint(revisionConfiguration(baseline)) === pins.baseline.configurationSha256, 'Baseline revision drifted');
-            requireThat(same(body.template, rollbackTemplate(baseline, pins)), 'Patch is not the exact reviewed rollback template');
+            const source = providerRelease ? (await checkedProviderCandidate(reads, pins)).candidate : baseline;
+            requireThat(same(body.template, rollbackTemplate(source, pins, providerRelease)), 'Patch is not the exact reviewed rollback template');
             requireThat(Number.isFinite(expiresAt) && Date.now() <= expiresAt, 'Rollback plan expired before the write');
             const operation = await run(`${SERVICE}?updateMask=template`, 'PATCH', body);
             requireThat(new RegExp(`^projects/(?:${PROJECT}|1012884798546)/locations/${REGION}/operations/[^/]+$`).test(operation.name)

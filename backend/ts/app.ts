@@ -14,6 +14,7 @@ import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import helmet from 'helmet';
 import { loadRuntimeConfig } from './config/runtimeConfig';
+import { registrationPolicyForCreation } from './config/registrationPolicy';
 import { closeDatabasePool, pool, verifyDatabaseConnection } from './db/dbConfig';
 import { preventSensitiveResponseCaching } from './middleware/apiResponseSecurity';
 import { notFoundHandler, requestErrorHandler, waitForPendingHandlers } from './middleware/errorHandling';
@@ -41,7 +42,7 @@ import { verifyParentRegistrationReadiness } from './migrations/parentRegistrati
 import { cleanupParentRegistrationAttempts } from './accounts/parentRegistrationRepository';
 
 const runtimeConfig = loadRuntimeConfig();
-const registration = createRegistrationAuthorization(pool, runtimeConfig.registrationPolicy);
+const registration = createRegistrationAuthorization(pool, registrationPolicyForCreation(runtimeConfig.registrationPolicy));
 const deletionJournal = runtimeConfig.accountDeletionEnabled
     ? createGcsDeletionJournal({ bucket: runtimeConfig.journalBucket }) : undefined;
 const app = express();
