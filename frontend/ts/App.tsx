@@ -5,7 +5,7 @@
  */
 import React, { lazy, useRef } from "react";
 import { useSafariBackgroundEdges } from '@/hooks/useSafariBackgroundEdges';
-import { Routes, Route, useLocation } from "react-router-dom";
+import { Routes, Route, Link, useLocation } from "react-router-dom";
 import RouteContentBoundary from '@/components/RouteContentBoundary';
 import PrivacyNoticeLink from '@/components/PrivacyNoticeLink';
 import { parsePrivacyNoticeUrl } from '@/config/privacyNoticeUrl';
@@ -32,6 +32,7 @@ const ThreeBossesAvailabilityGate = lazy(() => import('@/pages/games/ThreeBosses
 const Leaderboard = lazy(() => import('@/pages/Leaderboard'));
 const GameLeaderboard = lazy(() => import('@/pages/leaderboards/GameLeaderboard'));
 const Connect = lazy(() => import('@/pages/Connect'));
+const Privacy = lazy(() => import('@/pages/Privacy'));
 const Login = lazy(() => import('@/pages/Login'));
 const SignUp = lazy(() => import('@/pages/SignUp'));
 const ManageAccount = lazy(() => import('@/pages/ManageAccount'));
@@ -86,6 +87,7 @@ const App: React.FC = () => {
 					<Route path="/leaderboards" element={<Leaderboard />} />
 					<Route path="/leaderboards/:gameId" element={<GameLeaderboard />} />
 					<Route path="/connect" element={<Connect />} />
+					<Route path="/privacy" element={<Privacy />} />
 					<Route path="/login" element={<Login />} />
 					<Route path="/signup" element={<SignUp />} />
 					<Route path="/account" element={<ManageAccount />} />
@@ -97,7 +99,7 @@ const App: React.FC = () => {
 		<footer className="footer">
 			<p className="footer__text">
 			© 2024 Michel Fingergut {/* · Portfolio */}
-			{privacyNoticeUrl && <> · <PrivacyNoticeLink url={privacyNoticeUrl} /></>}
+			<> · {privacyNoticeUrl ? <PrivacyNoticeLink url={privacyNoticeUrl} /> : <Link to="/privacy">Privacy notice</Link>}</>
 			</p>
 		</footer>
     </div>

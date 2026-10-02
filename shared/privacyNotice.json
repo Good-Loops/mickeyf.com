@@ -1,0 +1,69 @@
+{
+  "version": "privacy-2026-10-02.1",
+  "noticeUrl": "https://mickeyf.com/privacy",
+  "operatorName": "Michel Silveira Dias Fingergut",
+  "contactEmail": "mickeyf.plays@gmail.com",
+  "availabilityText": "Feature availability can vary by platform and account. If an account or privacy control described below is unavailable, contact us for help. Separate permission is required before optional public leaderboard participation.",
+  "sections": [
+    {
+      "id": "operator",
+      "title": "Who operates Ludolume",
+      "text": "Ludolume is operated by Michel Silveira Dias Fingergut. For privacy questions or requests, contact mickeyf.plays@gmail.com. You can explore games and animations without an account. This notice explains account, game and support information; accepting it is not blanket consent to optional uses."
+    },
+    {
+      "id": "accounts",
+      "title": "Account information",
+      "text": "An account lets you save eligible game results. We process your chosen nickname, an internal account identifier and the credentials needed for your selected sign-in method. Password accounts store a password hash. Google or Apple sign-in supplies a provider identifier and verified email, which can be an Apple private relay address; we do not receive your Google or Apple password. Matching email addresses alone do not merge accounts."
+    },
+    {
+      "id": "children",
+      "title": "Country, age and parent-led accounts",
+      "text": "Registration asks for country and a coarse age range, rather than a birth date or identity document. Where a parent-led account is required, the parent uses their own account and completes the applicable permission process. The child has a separate chosen nickname and password; this flow does not request a child email. Provider sign-in establishes account control, not age or guardianship."
+    },
+    {
+      "id": "leaderboards",
+      "title": "Private scores and public leaderboards",
+      "text": "New accounts save scores privately by default. Where available and permitted, public leaderboard participation is a separate optional choice. It displays the nickname and qualifying game result, including relevant completion time or rank. Other people can view or copy public information. Choose a nickname that does not reveal a real name or contact details. Public permission can be withdrawn while retaining private results. Parent-managed participation requires the parent's separate permission where applicable. Existing accounts created before these registration controls retain their previously applicable visibility."
+    },
+    {
+      "id": "sessions",
+      "title": "Sessions and device storage",
+      "text": "We use account and session records to authenticate requests, associate results and prevent abuse. Standard sessions last four hours; an optional remembered session can be renewed for up to thirty days at a time. Signing out invalidates the session. Clearing local data or uninstalling the app does not delete the server account. Functional preferences and cached game assets may remain on your device until cleared."
+    },
+    {
+      "id": "deletion",
+      "title": "Account and family deletion",
+      "text": "You can request permanent account deletion through the account controls. Deleting a parent account requires confirmation of the listed dependent child accounts and deletes those accounts and results too. Parents can separately withdraw permission and delete a managed child account. Deletion invalidates old sign-ins. Removing public permission alone keeps private results; account deletion removes them."
+    },
+    {
+      "id": "apple",
+      "title": "Apple authorization and account changes",
+      "text": "Apple authorization credentials are encrypted so the service can revoke the app's authorization when an account is deleted. A failed revocation can be retried after deletion under a seven-day authorization deadline. Signed Apple account-change notifications help invalidate affected sign-ins. Minimal security records and independent deletion records help prevent retries or restored backups from reviving revoked access or deleted accounts."
+    },
+    {
+      "id": "operations",
+      "title": "Game receipts, hosting and support",
+      "text": "We process temporary game-submission receipts to recognize retries and prevent duplicate or abusive submissions. Hosting services also process connection information, including IP addresses and request information, to deliver and secure the service. If you email us, we receive your message and any attachments you choose to send. Do not send passwords or sign-in codes."
+    },
+    {
+      "id": "services",
+      "title": "Music and service providers",
+      "text": "Selected music is played and analyzed on your device; this feature does not upload the music file, its name or analysis results to our server or request microphone access. Google Cloud and Firebase host the service and account/result storage; the backend and database are in the United States, while delivery and support processing can occur elsewhere. Google Fonts receives connection information when fonts load. Google/Apple sign-in, Gmail and, for beta testers, Apple TestFlight have their respective service and privacy roles. We do not sell personal information or use it for targeted advertising."
+    },
+    {
+      "id": "retention",
+      "title": "Retention, choices and privacy requests",
+      "text": "We retain account data for the purposes described here while the account remains active, subject to deletion and applicable obligations. Recovery copies and security records have separate limited purposes and retention schedules. Contact us to request access, correction, deletion or other applicable privacy rights, including withdrawal of consent where processing relies on it. We use proportionate verification to protect against impersonation. You may also complain to the relevant data-protection authority. Changes to optional collection or public disclosure require the applicable new permission; they are not authorized merely by updating this notice."
+    }
+  ],
+  "consent": {
+    "parent": {
+      "version": "parent-consent-2026-10-02.1",
+      "text": "I am the child's parent or legal guardian and am authorized to make this choice. I have read the privacy notice. I authorize a separate child account with a chosen nickname and password, private game results, and the described account/security processing. I understand how to review the account or withdraw permission and delete it. Public leaderboard participation is optional and is authorized separately below. Any additional verification required for this account must be completed before activation."
+    },
+    "publicScores": {
+      "version": "public-scores-consent-2026-10-02.1",
+      "text": "I choose to display this account's nickname and qualifying game results on public leaderboards. Other people may view or copy them. I understand that public display is optional and I can withdraw this permission while keeping private results. For a managed child account, I confirm I am the parent or legal guardian and have completed any required additional verification. This choice is separate from permission to create or use the account."
+    }
+  }
+}
