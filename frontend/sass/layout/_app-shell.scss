@@ -40,6 +40,62 @@
     }
 }
 
+// Native screens have no Safari toolbar to paint behind. Lock the outer page,
+// not every scrollable control: long content still needs an accessible viewport.
+html[data-native-app] {
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+
+    body,
+    #root {
+        height: 100%;
+        min-height: 0;
+        overflow: hidden;
+        overscroll-behavior: none;
+    }
+}
+
+html[data-native-app] .app-shell {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    height: 100dvh;
+    min-height: 0;
+
+    > .header { height: auto; }
+    > .footer { min-height: 0; }
+
+    > .main {
+        min-height: 0;
+        padding-block: 1.6rem;
+        overflow: auto;
+        overscroll-behavior: contain;
+        justify-content: flex-start;
+
+        // Auto margins center short content and collapse for long content,
+        // unlike unsafe flex centering which can hide the first controls.
+        > * { flex-shrink: 0; margin-block: auto; }
+    }
+
+    // Gameplay fits the available screen; forms and other long routes still scroll.
+    > .main:has(> .p4-vega) {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: minmax(0, 1fr);
+        align-items: stretch;
+        justify-items: center;
+        padding-block: .8rem;
+        overflow: hidden;
+
+        > .p4-vega { margin-block: 0; }
+    }
+}
+
+// Inline gameplay stays clipped to its layout; fullscreen must cover that boundary.
+html[data-native-app].canvas-fullscreen-fallback-active .app-shell > .main {
+    overflow: visible;
+}
+
 .space-background {
     position: fixed;
     inset: 0;

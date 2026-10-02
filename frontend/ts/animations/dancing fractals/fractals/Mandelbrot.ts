@@ -524,6 +524,11 @@ export class Mandelbrot implements FractalAnimation<MandelbrotConfig> {
         this.disposalElapsed = 0;
     }
 
+    /** Cancels the countdown without changing an active disposal fade. */
+    cancelScheduledDisposal(): void {
+        this.disposalDelaySeconds = 0;
+    }
+
     /** Starts the disposal fade immediately (fade duration uses {@link Mandelbrot.disposalSeconds}). */
     startDisposal(): void {
         this.disposalDelaySeconds = 0;

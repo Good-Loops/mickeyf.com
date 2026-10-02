@@ -14,24 +14,33 @@
  */
 import { Router } from 'express';
 import { createMainController } from '../controllers/mainController';
-import { pool } from '../db/dbConfig';
+import type { Pool } from 'mysql2/promise';
 import { asyncHandler } from '../middleware/errorHandling';
 import {
     createAuthenticationIpRateLimiter,
     createLoginAccountRateLimiter,
 } from '../security/requestRateLimits';
 import { handleGetUsersNotSupported } from './mainRouter.handlers';
+import type { RegistrationAuthorization } from '../accounts/registrationAuthorization';
 
 type MainRouterDependencies = {
+    database: Pick<Pool, 'getConnection' | 'query'>;
+    scorePublicationDigest?: Buffer;
+    scoreParticipationReady?: boolean;
     sessionSecret: string;
     isProduction: boolean;
     p4VegaScoreSubmissionsEnabled: boolean;
+    allowedMutationOrigins: readonly string[];
+    registration?: RegistrationAuthorization;
 };
 
 export function createMainRouter({
+    database, scorePublicationDigest, scoreParticipationReady,
     sessionSecret,
     isProduction,
     p4VegaScoreSubmissionsEnabled,
+    allowedMutationOrigins,
+    registration,
 }: MainRouterDependencies): Router {
     /**
      * Configured Express router for core API routes.
@@ -41,10 +50,12 @@ export function createMainRouter({
      */
     const router = Router();
     const mainController = createMainController({
-        database: pool,
+        database, scorePublicationDigest, scoreParticipationReady,
         sessionSecret,
         isProduction,
         p4VegaScoreSubmissionsEnabled,
+        allowedMutationOrigins,
+        registration,
     });
 
     /** POST /users — core API request multiplexer (mutating/command-style). */

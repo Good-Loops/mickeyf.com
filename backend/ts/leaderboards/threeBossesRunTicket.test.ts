@@ -18,6 +18,7 @@ import {
 const sessionSecret = 'three-bosses-run-ticket-test-secret';
 const nowMs = 1_800_000_000_999;
 const userId = 42;
+const account = Object.freeze({ userId, accountId: '4bbaec47-5516-47fe-b13e-366bc6ec9814' });
 const runId = '123e4567-e89b-42d3-a456-426614174000';
 const ticketRequest: ThreeBossesRunTicketRequest = Object.freeze({
     contractVersion: 1,
@@ -36,7 +37,7 @@ function submission(runTicket: string): ThreeBossesRunSubmissionRequest {
 test('issues a bounded, domain-separated ticket with exact versioned claims', () => {
     const issued = issueThreeBossesRunTicket(
         sessionSecret,
-        userId,
+        account,
         ticketRequest,
         nowMs
     );
@@ -51,6 +52,7 @@ test('issues a bounded, domain-separated ticket with exact versioned claims', ()
         iss: 'mickeyf-backend',
         aud: 'three-bosses-run-submission',
         sub: String(userId),
+        account_uuid: account.accountId,
         jti: runId,
         purpose: 'three-bosses-ranked-run',
         runId,
@@ -66,7 +68,7 @@ test('issues a bounded, domain-separated ticket with exact versioned claims', ()
     assert.equal(
         verifyThreeBossesRunTicket(
             sessionSecret,
-            userId,
+            account,
             submission(issued.runTicket),
             nowMs + 50_000
         ),
@@ -81,7 +83,7 @@ test('issues a bounded, domain-separated ticket with exact versioned claims', ()
 test('binds the ticket to its key, account, run, contract, and rules', () => {
     const issued = issueThreeBossesRunTicket(
         sessionSecret,
-        userId,
+        account,
         ticketRequest,
         nowMs
     );
@@ -90,19 +92,19 @@ test('binds the ticket to its key, account, run, contract, and rules', () => {
 
     assert.equal(verifyThreeBossesRunTicket(
         'different-session-secret',
-        userId,
+        account,
         validSubmission,
         verificationTime
     ), false);
     assert.equal(verifyThreeBossesRunTicket(
         sessionSecret,
-        userId + 1,
+        { ...account, userId: userId + 1 },
         validSubmission,
         verificationTime
     ), false);
     assert.equal(verifyThreeBossesRunTicket(
         sessionSecret,
-        userId,
+        account,
         {
             ...validSubmission,
             runId: '123e4567-e89b-42d3-a456-426614174001',
@@ -111,13 +113,13 @@ test('binds the ticket to its key, account, run, contract, and rules', () => {
     ), false);
     assert.equal(verifyThreeBossesRunTicket(
         sessionSecret,
-        userId,
+        account,
         { ...validSubmission, contractVersion: 2 as 1 },
         verificationTime
     ), false);
     assert.equal(verifyThreeBossesRunTicket(
         sessionSecret,
-        userId,
+        account,
         { ...validSubmission, rulesVersion: 2 as 1 },
         verificationTime
     ), false);
@@ -126,7 +128,7 @@ test('binds the ticket to its key, account, run, contract, and rules', () => {
 test('rejects malformed claims, unsafe algorithms, and oversized tickets', () => {
     const issued = issueThreeBossesRunTicket(
         sessionSecret,
-        userId,
+        account,
         ticketRequest,
         nowMs
     );
@@ -142,19 +144,19 @@ test('rejects malformed claims, unsafe algorithms, and oversized tickets', () =>
 
     assert.equal(verifyThreeBossesRunTicket(
         sessionSecret,
-        userId,
+        account,
         submission(wrongPurpose),
         verificationTime
     ), false);
     assert.equal(verifyThreeBossesRunTicket(
         sessionSecret,
-        userId,
+        account,
         submission(unsigned),
         verificationTime
     ), false);
     assert.equal(verifyThreeBossesRunTicket(
         sessionSecret,
-        userId,
+        account,
         submission('x'.repeat(THREE_BOSSES_RUN_TICKET_MAX_LENGTH + 1)),
         verificationTime
     ), false);
@@ -166,16 +168,46 @@ test('rejects malformed claims, unsafe algorithms, and oversized tickets', () =>
     );
     assert.equal(verifyThreeBossesRunTicket(
         sessionSecret,
-        userId,
+        account,
         submission(sessionToken),
         verificationTime
     ), false);
 });
 
+test('a reused numeric user ID cannot authorize another account incarnation\'s ticket', () => {
+    const issued = issueThreeBossesRunTicket(sessionSecret, account, ticketRequest, nowMs);
+    const replacement = { ...account, accountId: '4bbaec47-5516-47fe-b13e-366bc6ec9815' };
+    assert.equal(verifyThreeBossesRunTicket(
+        sessionSecret, replacement, submission(issued.runTicket), nowMs + 50_000
+    ), false);
+});
+
+test('legacy tickets without a UUID and invalid account UUIDs are rejected', () => {
+    const issued = issueThreeBossesRunTicket(sessionSecret, account, ticketRequest, nowMs);
+    const legacyClaims = jwt.decode(issued.runTicket) as JwtPayload;
+    delete legacyClaims.account_uuid;
+    const legacyTicket = jwt.sign(legacyClaims, createThreeBossesRunTicketSigningKey(sessionSecret), {
+        algorithm: 'HS256',
+    });
+    assert.equal(verifyThreeBossesRunTicket(
+        sessionSecret, account, submission(legacyTicket), nowMs + 50_000
+    ), false);
+
+    for (const accountId of ['', 'not-a-uuid', account.accountId.toUpperCase()]) {
+        const invalidAccount = { ...account, accountId };
+        assert.throws(() => issueThreeBossesRunTicket(
+            sessionSecret, invalidAccount, ticketRequest, nowMs
+        ), TypeError);
+        assert.equal(verifyThreeBossesRunTicket(
+            sessionSecret, invalidAccount, submission(issued.runTicket), nowMs + 50_000
+        ), false);
+    }
+});
+
 test('enforces the 2.5-second issuance tolerance and strict 30-minute expiry', () => {
     const issued = issueThreeBossesRunTicket(
         sessionSecret,
-        userId,
+        account,
         ticketRequest,
         nowMs
     );
@@ -186,25 +218,25 @@ test('enforces the 2.5-second issuance tolerance and strict 30-minute expiry', (
 
     assert.equal(verifyThreeBossesRunTicket(
         sessionSecret,
-        userId,
+        account,
         validSubmission,
         earliestAcceptedMs - 1
     ), false);
     assert.equal(verifyThreeBossesRunTicket(
         sessionSecret,
-        userId,
+        account,
         validSubmission,
         earliestAcceptedMs
     ), true);
     assert.equal(verifyThreeBossesRunTicket(
         sessionSecret,
-        userId,
+        account,
         validSubmission,
         nowMs + THREE_BOSSES_RUN_TICKET_TTL_SECONDS * 1_000 - 1
     ), true);
     assert.equal(verifyThreeBossesRunTicket(
         sessionSecret,
-        userId,
+        account,
         validSubmission,
         nowMs + THREE_BOSSES_RUN_TICKET_TTL_SECONDS * 1_000
     ), false);
@@ -212,18 +244,18 @@ test('enforces the 2.5-second issuance tolerance and strict 30-minute expiry', (
 
 test('refuses to issue tickets for invalid identity, run, or time inputs', () => {
     assert.throws(
-        () => issueThreeBossesRunTicket(sessionSecret, 0, ticketRequest, nowMs),
+        () => issueThreeBossesRunTicket(sessionSecret, { ...account, userId: 0 }, ticketRequest, nowMs),
         TypeError
     );
     assert.throws(
-        () => issueThreeBossesRunTicket(sessionSecret, userId, {
+        () => issueThreeBossesRunTicket(sessionSecret, account, {
             ...ticketRequest,
             runId: ticketRequest.runId.toUpperCase(),
         }, nowMs),
         TypeError
     );
     assert.throws(
-        () => issueThreeBossesRunTicket(sessionSecret, userId, ticketRequest, -1),
+        () => issueThreeBossesRunTicket(sessionSecret, account, ticketRequest, -1),
         TypeError
     );
 });

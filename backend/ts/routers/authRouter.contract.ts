@@ -11,7 +11,7 @@
  * Invariants:
  * - Method + path pairs are stable; changes are breaking.
  * - `verify-token` is safe/idempotent; it does not mutate server state.
- * - `logout` clears the `session` cookie (if present) and returns `{ loggedOut: true }`.
+ * - Successful `logout` revokes the current device's session before clearing web/native cookies.
  */
 
 import type { RouteContract } from './routeContract';
@@ -20,7 +20,8 @@ import type { RouteContract } from './routeContract';
  * GET /verify-token request.
  *
  * Notes:
- * - This endpoint consumes auth context from a signed cookie (`session`) or `Authorization: Bearer <token>`.
+ * - This endpoint consumes auth context from a signed web/native cookie (`__session`/`session`)
+ *   or `Authorization: Bearer <token>`, then checks live session storage.
  * - No request body is used.
  *
  * @category Backend — DTOs
@@ -51,19 +52,52 @@ export type LogoutRequest = Record<string, never>;
  */
 export type LogoutResponse = {
     loggedOut: true;
+} | {
+    error: 'INVALID_REQUEST' | 'LOGOUT_UNAVAILABLE';
+};
+
+/** Explicit same-origin cookie renewal; ordinary sessions are never upgraded. */
+export type RenewSessionRequest = Record<string, never>;
+export type RenewSessionResponse = VerifyTokenResponse | {
+    error: 'INVALID_REQUEST' | 'SESSION_RENEWAL_UNAVAILABLE' | 'RATE_LIMITED';
+};
+
+/** Password reauthentication and explicit confirmation; account identity comes from the session. */
+export type DeleteAccountRequest = { password: string; confirmation: 'DELETE' };
+export type DeleteAccountResponse = { deleted: true } | {
+    error: 'UNAUTHENTICATED' | 'INVALID_REQUEST' | 'INVALID_PASSWORD'
+        | 'RATE_LIMITED' | 'ACCOUNT_DELETION_UNAVAILABLE' | 'ACCOUNT_DELETION_PENDING';
 };
 
 /** @category Backend — Contracts */
 export type AuthRoutesContract = {
     readonly routes: readonly (
         | RouteContract<VerifyTokenRequest, VerifyTokenResponse>
+        | RouteContract<RenewSessionRequest, RenewSessionResponse>
         | RouteContract<LogoutRequest, LogoutResponse>
+        | RouteContract<DeleteAccountRequest, DeleteAccountResponse>
     )[];
 };
 
 /** @category Backend — Contracts */
 export const authRoutesContract: AuthRoutesContract = {
     routes: [
+        {
+            id: 'auth.renewSession',
+            method: 'POST',
+            path: '/renew',
+            auth: 'public',
+            request: {} as RenewSessionRequest,
+            response: { loggedIn: false } as RenewSessionResponse,
+        },
+        {
+            id: 'auth.deleteAccount',
+            method: 'POST',
+            path: '/delete-account',
+            auth: 'user',
+            request: {} as DeleteAccountRequest,
+            response: { deleted: true } as DeleteAccountResponse,
+        },
         {
             id: 'auth.verifyToken',
             method: 'GET',

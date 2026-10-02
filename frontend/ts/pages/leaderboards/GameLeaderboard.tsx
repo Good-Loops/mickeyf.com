@@ -5,88 +5,17 @@ import { RouteHeading } from '@/components/RouteHeading';
 import {
     getGameLeaderboard,
     getLeaderboardCatalog,
-    LeaderboardRequestError,
+    leaderboardSourceNotice,
     type GameLeaderboardResponse,
     type LeaderboardCatalogGame,
-} from '@/services/leaderboardService';
-
-type DetailState =
-    | { status: 'loading' }
-    | { status: 'not-found'; games: LeaderboardCatalogGame[] }
-    | {
-          status: 'error';
-          game: LeaderboardCatalogGame | null;
-          message: string;
-      }
-    | {
-          status: 'success';
-          game: LeaderboardCatalogGame;
-          leaderboard: GameLeaderboardResponse;
-      };
+} from '@/services/leaderboardDisplayService';
+import {
+    isAbortError,
+    loadGameLeaderboardState,
+    type DetailState,
+} from './leaderboardDetailState';
 
 const numberFormatter = new Intl.NumberFormat('en-US');
-
-function isAbortError(error: unknown): boolean {
-    return error instanceof DOMException && error.name === 'AbortError';
-}
-
-type LeaderboardDetailReaders = {
-    readCatalog: typeof getLeaderboardCatalog;
-    readGame: typeof getGameLeaderboard;
-};
-
-type SettledDetailState = Exclude<DetailState, { status: 'loading' }>;
-
-/** Resolves one detail route into a renderable state without React side effects. */
-export async function loadGameLeaderboardState(
-    gameId: string | undefined,
-    signal?: AbortSignal,
-    readers: LeaderboardDetailReaders = {
-        readCatalog: getLeaderboardCatalog,
-        readGame: getGameLeaderboard,
-    }
-): Promise<SettledDetailState> {
-    let selectedGame: LeaderboardCatalogGame | null = null;
-    let knownGames: LeaderboardCatalogGame[] = [];
-
-    try {
-        const catalog = await readers.readCatalog(signal);
-        knownGames = catalog.games;
-        selectedGame = catalog.games.find((game) => game.gameId === gameId) ?? null;
-
-        if (!gameId || !selectedGame) {
-            return { status: 'not-found', games: knownGames };
-        }
-
-        const leaderboard = await readers.readGame(selectedGame.gameId, signal);
-
-        if (leaderboard.rulesVersion !== selectedGame.rulesVersion) {
-            throw new LeaderboardRequestError(
-                'The leaderboard service returned an unexpected response.',
-                200,
-                'INVALID_RESPONSE'
-            );
-        }
-
-        return { status: 'success', game: selectedGame, leaderboard };
-    } catch (error) {
-        if (isAbortError(error)) {
-            throw error;
-        }
-
-        if (error instanceof LeaderboardRequestError && error.code === 'UNKNOWN_GAME') {
-            return { status: 'not-found', games: knownGames };
-        }
-
-        return {
-            status: 'error',
-            game: selectedGame,
-            message: error instanceof Error
-                ? error.message
-                : 'The leaderboard could not be loaded.',
-        };
-    }
-}
 
 function formatCompletionTime(milliseconds: number): string {
     const hours = Math.floor(milliseconds / 3_600_000);
@@ -314,6 +243,8 @@ export function GameLeaderboardView({
                 </RouteHeading>
             </header>
 
+            {leaderboardSourceNotice && <p className="leaderboard__source">{leaderboardSourceNotice}</p>}
+
             <LeaderboardTable game={state.game} leaderboard={state.leaderboard} />
         </section>
     );
@@ -333,7 +264,8 @@ const GameLeaderboard: React.FC = () => {
             try {
                 const nextState = await loadGameLeaderboardState(
                     gameId,
-                    abortController.signal
+                    abortController.signal,
+                    { readCatalog: getLeaderboardCatalog, readGame: getGameLeaderboard }
                 );
 
                 if (!abortController.signal.aborted) {

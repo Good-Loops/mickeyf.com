@@ -30,7 +30,7 @@ const releaseProvenance = Object.freeze({
 });
 
 const rawRequest = (requestPath, {
-  headers = {}, method = "GET", port = serverPort, agent, signal,
+  headers = {}, method = "GET", port = serverPort, agent, signal, chunkDelayMs = 0,
 } = {}) =>
   new Promise((resolvePromise, reject) => {
     const clientRequest = request({
@@ -43,7 +43,19 @@ const rawRequest = (requestPath, {
       signal,
     }, (response) => {
       const chunks = [];
-      response.on("data", (chunk) => chunks.push(chunk));
+      let resumeTimer;
+      response.on("data", (chunk) => {
+        chunks.push(chunk);
+        if (chunkDelayMs > 0) {
+          response.pause();
+          resumeTimer = setTimeout(() => response.resume(), chunkDelayMs);
+        }
+      });
+      response.on("error", reject);
+      response.on("close", () => {
+        clearTimeout(resumeTimer);
+        if (!response.complete) reject(new Error("Asset response closed before its body completed."));
+      });
       response.on("end", () => resolvePromise({
         body: Buffer.concat(chunks).toString("utf8"),
         bytes: Buffer.concat(chunks),
@@ -112,6 +124,10 @@ test("returns a synthetic manifest without absolute host paths", async () => {
   assert.equal(manifest.dataUrl, `Build/test.data.br?buildId=${manifest.buildId}`);
   assert.match(manifest.buildId, /^[a-f0-9]{64}$/u);
   assert.equal(JSON.stringify(manifest).includes(rootPath), false);
+});
+
+test("does not expire upstream keep-alive while a slow proxy drains queued bytes", () => {
+  assert.equal(server.keepAliveTimeout, 0);
 });
 
 test("normalizes configured build roots but rejects filesystem roots and NUL bytes", async () => {
@@ -557,7 +573,7 @@ test("does not cache failed gzip work and allows HEAD to prepare exact metadata"
   });
 });
 
-test("completes concurrent large gzip responses over keep-alive connections", { timeout: 10000 }, async () => {
+test("completes concurrent and slow large gzip responses over keep-alive connections", { timeout: 20000 }, async () => {
   const largeRoot = await mkdtemp(join(tmpdir(), "three-bosses-webgl-keepalive-"));
   const buildPath = join(largeRoot, "Build");
   const payload = randomBytes(8 * 1024 * 1024 + 127);
@@ -575,14 +591,15 @@ test("completes concurrent large gzip responses over keep-alive connections", { 
         const options = {
           port,
           agent,
-          signal: AbortSignal.timeout(8000),
+          signal: AbortSignal.timeout(15000),
           headers: { "Accept-Encoding": "gzip" },
         };
         const responses = await Promise.all([
           rawRequest(`/${manifest.dataUrl}`, options),
           rawRequest(`/${manifest.dataUrl}`, options),
         ]);
-        responses.push(await rawRequest(`/${manifest.dataUrl}`, options));
+        // Pausing each chunk makes this transfer outlast Node's default 6-second idle expiry.
+        responses.push(await rawRequest(`/${manifest.dataUrl}`, { ...options, chunkDelayMs: 60 }));
         for (const response of responses) {
           assert.equal(response.status, 200);
           assert.equal(response.headers.connection, "keep-alive");

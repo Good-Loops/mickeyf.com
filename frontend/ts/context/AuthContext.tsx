@@ -11,18 +11,35 @@
  * - This module owns UI-facing auth state and update actions.
  * - The service layer (`services/authService.ts`) owns network/provider calls.
  */
-import { createContext, useContext, useState, ReactNode, useEffect } from 'react';
-import { loginRequest, verifyRequest } from '@/services/authService';
-import Swal from 'sweetalert2';
-import { API_BASE } from '@/config/apiConfig';
+import { createContext, useContext, useState, ReactNode, useEffect, useRef } from 'react';
+import { loginRequest, logoutRequest, verifyRequest, renewRequest, deleteAccountRequest, deleteFamilyRequest, runProviderAuthentication, watchAppleCredentialChanges,
+    prepareProviderLogin as prepareProviderLoginRequest, completeProviderLogin as completeProviderLoginRequest } from '@/services/authService';
+import type { DeleteAccountResponse, ProviderAuthenticationInput, AcquireProviderCredential, ProviderCredential,
+    ProviderAuthenticationOptions, ProviderAuthenticationResult, PreparedProviderLogin, PrepareProviderLoginResult,
+    CompleteProviderLoginOptions, CompleteProviderLoginResult } from '@/services/authApi';
+import { watchSessionRenewalActivity } from '@/services/sessionRenewalActivity';
+import Swal from '@/components/siteAlert';
+import { showScopedAlert } from '@/components/scopedAlert';
+
+type LoginOptions = { showFeedback?: boolean; rememberMe?: boolean; feedbackSignal?: AbortSignal };
 
 /** UI-facing auth context value owned by `AuthProvider`. */
 type AuthContextType = {
     userName: string | null;
     isAuthenticated: boolean;
     loading: boolean;
-    login: (user: string, pass: string) => Promise<boolean>;
-    logout: () => void;
+    /** Invalidates cookie-bound operations after a completed or uncertain renewal. */
+    sessionGeneration: number;
+    login: (user: string, pass: string, options?: LoginOptions) => Promise<boolean>;
+    logout: () => Promise<void>;
+    captureAccountAction: () => number;
+    deleteFamily: (grant: string, childAccountIds: readonly string[], expectedAction: number) => Promise<void>;
+    deleteAccount: (password: string) => Promise<DeleteAccountResponse>;
+    authenticateWithProvider: (input: ProviderAuthenticationInput, acquireCredential: AcquireProviderCredential,
+        options?: ProviderAuthenticationOptions) => Promise<ProviderAuthenticationResult>;
+    prepareProviderLogin: (clientKey: string, options?: ProviderAuthenticationOptions, action?: 'login' | 'signup') => Promise<PrepareProviderLoginResult>;
+    completeProviderLogin: (handle: PreparedProviderLogin, credential: ProviderCredential,
+        options?: CompleteProviderLoginOptions) => Promise<CompleteProviderLoginResult>;
 };
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -39,29 +56,61 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const [userName, setUserName] = useState<string | null>(null);
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [loading, setLoading] = useState(true);
+    const [sessionGeneration, setSessionGeneration] = useState(0);
+    const authActionVersion = useRef(0);
+    const preparedLoginVersions = useRef(new WeakMap<PreparedProviderLogin, number>());
+    const sessionMayExist = useRef(true);
+    const renewalActivity = useRef<ReturnType<typeof watchSessionRenewalActivity> | null>(null);
 
     useEffect(() => {
-        /**
-         * Initialization boundary:
-         * - Runs once on mount to reconcile UI state with the backend session.
-         * - No subscription is established here; cleanup is not required.
-         */
-        (async () => {
+        let active = true;
+        const renewSession = async () => {
+            const actionVersion = authActionVersion.current;
+            const canApply = () => active && actionVersion === authActionVersion.current;
             try {
-                const res = await verifyRequest();
-                if (res.loggedIn) {
-                    setIsAuthenticated(true);
-                    setUserName((res as any).user_name ?? null);
-                } else {
-                    setIsAuthenticated(false);
-                    setUserName(null);
+                const session = await renewRequest();
+                // A late renewal must not undo a newer login, logout or deletion.
+                if (!canApply()) {
+                    // Revocation may have logged out while a newer login was
+                    // queued. Re-read its outcome; never apply the old account.
+                    if (active && !session.loggedIn) void renewalActivity.current?.renewNow();
+                    return true;
                 }
-            } catch (err) {
-                console.error('verify on mount failed', err);
+                sessionMayExist.current = session.loggedIn || session.revocationPending === true;
+                setIsAuthenticated(session.loggedIn);
+                setUserName(session.loggedIn ? session.user_name : null);
+                return session.loggedIn || !session.revocationPending;
+            } catch {
+                // An outage is not evidence of sign-out. Later activity can retry quietly.
+                return !canApply();
             } finally {
-                setLoading(false);
+                // An HttpOnly cookie may rotate even if the response cannot be confirmed.
+                if (active) setSessionGeneration(value => value + 1);
+                if (canApply()) setLoading(false);
             }
-        })();
+        };
+        const activity = watchSessionRenewalActivity({
+            windowEvents: window,
+            documentEvents: document,
+            isVisible: () => document.visibilityState === 'visible',
+            canRenew: () => sessionMayExist.current,
+            renew: renewSession,
+        });
+        renewalActivity.current = activity;
+        let stopAppleListener: (() => void) | undefined;
+        void watchAppleCredentialChanges(() => {
+            if (active) void activity.renewNow();
+        }).then(stop => {
+            if (active) stopAppleListener = stop;
+            else stop();
+        });
+        void activity.renewNow();
+        return () => {
+            active = false;
+            stopAppleListener?.();
+            activity.stop();
+            renewalActivity.current = null;
+        };
     }, []);
 
     /**
@@ -70,71 +119,190 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
      * Non-obvious behavior: normalizes common failure modes into user-facing alerts and resolves to a boolean success
      * result rather than throwing.
      */
-    const login = async (user: string, pass: string) => {
+    const login = async (user: string, pass: string, { showFeedback = true, rememberMe = false, feedbackSignal }: LoginOptions = {}) => {
+        const actionVersion = ++authActionVersion.current;
+        setLoading(false);
         try {
             const res = await loginRequest({
                 user_name: user,
                 user_password: pass,
+                remember_me: rememberMe,
             });
+            // A completed older login must not undo a more recent logout.
+            if (actionVersion !== authActionVersion.current) return false;
 
             if ('error' in res) {
+                void renewalActivity.current?.renewNow();
+                if (!showFeedback) return false;
                 if (res.error === 'AUTH_FAILED') {
-                    await Swal.fire({
+                    await showScopedAlert({
                         title: 'Authentication failed',
                         text: 'Please check your username and password',
                         icon: 'error',
-                    });
+                    }, feedbackSignal);
                 } else {
-                    await Swal.fire({
+                    await showScopedAlert({
                         title: 'Login failed',
                         text: res.message ?? 'Try again later',
                         icon: 'error',
-                    });
+                    }, feedbackSignal);
                 }
                 return false;
             }
 
             setIsAuthenticated(true);
             setUserName(res.user_name);
+            sessionMayExist.current = true;
+            renewalActivity.current?.resetCooldown();
 
-            await Swal.fire({
-                title: 'Welcome back!',
-                icon: 'success',
-            });
+            if (showFeedback) {
+                await showScopedAlert({
+                    title: 'Welcome back!',
+                    icon: 'success',
+                }, feedbackSignal);
+            }
 
-            return true;
+            return actionVersion === authActionVersion.current;
         } catch (err) {
+            if (actionVersion !== authActionVersion.current) return false;
+            void renewalActivity.current?.renewNow();
             console.error(err);
-            await Swal.fire({
-                title: 'Error',
-                text: 'Could not reach the server.',
-                icon: 'error',
-            });
+            if (showFeedback) {
+                await showScopedAlert({
+                    title: 'Error',
+                    text: 'Could not reach the server.',
+                    icon: 'error',
+                }, feedbackSignal);
+            }
             return false;
         }
     };
 
+    const authenticateWithProvider: AuthContextType['authenticateWithProvider'] = async (input, acquireCredential, options) => {
+        const actionVersion = ++authActionVersion.current;
+        setLoading(false);
+        const result = await runProviderAuthentication(input, acquireCredential, options);
+        // A canceled dialog cannot undo a completed server request; a newer
+        // logout still owns the UI and runs after completion in the same queue.
+        if (actionVersion !== authActionVersion.current) return { error: 'CANCELLED' };
+        if ('error' in result) void renewalActivity.current?.renewNow();
+        if ('user_name' in result) {
+            setIsAuthenticated(true);
+            setUserName(result.user_name);
+            sessionMayExist.current = true;
+            renewalActivity.current?.resetCooldown();
+        }
+        if ('deleted' in result) {
+            setIsAuthenticated(false);
+            setUserName(null);
+            sessionMayExist.current = false;
+        }
+        return result;
+    };
+
+    const prepareProviderLogin: AuthContextType['prepareProviderLogin'] = async (clientKey, options, action) => {
+        const actionVersion = authActionVersion.current;
+        const result = await prepareProviderLoginRequest(clientKey, options, action);
+        if (actionVersion !== authActionVersion.current) return { error: 'CANCELLED' };
+        if ('handle' in result) preparedLoginVersions.current.set(result.handle, actionVersion);
+        return result;
+    };
+
+    const completeProviderLogin: AuthContextType['completeProviderLogin'] = async (handle, credential, options) => {
+        const actionVersion = preparedLoginVersions.current.get(handle);
+        preparedLoginVersions.current.delete(handle);
+        if (actionVersion === undefined || actionVersion !== authActionVersion.current) return { error: 'CANCELLED' };
+        const result = await completeProviderLoginRequest(handle, credential, options);
+        if (actionVersion !== authActionVersion.current) return { error: 'CANCELLED' };
+        if ('error' in result) void renewalActivity.current?.renewNow();
+        if ('signupRequired' in result) preparedLoginVersions.current.set(result.handle, actionVersion);
+        if ('user_name' in result) {
+            // An idle button or rejected late callback must never supersede a
+            // password login. Claim the action only after verified completion.
+            authActionVersion.current++;
+            setLoading(false);
+            setIsAuthenticated(true);
+            setUserName(result.user_name);
+            sessionMayExist.current = true;
+            renewalActivity.current?.resetCooldown();
+        }
+        return result;
+    };
+
     /**
-     * Logs out via the backend and clears local auth state.
+     * Clears local auth state only after the backend confirms sign-out.
      *
      * Side effect: performs a cookie-bearing request (`credentials: 'include'`) so the server can clear the session.
      */
     const logout = async () => {
+        const actionVersion = ++authActionVersion.current;
+        setLoading(false);
         try {
-            await fetch(`${API_BASE}/auth/logout`, {
-                method: 'POST',
-                credentials: 'include', // important so cookie is sent and cleared
-            });
+            await logoutRequest();
         } catch (err) {
             console.error('logout failed', err);
+            // A queued login may have succeeded while its older UI result was
+            // discarded. Reconcile that session without guessing that logout worked.
+            if (actionVersion !== authActionVersion.current) return;
+            try {
+                const session = await verifyRequest();
+                if (actionVersion !== authActionVersion.current) {
+                    if (!session.loggedIn) void renewalActivity.current?.renewNow();
+                    return;
+                }
+                setIsAuthenticated(session.loggedIn);
+                setUserName(session.loggedIn ? session.user_name : null);
+                sessionMayExist.current = session.loggedIn || session.revocationPending === true;
+                renewalActivity.current?.resetCooldown();
+            } catch (verificationError) {
+                // If the network is still unavailable, preserve the last known UI state.
+                console.error('session check after failed logout failed', verificationError);
+            }
+            if (actionVersion === authActionVersion.current) {
+                await Swal.fire({
+                    title: 'Sign-out could not be confirmed',
+                    text: 'You may still be signed in. Please try signing out again.',
+                    icon: 'error',
+                });
+            }
+            return;
         }
-        setIsAuthenticated(false);
-        setUserName(null);
+        if (actionVersion === authActionVersion.current) {
+            setIsAuthenticated(false);
+            setUserName(null);
+            sessionMayExist.current = false;
+        }
+    };
+
+    const captureAccountAction = () => authActionVersion.current;
+    const deleteFamily = async (grant: string, childAccountIds: readonly string[], expectedAction: number): Promise<void> => {
+        if (expectedAction !== authActionVersion.current) throw new Error('Family approval belongs to an earlier authentication action.');
+        const actionVersion = ++authActionVersion.current;
+        await deleteFamilyRequest(grant, childAccountIds);
+        if (actionVersion === authActionVersion.current) {
+            setIsAuthenticated(false); setUserName(null); setLoading(false); sessionMayExist.current = false;
+        }
+    };
+
+    const deleteAccount = async (password: string): Promise<DeleteAccountResponse> => {
+        const actionVersion = ++authActionVersion.current;
+        const result = await deleteAccountRequest(password);
+        // Like logout, deletion is server-first: a rejected/uncertain request
+        // must not hide the account or imply that its data has been removed.
+        if (actionVersion === authActionVersion.current
+            && ('deleted' in result || result.error === 'UNAUTHENTICATED')) {
+            setIsAuthenticated(false);
+            setUserName(null);
+            setLoading(false);
+            sessionMayExist.current = false;
+        }
+        return result;
     };
 
     return (
         <AuthContext.Provider
-            value={{ userName, isAuthenticated, loading, login, logout }}
+            value={{ userName, isAuthenticated, loading, sessionGeneration, login, logout, deleteAccount, deleteFamily, captureAccountAction, authenticateWithProvider,
+                prepareProviderLogin, completeProviderLogin }}
         >
             {children}
         </AuthContext.Provider>

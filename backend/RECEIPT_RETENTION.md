@@ -158,8 +158,10 @@ configuration as JSON (also valid YAML); it performs no cloud actions:
 node scripts/render-frozen-backend-deploy.mjs <reviewed-source-pins.json>
 ```
 
-That file must contain exactly `sourceBuildId`, `sourceCommit`, `imageDigest`,
-`sourceTriggerId`, `sourceTriggerName`, `sourceRef` and `deploymentTriggerName`.
+That file must contain `sourceBuildId`, `sourceCommit`, `imageDigest`,
+`sourceTriggerId`, `sourceTriggerName`, `sourceRef`, `deploymentTriggerName` and
+`sessionSecretVersion`, with only the optional `accountDeletion` and
+`googleSignIn` configurations allowed in addition.
 Use the exact successful feature image build, full 40-character commit and
 `sha256:` image digest. The dedicated source trigger/ref must match that build;
 neither canonical main trigger is a feature-image source. Keep the reviewed
@@ -179,7 +181,7 @@ node scripts/render-frozen-backend-deploy.mjs --steps-sha256 <reviewed-source-pi
 This re-renders the configuration and resolves its Cloud Build substitutions
 before hashing. The live build's `_DEPLOY_TRIGGER_ID` must be that trigger UUID;
 its `_APPROVAL` must be exactly
-`freeze-zero-traffic:<sourceCommit>:<sourceBuildId>:<imageDigest>`. The generated
+`freeze-zero-traffic:<sourceCommit>:<sourceBuildId>:<imageDigest>:session-secret:<sessionSecretVersion>`. The generated
 defaults are deliberately `INVALID`. Do not hash the unresolved template or
 copy a hash of live steps: either loses the independent review boundary. The
 successful approved deployment must attest the source provenance, image scan
@@ -189,6 +191,20 @@ source/image/build binding; it is **not** independent cryptographic signature
 verification. The source image build still requests
 `requestedVerifyOption: VERIFIED`.
 
+`sessionSecretVersion` is a reviewed positive decimal **string**, without leading
+zeros, whitespace or aliases such as `latest`. Supply the same version in the
+source and traffic pins; neither file contains the secret value. It is bound to
+the approval, rendered deployment, runtime verification and resolved steps digest.
+Old pin files/approvals must be updated, re-rendered and reviewed, not silently
+defaulted. This changes only the frozen rollout package: `DB_PASS:1` and the
+canonical main deployment's `SESSION_SECRET:2` remain unchanged. Do not reactivate
+the canonical trigger for a rotated-session rollout until it is separately aligned.
+No secret version is created or rotated by rendering.
+
+Frozen revision names still derive from the source build ID. The existing guard
+refuses to reuse an already-created revision, including after a version change;
+obtain a newly reviewed candidate build instead of attempting an overwrite.
+
 After the successful frozen deployment and the trigger/build freeze in step 3,
 prepare a **separate** traffic-pin JSON file with exactly these fields:
 
@@ -197,6 +213,7 @@ prepare a **separate** traffic-pin JSON file with exactly these fields:
   "sourceBuildId": "<reviewed feature image build UUID>",
   "sourceCommit": "<full 40-character source commit>",
   "imageDigest": "sha256:<64-character image digest>",
+  "sessionSecretVersion": "<reviewed positive decimal version>",
   "deploymentBuildId": "<successful approved frozen deployment build UUID>",
   "deploymentTriggerId": "<reviewed frozen deployment trigger UUID>",
   "deploymentStepsSha256": "<64-character offline resolved steps digest>"
@@ -227,8 +244,8 @@ operational checks explicit; settled routing alone is not permission for DDL.
 
 The frozen deployment, read-only traffic planning and separately approved
 traffic apply have been exercised against live resources as recorded below.
-The latest local run passed 57 frozen-rollout checks plus the three existing
-candidate-image and two cleanup-template contracts (62 total). Traffic
+The session-version preparation passes all 94 tests in `npm run test:frozen-backend`,
+including generated Bash syntax and embedded Python checks. Traffic
 drain, migration and write enablement remain separate gates.
 
 ## Failure and recovery

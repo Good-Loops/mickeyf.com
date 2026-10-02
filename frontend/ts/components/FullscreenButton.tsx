@@ -72,12 +72,15 @@ const FullscreenButton: React.FC<FullscreenButtonProps> = ({
     label,
 }) => {
     const [isFullscreen, setIsFullscreen] = useState(false);
-    const previousFocusRef = useRef<HTMLElement | null>(null);
+    const focusRestorationRef = useRef<{ previousElement: HTMLElement | null } | null>(null);
     const transitionVersionRef = useRef(0);
 
     const restorePreviousFocus = useCallback(() => {
-        const previousFocus = previousFocusRef.current;
-        previousFocusRef.current = null;
+        const restoration = focusRestorationRef.current;
+        if (!restoration) return;
+        // Native events and the awaited exit can both finish the same transition.
+        focusRestorationRef.current = null;
+        const previousFocus = restoration.previousElement;
 
         if (previousFocus?.isConnected) {
             previousFocus.focus({ preventScroll: true });
@@ -95,9 +98,11 @@ const FullscreenButton: React.FC<FullscreenButtonProps> = ({
         try {
             const wasFullscreen = isCanvasFullscreen(target);
             if (!wasFullscreen) {
-                previousFocusRef.current = document.activeElement instanceof HTMLElement
-                    ? document.activeElement
-                    : null;
+                focusRestorationRef.current = {
+                    previousElement: document.activeElement instanceof HTMLElement
+                        ? document.activeElement
+                        : null,
+                };
             }
 
             const nextFullscreen = await toggleCanvasFullscreen(target);
@@ -119,7 +124,7 @@ const FullscreenButton: React.FC<FullscreenButtonProps> = ({
         const update = () => {
             const nextFullscreen = isCanvasFullscreen(target);
             setIsFullscreen(nextFullscreen);
-            if (!nextFullscreen && previousFocusRef.current) restorePreviousFocus();
+            if (!nextFullscreen) restorePreviousFocus();
         };
 
         const exitFallbackWithEscape = (event: KeyboardEvent) => {
@@ -140,7 +145,7 @@ const FullscreenButton: React.FC<FullscreenButtonProps> = ({
             document.removeEventListener("webkitfullscreenchange", update);
             document.removeEventListener('keydown', exitFallbackWithEscape);
             clearCanvasFullscreenFallback(target);
-            if (previousFocusRef.current) restorePreviousFocus();
+            restorePreviousFocus();
         };
     }, [restorePreviousFocus, targetRef, toggle]);
 

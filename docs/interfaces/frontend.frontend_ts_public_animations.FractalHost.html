@@ -54,7 +54,7 @@ animation (if any) along with the underlying PIXI <code>Application</code>.</p>
 </div>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">void</span></h4><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/Good-Loops/mickeyf.com/blob/main/frontend/ts/animations/dancing fractals/interfaces/FractalHost.ts#L85">frontend/ts/animations/dancing fractals/interfaces/FractalHost.ts:85</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/Good-Loops/mickeyf.com/blob/main/frontend/ts/animations/dancing fractals/interfaces/FractalHost.ts#L86">frontend/ts/animations/dancing fractals/interfaces/FractalHost.ts:86</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="getstats"><span>get<wbr/>Stats</span><a href="#getstats" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures">
@@ -70,7 +70,7 @@ auto-disposal is disabled.</li>
 </div>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-symbol">{</span> <span class="tsd-kind-property">fps</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span><span class="tsd-signature-symbol">;</span> <span class="tsd-kind-property">remainingLifetime</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span> <span class="tsd-signature-symbol">}</span></h4><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/Good-Loops/mickeyf.com/blob/main/frontend/ts/animations/dancing fractals/interfaces/FractalHost.ts#L72">frontend/ts/animations/dancing fractals/interfaces/FractalHost.ts:72</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/Good-Loops/mickeyf.com/blob/main/frontend/ts/animations/dancing fractals/interfaces/FractalHost.ts#L73">frontend/ts/animations/dancing fractals/interfaces/FractalHost.ts:73</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="restart"><span>restart</span><a href="#restart" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures">
@@ -116,7 +116,8 @@ resources first (via the animation's disposal flow).</p>
 <div class="tsd-signature tsd-anchor-link" id="setlifetime-1"><span class="tsd-kind-call-signature">setLifetime</span><span class="tsd-signature-symbol">(</span><span class="tsd-kind-parameter">seconds</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">number</span> <span class="tsd-signature-symbol">|</span> <span class="tsd-signature-type">null</span><span class="tsd-signature-symbol">)</span><span class="tsd-signature-symbol">:</span> <span class="tsd-signature-type">void</span><a href="#setlifetime-1" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></div>
 <div class="tsd-description">
 <div class="tsd-comment tsd-typography"><p>Configures automatic disposal timing.</p>
-<p>When an animation is active, setting a lifetime re-arms its disposal countdown.</p>
+<p>When an animation is active, setting a lifetime re-arms its disposal countdown.
+Disabling cancels the pending countdown; a fade already started continues.</p>
 </div>
 <div class="tsd-parameters">
 <h4 class="tsd-parameters-title">Parameters</h4>
@@ -126,7 +127,7 @@ resources first (via the animation's disposal flow).</p>
 </div></li></ul></div>
 <h4 class="tsd-returns-title">Returns <span class="tsd-signature-type">void</span></h4><aside class="tsd-sources">
 <ul>
-<li>Defined in <a href="https://github.com/Good-Loops/mickeyf.com/blob/main/frontend/ts/animations/dancing fractals/interfaces/FractalHost.ts#L63">frontend/ts/animations/dancing fractals/interfaces/FractalHost.ts:63</a></li></ul></aside></div></li></ul></section>
+<li>Defined in <a href="https://github.com/Good-Loops/mickeyf.com/blob/main/frontend/ts/animations/dancing fractals/interfaces/FractalHost.ts#L64">frontend/ts/animations/dancing fractals/interfaces/FractalHost.ts:64</a></li></ul></aside></div></li></ul></section>
 <section class="tsd-panel tsd-member">
 <h3 class="tsd-anchor-link" id="updateconfig"><span>update<wbr/>Config</span><a href="#updateconfig" aria-label="Permalink" class="tsd-anchor-icon"><svg viewBox="0 0 24 24" aria-hidden="true"><use href="../assets/icons.svg#icon-anchor"></use></svg></a></h3>
 <ul class="tsd-signatures">

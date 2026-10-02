@@ -5,7 +5,7 @@
 	<key>CFBundleDevelopmentRegion</key>
 	<string>en</string>
 	<key>CFBundleDisplayName</key>
-        <string>BeatCalc</string>
+        <string>Ludolume</string>
 	<key>CFBundleExecutable</key>
 	<string>$(EXECUTABLE_NAME)</string>
 	<key>CFBundleIdentifier</key>
@@ -22,6 +22,23 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<key>LudolumeGoogleSignInEnabled</key>
+	<false/>
+	<key>GIDClientID</key>
+	<string>1012884798546-7ten55a60351ttr4ldeic64u3c45reeu.apps.googleusercontent.com</string>
+	<key>GIDServerClientID</key>
+	<string>1012884798546-u18tb6962p05mdpfe6nov8uhe0pbeak8.apps.googleusercontent.com</string>
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>com.googleusercontent.apps.1012884798546-7ten55a60351ttr4ldeic64u3c45reeu</string>
+			</array>
+		</dict>
+	</array>
+	<key>LudolumeAppleSignInEnabled</key>
+	<false/>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

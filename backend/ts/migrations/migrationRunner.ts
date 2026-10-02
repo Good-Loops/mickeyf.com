@@ -1,4 +1,25 @@
+import { verifyScoreParticipationSchema } from './scoreParticipationSchema';
 import { createHash } from 'node:crypto';
+import { inspectFamilyDeletionSchema, inspectParentManagedContact, verifyParentRegistrationTable } from './parentRegistrationSchema';
+import { verifyRegistrationSchema } from './registrationSchema';
+import {
+    inspectAccountIdentityStage,
+    accountIdentityBackfillComplete,
+    verifyAccountIdentityPrecondition,
+    verifyAccountIdentitySchema,
+} from './accountIdentitySchema';
+import { PROVIDER_IDENTITY_MIGRATION_VERSION, verifyProviderIdentitySchema } from './providerIdentitySchema';
+import { verifyAppleTokenSchema } from './appleTokenSchema';
+import { verifyAppleRevocationSchema } from './appleRevocationSchema';
+import { PROVIDER_ATTEMPT_MIGRATION_VERSION, PROVIDER_ATTEMPT_ACTIONS_MIGRATION_VERSION,
+    inspectProviderAttemptStage, verifyProviderAttemptSchema, type ProviderAttemptSchemaStage } from './providerAttemptSchema';
+import { ACCOUNT_SESSION_MIGRATION_VERSION, inspectAccountSessionRenewal,
+    ACCOUNT_SESSION_RENEWAL_MIGRATION_VERSION, APPLE_SESSION_PROVENANCE_MIGRATION_VERSION,
+    inspectAppleSessionProvenance, verifyAccountSessionSchema, verifyRenewableAccountSessionSchema } from './accountSessionSchema';
+import { UNIQUE_USER_NAME_MIGRATION_VERSION, PASSWORDLESS_ACCOUNT_MIGRATION_VERSION,
+    inspectUniqueUserNames, inspectPasswordlessAccounts, verifyUniqueUserNamesPrecondition,
+    verifyUniqueUserNamesSchema, verifyPasswordlessAccountsPrecondition,
+    verifyPasswordlessAccountSchema } from './passwordlessAccountSchema';
 import type { MigrationConfig } from '../config/migrationConfig';
 import {
     legacyP4ScoreColumnExists,
@@ -52,6 +73,32 @@ const RECEIPTS_VERSION = '0005_retain_submission_receipts';
 const LEGACY_VERSIONS = [
     '0001_create_game_runs', '0002_create_game_personal_bests', '0003_drop_users_p4_score',
 ];
+const PROVIDER_IDENTITY_PREREQUISITES = [
+    ...LEGACY_VERSIONS, DETACH_VERSION, RECEIPTS_VERSION,
+    '0006_add_account_identity', '0007_backfill_account_identity', '0008_finalize_account_identity',
+];
+const PROVIDER_ATTEMPT_PREREQUISITES = [
+    ...PROVIDER_IDENTITY_PREREQUISITES, PROVIDER_IDENTITY_MIGRATION_VERSION,
+];
+const ACCOUNT_SESSION_PREREQUISITES = [...PROVIDER_ATTEMPT_PREREQUISITES, PROVIDER_ATTEMPT_MIGRATION_VERSION];
+const SESSION_RENEWAL_PREREQUISITES = [...ACCOUNT_SESSION_PREREQUISITES, ACCOUNT_SESSION_MIGRATION_VERSION];
+const UNIQUE_USER_NAME_PREREQUISITES = [...SESSION_RENEWAL_PREREQUISITES, ACCOUNT_SESSION_RENEWAL_MIGRATION_VERSION];
+const PASSWORDLESS_ACCOUNT_PREREQUISITES = [...UNIQUE_USER_NAME_PREREQUISITES, UNIQUE_USER_NAME_MIGRATION_VERSION];
+const PROVIDER_ATTEMPT_ACTIONS_PREREQUISITES = [...PASSWORDLESS_ACCOUNT_PREREQUISITES, PASSWORDLESS_ACCOUNT_MIGRATION_VERSION];
+
+function isPasswordlessMigration(migration: MigrationDefinition): boolean {
+    return migration.effect === 'add-unique-user-names' || migration.effect === 'allow-passwordless-accounts'
+        || migration.effect === 'extend-provider-attempt-actions';
+}
+
+function requiresCompleteEarlierHistory(migration: MigrationDefinition): boolean {
+    return migration.effect === 'add-score-participation' || migration.effect === 'extend-parent-family' || migration.effect === 'allow-parent-managed-contact' || migration.effect === 'add-parent-attempts' || migration.effect === 'add-parent-consents'
+        || migration.effect === 'add-provider-identities' || migration.effect === 'add-provider-attempts'
+        || migration.effect === 'add-account-sessions' || migration.effect === 'add-session-renewal'
+        || migration.effect === 'add-apple-tokens' || migration.effect === 'add-apple-revocations'
+        || migration.effect === 'add-registration-authorization' || migration.effect === 'add-registration-profile'
+        || migration.effect === 'add-apple-session-provenance' || isPasswordlessMigration(migration);
+}
 
 async function inspectLeaderboardStage(
     connection: MigrationConnection,
@@ -210,18 +257,96 @@ async function inspectMigrationState(
     const appliedRows = historyExists ? await readAppliedMigrations(connection) : [];
     const appliedByVersion = validateHistory(migrations, appliedRows);
     const stage = await inspectLeaderboardStage(connection, migrations, appliedByVersion);
+    const attemptStage = migrations.some(({ version }) => version === PROVIDER_ATTEMPT_ACTIONS_MIGRATION_VERSION)
+        && await tableExists(connection, 'provider_auth_attempts')
+        ? await inspectProviderAttemptStage(connection) : 'legacy';
+    if (attemptStage === 'extended') {
+        const actionsMigration = migrations.find(({ version }) => version === PROVIDER_ATTEMPT_ACTIONS_MIGRATION_VERSION)!;
+        assertProviderMigrationHistory(migrations, actionsMigration, appliedByVersion);
+    }
+    if (migrations.some(({ version }) => version === APPLE_SESSION_PROVENANCE_MIGRATION_VERSION)
+        && await tableExists(connection, 'account_sessions') && await inspectAppleSessionProvenance(connection)) {
+        const provenance = migrations.find(({ version }) => version === APPLE_SESSION_PROVENANCE_MIGRATION_VERSION)!;
+        assertProviderMigrationHistory(migrations, provenance, appliedByVersion);
+    }
     const applied: string[] = [];
     const pending: string[] = [];
     const recoverable: string[] = [];
 
     for (const migration of migrations) {
         if (appliedByVersion.has(migration.version)) {
-            await verifyMigrationPostcondition(connection, migration, stage);
+            if (requiresCompleteEarlierHistory(migration)) {
+                assertProviderMigrationHistory(migrations, migration, appliedByVersion);
+            }
+            await verifyMigrationPostcondition(connection, migration, stage, attemptStage);
             applied.push(migration.version);
             continue;
         }
 
         pending.push(migration.version);
+        if (migration.effect === 'extend-parent-family') {
+            if (await tableExists(connection, migration.tableName) && await inspectFamilyDeletionSchema(connection)) {
+                assertProviderMigrationHistory(migrations, migration, appliedByVersion);
+                await verifyParentRegistrationTable(connection, 'parent_registration_attempts', true);
+                recoverable.push(migration.version);
+            }
+            continue;
+        }
+        if (migration.effect === 'allow-parent-managed-contact') {
+            if (await inspectParentManagedContact(connection)) {
+                assertProviderMigrationHistory(migrations, migration, appliedByVersion);
+                recoverable.push(migration.version);
+            }
+            continue;
+        }
+        if (migration.effect === 'add-apple-session-provenance') {
+            if (await tableExists(connection, migration.tableName)) {
+                if (await inspectAppleSessionProvenance(connection)) {
+                    assertProviderMigrationHistory(migrations, migration, appliedByVersion);
+                    await verifyAccountSessionSchema(connection, true, true);
+                    recoverable.push(migration.version);
+                } else await verifyAccountSessionSchema(connection, await inspectAccountSessionRenewal(connection));
+            }
+            continue;
+        }
+        if (isPasswordlessMigration(migration)) {
+            if (await tableExists(connection, migration.tableName)) {
+                const completed = migration.effect === 'add-unique-user-names'
+                    ? await inspectUniqueUserNames(connection)
+                    : migration.effect === 'allow-passwordless-accounts'
+                        ? await inspectPasswordlessAccounts(connection) : attemptStage === 'extended';
+                if (completed) {
+                    assertProviderMigrationHistory(migrations, migration, appliedByVersion);
+                    await verifyMigrationPostcondition(connection, migration, stage, attemptStage);
+                    recoverable.push(migration.version);
+                }
+            }
+            continue;
+        }
+        if (migration.effect === 'add-session-renewal') {
+            if (await tableExists(connection, migration.tableName)) {
+                if (await inspectAccountSessionRenewal(connection)) {
+                    assertProviderMigrationHistory(migrations, migration, appliedByVersion);
+                    await verifyRenewableAccountSessionSchema(connection);
+                    recoverable.push(migration.version);
+                } else await verifyAccountSessionSchema(connection);
+            }
+            continue;
+        }
+        if (requiresCompleteEarlierHistory(migration)) {
+            if (await tableExists(connection, migration.tableName)) {
+                assertProviderMigrationHistory(migrations, migration, appliedByVersion);
+                await verifyMigrationPostcondition(connection, migration);
+                recoverable.push(migration.version);
+            }
+            continue;
+        }
+        if (migration.effect === 'add-account-identity') {
+            if (await accountIdentityEffectComplete(connection, migration.stage)) {
+                recoverable.push(migration.version);
+            }
+            continue;
+        }
         if (migration.effect === 'detach-best-source' || migration.effect === 'retain-receipts') {
             const completed = migration.effect === 'detach-best-source'
                 ? stage !== 'original' : stage === 'receipts';
@@ -254,10 +379,106 @@ async function inspectMigrationState(
     });
 }
 
+async function accountIdentityEffectComplete(
+    connection: MigrationConnection, stage: 'column' | 'backfill' | 'finalize'
+): Promise<boolean> {
+    if (stage === 'backfill') return accountIdentityBackfillComplete(connection);
+    const schemaStage = await inspectAccountIdentityStage(connection);
+    return stage === 'column' ? schemaStage !== 'absent' : schemaStage === 'complete';
+}
+
 async function verifyMigrationPrecondition(
     connection: MigrationConnection,
     migration: MigrationDefinition
 ): Promise<void> {
+    if (migration.effect === 'add-score-participation') {
+        await verifyParentRegistrationTable(connection, 'parent_registration_attempts', true);
+        if (await tableExists(connection, migration.tableName)) throw new Error('Score permission table must be absent.'); return;
+    }
+    if (migration.effect === 'extend-parent-family') {
+        await verifyParentRegistrationTable(connection, 'parent_registration_attempts'); return;
+    }
+    if (migration.effect === 'allow-parent-managed-contact') {
+        await verifyRegistrationSchema(connection, 'account_registration_profiles');
+        if (await inspectParentManagedContact(connection)) throw new Error('Parent contact column already nullable');
+        return;
+    }
+    if (migration.effect === 'add-parent-attempts' || migration.effect === 'add-parent-consents') {
+        if (!await inspectParentManagedContact(connection) || await tableExists(connection, migration.tableName)) throw new Error('Invalid parent table precondition');
+        return;
+    }
+    if (migration.effect === 'add-registration-authorization' || migration.effect === 'add-registration-profile') {
+        await verifyAccountIdentitySchema(connection);
+        if (await tableExists(connection, migration.tableName)) throw new Error('Registration migration requires its table to be absent');
+        return;
+    }
+    if (migration.effect === 'add-apple-revocations') {
+        await verifyAppleTokenSchema(connection);
+        if (await tableExists(connection, migration.tableName)) throw new Error('Apple revocation migration requires its table to be absent');
+        return;
+    }
+    if (migration.effect === 'add-apple-session-provenance') {
+        await verifyAppleRevocationSchema(connection);
+        await verifyAccountSessionSchema(connection, true, false);
+        return;
+    }
+    if (migration.effect === 'add-apple-tokens') {
+        await verifyProviderIdentitySchema(connection);
+        if (await tableExists(connection, migration.tableName)) throw new Error('Apple token migration requires its table to be absent');
+        return;
+    }
+    if (migration.effect === 'add-unique-user-names') {
+        await verifyUniqueUserNamesPrecondition(connection);
+        return;
+    }
+    if (migration.effect === 'allow-passwordless-accounts') {
+        await verifyPasswordlessAccountsPrecondition(connection);
+        return;
+    }
+    if (migration.effect === 'extend-provider-attempt-actions') {
+        await verifyPasswordlessAccountSchema(connection);
+        await verifyProviderAttemptSchema(connection);
+        return;
+    }
+    if (migration.effect === 'add-session-renewal') {
+        await verifyAccountSessionSchema(connection);
+        return;
+    }
+    if (migration.effect === 'add-account-sessions') {
+        await verifyAccountIdentitySchema(connection);
+        await verifyProviderIdentitySchema(connection);
+        await verifyProviderAttemptSchema(connection);
+        if (await tableExists(connection, migration.tableName)) {
+            throw new Error('Account session migration requires its table to be absent');
+        }
+        return;
+    }
+    if (migration.effect === 'add-provider-attempts') {
+        await verifyAccountIdentitySchema(connection);
+        await verifyProviderIdentitySchema(connection);
+        if (await tableExists(connection, migration.tableName)) {
+            throw new Error('Provider attempt migration requires its table to be absent');
+        }
+        return;
+    }
+    if (migration.effect === 'add-provider-identities') {
+        await verifyAccountIdentitySchema(connection);
+        if (await tableExists(connection, migration.tableName)) {
+            throw new Error('Provider identity migration requires its table to be absent');
+        }
+        return;
+    }
+    if (migration.effect === 'add-account-identity') {
+        await verifyAccountIdentityPrecondition(connection);
+        const stage = await inspectAccountIdentityStage(connection);
+        if (migration.stage === 'column' ? stage !== 'absent' : stage === 'absent') {
+            throw new Error('Account identity migration requires the preceding reviewed schema stage');
+        }
+        if (migration.stage === 'finalize' && !(await accountIdentityBackfillComplete(connection))) {
+            throw new Error('Account identity finalization requires a complete UUID backfill');
+        }
+        return;
+    }
     if (migration.effect === 'detach-best-source') {
         await verifyLeaderboardTable(connection, 'game_personal_bests');
         return;
@@ -285,8 +506,80 @@ async function verifyMigrationPrecondition(
 async function verifyMigrationPostcondition(
     connection: MigrationConnection,
     migration: MigrationDefinition,
-    stage: LeaderboardSchemaStage = 'original'
+    stage: LeaderboardSchemaStage = 'original',
+    attemptStage: ProviderAttemptSchemaStage = 'legacy'
 ): Promise<void> {
+    if (migration.effect === 'add-score-participation') {
+        await verifyScoreParticipationSchema(connection); return;
+    }
+    if (migration.effect === 'extend-parent-family') {
+        await verifyParentRegistrationTable(connection, 'parent_registration_attempts', true); return;
+    }
+    if (migration.effect === 'allow-parent-managed-contact') {
+        if (!await inspectParentManagedContact(connection)) throw new Error('Parent contact column must be nullable');
+        return;
+    }
+    if (migration.effect === 'add-parent-attempts' || migration.effect === 'add-parent-consents') {
+        await verifyParentRegistrationTable(connection, migration.tableName, migration.tableName === 'parent_registration_attempts' && await inspectFamilyDeletionSchema(connection)); return;
+    }
+    if (migration.effect === 'add-registration-authorization' || migration.effect === 'add-registration-profile') {
+        await verifyRegistrationSchema(connection, migration.tableName);
+        return;
+    }
+    if (migration.effect === 'add-apple-revocations') {
+        await verifyAppleRevocationSchema(connection);
+        return;
+    }
+    if (migration.effect === 'add-apple-session-provenance') {
+        await verifyAccountSessionSchema(connection, true, true);
+        return;
+    }
+    if (migration.effect === 'add-apple-tokens') {
+        await verifyAppleTokenSchema(connection);
+        return;
+    }
+    if (migration.effect === 'add-unique-user-names') {
+        await verifyUniqueUserNamesSchema(connection);
+        return;
+    }
+    if (migration.effect === 'allow-passwordless-accounts') {
+        await verifyPasswordlessAccountSchema(connection);
+        return;
+    }
+    if (migration.effect === 'extend-provider-attempt-actions') {
+        await verifyPasswordlessAccountSchema(connection);
+        await verifyProviderAttemptSchema(connection, 'extended');
+        return;
+    }
+    if (migration.effect === 'add-session-renewal') {
+        await verifyRenewableAccountSessionSchema(connection);
+        return;
+    }
+    if (migration.effect === 'add-account-sessions') {
+        await verifyAccountIdentitySchema(connection);
+        await verifyProviderIdentitySchema(connection);
+        await verifyProviderAttemptSchema(connection, attemptStage);
+        await verifyAccountSessionSchema(connection, await inspectAccountSessionRenewal(connection),
+            await inspectAppleSessionProvenance(connection));
+        return;
+    }
+    if (migration.effect === 'add-provider-attempts') {
+        await verifyAccountIdentitySchema(connection);
+        await verifyProviderIdentitySchema(connection);
+        await verifyProviderAttemptSchema(connection, attemptStage);
+        return;
+    }
+    if (migration.effect === 'add-provider-identities') {
+        await verifyAccountIdentitySchema(connection);
+        await verifyProviderIdentitySchema(connection);
+        return;
+    }
+    if (migration.effect === 'add-account-identity') {
+        if (!(await accountIdentityEffectComplete(connection, migration.stage))) {
+            throw new Error(`Account identity ${migration.stage} postcondition is incomplete`);
+        }
+        return;
+    }
     if (migration.effect === 'detach-best-source') {
         await verifyLeaderboardStage(connection, 'game_personal_bests', 'detached');
         return;
@@ -325,6 +618,27 @@ export async function planMigrations(
     });
 }
 
+function assertProviderMigrationHistory(
+    migrations: readonly MigrationDefinition[], migration: MigrationDefinition,
+    applied: ReadonlyMap<string, unknown> | ReadonlySet<string>
+): void {
+    const attempts = migration.effect === 'add-provider-attempts';
+    const sessions = migration.effect === 'add-account-sessions';
+    const renewal = migration.effect === 'add-session-renewal';
+    const passwordlessPrerequisites = migration.effect === 'add-unique-user-names' ? UNIQUE_USER_NAME_PREREQUISITES
+        : migration.effect === 'allow-passwordless-accounts' ? PASSWORDLESS_ACCOUNT_PREREQUISITES
+            : migration.effect === 'extend-provider-attempt-actions' ? PROVIDER_ATTEMPT_ACTIONS_PREREQUISITES : undefined;
+    const prerequisites = passwordlessPrerequisites ?? (renewal ? SESSION_RENEWAL_PREREQUISITES : sessions ? ACCOUNT_SESSION_PREREQUISITES
+        : attempts ? PROVIDER_ATTEMPT_PREREQUISITES : PROVIDER_IDENTITY_PREREQUISITES);
+    if (!prerequisites.every(version => applied.has(version))
+        || migrations.some(({ version }) => version < migration.version && !applied.has(version))) {
+        const label = migration.effect === 'add-apple-revocations' || migration.effect === 'add-apple-session-provenance'
+            ? 'Apple revocation migrations' : migration.effect === 'add-apple-tokens' ? 'Apple token storage' : passwordlessPrerequisites ? 'Passwordless account migrations' : renewal ? 'Session renewal'
+            : sessions ? 'Account sessions' : `Provider ${attempts ? 'attempts' : 'identities'}`;
+        throw new Error(`${label} require all earlier migrations to be recorded first`);
+    }
+}
+
 export async function applyMigrations(
     connection: MigrationConnection,
     migrations: readonly MigrationDefinition[],
@@ -351,6 +665,9 @@ export async function applyMigrations(
         for (const migration of migrations) {
             if (applied.includes(migration.version)) continue;
             if (!allowedEffectKinds.has(migration.effect)) continue;
+            if (requiresCompleteEarlierHistory(migration)) {
+                assertProviderMigrationHistory(migrations, migration, new Set(applied));
+            }
             if (migration.effect === 'retain-receipts' && !applied.includes(DETACH_VERSION)) {
                 throw new Error('Receipt rename requires recorded personal-best detachment before DDL');
             }

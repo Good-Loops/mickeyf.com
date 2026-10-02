@@ -1,5 +1,4 @@
 using System.Collections;
-using TMPro;
 using ThreeBosses.Run;
 using UnityEngine;
 using UnityEngine.SceneManagement;
@@ -8,17 +7,24 @@ using UnityEngine.SceneManagement;
 /// Shared behavior for the two lightweight transition scenes. Each scene owns
 /// only its one background texture, while active-combat timing remains paused.
 /// </summary>
+[RequireComponent(typeof(OutcomeScreenView))]
+[DefaultExecutionOrder(100)]
 public sealed class BossTransitionScreenController : MonoBehaviour
 {
     [SerializeField] private BossId expectedPendingBoss = BossId.Cyborg;
     [SerializeField] private string destinationSceneName = "Level2_CyborgBoss";
     [SerializeField, Min(0f)] private float displaySeconds = 4f;
     [SerializeField, Min(0f)] private float fadeDurationSeconds = 0.35f;
-    [SerializeField] private TMP_Text splitTimeLabel;
-    [SerializeField] private ScreenFade screenFade;
+    [SerializeField] private OutcomeScreenView view;
 
     private void Start()
     {
+        view ??= GetComponent<OutcomeScreenView>();
+        if (view == null || !view.IsReady)
+        {
+            Debug.LogError("Transition screen UI is not configured.", this);
+            return;
+        }
         RunSession session = RunSessionService.Instance.Session;
         if (session.Phase != RunPhase.Transitioning || session.PendingBoss != expectedPendingBoss)
         {
@@ -29,17 +35,8 @@ public sealed class BossTransitionScreenController : MonoBehaviour
             return;
         }
 
-        if (splitTimeLabel == null)
-        {
-            Debug.LogError("Transition split-time label is not assigned.", this);
-        }
-        else
-        {
-            splitTimeLabel.text = RunUiFormatter.FormatTime(
-                session.GetBossSplitSeconds(session.CurrentBoss));
-        }
-
-        screenFade?.FadeOut(fadeDurationSeconds);
+        view.SetValues(RunUiFormatter.FormatTime(session.GetBossSplitSeconds(session.CurrentBoss)));
+        view.FadeOut(fadeDurationSeconds);
         StartCoroutine(ContinueAfterDelay());
     }
 
@@ -49,7 +46,7 @@ public sealed class BossTransitionScreenController : MonoBehaviour
         if (visibleSeconds > 0f)
             yield return new WaitForSecondsRealtime(visibleSeconds);
 
-        screenFade?.FadeIn(fadeDurationSeconds);
+        view.FadeIn(fadeDurationSeconds);
         if (fadeDurationSeconds > 0f)
             yield return new WaitForSecondsRealtime(fadeDurationSeconds);
 

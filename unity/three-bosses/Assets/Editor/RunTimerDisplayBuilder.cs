@@ -23,28 +23,14 @@ public static class RunTimerDisplayBuilder
     [MenuItem("Three Bosses/UI/Build Run Timer Displays")]
     public static void Build()
     {
-        if (EditorApplication.isPlayingOrWillChangePlaymode)
-            throw new InvalidOperationException("Exit Play Mode before building the run timer displays.");
-
-        Scene originalScene = SceneManager.GetActiveScene();
-        if (originalScene.isDirty)
-            throw new InvalidOperationException("Save the active scene before building the run timer displays.");
-
-        string originalPath = originalScene.path;
-
-        try
+        EditorSceneWorkspace.RunWithRestoredScenes("building the run timer displays", () =>
         {
             BuildScene(LevelOnePath);
             BuildScene(LevelTwoPath);
             BuildScene(LevelThreePath);
             AssetDatabase.SaveAssets();
             Debug.Log("Run timer displays were built successfully.");
-        }
-        finally
-        {
-            if (!string.IsNullOrWhiteSpace(originalPath))
-                EditorSceneManager.OpenScene(originalPath, OpenSceneMode.Single);
-        }
+        });
     }
 
     internal static void AddOrUpdateRunTimer(Scene scene)

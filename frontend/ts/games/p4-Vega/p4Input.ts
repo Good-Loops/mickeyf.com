@@ -8,7 +8,8 @@ type Movement = {
 };
 
 type InputOptions = {
-    keyboardTarget: Pick<Document, 'addEventListener' | 'removeEventListener'>;
+    keyboardTarget: Pick<Document, 'addEventListener' | 'removeEventListener' | 'hidden'>;
+    focusTarget: Pick<Window, 'addEventListener' | 'removeEventListener'>;
     joysticks: readonly HTMLElement[];
     movement: () => Movement | undefined;
     canMove: () => boolean;
@@ -145,6 +146,16 @@ export function bindP4Input(options: InputOptions) {
         clearMovement();
         joystickResets.forEach((reset) => reset());
     };
+    const clearWhenHidden = (): void => {
+        if (options.keyboardTarget.hidden) clear();
+    };
+    // A key released outside this window cannot deliver its keyup to the game.
+    options.focusTarget.addEventListener('blur', clear);
+    options.keyboardTarget.addEventListener('visibilitychange', clearWhenHidden);
+    cleanups.push(() => {
+        options.focusTarget.removeEventListener('blur', clear);
+        options.keyboardTarget.removeEventListener('visibilitychange', clearWhenHidden);
+    });
     return {
         clear,
         dispose(): void {

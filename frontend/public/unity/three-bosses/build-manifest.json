@@ -1,39 +1,39 @@
 {
   "version": 2,
-  "buildId": "97daf31ca0b4e854ef5e327ae68db24abe0d9f66d7259ae56df538a40ed8c098",
-  "certifiedBuildId": "5473694d7730f316a5e72cd67fe30d49ecc05f61f8c809c4ffd02b1b7fb14ba7",
-  "sourceCommit": "346491b4f07d3d7325813a2470ebd0819bbee6a5",
-  "unitySourceDigest": "83c9a133ca8024737af2b4e58ed52bf24fc902e65b5778dea229cb262c7c52fe",
-  "unitySourceFileCount": 1004,
+  "buildId": "9b96ad8eb43e6dc10a6c47aa0b27647d38c860baf5fef949fd12a1cc3613241a",
+  "certifiedBuildId": "a511d086b26e75061eb9ae89ae065f0b53d7c13ad3e92c45fa87533337bcf829",
+  "sourceCommit": "118a2b8b9acce11a62bb2a797fae73a0d3d8d2ae",
+  "unitySourceDigest": "fe4c964e1aa3f0d31e6ae76bbe4a18e7fbb9583c3c11072bdd286d8002c38539",
+  "unitySourceFileCount": 1046,
   "unityEditorVersion": "6000.3.8f1",
-  "loaderUrl": "releases/97daf31ca0b4e854ef5e327ae68db24abe0d9f66d7259ae56df538a40ed8c098/Build/three-bosses-webgl-release-20260910.loader.js",
-  "dataUrl": "releases/97daf31ca0b4e854ef5e327ae68db24abe0d9f66d7259ae56df538a40ed8c098/Build/three-bosses-webgl-release-20260910.data",
-  "frameworkUrl": "releases/97daf31ca0b4e854ef5e327ae68db24abe0d9f66d7259ae56df538a40ed8c098/Build/three-bosses-webgl-release-20260910.framework.js",
-  "codeUrl": "releases/97daf31ca0b4e854ef5e327ae68db24abe0d9f66d7259ae56df538a40ed8c098/Build/three-bosses-webgl-release-20260910.wasm",
-  "streamingAssetsUrl": "releases/97daf31ca0b4e854ef5e327ae68db24abe0d9f66d7259ae56df538a40ed8c098/StreamingAssets",
+  "loaderUrl": "releases/9b96ad8eb43e6dc10a6c47aa0b27647d38c860baf5fef949fd12a1cc3613241a/Build/three-bosses-c7-release-20260930.loader.js",
+  "dataUrl": "releases/9b96ad8eb43e6dc10a6c47aa0b27647d38c860baf5fef949fd12a1cc3613241a/Build/three-bosses-c7-release-20260930.data",
+  "frameworkUrl": "releases/9b96ad8eb43e6dc10a6c47aa0b27647d38c860baf5fef949fd12a1cc3613241a/Build/three-bosses-c7-release-20260930.framework.js",
+  "codeUrl": "releases/9b96ad8eb43e6dc10a6c47aa0b27647d38c860baf5fef949fd12a1cc3613241a/Build/three-bosses-c7-release-20260930.wasm",
+  "streamingAssetsUrl": "releases/9b96ad8eb43e6dc10a6c47aa0b27647d38c860baf5fef949fd12a1cc3613241a/StreamingAssets",
   "companyName": "DefaultCompany",
   "productName": "Three Bosses",
   "productVersion": "1.0",
   "assets": [
     {
-      "path": "releases/97daf31ca0b4e854ef5e327ae68db24abe0d9f66d7259ae56df538a40ed8c098/Build/three-bosses-webgl-release-20260910.data",
-      "sha256": "9aea78a8348495ab2f2d5dd0a08e2780db17b4e3748eeb5ea89979835de51943",
-      "size": 41818046
+      "path": "releases/9b96ad8eb43e6dc10a6c47aa0b27647d38c860baf5fef949fd12a1cc3613241a/Build/three-bosses-c7-release-20260930.data",
+      "sha256": "0a60ad990d2e4bea2be0cbe1aaf627b08699269ee73963c1cd02bdf13178db3c",
+      "size": 42094489
     },
     {
-      "path": "releases/97daf31ca0b4e854ef5e327ae68db24abe0d9f66d7259ae56df538a40ed8c098/Build/three-bosses-webgl-release-20260910.framework.js",
-      "sha256": "6db9c229fa7d921b9f0528ce5e821fbbbe0749f7ab0a68f6521f073ff287c4f7",
+      "path": "releases/9b96ad8eb43e6dc10a6c47aa0b27647d38c860baf5fef949fd12a1cc3613241a/Build/three-bosses-c7-release-20260930.framework.js",
+      "sha256": "fd091bbe80c238de0756fe5793c9b08c9675e8e9676ebd3e7dc86a153d961485",
       "size": 464049
     },
     {
-      "path": "releases/97daf31ca0b4e854ef5e327ae68db24abe0d9f66d7259ae56df538a40ed8c098/Build/three-bosses-webgl-release-20260910.loader.js",
-      "sha256": "f724c35fdb96c400fc6cd0e790bf12b825a357b62cf0515db7bdfa52c99d3e65",
+      "path": "releases/9b96ad8eb43e6dc10a6c47aa0b27647d38c860baf5fef949fd12a1cc3613241a/Build/three-bosses-c7-release-20260930.loader.js",
+      "sha256": "f138be6c0a8f543aee2f6aabe49dbddbb7fc61375d1c37e46463255828c43c88",
       "size": 26982
     },
     {
-      "path": "releases/97daf31ca0b4e854ef5e327ae68db24abe0d9f66d7259ae56df538a40ed8c098/Build/three-bosses-webgl-release-20260910.wasm",
-      "sha256": "e3c6aef2b7151043c94767f2eddad34833c7b56bc529f7e03611ada6b8adfff2",
-      "size": 52031665
+      "path": "releases/9b96ad8eb43e6dc10a6c47aa0b27647d38c860baf5fef949fd12a1cc3613241a/Build/three-bosses-c7-release-20260930.wasm",
+      "sha256": "39bb51a4e8f963d0fea7d0d802aa95a0449479dfaba369225d85a9d12914dd9e",
+      "size": 52117561
     }
   ]
 }

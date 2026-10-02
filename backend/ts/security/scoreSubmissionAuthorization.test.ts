@@ -1,10 +1,13 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { Request } from 'express';
-import jwt from 'jsonwebtoken';
 import { authorizeScoreSubmission } from './scoreSubmissionAuthorization';
+import { issueSessionToken } from './sessionPolicy';
 
 const secret = 'unit-test-secret-that-is-not-a-runtime-credential';
+const account = { userId: 42, userName: 'verified-user', accountId: '123e4567-e89b-42d3-a456-426614174000' };
+const session = issueSessionToken(account, secret);
+const identity = { ...account, sessionId: session.sessionId };
 
 function scoreRequest(
     body: unknown,
@@ -14,15 +17,12 @@ function scoreRequest(
     return {
         body,
         headers: options.bearer && token ? { authorization: `Bearer ${token}` } : {},
-        signedCookies: !options.bearer && token ? { session: token } : {},
+        signedCookies: !options.bearer && token ? { __session: token } : {},
     } as Pick<Request, 'body' | 'headers' | 'signedCookies'>;
 }
 
 function validToken(): string {
-    return jwt.sign({ user_id: 42, user_name: 'verified-user' }, secret, {
-        algorithm: 'HS256',
-        expiresIn: '5m',
-    });
+    return session.token;
 }
 
 test('missing or invalid authentication produces HTTP 401 contract', () => {
@@ -58,7 +58,7 @@ test('completion at 1000 is authorized with either existing authentication trans
     for (const bearer of [false, true]) {
         assert.deepEqual(
             authorizeScoreSubmission(scoreRequest({ p4_score: 1000 }, { token: validToken(), bearer }), secret),
-            { authorized: true, identity: { userId: 42, userName: 'verified-user' }, score: 1000 }
+            { authorized: true, identity, score: 1000 }
         );
     }
 });
@@ -79,7 +79,7 @@ test('body username mismatch produces HTTP 403 contract', () => {
 test('verified identity is authoritative with matching or omitted legacy username', () => {
     const expected = {
         authorized: true,
-        identity: { userId: 42, userName: 'verified-user' },
+        identity,
         score: 990,
     };
 

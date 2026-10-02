@@ -4,6 +4,72 @@ This tracked roadmap records the active continuation of the broader migration
 and game plan. Detailed implementation decisions remain subject to review at
 each phase boundary.
 
+**Current Clean Code continuation (2026-09-30):** use the
+[finite C1–C7 checklist](CLEAN_CODE_INVENTORY.md#remaining-clean-code-checklist--2026-09-23)
+as the source of remaining review scope. **C1–C6 are complete**: see the
+[C1 shared UI closeout](CLEAN_CODE_INVENTORY.md#c1-general-and-shared-ui-closeout--2026-09-23)
+and [C2 web experience closeout](CLEAN_CODE_INVENTORY.md#c2-web-experience-orchestration-closeout--2026-09-23).
+C2 fixed animation startup recovery, p4-Vega lost-focus/restart failures, stale
+paused beats and pitch timing, and removed proven-unused utility code. The
+[C3 tooling closeout](CLEAN_CODE_INVENTORY.md#c3-migration-and-grant-tooling-closeout--2026-09-29)
+completes backend source review and bounds runtime-grant identity checks and
+connection shutdown. All 22 affected-file tests, TypeScript and an isolated-output
+production build passed. Migration history and grant policies are unchanged.
+C4's [run-state source review](CLEAN_CODE_INVENTORY.md#c4-run-state-source-review--2026-09-29)
+retained the reviewed run/timing/submission and scene-transition boundaries.
+The [projectile impact checkpoint](CLEAN_CODE_INVENTORY.md#c4-projectile-impact-and-damage-boundaries--2026-09-29)
+fixes repeated damage from Stinger and non-attaching Phase Anchor hits: two
+physics regressions failed before the fix; all three focused PlayMode tests
+passed afterward, including normal anchor expiry. The
+[attack lifetime checkpoint](CLEAN_CODE_INVENTORY.md#c4-boss-attack-lifetimes-and-player-input--2026-09-29)
+fixes stale Kraken rune continuations and unbounded missed Stingers; four new
+regressions failed before the fix and all five affected cases pass afterward.
+Remaining player input/movement source required no change. The
+[audio and presentation checkpoint](CLEAN_CODE_INVENTORY.md#c4-audio-environment-and-shared-presentation--2026-09-29)
+reviews the audio/environment and shared effect helpers, and separates health-bar
+damage tint from pulse opacity. All three focused regressions failed before the
+repair and pass afterward. No WebGL rebuild or broad suite was run.
+The [Editor and WebGL checkpoint](CLEAN_CODE_INVENTORY.md#c4-editor-utilities-and-webgl-plugins--2026-09-29)
+guards unsaved additive scenes and restores the workspace after rebuilds; one
+regression failed before the repair and all six focused Editor checks pass.
+WebGL adapters required no changes. The
+[UI and integrity closeout](CLEAN_CODE_INVENTORY.md#c4-ui-and-source-integrity-closeout--2026-09-30)
+completes C4: Dot's remaining UI/style review and 16/16 timer tests carry forward;
+the checker now respects Unity's hidden-file metadata rule, with six focused
+Python regressions and project integrity passing. Dot's tested Firebase tooling
+update is recorded in the [security ledger](RELEASE_READINESS.md#local-firebase-tooling-remediation--2026-09-30).
+At that September 30 checkpoint, the edits were local. The owner has since
+authorized committing the reviewed candidate, pushing the existing branch and
+opening a draft PR for non-deploying checks; merge/deployment remain separate.
+The [C5 native shell closeout](CLEAN_CODE_INVENTORY.md#c5-native-shell-and-provider-readiness--2026-09-30)
+reviews Android/iOS entry points, the native API/Apple plugins and Capacitor
+configuration; no native code change was justified. Google/Apple sign-in must
+work from both login and signup, including local development against Cloud SQL.
+Their separate [activation requirements](backend/GOOGLE_SIGN_IN_ROLLOUT.md#september-30-local-readiness-and-required-behavior)
+remain open; provider controls are already wired into both pages but are not
+operationally enabled. The
+[C6 tooling/documentation closeout](CLEAN_CODE_INVENTORY.md#c6-tooling-and-documentation-delta--2026-09-30)
+corrects misleading local-database instructions, records the isolated launcher's
+actual schema ceiling and wires 11 existing launcher tests into PR CI; all pass
+locally without Docker/database work. The
+[C7 candidate review](CLEAN_CODE_INVENTORY.md#c7-candidate-and-security-review--2026-09-30)
+adds the available runtime/dependency patches, binds Firebase MCP to the reviewed
+tooling lock and restricts the deployment preflight's input path. **C7 remains
+open for embedded OpenSSL S8 and the recorded hosted scan disposition.**
+Completed checks carry forward;
+KWS/provider activation, store publication and Git deletion approvals are separate.
+The dated implementation and release history below is retained as evidence.
+
+Local backend interruption resolved (2026-09-29): the owner-approved Cloud SQL
+migrations 0009–0012 and additive session grant are complete. All 12 recorded
+checksums match; a fresh runtime connection passes session readiness. Other
+runtime grants are unchanged, and the temporary maintenance user was deleted
+with a fresh login denied. The existing VS Code backend restarted successfully;
+`GET /api/leaderboards` returned HTTP 200. The
+[migration review](backend/CLOUD_SQL_SESSION_MIGRATION_REVIEW.md) records execution
+and recovery evidence. Later migrations, provider activation and deployment
+remain outside this repair; no rebuild or broad test rerun was needed.
+
 Current release state (published 2026-09-09 local): see the
 [cumulative release/security ledger](RELEASE_READINESS.md). It supersedes stale
 pending claims in the dated history below. Named cleanup and the bounded script
@@ -2047,12 +2113,33 @@ signed HTTP-only session cookie; the successful login JSON now returns only
 `success` and `user_name`. Existing cookie authentication and the backend's
 Bearer-token compatibility path remain unchanged.
 
-An optional **Stay signed in for 30 days** Login control is approved but still
-open. Unchecked sessions must retain the current four-hour lifetime; checked
-sessions may use a server-controlled thirty-day JWT and signed HTTP-only cookie
-without storing passwords or preferences in browser-readable storage. The
-stateless token's lack of per-session revocation must be tested and recorded as
-an accepted risk before this item is closed.
+**Stay signed in checkpoint (2026-09-14):** implemented the optional, unchecked
+renewable Login control; ordinary sign-in remains four hours. Sign up now exposes
+the same choice for its existing automatic-login flow. Both forms share a round,
+glass-styled accessible 14px checkbox without the private-device hint. The owner chose
+revocable per-device sessions instead of accepting stateless-token replay risk.
+Migration 0011 stores only hashed random session identifiers, immutable account
+UUIDs and UTC timestamps, capped at ten sessions per account. Logout and cookie
+replacement revoke the old session; deletion cascades all sessions. Protected
+writes recheck the session inside the existing per-user transaction lock.
+No password, token or preference is stored in browser-readable storage.
+Production website API calls now use Firebase same-origin rewrites and its
+forwarded `__session` cookie; native transport keeps the OS cookie store and
+waits for server-confirmed logout. Implementation is not a production activation:
+schema/grants, coordinated backend/Hosting deployment, one expected re-login,
+and browser/native acceptance remain pending. See [session behavior and rollout](backend/SESSION_AUTHENTICATION.md).
+
+**Renewal extension (2026-09-14):** selected sessions expire after thirty days
+without renewal, with no fixed 90-day cutoff. Foreground activity renews via an
+explicit signed-cookie POST, with fifteen-minute throttling and a 120-second
+predecessor grace for concurrent tabs. Migration 0012 adds bounded rotation
+metadata to the same device row; no new service or cleanup job. Existing 0011
+sessions remain non-renewable. Password reauthentication remains required for
+account deletion. Production activation still requires the coordinated steps above.
+Renewal validation passed 418 backend unit tests, 39 isolated MySQL integration
+tests and 56 focused frontend tests. Added `backend:dev:isolated` so the local
+server can use the new schema without migrating production; its persistent
+loopback-only database starts empty, with no production accounts or scores.
 
 ## Phase 15 — p4-Vega improvement and mobile polish
 
@@ -2271,6 +2358,360 @@ improving the game incrementally; the owner approved extending completion to 100
 
 ## Phase 16 — Whole-project Clean Code sweep
 
+**2026-09-10 inventory checkpoint:** classified all 1,586 tracked files at
+`3af15ecb` by ownership and purpose; this is not a completed line-by-line code
+review. See [CLEAN_CODE_INVENTORY.md](CLEAN_CODE_INVENTORY.md) for the complete
+category totals, continuation checklist, protected/generated boundaries and teaching
+example. The active branch is `improvement/clean-code-sweep`.
+
+**Continuation reconciled 2026-09-23:** the canonical remaining work is
+[C1–C7 in the inventory](CLEAN_CODE_INVENTORY.md#remaining-clean-code-checklist--2026-09-23).
+The checked entries below retain historical evidence, not a second review queue.
+Unchanged accepted behavior is not reopened by a later cleanup step.
+
+- [x] Inventory tracked first-party, generated, native and third-party areas.
+- [x] First code slice: extract the existing leaderboard detail-state loader
+  from `GameLeaderboard.tsx` into a React/environment-independent adjacent
+  module with explicit readers; separate its logic tests from JSX/view tests.
+  Effect cleanup, rendering, HTTP contracts and decision body remain unchanged.
+  Completed 2026-09-10: 13 direct Node loader cases; TypeScript and all 185
+  frontend tests passed; production build passed with the existing chunk-size
+  warning; local browser detail/hub navigation and both tables verified.
+- [x] Second slice: consolidated the duplicated Three Bosses mutation
+  preconditions in `threeBossesMutationAuthorization.ts`, preserving guard
+  order, response contracts, router middleware and persistence. Backend
+  TypeScript, 8 policy cases, 7 existing HTTP/router cases and webpack build
+  passed on 2026-09-10; no production/authentication campaign was repeated.
+- [x] Simplified frontend test discovery to a quoted Node glob: the same 19
+  files and 185 passing tests, no coverage removed or dependency added.
+- [x] Corrected stale backend paths in `.github/copilot-instructions.md` and
+  retired the unused 586-line `resources/project-structure.txt` plus its
+  dedicated attribute rule. All 18 guide paths and tracked references checked;
+  no application changes, replacement generator or repeated build/test run.
+- [x] Login/signup request-boundary review: moved all four auth HTTP operations
+  into independently testable `authApi.ts`, kept configured exports in
+  `authService.ts`, and removed the session username `any` cast. Existing
+  forms, alerts, cookies and response contracts preserved. On 2026-09-10,
+  9 transport cases, TypeScript/all 194 frontend tests and Vite build passed;
+  existing chunk warning remains. No real auth requests or new dependency.
+- [x] Initial session verification now ignores results after a newer login/logout
+  starts or the effect is cleaned up. Deferred browser responses verified that
+  signup auto-login survives a late signed-out startup response.
+- [x] Owner-requested signup improvement: create the account, sign in through the
+  existing cookie-based login, show one welcome message and navigate Home.
+  Failed automatic login preserves account creation and routes to Log in;
+  duplicate submissions are guarded. Shared SweetAlert2 glass styling matches
+  the site without a replacement library. On 2026-09-10, TypeScript/all 200
+  frontend tests and Vite build passed (existing chunk warning); mocked browser
+  success/error/fallback and desktop/portrait/landscape checks passed. No real
+  accounts or backend changes; physical iPhone dialog behavior is not verified.
+- [x] Route loading/performance and owner-requested status screens (2026-09-14):
+  destinations load on demand behind one shared cosmic loading/error boundary;
+  Home, navigation and 404 recovery remain immediately available. Pixi's native
+  CSP compatibility registration moved with each graphics experience, not out of
+  the application. Initial minified JavaScript fell from 1,115,199 to 354,416
+  bytes (gzip 330,294 to 110,125); no build chunk exceeds the unchanged 500 kB
+  warning threshold. A matching custom 404 supplies Home/Games actions. Motion
+  respects reduced-motion preferences, without artificial loading delays.
+  TypeScript/all 265 frontend tests and production build passed. Built-browser
+  experience rendering, route recovery and genuine stalled/failed chunk states
+  were checked; desktop and 390x844 status screenshots inspected. This is not a
+  new physical-iPhone acceptance or production/native deployment. See the
+  [teaching checkpoint](CLEAN_CODE_INVENTORY.md#route-dependencies-and-shared-status-screens--2026-09-14).
+- [x] Animation music-upload boundary (2026-09-14): both pages now use one
+  `MusicUpload` control with MIME plus explicit audio-extension picker hints for
+  the owner's Safari Files report. Removed duplicated refs/effects/keyboard
+  handlers and the engine's UI-listener adapter; playback/visual behavior is
+  unchanged. Five focused tests, frontend TypeScript/all 373 tests and Vite build
+  passed. The owner confirmed Files selection/playback on iPhone on 2026-09-15;
+  this is local acceptance, not a deployment or every-codec claim.
+  See the [teaching checkpoint](CLEAN_CODE_INVENTORY.md#shared-music-picker-and-audioui-boundary--2026-09-14).
+- [x] Three Bosses browser-bridge teardown (2026-09-14): extracted only the
+  identical best-effort submission/layout/visibility release sequence into one
+  local function. Failed startup and normal shutdown keep their distinct
+  submission-disable policy, ordering, errors and once-only behavior. Five
+  mocked lifecycle tests, frontend TypeScript/all 378 tests and Vite build
+  passed; no Unity rebuild, gameplay/device retest or deployment.
+  See the [teaching checkpoint](CLEAN_CODE_INVENTORY.md#three-bosses-browser-bridge-teardown--2026-09-14).
+- [x] Renderer/upload cancellation ownership (2026-09-14): late Dancing Circles
+  startup is disposed after unmount; cancelled/replaced uploads cannot resume
+  playback, overwrite current state or clear a newer track during old cleanup.
+  Reused mount/session guards and captured-resource teardown, without changing
+  visuals, DSP or autoplay ordering. Three renderer and eight audio cases,
+  frontend TypeScript/all 389 tests and Vite build passed. Device acceptance and
+  Safari Files check remain deferred; no deployment.
+  See the [teaching checkpoint](CLEAN_CODE_INVENTORY.md#renderer-and-upload-cancellation-ownership--2026-09-14).
+- [x] Audio transport intent (2026-09-15): shared guarded playback now prevents
+  pending Play, upload autoplay and interruption recovery from overriding a
+  later Pause/Stop. Old success/failure cannot disrupt a newer Play. Track
+  loading/ownership, Pause position and Stop rewind are preserved. All 26 audio
+  cases, frontend TypeScript/all 407 tests and Vite build passed; no deployment
+  or repeated device acceptance. See the
+  [teaching checkpoint](CLEAN_CODE_INVENTORY.md#audio-transport-intent--2026-09-15).
+- [x] Shared hooks/dropdown boundary (2026-09-15): both hooks reviewed and kept
+  unchanged. Shared dropdown now makes closed options inert, supports Escape
+  and predictable focus return, closes when disabled and scopes its outside
+  listener to the open state. Six regression cases, real Chrome keyboard/
+  pointer checks, touch emulation, TypeScript/all 413 tests and Vite build
+  passed. Styling/callers unchanged; no physical-device retest or deployment.
+  See the [teaching checkpoint](CLEAN_CODE_INVENTORY.md#shared-hooks-and-dropdown-interaction--2026-09-15).
+- [x] Safari preview styling fix (2026-09-15): reproduced the owner's unstyled
+  page in WebKit by stalling Google Fonts imports. Separated optional font
+  downloads from local layout CSS, preserving families/weights and fallbacks.
+  Both animation pages stay styled with fonts stalled; failure/normal loading,
+  TypeScript/all 415 tests and build passed. The owner still saw unstyled content
+  on the built preview; the live development preview on LAN port 5173 restored
+  the test path. The owner then confirmed Files selection/playback works.
+  No public/native deployment or definitive phone-network diagnosis is claimed.
+- [x] Password-account persistence boundary (2026-09-15): moved the three
+  signup/login queries and unique-key error translation out of the HTTP
+  controller into `passwordAccountRepository.ts`. Explicit credential projection
+  keeps database column names/driver fields out of controller decisions.
+  Validation, bcrypt ordering/cost, session proof/commit/cookies and legacy DTOs
+  remain unchanged. Eight repository cases and 16 controller cases (including a
+  duplicate-preflight short-circuit check), backend TypeScript and webpack
+  production build passed; independent review found no regression. No real
+  account or database operation.
+  Reviewed both score repositories and left their ordered transactions intact.
+  See the [teaching checkpoint](CLEAN_CODE_INVENTORY.md#password-account-persistence-boundary--2026-09-15).
+- [x] Main-router database injection (2026-09-15): bootstrap now passes its
+  existing pool to `createMainRouter`; the router no longer imports runtime
+  database configuration. One required dependency matches the other routers,
+  without a fallback or new abstraction. Registration, limiter order/thresholds,
+  controllers, session/SQL/cookie policy and feature gates are unchanged.
+  The four-file pre-change baseline passed 43 tests; the requested five-file
+  post-change batch passed 50, including seven actual-router cases with fake
+  persistence and a cold child-process import without database configuration.
+  Both batches had zero failures, cancellations or skips. Backend TypeScript,
+  webpack and `git diff --check` passed using Node 22.23.2/npm 11.6.2 and a
+  worktree-local locked install with lifecycle scripts disabled. This is focused
+  coverage, not the full backend suite or a database/provider integration run.
+  No commit, deployment, development-server restart or branch cleanup occurred.
+  See the [teaching checkpoint](CLEAN_CODE_INVENTORY.md#main-router-database-injection--2026-09-15).
+- [x] Native sign-in cancellation ownership (2026-09-21): native retries now
+  remain blocked until the previous cancellation is acknowledged, even after
+  the cancelled operation returns a late token. Cancellation failures remain
+  blocked until client reload; user cancellation itself still returns promptly.
+  Three new regressions failed before the fix, then all 21 provider-client and
+  73 auth transport/signup cases passed; frontend TypeScript and build passed. Google,
+  native Swift code and disabled Apple activation flags are unchanged. This
+  does not complete Apple's token-revocation lifecycle or prove device timing.
+  See the [teaching checkpoint](CLEAN_CODE_INVENTORY.md#native-sign-in-cancellation-ownership--2026-09-21).
+- [x] Gameplay note-selector cleanup (2026-09-21): fixed lookup tables are shared
+  readonly data, semitone offsets are local, and redundant C-only key history is
+  explicit. Eight focused selector/playback tests and frontend TypeScript passed.
+  No musical policy or random-call ordering changed. See
+  [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#gameplay-note-selection-state-and-fixed-data--2026-09-21).
+- [x] Corrected the note-selector findings (2026-09-21): transposition wraps by
+  twelve pitch classes, Hz ratios become semitone intervals, and an empty
+  candidate pool restarts on the selected tonic. Normalized two G-frequency
+  rounding mismatches in the scale catalog. Seventeen focused tests and frontend
+  TypeScript passed; playback timing/range and gameplay are unchanged. No deploy.
+  See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#pickup-pitch-and-missing-note-corrections--2026-09-21).
+- [x] Three Bosses Figma/UI Toolkit compatibility review (2026-09-21): the
+  installed/pinned Editor is 6000.3.8f1 with Web support. Existing screens use
+  uGUI/TMP; at review time there were no UI Toolkit documents/styles in Assets. Unity's official
+  `com.unity.ui.figma` 0.1.0-exp.1 supports 6000.3+, so a major Editor upgrade is
+  not required for a pilot. The connector is experimental; it requires Figma
+  desktop and Design-mode edit access. The plugin is free, including on editable
+  Starter files. See the [official announcement](https://discussions.unity.com/t/experimental-ui-toolkit-connector-for-figma-design/1736969).
+  The [Unity package registry](https://packages.unity.com/com.unity.ui.figma)
+  confirms a Pipeline 0.6.0-exp.1 dependency; the review found 0.5.0-exp.1, so
+  connector setup must include a reviewed dependency update. Read-only CLI
+  commands: `unity --version` (1.0.0-beta.10), `unity editors --installed --format
+  json`, and `unity editors upgrade 6000.3.8f1 --dry-run --format json` (offers
+  6000.3.24f1). No Editor, dependency, scene or build changed; no tests were run.
+- [x] Isolated Main Menu UI Toolkit pilot (2026-09-22): initially implemented in
+  `Assets/Scenes/UI/MainMenuToolkitPilot.unity`, excluded from builds. At that
+  checkpoint Main Menu, HUD, touch controls and gameplay remained unchanged. Actual Figma
+  values from file `hH2nXiz3n12LclUjpsPgui`, root `3:2`, were imported through
+  the official `figma_import` Pipeline command, with no USS errors or notes.
+  Experimental pins are `com.unity.ui.figma` 0.1.0-exp.1 and
+  `com.unity.pipeline` 0.6.0-exp.1; the Editor version is unchanged. Generated
+  assets stay separate from the pilot controller and owned presentation USS.
+  Existing `Menu.png` is reused directly; Oxanium Bold intentionally replaces
+  Liberation Sans in the pilot only. The focused PlayMode run passed 2/2 tests
+  in 2.81 seconds across eight viewport sizes and three rotation/safe-area repeat
+  steps: centers within 1px, minimum 48px targets, focused/unfocused audio icons,
+  mute, and PLAY starting a new run/loading Level 1. All eight actual UIDocument
+  captures were visually inspected, with no clipped labels observed. Desktop
+  Figma-plugin pairing was not validated; the official import command was.
+  The subsequent user-approved source adoption replaces the old scene at
+  `Assets/Scenes/UI/MainMenu.unity`, preserving the Toolkit scene GUID and updating
+  the first build entry. The controller is now `MainMenuController`; obsolete
+  uGUI menu builders/tests are retired. Browser-ready signaling is preserved,
+  and the EventSystem supports Toolkit buttons while background swipes can scroll.
+  The focused `MainMenu` PlayMode run passed 4/4 tests, including build identity,
+  touch ownership, layout/centering, Play/mute and pause-to-menu navigation.
+  Rebuilt WebGL and physical phone/browser acceptance remain pending before release;
+  no WebGL rebuild or deployment is included in the source adoption.
+  On 6.3 retain margins instead of imported gap and avoid unsupported blur/shadow
+  assumptions. See the [pilot record](unity/three-bosses/Assets/UI/Pilots/README.md)
+  for source, file ownership and remaining gates.
+- [x] Remaining Three Bosses screen migration (2026-09-22): pause in all three
+  battles, three defeat screens, two boss transitions and the final result now
+  use UI Toolkit. Existing artwork, scene GUIDs, navigation, pause/input rules,
+  ranking and score-submission states are preserved; health bars, timer,
+  countdown and touch HUD remain uGUI. Six outcome scenes share
+  `OutcomeScreenView`; presentation is owned in `Assets/UI/Screens/`. Removed
+  three obsolete scene builders and four unused presentation helpers. Retained
+  `PauseGlassGraphic` because a local Unity recovery scene still references it;
+  recovery files were not modified. Focused `ScreenUI` PlayMode checks passed
+  12/12; after visual review corrected narrow-screen caption wrapping, the three
+  outcome tests passed again. Actual portrait/landscape render captures were
+  inspected, including all submission captions fitting their painted frames
+  while invisible touch targets remain at least 48px. The single guarded local
+  WebGL rebuild succeeded; its only warning disables Pipeline tooling in the
+  player because no runtime config is included. Physical-device acceptance and
+  deployment remain separate.
+- [x] Toolkit glass and hover restoration (2026-09-22): pause uses the original
+  translucent gradient and highlighted rims through a non-picking decorative
+  element. Main-menu PLAY/audio and outcome actions have hover/pressed feedback;
+  PLAY's imported inline color no longer overrides interaction styles. The
+  original shared touch HUD and its glass/press feedback remain unchanged in all
+  three battles. Pause checks passed 4/4; the combined `ScreenUI` run passed 13/14,
+  and the remaining menu test passed in a focused 4/4 rerun after test-teardown
+  cleanup. Portrait/landscape and hover captures were inspected. The follow-up
+  local WebGL rebuild succeeded with only the disabled-Pipeline warning; no
+  deployment or physical-device acceptance is implied.
+- [x] Three Bosses mobile layout acceptance (2026-09-22): after the final
+  Resume-hover/white-idle-PLAY corrections, the combined `ScreenUI` run passed
+  14/14 and the local WebGL preview was rebuilt. The owner subsequently confirmed
+  that the game loads in iPhone Safari and that the layout is fine. Two local
+  delivery fixes preserve upstream connections while slow downloads drain;
+  throttled payload checks matched both file hashes and the asset-server suite
+  passed 28/28. The owner reported temporary lag, then confirmed it stopped
+  without rendering/gameplay changes. This closes the requested phone layout
+  check, not an instrumented FPS benchmark or a new login/submission acceptance.
+  Touch controls remain uGUI. Publication remains separate; continue the Clean
+  Code sweep without reopening accepted game checks.
+- [x] p4-Vega entity ownership (2026-09-21): player/collectible updates now use
+  their stored sprites, removing redundant sprite arguments from the game loop.
+  Five entity tests, fifteen existing rule tests and frontend TypeScript passed.
+  Gameplay and audio rules are unchanged; no deployment or Unity change.
+  See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#p4-vega-entity-sprite-ownership--2026-09-21).
+- [x] Same-note color recovery (2026-09-21): reproduced stale idle policy state
+  after sustained silence, including its effect on a subsequent phase reset.
+  Continuous rendering already retained the correct pitch anchor. The policy now
+  remembers pitch color separately from idle output; tracker commit signals,
+  palette, drift and timing are unchanged. Three regression cases failed before
+  the fix; all nine focused color tests and frontend TypeScript pass afterward.
+  See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#pitch-color-recovery-after-silence--2026-09-21).
+- [x] Phase reset during silence (2026-09-22): reproduced the remaining
+  phase-only reset case used by fractal switching/restart. Replaced the ambiguous
+  anchor-presence boolean with an explicit idle/pitch/absent state, allowing the
+  same note to recover smoothly without inventing a tracker commit. The new case
+  failed before the fix; all ten focused color tests and frontend TypeScript pass.
+  Palette, timing, drift and interpolation remain unchanged. No device retest,
+  Unity rebuild or deployment.
+  See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#pitch-color-phase-reset-during-silence--2026-09-22).
+- [x] Failed audio initialization (2026-09-22): current setup failures now release
+  partial track resources and reset analysis state without touching a newer upload.
+  Both animation pages return the loading promise to the shared upload control,
+  which reports failures with the existing styled alert and permits same-file
+  retry. Autoplay handling and successful playback remain unchanged. Three engine
+  and three UI regression assertions failed before their fixes; 40 focused cases,
+  frontend TypeScript and whitespace checks passed. No device retest or deployment.
+  See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#failed-audio-initialization-ownership-and-feedback--2026-09-22).
+- [x] Fractal auto-dispose cancellation (2026-09-23): reproduced a fade starting
+  after the toggle was disabled. The host now explicitly cancels the animation's
+  pending timer and shares lifetime application between toggles/restarts/swaps.
+  All three fractals preserve fades already started; no visual tuning changed.
+  Three host and six real-class lifecycle checks, frontend TypeScript and
+  whitespace checks passed. No device retest or deployment.
+  See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#fractal-automatic-disposal-cancellation--2026-09-23).
+- [x] Fractal settings/default reset (2026-09-23): startup now applies current
+  selection/configuration/lifetime rather than its original captured values.
+  Reset works before readiness, and renderer updates no longer occur inside
+  replayable React state updaters. Tree explicit patches also update its motion
+  baseline without preserving transient beat boosts. Five page and two Tree
+  regressions failed before the fixes; nine focused checks, frontend TypeScript
+  and whitespace checks passed afterward. No device retest or deployment.
+  See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#fractal-settings-and-default-reset-synchronization--2026-09-23).
+- [x] Backend error handling (2026-09-23): controllers already sanitize internal
+  failures and preserve intentional endpoint-specific error contracts. Fixed the
+  shared async wrapper so primitive rejections cannot become Express routing
+  commands; error objects/status metadata remain intact. The local HTTP regression
+  failed before the fix; all 19 focused checks, backend TypeScript and whitespace
+  checks passed afterward. No real accounts, live database calls or deployment.
+  See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#backend-asynchronous-error-boundary--2026-09-23).
+- [x] Backend startup/shutdown ownership (2026-09-23): await listener readiness
+  and asynchronous bind failures; SIGINT/SIGTERM now stop accepting requests,
+  drain HTTP and tracked handlers, then close the pool, with one nine-second
+  deadline and idempotent cleanup. A stop during readiness cannot open the
+  listener afterward. Thirty focused checks, eight launcher checks, TypeScript,
+  production compilation and whitespace checks passed. No live SQL or deployment;
+  forced termination can still interrupt long work. Existing routes, readiness
+  checks, database configuration and score transactions are unchanged.
+  See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#backend-startup-and-shutdown-ownership--2026-09-23).
+- [x] Clean Code continuation consolidated (2026-09-23): six remaining review
+  groups plus one final closeout, with explicit completion rules and preserved
+  acceptance evidence. No application code, tests/builds or live state changed.
+  The canonical task checkboxes are in the inventory, not duplicated here.
+  **Next: C1 — remaining web shell/forms/shared UI review.**
+- [x] C3 provider-account transaction slice (2026-09-29): source-reviewed the
+  session/provider boundaries and added ten-second deadlines to provider signup,
+  linking and credential transaction controls. Uncertain begin/commit now discard
+  the connection immediately; failed rollback is not retried. Three regressions
+  failed before the fix; 104 focused tests, backend TypeScript, production build
+  to a temporary directory and whitespace checks passed. The adjusted MySQL
+  integration fixture typechecks but was not executed. C3 remains open, including
+  deletion transaction controls and queued-data-query timeout disposal; no live
+  account, SQL, provider activation, schema, dependency or deployment changed.
+  See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#c3-provider-account-transaction-boundaries--2026-09-29).
+- [x] C3 deletion and stalled-query slice (2026-09-29): added ten-second deletion
+  transaction deadlines and direct disposal after uncertain begin/commit. Guarded
+  borrowed account/auth connections now discard protocol timeouts before errors
+  are sanitized and reject further cleanup SQL. A real mysql2 client against a
+  scripted loopback peer reproduced stalled rollback before the fix and verified
+  socket closure and pool replacement afterward. All 218 focused tests,
+  TypeScript, temporary-output production build and whitespace checks passed.
+  Deletion-journal, session/credential and score ordering contracts are preserved.
+  No live MySQL integration or deployment; no total request deadline is claimed.
+  C3 remains open for recovery/maintenance and remaining backend tooling.
+  See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#c3-deletion-and-stalled-query-cleanup--2026-09-29).
+- [x] C3 recovery/maintenance resource slice (2026-09-29): guarded replay/audit
+  acquisitions and removed rollback after uncertain replay begin/commit. Existing
+  maintenance ownership retained after source review. Three targeted cases failed
+  before the fix; 25 affected-file tests, TypeScript and temporary-output build
+  passed. Prior shared-consumer/driver checks carried forward without rerunning.
+  No live database, cloud changes or deployment. See the
+  [checkpoint](CLEAN_CODE_INVENTORY.md#c3-recovery-and-maintenance-resource-ownership--2026-09-29).
+- [x] C3 runtime configuration/validation/contracts (2026-09-29): retained current
+  configuration and request policy; reused the existing guard for startup readiness
+  disposal and corrected login/logout contract declarations. Sixteen readiness
+  cases have passing results (one targeted fixture rerun), plus TypeScript and
+  temporary-output production compilation. No broader test rerun or live changes.
+  See the [checkpoint](CLEAN_CODE_INVENTORY.md#c3-configuration-validation-and-contracts--2026-09-29).
+- [x] C3 migration/grant tooling and backend source closeout (2026-09-29): reviewed
+  dedicated configuration, migration orchestration and grant controls; retained
+  existing SQL history and policies. Runtime-grant identity checks now share the
+  operation deadline, timeout forces socket closure and shutdown has a two-second
+  cap. All 22 affected-file tests, TypeScript and temporary-output production build
+  passed. No repeated broader suites, live SQL/cloud calls or deployment. C3 source
+  review is complete; C4–C6 and final C7 closeout remain. See the
+  [checkpoint](CLEAN_CODE_INVENTORY.md#c3-migration-and-grant-tooling-closeout--2026-09-29).
+- [x] Shared hue-distance calculation (2026-09-21): interpolation and pitch-color
+  transition settling now reuse the same existing-utility function. Preserved
+  wraparound, signed half-turn ties, rounding and thresholds. Four focused tests,
+  frontend TypeScript and whitespace checks passed; no full-suite/device retest.
+  See [the teaching checkpoint](CLEAN_CODE_INVENTORY.md#shared-hue-distance-calculation--2026-09-21).
+
+Record-notification follow-up (2026-09-10): p4-Vega's existing results-card badge
+was not a SweetAlert, and Three Bosses had no browser record announcement. Both
+now use the shared glass `PersonalBestAlert` after server confirmation. Receipt
+replays can supply the first confirmation but repeated Three Bosses run IDs do
+not repeat the announcement. Existing p4 badge, scores, ranking, submission
+contracts and Unity build are unchanged. Mocked browser checks covered desktop,
+portrait, native/fallback fullscreen, focus, help-dialog deferral and cleanup;
+physical-device record notification checks remain unverified.
+
+**Learning handoff:** show actual before/after code for each implementation,
+explain the project boundary and general coding principle, state trade-offs and
+preserved behavior, and report checks actually run. Proposed examples must be
+clearly distinguished from implemented changes. The inventory now records
+the implemented examples and their exact verification scopes.
+
 After Three Bosses and the p4-Vega improvement phase are stable, inspect every
 tracked first-party source, test, configuration, and documentation area using
 Robert C. Martin's *Clean Code: A Handbook of Agile Software Craftsmanship* as
@@ -2292,6 +2733,723 @@ The focused first-party `package.json` script audit (originally requested
 2026-09-06) was moved into the bounded pre-release temporary-artifact cleanup
 above by the owner on 2026-09-08. Do not duplicate that audit in this later phase
 unless relevant changes or new evidence warrant it.
+
+### Pending Git branch/worktree hygiene
+
+- [ ] Git branch/worktree hygiene — after this refactor is reviewed and
+  safely preserved:
+  - Inventory all local branches, remote branches, tracking references,
+    worktrees, and relevant open/merged pull requests.
+  - Establish the intended retained development/release branches; do
+    not assume main is the comparison baseline.
+  - Verify current remote state before proposing deletions.
+  - Check unique/unpushed commits and actual integration evidence,
+    including squash/cherry-pick cases where applicable.
+  - Preserve active worktrees, dirty/untracked/ignored local work,
+    protected/default branches, release/rollback references, and
+    anything whose purpose or integration is uncertain.
+  - Produce a keep/delete-candidate/uncertain table with exact names,
+    tip SHAs, and reasons. Age, naming, or a missing upstream alone
+    does not prove a branch obsolete.
+  - After approval of exact candidates, delete only the approved
+    obsolete local/remote branches and prune verified stale tracking
+    references. Preview worktree-metadata pruning separately.
+  - Do not force-delete branches, prune tags, expire reflogs, run
+    git prune, or remove active worktrees.
+
+## Phase 17 — Ludolume native stores and social sign-in
+
+Owner direction confirmed 2026-09-10: publish Ludolume through Capacitor to both
+Google Play and Apple's App Store. The owner has an Apple Developer membership
+but no Mac. The owner selected `com.mickeyf.app` on 2026-09-10 to match the
+reverse-domain convention for `mickeyf.com`. Capacitor, Android and iOS now use
+that identifier consistently; local configuration alone does not reserve it
+with Apple or Google Play.
+
+Immediate priority reaffirmed by the owner on 2026-09-10: finish this bounded
+branding/account setup, complete Apple distribution signing and a signed
+TestFlight build for the owner's iPhone, implement Google and Apple sign-in,
+then resume the incremental Clean Code sweep. Do not skip the TestFlight/device
+milestone. Public store publication still requires separate release approval.
+Do not let App Store Connect's stale bundle-description label expand this work
+into repeated refreshes, a replacement app/identifier or broader CI permissions.
+
+Owner reaffirmed on 2026-09-10: finish the scoped Clean Code pass and its security
+closeout before public store publication, together with the privacy/release
+deliverables below. TestFlight builds are not a public store release. Google
+sign-in and native iOS Sign in with Apple can be implemented and tested before
+publication; do not treat public release as their shared prerequisite. Apple's
+web/other-platform service has a separate documented prerequisite for an
+existing App Store app using Sign in with Apple. Keep that activation separate;
+do not accelerate publication solely to enable it. This clarification does not
+itself activate, implement or defer both providers.
+
+- [x] Register the Apple bundle ID and create the App Store Connect record.
+  Apple Developer registration verified 2026-09-10: explicit `com.mickeyf.app`
+  under team `AX4Z7T24C9`, description Ludolume. After the original listing name
+  was rejected, Apple accepted the owner-selected Ludolume: app `6810735137`,
+  iOS, English (U.S.), SKU `ludolume-ios`, status Prepare for Submission.
+  Registration alone did not upload or submit a binary. App Store Connect's
+  bundle selector still displayed the previous description after refresh, although
+  Apple Developer's Identifiers list confirmed Ludolume with `com.mickeyf.app`.
+- [x] Set App Information categories: Entertainment (primary), Music (secondary).
+  Saved in App Store Connect and verified after a page reload on 2026-09-10.
+  Exact API reads also reconfirmed Ludolume for both app and bundle records;
+  the selector's previous description remains an Apple UI inconsistency, not
+  evidence that `com.mickeyf.app` needs replacing. No store submission occurred.
+- [ ] Confirm Google Play developer account access and create its app record.
+- [ ] Preserve the PWA track and review the existing Android/iOS shells. Build
+  Android on Windows; use GitHub Actions macOS/Xcode for iOS (owner approved
+  2026-09-10), with protected signing credentials, bounded cost and manual release
+  approval. Manual unsigned simulator workflow and a shared Xcode scheme are
+  prepared. Approved workflow-only PR #330 merged to `main` on 2026-09-10;
+  it did not publish the pending website/authentication changes. The first
+  [manual cloud build](https://github.com/Good-Loops/mickeyf.com/actions/runs/34494943864)
+  passed on development commit `aa83270262ce579826eab79bc85ee55f85139da9`:
+  all 202 frontend tests, Vite build, Capacitor/CocoaPods sync, Xcode unsigned
+  simulator compilation and artifact upload succeeded. This is not physical
+  iPhone validation or a signed store build. Android native compilation is
+  still unverified; the local Java/Android SDK toolchain is not configured.
+  See `frontend/ios/BUILDING.md`; that unsigned run did not upload to TestFlight
+  or publish a store release. The signed iOS checkpoint is recorded below.
+- [x] Create the Apple distribution identity and configure protected signing secrets.
+  With owner approval on 2026-09-10, the account-holder UI created Apple
+  Distribution certificate `Q4FS72TU6B` (expires 2027-09-10) and active
+  `IOS_APP_STORE` profile `Z392C733U4`, “Ludolume App Store 2026-09-10”
+  (UUID `e312aedc-9b44-4464-8ce9-0e0f0fb39c0a`), for exactly
+  `AX4Z7T24C9.com.mickeyf.app`. After Chrome downloads were blocked, the existing
+  Developer-role API key retrieved both by exact GET (HTTP 200), without role
+  escalation. The RSA key matches the leaf certificate; Apple WWDR G3 leaf and
+  profile CMS signatures, profile/certificate matching and helper guards passed.
+  An AES-256-encrypted P12 and DPAPI-protected password are backed up locally
+  with restricted access. `ios-testflight` holds `ASC_PRIVATE_KEY_P8` and all
+  three iOS signing secrets; the exact `improvement/clean-code-sweep` branch
+  restriction and `Good-Loops` reviewer remain in place.
+- [x] Build, verify and upload the signed iOS app to internal TestFlight.
+  [Protected run `34505852569`](https://github.com/Good-Loops/mickeyf.com/actions/runs/34505852569)
+  passed on exact commit `cd59d311e8b866f77477f8867a6334544a89a066`: signed
+  archive/export, IPA metadata and leaf-certificate verification, upload and
+  credential/artifact cleanup all succeeded. App Store Connect GET (HTTP 200)
+  confirms Ludolume 1.0 build `4.1.0`, ID
+  `2999535d-e87d-47e1-91cf-ce2bb4bbd4ea`, processing `VALID`, audience
+  `INTERNAL_ONLY`, not expired. The initial `MISSING_EXPORT_COMPLIANCE` state
+  cleared after the owner personally submitted Apple's encryption declaration
+  on 2026-09-10; the live App Store Connect UI now confirms **Ready to Test**.
+  The **Ludolume Internal** group initially had one tester (the existing Account Holder)
+  and only build `4.1.0`; automatic distribution is disabled. The owner installed
+  TestFlight version 1.0/build `4.1.0` on the iPhone. The owner reports other
+  tested functionality working, but p4-Vega shows “The game could not load.
+  Please refresh to try again.” After the CORS rollout below, the owner confirms
+  password login works. A subsequent native-cookie correction in build `6.1.0`
+  passed the owner's login/logout and full close/reopen check on 2026-09-10;
+  signup, offline logout and expiry have not been separately rechecked.
+  p4-Vega still fails on that installed build. A deterministic Pixi custom-scheme
+  asset URL bug is now fixed locally, with five focused regression tests,
+  TypeScript and a production build passing. Signed build `7.1.0` is uploaded
+  and Apple-processed; owner export answers are saved and the existing internal
+  group has access (`IN_BETA_TESTING`). The owner confirms p4-Vega loads/plays.
+  Portrait HUD offsets and unwanted native outer-page scrolling reported next
+  are included in combined build `8.1.0` with the Home fix. Apple has processed
+  it; owner export answers are saved and existing internal access is verified
+  (`IN_BETA_TESTING`). The owner accepts those three corrections in `8.1.0`;
+  follow-up native fullscreen, canvas-frame and p4 inner-scroll issues are below.
+  See `frontend/ios/BUILDING.md`.
+  Provider login follows.
+  No roles, public testing, public store submission or website release were
+  enabled by this setup.
+- [x] Before public app release, accept small-screen Home typography and full
+  quotes on the iPhone. Implemented locally: smaller welcome/quote text, balanced
+  wrapping, separate author and stable normal-flow placement. All 61 quotes fit
+  at 320×568 and 844×390; portrait/landscape/desktop visual checks, TypeScript and
+  production build passed. This change postdates TestFlight `7.1.0` and is in
+  available internal build `8.1.0`, accepted by the owner. Global Safari edge
+  handling is unchanged.
+- [x] Accept native fixed-screen layout and p4-Vega portrait HUD in that combined
+  update. Local corrections scope safe insets to fullscreen and lock only the
+  outer native document, preserving overflow access for long forms/lists.
+  Thirty focused tests, TypeScript/build and simulated portrait bounds passed;
+  the owner confirms those corrections in `8.1.0`. Subsequent issues remain below.
+- [ ] Accept the follow-up native p4-Vega screen-fit/fullscreen corrections on an
+  installed build. Local fixes preserve rounded inline corners, fit controls
+  without main scrolling, remove fullscreen frame decoration, use in-app CSS
+  fullscreen on iOS, and preserve navigation state across overlapping requests.
+  Forty focused tests, TypeScript and production build pass. Approved internal
+  build `9.1.0` uploaded from `bd107c54`; all 226 cloud tests and signing/upload
+  cleanup passed. Owner export answers are saved, and existing internal-group
+  access is verified (`IN_BETA_TESTING`). Only the focused device check remains.
+  Do not repeat Home/loading tests.
+- [x] Create matching celestial/glass Ludolume native icons and launch artwork.
+  Sources and prompts live in `frontend/resources/README.md`. Android adaptive
+  icons have a real alpha foreground, extracted using the owner-approved chroma
+  key method; iOS retains an opaque 1024-square icon. Portrait/landscape exports,
+  XML/asset references and duplicate-resource checks passed. Native device
+  appearance remains part of signed-build acceptance, not a completed device test.
+- [ ] Add Google and Apple sign-in while retaining username/password accounts
+  and score ownership. Verify provider identities on the backend; require proof
+  before linking an existing account, never match solely on an email string.
+  Web and native clients need their own provider configuration and approved
+  sign-in flows; do not load Google OAuth inside Capacitor's embedded WebView.
+  **Backend foundation checkpoint (2026-09-14):** signed Google/Apple ID-token
+  verification, password-proven linking to immutable account UUIDs, conflict-safe
+  identity lookup/storage and migration 0009 are implemented offline. Deletion
+  readiness and restored-backup replay validate and remove provider links.
+  No provider routes/buttons, session changes, production schema/grant changes
+  or deployment are included. **One-use flow checkpoint (2026-09-14):** migration
+  0010 and bounded five-minute attempt storage, trusted session/origin context,
+  consume-before-verify orchestration, and deletion/replay compatibility are
+  implemented offline. No scheduled cleanup service is introduced. The internal
+  account-verification result does not issue a session. **Session checkpoint
+  (2026-09-14):** shared issuance/consumers now require v2 UUID-bound, revocable
+  device sessions, including score/ticket/deletion authorization and the internal
+  provider context. Username/password login supports an optional 30-day session.
+  **HTTP/session checkpoint:** shared provider issuance, exact-origin/signed-cookie
+  binding, rate limits and final locked link-session checks are implemented;
+  the 444-test backend suite and 31 isolated MySQL cases passed. **Client checkpoint:**
+  opt-in configuration/discovery, serialized frontend provider authentication,
+  login/link controls, and a disabled-by-default native Apple bridge are implemented.
+  The brief route loader is reduced to dots and Loading…; 404/error recovery remains.
+  **Authorized-origin checkpoint (2026-09-14):** saved and read back exactly
+  `http://localhost:5173`, `https://mickeyf.com` and `https://www.mickeyf.com` on the
+  existing `MickeyFOrg Client`. Its name/client ID and credentials are unchanged;
+  redirect URIs remain empty. **Branding/header checkpoint (2026-09-14):** Google
+  confirmed saving `Ludolume` and `https://mickeyf.com`; existing contacts/domain
+  and Testing status remain unchanged. Privacy/terms URLs and logo remain unset.
+  The privacy-policy draft is private, not a published link. Local Hosting CSP
+  now allows only the documented GIS resource paths, with popup-compatible COOP;
+  the seven focused policy/API-base tests pass. No provider activation, database
+  or deployment change occurred. Live headers require separate approval for the
+  Google resource trust and popup opener change. **Isolated Google checkpoint
+  (2026-09-14):** the local launcher accepts an explicit Google web client ID,
+  blocks inherited provider settings/root `.env` fallback, and adds only scoped
+  local provider grants. Seven launcher/bootstrap tests and backend typecheck
+  passed. The local runtime-role probe passed and rolled back all fixture rows;
+  Google's real button and cancellation worked in Chrome. Only Back restarted;
+  Front, Docs and WebGL stayed running. Real-account link/login/session acceptance
+  remains pending. The owner-approved fourth origin `http://localhost` was saved
+  and read back on the existing client; other origins, credentials, scopes and
+  publication status were preserved. No production
+  schema, grants, provider flags or deployment changed. Next: focused local
+  real-account acceptance, a published privacy policy before public activation,
+  approved native Apple capability/profile,
+  focused real-provider acceptance and native Google SDK/client configuration.
+  **Owner clarification (2026-09-14):** Continue with Google on both Login and
+  Sign up must sign in returning Google users directly and onboard new Google
+  users without requiring password-account creation or linking. Linking an
+  existing password account is optional, not the primary entry flow. Localhost
+  public preview and the public site must use the same real accounts/scores.
+  A link-only rollout is not completion; retain the existing privacy/age/deletion
+  requirements for production account creation rather than silently bypassing them.
+  **Deployment preparation (2026-09-14):** canonical/frozen deployment and traffic
+  validation now carry full Google signup/login settings with the exact approved
+  client and enabled-deletion prerequisite. Default-off cannot silently disable
+  an already-active provider; intentional enable/disable is source/image-bound.
+  Offline renderer/traffic checks passed 73 tests. No deployment occurred.
+  The owner explicitly requested returning the localhost Google buttons: restore
+  them on both forms when switching the gateway to the compatible public backend,
+  preserving real accounts/scores instead of selecting the isolated database.
+  **Localhost deletion transport (2026-09-14):** renewable gateway supports both
+  password-confirmed and Google-confirmed self-deletion, with exact body shapes,
+  session-cookie isolation and unchanged pending/error outcomes. Twenty mocked
+  gateway tests and frontend typechecking passed. Legacy mode and UI remain
+  unchanged; no real deletion or production activation occurred. At cutover,
+  retire the Manage account compatibility guard along with the sign-in guards.
+  **Passwordless signup checkpoint (2026-09-14):** owner-approved Google-web
+  signup now has a direct official button, username onboarding, atomic NULL-password
+  user/Google-link creation and the shared renewable session. Fresh Google proof
+  also authorizes deletion of that account under its live-session/deletion-journal
+  safeguards; password accounts keep their existing flow. Opt-in migrations
+  0013–0015 enforce username uniqueness, nullable passwords and purpose-bound
+  signup/delete challenges. Public signup remains disabled and subject to the
+  age/consent backlog; production requires available deletion, reviewed grants,
+  migration and explicit deployment approval. No native Google or cloud rollout.
+  **Session concurrency follow-up (2026-09-21):** reproduced different-account
+  first-session creation failing with `ER_LOCK_DEADLOCK / 1213 / 40001` when
+  both transactions held overlapping empty-index gap locks. Creation now uses
+  next-transaction-only `READ COMMITTED`; per-user/proof/cap locks, commit
+  safeguards, renewal/logout isolation and pool defaults remain unchanged.
+  One combined disposable provider/replay/session run passed 39/39, session
+  unit tests 12/12 and backend typechecking passed. No production change.
+  Copilot's router dependency-injection checkpoint `8c5dc7e1` is preserved and
+  synced. KWS's pending response does not block provider
+  implementation/testing; all-ages public activation keeps its consent gates.
+  **Native Apple onboarding (2026-09-21):** implemented a shared login/signup
+  username continuation, signed verified shared/private-relay email, immutable
+  provider-subject ownership, remembered-session reuse and fresh-proof SQL
+  deletion. Account management now discovers Apple capabilities. Existing
+  accounts do not have to link, and email never auto-merges accounts. Apple
+  signup/deletion and native capability remain disabled: complete authorization-
+  code exchange/token revocation and revoked-credential handling before activation.
+  Focused backend tests passed 87+33, frontend tests 88+32, both typechecks and
+  disposable MySQL provider group 40/40. No real Apple, macOS/TestFlight or
+  production rollout was performed. Next: finish that Apple lifecycle, native
+  Google SDK/client setup, then the remaining Clean Code sweep.
+  See [scope, migration boundary and remaining steps](backend/PROVIDER_SIGN_IN.md).
+  **Apple token lifecycle preparation (2026-09-21):** native authorization-code
+  transport, server exchange with nonce/subject binding, encrypted refresh-token
+  storage and transactional deletion/retry state are implemented behind the
+  existing disabled capabilities. Owner approved encrypted post-deletion retry
+  retention for at most seven days, erased sooner on confirmed revocation.
+  Backup replay preserves the earliest deadline and never contacts Apple.
+  Migration 0016 and the bounded explicit worker are source preparation only;
+  no production schema, keys, jobs, provider settings or deployment changed.
+  Before activation, document this privacy exception, verify the maintenance
+  execution/expiry path and grants, finish revoked-credential/session handling,
+  then perform the native build/device check. No repeat gameplay or general
+  login acceptance is requested. KWS remains a separate signup-audience gate.
+  **Native Apple credential-loss checkpoint (2026-09-21):** signed session
+  provenance now distinguishes Apple login from merely having a linked Apple
+  identity, survives renewal, and is absent from password/Google sessions.
+  The native-only credential lookup and platform startup/resume/revocation
+  checks reuse current-device logout without deleting accounts or scores.
+  Checks and logout are serialized with login; unconfirmed logout hides local
+  auth and retries without claiming server success. Unknown/platform-error
+  states do not trigger logout. No schema, keys, cloud jobs or activation changed.
+  **Signed Apple notification checkpoint (2026-09-21):** independent disabled
+  receiver verifies Apple's signature/audience and revokes only pre-event Apple
+  sessions. Original proof time survives renewal. Expiring hashed-subject
+  cutoffs and account locks close concurrent-login/signup races, including
+  unknown subjects; duplicate/late events preserve newer authorizations.
+  Migrations0017/0018, scoped grants, compatible restore verification and bounded
+  cleanup in the existing explicit Apple maintenance command are prepared.
+  Six focused disposable SQL cases and fifteen restricted-grant cases passed;
+  no live migration, provider setting, cloud job or deployment changed.
+  Remaining: approve/document the cutoff's short-lived security-data processing
+  and physical purge bound; publish the encrypted-token retention exception;
+  configure/verify the maintenance path and registered HTTPS receiver; invalidate
+  any legacy Apple sessions without provenance; then native build/lifecycle
+  acceptance. Restored sessions must be invalidated before reopening traffic.
+  KWS remains a separate signup-audience gate. Do not repeat accepted gameplay.
+  **Apple maintenance preparation (2026-09-21):** packaged a standalone production
+  entrypoint and separated verified DB-only expiry cleanup from Apple retry-key
+  parsing. Bounded drains, real backlog probes and work/shutdown deadlines replace
+  the single-pass command. Live read-only inventory found only the two existing
+  receipt/audit jobs; none were changed. The notification endpoint and draft privacy insert are documented
+  in [APPLE_MAINTENANCE.md](backend/APPLE_MAINTENANCE.md). No policy was published.
+  **No-new-recurring-spend revision (2026-09-21):** the owner rejected the
+  separate five-minute job; it was never created and is no longer recommended.
+  Confirmed local deletion now attempts one account-scoped Apple revocation,
+  bounded to ten seconds, leaving durable retries on failure. Implemented the
+  disabled workload-identity-protected backend maintenance endpoint and a single
+  call from the existing hourly receipt dispatch, independent of receipt failure.
+  Receipt work and dispatch run concurrently and both are awaited; either
+  failure fails the existing job. Backend work is capped at 90 seconds, dispatch
+  at 110 seconds, alongside the unchanged 120-second receipt budget/five-second
+  shutdown, fitting the existing 180-second job timeout. Keep
+  Apple keys/token SQL access in the backend; do not broaden either restricted
+  worker's SQL grants, add a schedule, increase frequency or set minimum
+  instances. Application code now loads pinned numeric Apple Secret Manager
+  versions after container startup; the HTTP path rejects inline/injected Apple
+  keys. A bootstrap secret outage hides only Apple until process restart; Google,
+  notifications and DB purge remain available. Each maintenance pass reloads
+  keys after DB-only purge. Queued credentials are purged beginning on day six,
+  leaving 24 hours of headroom within the original seven-day deadline, not an
+  outage-proof deletion guarantee. All new flags remain off; no live resource,
+  grant, key or deployment changed. Before activation, verify the exact caller
+  numeric uniqueId/service-base audience, schema/runtime settings, honest
+  retention wording and one real-path dummy retry/purge/failure acceptance.
+  Existing-resource reuse avoids the new fixed setup but does not promise zero
+  metered usage. Source verification passed 182 focused tests, backend
+  TypeScript, isolated production server/receipt builds and the disabled
+  compiled-entry smoke check; exact test commands are in the maintenance runbook.
+  The owner approved the CORS-only backend deployment for exactly
+  `capacitor://localhost`, and renewed the same temporary Node/OpenSSL exception
+  through 2026-10-07 only for the matching unchanged-runtime/base/dependency
+  replacement, with earlier-review conditions unchanged. PR #332 merged as
+  `ff9c79bedb1b3c8ca4e671ed8a9ac00739863f80`. The reviewed image from source
+  `a1f3ea4331ea28f7477a7addfd21d34ecd13d39e` now serves 100% at generation138,
+  revision `mickeyf-org-ios-origin-a1f3ea43-0910`, with no temporary tags and
+  unchanged runtime/configuration. All six live preflights and the unauthenticated
+  session probe passed; the prior p4 revision remains intact for rollback.
+  Exact build/deployment evidence and scope are in `RELEASE_READINESS.md`.
+  Native login/session acceptance and that scoped origin change belong to this
+  provider-login milestone, not the initial signed gameplay-build checkpoint.
+- [ ] Configure Apple's primary Sign in with Apple App ID, web Services ID,
+  return URLs and protected signing key. Configure/test native iOS authentication
+  separately from web/other-platform Services ID activation. Apple's documented
+  web-service prerequisite is an existing App Store app using Sign in with Apple;
+  do not assume a developer membership or TestFlight build alone satisfies it.
+- [ ] Review native session persistence, provider disconnect/revocation and
+  current store policies before submission. Privacy disclosures and account
+  deletion are tracked in the approved implementation backlog below; coordinate
+  them with provider login rather than creating separate competing auth flows.
+- [ ] Complete Android internal testing and obtain separate approval for each
+  public store release. iPhone installation/login are accepted; native p4-Vega,
+  session persistence and the unverified signup path remain open as recorded above.
+
+Primary references checked 2026-09-10:
+[Capacitor build requirements](https://capacitorjs.com/docs/getting-started/environment-setup),
+[Codemagic Capacitor signing and distribution](https://docs.codemagic.io/yaml-quick-start/building-an-ionic-app/),
+[Google native sign-in restrictions](https://developers.google.com/identity/protocols/oauth2/native-app),
+[Google OAuth client setup](https://support.google.com/cloud/answer/15549257?hl=en),
+[Apple native sign-in sample and development setup](https://developer.apple.com/documentation/authenticationservices/implementing-user-authentication-with-sign-in-with-apple),
+[Apple web/other-platform prerequisites](https://developer.apple.com/documentation/signinwithapple/configuring-your-environment-for-sign-in-with-apple),
+[Apple web sign-in setup](https://developer.apple.com/help/account/capabilities/configure-sign-in-with-apple-for-the-web/),
+[Apple login/account review requirements](https://developer.apple.com/app-store/review/guidelines/).
+Provider login and store publication are planned, not implemented or verified.
+
+### Public-account preview cutover checkpoint — 2026-09-21
+
+Localhost now has an explicit, validated legacy/renewable authentication selector
+separate from the real-account API choice. Default legacy behavior is unchanged;
+the provider controls, remembered sessions and account management are available
+to the renewable protocol once the compatible public backend is deployed.
+No environment flag, cloud resource, database or live account was changed.
+See [the cutover contract](backend/PROVIDER_SIGN_IN.md#explicit-localhost-cutover-configuration--2026-09-21).
+
+The owner subsequently approved initial adult-only new-account signup without
+invitations, while retaining the all-ages/parent-managed flow as later work.
+Apply eligibility to password, Google and Apple account creation; preserve
+existing-account login, optional linking and guest play. Do not assume existing
+accounts are adult-verified or change country availability. A checkbox or a
+Google identity is not verified age, and this audience decision does not itself
+resolve regional privacy obligations.
+
+KWS Age Verification is the candidate for adult self-registration, distinct from
+Parent Verification. Its portal requires service enablement before test setup.
+The owner authorized the test-access contact request; submission closed without
+a visible error, but receipt is unconfirmed because no durable confirmation was
+captured. Do not resend automatically. No agreement was accepted or service
+activated. See the [signup preparation and integration boundary](backend/PROVIDER_SIGN_IN.md#adult-only-signup-preparation--2026-09-21).
+
+Next: obtain test access, review the applicable agreement and result-binding
+contract, then implement and narrowly test one server-enforced eligibility flow
+across all new-account paths. Independent development need not await the older
+privacy enquiry. Published privacy information and backend/deletion/schema
+readiness still need completion before public signup activation. No release is
+authorized by this planning checkpoint.
+
+**Real-account rollout preparation (2026-09-21):** read-only cloud access was
+restored using Windows' existing trusted CA, without disabling TLS or changing
+persistent settings. Production still serves `mickeyf-org-localhost-dbb80d4f`;
+its provider-config endpoint returns 404, explaining the absent localhost Google
+button. Added a guarded command for Google signup migrations 0013–0015 without
+expanding ordinary migration behavior (51 focused mocked tests and typecheck
+passed). The Google-only runtime grant profile is now prepared too: shared
+permissions remain centralized, Apple permissions are separate, and the selected
+profile is bound to the reviewed approval hash. Existing Apple schema/privileges
+block a Google-only downgrade; direct maintenance schema visibility and migration
+history are checked before inspection. The 79 focused grant/CLI/configuration
+tests and typecheck passed. No live SQL, grants, flags, deployment or servers
+changed. Explicit session-secret version pinning is now prepared in the frozen
+deployment/preflight/traffic tools: approval and runtime checks use the same
+reviewed version, with no default or alias. The canonical main deployment remains
+unchanged. Next review the concrete production migration/grant/recovery state;
+server-validated registration eligibility remains required before activation.
+Apple browser sign-in
+is separate unimplemented work, not a hidden completed button. See the
+[ordered real-account rollout](backend/GOOGLE_SIGN_IN_ROLLOUT.md).
+
+### Approved privacy implementation backlog — not implemented
+
+Owner decisions confirmed during the 2026-09-10 privacy-policy review. The
+owner approved the account-deletion flow, including dependent child-profile
+deletion, and explicitly requested these changes be recorded for later
+implementation. Keep this work pending during policy drafting; approval of the
+design is not approval to delete live data, change cloud settings or publish.
+The owner-review policy draft remains private and outside this public repository.
+These are required deliverables for the agreed child-account/store launch,
+coordinated with the existing social-sign-in work before returning to the
+incremental Clean Code sweep. Preserve accepted device/gameplay checks.
+Existing hourly submission-receipt cleanup is complete and is not reopened by
+the support-message and backup-retention work below.
+
+- [ ] **Resolve child-account prerequisites:** the owner approved worldwide
+  availability wherever eligible, with necessary country exceptions presented
+  individually before changing availability. Confirm actual regional eligibility,
+  applicable age/consent rules and a proportionate parental-verification method.
+  Include Brazil's LGPD and ECA Digital, not only an under-13 consent check.
+  All ages is the audience decision, not automatic Kids Category enrollment or
+  a universal account-age threshold. Provider purchases/activation and extra
+  identity-data collection require their own reviewed scope.
+  The owner approved provider-hosted verification, with Epic Kids Web Services
+  (KWS) as the preferred candidate, subject to agreement/privacy/regional checks.
+  This is not contract acceptance or service activation. Keep raw identity,
+  biometric and payment verification inputs out of Ludolume's servers; confirm
+  provider retention/deletion and consent-withdrawal behavior before integration.
+  Adult verification is distinct from guardianship and each consent choice;
+  validate results and enforce separate publication permissions on the backend.
+  Deep public terms/privacy/technical review completed 2026-09-11. The owner
+  approved proceeding with KWS Parent Verification plus Ludolume-managed consent;
+  PV alone does not obtain consent.
+  Full KWS Consent Management is not an immediate integration requirement.
+  Confirm parent-email ownership and bind each verified result to the correct
+  authenticated parent/attempt; AgeGraph recognition alone is not ownership.
+  Service-specific controller/processor roles differ, so do not describe all KWS
+  data as ours to erase. Its DPA's 30-day termination download window is not a
+  deletion deadline. Resolve provider-data handling and relevant Brazil
+  processing/transfer safeguards before real-data activation, including request
+  expiry, cancellation, refusal and deletion of independently controlled records
+  and backups. Confirm the authenticated API contract, result binding, duplicates
+  and retries during implementation, not as a broad enquiry blocker. Enforce our
+  own consent/withdrawal/deletion lifecycle with private defaults; independent
+  development can continue while awaiting provider evidence.
+  AgeGraph opt-out is separate from local consent withdrawal and account deletion.
+  The owner must review broad indemnities and the standard GBP 100 liability
+  cap before accepting. On 2026-09-11, the authorized Individual Ludolume
+  organization (Brazil) and bare Ludolume product record were created; the
+  private support form required a product. The reduced two-question privacy
+  enquiry was submitted under Kids Web Services through
+  `https://eoshelp.epicgames.com/s/eos-case-page?casetype=Private`; the UI confirmed
+  successful case creation. Awaiting response. No KWS terms were accepted and
+  KWS was not activated; no attachments or parent/child data were submitted.
+  Keep case details private; do not repeat the public review absent material change.
+  Check relevant regional game-distribution prerequisites (including mainland
+  China and Vietnam) against the actual app; no country exclusion is approved
+  merely by listing this work. Review automatic future-storefront expansion
+  separately at release. Store availability does not restrict the public website.
+- [ ] **Parent-managed profiles and private results:** use the parent's contact
+  email, separate child identities and generated nonidentifying nicknames.
+  Implement required consent notices/evidence and parental review/withdrawal
+  controls. Save child results privately by default; enforce separate parental
+  opt-in for public leaderboards on the server, not only in the UI. Withdrawing
+  public-display permission must remove that visibility without forcing loss
+  of private results. Do not recreate a permanent history of all game runs.
+- [ ] **Unfinished signup/consent retention (approved 2026-09-11; implementation
+  pending):** use 24-hour expiry for a future adult email-verification attempt
+  and seven-day expiry for an adult-initiated parental-consent attempt. Current
+  signup creates normal accounts immediately; do not relabel or expire existing
+  users under a pending-registration rule. Minimize preliminary data, use the
+  parent's own initiated setup, and do not store child-supplied contact details
+  under a supposed universal seven-day exception. Resends/callbacks cannot extend
+  original expiry; cancel on refusal, cancellation or permanent delivery failure.
+  Reject stale callbacks and delete live pending data, not only expire links;
+  validate cleanup timing before publishing a retention maximum. Preserve other
+  independently valid profiles. Apply the approved completed-evidence design;
+  validate provider cancellation/deletion separately. Neither flow is activated.
+- [ ] **Completed consent evidence (approved 2026-09-11; not implemented):**
+  retain minimal purpose-specific proof while the relevant processing relies on
+  it, with retrievable non-personal notice/flow documentation. Remove evidence
+  no longer necessary when processing ends; include receipts in account deletion
+  unless a specific legal retention requirement applies. No automatic support-
+  period or multi-year archive. Preserve separate valid permissions and only
+  necessary denied-state/restore markers; missing proof cannot grant permission.
+  Exclude raw verification inputs and full provider payloads. Validate KWS fields,
+  contractual obligations and deletion interfaces separately; local deletion is
+  not a promise to erase provider-held AgeGraph data. Implementation is pending.
+- [ ] **In-app and web account deletion:** add Account → Manage account → Delete
+  account with proportionate reauthentication and explicit permanent-deletion
+  confirmation. Delete the live account, personal bests, public entries and
+  remaining submission receipts. A parent can delete one child independently;
+  deleting the parent deletes all dependent child profiles/results, listed in
+  the warning. Enforce ownership, reject old sessions/run tickets and score
+  retries, handle concurrent submissions transactionally, and report completion
+  only after durable success. Use narrow database privileges. Preserve guest
+  access; handle provider-token revocation when social sign-in is added.
+  - [x] **Existing password-account implementation (2026-09-11, local only):**
+    `/account` exposes a responsive themed confirmation, current-password
+    reauthentication and typed DELETE. The server derives ownership from the
+    signed session, checks trusted Origin/JSON, and limits password attempts.
+    Deletion shares the games' per-user lock and removes all owned bests,
+    receipts and the account in one transaction. Session verification and new
+    run tickets check account existence; stale p4-Vega/Three Bosses submissions
+    cannot recreate records. Success alone clears auth; uncertain responses do
+    not imply deletion. The native endpoint allowlist/cookie cleanup is updated.
+    Focused HTTP, transaction/race and isolated MySQL restricted-role checks
+    cover this path. No live account/data/privilege changes or deployment.
+  - [ ] **Release and future-profile work:** apply the reviewed table-scoped
+    DELETE grants through the existing approval workflow, coordinate backend,
+    web and signed iOS rollout, and verify on-device cookie cleanup. Complete
+    deletion-aware restore before enabling live self-deletion. Parent/child
+    cascades, consent evidence and provider-token revocation remain pending
+    their corresponding models/integrations; do not mark all deletion work done.
+- [ ] **Privacy-request handling (drafted 2026-09-11; implementation pending):**
+  use the privacy mailbox and a minimal restricted case record for manual
+  requests; no new helpdesk service is required. Add proportionate ownership
+  recovery and representative/parent checks, secure delivery, relevant provider
+  notifications and truthful completion/refusal notices. Track receipt and the
+  applicable request-specific deadline, not a universal 30-day waiting period;
+  do not add support contact as a prerequisite for normal in-app deletion.
+  Valid erasure and mandatory shorter retention override routine support limits,
+  including prompt removal for COPPA's one-time child-contact exception. Minimize
+  request evidence and document any distinct lawful hold and expiry. Operational
+  readiness and regional requirements remain to be verified before publication.
+- [ ] **Renewable dormant profiles (approved 2026-09-11; not implemented):** after
+  24 months without meaningful activity or affirmative renewal, notify the user
+  or managing parent and allow 30 days to renew. Intentional renewal keeps the
+  profile, username and results and restarts the period; no new score is needed.
+  Without renewal or qualifying activity, delete the expired profile and its
+  results, including public entries. Keep management/removal access usable;
+  dormancy is not deletion or anonymization, and no permanent archive is added.
+  Apply child-profile activity separately, preserve an active child's managing
+  account, and never treat renewal as public opt-in or restored consent. Earlier
+  deletion requests and applicable parental withdrawals override the schedule.
+  Before enforcement, establish reliable activity data, notify existing users,
+  handle notice failures and recheck activity/renewal atomically with deletion.
+  Background requests or email previews must not renew profiles. Validate the
+  legal basis and regional requirements before publishing promises. This design
+  approval does not authorize deleting live accounts or enabling cleanup now.
+- [ ] **Retention enforcement:** implement the approved 90-day post-resolution
+  limit for routine support messages and our copies of beta feedback/diagnostics,
+  using the simplest reliable operational process rather than assuming a new
+  service is necessary. Enforce the approved 30-day maximum for ordinary recovery
+  copies under our control, preserving shorter automated-backup rotation and
+  seven-day recovery logs. Cover manual backups/exports and relevant retained
+  copies; verify provider-controlled retention before publishing a broader
+  guarantee. Scope/document legal exceptions. Review exact existing-backup
+  deletions and recovery coverage separately before execution.
+- [ ] **Deletion-aware restore:** keep only the minimal protected identifiers,
+  actions and timestamps needed to prevent deleted data or withdrawn permissions
+  from returning. The record must survive database rollback and expire once no
+  recoverable copy can resurrect the affected data, accounting for lawful holds.
+  Restore in isolation and reapply deletions/withdrawals before public access;
+  do not expose restored data if the current record is unavailable. This is not
+  permission to retain names, email addresses, passwords or gameplay history.
+  - [x] **Release safeguard (2026-09-11, local only):** added an exact-opt-in
+    `ACCOUNT_DELETION_ENABLED` runtime switch, disabled by default in every
+    environment. Disabled deletion returns the existing unavailable response
+    without database access or cookie mutation; session verification and logout
+    remain usable. Config and HTTP checks cover the default and enabled paths.
+    This is a release switch, not a completed restore safeguard. No live settings,
+    database grants, account data or cloud resources changed.
+  - [x] **Journal storage/IAM (2026-09-11, explicitly approved):** provisioned the
+    private `ludolume-deletion-journal-1012884798546` Cloud Storage bucket in
+    `us-central1`, with public-access prevention, uniform access, create-only
+    backend access and a separate read-only recovery identity. Preserved owner
+    access, removed new-bucket Editor/Viewer convenience grants, and left project
+    IAM unchanged. Verified policy/settings and empty current/versioned/soft-
+    deleted listings. Seven-day soft delete; no live-object lifecycle expiry,
+    Bucket Lock, scheduler, user-managed keys or deployment. No live account or
+    score changes.
+  - [x] **Independent journal and replay implementation (2026-09-11, local):**
+    added three explicit identity migrations, create-only write-ahead intents,
+    truthful pending responses, startup schema/original-epoch checks, and a
+    bounded plan/apply recovery tool. UUIDs prevent reused numeric IDs from
+    targeting another account. Runtime grants add only UUID and migration-epoch
+    reads, never identity writes. The tool also finishes pending requests on an
+    explicitly frozen active database. No production migration, grant change,
+    journal object, replay or deployment was performed in this implementation.
+  - [ ] **Recovery activation and evidence:** the identity schema, runtime SQL
+    grants and journal identity permissions are verified; the independent
+    read-only pending-request audit is provisioned. Resolve the remaining
+    pre-identity automatic/PITR history without shortening retention, then
+    finish actual writer-upload acceptance and the reviewed website rollout.
+    The isolated
+    backup/SQL replay exercise is verified below; any actual recovery cutover
+    still requires a final drained-writer checkpoint and session-secret rotation.
+    The exercise does not replace those cutover safeguards.
+    Keep deletion disabled until these items and the separate rollout are
+    approved. Commands and limitations are in
+    [Deleted-account recovery](backend/LEADERBOARD_DESIGN.md#deleted-account-recovery).
+    - **Read-only inventory (2026-09-11):** found eight automated backups,
+      four on-demand migration snapshots, and a seven-day PITR configuration.
+      All are treated as pre-identity; no live migration or backup deletion was
+      performed. Project-wide SQL listing found no additional instance/retained
+      backup; bounded local metadata searches found no database dumps. The owner
+      confirmed no exports/backups saved elsewhere. Preserve current
+      recovery until a post-identity backup/restore is verified, then retire
+      exact approved manual copies and let automated/PITR history roll forward.
+      See the [inventory and activation order](backend/LEADERBOARD_DESIGN.md#pre-identity-backup-inventory--2026-09-11-approximately-2343-utc).
+    - **Live identity checkpoint (2026-09-11 local / September 12 UTC):**
+      approved migrations 0006–0008 applied and verified for all 12 accounts;
+      every existing account field and all nine personal bests were preserved.
+      Captured the original epoch outside SQL. Pre-change backup `1789171137743`
+      and clean post-change backup `1789172213271` succeeded; all twelve older
+      backups remain. Original grants, sign-in lock states, public ingress,
+      cleanup schedule and local backend were restored; temporary SQL accounts
+      removed. No new runtime grants, deletion activation, journal write, replay
+      or deployment. Next is one approved isolated restore/replay exercise and
+      the remaining old-backup/PITR transition, not another generic login test.
+      See the [production checkpoint](backend/LEADERBOARD_DESIGN.md#production-identity-checkpoint--2026-09-12-utc).
+    - **Isolated restore/replay verified (2026-09-12 UTC):** restored the clean
+      post-identity backup into a temporary, separately addressed Cloud SQL
+      instance. All 12 accounts, nine bests, eight migration checksums and the
+      independently saved identity epoch matched. The actual journal was empty
+      and readable with the existing operator credentials. A separate in-memory
+      dummy intent exercised restricted SQL replay, repeat safety and numeric-ID
+      reuse without changing the original copied rows or writing a live marker.
+      This proves backup restoration and SQL replay, not live journal-writer/
+      recovery-service authentication, session invalidation or a public cutover.
+      Temporary Cloud SQL instance, SQL credentials and proxy were removed;
+      all 14 source backups remain. External helper-folder removal was refused
+      by the filesystem tool and remains a small explicit cleanup item; no
+      helper was added to the repository. Production remained online with
+      deletion disabled. See the
+      [exercise evidence](backend/LEADERBOARD_DESIGN.md#isolated-recovery-exercise--2026-09-12-utc).
+    - **Activation preparation (2026-09-12 UTC):** fixed the replay CLI's rejection
+      of exact Cloud SQL `cloudsqlproxy~%` account hosts; the focused config suite
+      passed (four tests). Recorded the five exact manual-backup retirement
+      candidates, preserving the verified replacement and automatic/PITR history;
+      exact retirement approval was subsequently obtained and completed below.
+      Prepared pending/unconfirmed-request
+      handling, including crash-before-log outcomes; an accepted operator and
+      reliable notification/reconciliation arrangement remain prerequisites, not
+      an implicitly created service. Runtime SQL grants, keyless service-identity
+      access/probe disposition and eventual rollout still require scoped approval.
+      That preparation changed no cloud resources; the approved retirement is
+      recorded below. See the [retirement set](backend/LEADERBOARD_DESIGN.md#backup-retirement-approval-set--2026-09-12-utc).
+    - **Manual backup retirement completed (2026-09-12 UTC):** deleted only the
+      five specifically approved pre-identity manual snapshots. Verified exactly
+      nine successful backups remain: the restored-and-verified replacement and
+      all eight automatic backups. The live database and recovery settings were
+      preserved. Older automatic/PITR history still precedes the identity epoch,
+      so deletion remains disabled; no repeat restore or new deployment occurred.
+    - **Access review (2026-09-14 UTC):** recovery history is rotating normally,
+      but six automatic backups and the earliest PITR point still predate the
+      identity epoch. The ordinary operator lacks the MySQL metadata access
+      needed for an exact runtime-grant plan; recovery-service impersonation
+      also failed before storage access. No privileges were broadened, objects
+      written or deployment made. Authorize the narrow execution paths before
+      the live plan/service-identity checks; do not repeat the restore exercise.
+      See the [access review](backend/LEADERBOARD_DESIGN.md#activation-access-review--2026-09-14-utc).
+    - **Approved access rollout (2026-09-14 UTC):** applied the existing
+      planner's exact additive runtime grant plan under a verified writer drain;
+      fresh allowed/denied zero-row probes and grant verification passed.
+      Actual writer and reader credentials verified create-only versus get/list
+      bucket permissions; strict reader authentication/listing passed. No real
+      account/score rows or journal objects changed. Restored the same backend
+      revision, receipt schedule and local backend; removed temporary SQL and
+      impersonation access. Created a separate audit SQL account that cannot
+      read passwords, emails or scores and cannot delete anything. See the
+      [rollout evidence](backend/LEADERBOARD_DESIGN.md#approved-access-and-audit-rollout--2026-09-14-utc).
+    - **Read-only audit implementation (2026-09-14 UTC):** added bounded
+      journal-to-account comparison, earliest-request retry handling, strict
+      target/identity validation and aggregate-only logging. Eleven focused
+      tests and backend typechecking passed. The reviewed image-only cloud
+      build succeeded and completed vulnerability analysis found no
+      occurrences. Job, schedule and alert acceptance are tracked in
+      [DELETION_AUDIT.md](backend/DELETION_AUDIT.md). This detector is not an
+      automatic deletion/replay service and does not enable self-deletion.
+    - **Audit operational acceptance (2026-09-14 UTC):** enabled the hourly
+      minute-20 UTC schedule and forced one dispatch through Scheduler's actual
+      identity. Execution `ludolume-account-deletion-audit-pcmdg` succeeded with
+      a correlated clear/zero-pending log. Read back all three enabled policies
+      on the existing approved email channel; missing-success monitoring was
+      armed after that success. Removed the temporary image-build trigger and
+      verified all four old deployment triggers still disabled. No duplicate
+      restore/login/score testing or natural-tick claim is added.
+      Local removal of today's five non-secret external helper scripts was
+      refused by the filesystem tool and remains explicitly outstanding;
+      [the audit runbook](backend/DELETION_AUDIT.md) records the exact folder.
+    - **Deployment contract preparation (2026-09-14 UTC):** canonical/frozen
+      deployments and traffic validation now carry exact optional deletion
+      pins, default off. Explicit enable/disable decisions are tied to reviewed
+      source/image inputs; active template/serving/tagged revision checks prevent
+      a normal default-off deployment from silently disabling the feature.
+      Intentional disable/rollback remains supported. No website deployment,
+      trigger activation or backup-gate bypass was performed. See the
+      [deployment contract](backend/LEADERBOARD_DESIGN.md#deployment-contract-prepared-website-rollout-not-performed).
+- [ ] **Finish and publish accurate privacy information:** resolve remaining
+  retention/rights/provider/market decisions; implement the approved safeguards
+  before claiming they exist. Preserve the no-sale/no-targeted-advertising
+  commitment without promising that the app is forever free or ad-free. Add an
+  accessible HTTPS policy page and in-app/registration links, then matching
+  App Store Connect/App Privacy and Google Play data disclosures under the
+  appropriate publication approval. Review actual Google/Apple login data flows
+  when implemented; do not predeclare them. Keep private operator/reviewer
+  records out of this roadmap.
+- [ ] **Focused acceptance and security closeout:** verify account/child isolation,
+  parental visibility choices, deletion with stale credentials and submission
+  races, failure/retry behavior, retention expiry and a deletion-aware restore.
+  Use bounded fixtures/disposable data where authorized, not repeated checks of
+  already-accepted gameplay or generic login. Retain outstanding evidence and
+  implementation gaps explicitly; no public release/compliance claim follows
+  merely from completing the policy wording.
+
+Regional scope references checked 2026-09-10:
+[Apple availability and future storefronts](https://developer.apple.com/help/app-store-connect/manage-your-apps-availability/manage-availability-for-your-app-on-the-app-store/),
+[Apple regional game-distribution requirements](https://developer.apple.com/help/app-store-connect/reference/app-information/app-information/),
+[ANPD ECA Digital](https://www.gov.br/anpd/pt-br/assuntos/eca-digital/eca-digital-english).
+These identify review requirements, not completed regional clearance.
 
 ## Deferred tooling follow-up
 

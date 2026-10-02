@@ -1,4 +1,4 @@
-# mickeyf.com — BeatCalc Web App
+# mickeyf.com — Ludolume Web App
 
 mickeyf.com is an interactive music-and-math platform with games, animations,
 educational resources, authentication, and leaderboards.
@@ -38,7 +38,7 @@ live in any local folder; the commands below assume this repository root:
 ### Prerequisites
 
 - Git for Windows
-- Node.js 22.15 or newer, but lower than 23 (CI/runtime pinned at 22.23.2), and
+- Node.js 22.15 or newer, but lower than 23 (CI/runtime candidate pinned at 22.23.3), and
   npm 11.6.2
 - Visual Studio Code for Windows
 - Docker Desktop using Linux containers
@@ -68,12 +68,38 @@ workspaces.
 Create the ignored local files when they do not already exist:
 
 ```powershell
-Copy-Item .env.example .env
-Copy-Item frontend\.env.example frontend\.env
+if (!(Test-Path .env)) { Copy-Item .env.example .env }
+if (!(Test-Path frontend\.env)) { Copy-Item frontend\.env.example frontend\.env }
 ```
 
 Fill in the required local values. Never commit `.env`, `frontend/.env`,
 database credentials, session secrets, Firebase credentials, or ADC files.
+
+Development uses Cloud SQL. The local backend connects through the Cloud SQL
+Auth Proxy using the root `.env` configuration.
+
+Choose which backend the browser preview uses in ignored
+`frontend/.env.development.local`, then restart Front:
+
+- `VITE_USE_PUBLIC_API=1`: open `http://localhost:5173`. Password signup/login,
+  both games' submissions and leaderboards use the **real public service**.
+  These are real accounts and scores, not test fixtures. The currently deployed
+  backend has four-hour password sessions; Google login, renewable sessions and
+  account-management changes remain in source preparation until the coordinated
+  backend rollout. See the [provider rollout plan](backend/GOOGLE_SIGN_IN_ROLLOUT.md).
+- `VITE_USE_PUBLIC_API=0`: authentication and submissions use the local backend
+  at `VITE_DEV_API_URL`, started with `npm run backend:dev:local`. It connects
+  to Cloud SQL through the proxy. Leaderboard pages still read public rankings.
+
+Both modes use real Cloud SQL data. This flag selects the backend endpoint;
+it does not create a separate development database.
+
+The public mode uses a loopback-only, route-allowlisted Vite `/__public-api`
+gateway with a separate HttpOnly cookie. It preserves the real localhost Origin
+and keeps database credentials out of browser code. LAN/mobile preview origins
+are not authorized. Automated account/score mutation tests use disposable test
+fixtures, never this gateway or the Cloud SQL-backed development server.
+Production builds and installed apps retain their normal API routing.
 
 The tracked `compose.yaml` expects the Cloud SQL connection name in the root
 `.env`:
@@ -172,6 +198,14 @@ Default local ports are:
 
 If port 8080 is occupied, identify its owning process before stopping it. The
 backend start command deliberately does not kill unrelated processes.
+
+If webpack succeeds but the backend reports `Backend startup failed`, an open
+proxy port alone does not prove that Cloud SQL matches the checked-out branch.
+The current backend requires recorded session migrations 0011/0012 and their
+prerequisites, plus session-table permissions. Keep readiness enabled and review
+the target before applying migrations. See the
+[Cloud SQL session migration review](backend/CLOUD_SQL_SESSION_MIGRATION_REVIEW.md)
+for the diagnosed failure, approved repair and completed maintenance cleanup.
 
 ### Documentation development
 
@@ -281,7 +315,8 @@ npm --prefix backend run prod
 
 The migration integration suite starts its own digest-pinned MySQL 8.0.31
 container on a dynamically assigned `127.0.0.1` port and destroys it after the
-tests. It never uses the Cloud SQL proxy on port 3306 or the runtime `DB_*`
+tests. This disposable test fixture is separate from the Cloud SQL development
+workflow. It never uses the Cloud SQL proxy on port 3306 or the runtime `DB_*`
 variables; concurrent worktrees receive separate Compose projects and ports.
 
 The migration CLI uses only dedicated `MIGRATION_DB_*` variables. Its
@@ -404,7 +439,7 @@ The runtime manifest is deliberately render-only: importing it opens no
 connection and changes no privilege. It grants only the columns used by the
 application on `users`, `game_runs`, and `game_personal_bests`; it grants
 nothing on `schema_migrations`, no `DELETE` or DDL, no role, and no grant
-option. The isolated MySQL 8.0.31 suite installs those grants on a disposable
+option. The MySQL 8.0.31 integration suite installs those grants on a disposable
 runtime user and a `users` table without `p4_score`, exercises the current
 signup, login, p4-Vega, and Three Bosses SQL paths, and proves that user-row
 `FOR UPDATE`, migration history, ledger mutation, destructive DML, DDL, account

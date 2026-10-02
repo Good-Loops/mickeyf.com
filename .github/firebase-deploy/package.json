@@ -3,22 +3,23 @@
   "version": "1.0.0",
   "private": true,
   "engines": {
-    "node": "22.23.2",
+    "node": "22.23.3",
     "npm": "11.6.2"
   },
   "packageManager": "npm@11.6.2",
   "scripts": {
+    "test:auth-browser": "node --test --test-concurrency=1 registration-browser.test.mjs apple-web-browser.test.mjs",
     "three-bosses:webgl:preview:smoke": "node smoke-three-bosses-webgl-preview.mjs",
     "test:three-bosses-webgl-smoke": "node --test smoke-three-bosses-webgl-preview.test.mjs"
   },
   "dependencies": {
-    "firebase-tools": "15.28.1",
+    "firebase-tools": "15.32.0",
     "picomatch": "4.0.4",
     "playwright-core": "1.62.1"
   },
   "overrides": {
-    "firebase-tools@15.28.1": {
-      "csv-parse": "7.0.2"
+    "get-uri": {
+      "basic-ftp": "6.2.1"
     },
     "qs": "6.16.0",
     "re2": "1.26.1",

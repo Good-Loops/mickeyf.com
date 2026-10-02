@@ -25,16 +25,47 @@ test('migration manifest preserves lexical order and hashes exact LF bytes', () 
             '0003_drop_users_p4_score',
             '0004_detach_personal_best_sources',
             '0005_retain_submission_receipts',
+            '0006_add_account_identity',
+            '0007_backfill_account_identity',
+            '0008_finalize_account_identity',
+            '0009_create_account_provider_identities',
+            '0010_create_provider_auth_attempts',
+            '0011_create_account_sessions',
+            '0012_add_session_renewal',
+            '0013_add_unique_user_names',
+            '0014_allow_passwordless_accounts',
+            '0015_extend_provider_attempt_actions',
+            '0016_create_apple_provider_tokens',
+            '0017_create_apple_auth_revocations',
+            '0018_add_apple_session_provenance',
+            '0019_create_registration_authorizations',
+            '0020_create_account_registration_profiles',
+            '0021_allow_parent_managed_contact',
+            '0022_create_parent_registration_attempts',
+            '0023_create_parent_child_consents',
+            '0024_extend_parent_family_deletion',
+            '0025_create_score_participation',
         ]
     );
     assert.deepEqual(
         migrations.map(({ effect }) => effect),
-        ['create-table', 'create-table', 'drop-column', 'detach-best-source', 'retain-receipts']
+        ['create-table', 'create-table', 'drop-column', 'detach-best-source', 'retain-receipts',
+            'add-account-identity', 'add-account-identity', 'add-account-identity', 'add-provider-identities',
+            'add-provider-attempts', 'add-account-sessions', 'add-session-renewal', 'add-unique-user-names',
+            'allow-passwordless-accounts', 'extend-provider-attempt-actions', 'add-apple-tokens',
+            'add-apple-revocations', 'add-apple-session-provenance', 'add-registration-authorization', 'add-registration-profile', 'allow-parent-managed-contact', 'add-parent-attempts', 'add-parent-consents', 'extend-parent-family', 'add-score-participation']
     );
-    assert.deepEqual(migrations.slice(0, 3).map(({ checksum }) => checksum.toString('hex')), [
+    assert.deepEqual(migrations.slice(0, 10).map(({ checksum }) => checksum.toString('hex')), [
         '9a797edd514dfc946783cf66cf80ee8dfa774210a0d100946c3a9a822596ca00',
         '01eade4cfc8e1131be79df43881a9bc7a538aaf0e1e1d3f470deb6c21eaaed3a',
         'bc4c89691d9d2f729977446e1bde8f168c5ee83c95349e80c3a6deec598a2951',
+        '88cc121f6410f6c324cff0d6bb57691062a64a10722c0c35deb826ce4cc0f9a6',
+        'f91a3f5aa52f14e43c652282ca9cc1a9e6dc5e9294c8c7c330c8142cbd33becc',
+        'aecdd543c2b3b5f9779b1ff607f2dacefe547a3d578c91806f65d4c73652d6bb',
+        '59b3b59b87ecf4b7f78b1f2632935546493f0ff826370fd43efef2b21b9cc55c',
+        'f92d599dfd8586022bfcbd60e9de382643a0fb89ff644ad664cd61d817701883',
+        'e340eef416c5b837a37b40b10b5c435b7519536596f6d477b69addbb3314a57f',
+        '150391a30408a7df03953b006472f39316be99b20c01fe3e57f481b5487ca937',
     ], 'historical migration bytes must remain immutable');
     for (const migration of migrations) {
         const rawSql = readFileSync(path.join(migrationDirectory, migration.fileName));

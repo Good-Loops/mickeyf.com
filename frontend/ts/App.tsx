@@ -3,20 +3,15 @@
  * Composes the top-level layout (header/footer) and the client-side route table.
  * Ownership: this module wires pages and navigation only; domain logic lives in feature modules, hooks, and services.
  */
-import "pixi.js/unsafe-eval";
-import React, { useRef } from "react";
+import React, { lazy, useRef } from "react";
 import { useSafariBackgroundEdges } from '@/hooks/useSafariBackgroundEdges';
-import { Routes, Route } from "react-router-dom";
+import { Routes, Route, useLocation } from "react-router-dom";
+import RouteContentBoundary from '@/components/RouteContentBoundary';
+import PrivacyNoticeLink from '@/components/PrivacyNoticeLink';
+import { parsePrivacyNoticeUrl } from '@/config/privacyNoticeUrl';
 import Header from "@/Header";
 import Home from "@/pages/Home";
 
-import Animations from "@/pages/Animations";
-import DancingCircles from "@/pages/animations/DancingCircles";
-import DancingFractals from "@/pages/animations/DancingFractals";
-
-import Games from "@/pages/Games";
-import P4Vega from "@/pages/games/P4Vega";
-import { ThreeBossesAvailabilityGate } from "@/pages/games/ThreeBosses";
 import { isThreeBossesAvailableInCurrentBrowser } from '@/games/three-bosses/unityVisibility';
 import {
 	isThreeBossesEnabled,
@@ -24,15 +19,29 @@ import {
 	THREE_BOSSES_ROUTE,
 } from '@/config/featureFlags';
 
-import Leaderboard from "@/pages/Leaderboard";
-import GameLeaderboard from "@/pages/leaderboards/GameLeaderboard";
-import Connect from "@/pages/Connect";
-import Login from "@/pages/Login";
-import SignUp from "@/pages/SignUp";
 import NotFound from "@/pages/NotFound";
+
+// Home and recovery stay immediate; every destination shares the route loading boundary.
+const Animations = lazy(() => import('@/pages/Animations'));
+const Games = lazy(() => import('@/pages/Games'));
+const DancingCircles = lazy(() => import('@/pages/animations/DancingCircles'));
+const DancingFractals = lazy(() => import('@/pages/animations/DancingFractals'));
+const P4Vega = lazy(() => import('@/pages/games/P4Vega'));
+const ThreeBossesAvailabilityGate = lazy(() => import('@/pages/games/ThreeBosses')
+	.then(module => ({ default: module.ThreeBossesAvailabilityGate })));
+const Leaderboard = lazy(() => import('@/pages/Leaderboard'));
+const GameLeaderboard = lazy(() => import('@/pages/leaderboards/GameLeaderboard'));
+const Connect = lazy(() => import('@/pages/Connect'));
+const Privacy = lazy(() => import('@/pages/Privacy'));
+const Login = lazy(() => import('@/pages/Login'));
+const SignUp = lazy(() => import('@/pages/SignUp'));
+const ManageAccount = lazy(() => import('@/pages/ManageAccount'));
+const ParentAccounts = lazy(() => import('@/pages/ParentAccounts'));
+const privacyNoticeUrl = parsePrivacyNoticeUrl(import.meta.env.VITE_PRIVACY_NOTICE_URL);
 
 const App: React.FC = () => {
 	const shellRef = useRef<HTMLDivElement>(null);
+	const { pathname } = useLocation();
 	useSafariBackgroundEdges(shellRef);
 	const threeBossesAvailable = isThreeBossesEnabled
 		&& isThreeBossesAvailableInCurrentBrowser(undefined, isThreeBossesReleaseEnabled);
@@ -55,36 +64,45 @@ const App: React.FC = () => {
 		</div>
 		<Header />
 		<main className="main">
-			<Routes>
-				<Route path="/" element={<Home />} />
+			<RouteContentBoundary key={pathname}>
+				<Routes>
+					<Route path="/" element={<Home />} />
 
-				<Route path="/animations/*" element={<Animations />} />
-				<Route path="/animations/dancing-circles" element={<DancingCircles />} />
-				<Route path="/animations/dancing-fractals" element={<DancingFractals />} />
-				
-				<Route
-					path="/games"
-					element={<Games threeBossesAvailable={threeBossesAvailable} />}
-				/>
-				<Route path="/games/p4-Vega" element={<P4Vega />} />
-				{isThreeBossesEnabled && (
+					<Route path="/animations/*" element={<Animations />} />
+					<Route path="/animations/dancing-circles" element={<DancingCircles />} />
+					<Route path="/animations/dancing-fractals" element={<DancingFractals />} />
+
 					<Route
-						path={THREE_BOSSES_ROUTE}
-						element={<ThreeBossesAvailabilityGate />}
+						path="/games"
+						element={<Games threeBossesAvailable={threeBossesAvailable} />}
 					/>
-				)}
+					<Route path="/games/p4-Vega" element={<P4Vega />} />
+					{isThreeBossesEnabled && (
+						<Route
+							path={THREE_BOSSES_ROUTE}
+							element={<ThreeBossesAvailabilityGate />}
+						/>
+					)}
 
-				<Route path="/leaderboards" element={<Leaderboard />} />
-				<Route path="/leaderboards/:gameId" element={<GameLeaderboard />} />
-				<Route path="/connect" element={<Connect />} />
-				<Route path="/login" element={<Login />} />
-				<Route path="/signup" element={<SignUp />} />
-				<Route path="*" element={<NotFound />} />
-			</Routes>
+					<Route path="/leaderboards" element={<Leaderboard />} />
+					<Route path="/leaderboards/:gameId" element={<GameLeaderboard />} />
+					<Route path="/connect" element={<Connect />} />
+					<Route path="/privacy" element={<Privacy />} />
+					<Route path="/login" element={<Login />} />
+					<Route path="/signup" element={<SignUp />} />
+					<Route path="/account" element={<ManageAccount />} />
+                    <Route path="/parent-accounts" element={<ParentAccounts />} />
+					<Route path="*" element={<NotFound />} />
+				</Routes>
+			</RouteContentBoundary>
 		</main>
 		<footer className="footer">
 			<p className="footer__text">
 			© 2024 Michel Fingergut {/* · Portfolio */}
+			<> · {privacyNoticeUrl ? <PrivacyNoticeLink url={privacyNoticeUrl} />
+				: <a href="/privacy" target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">
+					Privacy notice <span>(opens in a new tab)</span>
+				</a>}</>
 			</p>
 		</footer>
     </div>

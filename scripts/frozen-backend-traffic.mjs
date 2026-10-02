@@ -1,8 +1,11 @@
 // Deliberately separate from the enabled main-branch deployment path.
 import { createHash } from 'node:crypto';
+import { providerReleaseEnvironment } from './provider-release-config.mjs';
 import { execFileSync } from 'node:child_process';
 import { readFile, writeFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
+import { accountDeletionEnvironment, googleSignInEnvironment, validateSessionSecretVersion,
+    frozenDeploymentApproval } from './render-frozen-backend-deploy.mjs';
 
 export const PROJECT = 'noted-reef-387021';
 export const REGION = 'us-central1';
@@ -26,9 +29,13 @@ function keys(value, expected, label) {
 }
 
 export function validatePins(pins) {
-    keys(pins, ['sourceBuildId', 'sourceCommit', 'imageDigest', 'deploymentBuildId',
-        'deploymentTriggerId', 'deploymentStepsSha256'], 'Pins');
-    requireThat(Object.values(pins).every(value => typeof value === 'string'), 'All pins must be strings');
+    const { accountDeletion, googleSignIn, ...sourcePins } = pins ?? {};
+    keys(sourcePins, ['sourceBuildId', 'sourceCommit', 'imageDigest', 'deploymentBuildId',
+        'deploymentTriggerId', 'deploymentStepsSha256', 'sessionSecretVersion'], 'Pins');
+    requireThat(Object.values(sourcePins).every(value => typeof value === 'string'), 'All source pins must be strings');
+    validateSessionSecretVersion(pins.sessionSecretVersion);
+    accountDeletionEnvironment(accountDeletion);
+    googleSignInEnvironment(googleSignIn, accountDeletion);
     for (const key of ['sourceBuildId', 'deploymentBuildId', 'deploymentTriggerId']) {
         requireThat(UUID.test(pins[key]), `Invalid ${key}`);
     }
@@ -47,6 +54,9 @@ export function deploymentStepsFingerprint(steps) {
         Object.entries(step).filter(([key]) => !outputFields.has(key)))));
 }
 export function validateDeployment(build, pins) {
+    return validateDeploymentReceipt(build, pins, frozenDeploymentApproval(pins));
+}
+export function validateDeploymentReceipt(build, pins, expectedApproval) {
     requireThat(build.id === pins.deploymentBuildId && build.projectId === PROJECT
         && build.buildTriggerId === pins.deploymentTriggerId
         && [DEPLOY_SA, DEPLOY_SA.replace(`projects/${PROJECT}/`, 'projects/-/')].includes(build.serviceAccount)
@@ -64,15 +74,30 @@ export function validateDeployment(build, pins) {
         && (options.pool === undefined || same(options.pool, {})) && build.timeout === '2400s',
     'Unreviewed deployment execution options');
     requireThat(build.substitutions?._DEPLOY_TRIGGER_ID === pins.deploymentTriggerId
-        && build.substitutions?._APPROVAL === `freeze-zero-traffic:${pins.sourceCommit}:${pins.sourceBuildId}:${pins.imageDigest}`,
-    'Deployment substitution approval differs from the pinned source and image');
+        && build.substitutions?._APPROVAL === expectedApproval,
+    'Deployment substitution approval differs from the pinned source, image or session-secret version');
     requireThat(deploymentStepsFingerprint(build.steps) === pins.deploymentStepsSha256
         && build.steps.every(step => step.status === 'SUCCESS' && (step.exitCode ?? 0) === 0
             && !step.allowFailure && !step.allowExitCodes?.length), 'Deployment steps differ from the offline reviewed config');
 }
 
 export function validateFrozenRevision(revision, pins) {
-    requireThat(revision.name === `${SERVICE}/revisions/${revisionName(pins)}`
+    return validateRuntimeRevision(revision, pins, revisionName(pins), false);
+}
+export const sessionRevisionName = pins => `mickeyf-org-session-${pins.sourceBuildId.replaceAll('-', '')}`;
+export function validateSessionRevision(revision, pins) {
+    return validateRuntimeRevision(revision, pins, sessionRevisionName(pins), true);
+}
+export function validateLegacySessionRevision(revision, pins, expectedName) {
+    return validateRuntimeRevision(revision, pins, expectedName, true, true);
+}
+export function validateProviderRevision(revision, pins, expectedName = sessionRevisionName(pins), rollback = false) {
+    return validateRuntimeRevision(revision, pins, expectedName, true, false,
+        providerReleaseEnvironment(pins.providerRelease, rollback));
+}
+function validateRuntimeRevision(revision, pins, expectedName, scoringEnabled, legacy = false, providerEnvironment) {
+    const sessionSecretVersion = validateSessionSecretVersion(pins.sessionSecretVersion);
+    requireThat(revision.name === `${SERVICE}/revisions/${expectedName}`
         && revision.service === 'mickeyf-org' && revision.uid && !revision.deleteTime && !revision.reconciling
         && revision.conditions?.some(c => c.type === 'Ready' && c.state === 'CONDITION_SUCCEEDED'), 'Frozen revision is not Ready');
     requireThat(revision.labels?.['source-build-id'] === pins.sourceBuildId
@@ -93,13 +118,20 @@ export function validateFrozenRevision(revision, pins) {
     const expectedPlain = {
         NODE_ENV: 'production', CLOUD_SQL_CONNECTION_NAME: `${PROJECT}:${REGION}:cms-mickeyf`,
         DB_USER: 'cms_mickeyf', DB_NAME: 'cms',
-        P4_VEGA_SCORE_SUBMISSIONS_ENABLED: 'false', THREE_BOSSES_RUN_SUBMISSIONS_ENABLED: 'false',
+        P4_VEGA_SCORE_SUBMISSIONS_ENABLED: String(scoringEnabled), THREE_BOSSES_RUN_SUBMISSIONS_ENABLED: String(scoringEnabled),
+        ...providerEnvironment ?? { ...accountDeletionEnvironment(pins.accountDeletion),
+            ...googleSignInEnvironment(pins.googleSignIn, pins.accountDeletion) },
     };
-    requireThat(container.env?.length === 8 && new Set(container.env.map(e => e.name)).size === 8, 'Unexpected environment variables');
+    // The recorded legacy runtime predates these default-off feature variables.
+    if (legacy) for (const name of ['ACCOUNT_DELETION_ENABLED', 'PROVIDER_AUTH_ENABLED', 'PROVIDER_GOOGLE_SIGNUP_ENABLED']) {
+        if (!container.env?.some(entry => entry.name === name)) delete expectedPlain[name];
+    }
+    const expectedCount = Object.keys(expectedPlain).length + 2;
+    requireThat(container.env?.length === expectedCount && new Set(container.env.map(e => e.name)).size === expectedCount, 'Unexpected environment variables');
     for (const [name, value] of Object.entries(expectedPlain)) {
         requireThat(same(container.env.find(e => e.name === name), { name, value }), `Frozen environment differs: ${name}`);
     }
-    for (const [name, version] of [['DB_PASS', '1'], ['SESSION_SECRET', '2']]) {
+    for (const [name, version] of [['DB_PASS', '1'], ['SESSION_SECRET', sessionSecretVersion]]) {
         const env = container.env.find(e => e.name === name);
         const reference = env?.valueSource?.secretKeyRef;
         requireThat(env && !('value' in env) && reference?.version === version
@@ -116,7 +148,7 @@ export function validateFrozenRevision(revision, pins) {
     return revision;
 }
 
-function trafficShape(items, statuses = false) {
+export function trafficShape(items, statuses = false) {
     requireThat(Array.isArray(items) && items.length > 0, 'Missing explicit traffic');
     const tags = new Set();
     const result = items.map(item => {
@@ -143,14 +175,54 @@ export function validateService(service) {
 }
 
 // Output-only fields can settle after a traffic PATCH; all configuration must stay unchanged.
-function serviceConfiguration(service) {
+export function serviceConfiguration(service) {
     const volatile = new Set(['generation', 'observedGeneration', 'etag', 'updateTime', 'lastModifier', 'traffic',
         'trafficStatuses', 'conditions', 'terminalCondition', 'reconciling', 'urls']);
     return Object.fromEntries(Object.entries(service).filter(([key]) => !volatile.has(key)));
 }
-function revisionConfiguration(revision) {
+export function revisionConfiguration(revision) {
     return Object.fromEntries(Object.entries(revision).filter(([key]) =>
         !['scalingStatus', 'conditions', 'observedGeneration', 'etag', 'updateTime', 'reconciling'].includes(key)));
+}
+
+function checkPreviousDeletionState(containers, pins) {
+    requireThat(containers?.length === 1, 'Active deletion state requires one container');
+    const names = ['ACCOUNT_DELETION_ENABLED', 'ACCOUNT_DELETION_JOURNAL_BUCKET', 'ACCOUNT_IDENTITY_EPOCH'];
+    const entries = (containers[0].env ?? []).filter(item => names.includes(item.name));
+    requireThat(new Set(entries.map(item => item.name)).size === entries.length
+        && entries.every(item => same(Object.keys(item).sort(), ['name', 'value'])), 'Active deletion settings are not unique literal values');
+    const previous = Object.fromEntries(entries.map(item => [item.name, item.value]));
+    requireThat(['false', 'true'].includes(previous.ACCOUNT_DELETION_ENABLED ?? 'false'), 'Unknown active deletion state');
+    if (previous.ACCOUNT_DELETION_ENABLED !== 'true') return;
+    accountDeletionEnvironment({ enabled: true, journalBucket: previous.ACCOUNT_DELETION_JOURNAL_BUCKET,
+        identityEpoch: previous.ACCOUNT_IDENTITY_EPOCH });
+    requireThat(pins.accountDeletion !== undefined, 'Default-off would disable active deletion; explicitly review enable or disable in the traffic pins');
+}
+
+function checkPreviousGoogleState(containers, pins) {
+    requireThat(containers?.length === 1, 'Active Google state requires one container');
+    const names = ['PROVIDER_AUTH_ENABLED', 'PROVIDER_GOOGLE_SIGNUP_ENABLED', 'GOOGLE_WEB_CLIENT_ID'];
+    const entries = (containers[0].env ?? []).filter(item => /^(?:PROVIDER_|GOOGLE_|APPLE_)/u.test(item.name));
+    requireThat(entries.every(item => names.includes(item.name)
+        && same(Object.keys(item).sort(), ['name', 'value']))
+        && new Set(entries.map(item => item.name)).size === entries.length,
+    'Active provider settings are unsupported, duplicated or not literal values');
+    const previous = Object.fromEntries(entries.map(item => [item.name, item.value]));
+    const enabled = previous.PROVIDER_AUTH_ENABLED ?? 'false';
+    const signup = previous.PROVIDER_GOOGLE_SIGNUP_ENABLED ?? 'false';
+    requireThat(['false', 'true'].includes(enabled) && ['false', 'true'].includes(signup), 'Unknown active Google state');
+    if (enabled === 'false') {
+        requireThat(signup === 'false' && previous.GOOGLE_WEB_CLIENT_ID === undefined, 'Inactive Google settings are inconsistent');
+        return;
+    }
+    requireThat(signup === 'true', 'Active Google configuration is not the reviewed full signup/login contract');
+    const deletion = Object.fromEntries((containers[0].env ?? []).map(item => [item.name, item.value]));
+    requireThat(deletion.ACCOUNT_DELETION_ENABLED === 'true', 'Active Google signup requires account deletion');
+    googleSignInEnvironment({ enabled: true, clientId: previous.GOOGLE_WEB_CLIENT_ID }, {
+        enabled: true, journalBucket: deletion.ACCOUNT_DELETION_JOURNAL_BUCKET, identityEpoch: deletion.ACCOUNT_IDENTITY_EPOCH,
+    });
+    requireThat(pins.googleSignIn !== undefined,
+        'Default-off would disable active Google sign-in; explicitly review enable or disable in the traffic pins');
 }
 
 async function checkedState(provider, pins) {
@@ -162,6 +234,15 @@ async function checkedState(provider, pins) {
     validateService(service);
     validateFrozenRevision(revision, pins);
     validateDeployment(build, pins);
+    checkPreviousDeletionState(service.template.containers, pins);
+    checkPreviousGoogleState(service.template.containers, pins);
+    const active = new Set(service.traffic.filter(item => item.tag || item.percent > 0).map(item => item.revision));
+    for (const name of active) {
+        const previous = name === revisionName(pins) ? revision : await provider.getRevision(name);
+        requireThat(previous.name === `${SERVICE}/revisions/${name}` && !previous.deleteTime, 'Active revision inventory differs');
+        checkPreviousDeletionState(previous.containers, pins);
+        checkPreviousGoogleState(previous.containers, pins);
+    }
     return { service, revision };
 }
 export async function planFrozenTraffic(provider, pins, now = Date.now()) {
@@ -204,13 +285,23 @@ export async function applyFrozenTraffic(provider, plan, confirmation, now = Dat
 }
 
 export function createCloudProvider(token, fetcher = fetch) {
+    return cloudProvider(token, fetcher, /^mickeyf-org-freeze-[0-9a-f]{32}$/);
+}
+export function createSessionCloudProvider(token, fetcher = fetch) {
+    return cloudProvider(token, fetcher, /^mickeyf-org-session-(?:rollback-)?[0-9a-f]{32}$/);
+}
+export function createCloudRequest(token, fetcher = fetch) {
     requireThat(typeof token === 'string' && token.length >= 20 && token.length <= 8192 && !/\s/.test(token), 'Access token unavailable');
-    async function request(base, path, method = 'GET', body) {
+    return async function request(base, path, method = 'GET', body, allowNotFound = false) {
         const response = await fetcher(`${base}${path}`, {
             method, redirect: 'error', signal: AbortSignal.timeout(30_000),
             headers: { Authorization: `Bearer ${token}`, ...(body ? { 'Content-Type': 'application/json' } : {}) },
             ...(body ? { body: JSON.stringify(body) } : {}),
         });
+        if (allowNotFound && method === 'GET' && response.status === 404) {
+            await response.body?.cancel();
+            return null;
+        }
         requireThat(response.ok, `Cloud API ${method} returned HTTP ${response.status}`);
         const reader = response.body.getReader();
         const chunks = [];
@@ -225,7 +316,10 @@ export function createCloudProvider(token, fetcher = fetch) {
         const value = JSON.parse(Buffer.concat(chunks).toString('utf8'));
         requireThat(object(value), 'Cloud API returned non-object JSON');
         return value;
-    }
+    };
+}
+function cloudProvider(token, fetcher, allowedRevision) {
+    const request = createCloudRequest(token, fetcher);
     const run = (path, method, body) => request('https://run.googleapis.com/v2/', path, method, body);
     const builds = path => request('https://cloudbuild.googleapis.com/v1/', path);
     async function listAll(path, field) {
@@ -247,7 +341,8 @@ export function createCloudProvider(token, fetcher = fetch) {
     return {
         getService: () => run(SERVICE),
         getRevision: name => {
-            requireThat(/^mickeyf-org-freeze-[0-9a-f]{32}$/.test(name), 'Invalid revision name');
+            // Reading existing service revisions is needed to reject silent deletion downgrades.
+            requireThat(/^mickeyf-org-[a-z0-9-]+$/.test(name), 'Invalid revision name');
             return run(`${SERVICE}/revisions/${name}`);
         },
         getDeployment: id => { requireThat(UUID.test(id), 'Invalid deployment ID'); return builds(`projects/${PROJECT}/locations/global/builds/${id}`); },
@@ -268,7 +363,7 @@ export function createCloudProvider(token, fetcher = fetch) {
             keys(body, ['name', 'etag', 'traffic'], 'Traffic patch');
             requireThat(body.name === SERVICE && body.etag && body.traffic.length === 1
                 && body.traffic[0].percent === 100 && body.traffic[0].type === REVISION_TYPE
-                && /^mickeyf-org-freeze-[0-9a-f]{32}$/.test(body.traffic[0].revision)
+                && allowedRevision.test(body.traffic[0].revision)
                 && Object.keys(body.traffic[0]).length === 3, 'Patch exceeds frozen traffic-only authority');
             const operation = await run(`${SERVICE}?updateMask=traffic`, 'PATCH', body);
             requireThat(new RegExp(`^projects/(?:${PROJECT}|1012884798546)/locations/${REGION}/operations/[^/]+$`).test(operation.name)
@@ -293,7 +388,7 @@ export function createCloudProvider(token, fetcher = fetch) {
     };
 }
 
-function accessToken() {
+export function accessToken() {
     try {
         // Fixed command only; no user data is passed through a shell.
         return process.platform === 'win32'
@@ -301,7 +396,7 @@ function accessToken() {
             : execFileSync('gcloud', ['auth', 'print-access-token'], { encoding: 'utf8', timeout: 30_000, stdio: ['ignore', 'pipe', 'pipe'] }).trim();
     } catch { fail('Could not obtain a short-lived gcloud access token'); }
 }
-async function readJson(path) {
+export async function readJson(path) {
     const raw = await readFile(path, 'utf8');
     requireThat(raw.length <= 1024 * 1024, 'Input JSON exceeds size limit');
     return JSON.parse(raw);

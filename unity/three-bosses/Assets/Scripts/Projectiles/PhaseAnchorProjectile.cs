@@ -66,7 +66,7 @@ public sealed class PhaseAnchorProjectile :
 
     private bool initialized;
     private bool anchored;
-    private bool hasStuck;
+    private bool hasImpacted;
     private bool isEnding;
 
     private void Awake()
@@ -121,12 +121,15 @@ public sealed class PhaseAnchorProjectile :
         if (
             !initialized ||
             anchored ||
-            hasStuck ||
+            hasImpacted ||
             isEnding
         )
         {
             return;
         }
+
+        // Consume the hit before damage callbacks, including surfaces we cannot anchor to.
+        hasImpacted = true;
 
         DamageUtils2D.TryDealDamage(
             collision,
@@ -141,7 +144,6 @@ public sealed class PhaseAnchorProjectile :
         }
 
         anchored = true;
-        hasStuck = true;
 
         CancelInvoke(nameof(ExpireInFlight));
 

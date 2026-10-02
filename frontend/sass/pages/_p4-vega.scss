@@ -53,8 +53,8 @@
     &__pause-btn {
         position: absolute;
         z-index: $front;
-        top: max(.85rem, env(safe-area-inset-top));
-        right: max(.85rem, env(safe-area-inset-right));
+        top: .85rem;
+        right: .85rem;
         width: 3.8rem;
         height: 3.8rem;
     }
@@ -62,8 +62,8 @@
     &__score {
         position: absolute;
         z-index: 1;
-        top: max(.85rem, env(safe-area-inset-top));
-        left: max(.85rem, env(safe-area-inset-left));
+        top: .85rem;
+        left: .85rem;
         display: flex;
         align-items: baseline;
         gap: .55rem;
@@ -382,6 +382,13 @@
         -webkit-user-select: none;
         user-select: none;
         -webkit-touch-callout: none;
+
+        // Only edge-to-edge gameplay needs device insets; embedded HUDs use canvas corners.
+        .p4-vega__score,
+        .p4-vega__pause-btn { top: max(.85rem, env(safe-area-inset-top)); }
+
+        .p4-vega__score { left: max(.85rem, env(safe-area-inset-left)); }
+        .p4-vega__pause-btn { right: max(.85rem, env(safe-area-inset-right)); }
     }
 }
 
@@ -477,5 +484,89 @@
             padding: .4rem 1.1rem;
             font-size: 1.05rem;
         }
+    }
+}
+
+// The native shell provides a finite main size. Share a controls row in portrait
+// and fit the scene into the remaining height instead of scrolling the game page.
+html[data-native-app] .p4-vega {
+    --p4-safe-width: calc(100vw - env(safe-area-inset-left) - env(safe-area-inset-right));
+    --p4-page-width: min(94vw, var(--p4-safe-width), 145rem);
+    --p4-canvas-width: var(--p4-page-width);
+
+    grid-template-columns: minmax(0, 1fr) 8.6rem;
+    grid-template-rows: auto minmax(0, 1fr) auto auto;
+    grid-template-areas:
+        'notice notice'
+        'canvas canvas'
+        'ui joystick'
+        'preference preference';
+    align-items: center;
+    gap: .6rem;
+    width: var(--p4-page-width);
+    height: 100%;
+    min-height: 0;
+
+    > .score-submission-notice { grid-area: notice; }
+
+    &__canvas-wrapper:not(:is(:fullscreen, :-webkit-full-screen, [data-canvas-fullscreen])) {
+        grid-area: canvas;
+        // Keep the frame outside the scene's 16:9 content box, so its padding
+        // cannot crop the canvas's bottom edge or its rounded lower corners.
+        box-sizing: content-box;
+        width: auto;
+        height: calc(100% - 1.1rem);
+        max-width: calc(100% - 1.1rem);
+        max-height: calc((var(--p4-canvas-width) - 1.1rem) * 9 / 16);
+        min-width: 0;
+        min-height: 0;
+
+        > * { box-sizing: border-box; }
+
+        > .p4-vega__canvas {
+            width: 100%;
+            height: 100%;
+            // Clip the actual canvas as well as its glass frame in WebKit.
+            clip-path: inset(0 round .8rem);
+        }
+
+        .p4-vega__pause-overlay { padding: .7rem 3.8rem; }
+
+        .p4-vega__pause-menu {
+            max-height: 100%;
+            overflow-y: auto;
+            padding: .8rem;
+            overscroll-behavior: contain;
+        }
+    }
+
+    &__ui { grid-area: ui; width: 100%; }
+
+    &__ui--dropdown-menu {
+        top: auto;
+        bottom: calc(100% + .35rem);
+        max-height: min(20rem, 30dvh);
+        overscroll-behavior: contain;
+    }
+
+    &__joystick--page { grid-area: joystick; display: block; }
+    &__joystick-preference { grid-area: preference; display: grid; }
+    &__orientation-hint { display: none; }
+
+    @media (orientation: landscape) {
+        --p4-settings-width: min(22rem, calc(var(--p4-safe-width) * .4));
+        --p4-canvas-width: calc(var(--p4-page-width) - var(--p4-settings-width) - 9.8rem);
+
+        grid-template-columns: var(--p4-settings-width) minmax(0, 1fr) 8.6rem;
+        grid-template-rows: auto minmax(0, 1fr) auto;
+        grid-template-areas:
+            'notice notice joystick'
+            'ui canvas joystick'
+            'preference preference joystick';
+
+        &__ui { gap: .4rem; padding: .5rem; }
+        &__ui--option,
+        &__ui--dropdown-btn { padding: .5rem; }
+        &__ui--dropdown-grid { gap: .4rem; }
     }
 }

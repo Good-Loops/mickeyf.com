@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { test } from 'node:test';
+import { accountDeletionEnvironment, googleSignInEnvironment, APPROVED_GOOGLE_WEB_CLIENT_ID,
+    ACCOUNT_DELETION_JOURNAL_BUCKET, ORIGINAL_ACCOUNT_IDENTITY_EPOCH,
+    frozenDeploymentApproval } from './render-frozen-backend-deploy.mjs';
 import {
     PROJECT, REGION, SERVICE, IMAGE, REVISION_TYPE, fingerprint, revisionName,
     deploymentStepsFingerprint, validatePins, validateDeployment, validateFrozenRevision,
@@ -14,6 +17,7 @@ const pins = {
     sourceBuildId: '11111111-1111-4111-8111-111111111111', sourceCommit: 'a'.repeat(40),
     imageDigest: `sha256:${'b'.repeat(64)}`, deploymentBuildId: '22222222-2222-4222-8222-222222222222',
     deploymentTriggerId: '33333333-3333-4333-8333-333333333333', deploymentStepsSha256: deploymentStepsFingerprint(steps),
+    sessionSecretVersion: '2',
 };
 
 test('Windows token command selects the installed cmd wrapper without changing execution policy', async () => {
@@ -35,13 +39,16 @@ function fixture() {
             resources: { limits: { cpu: '1', memory: '512Mi' }, startupCpuBoost: true },
             startupProbe: { timeoutSeconds: 240, periodSeconds: 240, failureThreshold: 1, tcpSocket: { port: 8080 } },
             env: Object.entries({ NODE_ENV: 'production', CLOUD_SQL_CONNECTION_NAME: `${PROJECT}:${REGION}:cms-mickeyf`,
-                DB_USER: 'cms_mickeyf', DB_NAME: 'cms', P4_VEGA_SCORE_SUBMISSIONS_ENABLED: 'false', THREE_BOSSES_RUN_SUBMISSIONS_ENABLED: 'false' })
+                DB_USER: 'cms_mickeyf', DB_NAME: 'cms', P4_VEGA_SCORE_SUBMISSIONS_ENABLED: 'false', THREE_BOSSES_RUN_SUBMISSIONS_ENABLED: 'false',
+                ACCOUNT_DELETION_ENABLED: 'false', PROVIDER_AUTH_ENABLED: 'false', PROVIDER_GOOGLE_SIGNUP_ENABLED: 'false' })
                 .map(([name, value]) => ({ name, value }))
-                .concat(['DB_PASS', 'SESSION_SECRET'].map((name, index) => ({ name, valueSource: { secretKeyRef: { secret: name, version: String(index + 1) } } }))),
+                .concat([['DB_PASS', '1'], ['SESSION_SECRET', pins.sessionSecretVersion]]
+                    .map(([name, version]) => ({ name, valueSource: { secretKeyRef: { secret: name, version } } }))),
             volumeMounts: [{ name: 'cloudsql', mountPath: '/cloudsql' }],
         }],
         volumes: [{ name: 'cloudsql', cloudSqlInstance: { instances: [`${PROJECT}:${REGION}:cms-mickeyf`] } }],
     };
+    const previousRevision = copy(revision);
     const traffic = [
         { type: REVISION_TYPE, revision: 'mickeyf-org-old-enabled', percent: 100 },
         { type: REVISION_TYPE, revision: revisionName(pins), tag: 'frozen-candidate' },
@@ -60,12 +67,15 @@ function fixture() {
         status: 'SUCCESS', approval: { config: { approvalRequired: true }, state: 'APPROVED', result: { decision: 'APPROVED' } },
         options: { logging: 'CLOUD_LOGGING_ONLY' }, timeout: '2400s',
         substitutions: { _DEPLOY_TRIGGER_ID: pins.deploymentTriggerId,
-            _APPROVAL: `freeze-zero-traffic:${pins.sourceCommit}:${pins.sourceBuildId}:${pins.imageDigest}` },
+            _APPROVAL: frozenDeploymentApproval(pins) },
         steps: steps.map(step => ({ ...copy(step), status: 'SUCCESS', exitCode: 0, timing: {} })),
     };
     let patches = 0;
     const provider = {
-        getService: async () => copy(service), getRevision: async () => copy(revision), getDeployment: async () => copy(build),
+        getService: async () => copy(service),
+        getRevision: async name => name === revisionName(pins) ? copy(revision)
+            : { ...copy(previousRevision), name: `${SERVICE}/revisions/${name}` },
+        getDeployment: async () => copy(build),
         assertAutomationPaused: async () => {},
         patchTraffic: async body => {
             patches++;
@@ -79,7 +89,7 @@ function fixture() {
         },
         waitForService: async () => copy(service),
     };
-    return { revision, service, build, provider, patches: () => patches };
+    return { revision, previousRevision, service, build, provider, patches: () => patches };
 }
 
 test('read-only plan includes every tag; one explicit etag PATCH freezes all traffic', async () => {
@@ -103,6 +113,226 @@ test('fresh plan supports frozen service rollback, not an old enabled revision',
     await assert.rejects(planFrozenTraffic(f.provider, pins, now), /Frozen environment differs/);
 });
 
+test('an explicitly reviewed nondefault session-secret version supports the normal traffic approval flow', async () => {
+    const f = fixture();
+    const reviewedPins = { ...pins, sessionSecretVersion: '17' };
+    f.revision.containers[0].env.find(entry => entry.name === 'SESSION_SECRET').valueSource.secretKeyRef.version = '17';
+    f.build.substitutions._APPROVAL = frozenDeploymentApproval(reviewedPins);
+    const plan = await planFrozenTraffic(f.provider, reviewedPins, now);
+    assert.equal(plan.pins.sessionSecretVersion, '17');
+    await applyFrozenTraffic(f.provider, plan, fingerprint(plan), now);
+    assert.equal(f.patches(), 1);
+});
+
+for (const [label, mutate] of Object.entries({
+    'mismatched version': env => { env.valueSource.secretKeyRef.version = '3'; },
+    'latest alias': env => { env.valueSource.secretKeyRef.version = 'latest'; },
+    'custom alias': env => { env.valueSource.secretKeyRef.version = 'active'; },
+    'numeric value': env => { env.valueSource.secretKeyRef.version = 2; },
+    'padded version': env => { env.valueSource.secretKeyRef.version = '02'; },
+    'wrong secret name': env => { env.valueSource.secretKeyRef.secret = 'DIFFERENT_SECRET'; },
+    'foreign project': env => { env.valueSource.secretKeyRef.secret = 'projects/foreign/secrets/SESSION_SECRET'; },
+    'missing reference': env => { delete env.valueSource; },
+    'literal alongside reference': env => { env.value = 'not-a-secret'; },
+    'literal instead of reference': env => { delete env.valueSource; env.value = 'not-a-secret'; },
+})) test(`session-secret ${label} refuses traffic mutation`, async () => {
+    const f = fixture();
+    mutate(f.revision.containers[0].env.find(entry => entry.name === 'SESSION_SECRET'));
+    await assert.rejects(planFrozenTraffic(f.provider, pins, now), /Secret reference differs: SESSION_SECRET/);
+    assert.equal(f.patches(), 0);
+});
+
+for (const duplicate of [false, true]) test(`session-secret ${duplicate ? 'duplicate' : 'missing'} environment refuses traffic mutation`, async () => {
+    const f = fixture();
+    const env = f.revision.containers[0].env;
+    const sessionSecret = env.find(entry => entry.name === 'SESSION_SECRET');
+    f.revision.containers[0].env = duplicate ? [...env, copy(sessionSecret)] : env.filter(entry => entry !== sessionSecret);
+    await assert.rejects(planFrozenTraffic(f.provider, pins, now), /Unexpected environment variables/);
+    assert.equal(f.patches(), 0);
+});
+
+test('database secret remains fixed at version 1 even when another session-secret version is approved', async () => {
+    const f = fixture();
+    const reviewedPins = { ...pins, sessionSecretVersion: '17' };
+    f.revision.containers[0].env.find(entry => entry.name === 'SESSION_SECRET').valueSource.secretKeyRef.version = '17';
+    f.revision.containers[0].env.find(entry => entry.name === 'DB_PASS').valueSource.secretKeyRef.version = '17';
+    await assert.rejects(planFrozenTraffic(f.provider, reviewedPins, now), /Secret reference differs: DB_PASS/);
+    assert.equal(f.patches(), 0);
+});
+
+test('missing or malformed session-secret pins fail plan and apply before any provider call', async () => {
+    const f = fixture();
+    const validPlan = await planFrozenTraffic(f.provider, pins, now);
+    let calls = 0;
+    const untouchedProvider = Object.fromEntries(Object.keys(f.provider).map(name => [name, async () => {
+        calls++;
+        throw new Error('Provider must not be called');
+    }]));
+    for (const value of [undefined, null, '', '0', '02', 'latest', 'active', ' 2', '2 ', '2\n', '2.0', '+2', '-2', '2e1', '2,DB_PASS:3', 2, ['2'], {}]) {
+        const invalidPins = { ...pins, sessionSecretVersion: value };
+        if (value === undefined) delete invalidPins.sessionSecretVersion;
+        assert.throws(() => validatePins(invalidPins));
+        await assert.rejects(planFrozenTraffic(untouchedProvider, invalidPins, now), /Pins|strings|[Ss]ession/);
+        const invalidPlan = { ...copy(validPlan), pins: invalidPins };
+        await assert.rejects(applyFrozenTraffic(untouchedProvider, invalidPlan, fingerprint(invalidPlan), now), /Pins|strings|[Ss]ession/);
+    }
+    assert.equal(calls, 0);
+    assert.equal(f.patches(), 0);
+});
+
+test('changing the reviewed session-secret pin invalidates plan approval and never patches', async () => {
+    const f = fixture();
+    const plan = await planFrozenTraffic(f.provider, pins, now);
+    const approval = fingerprint(plan);
+    plan.pins.sessionSecretVersion = '17';
+    assert.notEqual(fingerprint(plan), approval);
+    await assert.rejects(applyFrozenTraffic(f.provider, plan, approval, now), /Plan SHA256 confirmation differs/);
+    // A newly calculated hash still cannot authorize a revision with a different secret reference.
+    await assert.rejects(applyFrozenTraffic(f.provider, plan, fingerprint(plan), now), /Secret reference differs: SESSION_SECRET/);
+    assert.equal(f.patches(), 0);
+});
+
+const enabledDeletion = {
+    enabled: true, journalBucket: ACCOUNT_DELETION_JOURNAL_BUCKET, identityEpoch: ORIGINAL_ACCOUNT_IDENTITY_EPOCH,
+};
+function setDeletion(containers, settings) {
+    containers[0].env = containers[0].env.filter(item => !['ACCOUNT_DELETION_ENABLED', 'ACCOUNT_DELETION_JOURNAL_BUCKET', 'ACCOUNT_IDENTITY_EPOCH'].includes(item.name))
+        .concat(Object.entries(accountDeletionEnvironment(settings)).map(([name, value]) => ({ name, value })));
+}
+
+const enabledGoogle = { enabled: true, clientId: APPROVED_GOOGLE_WEB_CLIENT_ID };
+function setGoogle(containers, settings) {
+    containers[0].env = containers[0].env.filter(item => !['PROVIDER_AUTH_ENABLED', 'PROVIDER_GOOGLE_SIGNUP_ENABLED', 'GOOGLE_WEB_CLIENT_ID'].includes(item.name))
+        .concat(Object.entries(googleSignInEnvironment(settings, enabledDeletion)).map(([name, value]) => ({ name, value })));
+}
+
+test('Google candidate requires full signup/login, exact client, and reviewed deletion pins', () => {
+    const f = fixture();
+    const enabledPins = { ...pins, accountDeletion: enabledDeletion, googleSignIn: enabledGoogle };
+    setDeletion(f.revision.containers, enabledDeletion);
+    setGoogle(f.revision.containers, enabledGoogle);
+    validatePins(enabledPins);
+    validateFrozenRevision(f.revision, enabledPins);
+    assert.throws(() => validatePins({ ...pins, googleSignIn: enabledGoogle }), /deletion/iu);
+    for (const settings of [{ ...enabledGoogle, clientId: 'foreign.apps.googleusercontent.com' },
+        { ...enabledGoogle, signupEnabled: false }, { enabled: true }, { enabled: false, clientId: APPROVED_GOOGLE_WEB_CLIENT_ID }]) {
+        assert.throws(() => validatePins({ ...enabledPins, googleSignIn: settings }));
+    }
+    for (const change of [env => env.filter(item => item.name !== 'GOOGLE_WEB_CLIENT_ID'),
+        env => [...env, { name: 'GOOGLE_WEB_CLIENT_ID', value: APPROVED_GOOGLE_WEB_CLIENT_ID }],
+        env => env.map(item => item.name === 'PROVIDER_GOOGLE_SIGNUP_ENABLED' ? { ...item, value: 'false' } : item)]) {
+        const revision = copy(f.revision);
+        revision.containers[0].env = change(revision.containers[0].env);
+        assert.throws(() => validateFrozenRevision(revision, enabledPins), /environment/iu);
+    }
+});
+
+for (const location of ['template', 'live', 'tagged']) test(`Google ${location} state cannot be implicitly disabled by a traffic plan`, async () => {
+    const f = fixture();
+    const reviewedDeletionPins = { ...pins, accountDeletion: enabledDeletion };
+    setDeletion(f.revision.containers, enabledDeletion);
+    const activeContainers = location === 'template' ? f.service.template.containers : f.previousRevision.containers;
+    setDeletion(activeContainers, enabledDeletion);
+    setGoogle(activeContainers, enabledGoogle);
+    if (location === 'tagged') {
+        f.service.traffic = [
+            { type: REVISION_TYPE, revision: revisionName(pins), percent: 100 },
+            { type: REVISION_TYPE, revision: 'mickeyf-org-old-enabled', tag: 'old-enabled-tag' },
+        ];
+        f.service.trafficStatuses = copy(f.service.traffic);
+    }
+    await assert.rejects(planFrozenTraffic(f.provider, reviewedDeletionPins, now), /disable active Google/iu);
+    assert.equal(f.patches(), 0);
+    const plan = await planFrozenTraffic(f.provider, { ...reviewedDeletionPins, googleSignIn: { enabled: false } }, now);
+    assert.deepEqual(plan.pins.googleSignIn, { enabled: false });
+    await applyFrozenTraffic(f.provider, plan, fingerprint(plan), now);
+    assert.equal(f.patches(), 1);
+});
+
+test('Google activation works with a legacy source; configuration drift prevents traffic changes', async () => {
+    const f = fixture();
+    for (const containers of [f.service.template.containers, f.previousRevision.containers]) {
+        containers[0].env = containers[0].env.filter(item => !item.name.startsWith('PROVIDER_'));
+    }
+    setDeletion(f.revision.containers, enabledDeletion);
+    setGoogle(f.revision.containers, enabledGoogle);
+    const enabledPins = { ...pins, accountDeletion: enabledDeletion, googleSignIn: enabledGoogle };
+    const plan = await planFrozenTraffic(f.provider, enabledPins, now);
+    assert.deepEqual(plan.pins.googleSignIn, enabledGoogle);
+    f.revision.containers[0].env.find(item => item.name === 'GOOGLE_WEB_CLIENT_ID').value = 'foreign.apps.googleusercontent.com';
+    await assert.rejects(applyFrozenTraffic(f.provider, plan, fingerprint(plan), now), /environment/iu);
+    assert.equal(f.patches(), 0);
+});
+
+test('unsupported or incomplete active provider settings reject even an explicit disable', async () => {
+    for (const change of [
+        env => [...env, { name: 'APPLE_CLIENT_ID', value: 'com.mickeyf.app' }],
+        env => [...env, { name: 'GOOGLE_IOS_CLIENT_ID', value: 'native-client' }],
+        env => [...env, { name: 'PROVIDER_FUTURE_SETTING', value: 'true' }],
+        env => [...env, { name: 'GOOGLE_WEB_CLIENT_ID', value: APPROVED_GOOGLE_WEB_CLIENT_ID }],
+        env => env.map(item => item.name === 'GOOGLE_WEB_CLIENT_ID' ? { name: item.name, valueSource: { secretKeyRef: {} } } : item),
+        env => env.map(item => item.name === 'PROVIDER_GOOGLE_SIGNUP_ENABLED' ? { ...item, value: 'false' } : item),
+        env => env.map(item => item.name === 'GOOGLE_WEB_CLIENT_ID' ? { ...item, value: 'foreign.apps.googleusercontent.com' } : item),
+        env => env.filter(item => item.name !== 'ACCOUNT_DELETION_ENABLED'),
+    ]) {
+        const f = fixture();
+        setDeletion(f.revision.containers, enabledDeletion);
+        setDeletion(f.previousRevision.containers, enabledDeletion);
+        setGoogle(f.previousRevision.containers, enabledGoogle);
+        f.previousRevision.containers[0].env = change(f.previousRevision.containers[0].env);
+        await assert.rejects(planFrozenTraffic(f.provider, { ...pins, accountDeletion: enabledDeletion, googleSignIn: { enabled: false } }, now));
+        assert.equal(f.patches(), 0);
+    }
+});
+
+test('enabled deletion revision requires exact reviewed pins and exact environment; disabled revision requires literal false', () => {
+    const f = fixture();
+    setDeletion(f.revision.containers, enabledDeletion);
+    const enabledPins = { ...pins, accountDeletion: enabledDeletion };
+    validatePins(enabledPins);
+    validateFrozenRevision(f.revision, enabledPins);
+    assert.throws(() => validateFrozenRevision(f.revision, pins), /environment/iu);
+    for (const changed of [{ ...enabledDeletion, identityEpoch: '2026-09-13 00:15:39.954172' },
+        { ...enabledDeletion, journalBucket: 'other' }, { ...enabledDeletion, arbitrary: 'value' }]) {
+        assert.throws(() => validatePins({ ...pins, accountDeletion: changed }));
+    }
+    f.revision.containers[0].env.find(item => item.name === 'ACCOUNT_IDENTITY_EPOCH').value = '2026-09-13 00:15:39.954172';
+    assert.throws(() => validateFrozenRevision(f.revision, enabledPins), /environment/iu);
+    const missing = fixture().revision;
+    missing.containers[0].env = missing.containers[0].env.filter(item => item.name !== 'ACCOUNT_DELETION_ENABLED');
+    assert.throws(() => validateFrozenRevision(missing, pins), /environment/iu);
+});
+
+for (const location of ['template', 'live', 'tagged']) test(`default-off traffic plan refuses silently disabling ${location} deletion`, async () => {
+    const f = fixture();
+    if (location === 'template') setDeletion(f.service.template.containers, enabledDeletion);
+    else setDeletion(f.previousRevision.containers, enabledDeletion);
+    if (location === 'tagged') {
+        f.service.traffic = [
+            { type: REVISION_TYPE, revision: revisionName(pins), percent: 100 },
+            { type: REVISION_TYPE, revision: 'mickeyf-org-old-enabled', tag: 'old-enabled-tag' },
+        ];
+        f.service.trafficStatuses = copy(f.service.traffic);
+    }
+    await assert.rejects(planFrozenTraffic(f.provider, pins, now), /explicitly review/iu);
+    assert.equal(f.patches(), 0);
+    const explicitDisable = { ...pins, accountDeletion: { enabled: false } };
+    const plan = await planFrozenTraffic(f.provider, explicitDisable, now);
+    assert.deepEqual(plan.pins.accountDeletion, { enabled: false });
+    await applyFrozenTraffic(f.provider, plan, fingerprint(plan), now);
+    assert.equal(f.patches(), 1);
+});
+
+test('explicit activation plan permits matching enabled target and refuses a missing active revision', async () => {
+    const f = fixture();
+    setDeletion(f.revision.containers, enabledDeletion);
+    const plan = await planFrozenTraffic(f.provider, { ...pins, accountDeletion: enabledDeletion }, now);
+    assert.deepEqual(plan.pins.accountDeletion, enabledDeletion);
+    f.provider.getRevision = async () => { throw new Error('revision read unavailable'); };
+    await assert.rejects(planFrozenTraffic(f.provider, pins, now), /unavailable/u);
+    assert.equal(f.patches(), 0);
+});
+
 for (const [label, mutate] of Object.entries({
     'p4 writes enabled': r => { r.containers[0].env.find(e => e.name === 'P4_VEGA_SCORE_SUBMISSIONS_ENABLED').value = 'true'; },
     'Three Bosses writes enabled': r => { r.containers[0].env.find(e => e.name === 'THREE_BOSSES_RUN_SUBMISSIONS_ENABLED').value = 'true'; },
@@ -114,7 +344,7 @@ for (const [label, mutate] of Object.entries({
     'wrong runtime identity': r => { r.serviceAccount = 'owner@example.com'; },
     'command override': r => { r.containers[0].command = ['sh']; },
     'args override': r => { r.containers[0].args = ['--enable']; },
-    'secret latest': r => { r.containers[0].env[6].valueSource.secretKeyRef.version = 'latest'; },
+    'secret latest': r => { r.containers[0].env.find(e => e.name === 'DB_PASS').valueSource.secretKeyRef.version = 'latest'; },
     'different database': r => { r.volumes[0].cloudSqlInstance.instances = ['other']; },
     'not Ready': r => { r.conditions[0].state = 'CONDITION_FAILED'; },
     'sidecar': r => r.containers.push(copy(r.containers[0])),
@@ -141,6 +371,8 @@ for (const [label, mutate] of Object.entries({
     'approval rejected': b => { b.approval.result.decision = 'REJECTED'; },
     'wrong trigger': b => { b.buildTriggerId = pins.sourceBuildId; },
     'wrong source approval': b => { b.substitutions._APPROVAL = 'INVALID'; },
+    'legacy approval without session version': b => { b.substitutions._APPROVAL = `freeze-zero-traffic:${pins.sourceCommit}:${pins.sourceBuildId}:${pins.imageDigest}`; },
+    'approval for another session version': b => { b.substitutions._APPROVAL = frozenDeploymentApproval({ ...pins, sessionSecretVersion: '17' }); },
     'wrong trigger approval': b => { b.substitutions._DEPLOY_TRIGGER_ID = pins.sourceBuildId; },
     'source present': b => { b.source = { gitSource: {} }; },
     'global environment override': b => { b.options.env = ['PYTHONPATH=/malicious']; },

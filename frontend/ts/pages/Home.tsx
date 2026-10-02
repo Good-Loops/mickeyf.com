@@ -69,16 +69,17 @@ const QUOTES = [
 	'"It does not matter how slowly you go as long as you do not stop." -Confucius'
 ];
 
-const DISPLAY_MS = 4500;
+const DISPLAY_MS = 8000;
 const FADE_MS = 2000;
 
 const Home: React.FC = () => {
 	const containerRef = useRef<HTMLDivElement | null>(null);
-	const quoteRef = useRef<HTMLDivElement | null>(null);
+	const quoteRef = useRef<HTMLQuoteElement | null>(null);
 
 	const [quote, setQuote] = useState<string>("");
 	const [pos, setPos] = useState<{ top: number; left: number }>({ top: 0, left: 0 });
 	const [visible, setVisible] = useState<boolean>(false);
+	const [quoteText, quoteAuthor] = quote.split(' -');
 
 	const pickRandomQuote = () => QUOTES[Math.floor(Math.random() * QUOTES.length)];
 
@@ -90,27 +91,31 @@ const Home: React.FC = () => {
 		if (!quote) return;
 
 		const container = containerRef.current;
-		const containerWidth = container?.offsetWidth ?? window.innerWidth;
-		const containerHeight = container?.offsetHeight ?? window.innerHeight;
-
 		const quoteEl = quoteRef.current;
-		const quoteWidth = quoteEl?.offsetWidth ?? 220;
-		const quoteHeight = quoteEl?.offsetHeight ?? 90;
+		if (!container || !quoteEl) return;
 
-		const padding = 20;
-		
-		const header = document.querySelector(".header") as HTMLElement;
-        const headerHeight = header?.offsetHeight ?? 80;
-		const paddingTop = headerHeight + 30;
+		const placeAmbientQuote = () => {
+			// Compact layouts place the quote in normal flow below the welcome.
+			if (getComputedStyle(quoteEl).position !== 'absolute') return;
+			const padding = 20;
+			const header = document.querySelector<HTMLElement>(".header");
+			const paddingTop = (header?.offsetHeight ?? 80) + 30;
+			const maxLeft = Math.max(padding, container.offsetWidth - quoteEl.offsetWidth - padding);
+			const maxTop = Math.max(paddingTop, container.offsetHeight - quoteEl.offsetHeight - padding);
 
-		const maxLeft = Math.max(padding, containerWidth - quoteWidth - padding);
-		const maxTop = Math.max(paddingTop, containerHeight - quoteHeight - padding);
+			setPos({
+				top: paddingTop + Math.random() * (maxTop - paddingTop),
+				left: padding + Math.random() * (maxLeft - padding),
+			});
+		};
 
-		const left = padding + Math.random() * (maxLeft - padding);
-		const top = paddingTop + Math.random() * (maxTop - paddingTop);
-
-		setPos({ top, left });
-  	}, [quote]);
+		// Re-measure when a font loads or rotation changes the available space.
+		const observer = new ResizeObserver(placeAmbientQuote);
+		observer.observe(container);
+		observer.observe(quoteEl);
+		placeAmbientQuote();
+		return () => observer.disconnect();
+	}, [quote]);
 
 	useEffect(() => {
 		if (!quote) setQuote(pickRandomQuote());
@@ -154,17 +159,17 @@ const Home: React.FC = () => {
 			ref={containerRef}
 		>
 			{quote && (
-				<div
+				<blockquote
 					ref={quoteRef}
 					className={`quote ${visible ? "fade-in" : "fade-out"}`}
 					style={{
-						position: "absolute",
 						top: pos.top,
 						left: pos.left,
 					}}
 				>
-					{quote}
-				</div>
+					<p>{quoteText}</p>
+					<cite className="quote__author">— {quoteAuthor}</cite>
+				</blockquote>
 			)}
 		</div>
 		</section>

@@ -1,23 +1,50 @@
-require('dotenv').config({
-    path: require('path').resolve(__dirname, '../..', '.env'),
-});
+// The isolated launcher supplies its complete environment; loading the root
+// .env afterward could reintroduce provider or cloud settings it deliberately removed.
+if (!(process.env.NODE_ENV === 'development' && process.env.LUDOLUME_ISOLATED_RUNTIME === 'true')) {
+    require('dotenv').config({
+        path: require('path').resolve(__dirname, '../..', '.env'),
+    });
+}
 
 // Environment loading intentionally precedes imports whose modules construct
 // configuration-dependent resources such as the database pool.
 import express from 'express';
+import { createServer } from 'node:http';
 import cookieParser from 'cookie-parser';
 import cors from 'cors';
 import helmet from 'helmet';
 import { loadRuntimeConfig } from './config/runtimeConfig';
+import { registrationPolicyForCreation } from './config/registrationPolicy';
 import { closeDatabasePool, pool, verifyDatabaseConnection } from './db/dbConfig';
 import { preventSensitiveResponseCaching } from './middleware/apiResponseSecurity';
-import { notFoundHandler, requestErrorHandler } from './middleware/errorHandling';
+import { notFoundHandler, requestErrorHandler, waitForPendingHandlers } from './middleware/errorHandling';
+import { runHttpServer } from './serverLifecycle';
 import { createAuthRouter } from './routers/authRouter';
 import { createLeaderboardRouter } from './routers/leaderboardRouter';
 import { createMainRouter } from './routers/mainRouter';
 import { createGeneralApiRateLimiter } from './security/requestRateLimits';
+import { createGcsDeletionJournal } from './accounts/gcsDeletionJournal';
+import { verifyAccountDeletionReadiness, verifyAccountSessionReadiness,
+    verifyProviderAuthReadiness } from './accounts/accountDeletionReadiness';
+import { verifyPasswordlessAccountSchema } from './migrations/passwordlessAccountSchema';
+import { verifyAppleTokenReadiness } from './migrations/appleTokenSchema';
+import { verifyAppleRevocationReadiness } from './migrations/appleRevocationSchema';
+import { APPLE_MAINTENANCE_PATH } from './config/appleMaintenanceConfig';
+import { createAppleMaintenanceRouter } from './routers/appleMaintenanceRouter';
+import { runAppleMaintenance } from './accounts/runAppleTokenRevocation';
+import { loadAppleRuntimeLifecycle } from './config/appleRuntimeSecrets';
+import { prepareRuntimeProviderAuth } from './config/providerAuthConfig';
+
+import { createRegistrationAuthorization, cleanupRegistrationAuthorizations } from './accounts/registrationAuthorization';
+import { verifyRegistrationReadiness } from './migrations/registrationSchema';
+import { verifyScoreParticipationReadiness } from './migrations/scoreParticipationSchema';
+import { verifyParentRegistrationReadiness } from './migrations/parentRegistrationSchema';
+import { cleanupParentRegistrationAttempts } from './accounts/parentRegistrationRepository';
 
 const runtimeConfig = loadRuntimeConfig();
+const registration = createRegistrationAuthorization(pool, registrationPolicyForCreation(runtimeConfig.registrationPolicy));
+const deletionJournal = runtimeConfig.accountDeletionEnabled
+    ? createGcsDeletionJournal({ bucket: runtimeConfig.journalBucket }) : undefined;
 const app = express();
 
 // Cloud Run supplies one trusted proxy hop. This must be configured before any
@@ -40,6 +67,21 @@ app.use(helmet({
     strictTransportSecurity: runtimeConfig.isProduction ? undefined : false,
 }));
 
+// This endpoint accepts only a pinned workload identity, never browser cookies.
+// Mount before CORS/preflight and body parsers so they cannot bypass its checks.
+app.use(APPLE_MAINTENANCE_PATH, createAppleMaintenanceRouter(runtimeConfig.appleMaintenance, async () => {
+    // Independent cleanup must still run if Apple's provider request fails.
+    const [apple, registrationCleanup, parentCleanup] = await Promise.allSettled([
+        runAppleMaintenance({ database: pool, expectedServerUuid: runtimeConfig.appleMaintenance!.expectedServerUuid,
+            loadLifecycle: () => loadAppleRuntimeLifecycle() }),
+        cleanupRegistrationAuthorizations(pool),
+        cleanupParentRegistrationAttempts(pool),
+    ]);
+    return apple.status === 'fulfilled' && apple.value === 0
+        && registrationCleanup.status === 'fulfilled' && !registrationCleanup.value.backlog
+        && parentCleanup.status === 'fulfilled' && !parentCleanup.value.backlog ? 0 : 1;
+}));
+
 app.use(cors({
     origin: [...runtimeConfig.corsOrigins],
     credentials: true,
@@ -54,6 +96,7 @@ app.use(cookieParser(runtimeConfig.sessionSecret));
 const generalApiRateLimiter = createGeneralApiRateLimiter();
 app.use(['/api', '/auth'], generalApiRateLimiter);
 app.use('/api/leaderboards', createLeaderboardRouter(pool, {
+    scorePublicationDigest: runtimeConfig.scoreParticipationPolicy?.digest, scoreParticipationReady: true,
     sessionSecret: runtimeConfig.sessionSecret,
     allowedMutationOrigins: runtimeConfig.corsOrigins,
     threeBossesRunSubmissionsEnabled:
@@ -63,19 +106,51 @@ app.use('/api/leaderboards', createLeaderboardRouter(pool, {
 // parser so a disabled Three Bosses endpoint rejects before reading a body.
 app.use(express.json({ limit: '32kb', strict: true }));
 app.use('/api', createMainRouter({
+    database: pool,
+    scorePublicationDigest: runtimeConfig.scoreParticipationPolicy?.digest, scoreParticipationReady: true,
+    registration,
     sessionSecret: runtimeConfig.sessionSecret,
     isProduction: runtimeConfig.isProduction,
     p4VegaScoreSubmissionsEnabled: runtimeConfig.p4VegaScoreSubmissionsEnabled,
+    allowedMutationOrigins: runtimeConfig.corsOrigins,
 }));
-app.use('/auth', createAuthRouter(runtimeConfig.sessionSecret, runtimeConfig.isProduction));
-
-app.use(notFoundHandler);
-app.use(requestErrorHandler);
-
 async function startServer(): Promise<void> {
-    try {
-        await verifyDatabaseConnection();
-        app.listen(runtimeConfig.port, () => {
+    await runHttpServer({
+        server: createServer(app),
+        port: runtimeConfig.port,
+        closeDatabase: closeDatabasePool,
+        waitForHandlers: waitForPendingHandlers,
+        prepare: async () => {
+            await verifyDatabaseConnection();
+            await verifyAccountSessionReadiness(pool);
+            await verifyRegistrationReadiness(pool);
+            await verifyParentRegistrationReadiness(pool);
+            await verifyScoreParticipationReadiness(pool);
+            const providerAuth = await prepareRuntimeProviderAuth(runtimeConfig.providerAuth);
+            if (providerAuth.appleTokenLifecycle) await verifyAppleTokenReadiness(pool);
+            if (runtimeConfig.providerAuth.appleNotifications) await verifyAppleRevocationReadiness(pool);
+            if (runtimeConfig.providerAuth.signupEnabled) {
+                await verifyPasswordlessAccountSchema(pool);
+            }
+            if (runtimeConfig.providerAuth.enabled) {
+                const requiresExtendedAttempts = providerAuth.signupEnabled
+                    || (runtimeConfig.accountDeletionEnabled && (providerAuth.clients['google-web'] !== undefined
+                        || providerAuth.clients['apple-ios']?.deletionEnabled === true));
+                await verifyProviderAuthReadiness(pool, requiresExtendedAttempts);
+            }
+            if (runtimeConfig.accountDeletionEnabled) {
+                await verifyAccountDeletionReadiness(pool, runtimeConfig.accountIdentityEpoch!);
+            }
+            app.use('/auth', createAuthRouter(
+                pool, runtimeConfig.sessionSecret, runtimeConfig.isProduction, runtimeConfig.corsOrigins,
+                { accountDeletionEnabled: runtimeConfig.accountDeletionEnabled, deletionJournal, providerAuth, registration,
+                    parentRegistrationStorageReady: true, parentRegistrationPolicy: runtimeConfig.parentRegistrationPolicy,
+                    scoreParticipationPolicy: runtimeConfig.scoreParticipationPolicy }
+            ));
+            app.use(notFoundHandler);
+            app.use(requestErrorHandler);
+        },
+        onListening: () => {
             console.log('Backend listening', {
                 port: runtimeConfig.port,
                 p4VegaScoreSubmissions: runtimeConfig.p4VegaScoreSubmissionsEnabled
@@ -85,19 +160,11 @@ async function startServer(): Promise<void> {
                     runtimeConfig.threeBossesRunSubmissionsEnabled
                         ? 'enabled'
                         : 'disabled',
+                accountDeletion: runtimeConfig.accountDeletionEnabled ? 'enabled' : 'disabled',
+                providerAuth: runtimeConfig.providerAuth.enabled ? 'enabled' : 'disabled',
             });
-        });
-    } catch (error: unknown) {
-        console.error('Backend startup failed', {
-            name: error instanceof Error ? error.name : 'UnknownError',
-        });
-        process.exitCode = 1;
-        try {
-            await closeDatabasePool();
-        } catch {
-            // Preserve the original startup failure and avoid exposing details.
-        }
-    }
+        },
+    });
 }
 
 void startServer();

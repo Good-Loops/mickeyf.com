@@ -1,17 +1,17 @@
 # Registry-verified multi-platform digest for the supported Node 22 LTS Alpine
 # image. Update the tag and digest together during a reviewed runtime upgrade.
-FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS node-runtime-base
+FROM node:22.23.3-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 AS node-runtime-base
 
-# Artifact Registry identifies Alpine's OpenSSL 3.5.7-r0 package record as
-# affected. This patches Alpine's shared libraries; Node's separately embedded
-# OpenSSL remains part of each reviewed Node runtime upgrade. Upgrade only the
-# installed libraries, verify the result, and discard the repository indexes.
+# Patch Alpine's shared libraries for the September 29 OpenSSL advisories.
+# Node 22.23.3 separately embeds OpenSSL 3.5.8; that remaining exposure is
+# tracked in RELEASE_READINESS.md (S8). Upgrade only the installed libraries,
+# verify the result, and discard the repository indexes.
 RUN apk update \
     && apk add --no-cache --upgrade \
-        libcrypto3=3.5.8-r0 \
-        libssl3=3.5.8-r0 \
-    && apk info --exists 'libcrypto3=3.5.8-r0' > /dev/null \
-    && apk info --exists 'libssl3=3.5.8-r0' > /dev/null \
+        libcrypto3=3.5.9-r0 \
+        libssl3=3.5.9-r0 \
+    && apk info --exists 'libcrypto3=3.5.9-r0' > /dev/null \
+    && apk info --exists 'libssl3=3.5.9-r0' > /dev/null \
     && rm -rf /var/cache/apk/*
 
 FROM node-runtime-base AS npm-base
@@ -48,6 +48,12 @@ RUN npm ci --omit=dev
 
 
 FROM node-runtime-base AS runtime
+
+# On 2026-09-30 the owner accepted S8 for this pinned official runtime rather
+# than delaying release. Permit its embedded 3.5.8 and patched 3.5 releases;
+# older versions and other series still require review. Remove the exception
+# when the pinned Node image incorporates the upstream fix.
+RUN node -e 'const version = process.versions.openssl; const match = /^3[.]5[.]([0-9]+)$/.exec(version); if (version !== "3.5.8" && (!match || Number(match[1]) < 9)) { console.error("Production image blocked: unreviewed embedded OpenSSL " + version + "; S8 permits 3.5.8 by owner exception or patched 3.5.9+."); process.exit(1); }'
 
 ENV NODE_ENV=production
 WORKDIR /usr/src/app/backend

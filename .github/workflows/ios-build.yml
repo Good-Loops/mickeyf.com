@@ -4,16 +4,41 @@ run-name: Ludolume iOS build
 # No push/PR trigger: native builds remain separate from website deployment.
 on:
   workflow_dispatch:
+    inputs:
+      compile_only:
+        description: Validate both native targets without signing, deployment, caches or app artifacts
+        type: boolean
+        required: false
+        default: false
+      resolve_native_locks:
+        description: Resolve native dependency locks for review before the locked verification run
+        type: boolean
+        required: false
+        default: false
+      upload_testflight:
+        description: Sign and upload a build (requires ios-testflight approval; never submits for review)
+        type: boolean
+        required: false
+        default: false
+      upload_distribution:
+        description: Build eligibility; app-store-draft permits draft attachment, not submission or release
+        type: choice
+        required: true
+        default: internal-only
+        options:
+          - internal-only
+          - app-store-draft
 
 permissions:
   contents: read
 
 concurrency:
-  group: ios-simulator-${{ github.ref }}
-  cancel-in-progress: true
+  group: ios-${{ inputs.upload_testflight && 'testflight' || github.ref }}
+  cancel-in-progress: ${{ !inputs.upload_testflight }}
 
 jobs:
   simulator:
+    if: ${{ !inputs.upload_testflight }}
     name: Compile unsigned iOS simulator app
     runs-on: macos-26
     timeout-minutes: 30
@@ -37,7 +62,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22.23.2
+          node-version: 22.23.3
           package-manager-cache: false
 
       - name: Check native build tools
@@ -64,16 +89,29 @@ jobs:
             -configuration Release \
             -sdk iphonesimulator \
             -destination 'generic/platform=iOS Simulator' \
-            -derivedDataPath "$RUNNER_TEMP/beatcalc-derived-data" \
-            -resultBundlePath "$RUNNER_TEMP/beatcalc-build.xcresult" \
+            -derivedDataPath "$RUNNER_TEMP/ludolume-derived-data" \
+            -resultBundlePath "$RUNNER_TEMP/ludolume-build.xcresult" \
             CODE_SIGNING_ALLOWED=NO \
             build
 
+      - name: Report resolved CocoaPods lock
+        if: ${{ always() && inputs.compile_only }}
+        run: |
+          test -f ios/App/Podfile.lock
+          echo 'NATIVE_POD_LOCK_BEGIN'
+          cat ios/App/Podfile.lock
+          echo 'NATIVE_POD_LOCK_END'
+          if [ "${{ inputs.resolve_native_locks }}" != "true" ]; then
+            git ls-files --error-unmatch ios/App/Podfile.lock
+            git diff --exit-code -- ios/App/Podfile.lock
+          fi
+
       - name: Package simulator app
+        if: ${{ !inputs.compile_only }}
         run: |
           ditto -c -k --sequesterRsrc --keepParent \
-            "$RUNNER_TEMP/beatcalc-derived-data/Build/Products/Release-iphonesimulator/App.app" \
-            "$RUNNER_TEMP/BeatCalc-simulator.zip"
+            "$RUNNER_TEMP/ludolume-derived-data/Build/Products/Release-iphonesimulator/App.app" \
+            "$RUNNER_TEMP/Ludolume-simulator.zip"
           {
             echo '### Unsigned simulator build'
             echo "Source commit: $GITHUB_SHA"
@@ -82,18 +120,158 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload simulator app
+        if: ${{ !inputs.compile_only }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: beatcalc-ios-simulator-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/BeatCalc-simulator.zip
+          name: ludolume-ios-simulator-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/Ludolume-simulator.zip
           if-no-files-found: error
           retention-days: 1
 
       - name: Upload Xcode diagnostics on failure
-        if: ${{ failure() }}
+        if: ${{ failure() && !inputs.compile_only }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: beatcalc-ios-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
-          path: ${{ runner.temp }}/beatcalc-build.xcresult
+          name: ludolume-ios-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}
+          path: ${{ runner.temp }}/ludolume-build.xcresult
           if-no-files-found: ignore
           retention-days: 1
+
+  testflight:
+    # Also restrict the protected environment to this exact branch in GitHub.
+    if: ${{ !inputs.compile_only && inputs.upload_testflight && github.ref == 'refs/heads/improvement/clean-code-sweep' }}
+    name: Sign and upload (${{ inputs.upload_distribution || 'internal-only' }})
+    environment: ios-testflight
+    runs-on: macos-26
+    timeout-minutes: 35
+    defaults:
+      run:
+        shell: bash
+        working-directory: frontend
+    env:
+      CI: "true"
+      NPM_CONFIG_FUND: "false"
+      COCOAPODS_DISABLE_STATS: "true"
+      DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
+      VITE_PROD_API_URL: https://mickeyf-org-j7yuum4tiq-uc.a.run.app
+      VITE_ENABLE_THREE_BOSSES_RELEASE: "1"
+      ASC_KEY_ID: ${{ vars.ASC_KEY_ID }}
+      ASC_ISSUER_ID: ${{ vars.ASC_ISSUER_ID }}
+      ASC_APP_ID: ${{ vars.ASC_APP_ID }}
+      IOS_TEAM_ID: ${{ vars.IOS_TEAM_ID }}
+      IOS_BUNDLE_ID: ${{ vars.IOS_BUNDLE_ID }}
+      IOS_UPLOAD_DISTRIBUTION: ${{ inputs.upload_distribution || 'internal-only' }}
+    steps:
+      - name: Checkout reviewed branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.23.3
+          package-manager-cache: false
+
+      - name: Check pinned signing tools and public configuration
+        run: |
+          node --test ../scripts/ios-testflight.test.mjs
+          node ../scripts/ios-testflight.mjs preflight
+          pod --version
+
+      - name: Install locked dependencies and build before loading credentials
+        run: |
+          npm install --global npm@11.6.2 --no-audit --no-fund
+          npm ci --no-audit
+          npm test
+          npm run build
+          npx --no-install cap sync ios
+
+      - name: Sign, verify and upload without submitting for review
+        env:
+          IOS_DISTRIBUTION_P12_BASE64: ${{ secrets.IOS_DISTRIBUTION_P12_BASE64 }}
+          IOS_DISTRIBUTION_P12_PASSWORD: ${{ secrets.IOS_DISTRIBUTION_P12_PASSWORD }}
+          IOS_PROVISION_PROFILE_BASE64: ${{ secrets.IOS_PROVISION_PROFILE_BASE64 }}
+          ASC_PRIVATE_KEY_P8: ${{ secrets.ASC_PRIVATE_KEY_P8 }}
+        run: node ../scripts/ios-testflight.mjs upload
+
+      # No IPA/archive/log artifacts: only the unsigned job uploads artifacts.
+      - name: Remove signing material and signed outputs
+        if: ${{ always() }}
+        run: node ../scripts/ios-testflight.mjs cleanup
+
+
+  android:
+    if: ${{ inputs.compile_only && !inputs.upload_testflight }}
+    name: Compile and test Android without distribution
+    runs-on: ubuntu-24.04
+    timeout-minutes: 25
+    defaults:
+      run:
+        shell: bash
+        working-directory: frontend
+    env:
+      CI: "true"
+      NPM_CONFIG_FUND: "false"
+      VITE_PROD_API_URL: https://mickeyf-org-j7yuum4tiq-uc.a.run.app
+      VITE_ENABLE_THREE_BOSSES_RELEASE: "1"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.23.3
+          package-manager-cache: false
+
+      - name: Require existing hosted Android toolchain and license state
+        run: |
+          test -x "$JAVA_HOME_21_X64/bin/java"
+          test -f "$ANDROID_HOME/platforms/android-36/android.jar"
+          test -s "$ANDROID_HOME/licenses/android-sdk-license"
+          echo "JAVA_HOME=$JAVA_HOME_21_X64" >> "$GITHUB_ENV"
+          echo "$JAVA_HOME_21_X64/bin" >> "$GITHUB_PATH"
+          "$JAVA_HOME_21_X64/bin/java" -version
+          # No sdkmanager installation or license acceptance in this workflow.
+
+      - name: Install locked frontend dependencies and synchronize Android
+        run: |
+          npm install --global npm@11.6.2 --no-audit --no-fund
+          npm ci --no-audit
+          npm run build
+          npx --no-install cap sync android
+
+      - name: Resolve or verify native dependency locks and compile
+        working-directory: frontend/android
+        run: |
+          options=()
+          if [ "${{ inputs.resolve_native_locks }}" = "true" ]; then
+            options+=(--write-locks)
+          else
+            test -f app/gradle.lockfile
+            git ls-files --error-unmatch app/gradle.lockfile
+          fi
+          bash gradlew --no-daemon --console=plain "${options[@]}" :app:testReleaseUnitTest :app:lintRelease :app:assembleRelease
+
+      - name: Report native locks and test totals
+        if: ${{ always() }}
+        working-directory: frontend/android
+        run: |
+          python3 - <<'PY'
+          import pathlib, xml.etree.ElementTree as ET
+          for path in sorted(pathlib.Path('.').rglob('*.lockfile')):
+              if 'build' in path.parts or '.gradle' in path.parts: continue
+              print('NATIVE_GRADLE_LOCK_BEGIN ' + str(path))
+              print(path.read_text())
+              print('NATIVE_GRADLE_LOCK_END')
+          for path in pathlib.Path('app/build/test-results/testReleaseUnitTest').glob('TEST-*.xml'):
+              root = ET.parse(path).getroot()
+              print('NATIVE_TEST_RESULT', root.attrib)
+          PY
+          if [ "${{ inputs.resolve_native_locks }}" != "true" ]; then
+            git diff --exit-code -- '*.lockfile'
+          fi
+          # No APK, credential, signing material or diagnostic artifact uploads.

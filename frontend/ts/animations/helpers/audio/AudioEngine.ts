@@ -89,8 +89,10 @@ export class AudioEngine {
     private objectUrl: string | null = null;
     private endedListener: (() => void) | null = null;
 
-    // Used to invalidate old analysis loops when a new track is loaded or stopped
+    // Invalidates pending uploads and analysis loops when a track is replaced or disposed.
     private sessionId: number = 0;
+    // Null means playback is no longer wanted, without cancelling the loaded track.
+    private playbackRequest: symbol | null = null;
     private listeners = new Set<(state: AudioState) => void>();
     
     /**
@@ -108,24 +110,6 @@ export class AudioEngine {
     }
 
     /**
-     * Wires a file input to `processAudio()`.
-     *
-     * @param fileInput - File input element that provides audio files.
-     * @returns Cleanup function that removes the event listener.
-     */
-    initializeUploadButton(fileInput: HTMLInputElement): (() => void) {
-        const handleChange = () => {
-            const file = fileInput.files?.[0];
-            if (file) {
-                void this.processAudio(file);
-            }
-        };
-
-        fileInput.addEventListener("change", handleChange);
-        return () => fileInput.removeEventListener("change", handleChange);
-    }
-
-    /**
      * Loads an audio file, constructs the Web Audio graph, and begins playback/analysis.
      *
      * If an existing track is loaded, it is torn down first.
@@ -134,53 +118,65 @@ export class AudioEngine {
      * @param file - Audio file selected by the user.
      */
     async processAudio(file: File): Promise<void> {
-        this.sessionId++;
+        const currentSessionId = ++this.sessionId;
+        const request = this.playbackRequest = Symbol("upload playback");
 
         // Tear down any previous track so analysis sessions don't overlap.
-        await this.teardownTrack({ closeContext: true });
+        await this.teardownTrack();
+        if (currentSessionId !== this.sessionId) return;
         this.patchState({ hasAudio: false, playing: false });
 
-        const url = URL.createObjectURL(file);
-        this.objectUrl = url;
-
-        const audio = new Audio(url);
-
-        this.endedListener = () => {
-            // Treat natural end like "paused at end": stop analysis, mark not playing, reset time
-            this.patchState({ playing: false });
-            this.stopAnalysisLoop();
-
-            try {
-                audio.currentTime = 0;
-            } catch {}
-        };
-
-        audio.addEventListener("ended", this.endedListener);
-
-        const audioContext = new window.AudioContext();
-        await audioContext.resume();
-
-        // Analyzer provides the time-domain buffer used for pitch/volume extraction.
-        const analyser = audioContext.createAnalyser();
-        analyser.fftSize = 2048;
-        this.analyserNode = analyser;
-
-        const source = audioContext.createMediaElementSource(audio);
-        source.connect(analyser);
-        analyser.connect(audioContext.destination);
-
-        this.sourceNode = source;
-
-        this.audioElement = audio;
-        this.audioContext = audioContext;
-        this.patchState({ hasAudio: true });
-
-        audio.load();
         try {
-            await audio.play();
-            this.patchState({ playing: true });
-            this.startAnalysis();
-        } catch {
+            const url = URL.createObjectURL(file);
+            this.objectUrl = url;
+
+            const audio = new Audio(url);
+            this.audioElement = audio;
+
+            this.endedListener = () => {
+                this.playbackRequest = null;
+                // Treat natural end like "paused at end": stop analysis, mark not playing, reset time
+                this.patchState({ playing: false });
+                this.stopAnalysisLoop();
+
+                try {
+                    audio.currentTime = 0;
+                } catch {}
+            };
+
+            audio.addEventListener("ended", this.endedListener);
+
+            const audioContext = new window.AudioContext();
+            // Disposal must own these resources even while the browser is resuming audio.
+            this.audioContext = audioContext;
+            await audioContext.resume();
+            if (currentSessionId !== this.sessionId) return;
+
+            // Analyzer provides the time-domain buffer used for pitch/volume extraction.
+            const analyser = audioContext.createAnalyser();
+            analyser.fftSize = 2048;
+            this.analyserNode = analyser;
+
+            const source = audioContext.createMediaElementSource(audio);
+            this.sourceNode = source;
+            source.connect(analyser);
+            analyser.connect(audioContext.destination);
+
+            this.patchState({ hasAudio: true });
+
+            audio.load();
+            try {
+                await this.resumePlayback(audio, request);
+            } catch {
+            }
+        } catch (error) {
+            if (currentSessionId !== this.sessionId) return;
+            this.playbackRequest = null;
+            await this.teardownTrack();
+            if (currentSessionId !== this.sessionId) return;
+            this.volumeHistory = [];
+            this.patchState({ ...DEFAULT_STATE, beat: { ...DEFAULT_STATE.beat } });
+            throw error;
         }
     }
 
@@ -191,7 +187,8 @@ export class AudioEngine {
      */
     async play() {
         const audio = this.audioElement;
-        if (!audio) return;
+        if (!audio || !this.state.hasAudio) return;
+        const request = this.playbackRequest = Symbol("explicit playback");
 
         // If we reached the end previously, restart from the beginning
         if (audio.ended || audio.currentTime >= audio.duration) {
@@ -199,14 +196,10 @@ export class AudioEngine {
         }
 
         try {
-            await this.ensureContextRunning();
-            await audio.play();
-            this.patchState({ playing: true });
-            if (this.rafId === null && this.analyserNode && this.audioContext) {
-                this.startAnalysis();
-            }
+            await this.resumePlayback(audio, request);
         } catch (err) {
-            this.patchState({ playing: false });
+            if (!this.isCurrentPlayback(audio, request)) return;
+            this.pause();
             console.error("AudioHandler.play() error:", err);
         }
     }
@@ -215,6 +208,7 @@ export class AudioEngine {
      * Pauses playback while keeping the current playback position.
      */
     pause() {
+        this.playbackRequest = null;
         if (!this.audioElement) return;
 
         this.patchState({ playing: false });
@@ -229,6 +223,7 @@ export class AudioEngine {
         * `play()` calls can resume without rebuilding the entire graph.
      */
     stop() {
+        this.playbackRequest = null;
         const audio = this.audioElement;
         if (!audio) return;
 
@@ -253,8 +248,10 @@ export class AudioEngine {
      * After disposal, state resets to its defaults.
      */
     async dispose() {
-        this.sessionId++;
-        await this.teardownTrack({ closeContext: true });
+        const currentSessionId = ++this.sessionId;
+        this.playbackRequest = null;
+        await this.teardownTrack();
+        if (currentSessionId !== this.sessionId) return;
         this.volumeHistory = [];
         this.patchState({ ...DEFAULT_STATE, beat: { ...DEFAULT_STATE.beat } });
     }
@@ -332,10 +329,9 @@ export class AudioEngine {
             if (!this.state.playing) {
                 if (!music.paused) music.pause();
             } else {
-                if (music.paused) {
-                    void this.ensureContextRunning()
-                        .then(() => music.play().catch(() => {}))
-                        .catch(() => {});
+                const request = this.playbackRequest;
+                if (music.paused && request) {
+                    void this.resumePlayback(music, request).catch(() => {});
                 }
             }
 
@@ -403,14 +399,25 @@ export class AudioEngine {
         };
     }
 
-    /**
-     * Ensure the AudioContext is running (autoplay policies).
-     */
-    private async ensureContextRunning() {
-        if (!this.audioContext) return;
-        if (this.audioContext.state === "suspended") {
-            await this.audioContext.resume();
+    private isCurrentPlayback(audio: HTMLAudioElement, request: symbol): boolean {
+        return this.playbackRequest === request && this.audioElement === audio;
+    }
+
+    // All playback paths respect the latest transport command across browser waits.
+    private async resumePlayback(audio: HTMLAudioElement, request: symbol): Promise<void> {
+        const context = this.audioContext;
+        if (!context || !this.isCurrentPlayback(audio, request)) return;
+        if (context.state === "suspended") await context.resume();
+        if (!this.isCurrentPlayback(audio, request)) return;
+
+        await audio.play();
+        if (!this.isCurrentPlayback(audio, request)) {
+            // A newer Play may own this same element; do not silence that request.
+            if (this.playbackRequest === null || this.audioElement !== audio) audio.pause();
+            return;
         }
+        this.patchState({ playing: true });
+        if (this.rafId === null && this.analyserNode) this.startAnalysis();
     }
 
     private stopAnalysisLoop(): void {
@@ -420,41 +427,43 @@ export class AudioEngine {
         }
     }
 
-    private async teardownTrack(options?: { closeContext?: boolean }) {
-        const { closeContext = false } = options ?? {};
-
+    private async teardownTrack() {
         this.stopAnalysisLoop();
 
         const audio = this.audioElement;
-        if (audio && this.endedListener) {
-            audio.removeEventListener("ended", this.endedListener);
-        }
+        const audioContext = this.audioContext;
+        const source = this.sourceNode;
+        const objectUrl = this.objectUrl;
+        const endedListener = this.endedListener;
+
+        // A new upload may start while close() waits; only release this captured track.
+        this.audioElement = null;
+        this.audioContext = null;
+        this.sourceNode = null;
+        this.analyserNode = null;
+        this.objectUrl = null;
         this.endedListener = null;
+
+        if (audio && endedListener) audio.removeEventListener("ended", endedListener);
 
         try {
             audio?.pause();
         } catch {}
 
         try {
-            this.sourceNode?.disconnect();
+            source?.disconnect();
         } catch {}
-        this.sourceNode = null;
-        this.analyserNode = null;
 
-        if (closeContext && this.audioContext) {
-            try { await this.audioContext.close(); } catch {}
-            this.audioContext = null;
+        if (audioContext) {
+            try { await audioContext.close(); } catch {}
         }
 
         // Revoke object URL to avoid memory leaks.
-        if (this.objectUrl) {
+        if (objectUrl) {
             try {
-                URL.revokeObjectURL(this.objectUrl);
+                URL.revokeObjectURL(objectUrl);
             } catch {}
-            this.objectUrl = null;
         }
-
-        this.audioElement = null;
     }
 }
 

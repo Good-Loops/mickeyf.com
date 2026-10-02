@@ -67,6 +67,19 @@ export const RUNTIME_GRANT_OPERATIONS_INTEGRATION_TEST_COMMAND = Object.freeze({
     "ts/security/runtimeGrantOperations.integration.test.ts",
   ]),
 });
+export const APPLE_REVOCATION_INTEGRATION_TEST_COMMAND = Object.freeze({
+  executable: process.execPath,
+  args: Object.freeze([
+    "--test", "-r", "ts-node/register",
+    "ts/auth/appleSessionRevocation.integration.test.ts",
+  ]),
+});
+
+export const REGISTRATION_INTEGRATION_TEST_COMMAND = Object.freeze({ executable: process.execPath,
+  args: Object.freeze(["--test", "-r", "ts-node/register", "ts/accounts/registrationAuthorization.integration.test.ts"]) });
+
+export const PARENT_REGISTRATION_INTEGRATION_TEST_COMMAND = Object.freeze({ executable: process.execPath,
+  args: Object.freeze(["--test", "-r", "ts-node/register", "ts/accounts/parentRegistrationRepository.integration.test.ts"]) });
 
 const INTEGRATION_TEST_COMMANDS = Object.freeze([
   MIGRATION_INTEGRATION_TEST_COMMAND,
@@ -75,6 +88,37 @@ const INTEGRATION_TEST_COMMANDS = Object.freeze([
   P4_VEGA_RECONCILIATION_INTEGRATION_TEST_COMMAND,
   RUNTIME_GRANT_INTEGRATION_TEST_COMMAND,
   RUNTIME_GRANT_OPERATIONS_INTEGRATION_TEST_COMMAND,
+  Object.freeze({
+    executable: process.execPath,
+    args: Object.freeze([
+      "--test", "-r", "ts-node/register",
+      "ts/accounts/deletionReplay.integration.test.ts",
+    ]),
+  }),
+  Object.freeze({
+    executable: process.execPath,
+    args: Object.freeze([
+      "--test", "-r", "ts-node/register",
+      "ts/accounts/providerAccountRepository.integration.test.ts",
+    ]),
+  }),
+  Object.freeze({
+    executable: process.execPath,
+    args: Object.freeze([
+      "--test", "-r", "ts-node/register",
+      "ts/auth/providerAttemptRepository.integration.test.ts",
+    ]),
+  }),
+  Object.freeze({
+    executable: process.execPath,
+    args: Object.freeze([
+      "--test", "-r", "ts-node/register",
+      "ts/auth/accountSessionRepository.integration.test.ts",
+    ]),
+  }),
+  APPLE_REVOCATION_INTEGRATION_TEST_COMMAND,
+  REGISTRATION_INTEGRATION_TEST_COMMAND,
+  PARENT_REGISTRATION_INTEGRATION_TEST_COMMAND,
 ]);
 
 const MYSQL_SERVICE = "mysql";
@@ -271,7 +315,25 @@ const cleanup = () => {
   return cleanupPromise;
 };
 
-export const runMigrationTests = async () => {
+export const selectMigrationTestCommands = ({ providerIdentitiesOnly = false,
+  runtimeGrantsOnly = false, appleRevocationOnly = false, registrationOnly = false, parentRegistrationOnly = false } = {}) => {
+  if ([providerIdentitiesOnly, runtimeGrantsOnly, appleRevocationOnly, registrationOnly, parentRegistrationOnly].filter(Boolean).length > 1) {
+    throw new Error("Select only one focused migration-test group.");
+  }
+  if (parentRegistrationOnly) return [PARENT_REGISTRATION_INTEGRATION_TEST_COMMAND];
+  if (registrationOnly) return [REGISTRATION_INTEGRATION_TEST_COMMAND];
+  if (appleRevocationOnly) return [APPLE_REVOCATION_INTEGRATION_TEST_COMMAND];
+  if (runtimeGrantsOnly) return [RUNTIME_GRANT_INTEGRATION_TEST_COMMAND, RUNTIME_GRANT_OPERATIONS_INTEGRATION_TEST_COMMAND];
+  if (providerIdentitiesOnly) return INTEGRATION_TEST_COMMANDS.filter(command => command.args.some(argument =>
+    argument === "ts/accounts/deletionReplay.integration.test.ts"
+    || argument === "ts/accounts/providerAccountRepository.integration.test.ts"
+    || argument === "ts/auth/providerAttemptRepository.integration.test.ts"
+    || argument === "ts/auth/accountSessionRepository.integration.test.ts"));
+  return INTEGRATION_TEST_COMMANDS;
+};
+
+export const runMigrationTests = async (options = {}) => {
+  const commands = selectMigrationTestCommands(options);
   let failure;
 
   try {
@@ -288,7 +350,7 @@ export const runMigrationTests = async () => {
       MYSQL_SERVICE,
     ]);
     const mysqlPort = await inspectMigrationContainer();
-    for (const command of INTEGRATION_TEST_COMMANDS) {
+    for (const command of commands) {
       await runProcess(
         command.executable,
         command.args,
@@ -319,6 +381,10 @@ const isMainModule = process.argv[1]
   && resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 
 if (isMainModule) {
+  const arguments_ = process.argv.slice(2);
+  if (arguments_.length > 1 || arguments_.some(argument => !["--provider-identities", "--runtime-grants", "--apple-revocation", "--registration", "--parent-registration"].includes(argument))) {
+    throw new Error("Usage: run-migration-tests.mjs [--provider-identities|--runtime-grants|--apple-revocation|--registration|--parent-registration]");
+  }
   let shuttingDown = false;
   const handleSignal = async (exitCode) => {
     if (shuttingDown) return;
@@ -339,7 +405,11 @@ if (isMainModule) {
   process.once("SIGINT", handleInterrupt);
   process.once("SIGTERM", handleTermination);
 
-  runMigrationTests()
+  runMigrationTests({ providerIdentitiesOnly: arguments_.includes("--provider-identities"),
+    runtimeGrantsOnly: arguments_.includes("--runtime-grants"),
+    appleRevocationOnly: arguments_.includes("--apple-revocation"),
+    parentRegistrationOnly: arguments_.includes("--parent-registration"),
+    registrationOnly: arguments_.includes("--registration") })
     .catch((error) => {
       console.error(error.message);
       process.exitCode = 1;
