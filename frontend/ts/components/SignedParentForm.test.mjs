@@ -1,6 +1,5 @@
 import assert from 'node:assert/strict';
 import test, { after } from 'node:test';
-import { readFile, writeFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
@@ -31,11 +30,9 @@ test('printable form contains exact parent/request references, notice versions, 
     assert.doesNotMatch(markup, /<input|<form|childPassword|idToken|grant=/u);
 });
 test('no public choice is offered without a separately bound disclosure policy; nickname HTML is escaped', () => {
-    const value = render({ ...request, userName: '<script>synthetic</script>', publicConsentText: null, publicConsentVersion: null, publicPolicyDigest: null });
-    assert.doesNotMatch(value, /<script>|Separate optional public disclosure|I separately authorize/u);
-    assert.match(value, /&lt;script&gt;synthetic&lt;\/script&gt;/u);
+    for (const userName of ['<script>synthetic</script>', '<SCRIPT>synthetic</SCRIPT>']) {
+        const value = render({ ...request, userName, publicConsentText: null, publicConsentVersion: null, publicPolicyDigest: null });
+        assert.doesNotMatch(value, /<script>|Separate optional public disclosure|I separately authorize/iu);
+        assert.match(value, /&lt;script&gt;synthetic&lt;\/script&gt;/iu);
+    }
 });
-if (process.env.SIGNED_FORM_PREVIEW_PATH) {
-    const css = await readFile(new URL('./SignedParentForm.css', import.meta.url), 'utf8');
-    await writeFile(process.env.SIGNED_FORM_PREVIEW_PATH, `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Ludolume signed form — synthetic preview</title><style>body{font:16px/1.5 sans-serif;max-width:900px;margin:20px auto;padding:0 20px}${css}</style><body><p>Preview with synthetic request details. No account or consent exists.</p>${markup}</body></html>`, 'utf8');
-}
