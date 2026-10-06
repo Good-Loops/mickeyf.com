@@ -89,6 +89,71 @@ test('session approval and receipt digest bind both versions and cannot reuse fr
     assert.match(preflight, /SESSION_CUTOVER = True/u);
 });
 
+test('session scan accepts the regional update timestamp but rejects unknown fields, invalid timestamps and scanner errors', () => {
+    const policy = /<<'PY'\n([\s\S]*?)\nPY/u.exec(resolved[2].args[1])[1];
+    python(String.raw`
+from copy import deepcopy
+from datetime import datetime, timedelta, timezone
+from pathlib import Path
+from tempfile import TemporaryDirectory
+from types import SimpleNamespace
+from unittest.mock import patch
+import io, os, urllib.request
+
+now = datetime.now(timezone.utc)
+stamp = now.isoformat()
+image = "us-central1-docker.pkg.dev/noted-reef-387021/cloud-run-source-deploy/cloud-run-source-deploy"
+compact = payload["pins"]["sourceBuildId"].replace("-", "")
+state = {"build_id":payload["pins"]["sourceBuildId"], "commit":payload["pins"]["sourceCommit"],
+    "digest":payload["pins"]["imageDigest"], "candidate_tag":"s-"+compact,
+    "revision_name":"mickeyf-org-session-"+compact, "revision_suffix":"session-"+compact,
+    "target_image":image+"@"+payload["pins"]["imageDigest"]}
+occurrence = {"name":"projects/noted-reef-387021/locations/us-central1/occurrences/123e4567-e89b-42d3-a456-426614174000",
+    "resourceUri":"https://"+state["target_image"],
+    "noteName":"projects/goog-analysis/locations/us-central1/notes/PACKAGE_VULNERABILITY",
+    "kind":"DISCOVERY", "createTime":stamp, "updateTime":stamp,
+    "discovery":{"continuousAnalysis":"ACTIVE", "analysisStatus":"FINISHED_SUCCESS", "lastScanTime":stamp,
+        "analysisCompleted":{"analysisType":["OS","NPM","SECRET"]}, "lastVulnerabilityUpdateTime":stamp}}
+
+class Response(io.BytesIO):
+    status = 200
+
+def run(item):
+    with TemporaryDirectory() as directory:
+        source = Path(directory)/"state.json"
+        receipt = Path(directory)/"receipt.json"
+        source.write_text(json.dumps(state), encoding="utf-8")
+        def get(request, timeout):
+            assert request.full_url.startswith("https://containeranalysis.googleapis.com/v1/projects/noted-reef-387021/locations/us-central1/occurrences?")
+            assert timeout == 30
+            return Response(json.dumps({"occurrences":[item]}).encode())
+        with patch.dict(os.environ, {"PROJECT_ID":"noted-reef-387021", "LOCATION":"us-central1", "IMAGE":image}), \
+                patch.object(sys, "argv", ["scan", str(source), str(receipt)]), \
+                patch("subprocess.run", return_value=SimpleNamespace(returncode=0, stdout="synthetic-token-for-offline-tests")), \
+                patch.object(urllib.request, "urlopen", get):
+            try: exec(compile(payload["policy"], "scan.py", "exec"), {})
+            except SystemExit as error: return str(error)
+        result = json.loads(receipt.read_text(encoding="utf-8"))
+        assert result["analysis_status"] == "FINISHED_SUCCESS"
+        assert result["digest"] == state["digest"]
+        return None
+
+assert run(occurrence) is None
+without_timestamp = deepcopy(occurrence)
+del without_timestamp["discovery"]["lastVulnerabilityUpdateTime"]
+assert run(without_timestamp) is None
+for timestamp in [None, 1, "bad", "2026-01-01T00:00:00", (now+timedelta(minutes=10)).isoformat()]:
+    changed = deepcopy(occurrence)
+    changed["discovery"]["lastVulnerabilityUpdateTime"] = timestamp
+    assert "lastVulnerabilityUpdateTime" in run(changed)
+for key, value in [("unexpected", stamp), ("analysisStatus", "FINISHED_FAILED"),
+                   ("analysisError", [{"code":1}]), ("analysisStatusError", {"code":1})]:
+    changed = deepcopy(occurrence)
+    changed["discovery"][key] = value
+    assert run(changed) is not None
+`, { policy });
+});
+
 test('session preflight rejects bad paths, stale secrets and cross-mode approvals before cloud access', () => {
     python(String.raw`
 from io import StringIO

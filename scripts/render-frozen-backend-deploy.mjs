@@ -312,7 +312,19 @@ function renderBackendDeployConfig({ canonical, candidate, preflight, pins: requ
             + yamlStep('Validate exact provider candidate and operational exclusion', ['-ceu', preflightInvocation('initial')], { entrypoint: 'bash' });
     }
 
-    const discovery = candidateState(stepBlock(canonical, 'Require successful Artifact Analysis scan'));
+    let discovery = candidateState(stepBlock(canonical, 'Require successful Artifact Analysis scan'));
+    if (sessionCutover) {
+        // Current regional scan responses include this optional timestamp.
+        // Keep the frozen policy intact and validate the added field explicitly.
+        discovery = replaceExactly(discovery,
+            '"analysisError", "analysisStatusError"}',
+            '"analysisError", "analysisStatusError", "lastVulnerabilityUpdateTime"}');
+        discovery = replaceExactly(discovery,
+            '        last_scan = parse_time(body.get("lastScanTime"), "lastScanTime")',
+            '        last_scan = parse_time(body.get("lastScanTime"), "lastScanTime")\n'
+            + '        if "lastVulnerabilityUpdateTime" in body:\n'
+            + '            parse_time(body["lastVulnerabilityUpdateTime"], "lastVulnerabilityUpdateTime")');
+    }
     const severity = candidateState(stepBlock(canonical, 'Enforce Artifact Analysis severity policy'));
     let deletion = stepBlock(canonical, 'Validate account-deletion deployment contract');
     const deletionEnvironment = accountDeletionEnvironment(pins.accountDeletion);
