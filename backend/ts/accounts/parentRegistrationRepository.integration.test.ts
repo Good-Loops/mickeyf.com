@@ -50,7 +50,7 @@ before(async () => {
     const [target] = await admin.query<RowDataPacket[]>('SELECT DATABASE() AS db, @@version AS version, @@version_comment AS vendor');
     assert.equal(target[0].db, config.database); assert.match(target[0].version, /^8\.0\.31(?:-|$)/u); assert.doesNotMatch(target[0].vendor, /Google/iu);
     await admin.query('SET FOREIGN_KEY_CHECKS = 0');
-    try { await admin.query(`DROP TABLE IF EXISTS account_score_permissions, parent_child_consents, parent_registration_attempts, account_registration_profiles, registration_authorizations,
+    try { await admin.query(`DROP TABLE IF EXISTS parent_signed_forms, account_score_permissions, parent_child_consents, parent_registration_attempts, account_registration_profiles, registration_authorizations,
         apple_auth_revocations, apple_provider_tokens, account_sessions, provider_auth_attempts, account_provider_identities,
         game_personal_bests, game_runs, game_submission_receipts, schema_migrations, users`); }
     finally { await admin.query('SET FOREIGN_KEY_CHECKS = 1'); }

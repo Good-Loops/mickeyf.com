@@ -75,7 +75,7 @@ before(async () => {
     // This fixture intentionally applies only the existing Apple/self-registration schema.
     assert.deepEqual((await planMigrations(connection, migrations, config)).pending, [
         '0021_allow_parent_managed_contact', '0022_create_parent_registration_attempts', '0023_create_parent_child_consents',
-        '0024_extend_parent_family_deletion', '0025_create_score_participation',
+        '0024_extend_parent_family_deletion', '0025_create_score_participation', '0026_create_signed_parent_forms',
     ]);
     await verifyAppleRevocationReadiness(connection);
     database = mysql.createPool({ ...options, connectionLimit: 4 });
