@@ -11,10 +11,9 @@
         },
         "firebase": {
             "type": "stdio",
-            "command": "npx",
+            "command": "node",
             "args": [
-                "-y",
-                "firebase-tools@15.28.1",
+                "${workspaceFolder}/.github/firebase-deploy/node_modules/firebase-tools/lib/bin/firebase.js",
                 "mcp",
                 "--dir",
                 "${workspaceFolder}",

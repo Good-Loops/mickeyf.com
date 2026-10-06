@@ -1,7 +1,11 @@
 # Release readiness and cumulative security ledger
 
-Reconciled 2026-09-08 local (2026-09-09 UTC), against source checkpoint
-`015d962e3b056b6c0aa1ad306a4ca4b94a398b79`. This is the current gate summary;
+Current dispositions refreshed 2026-09-30 against draft PR #341's successful
+candidate `6c28939d` and the owner-accepted S8 runtime exception below.
+The previous wait-for-upstream hold is superseded. Subsequent hosted results are recorded on
+[draft PR #341](https://github.com/Good-Loops/mickeyf.com/pull/341); checkpoint
+results below retain their exact tested revisions. The original reconciliation was 2026-09-08 local
+(2026-09-09 UTC), against `015d962e`. This is the current gate summary;
 dated entries in [PROJECT_PLAN.md](PROJECT_PLAN.md) and
 [RECEIPT_RETENTION.md](backend/RECEIPT_RETENTION.md) remain supporting history.
 Update this ledger instead of treating superseded historical blockers as new work.
@@ -19,23 +23,473 @@ history; the publication closeout records the final delivery checks.
 | ID | Status | Evidence and remaining boundary |
 | --- | --- | --- |
 | S1 | Fixed; dated production acceptance | Receipt migration, exact SQL runtime/operator grants, preservation checks, temporary-account removal, 64 enabled HTTP acceptance assertions and 36 promotion assertions are complete. Do not repeat migrations or synthetic-account acceptance. These are not browser-cookie tests. |
-| S2 | Fixed; scoped live readback | On 2026-09-10, Cloud Run generation/observed generation135 serves 100% intended/observed traffic to `mickeyf-org-p4-1000-6c5a8859-0910`, image `6c5a8859…6331`. Complete runtime comparison preserved numeric DB/session secret references1/2, runtime identity, Cloud SQL attachment, flags and resource settings. Earlier scoped IAM/grant findings are carried forward, not re-enumerated by this image/traffic-only rollout. The receipt-compatible prior revision remains the rollback target. |
+| S2 | Fixed controls; current scoped live readback | September 30 readback confirms generation 146, 100% traffic to `mickeyf-org-localhost-dbb80d4f`, no tags, image `1ae9d489…82b1e19` and the dedicated runtime identity. `DB_PASS:1` and `SESSION_SECRET:2` remain Secret Manager references, without literal credential values. This supersedes the older serving-revision summary; prior IAM/grant and browser acceptance remains dated evidence, not newly repeated. |
 | S3 | Fixed; source and live control checks | Backend build contexts exclude local environment/dependency/generated files; Docker remains pinned, multistage and non-root. All four existing global backend build/deploy triggers are disabled; none are configured in `us-central1`. Reviewed frozen deployment/traffic guards remain. Do not re-enable triggers or route traffic as part of verification. |
 | S4 | Fixed; operational acceptance | Manual cleanup/retry acceptance, hourly activation and exact first natural execution `zjpfg` succeeded. One-off follow-up was deleted. Permanent bests remain independent of receipt deletion. No extra cleanup dispatch is needed. |
 | S5 | Fixed; scoped live readback | At 2026-09-09 02:12:46 UTC, read-only Monitoring API requests verified all three enabled ERROR policies, their exact filters/conditions/alert strategies and sole approved channel against the activation snapshots. The email channel is enabled and its recipient matches the owner's choice. The API resolved the readback blocker without installations or permission changes; browser/CLI repair is not claimed. This is configuration evidence, not a new incident or email-delivery test. |
 | S6 | Fixed; merged | PR #322 brought the reviewed dependency fixes into main. GitHub's post-merge push report lists only the previously accepted moderate alert #287. At the initial reconciliation, 13 of 14 alerts mapped to branch fixes: eight `fast-uri`, two `qs`, and three `xmldom`. This is distinct from the subsequent CI audit findings in S12. |
-| S7 | Accepted; bounded and expiring | Deployment-only `stream-json` 1.9.1, GHSA-528h-pc64-c93x, remains under the owner's static-Hosting-only exception through 2026-10-07 or earlier reassessment triggers. Firebase 15.28.1, locked install, high audit gate and eight-minute deployment timeout remain. No import/framework pipeline expansion or major override is accepted. |
-| S8 | Accepted; bounded and expiring | The owner explicitly approved the exact p4 release image `6c5a8859…6331` on 2026-09-10 through 2026-10-07 with the existing earlier-reassessment triggers retained. The historical receipt-image exception and the new exact-image evidence/approval are recorded below. This is risk acceptance, not an OpenSSL fix or blanket approval for subsequent images. Clean OS/NPM/SECRET scans do not certify the embedded component. |
-| S9 | Fixed; tested CI checkpoint | Authorized non-deploying run `34301221560` passed both jobs on `3ea379fe`: dependency validation/audits, frontend tests/build, WebGL package/tooling checks, backend unit/MySQL integration tests/build, docs watcher tests/docs build and Unity static integrity. All reported test summaries had zero skips. This supersedes failed run `34300667096`; it is not a Unity rebuild or a browser/device test. A PR with required checks/CodeQL on its eventual merge head remains a separate gate. |
-| S10 | Fixed controls; limited scan coverage | Main ruleset requires PR/thread resolution, strict Web/Unity checks and CodeQL errors/high-or-higher protection, with no bypass actors. Zero open code/secret-scanning alerts were observed; main CodeQL evidence covers `2bffc0db`, not this branch. Push protection is enabled; non-provider patterns and validity checks are disabled. Zero alerts is not proof that no secret exists. |
-| S11 | Deferred; local maintenance | Active backend install still has `qs` 6.15.3 versus locked 6.16.0. Isolated locked tests already passed. Refresh only during a deliberate development-stack stop; do not use the stale install as release evidence or modify running dependencies silently. |
+| S7 | Fixed on PR branch; deployment pending | Firebase 15.32.0 resolves the earlier Undici/ip-address/stream-json findings. C7 also updates `@grpc/grpc-js` to 1.14.5; the local and PR locked audits are zero. Earlier CSV/Hosting tests carry forward for unchanged paths. No deployment occurred; the historical exception is not renewed. |
+| S8 | Accepted risk for the reviewed runtime; upstream patch remains a follow-up | On September 30, after the embedded-library risk and unknown patch date were explained, the owner explicitly chose to continue and eventually deploy without waiting. This supersedes the earlier hold. The gate now permits this pinned official Node 22.23.3 / embedded OpenSSL 3.5.8, or patched 3.5.9+ in the reviewed series, while rejecting older/other-series versions. The final image builds successfully; patched Alpine libcrypto3/libssl3 3.5.9-r0 and non-root execution are verified. This exception is not a fix, non-exploitability finding, or acceptance of unrelated vulnerabilities. |
+| S9 | Fixed; final candidate CI passed | Run `36769138253` on `6c28939d` passed frontend TypeScript/581 tests/build, backend TypeScript/807 unit tests/109 MySQL integration cases/build, package provenance, WebGL tooling, deployment guards, launchers, docs watcher/build and Unity integrity. All test summaries have zero failures/skips. All five CodeQL analyses, its security gate and independent docs build pass; docs deployment was skipped. This supersedes the earlier failed candidate runs. The runtime-exception change has separate focused image/gate validation below; required checks on the eventual merge head still apply. |
+| S10 | Historical controls retained; candidate scan dispositions verified | The earlier September 30 readback reported zero open secret-scanning alerts and CodeQL #20/#21 on main `ff9c79be`. PR #341's 32 new JavaScript/TypeScript findings and Python #20 were subsequently reviewed and dismissed as false positives with owner approval; zero open candidate CodeQL alerts remain. #21 remains open on main, with its fix confirmed on the PR. Earlier ruleset/permissions evidence remains dated. Zero secret alerts is not proof that no secret exists. |
+| S11 | On-disk mismatch resolved; running-process state unverified | September 30 readback finds installed backend `qs` 6.16.0, matching the lock; the earlier 6.15.3 disk mismatch is superseded. C7 did not refresh or restart the active backend, so cached running modules are not certified. Backend validation used a clean locked build container with no SQL connection. |
 | S12 | Fixed; deployment-only dependency patch | `3ea379fe` updates exactly four lock entries: `js-yaml` 4.3.2, `hono` 4.13.7, `morgan` 1.12.0 and Firebase-scoped `csv-parse` 7.0.2. Firebase stays 15.28.1. Fresh locked install, full production dependency-tree validation, CLI version check, eight offline CSV tests and twelve smoke-tool tests pass. Audit now has zero high/critical and only the two previously accepted stream-json/parent moderate entries. No unrelated finding was waived or threshold lowered. |
+| S13 | Fixed locally; editor restart not performed | Firebase MCP now runs the local Firebase 15.32.0 CLI from `.github/firebase-deploy`, sharing its reviewed lock and overrides instead of an independent `npx` tree. The installed tooling tree was refreshed; offline selection still exposes exactly the three named read-only tools. No authenticated MCP server or user-data tool was invoked. |
+| S14 | Resolved on candidate; main preflight fix awaits merge | CodeQL #21 is absent from the PR's Python analysis after restricting preflight to the literal `/workspace/frozen-pins.json`. Owner-authorized false-positive dismissal of #20 is verified: its traced diagnostic uses static pattern labels, not credential contents, with the existing sentinel regression. #21 was not dismissed and remains open on main. |
+| S15 | Fixed in candidate locks; local runtime installs not broadly refreshed | Fresh audit findings prompted exactly six transitive version changes: brace-expansion 5.0.12 in root/frontend/backend, backend fast-uri 3.1.8 and ip-address 10.7.2, Firebase grpc-js 1.14.5. All four final lock audits and dependency graphs pass. Running development installations were not replaced; final backend build used the patched locked tree. |
+| S16 | Fixed; local and hosted package checks pass | Fresh guarded Unity build `9b96ad8e…3241a` replaces the stale package. Certification, hashes and 1046-file source provenance match committed Unity source `118a2b8b`; release validation and a release-enabled frontend build pass. Isolated Chrome smoke reaches running with a valid 1141x642 canvas. Run `36767176434` also passes package, frontend and WebGL tooling checks on `7a58c045`; its later integration failure is tracked separately as S18. No gameplay/device replay or publication is claimed. |
+| S17 | Closed as false positives; remote disposition verified | All 32 new JavaScript/TypeScript alerts (#22–#53; two critical, 30 high) were dismissed with owner approval and the specific reasons below. Readback verifies each reason/comment; the candidate has zero open CodeQL alerts and its CodeQL gate passes. No rules were excluded or thresholds changed. This disposition is tied to the reviewed source and trust boundaries, not a blanket security exception. |
+| S18 | Fixed; focused and final hosted checks pass | Three Bosses' old JWT setup now uses current token/session APIs and existing fixture migrations. Apple's login assertion now checks required verified session-proof metadata. All 43 affected/following cases pass locally; final run `36769138253` passes every integration suite on `6c28939d`, with no skips. No production authentication or migration SQL changed. |
+| S19 | Session candidate, rollback and traffic tooling prepared; activation pending | September 30 SQL readback verifies recorded 0001–0012, session schema and direct grants. The captured legacy baseline uses secret version 2; Hosting still has the SPA-only rewrite. The Hosting gate checks renewal through backend/preview; the session renderer retains enabled scoring, zero traffic and trust/scan/runtime checks. The rollback deployment tool now plans a single etag-conditional template update, copying the captured runtime with a fresh enabled secret reference while preserving traffic and adding no tag. Traffic promotion requires that copy Ready, exact reviewed pins and paused automation; promotion/rollback each remove all tags with one conditional traffic write. All 126 existing and 21 new cases have passing results. Actual secrets, cloud image/scan receipt, candidate/rollback deployment, compatible native build and approved signup eligibility remain outstanding; S8 acceptance does not waive them. See the [rollback deployment review](backend/SESSION_AUTHENTICATION.md#zero-traffic-rollback-deployment--prepared-2026-09-30). |
 | R1 | Fixed; certified and published | Package `97daf31c…c098` contains the canvas-scroll bridge: certified build `5473694d…4ba7`, source `346491b4`, 1004-file provenance, Unity6000.3.8f1. Guarded build/settings restoration and packaged hash/provenance validation passed; Firebase verified preview startup and live payload delivery. Earlier game/device checks are carried forward. |
 | R2 | Fixed; owner phone acceptance | After opening the release-candidate mobile preview for the requested fresh-load/landscape touch check, the owner reported about 10 seconds to load and confirmed Fire/fullscreen-exit buttons behave properly. This closes the combined observation. The timing is owner-observed local Safari delivery, not an instrumented cache-miss measurement or production CDN benchmark; the exact 640x360 geometry remains covered by the earlier layout fixture. No repeat login/submission or exhaustive clip-listening pass is required. |
 | R3 | Fixed; accepted owner checks | Keep closed: owner-confirmed published-site login/submission; Android/iPhone normal routes and recorded defeat/retry/menu checks; touch controls; mute persistence; automatic/combined pause; complete outcome-centering audit; accepted fullscreen-button placement and Safari toolbar limitation; recovered desktop FPS incident. Carry acceptance forward unless relevant code/origin/configuration changes or a concrete regression invalidate it. A brief post-publication smoke check is not a new pre-release authentication campaign. |
 | R4 | Fixed; published | Latest game release PR #328 / `b6888bc2` published through Firebase run `34481007522` after the compatible backend was serving. Preview/live WebGL payload checks, preview startup, promotion verification and temporary preview deletion passed. Public p4-Vega canvas/help/score delivery passed in fresh signed-out Chromium. This is not a new physical Safari timing or authenticated-persistence test. |
 | M1 | Fixed; named scope | Named temporary-artifact cleanup and the 57-script bounded audit are complete. Recycled copies remain recoverable; intentional verification/recovery archives remain. Do not reopen an unlimited package/filesystem audit. |
 | M2 | Deferred; explicit follow-ups | Exhaustive per-weapon/per-clip listening and game-feel coverage is optional follow-up absent a specific defect or relevant change; the bounded source review below found no missing weapon/audio reference. Shared-shell device checks (landscape nav/dropdowns with browser bars; Dancing Circles aspect/color) remain distinct from Three Bosses gameplay. Also retain the large-chunk warning, Unity CLI/Pipeline compatibility follow-up and unmeasured DB instrumentation overhead. p4-Vega polish and the incremental Clean Code sweep follow this release phase. |
+
+## C7 security reassessment — 2026-09-30
+
+**C7 is complete at the source/security-review boundary with S8 accepted.**
+The owner superseded the upstream-patch hold; the explicit, scoped exception and
+successful production-image build are recorded below. S16's rebuilt package,
+S18's corrected fixtures, final aggregate CI and S14/S17's CodeQL dispositions
+are verified. The coordinated backend/Hosting/session rollout and Google/Apple
+activation retain their own prerequisites. Exact commands and carried-forward evidence are in the
+[C7 inventory checkpoint](CLEAN_CODE_INVENTORY.md#c7-candidate-and-security-review--2026-09-30).
+
+### Runtime component boundary (S8)
+
+The [official Node index](https://nodejs.org/dist/index.json) and
+[22.23.3 release](https://nodejs.org/en/blog/release/v22.23.3) identify the newest
+Node 22 patch with embedded OpenSSL 3.5.8. The official Alpine image index is
+`sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402`.
+C7 uses that exact image and explicitly installs Alpine's available
+`libcrypto3=3.5.9-r0` and `libssl3=3.5.9-r0`. The local Linux base build and binary
+probe verify both shared-library pins and Node 22.23.3 / embedded OpenSSL 3.5.8.
+CI pins and the Firebase tooling engine contract now target 22.23.3 too; the
+host's installed Node and active processes were not upgraded.
+
+The [September 29 OpenSSL advisory](https://openssl-library.org/news/secadv/20260929.txt)
+and [3.5 release notes](https://openssl-library.org/news/openssl-3.5-notes/index.html)
+require a fresh assessment beyond the earlier 3.5.7 exception:
+
+| Relevant 3.5 family | Candidate source assessment; not a non-exploitability claim |
+| --- | --- |
+| DTLS CVE-2026-84782 (high) | No DTLS endpoint/caller identified in authored backend source. |
+| QUIC CVE-2026-35191 / -42772 | No OpenSSL QUIC endpoint/caller identified in authored backend source. |
+| Certificate allocation CVE-2026-35189 | Outbound HTTPS exists in provider verification, Apple token work and the deletion journal. Fixed destination URLs reduce attacker control but do not prove an unaffected TLS certificate path. Remains unresolved in Node's embedded component. |
+| Generic-curve timing CVE-2026-54872 | Inspected signing uses HMAC or Apple's ES256/P-256; no Brainpool/SM2 signing identified. |
+
+OpenSSL 4.0-only CVE-2026-84783 does not apply to this 3.5 component. Apple token
+storage uses AES-256-GCM with update/final, not the earlier CCM example. These
+source observations supersede the historical pre-provider statement that the
+application had no cipher/HTTPS paths. They do not certify the deployed image,
+all transitive/native behavior, or the host's older embedded OpenSSL.
+
+The earlier follow-up official release-index check found no patched Node 22
+binary; newer official Node majors also did not provide OpenSSL 3.5.9. The
+owner initially chose **keep the official runtime and block deployment until
+its patch arrives**, instead of introducing a custom runtime build. That initial
+hold is superseded by the subsequent acceptance below; the component remains
+unpatched and must not be described as fixed.
+
+At that initial checkpoint the Docker `runtime` stage failed before creating a deployable image unless
+`process.versions.openssl` is at least 3.5.9 within the reviewed 3.5 series.
+It has no build-argument bypass. The existing development/build stages remain
+usable, and a different OpenSSL series requires review. A local
+`docker build --target runtime --progress plain --tag mickeyf-c7-runtime-block-check:20260930 .`
+failed as intended with `Production image blocked: embedded OpenSSL 3.5.8`;
+the wrapper verified that exact cause. The three existing
+`node --test scripts/cloudbuild-candidate.test.mjs` checks pass. No broad backend
+test rerun was needed for this build-only gate.
+
+No custom Node build, major-version migration, exception renewal, full image
+scan or deployment was performed at that initial checkpoint. The gate applied to newly built candidate
+images; it does not modify existing images or the running service. The last
+serving-image readback remains `1ae9d489…82b1e19`, not this local candidate;
+its earlier exception is also due for advisory reassessment. Existing disabled
+build/deploy triggers were not changed. Logs are in
+`%TEMP%/mickeyf-c7-20260930/openssl-runtime-gate.log`.
+
+### Owner-accepted runtime exception and image preparation — 2026-09-30
+
+After receiving the explanation of the unpatched embedded component, unknown
+official release date and custom-runtime alternative, the owner instructed:
+“let's continue and eventually deploy independent of this patch then. I don't
+wanna have to wait”. This accepts the remaining S8 exposure for the reviewed
+candidate and supersedes the waiting policy. It does not classify the findings
+as false positives or accept unrelated future findings. Track the official fix
+as a dependency follow-up and reassess if the pinned runtime or exposed features
+change.
+
+`Dockerfile` retains the exact official base digest and Alpine library pins.
+Its final-stage gate now explicitly accepts embedded OpenSSL 3.5.8 alongside
+patched 3.5.9+ releases in the reviewed 3.5 series. No general bypass flag was
+introduced. A bounded execution of the actual gate accepts 3.5.8, 3.5.9 and
+3.5.10, and rejects 3.5.7 and 3.6.0. The three existing
+`node --test scripts/cloudbuild-candidate.test.mjs` tests pass.
+
+`docker build --target runtime --progress plain --tag mickeyf-c7-runtime:20260930-accepted .`
+succeeds, including the production backend bundles. The local image index is
+`sha256:5e0db506ef9924d7a066a2988f66a1709e3b7f46c452334e40b657e78e6b4af8`,
+with Linux manifest
+`sha256:befc78fbf039eeab36f00d85be2fb1d12e3af5977697b59fc00cbc50b1f33394`.
+This is a local build, not an Artifact Registry release or serving revision.
+A network-disabled Node probe confirms Node v22.23.3, embedded OpenSSL 3.5.8,
+`node_shared_openssl=false`, UID 1000, the server bundle present and npm absent;
+`apk info --exists libcrypto3=3.5.9-r0 libssl3=3.5.9-r0` confirms the shared pins.
+
+Docker Scout could not scan without an account login. Instead, official Trivy
+0.74.0 was downloaded into the temporary review directory; its Windows archive
+matched the GitHub asset SHA-256
+`94c40e0696e4b907a74b7b2e1438d5d72ebaca83115817407f568a002d520842`.
+No global tool installation or Docker login was performed.
+
+Commands (all outputs under `%TEMP%/mickeyf-c7-20260930`):
+
+```text
+docker image save --output <temp>/accepted-runtime-image.tar mickeyf-c7-runtime:20260930-accepted
+trivy.exe image --input <temp>/accepted-runtime-image.tar --cache-dir <temp>/trivy-cache --scanners vuln --format json --output <temp>/accepted-runtime-trivy.json --timeout 5m
+```
+
+Trivy's database was updated at `2026-09-30T19:11:21Z`; the scan completed at
+`20:23:08Z` with zero findings across 18 Alpine and 122 npm packages. It warned
+that Alpine 3.24 is absent from its EOL list. The report does not inventory or
+certify the Node binary's embedded OpenSSL; the direct runtime probe and accepted
+S8 advisory assessment remain authoritative for that component. This local scan
+also does not replace the frozen rollout's required Artifact Analysis receipt.
+Build/probe/scan work made no network connection from the candidate to Cloud SQL.
+
+The next release step is a coordinated session cutover, following
+[the rollout plan](backend/GOOGLE_SIGN_IN_ROLLOUT.md#ordered-preparation-and-activation):
+prepare the exact remote build/image, session-secret reference, compatible
+backend/Hosting/local protocol settings and rollback before changing traffic.
+Keep Google/Apple activation, production schema/grants and registration/deletion
+prerequisites explicit. The S8 exception alone does not execute that cutover.
+
+### New dependency and scanning evidence (S7, S14, S15)
+
+GitHub's scoped readback found 14 open default-branch dependency alerts (3 high,
+8 medium, 3 low), all in the Firebase deployment lock. Their affected versions
+are absent from the candidate. The subsequent npm audit additionally surfaced
+[brace-expansion](https://github.com/advisories/GHSA-qhr7-859c-m2p7),
+[fast-uri](https://github.com/advisories/GHSA-hrr3-gc8f-f4qj),
+[ip-address](https://github.com/advisories/GHSA-j6r3-76f7-8jcv) and
+[grpc-js](https://github.com/advisories/GHSA-m9gg-hp2v-232j) findings, which justified
+refreshing the earlier audit. All four final candidate lock audits now report
+zero findings; all four lock graphs validate. This does not close alerts on
+main or attest to old running installations.
+
+CodeQL reports #20 (Unity diagnostic logging) and #21 (preflight path) on main
+`ff9c79bedb1b3c8ca4e671ed8a9ac00739863f80`. The preflight now uses a constant
+file path and rejects alternate arguments before access. The logging finding
+is confirmed as a false positive in the retrieved SARIF trace: analysis
+`1820860201` starts at the literal `SECRET_PATTERNS` dictionary and follows its
+static `label` into the diagnostic, not matched file contents. The expanded
+regression verifies that both matched private-key content and four synthetic
+settings values stay out of stderr. All seven checker tests pass. No query
+suppression was added. After owner-authorized publication, draft
+[PR #341](https://github.com/Good-Loops/mickeyf.com/pull/341) now points to
+`118a2b8b9acce11a62bb2a797fae73a0d3d8d2ae`. Its CodeQL analyses completed:
+Python retains #20 but no longer reports #21; JavaScript/TypeScript reports
+32 new findings, reviewed below. The owner subsequently authorized dismissal
+conditional on confidence that these were false positives. All 33 reviewed
+dismissals (#20 and #22–#53) are verified, and the CodeQL gate now passes.
+That approval does not accept S8 risk or authorize merge, deployment or database changes.
+
+### PR #341 CodeQL disposition review (S14, S17)
+
+Reviewed the exact SARIF from JavaScript/TypeScript analysis `1868993490`,
+the candidate source, each reported path source and sink, and all 13 related
+route locations in the CSRF results. A fresh read of open alerts on
+`refs/pull/341/head` confirms #22–#53 plus existing #20, all at `118a2b8b`.
+The disposition is **false positive** for these individual findings, with
+the reasons below. The owner approved these specific dismissals after review;
+all were recorded and verified. This is not acceptance of an exploitable risk
+or a claim that the entire application is vulnerability-free.
+
+| Alerts | Evidence and recorded disposition |
+| --- | --- |
+| #22 — critical request forgery | `appleRuntimeSecrets.ts` receives deployment environment configuration, not a request URL. Both secret versions pass the same anchored grammar: one of the two fixed project identifiers, a bounded alphanumeric/underscore/hyphen secret name and a positive numeric version. Dots, percent encoding, query/fragment delimiters, alternate schemes and hosts cannot pass. The request origin is the literal `https://secretmanager.googleapis.com`; redirects are errors. Responses must match the requested resource and CRC32C. The metadata endpoint is also a constant. **False positive:** the reported flow cannot choose an arbitrary host or traverse the resource path. |
+| #23–#42 — 20 iOS path findings | Every SARIF source is `RUNNER_TEMP`, `GITHUB_RUN_ID` or `GITHUB_RUN_ATTEMPT`, supplied by the GitHub runner. `configuration()` requires macOS, GitHub Actions, manual dispatch and the exact approved branch; run identifiers are numeric and the base path absolute. Files use fixed child names, private exclusive writes and an owned per-run directory; cleanup checks direct-child containment, rejects a symlink root and verifies the run ownership marker before recursive removal. Profiles are written to the fixed Xcode profile directory with the numeric run suffix. **False positives within this CI trust boundary:** these are not HTTP, PR-title or dispatch-input paths. This helper must not be reused with untrusted environment/path inputs. |
+| #43 — iOS summary path | The sink appends to GitHub's per-step `GITHUB_STEP_SUMMARY` file after the guarded manual upload flow. It does not accept a user-selected output path. **False positive** for the same runner-controlled environment boundary. |
+| #44 — critical code injection | `dev-isolated.test.cjs` reads the fixed repository `backend/ts/app.ts`, extracts its bootstrap and evaluates it with synthetic environments and a restricted `require` stub. No request, environment string or external fixture becomes executable source. Anyone changing those bytes already controls executable code in the same checkout/test job. **False positive:** repository test execution, not an application code-injection entry point. The VM is not being treated as a sandbox for hostile code. |
+| #45–#50 — missing CSRF middleware | One application cookie-parser mount and five test mounts share results from the same route graph. The actual cookie mutations enforce explicit, exact trusted Origin checks; JSON is additionally required for login, renewal, provider attempts, deletion and score mutations. Cookie-bearing requests cannot use the originless bearer exception. Provider attempts bind to the current cookie, origin, account, state and nonce. See the route review below. **False positives:** the query's recognized token/middleware models do not recognize these origin guards. No decorative token, middleware rename or query suppression was added. |
+| #51 — insufficient password hash | The trace starts at `createPasswordlessSession()` and reaches SHA-256 of `session.sessionId` in a SQL test fixture. That ID is generated by `randomBytes(32)` and is the same identifier hashed by the production session repository; it is not a human password. **False positive:** the fixture deliberately locates a session row to exercise expiry. No database fixture was executed for this review. |
+| #52 — insufficient password hash | The trace starts at `createPasswordlessFixture()` and reaches `createThreeBossesPayloadFingerprint()`. The hashed data consists of contract/game/rules versions, numeric user ID, run UUID and completion time. It is an idempotency fingerprint, not a password verifier. Actual password login uses bcrypt. **False positive;** changing the hash would unnecessarily change receipt compatibility. |
+| #53 — weak cryptography | The flagged MD5 hashes synthetic journal JSON to emulate Google Cloud Storage's `md5Hash` metadata. It is an interoperability/corruption checksum, not password storage, encryption or a signature. The production journal uses authenticated HTTPS and bucket access controls; MD5 does not establish the writer's identity. **False positive in this fixture.** This does not claim MD5 is suitable for adversarial authenticity checks. |
+| #20 — existing Python logging finding | Carry forward the prior exact SARIF review and seven passing checker tests: the source is the literal `SECRET_PATTERNS` label dictionary, not matched credential contents. The retained finding is now **dismissed as a false positive with owner approval**; no additional source change or test rerun was justified. |
+
+The iOS trust boundary was also checked live, read-only: `ios-testflight`
+requires reviewer `Good-Loops` and its custom deployment branch policy permits
+only `improvement/clean-code-sweep`. Self-review is allowed; this is an owner
+approval gate, not a two-person control. The workflow has no push/PR trigger,
+loads signing secrets only in the explicit upload step and removes them from
+child process environments. No workflow, upload or cleanup was dispatched.
+
+CSRF route review:
+
+- Password login and session renewal require a trusted Origin and JSON before
+  persistence/cookie changes. Provider begin/complete require the same, reject
+  bearer/unsigned/ambiguous cookie transport and enforce server-bound attempts.
+- Logout checks the Origin before revoking or clearing cookies. Password deletion
+  and both games' score/ticket mutations check authentication and Origin before
+  persistence. The originless fallback requires an explicitly presented bearer
+  credential and no signed session cookie; browsers cannot forge that bearer.
+- Anonymous password signup creates an independent account and does not issue
+  a session or act on the browser's current account. Leaderboard reads and auth
+  verification do not mutate that account or its cookies. Disabled mutation
+  routes return without persistence.
+- Apple notifications authenticate Apple's signed payload, not browser cookies.
+  Apple maintenance is mounted before cookie parsing and rejects Cookie/Origin
+  headers, requiring a pinned workload identity. Both are included in CodeQL's
+  related-route list despite these distinct authentication mechanisms.
+- The extra `/api/users` route reported in `authRouter.security.test.ts` uses
+  the same production controller with fake persistence on a loopback test server.
+  The other test mounts use the same guards; they are not production listeners.
+
+These conclusions depend on retaining the exact allowlist and control of its
+origins, including the deliberately approved local frontend origin. CORS and
+SameSite alone are not the claimed defense, and the native Origin is not app
+attestation. New mutations or changes to cookie routing require a fresh review.
+
+Primary references: [CodeQL SSRF guidance](https://codeql.github.com/codeql-query-help/javascript/js-request-forgery/),
+the [CSRF query implementation](https://github.com/github/codeql/blob/main/javascript/ql/src/Security/CWE-352/MissingCsrfMiddleware.ql),
+[OWASP origin verification](https://cheatsheetseries.owasp.org/cheatsheets/Cross-Site_Request_Forgery_Prevention_Cheat_Sheet.html#using-standard-headers-to-verify-origin),
+[GitHub runner variables](https://docs.github.com/en/actions/reference/workflows-and-actions/variables),
+and [Cloud Storage checksums](https://docs.cloud.google.com/storage/docs/data-validation).
+
+Verification in this follow-up was read-only source/SARIF/API inspection plus
+`git diff --check` for these documentation changes. No executable code changed,
+so the previously recorded 807 backend unit tests, the final 92 dependency-path
+tests, seven Python checker tests and focused launcher evidence carry forward;
+they were not rerun. Relevant existing cases include `appleRuntimeSecrets.test.ts`
+(malformed resource/host/traversal and redirect rejection),
+`providerAuthContext.test.ts`, `authRouter.security.test.ts`,
+`mainController.security.test.ts` and `threeBossesRouter.security.test.ts`
+(Origin/JSON rejection before persistence), and the bootstrap test cited in #44.
+SQL integration fixtures, real provider authentication and macOS signing were
+not executed. SARIF is retained outside Git in
+`%TEMP%/mickeyf-c7-20260930/codeql-javascript-pr341.sarif`.
+
+After confirming unchanged PR head `118a2b8b` and the same 33 findings, used
+`gh api --method PATCH repos/Good-Loops/mickeyf.com/code-scanning/alerts/<number>`
+with a JSON body for each approved alert: `state=dismissed`,
+`dismissed_reason=false positive`, and a specific comment pointing to PR #341's
+full review. A final alert-list readback verified all 33 states, reasons and
+comments and zero open alerts at `refs/pull/341/head`. `gh pr checks 341`
+confirms CodeQL check `110043829795` passes; no scan/test rerun was needed.
+Separate readback confirms #21 remains open on main and was not dismissed.
+Before/after responses and mutation receipts are outside Git in the same
+temporary review directory. These documentation edits remain local until the
+next substantive commit, avoiding an unnecessary docs-only CI run.
+
+The runtime/package follow-up below supersedes this checkpoint's S16 blocker.
+The draft remains blocked by S8's official upstream runtime patch. No OpenSSL
+exception is implied by these false-positive dismissals.
+
+### WebGL replacement and runtime hold follow-up (S8, S16)
+
+The guarded release build used Unity 6000.3.8f1 and completed in 226403 ms.
+Package `9b96ad8eb43e6dc10a6c47aa0b27647d38c860baf5fef949fd12a1cc3613241a`
+has certified build ID
+`a511d086b26e75061eb9ae89ae065f0b53d7c13ad3e92c45fa87533337bcf829`,
+source commit `118a2b8b9acce11a62bb2a797fae73a0d3d8d2ae`, and 1046-file
+Unity source digest
+`fe4c964e1aa3f0d31e6ae76bbe4a18e7fbb9583c3c11072bdd286d8002c38539`.
+The generated bytes replace the old candidate package; R1/R4 above still record
+the separately published release. No tracked Unity source/settings changed.
+
+An initial guarded attempt rejected old ignored `Assets/_Recovery` scenes.
+The task-owned Editor moved the folder and its metadata intact to
+`%TEMP%/mickeyf-c7-20260930/unity-recovery-backup` before rebuilding. The files
+remain recoverable outside Assets. The completed build reported that absent
+`RuntimePipelineConfig` disables development Pipeline in the Player; no runtime
+Pipeline configuration was added. The task-owned Editor and preview server were
+closed after verification.
+
+Commands and results (Windows paths abbreviated):
+
+- Set `THREE_BOSSES_WEBGL_DIR` to
+  `%LOCALAPPDATA%/mickeyf.com/three-bosses-c7-release-20260930`; ran
+  `npm run three-bosses:webgl:release:build`,
+  `npm run three-bosses:webgl:package` and
+  `npm run three-bosses:webgl:release:validate`: passed.
+- Set `VITE_ENABLE_THREE_BOSSES_RELEASE=1` and
+  `VITE_PROD_API_URL=http://127.0.0.1:4317`; ran
+  `npm --prefix frontend run build -- --outDir <temp>/frontend-release-preview`:
+  passed. Served that output with
+  `npm --prefix frontend run preview -- --host 127.0.0.1 --port 4317 --strictPort --outDir <temp>/frontend-release-preview`.
+- `node .github/firebase-deploy/smoke-three-bosses-webgl-preview.mjs --base-url http://127.0.0.1:4317 --chrome-executable "C:/Program Files/Google/Chrome/Application/chrome.exe" --artifacts <temp>/webgl-smoke`:
+  passed, running canvas 1141x642. This is isolated Chrome startup, not a new
+  gameplay/device or authenticated-submission acceptance run.
+- S8's production-image rejection and three deployment-tool checks passed as
+  described above. No custom Node binary or OpenSSL exception was introduced.
+
+Build logs and preview output are outside Git under
+`%TEMP%/mickeyf-c7-20260930`. Package/runtime commit `7a58c045` was pushed to the
+existing draft PR. No merge, deployment, Cloud SQL change or provider activation
+is part of this checkpoint.
+
+### Hosted follow-up and session fixture correction (S18)
+
+Run `36767176434` on `7a58c045` passes locked installs/audits, package provenance,
+frontend tests/build, WebGL tooling, deployment guards, development/migration
+launchers, backend TypeScript and all 807 unit tests. Its first two MySQL suites
+pass 25 and six cases. Three Bosses repository integration passes 12 cases but
+fails its HTTP round trip (`401` instead of `201`): the test still signs an old
+JWT directly and prepares only the pre-session schema. Later integration suites,
+backend production build and this job's documentation steps were skipped.
+The independent docs build, Unity integrity, all five CodeQL analyses and the
+CodeQL security gate pass. Documentation deployment remains skipped.
+
+Only `threeBossesRunRepository.integration.test.ts` changes to repair the fixture:
+apply the existing migrations through session renewal in the guarded test
+database, read its generated account UUID, issue the current v2 token and
+persist the live session using `createAccountSession`. The real HTTP routes,
+authorization, ticket timing and submission/replay assertions remain intact.
+Additional session/provider fixture tables are cleaned before later suites.
+No production code, SQL migration file or Cloud SQL state changes.
+
+Focused validation uses a temporary copy of the existing migration-test launcher
+with only its source directory fixed and command selection narrowed to
+`THREE_BOSSES_RUN_INTEGRATION_TEST_COMMAND`. Container identity, environment
+scrubbing and teardown guards are unchanged. The temporary runner and log are
+`%TEMP%/mickeyf-c7-20260930/run-three-bosses-integration.mjs` and
+`three-bosses-integration-fix.log`. Running `node <temp>/run-three-bosses-integration.mjs`
+passed all 13 cases with zero failures/skips; container and network removal
+completed. Current follow-up CI results belong to the PR
+head reported on PR #341; this checkpoint does not claim a pass for skipped work.
+
+Run `36768246402` on fixture commit `02001324` confirms the repaired Three
+Bosses round trip and the intervening reconciliation, grants, deletion-replay
+and provider-account suites. It then exposes a second stale expectation in
+`providerAttemptRepository.integration.test.ts`: verified Apple login now
+returns `authenticationMethod: 'apple'` and the original verified subject,
+audience and issue time as `appleSessionProof`. Those fields are required by
+session establishment for Apple revocation; the assertion now checks their
+exact fixture values. Production flow/session code remains unchanged.
+
+The temporary `run-remaining-session-integrations.mjs` harness selects only
+the affected provider-attempt suite and the two not yet reached session and
+Apple-revocation suites; all existing isolation/teardown guards remain. Its log
+is `remaining-session-integrations.log` in the same temporary directory.
+`node <temp>/run-remaining-session-integrations.mjs` passes all 30 cases
+(12 provider-attempt, 12 session, six Apple-revocation), with zero failures or
+skips and confirmed disposable-container/network removal. No earlier successful
+integration groups were repeated locally.
+
+### Carried-forward security boundaries
+
+A bounded pattern scan of 484 changed text files since the sweep baseline found
+no key/token payload match. Unity's full tracked-content checker also passes;
+GitHub reports zero open secret-scanning alerts. These checks do not prove
+absence of all secrets. Request error logging and provider/session source
+boundaries were re-inspected; unchanged C3 auth, origin, nonce, cookie and
+transaction evidence carries forward. Docker/Cloud Build context allowlists,
+non-root runtime and frozen deployment approval/traffic guards remain intact.
+Live readback confirms numeric secret references and four disabled global build
+triggers, with none in `us-central1`. Existing IAM, monitoring, SQL, scheduler,
+Unity and device acceptance remains dated evidence; no account or SQL tests were
+repeated. Development continues to use Cloud SQL.
+
+## Local Firebase tooling remediation — 2026-09-30
+
+This initial checkpoint is retained as history; C7 above supersedes its audit
+and separate-MCP disposition after the new grpc-js finding.
+
+The Dot task "Review Ludolume continuation and security" updated only
+`.github/firebase-deploy/package.json`, its lock and the Hosting workflow's
+exact CLI-version guard for this repair. Firebase 15.32.0 declares compatible
+streaming/CSV ranges itself; the old Firebase-15.28.1-specific CSV override was
+removed. The lock resolves `stream-json` 3.7.0 and `stream-chain` 4.2.6 plus
+patched transitive dependencies. Static Hosting scope, Node pins, disabled
+install lifecycle scripts, audit threshold and deployment timeout are unchanged.
+
+Dot validated an isolated candidate with Node 22.23.2/npm 11.6.2: locked install,
+full production dependency-tree check, CLI version/help, **20/20 CSV/preview
+tests**, **10/10 Hosting tests**, and audit reduction from **2 high + 5 moderate
+package findings to zero**. Process-local `--use-system-ca` used Windows trust
+without disabling TLS verification. On continuation, the three current files
+matched the recorded tested hashes and the audit/test reports were read;
+installation, audit and those tests were not repeated. Evidence remains outside
+Git in `C:\Users\User\Documents\Codex\2026-09-30\task\firebase-tooling-review`.
+
+These are local dependency results. They neither certify a deployed revision nor
+close C7. The earlier S12 checkpoint below remains historical evidence; it does
+not describe today's local Firebase version. Dot also identified upstream
+Node/OpenSSL releases as S8 reassessment triggers. S8 still requires its separate
+image/advisory review; no production readback, exception renewal, image upgrade
+or rollout was performed in this continuation.
+
+The [C4 UI/integrity closeout](CLEAN_CODE_INVENTORY.md#c4-ui-and-source-integrity-closeout--2026-09-30)
+records the timer fix and correction of a hidden-file metadata false positive.
+C1–C6 are complete at the source-review boundary; C7 remains open. The
+[C5 native/provider checkpoint](CLEAN_CODE_INVENTORY.md#c5-native-shell-and-provider-readiness--2026-09-30)
+made no application changes and does not enable Google/Apple sign-in. Both
+providers remain explicit login/signup requirements for local and released
+surfaces, with schema/grants, eligibility/deletion and platform activation open.
+The [C6 tooling checkpoint](CLEAN_CODE_INVENTORY.md#c6-tooling-and-documentation-delta--2026-09-30)
+corrects development-target documentation and adds existing launcher tests to
+PR CI: 11/11 pass locally, with no Docker, SQL, cloud or application changes.
+Hosted CI and the final cumulative security closeout have not been rerun.
+Those initial September 30 checks preceded commit/push. The owner subsequently
+authorized branch publication and a draft PR; hosted candidate checks are pending.
+
+## C3 source availability findings — 2026-09-29
+
+These local source dispositions supplement the dated release evidence above;
+they do not change the serving backend or close the overall security review.
+The [latest tooling checkpoint](CLEAN_CODE_INVENTORY.md#c3-migration-and-grant-tooling-closeout--2026-09-29)
+completes C3 source review, superseding the earlier rows' pending C3 scope below.
+The final C7 security/release closeout remains open after the September 30
+C4–C6 source/tooling closeouts above.
+
+The push of `005706cf` on 2026-09-29 reported **five default-branch vulnerabilities:
+one high and four moderate**. This supersedes the earlier four-moderate notice
+for notification tracking only. Alert identities and applicability to this branch
+were not queried; reconcile them in C7 before carrying dependency evidence forward.
+This notice grants no new exception and is not a fresh dependency audit.
+
+| ID | Status | Evidence and remaining boundary |
+| --- | --- | --- |
+| C3-A1 | Fixed in source; not deployed | Provider signup/link/credential transaction controls now use ten-second query deadlines, discard uncertain begin/commit connections without another SQL command, and avoid retrying failed rollback. Three before-fix regressions reproduced missing deadline options/cleanup ordering; 104 focused tests, backend typecheck and temporary-output production build passed. MySQL integration fixture updated and typechecked only. See the [checkpoint](CLEAN_CODE_INVENTORY.md#c3-provider-account-transaction-boundaries--2026-09-29). |
+| C3-A2 | Fixed in source for reviewed borrowed account/auth connections; not deployed | Deletion transaction controls now have ten-second deadlines and uncertain begin/commit discard directly. A guard at four acquisition boundaries destroys protocol-timeout sessions before helper error sanitization and prevents stalled cleanup SQL. The installed mysql2 client with a scripted loopback peer reproduced the stall and verified socket closure/pool replacement; 218 focused tests, TypeScript and temporary-output production build passed. No live SQL-engine integration, total request/pool-acquisition deadline or blanket direct `pool.query` coverage is claimed. Recovery/audit follow-up is recorded in C3-A3; C3 and final closeout remain open. See the [checkpoint](CLEAN_CODE_INVENTORY.md#c3-deletion-and-stalled-query-cleanup--2026-09-29). |
+| C3-A3 | Fixed in source for replay/audit resource disposal; not deployed | Replay's remaining acquisitions and audit now reuse the tested connection guard to close timed-out sockets; audit deadline disposal also closes its socket. Uncertain replay begin/commit no longer attempts rollback. Three targeted cases failed before the fix; 25 affected-file tests, TypeScript and temporary-output production build passed. Existing maintenance watchdogs retained after source review. CLI-wide deadline semantics were not expanded; C3 configuration/tooling and final closeout remain open. See the [checkpoint](CLEAN_CODE_INVENTORY.md#c3-recovery-and-maintenance-resource-ownership--2026-09-29). |
+| C3-A4 | Fixed in source for startup readiness disposal; not deployed | Account/session/provider readiness now borrows a guarded connection, closing the underlying socket after query failure or its existing deadline. Three strengthened cleanup cases failed before the fix; all 16 readiness cases have passing results, with one targeted rerun for a stale fixture expectation. TypeScript and temporary-output production build passed. Configuration/policies retained after source review; login/logout type declarations aligned with existing handlers. Migration/grant tooling and final closeout remain open. See the [checkpoint](CLEAN_CODE_INVENTORY.md#c3-configuration-validation-and-contracts--2026-09-29). |
+| C3-A5 | Fixed in source for runtime-grant CLI lifetime; not deployed | Target-identity SQL now shares the operation watchdog; late identity responses cannot start grant work after timeout. Timeout forces socket closure even if driver teardown fails, and shutdown is capped at two seconds. Three scenarios reproduced the gaps before the fix; all 22 affected-file tests, TypeScript and temporary-output production build passed. Migration/configuration/grant-policy review is complete with no SQL or grant changes. Fixtures mocked database/cloud operations; no live execution or total CLI deadline claim. Apply timeouts retain indeterminate-outcome reporting. See the [checkpoint](CLEAN_CODE_INVENTORY.md#c3-migration-and-grant-tooling-closeout--2026-09-29). |
+
+## Local Cloud SQL startup mismatch — 2026-09-29
+
+**Fixed local startup; approved Cloud SQL schema/grant repair complete.** Initial
+inspection found migration records only through 0008 and no session-table
+grants; this branch requires 0011/0012. Following the approved read-only preflight,
+the owner authorized migrations 0009–0012 and the additive session grant.
+All four completed, all 12 recorded checksums match, and a fresh runtime connection
+passes session readiness. Other runtime grants are unchanged. The temporary
+maintenance user was deleted, confirmed absent and a fresh login denied.
+The existing VS Code backend restarted and returned HTTP 200 from
+`/api/leaderboards`. See the [review](backend/CLOUD_SQL_SESSION_MIGRATION_REVIEW.md)
+for exact scope, commands and rollback boundaries. Migrations 0013–0018 remain
+pending; provider flags, credentials and deployed revisions are unchanged.
+Backup metadata and serving-source compatibility were checked; no restore,
+rebuild, broad suite or login/logout/renewal smoke test was run. C7 remains open.
+
+## Local Three Bosses UI checkpoint — 2026-09-22
+
+The UI Toolkit menu/pause/outcome changes remain on the active development
+branch, not the published package. The final source correction is `148e38e0`;
+its combined `ScreenUI` run passed 14/14 and the local WebGL build succeeded.
+Local preview delivery fixes `0bc613e1` and `b0ff1efd` address truncated downloads
+under forced-close and slow-consumer conditions; full throttled payload hashes
+and 28 asset-server tests passed. These are development-server changes only.
+
+The owner now confirms successful Safari loading and accepts the phone layout.
+Reported temporary lag stopped without performance changes; no sustained-FPS
+measurement or performance improvement is claimed. Do not repeat this layout
+check or the previously accepted login/submission/gameplay checks without a
+relevant regression. Production packaging/publication remains separately scoped.
 
 ## Exact dependency interpretation
 
@@ -117,7 +571,10 @@ was suppressed or turned into additional unrelated work. Documentation-only
 recording after this run does not claim a new tested SHA or require repeating
 unchanged application checks merely to update this ledger.
 
-## Embedded OpenSSL: no automatic carry-forward
+## Embedded OpenSSL: historical September 9 review
+
+The C7 reassessment above supersedes the release-version and reachability
+statements in this historical exact-image review. Its approval remains bounded.
 
 The most recent historical exception covered image
 `sha256:3bba5ca29a474c6b75d92f48f93a9efc6cfa3fe32d3a4ddb7b82f2a610baaa48`.
@@ -358,8 +815,114 @@ The following release sequence is complete; it is not a fresh checklist to rerun
    gameplay/authentication checks closed absent a relevant regression.
 4. Retain the dated S7/S8 reassessment boundaries and deferred maintenance list.
    No backend pipeline reactivation, dependency refresh, further deployment or
-   unrelated cloud mutation is implied by this closeout. Next is Phase16's
-   bounded first-party Clean Code inventory, not another release audit.
+   unrelated cloud mutation is implied by this closeout. Phase16's bounded
+   first-party inventory, leaderboard detail-loader extraction and shared
+   Three Bosses request-policy extraction are recorded in
+   `CLEAN_CODE_INVENTORY.md`. Frontend test discovery now uses a matching glob
+   without removing coverage. Stale project-guidance cleanup is also complete;
+   auth transport is now consistently service-owned with corrected session
+   response typing, and stale startup checks cannot overwrite newer auth actions.
+   The owner-requested signup auto-login and shared SweetAlert2 glass theme are
+   also implemented: creation succeeds before login, and failed automatic login
+   routes to manual login without repeating registration. TypeScript/all 200
+   frontend tests, Vite build and mocked browser flow/responsive checks passed;
+   physical iPhone dialog behavior remains unverified. No backend/cookie-policy
+   changes or real account writes. These changes have not been deployed; continue
+   bounded subsystem cleanup, not another production authentication audit.
+   Subsequent game record alerts use the same theme: server-confirmed personal
+   bests only, Three Bosses run-ID deduplication and fullscreen-aware placement.
+   All 202 frontend tests and build passed; mocked browser notifications and
+   lifecycle checks passed, not real account/score writes or device testing.
+   Backend/Unity assets remain unchanged. Native-store/social-provider work is
+   separately planned in Phase 17. The owner subsequently approved GitHub Actions
+   for iOS: approved workflow-only PR #330 activated manual builds on `main`
+   without publishing the pending website/authentication changes. Cloud run
+   `34494943864` passed against development commit `aa832702`: all 202 frontend
+   tests, Vite build, Capacitor/CocoaPods sync, unsigned Xcode simulator build
+   and artifact upload. New celestial native artwork includes a real-alpha
+   Android adaptive layer; exports and asset references were checked. Physical
+   native appearance, Android compilation and native authentication remain
+   unverified. No provider login, store upload or additional public website
+   release was activated by that unsigned build.
+   On 2026-09-10 the owner selected `com.mickeyf.app`; Capacitor, Android and
+   iOS configurations were aligned and the explicit bundle ID was registered
+   with Apple. Focused identifier/XML/Xcode-project checks passed, not a fresh
+   native compile. After the original listing name was rejected, Apple accepted
+   the owner-selected Ludolume: app `6810735137`, SKU `ludolume-ios`, status
+   Prepare for Submission. The Developer identifier description is Ludolume;
+   `com.mickeyf.app` remains unchanged. Registration did not itself upload or
+   publish a binary; the subsequent signed checkpoint is recorded below.
+   App Information categories Entertainment (primary) and Music (secondary)
+   were saved and verified after reload on 2026-09-10. Fresh app/bundle API
+   reads still return Ludolume; the previous description persists only in the
+   observed App Store Connect selector. That cosmetic inconsistency does not
+   change the registered identifier or authorize broader CI-key permissions.
+   Distribution signing is now configured with owner approval (2026-09-10):
+   certificate `Q4FS72TU6B` expires 2027-09-10; active `IOS_APP_STORE` profile
+   `Z392C733U4` (UUID `e312aedc-9b44-4464-8ce9-0e0f0fb39c0a`) matches exactly
+   `AX4Z7T24C9.com.mickeyf.app`. Existing Developer-key GETs retrieved both
+   (HTTP 200) after browser downloads failed, without permission escalation.
+   RSA-key/leaf matching, Apple WWDR G3 leaf signature, profile CMS signature,
+   profile certificate and helper guards passed. The encrypted P12/password
+   backup has restricted local access; `ios-testflight` stores the API key and
+   three signing secrets, retaining its exact active-branch restriction and
+   `Good-Loops` reviewer. Protected run
+   [`34505852569`](https://github.com/Good-Loops/mickeyf.com/actions/runs/34505852569)
+   passed on exact commit `cd59d311e8b866f77477f8867a6334544a89a066`, including
+   signed archive/export, IPA metadata and leaf-certificate verification,
+   TestFlight upload and credential/artifact cleanup. App Store Connect GET
+   (HTTP 200) confirms Ludolume 1.0 build `4.1.0`
+   (`2999535d-e87d-47e1-91cf-ce2bb4bbd4ea`): processing `VALID`, audience
+   `INTERNAL_ONLY`, not expired. The owner personally submitted Apple's
+   encryption declaration on 2026-09-10; the live App Store Connect UI now shows
+   **Ready to Test**, replacing the initial `MISSING_EXPORT_COMPLIANCE` state.
+   **Ludolume Internal** initially contained only build `4.1.0` and the existing Account
+   Holder as its sole tester, with automatic distribution disabled. The owner
+   installed TestFlight version 1.0/build `4.1.0` on the iPhone. Other tested
+   functionality is reported working, but p4-Vega shows “The game could not
+   load. Please refresh to try again.”; the cause was initially unknown. After the
+   CORS rollout below, the owner confirms password login works, but fully closing
+   and reopening the app initially lost the session. The owner subsequently
+   confirmed login/logout and close/reopen persistence on build `6.1.0`.
+   Signup, offline logout and expiry have not been separately device-verified.
+   Native p4-Vega still fails on that build. Its demonstrated Pixi asset URL bug
+   is corrected in uploaded build `7.1.0` (source `320997ce`), Apple-processed as
+   `VALID` / `INTERNAL_ONLY`. Export answers are saved and the existing internal
+   group has access (`IN_BETA_TESTING`); the owner confirms p4-Vega loads/plays.
+   The follow-up native portrait HUD, outer-page scrolling and small-screen Home
+   typography/quote fixes are uploaded in combined build `8.1.0` (source
+   `57665ff1`); all 221 cloud tests, build, signing/upload and cleanup passed.
+   Apple reports `VALID` / `INTERNAL_ONLY`; owner export answers are saved and
+   existing internal group access is verified (`IN_BETA_TESTING`). The owner
+   accepts those three fixes. Subsequent p4 frame/main-scroll, native fullscreen
+   exit and navigation fixes are uploaded in `9.1.0` from `bd107c54`; forty focused
+   tests, TypeScript/build and all 226 cloud tests pass, including signed upload
+   and cleanup. Owner export answers are saved; existing internal-group access
+   is verified (`IN_BETA_TESTING`). Native device acceptance remains.
+   No roles, public
+   testing, public store submission or website release were enabled.
+   The exact `capacitor://localhost` backend allowance is now live;
+   14 focused configuration/authorization tests and backend TypeScript passed.
+   The owner approved this CORS-only deployment and renewed S8 only for a matching
+   unchanged-runtime/base/dependency replacement through **2026-10-07**. The same
+   earlier-review triggers remain: a patched supported Node release, relevant
+   image/code/runtime dependency/configuration changes, native/FFI/provider/
+   cipher/protocol expansion, or a relevant advisory/incident. This is temporary
+   risk acceptance, not remediation or blanket approval for later images.
+   Cloud Build `c25d3432-10dc-4f23-b795-87cfde6b9300` built source
+   `a1f3ea4331ea28f7477a7addfd21d34ecd13d39e` as
+   `sha256:90a9bca6bbd44f5b7d05c944a6443e3692538089a9e1aafdca8983c80b7646d1`.
+   PR #332 merged as `ff9c79bedb1b3c8ca4e671ed8a9ac00739863f80`. Stage job
+   `67dfa5dc-f380-404f-bf4c-bb872977e5e9`, promotion
+   `8c7dba8f-7b8b-4fb8-92b1-a11cc54d277f` and tag cleanup
+   `502741da-8d94-4375-afdd-c800e22d3264` all succeeded. Final generation138
+   serves 100% on `mickeyf-org-ios-origin-a1f3ea43-0910` with no tags; runtime/
+   configuration and rollback revision `mickeyf-org-p4-1000-6c5a8859-0910` are
+   intact. All six live preflights and the unauthenticated session probe passed.
+   The temporary branch/worktree were removed, leaving only `main` and the
+   active branch. Native persistence is now owner-confirmed on build `6.1.0`;
+   p4-Vega's portrait layout/scrolling corrections and signup still need device confirmation.
+   See `frontend/ios/BUILDING.md` for the current narrow checkpoint.
 
 Accepted operational limits remain: expired receipt IDs lose historical retry
 recognition; failures/backlog can extend retention; expired receipts require a

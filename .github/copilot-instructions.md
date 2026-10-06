@@ -40,14 +40,14 @@ Follow the existing folder boundaries. Do not introduce new top-level patterns u
   - `frontend/sass/components`
   - `frontend/sass/layout`
   - `frontend/sass/pages`
-  - `frontend/sass/themes`
 
 ### Backend
-- App entry: `backend/app.ts`
-- Controllers: `backend/controllers/**`
-- Routers: `backend/routers/**`
-- Database config: `backend/config/dbConfig.ts`
-- Shared types: `backend/types/**`
+- App entry: `backend/ts/app.ts`
+- Controllers: `backend/ts/controllers/**`
+- Routers: `backend/ts/routers/**`
+- Database pool: `backend/ts/db/dbConfig.ts`
+- Validated environment configuration: `backend/ts/config/**`
+- Shared types: `backend/ts/types/**`
 
 ## 5) Code style requirements
 ### TypeScript

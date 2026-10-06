@@ -1,0 +1,11 @@
+.signed-parent-form { border: 1px solid currentColor; padding: 1rem; margin-block: 1rem; overflow-wrap: anywhere; }
+.signed-parent-form dd { margin-inline-start: 0; margin-block-end: .5rem; }
+.signed-parent-form dt { font-weight: 600; }
+@media print {
+    @page { margin: 14mm; }
+    html, body { margin: 0; background: #fff; color: #000; }
+    body *:has(.signed-parent-form) { display: contents; }
+    body *:not(:has(.signed-parent-form)):not(.signed-parent-form):not(.signed-parent-form *) { display: none; }
+    .signed-parent-form { position: static; width: 100%; box-sizing: border-box; border: 0; margin: 0; padding: 0; color: #000; background: #fff; font: 11pt/1.4 sans-serif; }
+    .signed-parent-form__print { display: none; }
+}

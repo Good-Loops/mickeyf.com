@@ -1,8 +1,8 @@
 /**
  * Cross-browser fullscreen boundary for canvas wrappers.
  *
- * iPhone Safari does not expose element fullscreen for ordinary DOM content,
- * so unsupported browsers receive a reversible, viewport-filling CSS mode.
+ * Unsupported browsers and the installed iOS app use reversible CSS fullscreen.
+ * iOS keeps its web view in place instead of opening WebKit's separate presenter.
  */
 
 import { cancelSafariFullscreenPaint, releaseSafariFullscreenPaint } from './safariFullscreenPaint.ts';
@@ -62,6 +62,8 @@ const restoreFallbackIsolation = (target: HTMLElement): void => {
 };
 
 const isolateFallbackTarget = (target: HTMLElement): void => {
+    // Overlapping requests must not replace the original state with our own inert flags.
+    if (fallbackIsolationByTarget.has(target)) return;
     const entries: FallbackIsolationEntry[] = [];
     let branch: HTMLElement | null = target;
 
@@ -224,6 +226,13 @@ export const enterCanvasFullscreen = async (
     }
 
     cancelSafariFullscreenPaint(target);
+
+    // WKWebView's presenter adds system controls and reparents the entire web view.
+    // The installed iOS app already owns its viewport; keep that native layout intact.
+    if (fullscreenDocument.documentElement.getAttribute('data-native-app') === 'ios') {
+        enableCanvasFullscreenFallback(target, fullscreenDocument);
+        return true;
+    }
 
     const requestFullscreen = requestNativeFullscreen(target);
 

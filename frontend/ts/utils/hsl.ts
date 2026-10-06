@@ -97,15 +97,16 @@ export function parseHslString(hsl: string): HslColor {
  */
 export function wrapHue(h: number) { return ((h % 360) + 360) % 360; }
 
-const lerpHue = (h1: number, h2: number, t: number) => {
-    const a = wrapHue(h1);
-    const b = wrapHue(h2);
-
-    let delta = b - a;
+/** Shortest signed hue distance in degrees; exact half-turns retain their direction. */
+export function signedHueDistance(from: number, to: number): number {
+    let delta = wrapHue(to) - wrapHue(from);
     if (delta > 180) delta -= 360;
     if (delta < -180) delta += 360;
+    return delta;
+}
 
-    return wrapHue(a + delta * t);
+const lerpHue = (h1: number, h2: number, t: number) => {
+    return wrapHue(wrapHue(h1) + signedHueDistance(h1, h2) * t);
 };
 
 /**

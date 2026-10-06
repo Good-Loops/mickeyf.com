@@ -10,6 +10,8 @@
 		"infra:up": "docker compose -f compose.yaml up -d cloud-sql-proxy",
 		"infra:down": "docker compose -f compose.yaml down",
 		"backend:dev:local": "npm run infra:up && concurrently --kill-others-on-fail --names proxy,watch,server --prefix-colors yellow,magenta,red \"docker compose -f compose.yaml logs --tail=20 -f cloud-sql-proxy\" \"npm --prefix backend run watch\" \"node scripts/wait-for-port.mjs 127.0.0.1 3306 60000 && npm --prefix backend run dev\"",
+		"backend:dev:isolated": "node backend/scripts/dev-isolated.cjs",
+		"test:backend-isolated": "node --test backend/scripts/dev-isolated.test.cjs",
 		"frontend:dev:local": "concurrently --kill-others --passthrough-arguments --names webgl,front --prefix-colors blue,cyan \"npm run three-bosses:webgl:serve\" \"node scripts/wait-for-port.mjs 127.0.0.1 4174 10000 && npm --prefix frontend run dev:vite -- {@}\" --",
 		"three-bosses:webgl:build": "node scripts/build-three-bosses-webgl.mjs",
 		"three-bosses:webgl:release:build": "node scripts/build-three-bosses-webgl.mjs --release",
@@ -24,7 +26,7 @@
 		"test:three-bosses-webgl-hosting": "node --test scripts/verify-three-bosses-webgl-hosting.test.mjs",
 		"test:three-bosses-webgl-smoke": "npm --prefix .github/firebase-deploy run test:three-bosses-webgl-smoke",
 		"test:cloudbuild-candidate": "node --test scripts/cloudbuild-candidate.test.mjs",
-		"test:frozen-backend": "node --test scripts/render-frozen-backend-deploy.test.mjs scripts/frozen-backend-traffic.test.mjs",
+		"test:frozen-backend": "node --test scripts/render-frozen-backend-deploy.test.mjs scripts/frozen-backend-traffic.test.mjs scripts/render-session-backend-deploy.test.mjs scripts/session-backend-traffic.test.mjs scripts/session-backend-rollback.test.mjs scripts/provider-backend-release.test.mjs",
 		"test:receipt-cleanup": "node --test .github/receipt-cleanup/templates.test.mjs",
 		"docs:clean": "node scripts/clean-docs.mjs",
 		"docs:json:frontend": "typedoc --options frontend/typedoc.json --tsconfig frontend/tsconfig.typedoc.json --json .typedoc-tmp/frontend.json",
@@ -41,8 +43,13 @@
 		"test:unity-yaml-normalizer": "node --test scripts/normalize-unity-yaml-whitespace.test.mjs",
 		"unity:yaml:normalize-staged": "node scripts/normalize-unity-yaml-whitespace.mjs --staged"
 	},
+	"overrides": {
+		"concurrently": {
+			"shell-quote": "1.11.0"
+		}
+	},
 	"devDependencies": {
-		"chokidar-cli": "^3.0.0",
+		"chokidar": "^4.0.3",
 		"concurrently": "^10.0.4",
 		"http-server": "^14.1.1",
 		"typedoc": "^0.28.20"

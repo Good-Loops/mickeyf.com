@@ -12,10 +12,10 @@ public static class RunUiFormatter
             safeSeconds * 1000d,
             MidpointRounding.AwayFromZero);
 
-        if (!double.IsFinite(roundedMilliseconds) || roundedMilliseconds > long.MaxValue)
-            roundedMilliseconds = long.MaxValue;
-
-        long totalMilliseconds = (long)roundedMilliseconds;
+        // Clamp as a long: converting long.MaxValue to double rounds beyond its range.
+        long totalMilliseconds = !double.IsFinite(roundedMilliseconds) || roundedMilliseconds >= long.MaxValue
+            ? long.MaxValue
+            : (long)roundedMilliseconds;
         long minutes = totalMilliseconds / 60000L;
         long seconds = totalMilliseconds / 1000L % 60L;
         long milliseconds = totalMilliseconds % 1000L;

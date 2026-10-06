@@ -1,3 +1,4 @@
+import { PUBLIC_SCORE_JOIN, PUBLIC_SCORE_FILTER } from './publicScoreVisibility';
 import { createHash } from 'node:crypto';
 import {
     Pool,
@@ -13,6 +14,8 @@ import {
     LEADERBOARD_PAGE_SIZE,
 } from './leaderboardContract';
 import { withUserSubmissionLock } from './userSubmissionLock';
+import { readLiveSession } from '../auth/accountSessionRepository';
+import type { SessionProof } from '../security/sessionPolicy';
 
 type ThreeBossesReadDatabase = Pick<Pool, 'query'>;
 type ThreeBossesWriteDatabase = Pick<Pool, 'getConnection'>;
@@ -90,7 +93,7 @@ export function createThreeBossesPayloadFingerprint(
 }
 
 export async function readThreeBossesLeaderboard(
-    database: ThreeBossesReadDatabase
+    database: ThreeBossesReadDatabase, publicationDigest?: Buffer, participationReady = false
 ): Promise<ThreeBossesLeaderboardRow[]> {
     const [rows] = await database.query<Array<RowDataPacket & ThreeBossesLeaderboardRow>>(
         {
@@ -101,7 +104,11 @@ export async function readThreeBossesLeaderboard(
                 FROM game_personal_bests
                 INNER JOIN users
                     ON users.user_id = game_personal_bests.user_id
-                WHERE game_personal_bests.game_id = ?
+                LEFT JOIN account_registration_profiles AS registration
+                    ON registration.account_uuid = users.account_uuid
+                ${participationReady ? PUBLIC_SCORE_JOIN : ''}
+                WHERE ${participationReady ? PUBLIC_SCORE_FILTER : "(registration.account_uuid IS NULL OR registration.score_visibility = 'public')"}
+                  AND game_personal_bests.game_id = ?
                   AND game_personal_bests.rules_version = ?
                   AND game_personal_bests.completion_time_ms IS NOT NULL
                 ORDER BY
@@ -111,7 +118,7 @@ export async function readThreeBossesLeaderboard(
                 LIMIT ${LEADERBOARD_PAGE_SIZE}`,
             timeout: DATABASE_QUERY_TIMEOUT_MS,
         },
-        [THREE_BOSSES.gameId, THREE_BOSSES.rulesVersion]
+        [...(participationReady ? [publicationDigest ?? null] : []), THREE_BOSSES.gameId, THREE_BOSSES.rulesVersion]
     );
 
     return rows.map(({ userName, score, completionTimeMs }) => ({
@@ -155,12 +162,15 @@ function replayResult(
  * Retained receipts preserve the original outcome, even after a later best.
  * Cleanup uses the same user lock; it cannot remove a receipt mid-submission.
  * Replays are resolved before rate admission and never consume another slot.
+ * HTTP callers supply the authenticated session; omission is only for trusted
+ * internal operations against historical, pre-identity migration fixtures.
  */
 export async function submitThreeBossesRun(
     database: ThreeBossesWriteDatabase,
     userId: number,
     runId: string,
-    completionTimeMs: number
+    completionTimeMs: number,
+    expectedSession?: SessionProof,
 ): Promise<ThreeBossesRunResult> {
     const fingerprint = createThreeBossesPayloadFingerprint(
         userId,
@@ -177,6 +187,14 @@ export async function submitThreeBossesRun(
             try {
                 await connection.beginTransaction();
                 transactionStarted = true;
+
+                if (expectedSession !== undefined && !await readLiveSession(
+                    connection, userId, expectedSession.accountId, expectedSession.sessionId
+                )) {
+                    await connection.commit();
+                    transactionStarted = false;
+                    return { kind: 'user-not-found' };
+                }
 
                 // The shared application lock serializes replay checks, rate
                 // admission, receipt inserts/cleanup, and bests for this user.

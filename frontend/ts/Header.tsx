@@ -20,7 +20,7 @@ const Header: React.FC = () => {
 
     const entertainmentIsActive = ['/animations', '/games', '/leaderboards']
         .some(routeBelongsTo);
-    const accountIsActive = ['/login', '/signup'].some(routeBelongsTo);
+    const accountIsActive = ['/login', '/signup', '/account'].some(routeBelongsTo);
 
     useEffect(() => {
         setOpenGroup(null);
@@ -156,6 +156,11 @@ const Header: React.FC = () => {
                                 <>
                                     <li className="nav__account-name">
                                         Signed in as <strong>{userName ?? 'user'}</strong>
+                                    </li>
+                                    <li>
+                                        <NavLink className="nav__dropdown-link" to="/account" onClick={() => setOpenGroup(null)}>
+                                            Manage account
+                                        </NavLink>
                                     </li>
                                     <li>
                                         <button

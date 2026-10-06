@@ -1,5 +1,6 @@
 import { createHmac } from 'node:crypto';
 import jwt, { JwtPayload } from 'jsonwebtoken';
+import { isAccountId } from '../accounts/deletionJournal';
 import {
     isCanonicalV4RunId,
     isValidThreeBossesCompletionTimeMs,
@@ -23,7 +24,10 @@ export type IssuedThreeBossesRunTicket = Readonly<{
     expiresAt: string;
 }>;
 
+export type ThreeBossesRunAccount = Readonly<{ userId: number; accountId: string }>;
+
 type ThreeBossesRunTicketClaims = JwtPayload & {
+    account_uuid: string;
     purpose: typeof RUN_TICKET_PURPOSE;
     runId: string;
     contractVersion: typeof LEADERBOARD_CONTRACT_VERSION;
@@ -45,12 +49,13 @@ export function createThreeBossesRunTicketSigningKey(sessionSecret: string): Buf
 
 export function issueThreeBossesRunTicket(
     sessionSecret: string,
-    userId: number,
+    account: ThreeBossesRunAccount,
     request: ThreeBossesRunTicketRequest,
     nowMs = Date.now()
 ): IssuedThreeBossesRunTicket {
-    if (!Number.isSafeInteger(userId) || userId <= 0) {
-        throw new TypeError('Three Bosses run tickets require a valid user ID.');
+    if (!account || !Number.isSafeInteger(account.userId) || account.userId <= 0
+        || !isAccountId(account.accountId)) {
+        throw new TypeError('Three Bosses run tickets require a valid account identity.');
     }
     if (
         request.contractVersion !== LEADERBOARD_CONTRACT_VERSION
@@ -70,7 +75,8 @@ export function issueThreeBossesRunTicket(
         {
             iss: RUN_TICKET_ISSUER,
             aud: RUN_TICKET_AUDIENCE,
-            sub: String(userId),
+            sub: String(account.userId),
+            account_uuid: account.accountId,
             jti: request.runId,
             purpose: RUN_TICKET_PURPOSE,
             runId: request.runId,
@@ -101,13 +107,15 @@ export function issueThreeBossesRunTicket(
  */
 export function verifyThreeBossesRunTicket(
     sessionSecret: string,
-    userId: number,
+    account: ThreeBossesRunAccount,
     submission: ThreeBossesRunSubmissionRequest,
     nowMs = Date.now()
 ): boolean {
     if (
-        !Number.isSafeInteger(userId)
-        || userId <= 0
+        !account
+        || !Number.isSafeInteger(account.userId)
+        || account.userId <= 0
+        || !isAccountId(account.accountId)
         || !Number.isSafeInteger(nowMs)
         || nowMs < 0
         || submission.contractVersion !== LEADERBOARD_CONTRACT_VERSION
@@ -129,7 +137,7 @@ export function verifyThreeBossesRunTicket(
                 algorithms: ['HS256'],
                 issuer: RUN_TICKET_ISSUER,
                 audience: RUN_TICKET_AUDIENCE,
-                subject: String(userId),
+                subject: String(account.userId),
                 jwtid: submission.runId,
                 clockTimestamp: Math.floor(nowMs / 1_000),
             }
@@ -138,7 +146,8 @@ export function verifyThreeBossesRunTicket(
 
         const claims = decoded as ThreeBossesRunTicketClaims;
         if (
-            claims.purpose !== RUN_TICKET_PURPOSE
+            claims.account_uuid !== account.accountId
+            || claims.purpose !== RUN_TICKET_PURPOSE
             || claims.runId !== submission.runId
             || claims.contractVersion !== submission.contractVersion
             || claims.rulesVersion !== submission.rulesVersion

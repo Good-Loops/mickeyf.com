@@ -1,87 +1,120 @@
 /**
  * Sign-up page ("/signup").
- * Collects account details and calls the existing backend registration endpoint.
+ * Creates an account, then signs in through the existing cookie-based login flow.
  */
-import { useState } from "react";
-import Swal from "sweetalert2";
-import { API_BASE } from "@/config/apiConfig";
+import { useRef, useState } from "react";
+import { useNavigate } from "react-router-dom";
+import { showScopedAlert } from "@/components/scopedAlert";
+import { usePageLifetime } from "@/hooks/usePageLifetime";
+import StaySignedInCheckbox from "@/components/StaySignedInCheckbox";
+import ProviderSignInControls from "@/components/ProviderSignInControls";
+import { signupRequest } from "@/services/authService";
+import { useAuth } from "@/context/AuthContext";
+import { signupAndLogin } from "./signupFlow.ts";
+import PublicAccountPreviewNotice from '@/components/PublicAccountPreviewNotice';
+import { LEGACY_PUBLIC_API_PREVIEW } from '@/config/apiConfig';
 
-const SignUp: React.FC = () => {
+import RegistrationGate from '@/components/RegistrationGate';
+
+export const SignupCredentials: React.FC<{ reset: () => void; scoreVisibility: 'private' | 'public' }> = ({ reset, scoreVisibility }) => {
     const [userName, setUserName] = useState("");
     const [email, setEmail] = useState("");
     const [userPassword, setUserPassword] = useState("");
+    const [rememberMe, setRememberMe] = useState(false);
     const [loading, setLoading] = useState(false);
+    const [providerBusy, setProviderBusy] = useState(false);
+    const busy = loading || providerBusy;
+    const submitting = useRef(false);
+    const { login } = useAuth();
+    const navigate = useNavigate();
+    const pageLifetime = usePageLifetime();
+    const showSignupSuccess = async (signal = pageLifetime.current) => {
+        if (!signal || signal.aborted) return;
+        await showScopedAlert({ title: "You're all set!",
+            text: "Your account is ready and you're logged in. Go break some records!",
+            icon: "success", confirmButtonText: "Let's go" }, signal);
+        if (!signal.aborted) navigate("/");
+    };
 
     const handleSubmit = async (event: React.FormEvent) => {
         event.preventDefault();
+        const signal = pageLifetime.current;
+        if (!signal || signal.aborted || submitting.current) return;
+        submitting.current = true;
         setLoading(true);
 
         try {
-            const response = await fetch(`${API_BASE}/api/users`, {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                },
-                body: JSON.stringify({
-                    type: "signup",
-                    user_name: userName,
-                    email,
-                    user_password: userPassword,
-                }),
-                credentials: "include",
-            });
+            const result = await signupAndLogin({
+                user_name: userName,
+                email,
+                user_password: userPassword,
+            }, {
+                signup: signupRequest,
+                // Creation may already have reached the server. Only cancel the not-yet-started login.
+                login: (user, password, options) => signal.aborted ? Promise.resolve(false)
+                    : login(user, password, { ...options, showFeedback: false }),
+            }, { rememberMe: !LEGACY_PUBLIC_API_PREVIEW && rememberMe });
 
-            if (!response.ok) {
-                throw new Error(`HTTP error: ${response.status}`);
-            }
+            if (signal.aborted) return;
 
-            const data = await response.json();
-
-            if (data.error) {
-                switch (data.error) {
+            if (result.status === "rejected") {
+                switch (result.error) {
+                case "REGISTRATION_REQUIRED":
+                    reset();
+                    return;
                 case "INVALID_EMAIL":
-                    Swal.fire({ title: "Invalid email", icon: "warning" });
+                    await showScopedAlert({ title: "Invalid email", icon: "warning" }, signal);
                     break;
                 case "INVALID_PASSWORD":
-                    Swal.fire({ title: "Invalid password", icon: "warning" });
+                    await showScopedAlert({ title: "Invalid password", icon: "warning" }, signal);
                     break;
                 case "EMPTY_FIELDS":
-                    Swal.fire({ title: "Missing required fields", icon: "warning" });
+                    await showScopedAlert({ title: "Missing required fields", icon: "warning" }, signal);
                     break;
                 case "DUPLICATE_USER":
-                    Swal.fire({
+                    await showScopedAlert({
                         title: "Duplicate user",
                         text: "This email or username is already in use",
                         icon: "warning",
-                    });
+                    }, signal);
                     break;
                 default:
-                    Swal.fire({
+                    await showScopedAlert({
                         title: "Could not sign up",
-                        text: data.message || "Please try again.",
+                        text: result.message || "Please try again.",
                         icon: "error",
-                    });
+                    }, signal);
                     break;
                 }
             } else {
-                Swal.fire({
-                    title: "Welcome, go break some records!",
-                    text: "Successfully signed up",
-                    icon: "success",
-                });
                 setUserName("");
                 setEmail("");
                 setUserPassword("");
+
+                if (result.status === "authenticated") {
+                    await showSignupSuccess(signal);
+                } else {
+                    // Registration succeeded: never ask the user to create it again.
+                    await showScopedAlert({
+                        title: "Account created",
+                        text: "We couldn't log you in automatically. Please log in with your new account.",
+                        icon: "info",
+                        confirmButtonText: "Go to log in",
+                    }, signal);
+                    if (!signal.aborted) navigate("/login");
+                }
             }
         } catch (error) {
-            console.error(error);
-            Swal.fire({
+            if (signal.aborted) return;
+            // Do not log a transport error that may include submitted credentials.
+            await showScopedAlert({
                 title: "Network/server error",
                 text: "Could not reach the server.",
                 icon: "error",
-            });
+            }, signal);
         } finally {
-            setLoading(false);
+            submitting.current = false;
+            if (!signal.aborted) setLoading(false);
         }
     };
 
@@ -89,11 +122,15 @@ const SignUp: React.FC = () => {
         <section className="signup" aria-labelledby="signup-title">
             <h1 id="signup-title" className="u-visually-hidden">Sign up</h1>
             <div className="signup__form-wrapper">
-                <form className="signup__form" onSubmit={handleSubmit} aria-busy={loading}>
+                <PublicAccountPreviewNotice />
+                <p>{scoreVisibility === 'private' ? 'Your scores will stay off public leaderboards.' : 'Your scores can appear on public leaderboards.'}</p>
+                <button type="button" disabled={busy} onClick={reset}>Back to country and age range</button>
+                <form className="signup__form" onSubmit={handleSubmit} aria-busy={busy}>
                     <label className="signup__field" htmlFor="signup-username">
                         <span className="signup__label">Username</span>
                         <input
                             id="signup-username"
+                            disabled={busy}
                             className="signup__input"
                             type="text"
                             name="user_name"
@@ -109,6 +146,7 @@ const SignUp: React.FC = () => {
                         <span className="signup__label">Email</span>
                         <input
                             id="signup-email"
+                            disabled={busy}
                             className="signup__input"
                             type="text"
                             name="email"
@@ -125,6 +163,7 @@ const SignUp: React.FC = () => {
                         <span className="signup__label">Password</span>
                         <input
                             id="signup-password"
+                            disabled={busy}
                             className="signup__input"
                             type="password"
                             name="user_password"
@@ -134,13 +173,20 @@ const SignUp: React.FC = () => {
                             onChange={(inputEvent) => setUserPassword(inputEvent.target.value)}
                         />
                     </label>
-                    <button className="signup__submit" type="submit" disabled={loading}>
+                    {!LEGACY_PUBLIC_API_PREVIEW && <StaySignedInCheckbox checked={rememberMe} onChange={setRememberMe} disabled={busy} />}
+                    <button className="signup__submit" type="submit" disabled={busy}>
                         {loading ? "Signing up…" : "Sign up"}
                     </button>
                 </form>
+                {!LEGACY_PUBLIC_API_PREVIEW && <ProviderSignInControls action="signup" userName={userName} rememberMe={rememberMe}
+                    disabled={loading} operationLock={submitting} onBusyChange={setProviderBusy}
+                    onSuccess={() => { void showSignupSuccess(); }} />}
             </div>
         </section>
     );
 };
+
+const SignUp: React.FC = () => <RegistrationGate>{(reset, scoreVisibility) =>
+    <SignupCredentials reset={reset} scoreVisibility={scoreVisibility} />}</RegistrationGate>;
 
 export default SignUp;

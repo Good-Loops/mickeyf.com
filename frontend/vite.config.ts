@@ -2,9 +2,18 @@ import { defineConfig, loadEnv } from "vite";
 import react from "@vitejs/plugin-react";
 import path from "node:path";
 import { Agent } from "node:http";
+import { publicLeaderboardsPlugin } from "./dev/publicLeaderboards";
+import { publicApiPlugin } from "./dev/publicApi";
+import { parsePublicAuthProtocol } from "./ts/config/publicAuthProtocol";
+import { parsePrivacyNoticeUrl } from "./ts/config/privacyNoticeUrl";
 
 export default defineConfig(({ command, mode, isPreview }) => {
   const env = loadEnv(mode, process.cwd(), "VITE_");
+  if (env.VITE_PRIVACY_NOTICE_URL && !parsePrivacyNoticeUrl(env.VITE_PRIVACY_NOTICE_URL)) {
+    throw new Error('VITE_PRIVACY_NOTICE_URL must be a public HTTPS notice URL without credentials or query parameters.');
+  }
+  const developmentServer = command === "serve" && mode === "development" && !isPreview;
+  const publicApiPreview = developmentServer && env.VITE_USE_PUBLIC_API === "1";
   const enableThreeBossesLocal =
     command === "serve"
     && mode === "development"
@@ -12,7 +21,8 @@ export default defineConfig(({ command, mode, isPreview }) => {
     && env.VITE_ENABLE_THREE_BOSSES_LOCAL === "1";
 
   return {
-    plugins: [react()],
+    plugins: [react(), ...(developmentServer ? [publicLeaderboardsPlugin()] : []),
+      ...(publicApiPreview ? [publicApiPlugin(parsePublicAuthProtocol(env.VITE_PUBLIC_AUTH_PROTOCOL))] : [])],
     root: ".",
     resolve: {
       alias: {
@@ -20,13 +30,14 @@ export default defineConfig(({ command, mode, isPreview }) => {
       },
     },
     server: {
+      ...(publicApiPreview ? { host: "localhost" } : {}),
       port: 5173,
       strictPort: true,
       proxy: {
-        "/api": {
+        ...(!publicApiPreview ? { "/api": {
           target: "http://localhost:8080",
           changeOrigin: true,
-        },
+        } } : {}),
         ...(enableThreeBossesLocal
           ? {
               "/__local/three-bosses/": {
@@ -35,6 +46,8 @@ export default defineConfig(({ command, mode, isPreview }) => {
                 // Forced-close upstream transfers can lose their final chunk
                 // on the local Windows stack, leaving Unity waiting indefinitely.
                 agent: new Agent({ keepAlive: true }),
+                // The agent alone does not replace an incoming Connection: close.
+                headers: { connection: "keep-alive" },
                 rewrite: (requestPath: string) =>
                   requestPath.replace(/^\/__local\/three-bosses\//, "/"),
               },

@@ -64,18 +64,26 @@ paths. Authentication remains local to each developer.
 
 The local servers use exact package versions:
 
-- `firebase-tools@15.28.1`
+- `firebase-tools@15.32.0` (from the deployment tooling lockfile)
 - `@playwright/mcp@0.0.79`
 
-Exact pins prevent an unreviewed npm release from changing the available tools
-on the next start. `npx -y` may still download and cache that exact package on
-first use; this is a version pin, not a repository lockfile integrity pin. The
-remote GitHub server can evolve independently, so its exposed tool families
-must be rechecked periodically.
+Firebase runs the local CLI from `.github/firebase-deploy`, sharing its reviewed
+lockfile and dependency overrides. Install that tool tree from the repository
+root before starting the server, and refresh it after a tooling lockfile change:
+
+```powershell
+npm --prefix .github/firebase-deploy ci --ignore-scripts --no-audit --no-fund
+```
+
+The Firebase server does not fall back to downloading an unlocked `npx` tree.
+Playwright still uses `npx -y`, which may download and cache its pinned package;
+that version pin does not lock its transitive dependencies. The remote GitHub
+server can evolve independently, so recheck its exposed tool families after
+updates.
 
 Both stdio servers set `NODE_OPTIONS=--use-system-ca` so Node can use trusted
 Windows certificates without disabling TLS verification. Use Node 22.15 or
-newer, but lower than Node 23; the project is tested in CI with Node 22.23.2.
+newer, but lower than Node 23; the project CI is configured for Node 22.23.3.
 
 ### Local authentication
 
@@ -86,7 +94,7 @@ Firebase uses the same credentials as Firebase CLI. Either authenticate the
 pinned CLI:
 
 ```powershell
-npx -y firebase-tools@15.28.1 login
+node .github/firebase-deploy/node_modules/firebase-tools/lib/bin/firebase.js login
 ```
 
 or refresh ADC when the Google Cloud workflow already uses it:
@@ -140,8 +148,8 @@ configuration or a package pin:
 Get-Content -LiteralPath .vscode\mcp.json -Raw |
   ConvertFrom-Json | Out-Null
 
-npx -y firebase-tools@15.28.1 --version
-npx -y firebase-tools@15.28.1 mcp --help |
+node .github/firebase-deploy/node_modules/firebase-tools/lib/bin/firebase.js --version
+node .github/firebase-deploy/node_modules/firebase-tools/lib/bin/firebase.js mcp --help |
   Select-String -Pattern '--dir', '--only', '--tools'
 
 npx -y @playwright/mcp@0.0.79 --help |

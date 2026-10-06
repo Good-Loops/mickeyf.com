@@ -10,19 +10,21 @@
  * - Token issuance policy and persistence concerns (handled elsewhere).
  *
  * Side effects:
- * - None beyond reading request headers/cookies and producing a JSON response.
+ * - Reads the current account without changing cookies.
  *
  * Security boundary:
  * - Treats inbound credentials/tokens as untrusted input and verifies signatures before trusting claims.
  */
 import { Request, Response } from 'express';
+import { Pool } from 'mysql2/promise';
+import { readActiveAccount } from '../security/activeAccount';
 import { authenticateRequest } from '../security/requestAuthentication';
 
 /**
  * Auth verification handler.
  *
  * Request contract:
- * - Reads: `req.signedCookies.session` (preferred) and `req.headers.authorization` (Bearer fallback).
+ * - Reads: signed web/native cookies (preferred), then Bearer credentials; verifies live session storage.
  *
  * Response contract:
  * - Status: implicit 200 (no explicit status set in this handler).
@@ -34,16 +36,24 @@ import { authenticateRequest } from '../security/requestAuthentication';
  * Failure modes:
  * - Missing/invalid token yields `{ loggedIn: false }`.
  */
-export function createAuthController(sessionSecret: string) {
-    return function authController(req: Request, res: Response) {
+export function createAuthController(
+    database: Pick<Pool, 'query'>, sessionSecret: string
+) {
+    return async function authController(req: Request, res: Response) {
         const authentication = authenticateRequest(req, sessionSecret);
         if (!authentication.authenticated) {
             return res.json({ loggedIn: false });
         }
 
+        const account = await readActiveAccount(database, authentication.identity);
+        if (!account) {
+            // A delayed GET must not clear a newer login's cookie. Deletion/logout
+            // own cookie changes; a stale token is still rejected on every use.
+            return res.json({ loggedIn: false });
+        }
         return res.json({
             loggedIn: true,
-            user_name: authentication.identity.userName,
+            user_name: account.userName,
         });
     };
 }

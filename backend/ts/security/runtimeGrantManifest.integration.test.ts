@@ -1,12 +1,27 @@
 import assert from 'node:assert/strict';
-import { randomUUID } from 'node:crypto';
+import { randomBytes, randomUUID } from 'node:crypto';
 import { after, before, beforeEach, test } from 'node:test';
+import bcrypt from 'bcryptjs';
+import { createRegistrationAuthorization, cleanupRegistrationAuthorizations } from '../accounts/registrationAuthorization';
+import { createRegisteredPasswordAccount } from '../accounts/registeredPasswordAccount';
+import { loadRegistrationPolicy } from '../config/registrationPolicy';
+import type { ProviderAuthContext } from '../auth/providerAuthContext';
 import mysql, {
     Connection,
     Pool,
     RowDataPacket,
 } from 'mysql2/promise';
 import { loadMigrationConfig } from '../config/migrationConfig';
+import { deleteAccount } from '../accounts/accountDeletionRepository';
+import { createAppleTokenRepository, type StoredAppleToken } from '../accounts/appleTokenRepository';
+import { verifyAppleTokenReadiness } from '../migrations/appleTokenSchema';
+import { verifyAppleRevocationReadiness } from '../migrations/appleRevocationSchema';
+import { findProviderAccount, linkProviderAccount, readProviderAccountMethods } from '../accounts/providerAccountRepository';
+import { createAccountSession, readLiveSession, renewAccountSession, revokeAccountSession } from '../auth/accountSessionRepository';
+import { consumeProviderAttempt, createProviderAttempt, type ProviderAttempt } from '../auth/providerAttemptRepository';
+import type { VerifiedProviderIdentity } from '../auth/providerIdentity';
+import { deriveRenewedSessionId } from './sessionPolicy';
+import { verifyAccountSessionReadiness, verifyProviderAuthReadiness } from '../accounts/accountDeletionReadiness';
 import {
     readP4VegaLeaderboard,
     submitP4VegaScore,
@@ -18,10 +33,12 @@ import {
 import type { MigrationConnection } from '../migrations/leaderboardSchema';
 import { cleanupSubmissionReceipts } from '../leaderboards/submissionReceiptCleanup';
 import { loadMigrationManifest } from '../migrations/migrationManifest';
+import { ACCOUNT_IDENTITY_MIGRATION_VERSION, assertAccountIdentityEpoch, verifyAccountIdentitySchema } from '../migrations/accountIdentitySchema';
 import { applyMigrations } from '../migrations/migrationRunner';
 import {
     renderRuntimeGrantStatements,
     runtimeColumnPrivilegeInventory,
+    runtimeTablePrivilegeInventory,
     type RuntimeColumnPrivilege,
     type RuntimeDatabaseAccount,
 } from './runtimeGrantManifest';
@@ -105,6 +122,12 @@ async function createSchema(): Promise<void> {
     try {
         await administrator.query(`
             DROP TABLE IF EXISTS
+                account_registration_profiles, registration_authorizations,
+                apple_auth_revocations,
+                apple_provider_tokens,
+                account_sessions,
+                provider_auth_attempts,
+                account_provider_identities,
                 game_personal_bests,
                 game_runs,
                 game_submission_receipts,
@@ -134,11 +157,28 @@ async function createSchema(): Promise<void> {
     await applyMigrations(asMigrationConnection(administrator), migrations, config, {
         allowedEffectKinds: ['detach-best-source', 'retain-receipts'],
     });
+    await applyMigrations(asMigrationConnection(administrator), migrations, config, {
+        allowedEffectKinds: ['add-account-identity'],
+    });
+    await applyMigrations(asMigrationConnection(administrator), migrations, config, {
+        allowedEffectKinds: ['add-provider-identities', 'add-provider-attempts', 'add-account-sessions', 'add-session-renewal'],
+    });
+    await applyMigrations(asMigrationConnection(administrator), migrations, config, {
+        allowedEffectKinds: ['add-unique-user-names', 'allow-passwordless-accounts', 'extend-provider-attempt-actions', 'add-apple-tokens',
+            'add-apple-revocations', 'add-apple-session-provenance', 'add-registration-authorization', 'add-registration-profile'],
+    });
 }
 
 async function resetData(): Promise<void> {
     await administrator.query('SET FOREIGN_KEY_CHECKS = 0');
     try {
+        await administrator.query('TRUNCATE TABLE account_registration_profiles');
+        await administrator.query('TRUNCATE TABLE registration_authorizations');
+        await administrator.query('TRUNCATE TABLE apple_auth_revocations');
+        await administrator.query('TRUNCATE TABLE apple_provider_tokens');
+        await administrator.query('TRUNCATE TABLE account_sessions');
+        await administrator.query('TRUNCATE TABLE provider_auth_attempts');
+        await administrator.query('TRUNCATE TABLE account_provider_identities');
         await administrator.query('TRUNCATE TABLE game_personal_bests');
         await administrator.query('TRUNCATE TABLE game_submission_receipts');
         await administrator.query('TRUNCATE TABLE users');
@@ -240,10 +280,136 @@ after(async () => {
         await root.query(`DROP USER IF EXISTS ${TEST_CLEANUP_GRANTEE}`);
         await root.end();
     }
-    if (administrator) await administrator.end();
+    if (administrator) {
+        try { await administrator.query('DROP TABLE IF EXISTS account_registration_profiles, registration_authorizations'); }
+        finally { await administrator.end(); }
+    }
 });
 
-test('installs only the exact column-level manifest with no active role', async () => {
+test('runtime Apple watermark and provenance grants enforce exact schema, bounded purge and immutable attribution', async () => {
+    const connection = await runtimePool.getConnection();
+    try { await verifyAppleRevocationReadiness(connection as unknown as MigrationConnection); }
+    finally { connection.release(); }
+    const subjectHash = randomBytes(32);
+    await runtimePool.query(`INSERT INTO apple_auth_revocations (subject_hash, revoked_at, expires_at)
+        VALUES (?, 100, UTC_TIMESTAMP(6) + INTERVAL 1 HOUR)`, [subjectHash]);
+    await runtimePool.query(`UPDATE apple_auth_revocations SET revoked_at = 200,
+        expires_at = UTC_TIMESTAMP(6) + INTERVAL 2 HOUR WHERE subject_hash = ?`, [subjectHash]);
+    const [watermarks] = await runtimePool.query<RowDataPacket[]>('SELECT * FROM apple_auth_revocations WHERE subject_hash = ?', [subjectHash]);
+    assert.equal(watermarks[0].revoked_at, 200);
+    await assertPrivilegeDenied(() => runtimePool.query('UPDATE apple_auth_revocations SET subject_hash = subject_hash WHERE 1 = 0'));
+    const [accounts] = await runtimePool.query<RowDataPacket[]>('SELECT account_uuid FROM users WHERE user_id = 1');
+    const insertSession = (hash: Buffer | null, timestamp: number | null) => runtimePool.query(`INSERT INTO account_sessions
+        (session_hash, account_uuid, created_at, expires_at, remembered, renewed_at, apple_subject_hash, apple_authenticated_at)
+        VALUES (?, ?, UTC_TIMESTAMP(6), UTC_TIMESTAMP(6) + INTERVAL 1 HOUR, 0, NULL, ?, ?)`,
+    [randomBytes(32), accounts[0].account_uuid, hash, timestamp]);
+    await insertSession(subjectHash, 201);
+    for (const [hash, timestamp] of [[subjectHash, null], [null, 201], [subjectHash, 0]] as const) {
+        await assert.rejects(insertSession(hash, timestamp), (error: unknown) =>
+            (error as MysqlError).code === 'ER_CHECK_CONSTRAINT_VIOLATED');
+    }
+    for (const column of ['apple_subject_hash', 'apple_authenticated_at']) {
+        await assertPrivilegeDenied(() => runtimePool.query(`UPDATE account_sessions SET ${column} = ${column} WHERE 1 = 0`));
+    }
+    await runtimePool.query('DELETE FROM apple_auth_revocations WHERE subject_hash = ?', [subjectHash]);
+    assert.deepEqual((await runtimePool.query<RowDataPacket[]>('SELECT * FROM apple_auth_revocations'))[0], []);
+});
+
+test('runtime Apple token grants permit encrypted persistence and revocation but never credential rebinding', async () => {
+    const [accounts] = await administrator.query<RowDataPacket[]>('SELECT account_uuid FROM users WHERE user_id = 1');
+    const accountId = accounts[0].account_uuid as string;
+    await administrator.query(`INSERT INTO account_provider_identities (account_uuid,provider,subject,linked_at)
+        VALUES (?, 'apple', ?, UTC_TIMESTAMP(6))`, [accountId, Buffer.from('apple-grants-fixture')]);
+    const vault = createAppleTokenRepository({ clientId: 'com.example.disposable', activeKeyId: 'isolated-v1',
+        encryptionKeys: { 'isolated-v1': randomBytes(32) } });
+    const row = vault.prepare('isolated-grant-refresh-token', accountId);
+    const connection = await runtimePool.getConnection();
+    try {
+        await verifyAppleTokenReadiness(connection as unknown as MigrationConnection);
+        await connection.beginTransaction();
+        await vault.save(connection, row);
+        await vault.markForRevocation(connection, accountId);
+        await connection.query('DELETE FROM users WHERE user_id = 1');
+        await connection.commit();
+    } finally { connection.release(); }
+    const [pending] = await runtimePool.query<(RowDataPacket & StoredAppleToken)[]>('SELECT * FROM apple_provider_tokens');
+    assert.equal(pending.length, 1);
+    assert.equal(vault.decrypt(pending[0]), 'isolated-grant-refresh-token');
+    assert.ok(pending[0].retention_deadline);
+    for (const column of ['token_id', 'account_uuid', 'client_id', 'encrypted_token', 'created_at']) {
+        await assertPrivilegeDenied(() => runtimePool.query(`UPDATE apple_provider_tokens SET ${column} = ${column} WHERE 1 = 0`));
+    }
+    await runtimePool.query('DELETE FROM apple_provider_tokens WHERE token_id = ?', [row.token_id]);
+    assert.deepEqual((await runtimePool.query<RowDataPacket[]>('SELECT * FROM apple_provider_tokens'))[0], []);
+});
+
+test('limited runtime session grants support rotation without rewriting immutable session properties', async () => {
+    await verifyAccountSessionReadiness(runtimePool);
+    const [accounts] = await runtimePool.query<RowDataPacket[]>(
+        'SELECT account_uuid AS accountId FROM users WHERE user_id = 1');
+    const accountId = accounts[0].accountId as string;
+    const sessionId = Buffer.alloc(32, 3).toString('base64url');
+    assert.equal(await createAccountSession(runtimePool, { userId: 1, accountId }, sessionId,
+        Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60, undefined, true), true);
+    assert.deepEqual(await readLiveSession(runtimePool, 1, accountId, sessionId), { userName: 'player-1' });
+    for (const column of ['account_uuid', 'created_at', 'remembered']) {
+        await assertPrivilegeDenied(() => runtimePool.query(`UPDATE account_sessions SET ${column} = ${column} WHERE 1 = 0`));
+    }
+    // Only the isolated fixture administrator advances eligibility; the runtime performs the actual rotation.
+    await administrator.query('UPDATE account_sessions SET renewed_at = UTC_TIMESTAMP(6) - INTERVAL 16 MINUTE WHERE account_uuid = ?',
+        [accountId]);
+    const renewed = await renewAccountSession(runtimePool, 1, accountId, sessionId,
+        oldId => deriveRenewedSessionId(oldId, 'isolated-session-renewal-secret'));
+    assert.ok(renewed?.renewal);
+    assert.deepEqual(await readLiveSession(runtimePool, 1, accountId, renewed.renewal.sessionId), { userName: 'player-1' });
+    await revokeAccountSession(runtimePool, 1, accountId, sessionId);
+    assert.equal(await readLiveSession(runtimePool, 1, accountId, sessionId), null);
+    assert.equal(await readLiveSession(runtimePool, 1, accountId, renewed.renewal.sessionId), null);
+});
+
+test('limited provider grants support schema readiness, linking and login without identity reassignment', async () => {
+    await verifyProviderAuthReadiness(runtimePool);
+    const password = 'provider-grant-test-only';
+    await administrator.query('UPDATE users SET user_password = ? WHERE user_id = 1', [await bcrypt.hash(password, 4)]);
+    const [accounts] = await runtimePool.query<RowDataPacket[]>('SELECT account_uuid AS accountId FROM users WHERE user_id = 1');
+    const target = { userId: 1, accountId: accounts[0].accountId as string };
+    const proof = { accountId: target.accountId, sessionId: Buffer.alloc(32, 4).toString('base64url') };
+    assert.equal(await createAccountSession(runtimePool, target, proof.sessionId,
+        Math.floor(Date.now() / 1000) + 3_600), true);
+    const identity = { provider: 'google', subject: 'isolated-grant-subject' } as VerifiedProviderIdentity;
+    assert.equal(await findProviderAccount(runtimePool, identity), null);
+    assert.equal(await linkProviderAccount(runtimePool, target, password, identity, proof), 'linked');
+    // The duplicate path performs SELECT ... FOR UPDATE and must work without granting identity reassignment.
+    assert.equal(await linkProviderAccount(runtimePool, target, password, identity, proof), 'already-linked');
+    assert.deepEqual(await findProviderAccount(runtimePool, identity), { ...target, userName: 'player-1' });
+    assert.deepEqual(await readProviderAccountMethods(runtimePool, target.accountId), {
+        hasPassword: true, googleLinked: true, appleLinked: false,
+    });
+    for (const column of ['provider', 'subject', 'account_uuid']) {
+        await assertPrivilegeDenied(() => runtimePool.query(
+            `UPDATE account_provider_identities SET ${column} = ${column} WHERE 1 = 0`));
+    }
+    await assertPrivilegeDenied(() => runtimePool.query('DELETE FROM account_provider_identities WHERE 1 = 0'));
+});
+
+test('limited attempt grants create and consume login and link challenges without UPDATE', async () => {
+    const [accounts] = await runtimePool.query<RowDataPacket[]>('SELECT account_uuid AS accountId FROM users WHERE user_id = 1');
+    for (const [index, action] of (['login', 'link'] as const).entries()) {
+        const attempt: ProviderAttempt = {
+            stateHash: Buffer.alloc(32, index + 10), bindingHash: Buffer.alloc(32, index + 20),
+            nonce: Buffer.alloc(32, index + 30).toString('base64url'), clientKey: 'google-web', action,
+            userId: action === 'link' ? 1 : null, accountId: action === 'link' ? accounts[0].accountId as string : null,
+        };
+        assert.equal(await createProviderAttempt(runtimePool, attempt), 'created');
+        assert.deepEqual(await consumeProviderAttempt(runtimePool, attempt.stateHash, attempt.bindingHash, attempt.clientKey, action), {
+            nonce: attempt.nonce, userId: attempt.userId, accountId: attempt.accountId,
+        });
+        assert.equal(await consumeProviderAttempt(runtimePool, attempt.stateHash, attempt.bindingHash, attempt.clientKey, action), null);
+    }
+    await assertPrivilegeDenied(() => runtimePool.query('UPDATE provider_auth_attempts SET nonce = nonce WHERE 1 = 0'));
+});
+
+test('installs exact column grants and account-deletion table grants with no active role', async () => {
     const [columnRows] = await root.query<Array<RowDataPacket & {
         tableName: RuntimeColumnPrivilege['tableName'];
         columnName: string;
@@ -271,7 +437,6 @@ test('installs only the exact column-level manifest with no active role', async 
 
     for (const scope of [
         'SCHEMA_PRIVILEGES',
-        'TABLE_PRIVILEGES',
     ] as const) {
         const [rows] = await root.query<Array<RowDataPacket & { privilegeCount: number }>>(
             `SELECT COUNT(*) AS privilegeCount
@@ -281,6 +446,17 @@ test('installs only the exact column-level manifest with no active role', async 
         );
         assert.equal(Number(rows[0].privilegeCount), 0, `${scope} must be empty`);
     }
+
+    const [tableRows] = await root.query<RowDataPacket[]>(
+        `SELECT TABLE_SCHEMA AS schemaName, TABLE_NAME AS tableName,
+                PRIVILEGE_TYPE AS privilegeType, IS_GRANTABLE AS isGrantable
+         FROM information_schema.TABLE_PRIVILEGES
+         WHERE GRANTEE = ? ORDER BY TABLE_SCHEMA, TABLE_NAME, PRIVILEGE_TYPE`,
+        [TEST_RUNTIME_GRANTEE]
+    );
+    assert.deepEqual(tableRows, runtimeTablePrivilegeInventory()
+        .map((privilege) => ({ schemaName: config.database, ...privilege, isGrantable: 'NO' }))
+        .sort((left, right) => left.tableName.localeCompare(right.tableName)));
 
     const [userPrivilegeRows] = await root.query<Array<RowDataPacket & {
         privilegeType: string;
@@ -305,6 +481,12 @@ test('installs only the exact column-level manifest with no active role', async 
 });
 
 test('supports every current auth and leaderboard SQL path', async () => {
+    const [epochs] = await root.query<Array<RowDataPacket & { epoch: string }>>(
+        "SELECT DATE_FORMAT(applied_at, '%Y-%m-%d %H:%i:%s.%f') AS epoch FROM schema_migrations WHERE version = ?",
+        [ACCOUNT_IDENTITY_MIGRATION_VERSION]
+    );
+    await assertAccountIdentityEpoch(runtimePool as unknown as MigrationConnection, epochs[0].epoch);
+    await verifyAccountIdentitySchema(runtimePool as unknown as MigrationConnection);
     const [duplicates] = await runtimePool.query<RowDataPacket[]>(
         'SELECT 1 FROM users WHERE user_name = ? OR email = ? LIMIT 1',
         ['player-1', 'unused@example.test']
@@ -316,13 +498,14 @@ test('supports every current auth and leaderboard SQL path', async () => {
         ['player-2', 'player-2@example.test', 'test-only-hash']
     );
     const [loginRows] = await runtimePool.query<RowDataPacket[]>(
-        `SELECT user_id, user_name, user_password
+        `SELECT user_id, account_uuid, user_name, user_password
          FROM users
          WHERE user_name = ?
          LIMIT 1`,
         ['player-2']
     );
     assert.equal(loginRows.length, 1);
+    assert.match(String(loginRows[0].account_uuid), /^[a-f0-9-]{36}$/u);
 
     assert.equal(await submitP4VegaScore(runtimePool, 1, 900), true);
     assert.equal(await submitP4VegaScore(runtimePool, 1, 990), true);
@@ -355,21 +538,69 @@ test('supports every current auth and leaderboard SQL path', async () => {
     }]);
 });
 
-test('denies migration history, receipt mutation, destructive DML, and DDL', async () => {
+test('deletes an account and its dependent results transactionally using only runtime grants', async () => {
+    const password = 'account-deletion-test-only';
+    await administrator.query('UPDATE users SET user_password = ? WHERE user_id = ?', [
+        await bcrypt.hash(password, 4), 1,
+    ]);
+    await administrator.query(
+        'INSERT INTO users (user_name, email, user_password) VALUES (?, ?, ?)',
+        ['unrelated-player', 'unrelated@example.test', 'test-only-hash']
+    );
+    await submitP4VegaScore(runtimePool, 1, 900);
+    await submitThreeBossesRun(runtimePool, 1, randomUUID(), 60_000);
+    await submitP4VegaScore(runtimePool, 2, 500);
+    await submitThreeBossesRun(runtimePool, 2, randomUUID(), 70_000);
+    const tables = ['users', 'game_submission_receipts', 'game_personal_bests'];
+    const rowsBefore = new Map<string, RowDataPacket[]>();
+    for (const table of tables) {
+        const [rows] = await administrator.query<RowDataPacket[]>(`SELECT * FROM ${table}`);
+        rowsBefore.set(table, rows);
+    }
+
+    const recordedAccountIds: string[] = [];
+    const journal = {
+        recordAccountDeletion: async (accountId: string) => { recordedAccountIds.push(accountId); },
+    };
+    assert.equal(await deleteAccount(runtimePool, 1, 'wrong-test-password', journal), 'invalid-password');
+    assert.deepEqual(recordedAccountIds, []);
+    for (const table of tables) {
+        const [unchanged] = await administrator.query<RowDataPacket[]>(`SELECT * FROM ${table}`);
+        assert.deepEqual(unchanged, rowsBefore.get(table), `${table} unchanged after failed reauthentication`);
+    }
+
+    assert.equal(await deleteAccount(runtimePool, 1, password, journal), 'deleted');
+    assert.equal(await deleteAccount(runtimePool, 1, password, journal), 'not-found');
+    const deletedAccount = rowsBefore.get('users')?.find((row) => row.user_id === 1);
+    assert.deepEqual(recordedAccountIds, [deletedAccount?.account_uuid]);
+    assert.match(recordedAccountIds[0], /^[a-f0-9-]{36}$/u);
+    for (const table of tables) {
+        const [remaining] = await administrator.query<RowDataPacket[]>(
+            `SELECT * FROM ${table}`
+        );
+        assert.deepEqual(remaining, rowsBefore.get(table)?.filter((row) => row.user_id === 2),
+            `${table} preserves all unrelated data and removes all deleted-account data`);
+    }
+});
+
+test('denies migration history, receipt updates, unrelated deletion, and DDL', async () => {
     await assertPrivilegeDenied(() =>
-        runtimePool.query('SELECT version FROM schema_migrations LIMIT 1'));
+        runtimePool.query('SELECT checksum FROM schema_migrations LIMIT 1'));
     await assertPrivilegeDenied(() =>
         runtimePool.query('SELECT game_run_id FROM game_submission_receipts LIMIT 1'));
     await assertPrivilegeDenied(() =>
         runtimePool.query('UPDATE users SET email = email WHERE user_id = 1'));
     await assertPrivilegeDenied(() =>
-        runtimePool.query('SELECT user_id FROM users WHERE user_id = 1 FOR UPDATE'));
+        runtimePool.query('UPDATE users SET account_uuid = UUID() WHERE user_id = 1'));
+    await assertPrivilegeDenied(() =>
+        runtimePool.query(
+            'INSERT INTO users (account_uuid, user_name, email, user_password) VALUES (?, ?, ?, ?)',
+            [randomUUID(), 'forbidden-identity', 'forbidden@example.test', 'test-only-hash']
+        ));
     await assertPrivilegeDenied(() =>
         runtimePool.query('UPDATE game_submission_receipts SET score = score WHERE 1 = 0'));
     await assertPrivilegeDenied(() =>
-        runtimePool.query('DELETE FROM game_submission_receipts WHERE 1 = 0'));
-    await assertPrivilegeDenied(() =>
-        runtimePool.query('DELETE FROM game_personal_bests WHERE 1 = 0'));
+        runtimePool.query('DELETE FROM schema_migrations WHERE 1 = 0'));
     await assertPrivilegeDenied(() =>
         runtimePool.query('ALTER TABLE users ADD COLUMN forbidden INT NULL'));
     await assertPrivilegeDenied(() =>
@@ -447,4 +678,40 @@ test('cleanup identity deletes receipts without reading gameplay or changing per
     })));
     const [roles] = await cleanupPool.query<RowDataPacket[]>('SELECT CURRENT_ROLE() AS currentRole');
     assert.equal(roles[0].currentRole, 'NONE');
+});
+
+
+test('least-privilege runtime creates a private minor account, consumes once, cancels and removes expired grants', async () => {
+    const policy = loadRegistrationPolicy({ REGISTRATION_ENABLED: 'true', REGISTRATION_POLICY_REVIEWED: 'true',
+        REGISTRATION_POLICY_VERSION: 'synthetic-grants', REGISTRATION_COUNTRY_RULES: '{"ZZ":{"parentRequiredBelow":15}}' })!;
+    const registration = createRegistrationAuthorization(runtimePool, policy);
+    const context = () => ({ bindingHash: randomBytes(32), account: null, session: null,
+        bindingExpiresAt: Date.now() + 300_000, anonymousCookie: null }) as ProviderAuthContext;
+    const input = { country: 'ZZ', ageBand: 'minor', policyVersion: policy.version };
+    const binding = context();
+    await registration.begin(binding, input);
+    await registration.assertAvailable(binding);
+    assert.equal(await createRegisteredPasswordAccount(runtimePool,
+        { userName: 'registered-minor', email: 'registered-minor@example.test', passwordHash: 'synthetic-only' },
+        (connection, id) => registration.consume(connection, binding, id)), 'created');
+    await assert.rejects(registration.assertAvailable(binding));
+    const [profiles] = await runtimePool.query<RowDataPacket[]>('SELECT account_uuid, score_visibility FROM account_registration_profiles');
+    assert.equal(profiles.length, 1);
+    assert.equal(profiles[0].score_visibility, 'private');
+    const abandoned = context();
+    await registration.begin(abandoned, input);
+    await registration.cancel(abandoned);
+    await registration.cancel(abandoned);
+    await assert.rejects(registration.assertAvailable(abandoned));
+    const expired = context();
+    await registration.begin(expired, input);
+    await administrator.query('UPDATE registration_authorizations SET expires_at=UTC_TIMESTAMP(6) WHERE binding_hash=?', [expired.bindingHash]);
+    assert.deepEqual(await cleanupRegistrationAuthorizations(runtimePool), { deleted: 1, backlog: false });
+    for (const sql of [
+        'SELECT country_code FROM account_registration_profiles',
+        'SELECT age_band FROM account_registration_profiles',
+        "UPDATE account_registration_profiles SET score_visibility='public' WHERE 1=0",
+        "UPDATE registration_authorizations SET expires_at=UTC_TIMESTAMP(6) WHERE 1=0",
+        'DELETE FROM account_registration_profiles WHERE 1=0',
+    ]) await assertPrivilegeDenied(() => runtimePool.query(sql));
 });

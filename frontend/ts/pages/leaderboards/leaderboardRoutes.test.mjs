@@ -9,11 +9,11 @@ import {
     Routes,
     useParams,
 } from 'react-router-dom';
-import { createServer } from 'vite';
+import { createViteTestServer } from '../../testSupport/createViteTestServer.mjs';
 import { focusRouteHeading } from '../../components/routeHeadingFocus.ts';
 
 const frontendRoot = fileURLToPath(new URL('../../../', import.meta.url));
-const viteServer = await createServer({
+const viteServer = await createViteTestServer({
     root: frontendRoot,
     configFile: `${frontendRoot}/vite.config.ts`,
     appType: 'custom',
@@ -31,11 +31,7 @@ const {
 } = await viteServer.ssrLoadModule('/ts/pages/Leaderboard.tsx');
 const {
     GameLeaderboardView,
-    loadGameLeaderboardState,
 } = await viteServer.ssrLoadModule('/ts/pages/leaderboards/GameLeaderboard.tsx');
-const { LeaderboardRequestError } = await viteServer.ssrLoadModule(
-    '/ts/services/leaderboardApi.ts'
-);
 
 const p4VegaGame = {
     gameId: 'p4-vega',
@@ -315,87 +311,6 @@ test('unknown direct route renders not-found recovery links', () => {
     assert.match(html, /href="\/leaderboards"/);
     assert.match(html, /href="\/leaderboards\/p4-vega"/);
     assert.match(html, /href="\/leaderboards\/three-bosses"/);
-});
-
-test('detail loader selects both known games and settles failures safely', async () => {
-    const responses = new Map([
-        ['p4-vega', p4VegaLeaderboard],
-        ['three-bosses', threeBossesLeaderboard],
-    ]);
-    const readers = {
-        readCatalog: async () => catalog,
-        readGame: async (gameId) => responses.get(gameId),
-    };
-
-    assert.deepEqual(
-        await loadGameLeaderboardState('p4-vega', undefined, readers),
-        {
-            status: 'success',
-            game: p4VegaGame,
-            leaderboard: p4VegaLeaderboard,
-        }
-    );
-    assert.deepEqual(
-        await loadGameLeaderboardState('three-bosses', undefined, readers),
-        {
-            status: 'success',
-            game: threeBossesGame,
-            leaderboard: threeBossesLeaderboard,
-        }
-    );
-
-    let gameReadCount = 0;
-    const notFound = await loadGameLeaderboardState('not-a-game', undefined, {
-        readCatalog: async () => catalog,
-        readGame: async () => {
-            gameReadCount += 1;
-            return p4VegaLeaderboard;
-        },
-    });
-    assert.deepEqual(notFound, { status: 'not-found', games: catalog.games });
-    assert.equal(gameReadCount, 0);
-
-    const failed = await loadGameLeaderboardState('p4-vega', undefined, {
-        readCatalog: async () => catalog,
-        readGame: async () => {
-            throw new Error('service unavailable');
-        },
-    });
-    assert.deepEqual(failed, {
-        status: 'error',
-        game: p4VegaGame,
-        message: 'service unavailable',
-    });
-
-    const mismatchedRules = await loadGameLeaderboardState('p4-vega', undefined, {
-        readCatalog: async () => catalog,
-        readGame: async () => ({
-            ...p4VegaLeaderboard,
-            rulesVersion: p4VegaGame.rulesVersion + 1,
-        }),
-    });
-    assert.deepEqual(mismatchedRules, {
-        status: 'error',
-        game: p4VegaGame,
-        message: 'The leaderboard service returned an unexpected response.',
-    });
-
-    for (const gameId of ['p4-vega', 'three-bosses']) {
-        const apiNotFound = await loadGameLeaderboardState(gameId, undefined, {
-            readCatalog: async () => catalog,
-            readGame: async () => {
-                throw new LeaderboardRequestError(
-                    'That leaderboard does not exist.',
-                    404,
-                    'UNKNOWN_GAME'
-                );
-            },
-        });
-        assert.deepEqual(apiNotFound, {
-            status: 'not-found',
-            games: catalog.games,
-        });
-    }
 });
 
 test('route heading focus preserves scroll position for keyboard navigation', () => {

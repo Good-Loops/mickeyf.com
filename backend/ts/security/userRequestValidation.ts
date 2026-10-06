@@ -7,6 +7,7 @@ export type SignupInput = {
 export type LoginInput = {
     userName: string;
     password: string;
+    rememberMe: boolean;
 };
 
 export type SignupValidation =
@@ -89,7 +90,7 @@ export function validateSignupRequest(body: unknown): SignupValidation {
 export function validateLoginRequest(body: unknown): LoginValidation {
     if (!isRecord(body)) return { valid: false };
 
-    const { user_name, user_password } = body;
+    const { user_name, user_password, remember_me } = body;
     if (
         typeof user_name !== 'string'
         || typeof user_password !== 'string'
@@ -99,6 +100,7 @@ export function validateLoginRequest(body: unknown): LoginValidation {
         || Buffer.byteLength(user_password, 'utf8') > PASSWORD_MAX_BYTES
         || CONTROL_CHARACTERS.test(user_name)
         || CONTROL_CHARACTERS.test(user_password)
+        || (remember_me !== undefined && typeof remember_me !== 'boolean')
     ) {
         return { valid: false };
     }
@@ -108,6 +110,7 @@ export function validateLoginRequest(body: unknown): LoginValidation {
         input: {
             userName: user_name.trim(),
             password: user_password,
+            rememberMe: remember_me === true,
         },
     };
 }
