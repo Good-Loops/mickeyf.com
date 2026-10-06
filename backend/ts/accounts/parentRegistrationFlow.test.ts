@@ -79,7 +79,7 @@ test('closed by default; a reviewed policy is copied rather than mutable through
     assert.deepEqual(closed.config(), { enabled: false });
     assert.deepEqual(await closed.begin(f.context, beginInput), { error: 'CLOSED' });
     const countries = ['ZZ']; const flow = createParentRegistrationFlow({ policy: { ...policy, countries }, clients: f.clients, store: f.store });
-    countries.push('US'); assert.deepEqual(flow.config().countries, ['ZZ']);
+    countries.push('US'); const config = flow.config(); assert.ok(config.enabled); assert.deepEqual(config.countries, ['ZZ']);
 });
 
 for (const [name, patch] of Object.entries({ missingAdult: { adultAttestation: undefined }, falseGuardian: { guardianAttestation: false },
@@ -157,7 +157,7 @@ test('changing consent text invalidates a pending attempt even when its version 
 
 test('notice URL is exposed with consent and binds both pending proof and approved grant', async () => {
     const f = fixture();
-    assert.equal(f.flow.config().privacyNoticeUrl, policy.privacyNoticeUrl);
+    const config = f.flow.config(); assert.ok(config.enabled); assert.equal(config.privacyNoticeUrl, policy.privacyNoticeUrl);
     const approved = await f.approve();
     const pending = await f.flow.begin(f.context, beginInput); assert.ok('state' in pending);
     const changed = createParentRegistrationFlow({ policy: { ...policy, privacyNoticeUrl: 'https://notice.example.test/privacy-v2' },
@@ -196,4 +196,20 @@ test('a parent cannot target their own account through child withdrawal; child c
         childAccountId: f.context.account!.accountId, clientKey: 'google-web', confirmation: 'WITHDRAW AND DELETE', policyVersion: policy.version }), { error: 'INVALID_REQUEST' });
     const { result } = await f.approve();
     assert.deepEqual(await f.flow.createChild(f.context, { grant: result.grant, userName: 'nick', password: '😀'.repeat(19) }), { error: 'INVALID_REQUEST' });
+});
+
+test('US managed creation stays closed without the additional signed-form capability', async () => {
+    const f = fixture({ ...policy, countries: ['US'] });
+    assert.deepEqual(await f.flow.begin(f.context, { ...beginInput, country: 'US' }), { error: 'CLOSED' });
+    assert.equal(f.calls.length, 0);
+});
+
+test('signed form endpoints reject anonymous contexts, extra child fields and unsupported country challenges', async () => {
+    const f = fixture({ ...policy, countries: ['ZZ', 'US'], signedFormsEnabled: true });
+    f.store.requestSignedForm = async () => { throw new Error('must not store unsupported input'); };
+    assert.deepEqual(await f.flow.requestSignedForm(null, {}), { error: 'INVALID_CONTEXT' });
+    const challenge = await f.flow.begin(f.context, beginInput); assert.ok('state' in challenge);
+    assert.deepEqual(await f.flow.requestSignedForm(f.context, { state: challenge.state, idToken: 'token', userName: 'synthetic', childEmail: 'child@example.test' }), { error: 'INVALID_REQUEST' });
+    assert.deepEqual(await f.flow.requestSignedForm(f.context, { state: challenge.state, idToken: 'token', userName: 'synthetic' }), { error: 'INVALID_ATTEMPT' });
+    assert.equal(f.calls.includes('verify'), false);
 });

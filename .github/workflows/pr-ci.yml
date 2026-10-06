@@ -49,14 +49,14 @@ jobs:
       - name: Validate Firebase deploy dependency tree
         run: |
           npm --prefix .github/firebase-deploy ls --omit=dev
-          node --test .github/firebase-deploy/csv-parse-compat.test.mjs .github/firebase-deploy/basic-ftp-compat.test.mjs
+          node --test .github/firebase-deploy/csv-parse-compat.test.mjs .github/firebase-deploy/basic-ftp-compat.test.mjs .github/firebase-deploy/audit-hosting.test.mjs
 
       - name: Audit npm dependencies
         run: |
           npm audit --audit-level=low
           npm --prefix frontend audit --audit-level=low
           npm --prefix backend audit --audit-level=low
-          npm --prefix .github/firebase-deploy audit --audit-level=high --omit=dev
+          npm --prefix .github/firebase-deploy run audit:hosting
 
       - name: Validate packaged Three Bosses WebGL release
         run: npm run three-bosses:webgl:release:validate

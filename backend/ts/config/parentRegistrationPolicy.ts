@@ -21,6 +21,7 @@ export function loadParentRegistrationPolicy(env: Readonly<Record<string, string
             || countries.some(country => typeof country !== 'string' || !Object.prototype.hasOwnProperty.call(registration.countries, country))
             || new Set(countries).size !== countries.length) throw new Error();
         return Object.freeze({ version, consentVersion, consentText, privacyNoticeUrl, countries: Object.freeze([...countries].sort()),
-            creationEnabled: env.PARENT_REGISTRATION_CREATION_ENABLED === 'true' });
+            creationEnabled: env.PARENT_REGISTRATION_CREATION_ENABLED === 'true',
+            ...(env.PARENT_SIGNED_FORMS_ENABLED === 'true' ? { signedFormsEnabled: true } : {}) });
     } catch { throw new Error('Parent registration requires explicit reviewed countries, policy, consent versions/text and an HTTPS privacy notice URL.'); }
 }

@@ -6,6 +6,8 @@
 !.dockerignore
 !backend/
 !backend/**
+!shared/
+!shared/privacyNotice.json
 
 # Backend dependencies, generated output, and local configuration are not
 # image inputs.

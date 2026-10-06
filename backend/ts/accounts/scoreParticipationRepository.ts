@@ -47,6 +47,15 @@ export async function approveScoreParticipation(connection: PoolConnection, cont
 
 /** Also used during approved recovery; never erases private scores or the account. */
 export async function removePublicScoreParticipation(connection: PoolConnection, accountId: string): Promise<void> {
+    // The same withdrawal replay must invalidate signed permission restored from a backup.
+    // Schema 0025 remains usable while the additive signed-form migration is pending.
+    const [schema] = await rows(connection, `SELECT COUNT(*) AS available FROM information_schema.TABLES
+        WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='parent_signed_forms'`, []);
+    if (![0, 1].includes(Number(schema?.available))) throw new Error('Signed permission withdrawal schema is unavailable.');
+    if (Number(schema.available) === 1) {
+        const [child] = await rows(connection, "SELECT child_uuid FROM parent_child_consents WHERE child_uuid=? AND country_code='US' LIMIT 1", [accountId]);
+        if (child) await connection.query({ sql: 'UPDATE parent_signed_forms SET public_withdrawn=1 WHERE child_uuid=?', timeout }, [accountId]);
+    }
     await connection.query({ sql: `INSERT INTO account_score_permissions
         (account_uuid, visibility, confirmed_at) VALUES (?, 'private', UTC_TIMESTAMP(6))
         ON DUPLICATE KEY UPDATE visibility='private', policy_digest=NULL, registration_policy_version=NULL,

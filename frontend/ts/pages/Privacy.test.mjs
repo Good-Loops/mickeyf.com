@@ -27,11 +27,14 @@ test('public notice renders every reviewed paragraph and separate permissions wi
     assert.match(markup, /Feature availability can vary by platform and account/u);
 });
 
-test('public contact is the approved legal name and email, without private contact or provenance fields', () => {
+test('public contact contains the owner-approved operator details without local provenance fields', () => {
     assert.equal(notice.operatorName, 'Michel Silveira Dias Fingergut');
     assert.equal(notice.contactEmail, 'mickeyf.plays@gmail.com');
     assert.match(markup, /href="mailto:mickeyf\.plays@gmail\.com"/u);
-    assert.deepEqual(Object.keys(notice).sort(), ['availabilityText', 'consent', 'contactEmail', 'noticeUrl', 'operatorName', 'sections', 'version']);
+    assert.deepEqual(Object.keys(notice).sort(), ['availabilityText', 'consent', 'contactEmail', 'noticeUrl', 'operatorAddress', 'operatorName', 'operatorTelephone', 'sections', 'signedParentForm', 'version']);
+    assert.equal(notice.operatorTelephone, '+55 71 99910 2221');
+    assert.ok(markup.includes(notice.operatorTelephone));
+    assert.ok(markup.includes(notice.operatorAddress));
     assert.doesNotMatch(markup, /tel:|C:\\Users\\|privateDraft|postalAddress|phoneNumber/u);
 });
 

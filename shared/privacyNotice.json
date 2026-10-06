@@ -1,14 +1,21 @@
 {
-  "version": "privacy-2026-10-02.1",
+  "version": "privacy-2026-10-06.1",
   "noticeUrl": "https://mickeyf.com/privacy",
   "operatorName": "Michel Silveira Dias Fingergut",
   "contactEmail": "mickeyf.plays@gmail.com",
+  "operatorAddress": "Avenida Santa Luzia, 379, Horto Florestal, Salvador, Bahia, CEP 40295-050, Brazil",
+  "operatorTelephone": "+55 71 99910 2221",
+  "signedParentForm": {
+    "version": "signed-parent-form-2026-10-06.1",
+    "requestLifetimeDays": 14,
+    "notice": "Your permission is required before the child account is created. We ask you, the parent, for the child's chosen nickname and country; we do not ask for the child's real name, email, birth date or identity document. After approval, the child account stores the nickname, password hash, account identifier and private game results. Connection and session information protects sign-ins and prevents abuse. Google Cloud and Firebase process hosting and account/result data; Google or Apple establishes control of your linked parent account; Gmail processes the signed form you return. These service providers support the account and verification process. We do not sell personal information or use it for targeted advertising. Public disclosure of the nickname and qualifying results is optional and requires the separate signed choice below; declining it does not prevent a private account. Print this form, sign it by hand, and return a scan or photograph from the verified parent email shown on the form to mickeyf.plays@gmail.com. Do not include passwords or identity documents. We review the signature, parent declaration, sender and exact request before approving it. No child account is created if approval is missing. Unused requests expire after 14 days and are removed; incomplete or rejected form messages are deleted within 14 days. Approved signed forms are retained privately while the managed child account remains active, then deleted within 14 days after account-consent withdrawal or child-account deletion. Parents can review the child's information, withdraw public display alone, or withdraw account permission and delete the child through parent account controls or by contacting us. See the linked privacy notice for account and service information."
+  },
   "availabilityText": "Feature availability can vary by platform and account. If an account or privacy control described below is unavailable, contact us for help. Separate permission is required before optional public leaderboard participation.",
   "sections": [
     {
       "id": "operator",
       "title": "Who operates Ludolume",
-      "text": "Ludolume is operated by Michel Silveira Dias Fingergut. For privacy questions or requests, contact mickeyf.plays@gmail.com. You can explore games and animations without an account. This notice explains account, game and support information; accepting it is not blanket consent to optional uses."
+      "text": "Ludolume is operated by Michel Silveira Dias Fingergut. For privacy questions or requests, contact mickeyf.plays@gmail.com, +55 71 99910 2221, or Avenida Santa Luzia, 379, Horto Florestal, Salvador, Bahia, CEP 40295-050, Brazil. You can explore games and animations without an account. This notice explains account, game and support information; accepting it is not blanket consent to optional uses."
     },
     {
       "id": "accounts",
@@ -18,7 +25,7 @@
     {
       "id": "children",
       "title": "Country, age and parent-led accounts",
-      "text": "Registration asks for country and a coarse age range, rather than a birth date or identity document. Where a parent-led account is required, the parent uses their own account and completes the applicable permission process. The child has a separate chosen nickname and password; this flow does not request a child email. Provider sign-in establishes account control, not age or guardianship."
+      "text": "Registration asks for country and a coarse age range, rather than a birth date or identity document. Where a parent-led account is required, the parent uses their own account and completes the applicable permission process. US parent-managed accounts require a signed parent form, returned as a scan or photograph from the parent's verified email and reviewed before the child account is created. A separate signed choice is required for optional public leaderboard disclosure. The child has a separate chosen nickname and password; this flow does not request a child email. Provider sign-in establishes account control, not age or guardianship. Unused form requests expire and are removed after 14 days. Incomplete or rejected form messages are deleted within 14 days; approved forms are retained privately while the child account is active and deleted within 14 days after account withdrawal or deletion."
     },
     {
       "id": "leaderboards",

@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import notice from '../../../shared/privacyNotice.json' with { type: 'json' };
 import { randomBytes, randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { createParentRegistrationApi } from './parentRegistrationApi.ts';
@@ -109,4 +110,24 @@ test('withdrawal binds the exact child and explicit destructive confirmation wit
         { url: '/auth/parent-registration/withdraw', body: { grant, confirmation: 'WITHDRAW AND DELETE' } },
     ]);
     await assert.rejects(createParentRegistrationApi('', async () => response({ deleted: false })).withdraw(grant), { code: 'UNAVAILABLE' });
+});
+
+test('signed form configuration must match the bundled notice and only accepts exact private request metadata', async () => {
+    const signedConfig = { ...config, countries: ['US'], signedFormCountries: ['US'], signedFormVersion: notice.signedParentForm.version };
+    assert.deepEqual(await createParentRegistrationApi('', async () => response(signedConfig)).config(), signedConfig);
+    for (const patch of [{ signedFormVersion: 'old' }, { signedFormCountries: ['US', 'ZZ'] }, { signedFormVersion: undefined }]) {
+        await assert.rejects(createParentRegistrationApi('', async () => response({ ...signedConfig, ...patch })).config(), { code: 'UNAVAILABLE' });
+    }
+    const form = { reference: randomUUID(), parentAccountId: randomUUID(), country: 'US', userName: 'synthetic-child', verifiedContact: 'parent@example.test',
+        policyVersion: 'policy-test', consentVersion: 'consent-test', status: 'pending', expiresAt: new Date(Date.now()+86400000).toISOString(),
+        publicPolicyDigest: null, publicConsentText: null, publicConsentVersion: null };
+    const requests = [];
+    const api = createParentRegistrationApi('', async (url, options) => {
+        requests.push(JSON.parse(options.body)); return response({ form });
+    });
+    const state = random(); assert.deepEqual(await api.requestSignedForm(state, 'synthetic-proof', form.userName), form);
+    assert.deepEqual(requests, [{ state, idToken: 'synthetic-proof', userName: form.userName }]);
+    for (const patch of [{ childPassword: 'unexpected' }, { status: 'used' }, { reference: 'foreign' }, { expiresAt: 'never' }, { country: 'ZZ' }, { publicConsentText: 'unbound' }]) {
+        await assert.rejects(createParentRegistrationApi('', async () => response({ form: { ...form, ...patch } })).requestSignedForm(state, 'proof', form.userName), { code: 'UNAVAILABLE' });
+    }
 });

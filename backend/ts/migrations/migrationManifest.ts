@@ -4,7 +4,7 @@ import path from 'node:path';
 
 export type LeaderboardTableName = 'game_runs' | 'game_personal_bests';
 
-export type MigrationEffectKind = 'create-table' | 'drop-column' | 'detach-best-source' | 'retain-receipts' | 'add-account-identity' | 'add-provider-identities' | 'add-provider-attempts' | 'add-account-sessions' | 'add-session-renewal' | 'add-unique-user-names' | 'allow-passwordless-accounts' | 'extend-provider-attempt-actions' | 'add-apple-tokens' | 'add-apple-revocations' | 'add-apple-session-provenance' | 'add-registration-authorization' | 'add-registration-profile' | 'allow-parent-managed-contact' | 'add-parent-attempts' | 'add-parent-consents' | 'extend-parent-family' | 'add-score-participation';
+export type MigrationEffectKind = 'create-table' | 'drop-column' | 'detach-best-source' | 'retain-receipts' | 'add-account-identity' | 'add-provider-identities' | 'add-provider-attempts' | 'add-account-sessions' | 'add-session-renewal' | 'add-unique-user-names' | 'allow-passwordless-accounts' | 'extend-provider-attempt-actions' | 'add-apple-tokens' | 'add-apple-revocations' | 'add-apple-session-provenance' | 'add-registration-authorization' | 'add-registration-profile' | 'allow-parent-managed-contact' | 'add-parent-attempts' | 'add-parent-consents' | 'extend-parent-family' | 'add-score-participation' | 'add-signed-parent-forms';
 
 type MigrationMetadata = Readonly<{
     version: string;
@@ -42,6 +42,7 @@ export type MigrationDefinition = MigrationMetadata & Readonly<
     | { effect: 'add-parent-consents'; tableName: 'parent_child_consents' }
     | { effect: 'extend-parent-family'; tableName: 'parent_registration_attempts' }
     | { effect: 'add-score-participation'; tableName: 'account_score_permissions' }
+    | { effect: 'add-signed-parent-forms'; tableName: 'parent_signed_forms' }
 >;
 
 const MIGRATION_SPECS = Object.freeze([
@@ -146,6 +147,7 @@ const MIGRATION_SPECS = Object.freeze([
     Object.freeze({ fileName: '0023_create_parent_child_consents.sql', effect: 'add-parent-consents' as const, tableName: 'parent_child_consents' as const }),
     Object.freeze({ fileName: '0024_extend_parent_family_deletion.sql', effect: 'extend-parent-family' as const, tableName: 'parent_registration_attempts' as const }),
     Object.freeze({ fileName: '0025_create_score_participation.sql', effect: 'add-score-participation' as const, tableName: 'account_score_permissions' as const }),
+    Object.freeze({ fileName: '0026_create_signed_parent_forms.sql', effect: 'add-signed-parent-forms' as const, tableName: 'parent_signed_forms' as const }),
 ]);
 
 const MIGRATION_FILE_NAME = /^\d{4}_[a-z0-9]+(?:_[a-z0-9]+)*\.sql$/;

@@ -26,6 +26,7 @@ import { readP4VegaLeaderboard, submitP4VegaScore } from '../leaderboards/p4Vega
 import { withUserSubmissionLock } from '../leaderboards/userSubmissionLock';
 import { applyDeletionReplay, planDeletionReplay } from './deletionReplay';
 import type { DeletionReplaySettings } from '../config/deletionReplayConfig';
+import { reviewSignedParentForm, cleanupSignedParentForms } from './signedParentFormReview';
 
 const config = loadMigrationConfig();
 let admin: Connection; let database: Pool; let passwordHash: string;
@@ -63,7 +64,7 @@ before(async () => {
     }
     await verifyParentRegistrationReadiness(admin as unknown as MigrationConnection);
     await admin.query("CREATE USER 'parent_runtime_test'@'%' IDENTIFIED BY 'parent-runtime-test-only'");
-    for (const sql of renderRuntimeGrantStatements(config.database, { user: 'parent_runtime_test', host: '%' }, 'google-apple-parent')) await admin.query(sql);
+    for (const sql of renderRuntimeGrantStatements(config.database, { user: 'parent_runtime_test', host: '%' }, 'google-apple-parent-signed')) await admin.query(sql);
     database = mysql.createPool({ host: config.host, port: config.port, database: config.database, user: 'parent_runtime_test',
         password: 'parent-runtime-test-only', multipleStatements: false, connectionLimit: 10, dateStrings: true, timezone: 'Z' });
     passwordHash = await bcrypt.hash(password, 4);
@@ -95,6 +96,113 @@ async function child(p: Awaited<ReturnType<typeof parent>>, name = `child-${rand
     assert.ok('created' in result, JSON.stringify(result)); return { ...a, child: result.child };
 }
 const withdrawal = (id: string) => ({ purpose: 'withdraw-child', childAccountId: id, clientKey: 'google-web', policyVersion: policy.version, confirmation: 'WITHDRAW AND DELETE' });
+
+const signedPolicy = { ...policy, countries: ['US'], signedFormsEnabled: true };
+const usInput = { ...input, country: 'US' };
+async function usParent(publication = false) {
+    const p = await parent();
+    const publicationPolicy = publication ? { ...publicPolicy, countries: { US: { selfAgeBands: [] as const, parentManaged: true } }, digest: Buffer.alloc(32, 18) } : undefined;
+    const store = createParentRegistrationRepository(database, journal, publicationPolicy, true);
+    return { ...p, store, publicationPolicy, flow: createParentRegistrationFlow({ store, clients: p.clients, policy: signedPolicy, publicationPolicy }) };
+}
+async function usForm(p: Awaited<ReturnType<typeof usParent>>) {
+    const challenge = await p.flow.begin(p.context, usInput); assert.ok('state' in challenge);
+    const result = await p.flow.requestSignedForm(p.context, { state: challenge.state, idToken: 'synthetic-proof', userName: `us-child-${randomUUID()}` });
+    assert.ok('form' in result, JSON.stringify(result));
+    return result.form;
+}
+async function formReview(p: Awaited<ReturnType<typeof usParent>>, reference: string, publicApproved = false) {
+    const [forms] = await admin.query<RowDataPacket[]>('SELECT policy_digest FROM parent_signed_forms WHERE reference=?', [reference]);
+    return { reference, parentAccountId: p.account.accountId, verifiedContact: p.identity.email!, policyDigest: forms[0].policy_digest,
+        formSha256: Buffer.alloc(32, 71), reviewer: 'Synthetic owner', decision: 'approved' as const, publicApproved };
+}
+async function ownerReview(review: Awaited<ReturnType<typeof formReview>>) {
+    const owner = mysql.createPool({ host: config.host, port: config.port, database: config.database, user: 'root',
+        password: 'migration-test-root-only', connectionLimit: 1, timezone: 'Z', dateStrings: true });
+    try { await reviewSignedParentForm(owner, review); } finally { await owner.end(); }
+}
+
+test('US signed form waits for owner review without creating a child or storing a child password', async () => {
+    const p = await usParent(); const form = await usForm(p);
+    assert.equal(form.status, 'pending'); assert.equal(form.verifiedContact, p.identity.email);
+    assert.deepEqual(await p.store.listChildren(p.context), []);
+    const a = await approve(p, usInput);
+    assert.deepEqual(await p.flow.createChild(p.context, { grant: a.proof.grant, userName: form.userName, password }), { error: 'SIGNED_FORM_REQUIRED' });
+    assert.deepEqual(await p.flow.createChild(p.context, { grant: a.proof.grant, userName: form.userName, password, formReference: form.reference }), { error: 'SIGNED_FORM_REQUIRED' });
+    const review = await formReview(p, form.reference);
+    await assert.rejects(reviewSignedParentForm(database, review), /command denied|access denied/iu);
+    await assert.rejects(database.query('UPDATE parent_signed_forms SET public_approved=1 WHERE reference=?', [form.reference]), /command denied|access denied/iu);
+    await ownerReview(review);
+    await assert.rejects(ownerReview(review), /unavailable/u, 'owner review is single use, with no silent retry');
+    const fresh = await approve(p, usInput);
+    assert.deepEqual(await p.flow.createChild(p.context, { grant: fresh.proof.grant, userName: `${form.userName}-changed`, password, formReference: form.reference }), { error: 'SIGNED_FORM_REQUIRED' });
+    const result = await p.flow.createChild(p.context, { grant: fresh.proof.grant, userName: form.userName, password, formReference: form.reference });
+    assert.ok('created' in result); assert.equal(result.child.scoreVisibility, 'private');
+    const listed = await p.flow.listSignedForms(p.context, {}); assert.ok('forms' in listed); assert.equal(listed.forms.length, 0);
+});
+
+test('signed form belongs to the exact parent, linked provider, nickname and policy; one review creates at most one child', async () => {
+    const p = await usParent(); const form = await usForm(p); const other = await usParent();
+    assert.deepEqual(await other.flow.listSignedForms(other.context, {}), { forms: [] });
+    await other.flow.cancelSignedForm(other.context, { reference: form.reference });
+    const review = await formReview(p, form.reference);
+    await assert.rejects(ownerReview({ ...review, verifiedContact: 'another-parent@example.test' }), /unavailable/u);
+    await assert.rejects(ownerReview({ ...review, policyDigest: Buffer.alloc(32, 99) }), /unavailable/u);
+    await ownerReview(review);
+    const otherGrant = await approve(other, usInput);
+    assert.deepEqual(await other.flow.createChild(other.context, { grant: otherGrant.proof.grant, userName: form.userName, password, formReference: form.reference }), { error: 'SIGNED_FORM_REQUIRED' });
+    const [first, second] = await Promise.all([approve(p, usInput), approve(p, usInput)]);
+    const results = await Promise.all([first, second].map(a => p.flow.createChild(p.context, { grant: a.proof.grant, userName: form.userName, password, formReference: form.reference })));
+    assert.equal(results.filter(result => 'created' in result).length, 1);
+    assert.equal((await p.store.listChildren(p.context)).length, 1);
+    const created = results.find(result => 'created' in result)!; assert.ok('created' in created);
+    const a = await approve(p, withdrawal(created.child.accountId));
+    assert.deepEqual(await p.flow.withdrawChild(p.context, { grant: a.proof.grant, confirmation: 'WITHDRAW AND DELETE' }), { deleted: true });
+    assert.equal((await admin.query<RowDataPacket[]>('SELECT reference FROM parent_signed_forms WHERE reference=?', [form.reference]))[0].length, 0, 'child deletion removes the linked proof');
+});
+
+test('a pending private-only form stays readable when a later public policy is available', async () => {
+    const p = await usParent(); const form = await usForm(p);
+    const publicContext = await usParent(true);
+    const reader = createParentRegistrationRepository(database, journal, publicContext.publicationPolicy, true);
+    assert.ok(reader.listSignedForms);
+    const listed = await reader.listSignedForms(p.context, Buffer.from((await formReview(p, form.reference)).policyDigest));
+    assert.equal(listed.length, 1);
+    assert.equal(listed[0].publicConsentText, null);
+    assert.equal(listed[0].publicConsentVersion, null);
+});
+
+test('US public disclosure requires separately signed permission and a fresh choice, and withdrawal cannot reuse it', async () => {
+    for (const publicApproved of [false, true]) {
+        const p = await usParent(true); const form = await usForm(p);
+        assert.equal(form.publicConsentText, p.publicationPolicy!.consentText);
+        await ownerReview(await formReview(p, form.reference, publicApproved));
+        const a = await approve(p, usInput);
+        const created = await p.flow.createChild(p.context, { grant: a.proof.grant, userName: form.userName, password, formReference: form.reference });
+        assert.ok('created' in created); const id = created.child.accountId;
+        const publication = { ...participation(id), policyVersion: p.publicationPolicy!.version, consentVersion: p.publicationPolicy!.consentVersion,
+            consentText: p.publicationPolicy!.consentText, privacyNoticeUrl: p.publicationPolicy!.privacyNoticeUrl };
+        assert.deepEqual(await p.flow.scoreStatus(p.context, { childAccountId: id }), { visibility: 'private', canPublish: publicApproved });
+        if (!publicApproved) { assert.deepEqual(await p.flow.begin(p.context, publication), { error: 'UNAVAILABLE' }); continue; }
+        const consent = await approve(p, publication);
+        assert.deepEqual(await p.flow.publishScores(p.context, { grant: consent.proof.grant }), { visibility: 'public' });
+        assert.deepEqual(await p.flow.withdrawScores(p.context, { childAccountId: id }), { visibility: 'private' });
+        assert.deepEqual(await p.flow.scoreStatus(p.context, { childAccountId: id }), { visibility: 'private', canPublish: false });
+        assert.deepEqual(await p.flow.begin(p.context, publication), { error: 'UNAVAILABLE' });
+        assert.equal((await p.store.listChildren(p.context)).length, 1);
+    }
+});
+
+test('cancelled and expired form requests cannot be approved; bounded cleanup retains used proofs', async () => {
+    const p = await usParent(); const form = await usForm(p); const review = await formReview(p, form.reference);
+    await p.flow.cancelSignedForm(p.context, { reference: form.reference });
+    await assert.rejects(ownerReview(review), /unavailable/u);
+    const expired = await usForm(p); const expiredReview = await formReview(p, expired.reference);
+    await admin.query('UPDATE parent_signed_forms SET expires_at=UTC_TIMESTAMP(6)-INTERVAL 1 SECOND WHERE reference=?', [expired.reference]);
+    await assert.rejects(ownerReview(expiredReview), /unavailable/u);
+    assert.deepEqual(await cleanupSignedParentForms(database), { backlog: false });
+    assert.deepEqual(await p.flow.listSignedForms(p.context, {}), { forms: [] });
+});
 
 test('rotating a remembered session rejects old proof/grants and fresh parent approval recovers', async () => {
     for (const phase of ['provider-proof', 'child-credentials']) {

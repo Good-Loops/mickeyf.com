@@ -80,7 +80,7 @@ export function createAuthRouter(
     if (parentRegistrationStorageReady && deletionJournal) {
         router.use('/parent-registration', createParentRegistrationRouter(createParentRegistrationFlow({
             policy: parentRegistrationPolicy, publicationPolicy: scoreParticipationPolicy, clients: providerAuth?.clients ?? {},
-            store: createParentRegistrationRepository(database, deletionJournal, scoreParticipationPolicy),
+            store: createParentRegistrationRepository(database, deletionJournal, scoreParticipationPolicy, parentRegistrationPolicy?.signedFormsEnabled === true),
         }), createProviderAuthContextReader({ database, sessionSecret, allowedOrigins: allowedMutationOrigins }), isProduction));
     } else router.get('/parent-registration/config', (_req, res) => {
         res.setHeader('Cache-Control', 'no-store'); return res.json({ enabled: false });

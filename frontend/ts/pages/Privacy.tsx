@@ -1,4 +1,4 @@
-import notice from '../../../shared/privacyNotice.json';
+import notice from '../../../shared/privacyNotice.json' with { type: 'json' };
 
 /** Public notice needs no account, API response or consent submission. */
 export default function Privacy() {

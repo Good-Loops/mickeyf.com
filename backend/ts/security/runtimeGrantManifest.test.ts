@@ -79,6 +79,17 @@ test('unknown grant profiles fail closed rather than falling back to broader gra
     }
 });
 
+test('signed-form runtime can consume and withdraw proofs but cannot create review evidence or approve public disclosure', () => {
+    assert.equal(parseRuntimeGrantProfile('google-apple-parent-signed'), 'google-apple-parent-signed');
+    const columns = runtimeColumnPrivilegeInventory('google-apple-parent-signed');
+    assert.deepEqual(columns.filter(row => row.tableName !== 'parent_signed_forms'), runtimeColumnPrivilegeInventory('google-apple-parent'));
+    const form = columns.filter(row => row.tableName === 'parent_signed_forms');
+    assert.deepEqual(form.filter(row => row.privilegeType === 'UPDATE').map(row => row.columnName), ['status', 'child_uuid', 'public_withdrawn']);
+    for (const column of ['reviewed_at', 'reviewer', 'form_sha256', 'public_approved']) {
+        assert.equal(form.some(row => row.columnName === column && row.privilegeType !== 'SELECT'), false);
+    }
+});
+
 test('defines only runtime DML and read-only identity-epoch metadata', () => {
     assert.deepEqual(PRODUCTION_RUNTIME_DATABASE_ROLE, {
         user: 'cloudsqlsuperuser',

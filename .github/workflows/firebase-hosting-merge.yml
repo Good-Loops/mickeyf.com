@@ -140,9 +140,9 @@ jobs:
         run: |
           set -euo pipefail
           npm ci --ignore-scripts --no-audit --no-fund
-          npm audit --audit-level=high --omit=dev
+          npm run audit:hosting
           npm ls --omit=dev
-          node --test csv-parse-compat.test.mjs
+          node --test csv-parse-compat.test.mjs basic-ftp-compat.test.mjs audit-hosting.test.mjs
 
           version="$(./node_modules/.bin/firebase --version)"
           if [[ "$version" != "15.32.0" ]]; then

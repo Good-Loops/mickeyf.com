@@ -145,8 +145,8 @@ async function prepareContainer() {
 }
 
 function assertReviewedMigrationBoundary(migrations) {
-    requireLocal(migrations.length === 25 && migrations.at(-1).version === '0025_create_score_participation',
-        'The local bootstrap must be reviewed before applying migrations beyond 0025.');
+    requireLocal(migrations.length === 26 && migrations.at(-1).version === '0026_create_signed_parent_forms',
+        'The local bootstrap must be reviewed before applying migrations beyond 0026.');
 }
 
 async function prepareDatabase({ credentials, context, containerId }, options) {
@@ -186,14 +186,14 @@ async function prepareDatabase({ credentials, context, containerId }, options) {
             ['add-apple-tokens'], ['add-apple-revocations', 'add-apple-session-provenance'],
             ['add-registration-authorization', 'add-registration-profile'],
             ['allow-parent-managed-contact', 'add-parent-attempts', 'add-parent-consents'],
-            ['extend-parent-family', 'add-score-participation']]) {
+            ['extend-parent-family', 'add-score-participation'], ['add-signed-parent-forms']]) {
             await applyMigrations(connection, migrations, settings, { allowedEffectKinds });
         }
         requireLocal((await planMigrations(connection, migrations, settings)).pending.length === 0, 'Local schema setup is incomplete.');
         await connection.query(`CREATE USER IF NOT EXISTS '${runtimeUser}'@'%' IDENTIFIED BY ?`, [credentials.runtimePassword]);
-        for (const sql of renderRuntimeGrantStatements(databaseName, { user: runtimeUser, host: '%' }, 'google-apple-parent')) await connection.query(sql);
+        for (const sql of renderRuntimeGrantStatements(databaseName, { user: runtimeUser, host: '%' }, 'google-apple-parent-signed')) await connection.query(sql);
         for (const sql of localProviderGrantStatements(options)) await connection.query(sql);
-        console.log(`Verified local database ${databaseName}; migrations 0001-0025 and restricted runtime grants are ready. Registration, parent and public-participation capabilities remain closed.`);
+        console.log(`Verified local database ${databaseName}; migrations 0001-0026 and restricted runtime grants are ready. Registration, parent and public-participation capabilities remain closed.`);
     } finally { await connection.end(); }
 }
 

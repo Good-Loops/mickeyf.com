@@ -33,6 +33,7 @@ RUN npm ci
 # The allowlisted Docker context excludes local configuration and generated
 # output, so only reviewed backend sources enter this stage.
 COPY backend/ ./
+COPY shared/privacyNotice.json /usr/src/app/shared/privacyNotice.json
 RUN npm run prod
 
 

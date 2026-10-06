@@ -43,8 +43,13 @@
 		"test:unity-yaml-normalizer": "node --test scripts/normalize-unity-yaml-whitespace.test.mjs",
 		"unity:yaml:normalize-staged": "node scripts/normalize-unity-yaml-whitespace.mjs --staged"
 	},
+	"overrides": {
+		"concurrently": {
+			"shell-quote": "1.11.0"
+		}
+	},
 	"devDependencies": {
-		"chokidar-cli": "^3.0.0",
+		"chokidar": "^4.0.3",
 		"concurrently": "^10.0.4",
 		"http-server": "^14.1.1",
 		"typedoc": "^0.28.20"

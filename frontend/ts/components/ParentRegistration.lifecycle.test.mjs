@@ -30,6 +30,7 @@ const nodes = value => !value || typeof value !== 'object' ? [] : [value, ...[va
 const text = value => typeof value === 'string' ? value : typeof value === 'object' && value ? [value.props?.children].flat(Infinity).map(text).join(' ') : '';
 
 function mount(t, patch = {}) {
+    const { api: apiOverrides, ...propOverrides } = patch;
     const slots = [], effects = [], begins = [], proofs = [], acquisitions = [], creations = [], cancellations = [];
     let cursor = 0, dirty = false, mounted = true, tree;
     const props = { authenticated: true, accountKey: 'parent-one', clients: [{ clientKey: 'google-web', provider: 'google' }],
@@ -38,7 +39,8 @@ function mount(t, patch = {}) {
             complete(...args) { const pending = deferred(); proofs.push({ ...pending, args }); return pending.promise; },
             createChild(...args) { const pending = deferred(); creations.push({ ...pending, args }); return pending.promise; },
             async cancel(state) { cancellations.push(state); },
-        }, acquire(...args) { const pending = deferred(); acquisitions.push({ ...pending, args }); return pending.promise; }, ...patch };
+        }, acquire(...args) { const pending = deferred(); acquisitions.push({ ...pending, args }); return pending.promise; }, ...propOverrides };
+    Object.assign(props.api, apiOverrides);
     globalThis[fixtureKey] = {
         state(initial) { const slot = slots[cursor++] ??= { value: initial }; return [slot.value, next => {
             const value = typeof next === 'function' ? next(slot.value) : next;
@@ -154,4 +156,24 @@ test('unknown creation outcome never retries automatically or reports cancellati
 test('an unauthenticated parent sees login guidance without child credentials', async t => {
     const view = mount(t, { authenticated: false }); view.render(); await view.settle();
     assert.match(view.text(), /Log in to your own Ludolume account/u); assert.equal(view.all(node => node.type === 'input').length, 0);
+});
+
+test('a US signed form collects no child password while pending and late delivery cannot cross an account change', async t => {
+    const request = deferred(); const requests = [];
+    const signed = { ...config, countries: ['US'], signedFormCountries: ['US'], signedFormVersion: 'signed-parent-form-2026-10-06.1' };
+    const view = mount(t, { api: { config: async () => signed, listSignedForms: async () => [],
+        requestSignedForm(...args) { requests.push(args); return request.promise; } } });
+    view.render(); await view.settle();
+    view.find(node => node.type === 'select').props.onChange({ target: { value: 'US' } }); view.render();
+    view.find(node => node.type === 'input' && !node.props.type).props.onChange({ target: { value: 'synthetic-child' } });
+    view.all(node => node.type === 'input' && node.props.type === 'checkbox').forEach(node => node.props.onChange({ target: { checked: true } }));
+    view.render(); view.button('Confirm with Google').props.onClick(); await view.settle();
+    const state = random(); view.begins[0].resolve({ state, nonce: random(), expiresInSeconds: 300 }); await view.settle();
+    view.acquisitions[0].resolve('synthetic-proof'); await view.settle();
+    assert.equal(view.proofs.length, 0); assert.equal(requests.length, 1); assert.equal(requests[0][2], 'synthetic-child');
+    assert.equal(view.find(node => node.type === 'input' && node.props.type === 'password'), undefined);
+    view.render({ accountKey: 'different-parent' }); await view.settle();
+    request.resolve({ reference: randomUUID(), parentAccountId: randomUUID(), country: 'US', userName: 'synthetic-child', status: 'pending' }); await view.settle();
+    assert.equal(view.creations.length, 0); assert.doesNotMatch(view.text(), /synthetic-child: pending/u);
+    assert.equal(requests[0][3].aborted, true);
 });

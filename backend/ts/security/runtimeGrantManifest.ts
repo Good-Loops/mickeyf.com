@@ -5,12 +5,12 @@ export type RuntimeDatabaseAccount = Readonly<{
 
 export type RuntimeDmlPrivilege = 'SELECT' | 'INSERT' | 'UPDATE';
 
-export type RuntimeGrantProfile = 'google' | 'google-apple' | 'google-apple-parent';
+export type RuntimeGrantProfile = 'google' | 'google-apple' | 'google-apple-parent' | 'google-apple-parent-signed';
 
 export function parseRuntimeGrantProfile(value: string | undefined): RuntimeGrantProfile {
     if (value === undefined) return 'google-apple';
-    if (value === 'google' || value === 'google-apple' || value === 'google-apple-parent') return value;
-    throw new Error('Runtime grant profile must be google, google-apple or google-apple-parent');
+    if (value === 'google' || value === 'google-apple' || value === 'google-apple-parent' || value === 'google-apple-parent-signed') return value;
+    throw new Error('Runtime grant profile must be google, google-apple, google-apple-parent or google-apple-parent-signed');
 }
 
 export type RuntimeColumnGrant = Readonly<{
@@ -21,7 +21,7 @@ export type RuntimeColumnGrant = Readonly<{
 export type RuntimeTableGrant = Readonly<{
     table: 'users' | 'game_submission_receipts' | 'game_personal_bests' | 'schema_migrations' | 'account_sessions'
         | 'account_provider_identities' | 'provider_auth_attempts' | 'apple_provider_tokens' | 'apple_auth_revocations'
-        | 'registration_authorizations' | 'account_registration_profiles' | 'parent_registration_attempts' | 'parent_child_consents' | 'account_score_permissions';
+        | 'registration_authorizations' | 'account_registration_profiles' | 'parent_registration_attempts' | 'parent_child_consents' | 'account_score_permissions' | 'parent_signed_forms';
     grants: readonly RuntimeColumnGrant[];
     tablePrivileges: readonly 'DELETE'[];
 }>;
@@ -288,7 +288,19 @@ export const PARENT_RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Objec
 
 ]);
 
+export const SIGNED_PARENT_RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freeze([
+    ...PARENT_RUNTIME_GRANT_MANIFEST,
+    Object.freeze({ table: 'parent_signed_forms' as const, tablePrivileges: Object.freeze(['DELETE' as const]), grants: Object.freeze([
+        Object.freeze({ privilege: 'SELECT' as const, columns: Object.freeze(['reference', 'parent_uuid', 'country_code', 'user_name', 'policy_digest',
+            'consent_version', 'policy_version', 'provider', 'subject', 'verified_contact', 'status', 'submitted_at', 'expires_at', 'public_policy_digest', 'public_approved', 'public_withdrawn', 'child_uuid']) }),
+        Object.freeze({ privilege: 'INSERT' as const, columns: Object.freeze(['reference', 'parent_uuid', 'country_code', 'user_name', 'policy_digest',
+            'consent_version', 'policy_version', 'provider', 'subject', 'verified_contact', 'status', 'submitted_at', 'expires_at', 'public_policy_digest']) }),
+        Object.freeze({ privilege: 'UPDATE' as const, columns: Object.freeze(['status', 'child_uuid', 'public_withdrawn']) }),
+    ]) }),
+]);
+
 function manifestForProfile(profile: RuntimeGrantProfile | undefined): readonly RuntimeTableGrant[] {
+    if (profile === 'google-apple-parent-signed') return SIGNED_PARENT_RUNTIME_GRANT_MANIFEST;
     if (profile === 'google-apple-parent') return PARENT_RUNTIME_GRANT_MANIFEST;
     return parseRuntimeGrantProfile(profile) === 'google'
         ? GOOGLE_RUNTIME_GRANT_MANIFEST

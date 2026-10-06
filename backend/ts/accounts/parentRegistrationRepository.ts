@@ -1,4 +1,6 @@
 import bcrypt from 'bcryptjs';
+import { randomUUID } from 'node:crypto';
+import { SIGNED_FORM_LIFETIME_DAYS, signedFormRequired, SignedParentFormRequiredError, type SignedParentFormRequest } from './signedParentForm';
 import type { ScoreParticipationPolicy } from '../config/scoreParticipationPolicy';
 import { scoreParticipationTarget, scoreProfileDigest, canAuthorizePublication, approveScoreParticipation, readScoreParticipation, removePublicScoreParticipation } from './scoreParticipationRepository';
 import { familySelectionDigest } from './familyDeletionSelection';
@@ -51,7 +53,8 @@ async function transaction<T>(lock: UserSubmissionLockContext, operation: (conne
 }
 
 /** Only short-lived proof metadata and the minimal current consent relationship are persisted. */
-export function createParentRegistrationRepository(database: Database, journal: AccountDeletionJournal, publicationPolicy?: ScoreParticipationPolicy): ParentRegistrationStore {
+export function createParentRegistrationRepository(database: Database, journal: AccountDeletionJournal, publicationPolicy?: ScoreParticipationPolicy,
+    signedFormsEnabled = false): ParentRegistrationStore {
     if (!journal || typeof journal.recordAccountDeletion !== 'function') throw new TypeError('Parent registration requires deletion journaling.');
     async function currentParent(connection: PoolConnection, context: ProviderAuthContext, creation = false) {
         const parent = context.account; const session = context.session;
@@ -113,6 +116,26 @@ export function createParentRegistrationRepository(database: Database, journal: 
             WHERE state_hash = ? AND phase = 'approved' AND expires_at > UTC_TIMESTAMP(6)`, timeout }, [stateHash]);
         if (result.affectedRows !== 1) throw new Error('Parent grant expired.');
     }
+    const formProjection = (row: RowDataPacket): SignedParentFormRequest => ({ reference: row.reference,
+        parentAccountId: row.parent_uuid, country: row.country_code, userName: row.user_name, verifiedContact: row.verified_contact,
+        policyVersion: row.policy_version, consentVersion: row.consent_version, status: row.status,
+        expiresAt: new Date(Number(row.expiresAt)).toISOString(), publicPolicyDigest: row.public_policy_digest?.toString('hex') ?? null,
+        publicConsentText: Buffer.isBuffer(row.public_policy_digest) && publicationPolicy?.digest.equals(row.public_policy_digest) ? publicationPolicy.consentText : null,
+        publicConsentVersion: Buffer.isBuffer(row.public_policy_digest) && publicationPolicy?.digest.equals(row.public_policy_digest) ? publicationPolicy.consentVersion : null });
+    async function readForm(connection: PoolConnection, reference: string, parentId: string) {
+        const [form] = await rows(connection, `SELECT reference, parent_uuid, country_code, user_name, verified_contact,
+            policy_version, consent_version, status, public_policy_digest, ROUND(TIMESTAMPDIFF(MICROSECOND, '1970-01-01', expires_at)/1000) AS expiresAt
+            FROM parent_signed_forms WHERE reference=? AND parent_uuid=? AND status <> 'used' LIMIT 1`, [reference, parentId]);
+        if (!form) throw new Error('Signed form request unavailable.');
+        return formProjection(form);
+    }
+    async function signedPublicPermission(connection: PoolConnection, target: RowDataPacket): Promise<boolean> {
+        if (!target.parent_uuid || !signedFormRequired(target.country_code)) return true;
+        if (!signedFormsEnabled || !publicationPolicy) return false;
+        return (await rows(connection, `SELECT reference FROM parent_signed_forms WHERE child_uuid=? AND parent_uuid=?
+            AND status='used' AND public_approved=1 AND public_withdrawn=0 AND public_policy_digest=? LIMIT 1`,
+        [target.account_uuid, target.parent_uuid, publicationPolicy.digest])).length === 1;
+    }
     return {
         async begin(attempt, context) {
             // Expiry rejects independently; opportunistic bounded cleanup stores no identity after expiry.
@@ -122,7 +145,8 @@ export function createParentRegistrationRepository(database: Database, journal: 
                 let profileDigest: Buffer | null = null;
                 if (attempt.operation.purpose === 'publish-scores') {
                     const target = await scoreParticipationTarget(connection, context, attempt.operation.childAccountId);
-                    if (!journal.recordPublicScoreWithdrawal || !canAuthorizePublication(target, context.account!.accountId, publicationPolicy)) throw new Error('Publication policy is closed.');
+                    if (!journal.recordPublicScoreWithdrawal || !canAuthorizePublication(target, context.account!.accountId, publicationPolicy)
+                        || !await signedPublicPermission(connection, target)) throw new Error('Publication policy is closed.');
                     profileDigest = scoreProfileDigest(target);
                 }
                 if (attempt.operation.purpose === 'delete-family') {
@@ -180,6 +204,17 @@ export function createParentRegistrationRepository(database: Database, journal: 
             const passwordHash = await bcrypt.hash(credentials.password, 12);
             return locked(context, async connection => {
                 const approval = await grant(connection, grantHash, context, policyDigest, 'create-child');
+                let formReference: string | null = null;
+                if (signedFormRequired(approval.country_code)) {
+                    if (!signedFormsEnabled || !credentials.formReference) throw new SignedParentFormRequiredError();
+                    const [form] = await rows(connection, `SELECT reference, user_name, provider, subject FROM parent_signed_forms
+                        WHERE reference=? AND parent_uuid=? AND country_code=? AND policy_digest=? AND consent_version=? AND policy_version=?
+                        AND status='approved' AND expires_at>UTC_TIMESTAMP(6) LIMIT 1 FOR UPDATE`,
+                    [credentials.formReference, context.account!.accountId, approval.country_code, policyDigest, approval.consent_version, approval.policy_version]);
+                    if (!form || form.user_name !== credentials.userName || form.provider !== approval.provider
+                        || !Buffer.isBuffer(form.subject) || !form.subject.equals(approval.subject)) throw new SignedParentFormRequiredError();
+                    formReference = form.reference;
+                } else if (credentials.formReference) throw new SignedParentFormRequiredError();
                 const [insert] = await connection.query<ResultSetHeader>({ sql: 'INSERT INTO users (user_name, email, user_password) VALUES (?, NULL, ?)', timeout },
                     [credentials.userName, passwordHash]);
                 const [child] = await rows(connection, 'SELECT account_uuid FROM users WHERE user_id = ?', [insert.insertId]);
@@ -190,6 +225,7 @@ export function createParentRegistrationRepository(database: Database, journal: 
                     VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP(6))`,
                 [child.account_uuid, context.account!.accountId, approval.country_code, policyDigest, approval.consent_version]);
                 await consume(connection, approval.state_hash, context);
+                if (formReference) await command(connection, "UPDATE parent_signed_forms SET status='used', child_uuid=? WHERE reference=? AND status='approved'", [child.account_uuid, formReference]);
                 return { accountId: child.account_uuid, userName: credentials.userName, scoreVisibility: 'private' as const };
             });
         },
@@ -225,6 +261,7 @@ export function createParentRegistrationRepository(database: Database, journal: 
             if (!target) throw new Error('Publication grant unavailable.');
             await targetLocked(context, target.child_uuid, async connection => {
                 const approval = await grant(connection, grantHash, context, digest, 'publish-scores');
+                if (!await signedPublicPermission(connection, await scoreParticipationTarget(connection, context, approval.child_uuid))) throw new SignedParentFormRequiredError();
                 await approveScoreParticipation(connection, context, approval.child_uuid, publicationPolicy, approval.profile_digest);
                 await consume(connection, approval.state_hash, context);
             });
@@ -232,13 +269,15 @@ export function createParentRegistrationRepository(database: Database, journal: 
         withdrawScores: (context, targetId) => targetLocked(context, targetId, async connection => {
             await currentParent(connection, context);
             if (!journal.recordPublicScoreWithdrawal) throw new Error('Withdrawal journal unavailable.');
-            await scoreParticipationTarget(connection, context, targetId);
+            const target = await scoreParticipationTarget(connection, context, targetId);
             await journal.recordPublicScoreWithdrawal(targetId);
             await removePublicScoreParticipation(connection, targetId);
         }),
         scoreStatus: (context, targetId) => locked(context, async connection => {
             await currentParent(connection, context);
-            return readScoreParticipation(connection, context, targetId, publicationPolicy);
+            const status = await readScoreParticipation(connection, context, targetId, publicationPolicy);
+            const allowed = await signedPublicPermission(connection, await scoreParticipationTarget(connection, context, targetId));
+            return { ...status, canPublish: status.canPublish && allowed };
         }),
         async deleteFamily(grantHash, context, digest, confirmedFamily) {
             let recorded = false;
@@ -276,6 +315,39 @@ export function createParentRegistrationRepository(database: Database, journal: 
             const children = await rows(connection, `SELECT u.account_uuid, u.user_name FROM parent_child_consents c
                 INNER JOIN users u ON u.account_uuid = c.child_uuid WHERE c.parent_uuid = ? ORDER BY u.user_id LIMIT 50`, [context.account!.accountId]);
             return children.map(child => ({ accountId: child.account_uuid, userName: child.user_name, scoreVisibility: 'private' })) as ParentChild[];
+        }),
+        requestSignedForm: (attempt, identity, context, userName, policy) => locked(context, async connection => {
+            if (!signedFormsEnabled || attempt.operation.purpose !== 'create-child' || !signedFormRequired(attempt.operation.country)
+                || !identity.email || !policy.signedFormsEnabled) throw new Error('Signed forms are closed.');
+            await currentParent(connection, context, true);
+            if (!await linked(connection, context, identity)) throw new Error('Parent provider is no longer linked.');
+            await command(connection, "DELETE FROM parent_signed_forms WHERE parent_uuid=? AND status <> 'used' AND expires_at<=UTC_TIMESTAMP(6)", [context.account!.accountId]);
+            if ((await rows(connection, "SELECT reference FROM parent_signed_forms WHERE parent_uuid=? AND status <> 'used' LIMIT 50", [context.account!.accountId])).length >= 50) throw new Error('Form request limit reached.');
+            const [consumed] = await connection.query<ResultSetHeader>({ sql: `UPDATE parent_registration_attempts SET phase='used'
+                WHERE state_hash=? AND parent_uuid=? AND binding_hash=? AND policy_digest=? AND phase='verifying' AND expires_at>UTC_TIMESTAMP(6)`, timeout },
+            [attempt.stateHash, context.account!.accountId, context.bindingHash, attempt.policyDigest]);
+            if (consumed.affectedRows !== 1) throw new Error('Signed form challenge expired or cancelled.');
+            const reference = randomUUID();
+            await command(connection, `INSERT INTO parent_signed_forms (reference, parent_uuid, country_code, user_name,
+                policy_digest, consent_version, policy_version, provider, subject, verified_contact, status, submitted_at, expires_at, public_policy_digest)
+                VALUES (?, ?, 'US', ?, ?, ?, ?, ?, ?, ?, 'pending', UTC_TIMESTAMP(6), UTC_TIMESTAMP(6)+INTERVAL ? DAY, ?)`,
+            [reference, context.account!.accountId, userName, attempt.policyDigest, policy.consentVersion, policy.version,
+                identity.provider, Buffer.from(identity.subject, 'ascii'), identity.email, SIGNED_FORM_LIFETIME_DAYS, publicationPolicy?.digest ?? null]);
+            return readForm(connection, reference, context.account!.accountId);
+        }),
+        listSignedForms: (context, digest) => locked(context, async connection => {
+            if (!signedFormsEnabled) throw new Error('Signed forms are closed.');
+            await currentParent(connection, context);
+            const found = await rows(connection, `SELECT reference, parent_uuid, country_code, user_name, verified_contact,
+                policy_version, consent_version, status, public_policy_digest, ROUND(TIMESTAMPDIFF(MICROSECOND, '1970-01-01', expires_at)/1000) AS expiresAt
+                FROM parent_signed_forms WHERE parent_uuid=? AND policy_digest=? AND status <> 'used' AND expires_at>UTC_TIMESTAMP(6)
+                ORDER BY submitted_at DESC LIMIT 50`, [context.account!.accountId, digest]);
+            return found.map(formProjection);
+        }),
+        cancelSignedForm: (context, reference) => locked(context, async connection => {
+            if (!signedFormsEnabled) throw new Error('Signed forms are closed.');
+            await currentParent(connection, context);
+            await command(connection, "DELETE FROM parent_signed_forms WHERE reference=? AND parent_uuid=? AND status <> 'used'", [reference, context.account!.accountId]);
         }),
     };
 }

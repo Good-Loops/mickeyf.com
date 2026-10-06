@@ -1,6 +1,7 @@
 import { verifyScoreParticipationSchema } from './scoreParticipationSchema';
 import { createHash } from 'node:crypto';
 import { inspectFamilyDeletionSchema, inspectParentManagedContact, verifyParentRegistrationTable } from './parentRegistrationSchema';
+import { verifySignedParentFormSchema } from './signedParentFormSchema';
 import { verifyRegistrationSchema } from './registrationSchema';
 import {
     inspectAccountIdentityStage,
@@ -92,7 +93,7 @@ function isPasswordlessMigration(migration: MigrationDefinition): boolean {
 }
 
 function requiresCompleteEarlierHistory(migration: MigrationDefinition): boolean {
-    return migration.effect === 'add-score-participation' || migration.effect === 'extend-parent-family' || migration.effect === 'allow-parent-managed-contact' || migration.effect === 'add-parent-attempts' || migration.effect === 'add-parent-consents'
+    return migration.effect === 'add-signed-parent-forms' || migration.effect === 'add-score-participation' || migration.effect === 'extend-parent-family' || migration.effect === 'allow-parent-managed-contact' || migration.effect === 'add-parent-attempts' || migration.effect === 'add-parent-consents'
         || migration.effect === 'add-provider-identities' || migration.effect === 'add-provider-attempts'
         || migration.effect === 'add-account-sessions' || migration.effect === 'add-session-renewal'
         || migration.effect === 'add-apple-tokens' || migration.effect === 'add-apple-revocations'
@@ -391,6 +392,10 @@ async function verifyMigrationPrecondition(
     connection: MigrationConnection,
     migration: MigrationDefinition
 ): Promise<void> {
+    if (migration.effect === 'add-signed-parent-forms') {
+        await verifyParentRegistrationTable(connection, 'parent_child_consents');
+        if (await tableExists(connection, migration.tableName)) throw new Error('Signed parent form table must be absent.'); return;
+    }
     if (migration.effect === 'add-score-participation') {
         await verifyParentRegistrationTable(connection, 'parent_registration_attempts', true);
         if (await tableExists(connection, migration.tableName)) throw new Error('Score permission table must be absent.'); return;
@@ -509,6 +514,9 @@ async function verifyMigrationPostcondition(
     stage: LeaderboardSchemaStage = 'original',
     attemptStage: ProviderAttemptSchemaStage = 'legacy'
 ): Promise<void> {
+    if (migration.effect === 'add-signed-parent-forms') {
+        await verifySignedParentFormSchema(connection); return;
+    }
     if (migration.effect === 'add-score-participation') {
         await verifyScoreParticipationSchema(connection); return;
     }

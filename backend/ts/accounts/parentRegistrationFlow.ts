@@ -7,6 +7,7 @@ import { isRecord } from '../security/userRequestValidation';
 import type { ScoreParticipationPolicy } from '../config/scoreParticipationPolicy';
 import { familySelectionDigest } from './familyDeletionSelection';
 import { parsePrivacyNoticeUrl } from '../config/privacyNoticeUrl';
+import { SIGNED_FORM_VERSION, signedFormNoticeDigest, signedFormRequired, SignedParentFormRequiredError, type SignedParentFormRequest } from './signedParentForm';
 
 const LIFETIME_MS = 5 * 60 * 1000;
 const TOKEN = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/u;
@@ -22,6 +23,7 @@ export type ParentRegistrationPolicy = Readonly<{
     privacyNoticeUrl: string;
     countries: readonly string[];
     creationEnabled?: boolean;
+    signedFormsEnabled?: boolean;
 }>;
 export type ParentOperation = Readonly<{ purpose: 'create-child'; country: string }>
     | Readonly<{ purpose: 'withdraw-child'; childAccountId: string }>
@@ -36,9 +38,9 @@ export type ParentGrant = ParentChallenge & Readonly<{
     grantHash: Buffer; identity: VerifiedProviderIdentity; consentVersion: string; policyVersion: string;
 }>;
 export type ParentChild = Readonly<{ accountId: string; userName: string; scoreVisibility: 'private' }>;
-export type ParentCredentials = Readonly<{ userName: string; password: string }>;
+export type ParentCredentials = Readonly<{ userName: string; password: string; formReference?: string }>;
 export type ParentFailure = Readonly<{ error: 'CLOSED' | 'INVALID_REQUEST' | 'INVALID_CONTEXT' | 'INVALID_ATTEMPT'
-    | 'INVALID_PROVIDER_TOKEN' | 'PROVIDER_NOT_LINKED' | 'VERIFIED_CONTACT_REQUIRED' | 'UNAVAILABLE' }>;
+    | 'INVALID_PROVIDER_TOKEN' | 'PROVIDER_NOT_LINKED' | 'VERIFIED_CONTACT_REQUIRED' | 'SIGNED_FORM_REQUIRED' | 'UNAVAILABLE' }>;
 
 /**
  * Persistent implementation is mandatory before mounting the HTTP router. In particular:
@@ -64,6 +66,10 @@ export type ParentRegistrationStore = {
     scoreStatus?(context: ProviderAuthContext, targetAccountId: string): Promise<{ visibility: 'public' | 'private'; canPublish: boolean }>;
     deleteFamily?(grantHash: Buffer, context: ProviderAuthContext, policyDigest: Buffer, familyDigest: Buffer): Promise<void>;
     listChildren(context: ProviderAuthContext): Promise<ParentChild[]>;
+    requestSignedForm?(challenge: ParentChallenge, identity: VerifiedProviderIdentity, context: ProviderAuthContext,
+        userName: string, policy: ParentRegistrationPolicy): Promise<SignedParentFormRequest>;
+    listSignedForms?(context: ProviderAuthContext, policyDigest: Buffer): Promise<SignedParentFormRequest[]>;
+    cancelSignedForm?(context: ProviderAuthContext, reference: string): Promise<void>;
 };
 
 function authenticated(context: ProviderAuthContext | null): context is ProviderAuthContext {
@@ -82,7 +88,9 @@ function readPolicy(policy: ParentRegistrationPolicy | undefined) {
         || policy.countries.some(value => !/^[A-Z]{2}$/u.test(value))
         || new Set(policy.countries).size !== policy.countries.length) throw new TypeError('Invalid reviewed parent registration policy.');
     const copy = Object.freeze({ ...policy, privacyNoticeUrl, countries: Object.freeze([...policy.countries].sort()) });
-    return { ...copy, digest: hash(JSON.stringify([copy.version, copy.consentVersion, copy.consentText, copy.privacyNoticeUrl, copy.countries])) };
+    const terms = [copy.version, copy.consentVersion, copy.consentText, copy.privacyNoticeUrl, copy.countries];
+    if (copy.signedFormsEnabled) terms.push(signedFormNoticeDigest().toString('hex'));
+    return { ...copy, digest: hash(JSON.stringify(terms)) };
 }
 
 function readOperation(input: Record<string, unknown>, policy: ParentRegistrationPolicy): ParentOperation | null {
@@ -119,7 +127,8 @@ export function createParentRegistrationFlow({ policy: inputPolicy, publicationP
         config() {
             return policy ? { enabled: true as const, policyVersion: policy.version, consentVersion: policy.consentVersion,
                 consentText: policy.consentText, privacyNoticeUrl: policy.privacyNoticeUrl,
-                countries: [...policy.countries], creationEnabled: policy.creationEnabled !== false } : { enabled: false as const };
+                countries: [...policy.countries], creationEnabled: policy.creationEnabled !== false,
+                ...(policy.signedFormsEnabled ? { signedFormCountries: ['US'], signedFormVersion: SIGNED_FORM_VERSION } : {}) } : { enabled: false as const };
         },
         async begin(context: ProviderAuthContext | null, input: unknown) {
             const publishing = isRecord(input) && input.purpose === 'publish-scores';
@@ -136,6 +145,7 @@ export function createParentRegistrationFlow({ policy: inputPolicy, publicationP
                     ? { purpose: 'publish-scores', childAccountId: input.childAccountId as string | null ?? context.account!.accountId } : null
                 : readOperation(input, policy!);
             if (operation?.purpose === 'create-child' && policy?.creationEnabled === false) return failure('CLOSED');
+            if (operation?.purpose === 'create-child' && signedFormRequired(operation.country) && !policy?.signedFormsEnabled) return failure('CLOSED');
             if (!operation || (operation.purpose === 'withdraw-child' && operation.childAccountId === context.account!.accountId)) {
                 return failure('INVALID_REQUEST');
             }
@@ -188,18 +198,59 @@ export function createParentRegistrationFlow({ policy: inputPolicy, publicationP
         async createChild(context: ProviderAuthContext | null, input: unknown) {
             if (!policy || policy?.creationEnabled === false) return failure('CLOSED');
             if (!authenticated(context)) return failure('INVALID_CONTEXT');
-            if (!isRecord(input) || !keys(input, 'grant,password,userName') || typeof input.grant !== 'string' || !TOKEN.test(input.grant)
+            if (!isRecord(input) || !(keys(input, 'grant,password,userName') || keys(input, 'formReference,grant,password,userName'))
+                || (input.formReference !== undefined && (typeof input.formReference !== 'string' || !ACCOUNT.test(input.formReference)))
+                || typeof input.grant !== 'string' || !TOKEN.test(input.grant)
                 || typeof input.userName !== 'string' || !input.userName.trim() || input.userName.trim().length > 64
                 || /[\u0000-\u001f\u007f]/u.test(input.userName) || typeof input.password !== 'string'
                 || input.password.length < 8 || Buffer.byteLength(input.password, 'utf8') > 72
                 || /[\u0000-\u001f\u007f]/u.test(input.password)) return failure('INVALID_REQUEST');
             try {
                 const child = await store.createChild(hash(input.grant), context, policy.digest,
-                    { userName: input.userName.trim(), password: input.password });
+                    { userName: input.userName.trim(), password: input.password, ...(input.formReference ? { formReference: input.formReference as string } : {}) });
                 if (child.scoreVisibility !== 'private' || child.accountId === context.account!.accountId
                     || !ACCOUNT.test(child.accountId)) return failure('UNAVAILABLE');
                 return { created: true as const, child };
+            } catch (error) { return failure(error instanceof SignedParentFormRequiredError ? 'SIGNED_FORM_REQUIRED' : 'UNAVAILABLE'); }
+        },
+        async requestSignedForm(context: ProviderAuthContext | null, input: unknown) {
+            if (!policy?.signedFormsEnabled || policy.creationEnabled === false || !store.requestSignedForm) return failure('CLOSED');
+            if (!authenticated(context)) return failure('INVALID_CONTEXT');
+            if (!isRecord(input) || !keys(input, 'idToken,state,userName') || typeof input.state !== 'string' || !TOKEN.test(input.state)
+                || typeof input.idToken !== 'string' || !input.idToken || input.idToken.length > PROVIDER_TOKEN_MAX_LENGTH
+                || typeof input.userName !== 'string' || !input.userName.trim() || input.userName.trim().length > 64
+                || /[\u0000-\u001f\u007f]/u.test(input.userName)) return failure('INVALID_REQUEST');
+            try {
+                const attempt = await store.consumeChallenge(hash(input.state), context);
+                if (!attempt || !attempt.bindingHash.equals(context.bindingHash) || !attempt.policyDigest.equals(policy.digest)
+                    || attempt.parentAccountId !== context.account!.accountId || attempt.parentUserId !== context.account!.userId
+                    || attempt.expiresAt <= now() || attempt.operation.purpose !== 'create-child'
+                    || !signedFormRequired(attempt.operation.country)) return failure('INVALID_ATTEMPT');
+                const client = configuredClients.get(attempt.clientKey);
+                if (!client) return failure('INVALID_ATTEMPT');
+                const proof = await client.verifier.verify(client.provider, input.idToken, attempt.nonce);
+                if (!proof.verified) return failure(proof.reason === 'INVALID_PROVIDER_TOKEN' ? 'INVALID_PROVIDER_TOKEN' : 'UNAVAILABLE');
+                if (proof.identity.provider !== client.provider) return failure('INVALID_PROVIDER_TOKEN');
+                if (!await store.isLinkedParent(context, proof.identity)) return failure('PROVIDER_NOT_LINKED');
+                if (!proof.identity.email) return failure('VERIFIED_CONTACT_REQUIRED');
+                if (attempt.expiresAt <= now()) return failure('INVALID_ATTEMPT');
+                const form = await store.requestSignedForm(attempt, proof.identity, context, input.userName.trim(), policy);
+                return { form };
             } catch { return failure('UNAVAILABLE'); }
+        },
+        async listSignedForms(context: ProviderAuthContext | null, input: unknown) {
+            if (!policy?.signedFormsEnabled || !store.listSignedForms) return failure('CLOSED');
+            if (!authenticated(context)) return failure('INVALID_CONTEXT');
+            if (!isRecord(input) || Object.keys(input).length) return failure('INVALID_REQUEST');
+            try { return { forms: await store.listSignedForms(context, policy.digest) }; }
+            catch { return failure('UNAVAILABLE'); }
+        },
+        async cancelSignedForm(context: ProviderAuthContext | null, input: unknown) {
+            if (!policy?.signedFormsEnabled || !store.cancelSignedForm) return failure('CLOSED');
+            if (!authenticated(context)) return failure('INVALID_CONTEXT');
+            if (!isRecord(input) || !keys(input, 'reference') || typeof input.reference !== 'string' || !ACCOUNT.test(input.reference)) return failure('INVALID_REQUEST');
+            try { await store.cancelSignedForm(context, input.reference); return { cancelled: true as const }; }
+            catch { return failure('UNAVAILABLE'); }
         },
         async withdrawChild(context: ProviderAuthContext | null, input: unknown) {
             if (!policy) return failure('CLOSED');

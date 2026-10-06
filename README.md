@@ -167,7 +167,7 @@ copied into Git.
    - `front`, running the frontend Vite server and local Three Bosses WebGL
      asset server with a cyan browser icon;
    - `back`, starting the pinned Cloud SQL Auth Proxy, backend compiler/watch,
-     and nodemon server together with prefixed logs and a red server icon;
+     and Node's watching server together with prefixed logs and a red server icon;
    - `docs`, running the TypeDoc development server with a green book icon; and
    - `general`, running Copilot CLI in Git Bash at the repository root with the
      historical orange terminal tint (`terminal.ansiBlue` in the Monokai

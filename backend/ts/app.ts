@@ -40,6 +40,8 @@ import { verifyRegistrationReadiness } from './migrations/registrationSchema';
 import { verifyScoreParticipationReadiness } from './migrations/scoreParticipationSchema';
 import { verifyParentRegistrationReadiness } from './migrations/parentRegistrationSchema';
 import { cleanupParentRegistrationAttempts } from './accounts/parentRegistrationRepository';
+import { verifySignedParentFormReadiness } from './migrations/signedParentFormSchema';
+import { cleanupSignedParentForms } from './accounts/signedParentFormReview';
 
 const runtimeConfig = loadRuntimeConfig();
 const registration = createRegistrationAuthorization(pool, registrationPolicyForCreation(runtimeConfig.registrationPolicy));
@@ -71,15 +73,17 @@ app.use(helmet({
 // Mount before CORS/preflight and body parsers so they cannot bypass its checks.
 app.use(APPLE_MAINTENANCE_PATH, createAppleMaintenanceRouter(runtimeConfig.appleMaintenance, async () => {
     // Independent cleanup must still run if Apple's provider request fails.
-    const [apple, registrationCleanup, parentCleanup] = await Promise.allSettled([
+    const [apple, registrationCleanup, parentCleanup, formCleanup] = await Promise.allSettled([
         runAppleMaintenance({ database: pool, expectedServerUuid: runtimeConfig.appleMaintenance!.expectedServerUuid,
             loadLifecycle: () => loadAppleRuntimeLifecycle() }),
         cleanupRegistrationAuthorizations(pool),
         cleanupParentRegistrationAttempts(pool),
+        runtimeConfig.parentRegistrationPolicy?.signedFormsEnabled ? cleanupSignedParentForms(pool) : Promise.resolve({ backlog: false }),
     ]);
     return apple.status === 'fulfilled' && apple.value === 0
         && registrationCleanup.status === 'fulfilled' && !registrationCleanup.value.backlog
-        && parentCleanup.status === 'fulfilled' && !parentCleanup.value.backlog ? 0 : 1;
+        && parentCleanup.status === 'fulfilled' && !parentCleanup.value.backlog
+        && formCleanup.status === 'fulfilled' && !formCleanup.value.backlog ? 0 : 1;
 }));
 
 app.use(cors({
@@ -126,6 +130,7 @@ async function startServer(): Promise<void> {
             await verifyRegistrationReadiness(pool);
             await verifyParentRegistrationReadiness(pool);
             await verifyScoreParticipationReadiness(pool);
+            if (runtimeConfig.parentRegistrationPolicy?.signedFormsEnabled) await verifySignedParentFormReadiness(pool);
             const providerAuth = await prepareRuntimeProviderAuth(runtimeConfig.providerAuth);
             if (providerAuth.appleTokenLifecycle) await verifyAppleTokenReadiness(pool);
             if (runtimeConfig.providerAuth.appleNotifications) await verifyAppleRevocationReadiness(pool);
