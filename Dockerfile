@@ -2,7 +2,7 @@
 # image. Update the tag and digest together during a reviewed runtime upgrade.
 FROM node:22.23.3-alpine@sha256:0a7108bf6c7bf5de370ffb1a3ed6be93d405b43ff159f681a8d18c0e2bc2e402 AS node-runtime-base
 
-# Patch Alpine's shared libraries for the September 29 OpenSSL advisories.
+# Patch Alpine's shared libraries for the reviewed OpenSSL and zlib advisories.
 # Node 22.23.3 separately embeds OpenSSL 3.5.8; that remaining exposure is
 # tracked in RELEASE_READINESS.md (S8). Upgrade only the installed libraries,
 # verify the result, and discard the repository indexes.
@@ -10,8 +10,10 @@ RUN apk update \
     && apk add --no-cache --upgrade \
         libcrypto3=3.5.9-r0 \
         libssl3=3.5.9-r0 \
+        zlib=1.3.2-r1 \
     && apk info --exists 'libcrypto3=3.5.9-r0' > /dev/null \
     && apk info --exists 'libssl3=3.5.9-r0' > /dev/null \
+    && apk info --exists 'zlib=1.3.2-r1' > /dev/null \
     && rm -rf /var/cache/apk/*
 
 FROM node-runtime-base AS npm-base
