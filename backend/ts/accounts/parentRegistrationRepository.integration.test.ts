@@ -27,6 +27,7 @@ import { withUserSubmissionLock } from '../leaderboards/userSubmissionLock';
 import { applyDeletionReplay, planDeletionReplay } from './deletionReplay';
 import type { DeletionReplaySettings } from '../config/deletionReplayConfig';
 import { reviewSignedParentForm, cleanupSignedParentForms } from './signedParentFormReview';
+import { verifySignedParentFormReadiness } from '../migrations/signedParentFormSchema';
 
 const config = loadMigrationConfig();
 let admin: Connection; let database: Pool; let passwordHash: string;
@@ -121,6 +122,23 @@ async function ownerReview(review: Awaited<ReturnType<typeof formReview>>) {
         password: 'migration-test-root-only', connectionLimit: 1, timezone: 'Z', dateStrings: true });
     try { await reviewSignedParentForm(owner, review); } finally { await owner.end(); }
 }
+
+test('signed-form readiness works with restricted runtime grants while owner review data stays unreadable', async () => {
+    await verifySignedParentFormReadiness(database as unknown as MigrationConnection);
+    const [columns] = await database.query<RowDataPacket[]>(`SELECT COLUMN_NAME AS name FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='parent_signed_forms'`);
+    for (const name of ['reviewed_at', 'reviewer', 'form_sha256']) {
+        assert.equal(columns.some(column => column.name === name), false);
+        await assert.rejects(database.query('SELECT ?? FROM parent_signed_forms LIMIT 0', [name]),
+            (error: unknown) => (error as { code?: string }).code === 'ER_COLUMNACCESS_DENIED_ERROR');
+    }
+    await admin.query('ALTER TABLE parent_signed_forms MODIFY reviewer VARCHAR(129) CHARACTER SET ascii COLLATE ascii_bin NULL');
+    try {
+        await assert.rejects(verifySignedParentFormReadiness(database as unknown as MigrationConnection), /hidden review columns/u);
+    } finally {
+        await admin.query('ALTER TABLE parent_signed_forms MODIFY reviewer VARCHAR(128) CHARACTER SET ascii COLLATE ascii_bin NULL');
+    }
+});
 
 test('US signed form waits for owner review without creating a child or storing a child password', async () => {
     const p = await usParent(); const form = await usForm(p);
