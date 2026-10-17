@@ -264,6 +264,105 @@ test('Google controls are available before the independent Apple SDK preload fin
     assert.equal(view.find(node => node.type === InlineGoogleSignIn).props.client, google);
 });
 
+test('a transient discovery outage retries and restores both trusted web providers without reloading', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const view = mount(t, ProviderSignInControls, { action: 'login' });
+    const apple = { clientKey: 'apple-web', provider: 'apple', platform: 'web', clientId: 'com.example.web',
+        redirectUri: 'https://example.test/login' };
+    let calls = 0;
+    view.hooks.clients = async (_onAvailable, onUnavailable) => {
+        calls += 1;
+        if (calls === 1) { onUnavailable?.(); return []; }
+        return [google, apple];
+    };
+    view.render(); await view.settle();
+    assert.equal(view.find(node => node.type === InlineGoogleSignIn), undefined);
+    assert.equal(view.find(node => node.type === ProviderSignInButtons), undefined);
+    t.mock.timers.tick(1000); await view.settle();
+    assert.equal(calls, 2);
+    assert.equal(view.find(node => node.type === InlineGoogleSignIn).props.client, google);
+    assert.deepEqual(view.find(node => node.type === ProviderSignInButtons).props.clients, [google, apple]);
+    assert.deepEqual(view.busy, [], 'configuration retry cannot lock the password form or begin authentication');
+    assert.equal(view.preparation.length, 0);
+});
+
+test('a trusted empty provider configuration stays empty without automatic retries or error feedback', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const view = mount(t, ProviderSignInControls, { action: 'login' });
+    view.hooks.clients = t.mock.fn(async () => []);
+    view.render(); await view.settle();
+    assert.equal(view.render(), null);
+    t.mock.timers.tick(10000); await view.settle();
+    assert.equal(view.hooks.clients.mock.callCount(), 1);
+    assert.equal(view.find(node => node.props?.role === 'alert'), undefined);
+});
+
+test('persistent discovery failure is bounded and exposes an explicit safe retry for native signup', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const view = mount(t, ProviderSignInControls, { action: 'signup' });
+    const native = { clientKey: 'apple-ios', provider: 'apple', platform: 'ios', clientId: 'com.example.app', signup: true };
+    let healthy = false, calls = 0;
+    view.hooks.clients = async (_onAvailable, onUnavailable) => {
+        calls += 1;
+        if (healthy) return [native];
+        onUnavailable?.(); return [];
+    };
+    view.render(); await view.settle();
+    t.mock.timers.tick(1000); await view.settle();
+    t.mock.timers.tick(2000); await view.settle();
+    assert.equal(calls, 3);
+    assert.equal(view.find(node => node.props?.role === 'status').props.children, 'Sign-in options are temporarily unavailable.');
+    const retry = view.find(node => node.type === 'button' && node.props.children === 'Retry sign-in options');
+    assert(retry);
+    assert.equal(view.find(node => node.type === ProviderSignInButtons), undefined);
+    assert.equal(view.find(node => node.type === InlineGoogleSignIn), undefined);
+    t.mock.timers.tick(60000); await view.settle();
+    assert.equal(calls, 3, 'no background retry loop continues after the bounded attempts');
+    view.props.operationLock.current = true;
+    retry.props.onClick(); await view.settle();
+    assert.equal(calls, 3, 'retry cannot interrupt another form operation');
+    view.props.operationLock.current = false;
+    healthy = true;
+    retry.props.onClick(); await view.settle();
+    assert.equal(calls, 4);
+    assert.deepEqual(view.find(node => node.type === ProviderSignInButtons).props.clients, [native]);
+    assert.equal(view.preparation.length, 0);
+    assert.equal(view.acquisitions.length, 0);
+    assert.equal(view.props.operationLock.current, false);
+});
+
+test('unmount cancels discovery backoff before another request', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const view = mount(t, ProviderSignInControls, { action: 'link' });
+    view.hooks.clients = t.mock.fn(async (_onAvailable, onUnavailable) => { onUnavailable?.(); return []; });
+    view.render(); await view.settle();
+    view.unmount();
+    t.mock.timers.tick(10000); await view.settle();
+    assert.equal(view.hooks.clients.mock.callCount(), 1);
+    assert.deepEqual(view.busy, []);
+});
+
+test('a thrown discovery failure is retried but a late rejection after unmount cannot restart it', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const view = mount(t, ProviderSignInControls, { action: 'login' });
+    let calls = 0, rejectPending;
+    view.hooks.clients = () => {
+        calls += 1;
+        if (calls === 1) return Promise.reject(new Error('private transport details must not appear'));
+        return new Promise((_resolve, reject) => { rejectPending = reject; });
+    };
+    view.render(); await view.settle();
+    t.mock.timers.tick(1000); await view.settle();
+    assert.equal(calls, 2);
+    view.unmount();
+    rejectPending(new Error('late private transport details'));
+    await view.settle();
+    t.mock.timers.tick(10000); await view.settle();
+    assert.equal(calls, 2);
+    assert.equal(view.preparation.length, 0);
+    assert.deepEqual(view.busy, []);
+});
+
 test('closed signup choices explain availability without preparing or acquiring credentials', async t => {
     const view = mount(t, ProviderSignInControls, { action: 'signup' });
     const apple = { clientKey: 'apple-web', provider: 'apple', platform: 'web', clientId: 'com.example.web',

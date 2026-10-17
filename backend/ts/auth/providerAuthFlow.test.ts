@@ -112,6 +112,7 @@ async function fixture(currentAccount?: ProviderAccount, newActions = false, app
         'google-android': { provider: 'google', verifier },
         'apple-ios': { provider: 'apple', verifier, appleTokens, signupEnabled: appleActions, deletionEnabled: appleActions },
         'apple-web': { provider: 'apple', verifier, appleTokens, signupEnabled: appleActions, deletionEnabled: appleActions },
+        'apple-android': { provider: 'apple', verifier, appleTokens, signupEnabled: appleActions, deletionEnabled: appleActions },
     };
     Object.setPrototypeOf(clients, { inherited: clients['google-native'] });
     const dependencies: ProviderAuthFlowDependencies = {
@@ -937,9 +938,9 @@ test('closed registration preserves existing provider login but refuses unknown-
     }
 });
 
-for (const action of ['login', 'signup', 'link', 'delete'] as const) {
-    test(`browser Apple ${action} consumes state once and binds both ID tokens to the server nonce`, async () => {
-        const f = await fixture(action === 'link' || action === 'delete' ? account : undefined, true, true, 'apple-web');
+for (const clientKey of ['apple-web', 'apple-android']) for (const action of ['login', 'signup', 'link', 'delete'] as const) {
+    test(`${clientKey} ${action} consumes state once and binds both ID tokens to the server nonce`, async () => {
+        const f = await fixture(action === 'link' || action === 'delete' ? account : undefined, true, true, clientKey);
         const { result, input } = await f.appleChallenge(action);
         const completed = await f.flow.complete(f.context, input);
         assert.equal(completed.ok, true);

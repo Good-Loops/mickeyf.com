@@ -1,17 +1,20 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { createProviderClient, ProviderCredentialError } from './providerClient.ts';
+import { createProviderClient, ProviderCredentialError, selectProviderDeletionClient } from './providerClient.ts';
 
 const google = { clientKey: 'google-web', provider: 'google', platform: 'web', clientId: 'synthetic.apps.googleusercontent.com' };
 const apple = { clientKey: 'apple-ios', provider: 'apple', platform: 'ios', clientId: 'com.example.synthetic' };
 const appleWeb = { clientKey: 'apple-web', provider: 'apple', platform: 'web', clientId: 'com.example.synthetic.web',
     redirectUri: 'https://example.test/auth/apple/return', signup: true };
+const appleAndroid = { clientKey: 'apple-android', provider: 'apple', platform: 'android', clientId: 'com.mickeyf.web',
+    redirectUri: 'https://mickeyf.com/auth/providers/apple-android/callback', signup: true };
 const challenge = { state: Buffer.alloc(32, 1).toString('base64url'),
     nonce: Buffer.alloc(32, 2).toString('base64url'), expiresInSeconds: 300 };
 const token = 'synthetic.header.signature';
 const authorizationCode = 'synthetic-one-time-code';
 const nativeResult = Object.freeze({ identityToken: token, authorizationCode });
 const appleCredential = { idToken: token, authorizationCode };
+const returnProof = Buffer.alloc(32, 7).toString('base64url');
 const nextTurn = () => new Promise(resolve => setImmediate(resolve));
 const signal = () => new AbortController().signal;
 const rejectsCode = (promise, code) => assert.rejects(promise, error => {
@@ -96,6 +99,123 @@ test('discovery selects only server-configured web Google or capability-enabled 
         } else assert.deepEqual(f.calls, []);
         assert.equal(f.calls.includes('capabilities'), platform === 'ios' || platform === 'android');
     }
+});
+
+test('discovery distinguishes trusted empty configuration from retryable outage without inventing clients', async () => {
+    for (const fetchRequest of [async () => { throw new Error('private transport detail'); },
+        async () => Response.json({ error: 'UNAVAILABLE' }, { status: 503 }), async () => Response.json({}),
+        async () => Response.json({ clients: [google, google] }), async () => Response.json({ clients: [{ ...google, clientKey: 'foreign' }] })]) {
+        let unavailable = 0;
+        const f = fixture({ fetchRequest });
+        assert.deepEqual(await f.client.getAvailableProviderClients(undefined, () => { unavailable++; }), []);
+        assert.equal(unavailable, 1);
+        assert.deepEqual(f.scripts, []);
+    }
+    for (const clients of [[], [google]]) {
+        let unavailable = 0;
+        const f = fixture({ fetchRequest: async () => Response.json({ clients }) });
+        assert.deepEqual(await f.client.getAvailableProviderClients(undefined, () => { unavailable++; }), clients);
+        assert.equal(unavailable, 0);
+    }
+    for (const capabilities of [null, { apple: 'true' }, { google: 1 }, { apple: null }, { apple: false }]) {
+        let unavailable = 0;
+        const native = fixture({ platform: 'android', isNative: true, identity: { getCapabilities: async () => capabilities } });
+        assert.deepEqual(await native.client.getAvailableProviderClients(undefined, () => { unavailable++; }), []);
+        assert.equal(unavailable, capabilities?.apple === false ? 0 : 1);
+    }
+});
+
+test('six-client discovery includes Android Apple only with exact pins and a native capability', async () => {
+    const googleIos = { ...google, clientKey: 'google-ios', platform: 'ios' };
+    const googleAndroid = { ...google, clientKey: 'google-android', platform: 'android' };
+    const all = [google, googleIos, googleAndroid, apple, appleWeb, appleAndroid];
+    const f = fixture({ platform: 'android', isNative: true, identity: { getCapabilities: async () => ({ apple: true, google: true }) },
+        fetchRequest: async () => Response.json({ clients: all }) });
+    assert.deepEqual(await f.client.getAvailableProviderClients(), [googleAndroid, appleAndroid]);
+    assert.deepEqual(f.scripts, []);
+    for (const change of [{ clientId: 'com.other.web' }, { redirectUri: 'https://attacker.test/callback' },
+        { redirectUri: appleAndroid.redirectUri + '?extra=1' }, { platform: 'web' }, { extra: true }]) {
+        const invalid = fixture({ platform: 'android', isNative: true,
+            fetchRequest: async () => Response.json({ clients: [...all.slice(0, -1), { ...appleAndroid, ...change }] }) });
+        assert.deepEqual(await invalid.client.getAvailableProviderClients(), []);
+    }
+    const unsupported = fixture({ platform: 'android', isNative: true, identity: { getCapabilities: async () => ({ apple: false }) },
+        fetchRequest: async () => Response.json({ clients: all }) });
+    assert.deepEqual(await unsupported.client.getAvailableProviderClients(), []);
+    const excess = fixture({ platform: 'android', isNative: true, fetchRequest: async () => Response.json({ clients: [...all, google] }) });
+    assert.deepEqual(await excess.client.getAvailableProviderClients(), []);
+});
+
+test('Android Apple redeems only a matching safe handoff through the private API transport', async () => {
+    const requests = [];
+    const f = fixture({ platform: 'android', isNative: true,
+        identity: { async signIn(input) { requests.push(input); return { state: challenge.state, result: 'ready', proof: returnProof }; } },
+        async fetchRequest(url, init) { requests.push({ url, init }); return Response.json(appleCredential); } });
+    assert.deepEqual(await f.client.acquireProviderCredential(appleAndroid, challenge, signal()), appleCredential);
+    assert.deepEqual(requests[0], { provider: 'apple', clientId: 'com.mickeyf.web', redirectUri: appleAndroid.redirectUri,
+        nonce: challenge.nonce, state: challenge.state });
+    assert.equal(requests[1].url, 'https://api.example.test/auth/providers/apple-android/credential');
+    assert.equal(requests[1].init.method, 'POST'); assert.equal(requests[1].init.credentials, 'include');
+    assert.deepEqual(requests[1].init.headers, { 'Content-Type': 'application/json' });
+    assert.deepEqual(JSON.parse(requests[1].init.body), { state: challenge.state, proof: returnProof });
+    assert.deepEqual(f.scripts, []);
+});
+
+test('Android Apple rejects forged, cancelled and stale handoffs before any credential redemption', async () => {
+    for (const result of [null, {}, { state: 'wrong', result: 'ready', proof: returnProof }, { state: challenge.state, result: ['ready'] },
+        { state: challenge.state, result: 'ready', proof: returnProof, idToken: token }, { state: challenge.state, result: 'cancelled' },
+        { state: challenge.state, result: 'cancelled', proof: returnProof }, { state: challenge.state, result: 'ready' },
+        ...[null, ['ready'], 'bad', returnProof + '\n', 'A'.repeat(42) + 'B'].map(proof => ({ state: challenge.state, result: 'ready', proof }))]) {
+        let redeemed = false;
+        const f = fixture({ platform: 'android', isNative: true, identity: { signIn: async () => result },
+            fetchRequest: async () => { redeemed = true; return Response.json(appleCredential); } });
+        await rejectsCode(f.client.acquireProviderCredential(appleAndroid, challenge, signal()),
+            result?.result === 'cancelled' && Object.keys(result).length === 2 ? 'CANCELLED' : 'UNAVAILABLE');
+        assert.equal(redeemed, false);
+    }
+    const stale = fixture({ platform: 'android', isNative: true,
+        identity: { signIn: async () => ({ state: challenge.state, result: 'ready', proof: returnProof }) },
+        fetchRequest: async () => { throw new Error('Stale handoff reached redemption'); } });
+    await rejectsCode(stale.client.acquireProviderCredential(appleAndroid, { ...challenge, state: Buffer.alloc(32, 9).toString('base64url') }, signal()), 'UNAVAILABLE');
+});
+
+test('Android Apple private redemption rejects malformed proof and never retries uncertain results', async () => {
+    for (const [status, body] of [[401, { error: 'INVALID_ATTEMPT', detail: 'private' }], [200, null],
+        [200, { ...appleCredential, extra: 'private' }], [200, { ...appleCredential, idToken: 'bad' }],
+        [200, { ...appleCredential, authorizationCode: 'bad\ncode' }]]) {
+        let requests = 0;
+        const f = fixture({ platform: 'android', isNative: true,
+            identity: { signIn: async () => ({ state: challenge.state, result: 'ready', proof: returnProof }) },
+            fetchRequest: async () => { requests++; return Response.json(body, { status }); } });
+        await rejectsCode(f.client.acquireProviderCredential(appleAndroid, challenge, signal()), 'UNAVAILABLE');
+        assert.equal(requests, 1);
+    }
+});
+
+test('Android Apple cancellation discards late private redemption results', async () => {
+    let finish;
+    const controller = new AbortController();
+    const f = fixture({ platform: 'android', isNative: true,
+        identity: { signIn: async () => ({ state: challenge.state, result: 'ready', proof: returnProof }) },
+        fetchRequest: async () => new Promise(resolve => { finish = resolve; }) });
+    const pending = f.client.acquireProviderCredential(appleAndroid, challenge, controller.signal);
+    const cancelled = rejectsCode(pending, 'CANCELLED');
+    await nextTurn(); controller.abort(); await cancelled;
+    finish(Response.json(appleCredential)); await nextTurn();
+    assert.equal(f.controls.nativeCancelCount, 1);
+});
+
+test('account deletion selects each discovered Apple platform only with linked and enabled deletion capabilities', () => {
+    const methods = { hasPassword: false, googleLinked: false, googleDeletionEnabled: false, appleLinked: true, appleDeletionEnabled: true };
+    for (const client of [apple, appleWeb, appleAndroid, { ...appleAndroid, signup: undefined, issuance: false }]) {
+        assert.equal(selectProviderDeletionClient([client], methods), client);
+        assert.equal(selectProviderDeletionClient([client], { ...methods, appleLinked: false }), undefined);
+        assert.equal(selectProviderDeletionClient([client], { ...methods, appleDeletionEnabled: false }), undefined);
+        assert.equal(selectProviderDeletionClient([client], null), undefined);
+    }
+    assert.equal(selectProviderDeletionClient([], methods), undefined);
+    assert.equal(selectProviderDeletionClient([google], methods), undefined);
+    assert.equal(selectProviderDeletionClient([google], { ...methods, googleLinked: true, googleDeletionEnabled: true }), google);
 });
 
 test('auth-route resource warmup starts the public Google script and style cache without configuration or auth requests', async () => {

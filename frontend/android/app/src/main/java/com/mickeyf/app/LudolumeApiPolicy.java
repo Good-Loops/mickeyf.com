@@ -27,7 +27,8 @@ final class LudolumeApiPolicy {
         "GET /auth/registration/config", "POST /auth/registration/begin", "POST /auth/registration/cancel",
         "POST /api/users", "GET /auth/verify-token", "POST /auth/logout", "POST /auth/renew",
         "POST /auth/delete-account", "GET /auth/providers/config", "GET /auth/providers/account",
-        "GET /auth/providers/apple-credential", "POST /auth/providers/begin", "POST /auth/providers/complete",
+        "GET /auth/providers/apple-credential", "POST /auth/providers/apple-android/credential",
+        "POST /auth/providers/begin", "POST /auth/providers/complete",
         "GET /api/leaderboards", "GET /api/leaderboards/p4-vega", "GET /api/leaderboards/three-bosses",
         "POST /api/leaderboards/three-bosses/run-tickets", "POST /api/leaderboards/three-bosses/runs"));
 

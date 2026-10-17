@@ -8,6 +8,9 @@ import { verifyAppleRevocationReadiness } from '../migrations/appleRevocationSch
 import type { MigrationConnection } from '../migrations/leaderboardSchema';
 import { PRODUCTION_RUNTIME_DATABASE_ACCOUNT } from '../security/runtimeGrantManifest';
 import { APPLE_TOKEN_PURGE_PREDICATE, createAppleTokenRevocationWorker } from './appleTokenRevocation';
+import { verifyAppleAndroidHandoffReadiness } from '../migrations/appleAndroidHandoffSchema';
+import { cleanupAppleAndroidHandoffs } from '../auth/appleAndroidHandoffRepository';
+import { appleAndroidEnabled } from '../config/appleAndroidConfig';
 
 export const APPLE_MAINTENANCE_MAX_DURATION_MS = 180_000;
 export const APPLE_HTTP_MAINTENANCE_MAX_DURATION_MS = 90_000;
@@ -35,6 +38,7 @@ type MaintenanceOptions = Readonly<{
     expectedServerUuid: string;
     loadLifecycle: () => AppleTokenLifecycle | Promise<AppleTokenLifecycle>;
     log?: (event: Record<string, unknown>) => void;
+    appleAndroidEnabled?: boolean;
 }>;
 type ConnectionIdentity = Pick<AppleRevocationConfig, 'expectedAccount' | 'expectedServerUuid'>;
 type MaintenanceExecution = Readonly<{
@@ -132,6 +136,7 @@ async function executeMaintenance(options: MaintenanceOptions, execution: Mainte
     let destroyed = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     let cleanup: CleanupSummary | undefined;
+    let handoffBacklog = false;
     let exitCode = 1;
     let stage = 'configuration';
     const deadline = started + execution.durationMs;
@@ -176,6 +181,11 @@ async function executeMaintenance(options: MaintenanceOptions, execution: Mainte
             });
             await (execution.verifyConnection ?? verifyAppleRevocationConnection)(guarded, identity);
             cleanup = await cleanupExpiredMaterial(guarded);
+            if (options.appleAndroidEnabled === true) {
+                stage = 'android-handoff-cleanup';
+                await verifyAppleAndroidHandoffReadiness({ query: (sql, values) => guarded.query({ sql, timeout: QUERY_TIMEOUT_MS }, values) });
+                handoffBacklog = (await cleanupAppleAndroidHandoffs({ async getConnection() { return guarded; } })).backlog;
+            }
             assertRunning();
             stage = 'lifecycle';
             const lifecycle = await options.loadLifecycle();
@@ -204,7 +214,7 @@ async function executeMaintenance(options: MaintenanceOptions, execution: Mainte
             }, Math.max(1, deadline - performance.now()));
         })]);
         const incomplete = result.status !== 'completed' || result.retried > 0 || result.expired > 0
-            || cleanup!.guardCleanupBacklog || cleanup!.tokenCleanupBacklog;
+            || cleanup!.guardCleanupBacklog || cleanup!.tokenCleanupBacklog || handoffBacklog;
         exitCode = incomplete ? 2 : 0;
         emit({ severity: incomplete ? 'ERROR' : 'INFO', ...result });
     } catch (error) {
@@ -248,7 +258,8 @@ export async function runAppleTokenRevocation(args: readonly string[], dependenc
         const config = loadAppleRevocationConfig(args, env);
         pool = (dependencies.createPool ?? mysql.createPool)(config.databaseOptions);
         exitCode = await executeMaintenance({ database: pool, expectedServerUuid: config.expectedServerUuid,
-            loadLifecycle: () => (dependencies.loadLifecycle ?? loadAppleRevocationLifecycle)(env), log },
+            loadLifecycle: () => (dependencies.loadLifecycle ?? loadAppleRevocationLifecycle)(env), log,
+            appleAndroidEnabled: appleAndroidEnabled(env) },
         { durationMs, verifyConnection: dependencies.verifyConnection, acquired: value => { connection = value; } });
     } catch {
         emitFailure('configuration');

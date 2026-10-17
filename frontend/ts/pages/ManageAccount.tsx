@@ -4,7 +4,7 @@ import { RouteHeading } from '@/components/RouteHeading';
 import ProviderSignInControls, { providerSignInErrorMessage } from '@/components/ProviderSignInControls';
 import { providerAccountMethodsRequest } from '@/services/authService';
 import type { ProviderAccountMethods } from '@/services/authApi';
-import { acquireProviderCredential, getAvailableProviderClients, type PublicProviderClient } from '@/services/providerClient';
+import { acquireProviderCredential, getAvailableProviderClients, selectProviderDeletionClient, type PublicProviderClient } from '@/services/providerClient';
 import Swal from '@/components/siteAlert';
 import { useAuth } from '@/context/AuthContext';
 import { LEGACY_PUBLIC_API_PREVIEW } from '@/config/apiConfig';
@@ -41,9 +41,7 @@ export default function ManageAccount() {
             .then(([availableMethods, clients]) => {
                 if (!active) return;
                 setMethods(availableMethods);
-                setDeletionClient(clients.find(client => client.provider === 'google'
-                    ? availableMethods?.googleLinked && availableMethods.googleDeletionEnabled
-                    : client.clientKey === 'apple-ios' && availableMethods?.appleLinked && availableMethods.appleDeletionEnabled));
+                setDeletionClient(selectProviderDeletionClient(clients, availableMethods));
                 setMethodsLoading(false);
             });
         return () => { active = false; };

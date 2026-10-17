@@ -21,6 +21,9 @@ import { clearAuthenticationCookies, NATIVE_SESSION_COOKIE, WEB_SESSION_COOKIE, 
     sessionCookieOptions } from '../security/sessionCookie';
 import { isRecord } from '../security/userRequestValidation';
 import { createRegistrationAuthorization, type RegistrationAuthorization } from '../accounts/registrationAuthorization';
+import type { createAppleAndroidHandoffFlow } from '../auth/appleAndroidHandoffFlow';
+import { createAppleAndroidHandoffRouter } from './appleAndroidHandoffRouter';
+import type { ProviderAttemptAction } from '../auth/providerAttemptRepository';
 
 export const PROVIDER_BEGIN_IP_LIMIT = 30;
 export const PROVIDER_COMPLETE_IP_LIMIT = 50;
@@ -61,6 +64,7 @@ export type ProviderAuthRouterOptions = Readonly<{
     registration?: RegistrationAuthorization;
     beforeAccountDeletion?: BeforeAccountDeletion;
     appleIssuanceAvailable?: () => boolean;
+    appleAndroidHandoff?: ReturnType<typeof createAppleAndroidHandoffFlow>;
 }>;
 
 function createServices(options: ProviderAuthRouterOptions): ProviderAuthRouterServices {
@@ -124,12 +128,12 @@ export function createProviderAuthRouter(options: ProviderAuthRouterOptions): Ro
     const deletionAvailable = options.enabled === true && options.accountDeletionEnabled === true && options.deletionJournal !== undefined;
     const googleDeletionEnabled = deletionAvailable
         && Object.prototype.hasOwnProperty.call(options.clients, 'google-web') && options.clients['google-web'].provider === 'google';
-    const canDeleteWithApple = (key: unknown) => typeof key === 'string' && ['apple-ios', 'apple-web'].includes(key)
+    const canDeleteWithApple = (key: unknown) => typeof key === 'string' && ['apple-ios', 'apple-web', 'apple-android'].includes(key)
         && deletionAvailable && Object.prototype.hasOwnProperty.call(options.clients, key)
         && options.clients[key].provider === 'apple' && options.clients[key].deletionEnabled === true
         && options.clients[key].appleTokens !== undefined
         && (options.appleTokenRepository !== undefined || options.appleTokenRepositories !== undefined);
-    const appleDeletionEnabled = ['apple-ios', 'apple-web'].some(canDeleteWithApple);
+    const appleDeletionEnabled = ['apple-ios', 'apple-web', 'apple-android'].some(canDeleteWithApple);
     const canDeleteWith = (clientKey: unknown) => typeof clientKey === 'string'
         && ['google-web', 'google-ios', 'google-android'].includes(clientKey)
         ? googleDeletionEnabled && Object.prototype.hasOwnProperty.call(options.clients, clientKey) && options.clients[clientKey].provider === 'google'
@@ -206,6 +210,11 @@ export function createProviderAuthRouter(options: ProviderAuthRouterOptions): Ro
     if (!options.enabled) return router;
     if (Object.keys(options.clients).length === 0) throw new TypeError('Enabled provider routes require configured clients.');
     const services = options.services ?? createServices(options);
+    if (options.appleAndroidHandoff) router.use('/apple-android', createAppleAndroidHandoffRouter(options.appleAndroidHandoff,
+        services.readContext, () => {
+            try { return !options.appleIssuanceAvailable || options.appleIssuanceAvailable() === true; }
+            catch { return false; }
+        }));
 
     function unavailableAppleIssuance(body: unknown): boolean {
         if (!isRecord(body) || body.action === 'delete' || typeof body.clientKey !== 'string'
@@ -216,6 +225,8 @@ export function createProviderAuthRouter(options: ProviderAuthRouterOptions): Ro
 
     router.post('/begin', rateLimit({ ...limiterOptions, limit: PROVIDER_BEGIN_IP_LIMIT }),
         json({ limit: '32kb', strict: true }), asyncHandler(async (req, res) => {
+            if (isRecord(req.body) && req.body.clientKey === 'apple-android'
+                && (req.headers.origin !== 'capacitor://localhost' || !options.appleAndroidHandoff)) return fail(res, 'UNAVAILABLE');
             if (unavailableAppleIssuance(req.body)) return fail(res, 'UNAVAILABLE');
             if (isRecord(req.body) && req.body.action === 'signup' && !options.signupEnabled) return fail(res, 'UNAVAILABLE');
             if (isRecord(req.body) && req.body.action === 'delete' && !canDeleteWith(req.body.clientKey)) return fail(res, 'ACCOUNT_DELETION_UNAVAILABLE');
@@ -224,6 +235,10 @@ export function createProviderAuthRouter(options: ProviderAuthRouterOptions): Ro
                 const context = await services.readContext(req, isRecord(req.body) && req.body.action === 'signup' ? 'complete' : 'begin');
                 const result = await services.flow.begin(context, req.body);
                 if (!result.ok) return fail(res, result.reason);
+                if (isRecord(req.body) && req.body.clientKey === 'apple-android'
+                    && (!context || !await options.appleAndroidHandoff!.prepare(context, result, req.body.action as ProviderAttemptAction))) {
+                    return fail(res, 'UNAVAILABLE');
+                }
                 const cookie = context?.anonymousCookie;
                 if (cookie) {
                     if (cookie.name !== WEB_SESSION_COOKIE && cookie.name !== NATIVE_SESSION_COOKIE) {
@@ -241,6 +256,7 @@ export function createProviderAuthRouter(options: ProviderAuthRouterOptions): Ro
         json({ limit: '32kb', strict: true }), linkPasswordLimiter, asyncHandler(async (req, res) => {
             if (unavailableAppleIssuance(req.body)) return fail(res, 'UNAVAILABLE');
             if (!isRecord(req.body)) return fail(res, 'INVALID_REQUEST');
+            if (req.body.clientKey === 'apple-android' && req.headers.origin !== 'capacitor://localhost') return fail(res, 'INVALID_CONTEXT');
             if (req.body.action === 'signup' && !options.signupEnabled) return fail(res, 'UNAVAILABLE');
             if (req.body.action === 'delete' && !canDeleteWith(req.body.clientKey)) return fail(res, 'ACCOUNT_DELETION_UNAVAILABLE');
             const hasRememberMe = Object.prototype.hasOwnProperty.call(req.body, 'rememberMe');

@@ -31,6 +31,7 @@ import { verifyAccountDeletionReadiness, verifyAccountSessionReadiness,
 import { verifyPasswordlessAccountSchema } from './migrations/passwordlessAccountSchema';
 import { verifyAppleTokenReadiness } from './migrations/appleTokenSchema';
 import { verifyAppleRevocationReadiness } from './migrations/appleRevocationSchema';
+import { verifyAppleAndroidHandoffReadiness } from './migrations/appleAndroidHandoffSchema';
 import { APPLE_MAINTENANCE_PATH } from './config/appleMaintenanceConfig';
 import { createAppleMaintenanceRouter } from './routers/appleMaintenanceRouter';
 import { runAppleMaintenance } from './accounts/runAppleTokenRevocation';
@@ -83,7 +84,7 @@ async function runConfiguredMaintenance(): Promise<number> {
     // Independent cleanup must still run if Apple's provider request fails.
     const [apple, registrationCleanup, parentCleanup, formCleanup] = await Promise.allSettled([
         runAppleMaintenance({ database: pool, expectedServerUuid: runtimeConfig.appleMaintenance!.expectedServerUuid,
-            loadLifecycle: loadRuntimeAppleLifecycle }),
+            loadLifecycle: loadRuntimeAppleLifecycle, appleAndroidEnabled: runtimeConfig.providerAuth.appleAndroidEnabled === true }),
         cleanupRegistrationAuthorizations(pool),
         cleanupParentRegistrationAttempts(pool),
         runtimeConfig.parentRegistrationPolicy?.signedFormsEnabled ? cleanupSignedParentForms(pool) : Promise.resolve({ backlog: false }),
@@ -148,6 +149,7 @@ async function startServer(): Promise<void> {
                 { loadLifecycle: loadRuntimeAppleLifecycle });
             if (providerAuth.appleTokenLifecycle) await verifyAppleTokenReadiness(pool);
             if (runtimeConfig.providerAuth.appleNotifications) await verifyAppleRevocationReadiness(pool);
+            if (runtimeConfig.providerAuth.appleAndroidEnabled) await verifyAppleAndroidHandoffReadiness(pool);
             if (runtimeConfig.providerAuth.signupEnabled) {
                 await verifyPasswordlessAccountSchema(pool);
             }

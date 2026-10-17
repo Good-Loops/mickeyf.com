@@ -98,7 +98,7 @@ function validProviderInput(input: unknown): input is ProviderAuthenticationInpu
 }
 
 function supportsProviderSignup(clientKey: string): boolean {
-    return ['google-web', 'google-ios', 'google-android', 'apple-ios', 'apple-web'].includes(clientKey);
+    return ['google-web', 'google-ios', 'google-android', 'apple-ios', 'apple-web', 'apple-android'].includes(clientKey);
 }
 
 function validProviderUserName(value: unknown): value is string {
@@ -126,7 +126,7 @@ function validProviderToken(idToken: unknown): idToken is string {
 }
 
 function readProviderCredential(clientKey: string, value: unknown): { idToken: string; authorizationCode?: string } | null {
-    if (!['apple-ios', 'apple-web'].includes(clientKey)) return validProviderToken(value) ? { idToken: value } : null;
+    if (!['apple-ios', 'apple-web', 'apple-android'].includes(clientKey)) return validProviderToken(value) ? { idToken: value } : null;
     if (!isRecord(value) || !hasKeys(value, 'authorizationCode,idToken') || !validProviderToken(value.idToken)
         || typeof value.authorizationCode !== 'string' || value.authorizationCode.length < 1
         || value.authorizationCode.length > 4096 || /[^\x21-\x7e]/.test(value.authorizationCode)) return null;
@@ -441,7 +441,7 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
         // if UI cancellation arrives. Cancelling cannot undo a server-side login.
         const completion = await postProviderOperation('complete', {
             action: input.action, clientKey: input.clientKey, state, idToken: credential.idToken,
-            ...(['apple-ios', 'apple-web'].includes(input.clientKey) ? { authorizationCode: credential.authorizationCode } : {}),
+            ...(['apple-ios', 'apple-web', 'apple-android'].includes(input.clientKey) ? { authorizationCode: credential.authorizationCode } : {}),
             ...(input.action === 'login' || input.action === 'signup' ? { rememberMe: input.rememberMe === true }
                 : input.action === 'link' ? { password: input.password } : { confirmation: 'DELETE' }),
             ...(input.action === 'signup' ? { userName: input.userName } : {}),

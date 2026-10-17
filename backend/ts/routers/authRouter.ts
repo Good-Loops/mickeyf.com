@@ -37,6 +37,8 @@ import { createRegistrationRouter } from './registrationRouter';
 import { createParentRegistrationFlow, type ParentRegistrationPolicy } from '../accounts/parentRegistrationFlow';
 import { assertNoManagedChildren, createParentRegistrationRepository } from '../accounts/parentRegistrationRepository';
 import { createParentRegistrationRouter } from './parentRegistrationRouter';
+import { createAppleAndroidHandoffRepository } from '../auth/appleAndroidHandoffRepository';
+import { createAppleAndroidHandoffFlow } from '../auth/appleAndroidHandoffFlow';
 
 export { authRoutesContract } from './authRouter.contract';
 
@@ -74,6 +76,12 @@ export function createAuthRouter(
      * - None beyond Express route registration.
      */
     const router: Router = Router();
+    if (providerAuth?.clients['apple-android']) router.get('/native/apple-return', (_req, res) => {
+        res.setHeader('Cache-Control', 'no-store');
+        res.setHeader('Referrer-Policy', 'no-referrer');
+        // Auth Tab normally captures this URL. A browser fallback performs no authentication work.
+        return res.type('text/plain').send('Return to Ludolume to finish sign-in. If the app did not resume, close this tab and try again in the app.');
+    });
     const beforeAccountDeletion = parentRegistrationStorageReady ? assertNoManagedChildren : undefined;
     if ((parentRegistrationPolicy || scoreParticipationPolicy) && (!parentRegistrationStorageReady || !deletionJournal || !providerAuth?.enabled)) {
         throw new Error('Parent registration dependencies are not ready.');
@@ -122,6 +130,9 @@ export function createAuthRouter(
         appleTokenRepositories: appleLifecycle ? Object.freeze({ [appleLifecycle.clientId]: appleLifecycle.repository,
             ...(appleLifecycle.web ? { [appleLifecycle.web.clientId]: appleLifecycle.web.repository } : {}) }) : undefined,
         appleAccountRevocation, registration, beforeAccountDeletion,
+        ...(providerAuth?.clients['apple-android'] && appleLifecycle?.android ? { appleAndroidHandoff: createAppleAndroidHandoffFlow(
+            createAppleAndroidHandoffRepository(database, appleLifecycle.android.handoffCrypto),
+            providerAuth.clients['apple-android'].verifier) } : {}),
     }));
 
     /** GET /verify-token — validates auth context for the current request. */

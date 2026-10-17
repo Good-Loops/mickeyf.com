@@ -4,6 +4,8 @@ import type { Pool, PoolConnection, QueryOptions } from 'mysql2/promise';
 import type { AppleTokenLifecycle } from '../config/appleTokenConfig';
 import * as tokenSchema from '../migrations/appleTokenSchema';
 import * as revocationSchema from '../migrations/appleRevocationSchema';
+import * as handoffSchema from '../migrations/appleAndroidHandoffSchema';
+import * as handoffRepository from '../auth/appleAndroidHandoffRepository';
 import { APPLE_HTTP_MAINTENANCE_MAX_DURATION_MS, runAppleMaintenance, runAppleTokenRevocation } from './runAppleTokenRevocation';
 
 const environment = {
@@ -302,6 +304,42 @@ test('shared HTTP maintenance purges queued day-six tokens and expired guards be
     assert.equal(f.logs[0].expiredTokensPurged, 3);
     assert.equal(f.events.includes('end'), false);
     assert.doesNotMatch(JSON.stringify(f.logs), /private/u);
+});
+
+test('Android cleanup is opt-in and runs on the verified borrowed session before credential loading', async context => {
+    const f = httpFixture(context);
+    context.mock.method(handoffSchema, 'verifyAppleAndroidHandoffReadiness', async () => { f.events.push('handoff-schema'); });
+    context.mock.method(handoffRepository, 'cleanupAppleAndroidHandoffs', async (database: Pick<Pool, 'getConnection'>) => {
+        const session = await database.getConnection();
+        await session.query({ sql: 'SET SESSION autocommit = 1', timeout: 10_000 });
+        session.release();
+        f.events.push('handoff-cleanup');
+        return { deleted: 3, backlog: false };
+    });
+    assert.equal(await runAppleMaintenance(f.options), 0);
+    assert.equal(f.events.includes('handoff-schema'), false);
+    assert.equal(f.events.includes('handoff-cleanup'), false);
+    f.events.length = 0;
+    assert.equal(await runAppleMaintenance({ ...f.options, appleAndroidEnabled: true,
+        async loadLifecycle() { f.events.push('keys-unavailable'); throw new Error('synthetic-private-key-error'); } }), 1);
+    assert.ok(f.events.indexOf('identity') < f.events.indexOf('handoff-schema'));
+    assert.ok(f.events.indexOf('handoff-schema') < f.events.indexOf('handoff-cleanup'));
+    assert.ok(f.events.indexOf('handoff-cleanup') < f.events.indexOf('keys-unavailable'));
+    assert.equal(f.state.released, 1,'failed second operation destroys its session; cleanup cannot release the owner session');
+    assert.doesNotMatch(JSON.stringify(f.logs), /synthetic-private/u);
+});
+
+test('enabled Android maintenance rejects missing readiness and reports bounded cleanup backlog', async context => {
+    const f = httpFixture(context);
+    context.mock.method(handoffSchema, 'verifyAppleAndroidHandoffReadiness', async () => { throw new Error('synthetic-private-schema'); });
+    context.mock.method(handoffRepository, 'cleanupAppleAndroidHandoffs', async () => { assert.fail('readiness must precede new-table cleanup'); });
+    assert.equal(await runAppleMaintenance({ ...f.options, appleAndroidEnabled: true }), 1);
+    assert.equal(f.state.lifecycleLoads, 0);
+    assert.equal(f.logs.at(-1)?.reason, 'android-handoff-cleanup');
+    context.mock.method(handoffSchema, 'verifyAppleAndroidHandoffReadiness', async () => {});
+    context.mock.method(handoffRepository, 'cleanupAppleAndroidHandoffs', async () => ({ deleted: 1000, backlog: true }));
+    const backlog = httpFixture(context);
+    assert.equal(await runAppleMaintenance({ ...backlog.options, appleAndroidEnabled: true }), 2);
 });
 
 test('shared HTTP maintenance rejects each wrong database identity before schema or cleanup', async context => {

@@ -1,6 +1,8 @@
 import { createAppleTokenRepository } from '../accounts/appleTokenRepository';
 import { createAppleTokenClient } from '../auth/appleTokenClient';
 import { loadAppleWebConfig } from './appleWebConfig';
+import { appleAndroidEnabled, APPLE_ANDROID_CALLBACK_URI } from './appleAndroidConfig';
+import { createAppleAndroidHandoffCrypto } from '../auth/appleAndroidHandoffCrypto';
 
 type Environment = Readonly<Record<string, string | undefined>>;
 export type AppleClientLifecycle = Readonly<{
@@ -8,7 +10,10 @@ export type AppleClientLifecycle = Readonly<{
     client: ReturnType<typeof createAppleTokenClient>;
     repository: ReturnType<typeof createAppleTokenRepository>;
 }>;
-export type AppleTokenLifecycle = AppleClientLifecycle & Readonly<{ web?: AppleClientLifecycle & { redirectUri: string } }>;
+export type AppleTokenLifecycle = AppleClientLifecycle & Readonly<{
+    web?: AppleClientLifecycle & { redirectUri: string };
+    android?: AppleClientLifecycle & { redirectUri: string; handoffCrypto: ReturnType<typeof createAppleAndroidHandoffCrypto> };
+}>;
 
 /** Separate credentials from session signing and App Store Connect; no I/O on construction. */
 export function loadAppleTokenConfig(env: Environment = process.env): AppleTokenLifecycle | undefined {
@@ -27,15 +32,25 @@ export function loadAppleTokenConfig(env: Environment = process.env): AppleToken
             if (key.length !== 32 || key.toString('base64') !== value) throw new Error();
             keys[id] = key;
         }
+        const createClient = (audience: string, redirectUri?: string) => createAppleTokenClient({ clientId: audience,
+            teamId: env.APPLE_SIGN_IN_TEAM_ID ?? '', keyId: env.APPLE_SIGN_IN_KEY_ID ?? '',
+            privateKey: env.APPLE_SIGN_IN_PRIVATE_KEY ?? '', redirectUri });
         const createLifecycle = (audience: string, redirectUri?: string): AppleClientLifecycle => Object.freeze({
             clientId: audience,
             repository: createAppleTokenRepository({ clientId: audience,
                 activeKeyId: env.APPLE_TOKEN_ACTIVE_KEY_ID ?? '', encryptionKeys: keys }),
-            client: createAppleTokenClient({ clientId: audience, teamId: env.APPLE_SIGN_IN_TEAM_ID ?? '',
-                keyId: env.APPLE_SIGN_IN_KEY_ID ?? '', privateKey: env.APPLE_SIGN_IN_PRIVATE_KEY ?? '', redirectUri }),
+            client: createClient(audience, redirectUri),
         });
-        return Object.freeze({ ...createLifecycle(clientId),
-            ...(web ? { web: Object.freeze({ ...createLifecycle(web.clientId, web.redirectUri), redirectUri: web.redirectUri }) } : {}) });
+        const webLifecycle = web ? Object.freeze({ ...createLifecycle(web.clientId, web.redirectUri), redirectUri: web.redirectUri }) : undefined;
+        if (appleAndroidEnabled(env) && !webLifecycle) throw new Error();
+        return Object.freeze({ ...createLifecycle(clientId), ...(webLifecycle ? { web: webLifecycle } : {}),
+            ...(appleAndroidEnabled(env) && webLifecycle ? { android: Object.freeze({ clientId: webLifecycle.clientId,
+                repository: webLifecycle.repository,
+                client: createClient(webLifecycle.clientId, APPLE_ANDROID_CALLBACK_URI),
+                redirectUri: APPLE_ANDROID_CALLBACK_URI,
+                handoffCrypto: createAppleAndroidHandoffCrypto({ clientId: webLifecycle.clientId,
+                    activeKeyId: env.APPLE_TOKEN_ACTIVE_KEY_ID ?? '', encryptionKeys: keys }),
+            }) } : {}) });
     } catch {
         // JSON/crypto errors may contain secret fragments. Never expose their message or cause.
         throw new Error('Apple token lifecycle requires valid dedicated signing and encryption credentials.');

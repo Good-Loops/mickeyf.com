@@ -240,6 +240,7 @@ export default function ProviderSignInControls({ action, userName = '', remember
     const { authenticateWithProvider, prepareProviderLogin, completeProviderLogin } = useAuth();
     const [clients, setClients] = useState<PublicProviderClient[]>([]);
     const [configurationLoading, setConfigurationLoading] = useState(true);
+    const [configurationUnavailable, setConfigurationUnavailable] = useState(false);
     const [configurationRetry, setConfigurationRetry] = useState(0);
     const [busyClient, setBusyClient] = useState<string | null>(null);
     const [feedback, setFeedback] = useState<{ text: string; error: boolean; needsAccount?: boolean } | null>(null);
@@ -253,16 +254,47 @@ export default function ProviderSignInControls({ action, userName = '', remember
         if (LEGACY_PUBLIC_API_PREVIEW) return;
         mounted.current = true;
         let current = true;
+        let retryTimer: ReturnType<typeof setTimeout> | undefined;
+        let finishRetryWait: (() => void) | undefined;
         setConfigurationLoading(true);
-        void getAvailableProviderClients(available => {
-            if (current) setClients(available);
-        }).then(available => {
-            if (current) { setClients(available); setConfigurationLoading(false); }
-        }).catch(() => {
-            if (current) { setClients([]); setConfigurationLoading(false); }
-        });
+        setConfigurationUnavailable(false);
+        void (async () => {
+            const backoff = [1000, 2000];
+            for (let attempt = 0; current; attempt++) {
+                let unavailable = false;
+                let available: PublicProviderClient[] = [];
+                try {
+                    available = await getAvailableProviderClients(partial => {
+                        if (current) setClients(partial);
+                    }, () => { unavailable = true; });
+                } catch { unavailable = true; }
+                if (!current) return;
+                if (!unavailable) {
+                    // A valid empty configuration explicitly disables provider choices.
+                    setClients(available);
+                    setConfigurationLoading(false);
+                    return;
+                }
+                setClients([]);
+                if (attempt === backoff.length) {
+                    setConfigurationUnavailable(true);
+                    setConfigurationLoading(false);
+                    return;
+                }
+                await new Promise<void>(resolve => {
+                    finishRetryWait = resolve;
+                    retryTimer = setTimeout(() => {
+                        retryTimer = undefined;
+                        finishRetryWait = undefined;
+                        resolve();
+                    }, backoff[attempt]);
+                });
+            }
+        })();
         return () => {
             current = false;
+            if (retryTimer !== undefined) clearTimeout(retryTimer);
+            finishRetryWait?.();
             mounted.current = false;
             const pending = operation.current;
             operation.current = null;
@@ -386,6 +418,14 @@ export default function ProviderSignInControls({ action, userName = '', remember
     if (configurationLoading && clients.length === 0 && action !== 'link') return <div className="provider-sign-in" aria-busy="true">
         <span className="u-visually-hidden" role="status">Checking sign-in methods</span>
         {pendingProviderButton('google')}{pendingProviderButton('apple')}
+    </div>;
+    if (configurationUnavailable) return <div className="provider-sign-in">
+        <p role="status">Sign-in options are temporarily unavailable.</p>
+        <button className="provider-sign-in__button" type="button"
+            disabled={disabled || busyClient !== null || operationLock?.current === true}
+            onClick={() => {
+                if (!operationLock?.current && busyClient === null) setConfigurationRetry(value => value + 1);
+            }}>Retry sign-in options</button>
     </div>;
     if (clients.length === 0) return null;
     const inlineGoogle = action !== 'link' ? clients.find(client => client.clientKey === 'google-web'

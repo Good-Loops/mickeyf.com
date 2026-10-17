@@ -5,6 +5,7 @@ import { loadAppleNotificationConfig } from './appleNotificationConfig';
 import type { AppleNotificationVerifier } from '../auth/appleNotificationVerifier';
 import { loadAppleRuntimeLifecycle } from './appleRuntimeSecrets';
 import { loadAppleWebConfig } from './appleWebConfig';
+import { appleAndroidEnabled, APPLE_ANDROID_CALLBACK_URI } from './appleAndroidConfig';
 
 type Environment = Readonly<Record<string, string | undefined>>;
 type VerifierDependencies = Parameters<typeof createProviderTokenVerifier>[1];
@@ -15,6 +16,7 @@ export type PublicProviderAuthClient = Readonly<
     | { clientKey: 'google-android'; provider: 'google'; platform: 'android'; clientId: string; signup?: true }
     | { clientKey: 'apple-ios'; provider: 'apple'; platform: 'ios'; clientId: string; signup?: true }
     | { clientKey: 'apple-web'; provider: 'apple'; platform: 'web'; clientId: string; redirectUri: string; signup?: true }
+    | { clientKey: 'apple-android'; provider: 'apple'; platform: 'android'; clientId: string; redirectUri: string; signup?: true }
 >;
 
 export type ProviderAuthConfig = Readonly<{
@@ -24,6 +26,7 @@ export type ProviderAuthConfig = Readonly<{
     publicClients: readonly PublicProviderAuthClient[];
     appleTokenLifecycle?: AppleTokenLifecycle;
     appleNotifications?: AppleNotificationVerifier;
+    appleAndroidEnabled?: true;
 }>;
 
 const disabledConfig: ProviderAuthConfig = Object.freeze({
@@ -71,6 +74,8 @@ export function loadProviderAuthConfig(
         ? Object.freeze({ ...disabledConfig, appleNotifications }) : disabledConfig;
     const appleWeb = loadAppleWebConfig(env);
     const appleWebEnabled = env.APPLE_WEB_AUTH_ENABLED === 'true';
+    const androidEnabled = appleAndroidEnabled(env);
+    if (androidEnabled && (!appleWebEnabled || !appleWeb)) throw new Error('Apple Android requires the configured Apple web Services ID and lifecycle.');
     const googleWebId = optionalClientId(env, 'GOOGLE_WEB_CLIENT_ID', googleClientIdPattern);
     const googleIosId = optionalClientId(env, 'GOOGLE_IOS_CLIENT_ID', googleClientIdPattern);
     const googleAndroidIds = googleAndroidClientIds(env);
@@ -104,6 +109,12 @@ export function loadProviderAuthConfig(
         throw new Error('Apple web lifecycle does not match the configured Services ID and return URL.');
     }
     if (appleTokenLifecycle && !appleNotifications) throw new Error('Apple sign-in requires enabled server notifications.');
+    if (androidEnabled && appleTokenLifecycle && (appleTokenLifecycle.android?.clientId !== appleWeb?.clientId
+        || appleTokenLifecycle.android?.redirectUri !== APPLE_ANDROID_CALLBACK_URI
+        || appleTokenLifecycle.android?.repository !== appleTokenLifecycle.web?.repository
+        || !appleTokenLifecycle.android?.handoffCrypto)) {
+        throw new Error('Apple Android lifecycle does not match its dedicated callback and shared Services ID repository.');
+    }
     if (googleSignupEnabled && !googleWebId) throw new Error('Google signup requires GOOGLE_WEB_CLIENT_ID');
     if (googleWebId === undefined && appleIosId === undefined) {
         throw new Error('PROVIDER_AUTH_ENABLED requires GOOGLE_WEB_CLIENT_ID or APPLE_IOS_BUNDLE_ID');
@@ -150,8 +161,18 @@ export function loadProviderAuthConfig(
             platform: 'web', clientId: appleWeb.clientId, redirectUri: appleWeb.redirectUri,
             ...(appleSignupRequested ? { signup: true as const } : {}) }));
     }
+    if (androidEnabled && appleWeb) {
+        const lifecycle = appleTokenLifecycle?.android;
+        clients['apple-android'] = Object.freeze({ provider: 'apple',
+            ...(lifecycle ? { appleTokens: lifecycle.client } : {}),
+            signupEnabled: appleSignupRequested && !!lifecycle, deletionEnabled: appleDeletionRequested && !!lifecycle,
+            verifier: createProviderTokenVerifier({ appleAudience: appleWeb.clientId }, verifierDependencies) });
+        if (lifecycle) publicClients.push(Object.freeze({ clientKey: 'apple-android', provider: 'apple', platform: 'android',
+            clientId: appleWeb.clientId, redirectUri: APPLE_ANDROID_CALLBACK_URI, ...(appleSignupRequested ? { signup: true as const } : {}) }));
+    }
     return Object.freeze({ enabled: true, signupEnabled: googleSignupEnabled || appleSignupRequested,
         clients: Object.freeze(clients), publicClients: Object.freeze(publicClients),
+        ...(androidEnabled ? { appleAndroidEnabled: true as const } : {}),
         ...(appleTokenLifecycle ? { appleTokenLifecycle } : {}), ...(appleNotifications ? { appleNotifications } : {}) });
 }
 

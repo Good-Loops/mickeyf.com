@@ -61,7 +61,7 @@ function inputClient(input: unknown, clients: ReadonlyMap<string, ProviderAuthCl
 
 function supportsPasswordlessAccounts(clientKey: string, client: ProviderAuthClient | undefined): boolean {
     return ['google-web', 'google-ios', 'google-android'].includes(clientKey) && client?.provider === 'google'
-        || ['apple-ios', 'apple-web'].includes(clientKey) && client?.provider === 'apple';
+        || ['apple-ios', 'apple-web', 'apple-android'].includes(clientKey) && client?.provider === 'apple';
 }
 
 function matchesContext(context: ProviderAuthContext | null, action: ProviderAttemptAction): context is ProviderAuthContext {

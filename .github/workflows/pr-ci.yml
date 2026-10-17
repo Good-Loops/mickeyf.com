@@ -97,13 +97,14 @@ jobs:
           npm run test:receipt-cleanup
 
       - name: Test backend development and migration launchers
-        run: node --test backend/scripts/dev-isolated.test.cjs backend/scripts/run-migration-tests.test.mjs scripts/start-local-provider-backend.test.mjs
+        run: node --test backend/scripts/dev-isolated.test.cjs backend/scripts/run-migration-tests.test.mjs backend/scripts/run-apple-android-handoff-tests.test.mjs scripts/start-local-provider-backend.test.mjs
 
       - name: Test and build backend
         run: |
           npm --prefix backend test
           npm --prefix backend run test:unit
           npm --prefix backend run test:migrations
+          node backend/scripts/run-apple-android-handoff-tests.mjs
           npm --prefix backend run prod
 
       - name: Test documentation watcher scheduling
@@ -158,6 +159,7 @@ jobs:
           npm --prefix backend test
           npm --prefix backend run test:unit
           npm --prefix backend run test:migrations
+          node backend/scripts/run-apple-android-handoff-tests.mjs
           npm --prefix backend run prod
 
       - name: Build and probe the final unprivileged image
