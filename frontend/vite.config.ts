@@ -14,6 +14,7 @@ export default defineConfig(({ command, mode, isPreview }) => {
   }
   const developmentServer = command === "serve" && mode === "development" && !isPreview;
   const publicApiPreview = developmentServer && env.VITE_USE_PUBLIC_API === "1";
+  const publicAuthProtocol = publicApiPreview ? parsePublicAuthProtocol(env.VITE_PUBLIC_AUTH_PROTOCOL) : undefined;
   const enableThreeBossesLocal =
     command === "serve"
     && mode === "development"
@@ -21,8 +22,12 @@ export default defineConfig(({ command, mode, isPreview }) => {
     && env.VITE_ENABLE_THREE_BOSSES_LOCAL === "1";
 
   return {
-    plugins: [react(), ...(developmentServer ? [publicLeaderboardsPlugin()] : []),
-      ...(publicApiPreview ? [publicApiPlugin(parsePublicAuthProtocol(env.VITE_PUBLIC_AUTH_PROTOCOL))] : [])],
+    plugins: [react(), {
+      name: 'provider-startup-mode',
+      transformIndexHtml: html => html.replace('data-google-startup="enabled"',
+        `data-google-startup="${publicAuthProtocol === 'legacy' ? 'disabled' : 'enabled'}"`),
+    }, ...(developmentServer ? [publicLeaderboardsPlugin()] : []),
+      ...(publicApiPreview ? [publicApiPlugin(publicAuthProtocol!)] : [])],
     root: ".",
     resolve: {
       alias: {

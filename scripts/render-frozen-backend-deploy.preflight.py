@@ -115,16 +115,18 @@ def approved(build):
             and approval.get("result", {}).get("decision") == "APPROVED")
 
 
-def safe_options(options, require_provenance=False, allow_completed_source_defaults=False):
+def safe_options(options, require_provenance=False, allow_completed_source_defaults=False,
+                 allow_observed_deployment_defaults=False):
     allowed = {"logging", "substitutionOption", "dynamicSubstitutions", "pool"}
     if require_provenance:
         allowed.add("requestedVerifyOption")
-    # Google adds its documented current worker default after execution. This
-    # is accepted only for a SUCCESS source build whose pinned image-only
-    # contract is checked below, never pending, deployment or mutation input.
+    # Google adds its documented current worker default to API build responses.
+    # Input configurations remain strict. Observed defaults are accepted only
+    # after the caller checks the exact approved source/deployment identity.
     # https://docs.cloud.google.com/build/docs/release-channels (2026-10-17):
     # legacy remains the default until 2027-03-28; it selects the host VM only.
-    if require_provenance and allow_completed_source_defaults:
+    if (require_provenance and allow_completed_source_defaults
+            or not require_provenance and allow_observed_deployment_defaults):
         allowed.add("workerRelease")
     if (not isinstance(options, dict) or set(options) - allowed
             or options.get("logging") != "CLOUD_LOGGING_ONLY"
@@ -344,9 +346,12 @@ def verify_exclusion(stage_a, stage_b, active_builds, deploy_build, deploy_trigg
         reject("temporary deployment trigger is not the reviewed source-less approval-required trigger")
     if set(deploy_trigger) & {"filename", "gitFileSource", "sourceToBuild", "github", "pubsubConfig", "webhookConfig", "repositoryEventConfig", "developerConnectEventConfig"}:
         reject("temporary deploy trigger gained a source or event binding")
-    safe_options(deploy_build.get("options"))
     inline = deploy_trigger["build"]
     safe_options(inline.get("options"))
+    # The exact approved WORKING source-less build is already bound above.
+    # Its trigger's requested options remain strict; only the API response may
+    # materialize Google's current legacy host default (observed 2026-10-17).
+    safe_options(deploy_build.get("options"), allow_observed_deployment_defaults=True)
     if deploy_build.get("timeout") != "2400s" or inline.get("timeout") != "2400s":
         reject("deployment deadline differs from the reviewed package")
     if any(inline.get(key) for key in ("source", "images", "artifacts", "availableSecrets", "secrets", "dependencies")):

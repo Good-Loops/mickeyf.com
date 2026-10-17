@@ -23,7 +23,7 @@
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>LudolumeGoogleSignInEnabled</key>
-	<false/>
+	<true/>
 	<key>GIDClientID</key>
 	<string>1012884798546-7ten55a60351ttr4ldeic64u3c45reeu.apps.googleusercontent.com</string>
 	<key>GIDServerClientID</key>
@@ -38,7 +38,7 @@
 		</dict>
 	</array>
 	<key>LudolumeAppleSignInEnabled</key>
-	<false/>
+	<true/>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

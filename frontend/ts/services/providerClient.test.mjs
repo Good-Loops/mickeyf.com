@@ -60,7 +60,7 @@ function fixture(overrides = {}) {
     };
     const document = {
         createElement(tag) {
-            return { tag, style: {}, textContent: '', removed: false,
+            return { tag, style: {}, dataset: {}, textContent: '', removed: false,
                 replaceChildren() { this.textContent = ''; }, remove() { this.removed = true; } };
         },
         head: { appendChild(script) { scripts.push(script); } },
@@ -96,6 +96,46 @@ test('discovery selects only server-configured web Google or capability-enabled 
         } else assert.deepEqual(f.calls, []);
         assert.equal(f.calls.includes('capabilities'), platform === 'ios' || platform === 'android');
     }
+});
+
+test('auth-route resource warmup starts the public Google script and style cache without configuration or auth requests', async () => {
+    const f = fixture();
+    const warm = f.client.preloadGoogleSignInResources(signal());
+    await nextTurn();
+    const stylesheet = f.scripts.find(element => element.tag === 'link');
+    assert.equal(stylesheet.rel, 'preload');
+    assert.equal(stylesheet.as, 'style');
+    assert.equal(stylesheet.href, 'https://accounts.google.com/gsi/style');
+    assert.equal(f.scripts.find(element => element.tag === 'script').src, 'https://accounts.google.com/gsi/client?hl=en');
+    f.loadGoogle(); await warm;
+    await f.client.preloadGoogleSignInResources(signal());
+    assert.equal(f.scripts.length, 2, 'reuse the already-warmed public resources');
+    assert.deepEqual(f.calls, []);
+    assert.equal(f.controls.initialization, null);
+    assert.equal(f.controls.rendered, null);
+    assert.equal(f.controls.popup, null);
+});
+
+test('route warmup skips native platforms and an aborted web warmup can retry without auth side effects', async () => {
+    const native = fixture({ platform: 'ios', isNative: true });
+    await native.client.preloadGoogleSignInResources(signal());
+    assert.deepEqual(native.scripts, []); assert.deepEqual(native.calls, []);
+    const f = fixture(), cancelled = new AbortController();
+    cancelled.abort(); await rejectsCode(f.client.preloadGoogleSignInResources(cancelled.signal), 'CANCELLED');
+    assert.deepEqual(f.scripts, []);
+    const warm = f.client.preloadGoogleSignInResources(signal());
+    await nextTurn(); f.loadGoogle(); await warm;
+    assert.equal(f.scripts.length, 2); assert.deepEqual(f.calls, []);
+});
+
+test('App warmup adopts the early HTML style hint without injecting a duplicate', async () => {
+    const f = fixture();
+    f.document.head.querySelector = () => ({ rel: 'preload', as: 'style' });
+    const warm = f.client.preloadGoogleSignInResources(signal());
+    await nextTurn(); f.loadGoogle(); await warm;
+    assert.equal(f.scripts.length, 1);
+    assert.equal(f.scripts[0].tag, 'script');
+    assert.deepEqual(f.calls, []);
 });
 
 test('temporarily unavailable issuance retains the exact client for deletion proof without advertising signup', async () => {

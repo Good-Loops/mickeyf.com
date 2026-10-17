@@ -60,6 +60,24 @@ function shouldShowProviderChoice(client: PublicProviderClient, action: Provider
     return client.clientKey !== 'google-web' && (action !== 'signup' || client.signup === true);
 }
 
+function providerButtonLabel(provider: 'google' | 'apple') {
+    return provider === 'google' ? <>
+        <span className="provider-sign-in__google-mark" aria-hidden="true">
+            <img src="/images/google-sign-in-logo.svg" alt="" width="18" height="18" />
+        </span><span>Continue with Google</span>
+    </> : <>
+        <img src="/images/apple-sign-in-logo-white.png" alt="" aria-hidden="true" width="42" height="42" />
+        <span>Continue with Apple</span>
+    </>;
+}
+
+function pendingProviderButton(provider: 'google' | 'apple') {
+    return <button key={provider} className={`provider-sign-in__button provider-sign-in__button--placeholder${provider === 'apple' ? ' provider-sign-in__button--apple' : ''}`}
+        type="button" disabled aria-label={`Continue with ${provider === 'google' ? 'Google' : 'Apple'}`}>
+        {providerButtonLabel(provider)}
+    </button>;
+}
+
 /** Active Google web uses its official control; closed signup choices explain availability. */
 export function ProviderSignInButtons({ clients, action, busyClient, disabled, onSelect }: {
     clients: readonly PublicProviderClient[];
@@ -81,17 +99,10 @@ export function ProviderSignInButtons({ clients, action, busyClient, disabled, o
                         type="button" key={client.clientKey}
                         disabled={disabled || busyClient !== null} onClick={() => onSelect(client)}>
                         {busyClient === client.clientKey ? 'Please wait…'
-                            : client.provider === 'google' ? (client.platform === 'web' ? action === 'signup' ? <>
-                                <span className="provider-sign-in__google-mark" aria-hidden="true">
-                                    <img src="/images/google-sign-in-logo.svg" alt="" width="18" height="18" />
-                                </span><span>Continue with Google</span>
-                            </> : 'google'
+                            : client.provider === 'google' ? (client.platform === 'web' ? action === 'signup' ? providerButtonLabel('google') : 'google'
                                 : <img src={`/images/google-sign-in-${client.platform}.png`} alt="Sign in with Google"
                                     height="44" width={client.platform === 'ios' ? 188 : 198} />)
-                                : action === 'link' ? 'Apple account' : <>
-                                    <img src="/images/apple-sign-in-logo-white.png" alt="" aria-hidden="true" width="42" height="42" />
-                                    <span>Continue with Apple</span>
-                                </>}
+                                : action === 'link' ? 'Apple account' : providerButtonLabel('apple')}
                     </button>
                 ))}
             </div>
@@ -205,8 +216,7 @@ export function InlineGoogleSignIn({ client, action = 'login', userName = '', re
             {phase !== 'retry' && <div ref={host} className="provider-sign-in__google-host" role="group" aria-label="Continue with Google"
                 hidden={phase !== 'ready'}
                 inert={disabled || phase !== 'ready'} aria-disabled={disabled || phase !== 'ready'} />}
-            {(phase === 'preparing' || phase === 'completing') && <button className="provider-sign-in__button provider-sign-in__button--placeholder"
-                type="button" disabled>Continue with Google</button>}
+            {(phase === 'preparing' || phase === 'completing') && pendingProviderButton('google')}
             {phase === 'preparing' && <span className="u-visually-hidden" role="status">Preparing Google sign-in</span>}
             {phase === 'completing' && <span className="u-visually-hidden" role="status">Signing in</span>}
             {phase === 'retry' && <div className="provider-sign-in__retry">
@@ -375,10 +385,7 @@ export default function ProviderSignInControls({ action, userName = '', remember
     if (LEGACY_PUBLIC_API_PREVIEW) return null;
     if (configurationLoading && clients.length === 0 && action !== 'link') return <div className="provider-sign-in" aria-busy="true">
         <span className="u-visually-hidden" role="status">Checking sign-in methods</span>
-        {['Google', 'Apple'].map(provider => <button key={provider}
-            className="provider-sign-in__button provider-sign-in__button--placeholder" type="button" disabled>
-            Continue with {provider}
-        </button>)}
+        {pendingProviderButton('google')}{pendingProviderButton('apple')}
     </div>;
     if (clients.length === 0) return null;
     const inlineGoogle = action !== 'link' ? clients.find(client => client.clientKey === 'google-web'
@@ -394,7 +401,7 @@ export default function ProviderSignInControls({ action, userName = '', remember
                 disabled={disabled} onSelect={client => { void selectProvider(client); }} />
             {configurationLoading && action !== 'link' && <>
                 <span className="u-visually-hidden" role="status">Checking Apple sign-in availability</span>
-                <button className="provider-sign-in__button provider-sign-in__button--placeholder" type="button" disabled>Continue with Apple</button>
+                {pendingProviderButton('apple')}
             </>}
             {unavailableApple && <div role="status">
                 <p>Apple sign-in is temporarily unavailable.</p>

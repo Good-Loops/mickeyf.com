@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import { buildNumber, exportOptions, uploadArguments, uploadDistribution } from './ios-testflight.mjs';
+import { buildNumber, exportOptions, uploadArguments, uploadDistribution, signingBranchAllowed } from './ios-testflight.mjs';
 
 const signing = { fingerprint: 'TEST_CERTIFICATE', profile: { uuid: 'TEST_PROFILE' } };
 
@@ -35,11 +35,20 @@ test('upload remains the same verified-app package upload, not a release operati
     assert.throws(() => buildNumber('0', '1'), /build-number range/);
 });
 
+test('signing accepts only main and the current reviewed release branch', () => {
+    assert.equal(signingBranchAllowed('refs/heads/main'), true);
+    assert.equal(signingBranchAllowed('refs/heads/feature/auth-family-leaderboards'), true);
+    for (const ref of [undefined, '', 'main', 'refs/heads/improvement/clean-code-sweep',
+        'refs/heads/feature/auth-family-leaderboards-extra', 'refs/pull/342/merge']) {
+        assert.equal(signingBranchAllowed(ref), false);
+    }
+});
+
 test('workflow keeps the default and protected branch gate for both upload modes', async () => {
     const workflow = await readFile(new URL('../.github/workflows/ios-build.yml', import.meta.url), 'utf8');
     assert.match(workflow, /upload_testflight:[\s\S]*?type: boolean\s+required: false\s+default: false/);
     assert.match(workflow, /upload_distribution:[\s\S]*?type: choice\s+required: true\s+default: internal-only\s+options:\s+- internal-only\s+- app-store-draft/);
-    assert.match(workflow, /if: \$\{\{ !inputs\.compile_only && inputs\.upload_testflight && github\.ref == 'refs\/heads\/improvement\/clean-code-sweep' \}\}/);
+    assert.match(workflow, /if: \$\{\{ !inputs\.compile_only && inputs\.upload_testflight && \(github\.ref == 'refs\/heads\/main' \|\| github\.ref == 'refs\/heads\/feature\/auth-family-leaderboards'\) \}\}/);
     assert.match(workflow, /environment: ios-testflight/);
     assert.match(workflow, /IOS_UPLOAD_DISTRIBUTION: \$\{\{ inputs\.upload_distribution \|\| 'internal-only' \}\}/);
     assert.match(workflow, /node --test \.\.\/scripts\/ios-testflight\.test\.mjs/);

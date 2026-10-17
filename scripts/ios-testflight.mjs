@@ -7,7 +7,7 @@ import { createRequire } from 'node:module';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
-const BRANCH = 'refs/heads/improvement/clean-code-sweep';
+const SIGNING_BRANCHES = new Set(['refs/heads/main', 'refs/heads/feature/auth-family-leaderboards']);
 const TEAM = 'AX4Z7T24C9';
 const BUNDLE = 'com.mickeyf.app';
 const APP = '6810735137';
@@ -15,6 +15,8 @@ const SECRET_NAMES = ['IOS_DISTRIBUTION_P12_BASE64', 'IOS_DISTRIBUTION_P12_PASSW
     'IOS_PROVISION_PROFILE_BASE64', 'ASC_PRIVATE_KEY_P8'];
 const requireThat = (condition, message) => { if (!condition) throw new Error(message); };
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export const signingBranchAllowed = ref => SIGNING_BRANCHES.has(ref);
 
 export function buildNumber(runNumber, attempt) {
     requireThat(/^[1-9]\d{0,3}$/.test(runNumber) && /^[1-9]\d?$/.test(attempt),
@@ -55,7 +57,7 @@ export function validateProfile(profile, now = Date.now()) {
 
 function configuration() {
     requireThat(process.platform === 'darwin' && process.env.GITHUB_ACTIONS === 'true'
-        && process.env.GITHUB_EVENT_NAME === 'workflow_dispatch' && process.env.GITHUB_REF === BRANCH,
+        && process.env.GITHUB_EVENT_NAME === 'workflow_dispatch' && signingBranchAllowed(process.env.GITHUB_REF),
     'TestFlight signing requires the manual GitHub-hosted macOS job on the approved active branch.');
     requireThat(process.env.IOS_TEAM_ID === TEAM && process.env.IOS_BUNDLE_ID === BUNDLE
         && process.env.ASC_APP_ID === APP, 'Protected environment app/team/bundle variables do not match Ludolume.');

@@ -36,6 +36,7 @@ type ProviderClientDependencies = {
 };
 
 const GOOGLE_SCRIPT = 'https://accounts.google.com/gsi/client?hl=en';
+const GOOGLE_STYLE = 'https://accounts.google.com/gsi/style';
 const IO_TIMEOUT_MS = 10_000;
 const RANDOM_VALUE = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
 
@@ -131,6 +132,7 @@ export function createProviderClient(dependencies: ProviderClientDependencies) {
     const web = !dependencies.isNative && dependencies.platform === 'web';
     const native = dependencies.isNative && ['ios', 'android'].includes(dependencies.platform);
     let googleLoad: Promise<GoogleIdentity> | undefined;
+    let googleStylePreloaded = false;
     let acquiring = false;
     let nativeCancellationUnconfirmed = false;
 
@@ -199,6 +201,23 @@ export function createProviderClient(dependencies: ProviderClientDependencies) {
             else dom.head.appendChild(script);
         }).catch(error => { googleLoad = undefined; throw sanitizedError(error); });
         return googleLoad;
+    }
+
+    async function preloadGoogleSignInResources(signal: AbortSignal): Promise<void> {
+        if (!web) return;
+        if (!googleStylePreloaded && !signal.aborted
+            && !dom.head.querySelector?.('link[data-google-signin-preload="style"]')) {
+            // GIS otherwise requests this public resource only after the server challenge returns.
+            // A preload warms its cache; readiness still waits for GIS's actual stylesheet and control.
+            const stylesheet = dom.createElement('link');
+            stylesheet.rel = 'preload';
+            stylesheet.as = 'style';
+            stylesheet.href = GOOGLE_STYLE;
+            stylesheet.dataset.googleSigninPreload = 'style';
+            dom.head.appendChild(stylesheet);
+            googleStylePreloaded = true;
+        }
+        await cancellable(async activeSignal => { await loadGoogle(activeSignal); }, IO_TIMEOUT_MS, signal);
     }
 
     function waitForGoogleButtonStyles(signal: AbortSignal): Promise<void> {
@@ -371,6 +390,7 @@ export function createProviderClient(dependencies: ProviderClientDependencies) {
 
     return {
         getAvailableProviderClients,
+        preloadGoogleSignInResources,
         preloadProviderCredential: (client: PublicProviderClient, signal: AbortSignal) =>
             cancellable(async activeSignal => {
                 const selected = readClient(client);
@@ -416,6 +436,19 @@ export async function getAvailableProviderClients(onAvailable?: (clients: Public
 export async function preloadProviderCredential(client: PublicProviderClient, signal: AbortSignal): Promise<void> {
     try { await (await configuredClient()).preloadProviderCredential(client, signal); }
     catch (error) { throw sanitizedError(error); }
+}
+
+/** Warm public rendering resources on auth routes while the existing session check runs. No auth requests. */
+export function preloadGoogleSignInForRoute(pathname: string): () => void {
+    const controller = new AbortController();
+    if (/^\/(?:login|signup)\/?$/u.test(pathname)) {
+        void Promise.all([configuredClient(), import('../config/apiConfig.ts')]).then(async ([client, config]) => {
+            if (!config.LEGACY_PUBLIC_API_PREVIEW && !controller.signal.aborted) {
+                await client.preloadGoogleSignInResources(controller.signal);
+            }
+        }).catch(() => { /* The visible control owns bounded failure/retry feedback. */ });
+    }
+    return () => controller.abort();
 }
 
 export async function acquireProviderCredential(client: PublicProviderClient, challenge: ProviderAuthenticationChallenge,

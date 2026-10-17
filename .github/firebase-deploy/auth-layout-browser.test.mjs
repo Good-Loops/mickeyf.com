@@ -23,10 +23,13 @@ before(async () => {
 });
 after(async () => { await browser?.close(); await server?.close(); });
 
-async function fixture(t, width, { pendingBegin = false, pendingApple = false, height = 900, closedSignup = false } = {}) {
-    let releaseBegin, releaseApple;
+async function fixture(t, width, { pendingBegin = false, pendingApple = false, pendingRenew = false,
+    pendingConfig = false, height = 900, closedSignup = false } = {}) {
+    let releaseBegin, releaseApple, releaseRenew, releaseConfig;
     const beginReady = new Promise(resolve => { releaseBegin = resolve; });
     const appleReady = new Promise(resolve => { releaseApple = resolve; });
+    const renewReady = new Promise(resolve => { releaseRenew = resolve; });
+    const configReady = new Promise(resolve => { releaseConfig = resolve; });
     const context = await browser.newContext({ viewport: { width, height } });
     t.after(() => context.close());
     const page = await context.newPage();
@@ -36,6 +39,7 @@ async function fixture(t, width, { pendingBegin = false, pendingApple = false, h
     const calls = [];
     await context.route('**/*', async route => {
         const url = new URL(route.request().url());
+        if (url.href === 'https://accounts.google.com/gsi/style') return route.fulfill({ contentType: 'text/css', body: '' });
         if (url.href === 'https://accounts.google.com/gsi/client?hl=en') return route.fulfill({ contentType: 'application/javascript', body: `
             window.google = { accounts: { id: {
                 initialize(options) { window.__googleLayoutOptions = options; },
@@ -58,10 +62,13 @@ async function fixture(t, width, { pendingBegin = false, pendingApple = false, h
         if (url.pathname.startsWith('/auth/') || url.pathname.startsWith('/api/')) {
             calls.push({ path: url.pathname, body: route.request().postDataJSON() });
             let status = 200, result = {};
-            if (url.pathname === '/auth/providers/config') result = { clients: [
+            if (url.pathname === '/auth/providers/config') {
+                if (pendingConfig) await configReady;
+                result = { clients: [
                 { clientKey: 'google-web', provider: 'google', platform: 'web', clientId: 'synthetic.apps.googleusercontent.com', ...(closedSignup ? {} : { signup: true }) },
                 { clientKey: 'apple-web', provider: 'apple', platform: 'web', clientId: 'com.example.synthetic', redirectUri: 'https://example.test/return', ...(closedSignup ? {} : { signup: true }) },
-            ] };
+                ] };
+            }
             else if (url.pathname === '/auth/registration/config') result = closedSignup ? { enabled: false } : policy;
             else if (url.pathname === '/auth/registration/begin') {
                 assert.deepEqual(route.request().postDataJSON(), { policyVersion: policy.policyVersion });
@@ -72,13 +79,16 @@ async function fixture(t, width, { pendingBegin = false, pendingApple = false, h
                 result = { state, nonce, expiresInSeconds: 300 };
             }
             else if (url.pathname === '/auth/providers/complete') { status = 403; result = { error: 'REGISTRATION_REQUIRED' }; }
-            else if (url.pathname === '/auth/verify-token' || url.pathname === '/auth/renew') result = { loggedIn: false };
+            else if (url.pathname === '/auth/verify-token' || url.pathname === '/auth/renew') {
+                if (pendingRenew) await renewReady;
+                result = { loggedIn: false };
+            }
             else { status = 503; result = { error: 'UNAVAILABLE' }; }
             return route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(result) });
         }
         return route.continue();
     });
-    return { page, calls, releaseBegin, releaseApple };
+    return { page, calls, releaseBegin, releaseApple, releaseRenew, releaseConfig };
 }
 
 test('Google preparation keeps a disabled named pill at the final control height without visible loading copy', async t => {
@@ -88,7 +98,8 @@ test('Google preparation keeps a disabled named pill at the final control height
     const placeholder = page.getByRole('button', { name: 'Continue with Google', exact: true });
     await placeholder.waitFor();
     assert.equal(await placeholder.isDisabled(), true);
-    assert.equal(await placeholder.evaluate(button => getComputedStyle(button).backgroundColor), 'rgba(0, 0, 0, 0)');
+    assert.equal(await placeholder.evaluate(button => getComputedStyle(button).backgroundColor), 'rgb(255, 255, 255)');
+    assert.equal(await placeholder.locator('img').getAttribute('src'), '/images/google-sign-in-logo.svg');
     assert.equal(await page.getByText('Loading Google sign-in…', { exact: true }).count(), 0);
     assert.equal(await page.getByTestId('synthetic-google-sdk').count(), 0);
     const before = await placeholder.boundingBox();
@@ -99,6 +110,26 @@ test('Google preparation keeps a disabled named pill at the final control height
     assert.ok(Math.abs(before.width - after.width) < 2);
     assert.ok(Math.abs(before.height - after.height) < 2);
     assert.ok(Math.abs(before.y - after.y) < 2);
+});
+
+test('auth-route Google resources warm during renewal and config discovery without racing their cookie barrier', async t => {
+    const { page, calls, releaseRenew, releaseConfig } = await fixture(t, 390, { pendingRenew: true, pendingConfig: true });
+    const styleRequested = page.waitForRequest('https://accounts.google.com/gsi/style');
+    await page.goto(`${origin}/login`);
+    await page.waitForFunction(() => Boolean(window.google?.accounts?.id));
+    await styleRequested;
+    assert.equal(calls.filter(call => call.path === '/auth/providers/begin').length, 0);
+    const pending = page.getByRole('button', { name: 'Continue with Google', exact: true });
+    await pending.waitFor(); assert.equal(await pending.isDisabled(), true);
+    assert.equal(await pending.evaluate(button => getComputedStyle(button).opacity), '1');
+    assert.equal(await pending.evaluate(button => getComputedStyle(button).backgroundColor), 'rgb(255, 255, 255)');
+    releaseConfig();
+    await page.locator('.provider-sign-in__google').waitFor();
+    assert.equal(calls.filter(call => call.path === '/auth/providers/begin').length, 0, 'unknown session must not be replaced');
+    releaseRenew();
+    await page.getByTestId('synthetic-google-sdk').waitFor();
+    assert.equal(calls.filter(call => call.path === '/auth/providers/begin').length, 1);
+    assert.equal(calls.filter(call => call.path === '/auth/providers/complete').length, 0);
 });
 
 test('Google SDK loads alongside its challenge and becomes usable before the independent Apple SDK finishes', async t => {

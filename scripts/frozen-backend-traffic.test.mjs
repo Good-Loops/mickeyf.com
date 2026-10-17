@@ -378,6 +378,8 @@ for (const [label, mutate] of Object.entries({
     'global environment override': b => { b.options.env = ['PYTHONPATH=/malicious']; },
     'global volume override': b => { b.options.volumes = [{ name: 'v', path: '/workspace' }]; },
     'private pool override': b => { b.options.pool = { name: 'foreign-pool' }; },
+    'unreviewed worker channel': b => { b.options.workerRelease = 'canary'; },
+    'nonliteral worker channel': b => { b.options.workerRelease = { name: 'legacy' }; },
     'prefetched dependencies': b => { b.dependencies = [{ custom: 'code' }]; },
     'secret override': b => { b.availableSecrets = { secretManager: [{ env: 'PYTHONPATH' }] }; },
     'step added': b => b.steps.push(copy(b.steps[0])),
@@ -386,6 +388,17 @@ for (const [label, mutate] of Object.entries({
     'allowed failure': b => { b.steps[0].allowFailure = true; },
 })) test(`rejects deployment ${label}`, () => {
     const f = fixture(); mutate(f.build); assert.throws(() => validateDeployment(f.build, pins));
+});
+
+test('completed deployment receipts accept only the exact API-added legacy worker default', () => {
+    const f = fixture();
+    f.build.options.workerRelease = 'legacy';
+    validateDeployment(f.build, pins);
+    for (const mutate of [build => { build.status = 'WORKING'; }, build => { build.source = { gitSource: {} }; },
+        build => { build.steps[0].args = ['changed']; }, build => { build.options.unknownDefault = 'legacy'; }]) {
+        const changed = copy(f.build); mutate(changed);
+        assert.throws(() => validateDeployment(changed, pins));
+    }
 });
 
 test('stale/future plans, incorrect confirmations and changed service never patch', async () => {

@@ -155,17 +155,17 @@ test('native bridge diagnostics cannot log provider credentials in debug builds'
     assert.match(config, /loggingBehavior:\s*'none'/);
 });
 
-test('Apple identity bridge is registered in the App target but remains explicitly disabled', async () => {
+test('the release enables registered native provider capabilities while retaining bridge guards', async () => {
     const [native, identity, info] = await Promise.all([
         '../../ios/App/App/LudolumeApiPlugin.swift',
         '../../ios/App/App/LudolumeIdentityPlugin.swift',
         '../../ios/App/App/Info.plist',
     ].map((path) => readFile(new URL(path, import.meta.url), 'utf8')));
     assert.match(native, /registerPluginInstance\(LudolumeIdentityPlugin\(\)\)/);
-    assert.match(info, /<key>LudolumeAppleSignInEnabled<\/key>\s*<false\/>/);
+    assert.match(info, /<key>LudolumeAppleSignInEnabled<\/key>\s*<true\/>/);
     assert.match(identity, /forInfoDictionaryKey: "LudolumeAppleSignInEnabled"\) as\? Bool == true/);
     assert.match(identity, /call\.resolve\(\["apple": appleSignInEnabled, "google": googleConfiguration != nil\]\)/);
-    assert.match(info, /<key>LudolumeGoogleSignInEnabled<\/key>\s*<false\/>/);
+    assert.match(info, /<key>LudolumeGoogleSignInEnabled<\/key>\s*<true\/>/);
     for (const method of ['getCapabilities', 'getCredentialState', 'signIn', 'cancel']) {
         assert.ok(identity.includes(`CAPPluginMethod(name: "${method}", returnType: CAPPluginReturnPromise)`));
     }

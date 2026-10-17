@@ -68,9 +68,11 @@ export function validateDeploymentReceipt(build, pins, expectedApproval) {
     'Frozen deployment must be source-less and have no extra execution inputs');
     const options = build.options;
     requireThat(object(options) && options.logging === 'CLOUD_LOGGING_ONLY'
-        && Object.keys(options).every(key => ['logging', 'substitutionOption', 'dynamicSubstitutions', 'pool'].includes(key))
+        && Object.keys(options).every(key => ['logging', 'substitutionOption', 'dynamicSubstitutions', 'pool', 'workerRelease'].includes(key))
         && (options.substitutionOption === undefined || options.substitutionOption === 'ALLOW_LOOSE')
         && (options.dynamicSubstitutions === undefined || options.dynamicSubstitutions === true)
+        // Google adds the documented default only to the completed build response.
+        && (options.workerRelease === undefined || options.workerRelease === 'legacy')
         && (options.pool === undefined || same(options.pool, {})) && build.timeout === '2400s',
     'Unreviewed deployment execution options');
     requireThat(build.substitutions?._DEPLOY_TRIGGER_ID === pins.deploymentTriggerId

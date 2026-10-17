@@ -1,6 +1,6 @@
 # Native Google sign-in preparation
 
-The native Google source is prepared for iOS and Android. It is disabled in both app configurations. This document does not approve provider setup, signup policy, credential creation, deployments or release.
+The native Google source is prepared for iOS and Android. The next iOS build enables the reviewed Google and Apple capabilities; the server must also advertise their availability. Android Google remains disabled until its release signing certificate and exact Android OAuth client are configured. Source flags do not prove device or provider acceptance, and this document does not authorize new credentials or store submission.
 
 ## Identity contract
 
@@ -23,7 +23,7 @@ Existing account login, explicit linking, signup continuations and deletion reta
 
 The Podfile pins GoogleSignIn 10.0.0 (minimum iOS 15). Its AppAuth dependency owns OAuth state and S256 PKCE. Each explicit sign-in supplies the server nonce and requests no additional scopes beyond Google's SDK basic identity scopes. SDK credentials are signed out after extracting the ID token; no cached Google session is restored.
 
-Before activation, verify or reuse the project's real iOS and web OAuth clients. Set `GIDClientID` and `GIDServerClientID` in Info.plist, register the reversed iOS client ID under `CFBundleURLTypes` / `CFBundleURLSchemes`, then review enabling `LudolumeGoogleSignInEnabled`. Missing IDs, matching native/server IDs or a missing callback scheme keep the capability unavailable. The verified iOS client, existing web audience and reversed callback scheme are now populated. The capability flag remains off; registration alone does not authorize activation.
+The verified iOS client, existing web audience and reversed callback scheme are populated in Info.plist, and `LudolumeGoogleSignInEnabled` is enabled for the next signed build. `LudolumeAppleSignInEnabled` is also enabled for the registered primary app. Missing IDs, matching native/server IDs or a missing callback scheme still keep the Google capability unavailable; backend availability independently gates both providers. The signed provisioning profile must support the existing Apple entitlement, and owner device acceptance remains required.
 
 AppDelegate and SceneDelegate offer Google callbacks to the SDK, preserving unhandled Capacitor links. Google has no public programmatic cancellation API: cancellation discards credentials and holds the native operation lock until the SDK finishes. Apple and Google cannot open overlapping native sheets. A user may need to dismiss Google's sheet before retrying after a cancelled application request.
 

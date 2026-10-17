@@ -532,6 +532,42 @@ print("exclusion fixtures passed")
     assert.equal(result.status, 0, result.stderr);
 });
 
+test('deployment exclusion accepts only the observed legacy worker default and keeps trigger input strict', () => {
+    const result = python(fixtureCode + String.raw`
+bid=payload["buildId"]; tid=payload["deploymentTriggerId"]
+stage_a={"id":STAGE_A,"name":"main-push-mickeyf-com","resourceName":f"projects/{PROJECT}/locations/global/triggers/{STAGE_A}","disabled":True}
+stage_b={"id":pins["canonicalDeployTriggerId"],"name":pins["canonicalDeployTriggerName"],"resourceName":f"projects/{PROJECT}/locations/global/triggers/{pins['canonicalDeployTriggerId']}","disabled":True}
+deploy={"id":bid,"name":f"projects/{NUMBER}/locations/global/builds/{bid}","projectId":PROJECT,"buildTriggerId":tid,
+ "status":"WORKING","serviceAccount":DEPLOY_SA,"approval":build["approval"],
+ "options":{"logging":"CLOUD_LOGGING_ONLY","workerRelease":"legacy"},"timeout":"2400s"}
+dt={"id":tid,"name":pins["deploymentTriggerName"],"resourceName":f"projects/{PROJECT}/locations/global/triggers/{tid}",
+ "approvalConfig":{"approvalRequired":True},"serviceAccount":DEPLOY_SA,
+ "build":{"steps":[],"options":{"logging":"CLOUD_LOGGING_ONLY"},"timeout":"2400s"}}
+def check(d=deploy,t=dt):
+    verify_exclusion(stage_a,stage_b,[{"id":bid}],d,t,[stage_a,stage_b,trigger,t],pins,bid,tid)
+check()
+fails(lambda:safe_options(deploy["options"]))
+fails(lambda:safe_options(deploy["options"],allow_completed_source_defaults=True))
+for value in [None,"regular","rapid","stable","2026.10","LEGACY","legacy ",True,{},[]]:
+    changed=deepcopy(deploy); changed["options"]["workerRelease"]=value
+    fails(lambda:check(d=changed))
+for key,value in [("requestedVerifyOption","VERIFIED"),("env",["UNREVIEWED=1"]),
+        ("secretEnv",["UNREVIEWED"]),("volumes",[]),("pool",{"name":"foreign"}),
+        ("automapSubstitutions",True),("dynamicSubstitutions",False)]:
+    changed=deepcopy(deploy); changed["options"][key]=value
+    fails(lambda:check(d=changed))
+changed=deepcopy(dt); changed["build"]["options"]["workerRelease"]="legacy"
+fails(lambda:check(t=changed))
+for key,value in [("status","PENDING"),("status","SUCCESS"),("serviceAccount",BUILD_SA),
+        ("buildTriggerId",pins["sourceTriggerId"]),("source",{"gitSource":source})]:
+    changed=deepcopy(deploy); changed[key]=value
+    fails(lambda:check(d=changed))
+changed=deepcopy(deploy); changed["approval"]["state"]="PENDING"
+fails(lambda:check(d=changed))
+`, { pins: validateFrozenPins(pins), buildId, deploymentTriggerId });
+    assert.equal(result.status, 0, result.stderr);
+});
+
 test('provenance binds the authenticated registry envelope to exact image/build/source/trigger', () => {
     const code = fixtureCode + String.raw`
 bid=pins["sourceBuildId"]; digest=pins["imageDigest"]; target=f"{IMAGE}@{digest}"

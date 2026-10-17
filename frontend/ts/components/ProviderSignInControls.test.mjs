@@ -26,7 +26,7 @@ function markup(options = {}) {
     }));
 }
 
-test('discovery shows disabled placeholders without advertising a ready provider', () => {
+test('discovery shows branded disabled choices without advertising a ready provider', () => {
     assert.equal(markup({ clients: [] }), '');
     const pending = renderToStaticMarkup(React.createElement(AuthProvider, null,
         React.createElement(ProviderSignInControls, { action: 'login' })));
@@ -34,7 +34,9 @@ test('discovery shows disabled placeholders without advertising a ready provider
     assert.equal((pending.match(/type="button" disabled=""/g) ?? []).length, 2);
     assert.match(pending, /Continue with Google/);
     assert.match(pending, /Continue with Apple/);
-    assert.doesNotMatch(pending, /<iframe|<script|google-sign-in|apple-sign-in/);
+    assert.match(pending, /google-sign-in-logo\.svg/);
+    assert.match(pending, /apple-sign-in-logo-white\.png/);
+    assert.doesNotMatch(pending, /<iframe|<script/);
 });
 
 test('Google login has a direct official-widget host and no extra selector, heading or popup markup', () => {
@@ -42,7 +44,8 @@ test('Google login has a direct official-widget host and no extra selector, head
     const rendered = renderToStaticMarkup(React.createElement(AuthProvider, null,
         React.createElement(InlineGoogleSignIn, { client: google })));
     assert.match(rendered, /class="provider-sign-in__google-host" role="group" aria-label="Continue with Google"/);
-    assert.match(rendered, /provider-sign-in__button--placeholder" type="button" disabled="">Continue with Google<\/button>/);
+    assert.match(rendered, /provider-sign-in__button--placeholder" type="button" disabled="" aria-label="Continue with Google"/);
+    assert.match(rendered, /google-sign-in-logo\.svg/);
     assert.match(rendered, /class="u-visually-hidden" role="status">Preparing Google sign-in/);
     assert.doesNotMatch(rendered, /Loading Google|Or sign in with|<h2|<form|<iframe|<script|dialog|synthetic\.apps/);
 });

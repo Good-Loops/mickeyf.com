@@ -139,7 +139,7 @@ jobs:
 
   testflight:
     # Also restrict the protected environment to this exact branch in GitHub.
-    if: ${{ !inputs.compile_only && inputs.upload_testflight && github.ref == 'refs/heads/improvement/clean-code-sweep' }}
+    if: ${{ !inputs.compile_only && inputs.upload_testflight && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/auth-family-leaderboards') }}
     name: Sign and upload (${{ inputs.upload_distribution || 'internal-only' }})
     environment: ios-testflight
     runs-on: macos-26

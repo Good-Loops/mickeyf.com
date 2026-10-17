@@ -256,11 +256,11 @@ test('Google controls are available before the independent Apple SDK preload fin
     view.render(); await view.settle();
     assert(view.find(node => node.type === InlineGoogleSignIn));
     const pendingApple = view.find(node => node.type === 'button' && node.props.disabled
-        && node.props.children === 'Continue with Apple');
+        && node.props['aria-label'] === 'Continue with Apple');
     assert(pendingApple);
     assert.equal(view.find(node => node.type === 'button' && node.props.children === 'Check again'), undefined);
     final.resolve([google]); await view.settle();
-    assert.equal(view.find(node => node.type === 'button' && node.props.children === 'Continue with Apple'), undefined);
+    assert.equal(view.find(node => node.type === 'button' && node.props['aria-label'] === 'Continue with Apple'), undefined);
     assert.equal(view.find(node => node.type === InlineGoogleSignIn).props.client, google);
 });
 
