@@ -285,6 +285,8 @@ export async function planProviderActiveTraffic(provider, receipt, operation, no
         && same(unchangedTrafficService(state.service), unchangedTrafficService(receipt.after))
         && expectedServingPointer(state.service, receipt.after, activeRevisionName(pins)), 'Active service configuration drifted');
     if (operation === 'activate') requireThat(same(state.service, receipt.after), 'Service changed after active preparation');
+    else requireThat(state.service.latestReadyRevision === `${SERVICE}/revisions/${activeRevisionName(pins)}`,
+        'Active serving pointer does not match the exact serving revision');
     const target = operation === 'activate' ? activeRevisionName(pins) : activeRollbackRevisionName(pins);
     return { schemaVersion: 1, operation, createdAt: new Date(now).toISOString(), receipt, before: state.service,
         revisionSha256: { active: fingerprint(revisionConfiguration(active)), fallback: fingerprint(revisionConfiguration(fallback)),
@@ -307,7 +309,7 @@ export async function applyProviderActiveTraffic(provider, plan, confirmation, n
         exactTraffic(after, plan.request.traffic[0].revision);
         requireThat(after.generation === String(BigInt(plan.before.generation) + 1n) && after.etag !== plan.before.etag
             && same(unchangedTrafficService(after), unchangedTrafficService(plan.before))
-            && expectedServingPointer(after, plan.before, plan.request.traffic[0].revision), 'Unexpected service state after active traffic change');
+            && after.latestReadyRevision === `${SERVICE}/revisions/${plan.request.traffic[0].revision}`, 'Unexpected service state after active traffic change');
         const pins = plan.receipt.plan.pins;
         const state = await checked(provider, pins, plan.operation === 'activate');
         const [active, fallback] = await Promise.all([provider.getRevision(activeRevisionName(pins)), provider.getRevision(activeRollbackRevisionName(pins))]);

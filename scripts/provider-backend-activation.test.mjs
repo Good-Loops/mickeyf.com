@@ -46,7 +46,7 @@ function activationFixture({ retireUnrouted = false } = {}) {
         f.patches.push(structuredClone(body));
         f.service.traffic = structuredClone(body.traffic);
         f.service.trafficStatuses = structuredClone(body.traffic);
-        if (retireUnrouted) f.service.latestReadyRevision = `${SERVICE}/revisions/${body.traffic[0].revision}`;
+        f.service.latestReadyRevision = `${SERVICE}/revisions/${body.traffic[0].revision}`;
         advance();
     };
     f.provider.waitForActiveTraffic = async () => structuredClone(f.service);
@@ -128,6 +128,18 @@ test('a foreign serving pointer after a traffic write fails without retry', asyn
         return structuredClone(f.service);
     };
     await assert.rejects(applyProviderActiveTraffic(f.provider, activation, fingerprint(activation), when), /mutation attempted/);
+    assert.equal(f.patches.length, 3);
+});
+
+test('settled traffic must advance the serving pointer to the exact target', async () => {
+    const f = activationFixture({ retireUnrouted: true });
+    const { active, when } = await prepared(f);
+    const activation = await planProviderActiveTraffic(f.provider, active, 'activate', when);
+    f.provider.waitForActiveTraffic = async () => {
+        f.service.latestReadyRevision = activation.before.latestReadyRevision;
+        return structuredClone(f.service);
+    };
+    await assert.rejects(applyProviderActiveTraffic(f.provider, activation, fingerprint(activation), when), /Unexpected service state/);
     assert.equal(f.patches.length, 3);
 });
 
