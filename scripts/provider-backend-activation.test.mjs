@@ -299,13 +299,18 @@ test('HTTP adapter executes only the four exact template/traffic patches and rec
         if (url.pathname.endsWith('/triggers')) return ok({ triggers: ['ef5a2981-95be-4f4d-af91-f997fde73356', 'd71109da-8350-4f2f-a3be-2053bb6ccd45'].map(id => ({ id, disabled: true })) });
         if (url.pathname.endsWith('/builds')) {
             assert.equal(url.searchParams.has('orderBy'), false, 'Cloud Build does not support an orderBy query');
-            if (!url.searchParams.get('filter').includes('buildTriggerId')) return ok({ builds: [] });
+            if (url.searchParams.has('filter')) {
+                assert.equal(url.searchParams.get('filter').includes('buildTriggerId'), false, 'Trigger filtering is performed after complete enumeration');
+                return ok({ builds: [] });
+            }
             assert.equal(url.searchParams.get('pageSize'), '100');
             if (listingProblem === 'malformed') return ok({ builds: 'invalid' });
             if (listingProblem === 'repeated token') return ok({ builds: [], nextPageToken: 'same-token' });
             if (listingProblem === 'truncated') return ok({ builds: [], nextPageToken: `more-${listingPage++}` });
             if (!url.searchParams.get('pageToken')) return ok({ builds: [{ id: '99999999-9999-4999-8999-999999999999',
-                buildTriggerId: sourcePins.sourceTriggerId, createTime: new Date(Date.parse(timestamp) - 1000).toISOString() }], nextPageToken: 'synthetic-page-2' });
+                buildTriggerId: sourcePins.sourceTriggerId, createTime: new Date(Date.parse(timestamp) - 1000).toISOString() },
+                { id: '88888888-8888-4888-8888-888888888888', buildTriggerId: '77777777-7777-4777-8777-777777777777',
+                    createTime: new Date(Date.parse(timestamp) + 1000).toISOString() }], nextPageToken: 'synthetic-page-2' });
             assert.equal(url.searchParams.get('pageToken'), 'synthetic-page-2');
             return ok({ builds: [{ id: sourcePins.sourceBuildId, buildTriggerId: sourcePins.sourceTriggerId, createTime: timestamp }] });
         }

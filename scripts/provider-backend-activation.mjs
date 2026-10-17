@@ -353,16 +353,22 @@ export function createProviderActivationCloudProvider(token, fetcher = fetch) {
         waitForActiveTraffic: plan => wait(plan, false),
     };
     async function listSourceBuilds(pins) {
-        const filter = encodeURIComponent(`buildTriggerId="${pins.sourceTriggerId}"`);
         const builds = [], tokens = new Set();
         let pageToken = '';
         for (let page = 0; page < 20; page++) {
             const result = await request('https://cloudbuild.googleapis.com/v1/',
-                `projects/${PROJECT}/locations/global/builds?filter=${filter}&pageSize=100${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`);
+                `projects/${PROJECT}/locations/global/builds?pageSize=100${pageToken ? `&pageToken=${encodeURIComponent(pageToken)}` : ''}`);
             requireThat(Object.keys(result).every(key => ['builds', 'nextPageToken'].includes(key))
                 && (result.builds === undefined || Array.isArray(result.builds)), 'Malformed source build listing');
             builds.push(...result.builds ?? []);
-            if (!result.nextPageToken) return { builds };
+            if (!result.nextPageToken) {
+                requireThat(builds.length <= 2000 && new Set(builds.map(item => item?.id)).size === builds.length
+                    && builds.every(item => item && typeof item === 'object' && !Array.isArray(item)
+                        && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/u.test(item.id ?? '')
+                        && Number.isFinite(Date.parse(item.createTime))), 'Global source build listing is duplicated or malformed');
+                // The REST API does not support gcloud's client-side trigger filter or sort options.
+                return { builds: builds.filter(item => item.buildTriggerId === pins.sourceTriggerId) };
+            }
             requireThat(typeof result.nextPageToken === 'string' && result.nextPageToken.length <= 8192 && !tokens.has(result.nextPageToken),
                 'Invalid source build pagination token');
             pageToken = result.nextPageToken; tokens.add(pageToken);
