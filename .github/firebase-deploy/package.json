@@ -16,6 +16,7 @@
   },
   "dependencies": {
     "picomatch": "4.0.4",
-    "playwright-core": "1.62.1"
+    "playwright-core": "1.62.1",
+    "undici": "7.30.1"
   }
 }

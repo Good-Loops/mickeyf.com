@@ -8,6 +8,7 @@ import { pipeline } from 'node:stream/promises';
 import { fileURLToPath } from 'node:url';
 import { createGzip } from 'node:zlib';
 import picomatch from 'picomatch';
+import { fetch } from 'undici';
 
 const API = 'https://firebasehosting.googleapis.com/v1beta1';
 const PROJECT = 'noted-reef-387021';
@@ -155,11 +156,16 @@ export async function publishPreview({ projectId, siteId, channelId, token, conf
   const prepared = await prepareFiles(configPath, { signal: deadline });
   const channel = `sites/${siteId}/channels/${channelId}`;
   async function request(url, { method = 'GET', body, raw = false, allowMissing = false } = {}) {
+    const target = new URL(url);
+    if (target.protocol !== 'https:' || target.username || target.password || target.port || target.hash
+        || (target.hostname !== 'firebasehosting.googleapis.com' && target.hostname !== 'upload-firebasehosting.googleapis.com')) {
+      throw new Error('Unexpected Hosting request destination.');
+    }
     const upload = url.startsWith('https://upload-firebasehosting.googleapis.com/');
     requireCondition(upload || url.startsWith(`${API}/sites/${siteId}/`), 'Unexpected Hosting request destination.');
     let response;
     try {
-      response = await fetchImpl(url, {
+      response = await fetchImpl(target.href, {
         method, redirect: 'error', signal: AbortSignal.any([deadline, AbortSignal.timeout(raw ? 180_000 : 45_000)]),
         headers: { Authorization: `Bearer ${token}`, 'x-goog-user-project': projectId,
           ...(body === undefined ? {} : { 'Content-Type': raw ? 'application/octet-stream' : 'application/json' }) },
@@ -186,7 +192,9 @@ export async function publishPreview({ projectId, siteId, channelId, token, conf
       'Hosting preview creation did not return the expected expiring channel.');
     const createdVersion = await request(`${API}/sites/${siteId}/versions`, { method: 'POST', body: { config: prepared.config } });
     const version = createdVersion.name;
-    requireCondition(typeof version === 'string' && new RegExp(`^sites/${siteId}/versions/[A-Za-z0-9_-]+$`, 'u').test(version)
+    const versionParts = typeof version === 'string' ? version.split('/') : [];
+    requireCondition(versionParts.length === 4 && versionParts[0] === 'sites' && versionParts[1] === siteId
+      && versionParts[2] === 'versions' && /^[A-Za-z0-9_-]+$/u.test(versionParts[3])
       && createdVersion.status === 'CREATED', 'Hosting returned an unexpected version.');
     const pending = new Map();
     for (let start = 0; start < prepared.files.length; start += 1000) {
@@ -213,7 +221,9 @@ export async function publishPreview({ projectId, siteId, channelId, token, conf
     const finalized = await request(`${API}/${version}?updateMask=status`, { method: 'PATCH', body: { status: 'FINALIZED' } });
     requireCondition(finalized.name === version && finalized.status === 'FINALIZED', 'Hosting version was not finalized.');
     const release = await request(`${API}/${channel}/releases?versionName=${version}`, { method: 'POST', body: {} });
-    requireCondition(typeof release.name === 'string' && new RegExp(`^${channel}/releases/[0-9]+$`, 'u').test(release.name)
+    const releaseParts = typeof release.name === 'string' ? release.name.split('/') : [];
+    requireCondition(releaseParts.length === 6 && releaseParts[0] === 'sites' && releaseParts[1] === siteId
+      && releaseParts[2] === 'channels' && releaseParts[3] === channelId && releaseParts[4] === 'releases' && /^[0-9]+$/u.test(releaseParts[5])
       && release.type === 'DEPLOY' && release.version?.name === version && release.version?.status === 'FINALIZED', 'Hosting preview release did not bind the finalized version.');
     return { channel, version, files: prepared.files.length, uploaded: pending.size };
   } finally { await prepared.cleanup(); }

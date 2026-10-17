@@ -208,9 +208,30 @@ test('never retries ambiguous mutations and sanitizes transport errors', async t
   assert.equal(transport.requests.length, 2);
 });
 
+test('rejects URL and regex metacharacters in server resource names before subsequent requests', async t => {
+  const { configPath } = await fixture(t);
+  for (const invalid of [
+    `sites/${site}/versions/https://evil.example/upload`,
+    `sites/${site}/versions/id?redirect=https://evil.example`,
+    `sites/${site}/versions/id#fragment`,
+    `sites/${site}/versions/id|.*`,
+    `sites/${site}/versions/../other`,
+  ]) {
+    const transport = protocol({ mutate: (body, stage) => stage === 'version' ? { ...body, name: invalid } : body });
+    await assert.rejects(publish(configPath, transport), /unexpected version/);
+    assert.equal(transport.requests.length, 3);
+    assert.ok(transport.requests.every(({ url }) => new URL(url).hostname === 'firebasehosting.googleapis.com'));
+  }
+  for (const invalid of [`${channel}/releases/123|.*`, `${channel}/releases/123/extra`, `sites/${site}/channels/foreign/releases/123`]) {
+    const transport = protocol({ mutate: (body, stage) => stage === 'release' ? { ...body, name: invalid } : body });
+    await assert.rejects(publish(configPath, transport), /did not bind/);
+  }
+});
+
 test('wrong project, live channel and missing token cannot make requests', async t => {
   const { configPath } = await fixture(t);
-  for (const override of [{ projectId: 'foreign' }, { siteId: 'foreign' }, { channelId: 'live' }, { token: undefined }]) {
+  for (const override of [{ projectId: 'foreign' }, { siteId: 'foreign' }, { siteId: `${site}|.*` },
+    { channelId: 'live' }, { channelId: 'gha-12-1|.*' }, { token: undefined }]) {
     const transport = protocol();
     await assert.rejects(publish(configPath, transport, override));
     assert.equal(transport.requests.length, 0);

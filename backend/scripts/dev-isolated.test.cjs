@@ -100,9 +100,11 @@ test('Google signup is a separate local-only opt-in, never inherited from produc
 test('app bootstrap skips dotenv only for explicit isolated development, never ordinary development or production', () => {
     const appPath = path.join(__dirname, '../ts/app.ts');
     const appSource = readFileSync(appPath, 'utf8');
+    const fetchBootstrap = "import './runtime/fetchRuntime';";
+    assert.ok(appSource.startsWith(fetchBootstrap), 'patched HTTP runtime must initialize first');
     const firstImport = appSource.indexOf('\nimport ');
-    assert.ok(firstImport > 0, 'bootstrap must precede all app imports');
-    const bootstrap = appSource.slice(0, firstImport);
+    assert.ok(firstImport > fetchBootstrap.length, 'environment loading must precede application imports');
+    const bootstrap = appSource.slice(fetchBootstrap.length, firstImport);
     for (const [env, expectedCalls] of [
         [runtimeEnvironment(credentials, {}), 0],
         [runtimeEnvironment(credentials, {}, parseArguments(['--google-web-client-id', googleWebClientId])), 0],
