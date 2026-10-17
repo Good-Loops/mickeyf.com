@@ -33,6 +33,8 @@ async function fixture(t, width, { pendingBegin = false, pendingApple = false, h
     t.after(() => context.close());
     const page = await context.newPage();
     page.setDefaultTimeout(10_000);
+    // A cold Vite transform can overlap the full unit suite on CI; UI waits remain bounded separately.
+    page.setDefaultNavigationTimeout(30_000);
     const calls = [];
     await context.route('**/*', async route => {
         const url = new URL(route.request().url());
