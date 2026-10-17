@@ -50,7 +50,7 @@
         &:disabled { opacity: .55; cursor: wait; }
     }
 
-    &__button--apple, &__button--placeholder {
+    &__button--apple, &__button--placeholder, &__button--availability {
         position: relative;
         overflow: hidden;
         min-height: 40px;
@@ -70,6 +70,17 @@
 
     // The supplied logo contains white margins; align its visible ink with the GIS logo slot.
     &__button--apple img { position: absolute; inset: .5px auto auto 0; width: 42px; height: 42px; }
+
+    &__google-mark {
+        position: absolute;
+        inset: 9px auto auto 11px;
+        display: grid;
+        place-items: center;
+        width: 20px;
+        height: 20px;
+
+        img { display: block; width: 18px; height: 18px; }
+    }
 
     &__button--placeholder:disabled {
         background: transparent;

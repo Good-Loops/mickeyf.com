@@ -45,7 +45,8 @@ async function positionSheens(page, milliseconds) {
                 maskComposite: style.maskComposite, duration: style.animationDuration, timing: style.animationTimingFunction };
         });
         const bounds = navigation.getBoundingClientRect();
-        return { animations: animations.length, styles, bounds: { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height } };
+        return { animations: animations.length, styles, bounds: { x: bounds.x, y: bounds.y, width: bounds.width, height: bounds.height,
+            radius: parseFloat(getComputedStyle(navigation).borderTopLeftRadius) } };
     }, milliseconds);
 }
 
@@ -69,12 +70,68 @@ test('opposing border sheens complete a continuous full orbit without moving or 
     }
     const beforeWrap = await positionSheens(page, 8999);
     const afterWrap = await positionSheens(page, 9001);
-    assert.ok((afterWrap.styles[0].angle - beforeWrap.styles[0].angle + 360) % 360 < .1);
+    const approach = (360 - beforeWrap.styles[0].angle) % 360;
+    const departure = afterWrap.styles[0].angle;
+    assert.ok(approach > 0 && approach < 2.1);
+    assert.ok(Math.abs(approach - departure) < .005, 'speed matches through the full-orbit seam');
     const home = page.getByRole('link', { name: 'Home', exact: true });
     assert.equal(await home.evaluate(link => {
         const rect = link.getBoundingClientRect();
         return link.contains(document.elementFromPoint(rect.x + rect.width / 2, rect.y + rect.height / 2));
     }), true);
+});
+
+function projectedSheenPosition(snapshot) {
+    // The bright head ends at 359 degrees within the conic gradient. Intersect
+    // that ray with the measured rounded nav perimeter, rather than treating
+    // constant angular speed as constant movement along its long edges.
+    const angle = (snapshot.styles[0].angle - 1) * Math.PI / 180;
+    const dx = Math.sin(angle), dy = -Math.cos(angle);
+    const x = Math.abs(dx), y = Math.abs(dy);
+    const a = snapshot.bounds.width / 2, b = snapshot.bounds.height / 2;
+    const radius = Math.min(snapshot.bounds.radius, a, b);
+    let distance;
+    if (b / y * x <= a - radius) distance = b / y;
+    else if (a / x * y <= b - radius) distance = a / x;
+    else {
+        const dot = x * (a - radius) + y * (b - radius);
+        const offset = (a - radius) ** 2 + (b - radius) ** 2 - radius ** 2;
+        distance = dot + Math.sqrt(Math.max(0, dot ** 2 - offset));
+    }
+    return { x: dx * distance, y: dy * distance };
+}
+
+async function projectedSpeed(page, time) {
+    const before = projectedSheenPosition(await positionSheens(page, (time - 2 + 9000) % 9000));
+    const after = projectedSheenPosition(await positionSheens(page, (time + 2) % 9000));
+    return Math.hypot(after.x - before.x, after.y - before.y) / 4;
+}
+
+for (const width of [1440, 390]) test(`sheen movement is faster across the center and slower near the rounded ends at viewport ${width}`, async t => {
+    const page = await fixture(t, 'no-preference', width);
+    const start = await positionSheens(page, 0);
+    // Sample near the end of the long top edge as well as the short side's center.
+    const target = Math.atan2(.9 * start.bounds.width, start.bounds.height) * 180 / Math.PI + 1;
+    let low = 0, high = 2250;
+    for (let iteration = 0; iteration < 22; iteration++) {
+        const middle = (low + high) / 2;
+        const current = await positionSheens(page, middle);
+        if (current.styles[0].angle < target) low = middle;
+        else high = middle;
+    }
+    const center = await projectedSpeed(page, 0);
+    const nearEnd = await projectedSpeed(page, (low + high) / 2);
+    const side = await projectedSpeed(page, 2250);
+    assert.ok(center > nearEnd * 1.15, `center ${center} must move faster than the long-edge end ${nearEnd}`);
+    assert.ok(nearEnd > side * 5 && side > 0, `side ${side} must slow down without stopping or reversing`);
+    const previousSidePixelsPerSecond = width === 1440 ? 3 : 2;
+    assert.ok(side * 1000 >= previousSidePixelsPerSecond * 3 && side * 1000 <= previousSidePixelsPerSecond * 5,
+        'the lighter slowdown keeps side motion near four times its previous measured speed');
+    const bottomCenter = await projectedSpeed(page, 4500);
+    assert.ok(Math.abs(center - bottomCenter) < .005, 'opposite centers retain matching speed');
+    t.diagnostic(JSON.stringify({ viewport: width, pixelsPerSecond: {
+        center: Math.round(center * 1000), nearEnd: Math.round(nearEnd * 1000), side: Math.round(side * 1000),
+    } }));
 });
 
 test('border masks leave dropdowns visible and the inset selection slider usable at mobile width', async t => {

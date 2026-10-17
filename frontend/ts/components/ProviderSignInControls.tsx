@@ -50,7 +50,17 @@ export function providerSignInErrorMessage(error: string, action: ProviderAction
     }
 }
 
-/** Google web uses its official control; Apple opens its provider popup from this control. */
+function shouldShowProviderChoice(client: PublicProviderClient, action: ProviderAction): boolean {
+    if (action === 'signup' && client.platform === 'web') {
+        // Active Google signup uses GIS inline; unavailable signup remains an explicit availability action.
+        return client.clientKey !== 'google-web' || client.signup !== true || client.issuance === false;
+    }
+    if (client.issuance === false) return false;
+    if (action === 'link') return true;
+    return client.clientKey !== 'google-web' && (action !== 'signup' || client.signup === true);
+}
+
+/** Active Google web uses its official control; closed signup choices explain availability. */
 export function ProviderSignInButtons({ clients, action, busyClient, disabled, onSelect }: {
     clients: readonly PublicProviderClient[];
     action: ProviderAction;
@@ -59,8 +69,7 @@ export function ProviderSignInButtons({ clients, action, busyClient, disabled, o
     onSelect: (client: PublicProviderClient) => void;
 }) {
     const headingId = useId();
-    const choices = clients.filter(client => client.issuance !== false && (action === 'link'
-        || (client.clientKey !== 'google-web' && (action !== 'signup' || client.signup === true))));
+    const choices = clients.filter(client => shouldShowProviderChoice(client, action));
     if (LEGACY_PUBLIC_API_PREVIEW || choices.length === 0) return null;
     return (
         <div className="provider-sign-in__choices" role="group" aria-labelledby={action === 'link' ? headingId : undefined}
@@ -68,11 +77,15 @@ export function ProviderSignInButtons({ clients, action, busyClient, disabled, o
             {action === 'link' && <h2 className="provider-sign-in__heading" id={headingId}>Link a sign-in method</h2>}
             <div className="provider-sign-in__buttons">
                 {choices.map(client => (
-                    <button className={`provider-sign-in__button${client.provider === 'google' && client.platform !== 'web' ? ' provider-sign-in__button--native-google' : ''}${client.provider === 'apple' && action !== 'link' ? ' provider-sign-in__button--apple' : ''}`}
+                    <button className={`provider-sign-in__button${client.provider === 'google' && client.platform !== 'web' ? ' provider-sign-in__button--native-google' : ''}${client.provider === 'apple' && action !== 'link' ? ' provider-sign-in__button--apple' : ''}${client.clientKey === 'google-web' && action === 'signup' ? ' provider-sign-in__button--availability' : ''}`}
                         type="button" key={client.clientKey}
                         disabled={disabled || busyClient !== null} onClick={() => onSelect(client)}>
                         {busyClient === client.clientKey ? 'Please wait…'
-                            : client.provider === 'google' ? (client.platform === 'web' ? 'google'
+                            : client.provider === 'google' ? (client.platform === 'web' ? action === 'signup' ? <>
+                                <span className="provider-sign-in__google-mark" aria-hidden="true">
+                                    <img src="/images/google-sign-in-logo.svg" alt="" width="18" height="18" />
+                                </span><span>Continue with Google</span>
+                            </> : 'google'
                                 : <img src={`/images/google-sign-in-${client.platform}.png`} alt="Sign in with Google"
                                     height="44" width={client.platform === 'ios' ? 188 : 198} />)
                                 : action === 'link' ? 'Apple account' : <>
@@ -253,8 +266,13 @@ export default function ProviderSignInControls({ action, userName = '', remember
     }, [configurationRetry]);
 
     const selectProvider = async (client: PublicProviderClient) => {
-        if (LEGACY_PUBLIC_API_PREVIEW || client.issuance === false || (action === 'signup' && client.signup !== true)) return;
+        if (LEGACY_PUBLIC_API_PREVIEW) return;
         if (disabled || operation.current || operationLock?.current) return;
+        if (action === 'signup' && (client.issuance === false || client.signup !== true)) {
+            setFeedback({ text: `Account creation with ${client.provider === 'google' ? 'Google' : 'Apple'} is temporarily unavailable. Please try again later.`, error: true });
+            return;
+        }
+        if (client.issuance === false) return;
         if (operationLock) operationLock.current = true;
         const controller = new AbortController();
         operation.current = controller;

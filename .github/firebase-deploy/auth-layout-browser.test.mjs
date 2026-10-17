@@ -23,7 +23,7 @@ before(async () => {
 });
 after(async () => { await browser?.close(); await server?.close(); });
 
-async function fixture(t, width, { pendingBegin = false, pendingApple = false, height = 900 } = {}) {
+async function fixture(t, width, { pendingBegin = false, pendingApple = false, height = 900, closedSignup = false } = {}) {
     let releaseBegin, releaseApple;
     const beginReady = new Promise(resolve => { releaseBegin = resolve; });
     const appleReady = new Promise(resolve => { releaseApple = resolve; });
@@ -59,10 +59,10 @@ async function fixture(t, width, { pendingBegin = false, pendingApple = false, h
             calls.push({ path: url.pathname, body: route.request().postDataJSON() });
             let status = 200, result = {};
             if (url.pathname === '/auth/providers/config') result = { clients: [
-                { clientKey: 'google-web', provider: 'google', platform: 'web', clientId: 'synthetic.apps.googleusercontent.com', signup: true },
-                { clientKey: 'apple-web', provider: 'apple', platform: 'web', clientId: 'com.example.synthetic', redirectUri: 'https://example.test/return', signup: true },
+                { clientKey: 'google-web', provider: 'google', platform: 'web', clientId: 'synthetic.apps.googleusercontent.com', ...(closedSignup ? {} : { signup: true }) },
+                { clientKey: 'apple-web', provider: 'apple', platform: 'web', clientId: 'com.example.synthetic', redirectUri: 'https://example.test/return', ...(closedSignup ? {} : { signup: true }) },
             ] };
-            else if (url.pathname === '/auth/registration/config') result = policy;
+            else if (url.pathname === '/auth/registration/config') result = closedSignup ? { enabled: false } : policy;
             else if (url.pathname === '/auth/registration/begin') {
                 assert.deepEqual(route.request().postDataJSON(), { policyVersion: policy.policyVersion });
                 result = { authorized: true, expiresInSeconds: 300, scoreVisibility: 'private' };
@@ -116,6 +116,38 @@ test('Google SDK loads alongside its challenge and becomes usable before the ind
     await page.waitForFunction(() => Boolean(window.AppleID));
     await page.waitForFunction(() => ![...document.querySelectorAll('button')]
         .find(button => button.textContent === 'Continue with Apple')?.disabled);
+});
+
+test('closed registration retains both signup choices and explains a click without any auth mutation', async t => {
+    const { page, calls } = await fixture(t, 390, { closedSignup: true });
+    await page.goto(`${origin}/signup`);
+    const google = page.getByRole('button', { name: 'Continue with Google', exact: true });
+    const apple = page.getByRole('button', { name: 'Continue with Apple', exact: true });
+    await google.waitFor(); await apple.filter({ has: page.locator('img') }).waitFor();
+    const geometry = await page.evaluate(() => {
+        const google = document.querySelector('.provider-sign-in__button--availability');
+        const apple = document.querySelector('.provider-sign-in__button--apple');
+        const rect = element => { const value = element.getBoundingClientRect(); return { x: value.x, y: value.y, width: value.width, height: value.height }; };
+        const text = button => { const range = document.createRange(); range.selectNodeContents(button.querySelector('span:last-child'));
+            const box = range.getBoundingClientRect(); const buttonBox = button.getBoundingClientRect();
+            return { centerX: box.x + box.width / 2, relativeCenterY: box.y + box.height / 2 - buttonBox.y }; };
+        return { google: rect(google), apple: rect(apple), slot: rect(google.querySelector('.provider-sign-in__google-mark')),
+            logo: rect(google.querySelector('img')), googleText: text(google), appleText: text(apple) };
+    });
+    assert.equal(geometry.slot.width, 20); assert.equal(geometry.slot.height, 20);
+    assert.equal(geometry.logo.width, 18); assert.equal(geometry.logo.height, 18);
+    assert.ok(Math.abs(geometry.logo.x + 9 - geometry.google.x - 22) < .1);
+    assert.ok(Math.abs(geometry.logo.y + 9 - geometry.google.y - 20) < .1);
+    assert.equal(geometry.google.width, geometry.apple.width); assert.equal(geometry.google.height, geometry.apple.height);
+    assert.ok(Math.abs(geometry.googleText.centerX - geometry.appleText.centerX) < .1);
+    assert.ok(Math.abs(geometry.googleText.relativeCenterY - geometry.appleText.relativeCenterY) < .1);
+    assert.equal(await page.getByTestId('synthetic-google-sdk').count(), 0);
+    await google.click();
+    await page.getByRole('alert').filter({ hasText: 'Account creation with Google is temporarily unavailable.' }).waitFor();
+    await apple.click();
+    await page.getByRole('alert').filter({ hasText: 'Account creation with Apple is temporarily unavailable.' }).waitFor();
+    assert.equal(calls.filter(call => ['/auth/registration/begin', '/auth/providers/begin', '/auth/providers/complete', '/api/users'].includes(call.path)).length, 0);
+    assert.equal(await page.locator('select').count(), 0);
 });
 
 test('the viewport contains the shell while short screens can scroll to every account control inside main', async t => {

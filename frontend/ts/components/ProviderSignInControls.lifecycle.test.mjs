@@ -264,6 +264,27 @@ test('Google controls are available before the independent Apple SDK preload fin
     assert.equal(view.find(node => node.type === InlineGoogleSignIn).props.client, google);
 });
 
+test('closed signup choices explain availability without preparing or acquiring credentials', async t => {
+    const view = mount(t, ProviderSignInControls, { action: 'signup' });
+    const apple = { clientKey: 'apple-web', provider: 'apple', platform: 'web', clientId: 'com.example.web',
+        redirectUri: 'https://example.test/login' };
+    view.hooks.clients = async () => [google, apple];
+    view.render(); await view.settle();
+    assert.equal(view.find(node => node.type === InlineGoogleSignIn), undefined);
+    const choices = view.find(node => node.type === ProviderSignInButtons);
+    for (const client of [google, apple]) {
+        choices.props.onSelect(client); await view.settle();
+        assert.equal(view.find(node => node.props?.role === 'alert').props.children,
+            `Account creation with ${client.provider === 'google' ? 'Google' : 'Apple'} is temporarily unavailable. Please try again later.`);
+    }
+    assert.equal(view.preparation.length, 0);
+    assert.equal(view.acquisitions.length, 0);
+    assert.equal(view.completions.length, 0);
+    assert.equal(view.hooks.auth.authenticateWithProvider.mock.callCount(), 0);
+    assert.deepEqual(view.busy, []);
+    assert.equal(view.props.operationLock.current, false);
+});
+
 test('unmount during Google completion releases the lock and ignores late success', async t => {
     const view = mount(t);
     view.render();

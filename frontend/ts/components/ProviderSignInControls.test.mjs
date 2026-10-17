@@ -17,6 +17,8 @@ const { requestProviderUsername } = await viteServer.ssrLoadModule('/ts/componen
 const { default: alert } = await viteServer.ssrLoadModule('/ts/components/siteAlert.ts');
 const google = { clientKey: 'google-web', provider: 'google', platform: 'web', clientId: 'synthetic.apps.googleusercontent.com' };
 const apple = { clientKey: 'apple-ios', provider: 'apple', platform: 'ios', clientId: 'com.example.synthetic' };
+const appleWeb = { clientKey: 'apple-web', provider: 'apple', platform: 'web', clientId: 'com.example.synthetic.web',
+    redirectUri: 'https://example.test/return' };
 
 function markup(options = {}) {
     return renderToStaticMarkup(React.createElement(ProviderSignInButtons, {
@@ -68,18 +70,23 @@ test('native login has a Continue with Apple control without a login heading', (
     assert.doesNotMatch(rendered, /<h2|Or sign in with|google/);
 });
 
-test('unavailable Apple issuance never renders a login, signup or linking button', () => {
+test('unavailable Apple issuance keeps native/login/link closed and retains the web signup availability choice', () => {
     for (const action of ['login', 'signup', 'link']) {
         assert.equal(markup({ clients: [{ ...apple, issuance: false }], action }), '');
     }
+    assert.match(markup({ clients: [{ ...appleWeb, issuance: false }], action: 'signup' }), />Continue with Apple<\/span>/);
     const rendered = renderToStaticMarkup(React.createElement(AuthProvider, null,
         React.createElement(InlineGoogleSignIn, { client: { ...google, issuance: false } })));
     assert.equal(rendered, '');
 });
 
-test('Apple signup requires the explicit server capability and does not add another Google selector', () => {
-    assert.equal(markup({ clients: [google, apple], action: 'signup' }), '');
-    const rendered = markup({ clients: [google, { ...apple, signup: true }], action: 'signup' });
+test('signup keeps configured availability choices visible while active Google still uses only its official widget', () => {
+    const closed = markup({ clients: [google, appleWeb], action: 'signup' });
+    assert.match(closed, />Continue with Google<\/span>/);
+    assert.match(closed, /google-sign-in-logo\.svg/);
+    assert.match(closed, />Continue with Apple<\/span>/);
+    assert.equal((closed.match(/<button/g) ?? []).length, 2);
+    const rendered = markup({ clients: [{ ...google, signup: true }, { ...apple, signup: true }], action: 'signup' });
     assert.match(rendered, />Continue with Apple<\/span>/);
     assert.match(rendered, /aria-label="Other sign-in methods"/);
     assert.equal((rendered.match(/<button/g) ?? []).length, 1);
