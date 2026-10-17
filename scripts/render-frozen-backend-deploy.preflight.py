@@ -115,14 +115,22 @@ def approved(build):
             and approval.get("result", {}).get("decision") == "APPROVED")
 
 
-def safe_options(options, require_provenance=False):
+def safe_options(options, require_provenance=False, allow_completed_source_defaults=False):
     allowed = {"logging", "substitutionOption", "dynamicSubstitutions", "pool"}
     if require_provenance:
         allowed.add("requestedVerifyOption")
+    # Google adds its documented current worker default after execution. This
+    # is accepted only for a SUCCESS source build whose pinned image-only
+    # contract is checked below, never pending, deployment or mutation input.
+    # https://docs.cloud.google.com/build/docs/release-channels (2026-10-17):
+    # legacy remains the default until 2027-03-28; it selects the host VM only.
+    if require_provenance and allow_completed_source_defaults:
+        allowed.add("workerRelease")
     if (not isinstance(options, dict) or set(options) - allowed
             or options.get("logging") != "CLOUD_LOGGING_ONLY"
             or options.get("requestedVerifyOption") not in (None, "VERIFIED")
             or (require_provenance and options.get("requestedVerifyOption") != "VERIFIED")
+            or ("workerRelease" in options and options["workerRelease"] != "legacy")
             or options.get("substitutionOption") not in (None, "ALLOW_LOOSE")
             or ("dynamicSubstitutions" in options and options["dynamicSubstitutions"] is not True)
             or ("pool" in options and options["pool"] != {})):
@@ -156,7 +164,6 @@ def verify_source(build, trigger, pins, now):
             or build.get("sourceProvenance", {}).get("resolvedGitSource") != source
             or build.get("substitutions") != substitutions(pins)):
         reject("requested/resolved source or substitutions do not match the exact commit")
-    safe_options(build.get("options"), require_provenance=True)
     if any(build.get(key) for key in ("availableSecrets", "secrets", "dependencies")):
         reject("image-only build acquired secrets or additional dependencies")
     tag = f"{IMAGE}:{commit}"
@@ -191,6 +198,37 @@ def verify_source(build, trigger, pins, now):
         reject("manual source trigger identity or image-only source configuration differs")
     if set(trigger) & {"build", "filename", "github", "pubsubConfig", "webhookConfig", "repositoryEventConfig", "developerConnectEventConfig"}:
         reject("manual source trigger gained an alternate execution source")
+    safe_options(build.get("options"), require_provenance=True, allow_completed_source_defaults=True)
+
+
+def verify_provenance_envelope(envelope, statement):
+    required = "projects/verified-builder/locations/global/keyRings/attestor/cryptoKeys/google-hosted-worker/cryptoKeyVersions/1"
+    additional = "projects/verified-builder/locations/global/keyRings/attestor/cryptoKeys/pqcProvenanceSigner/cryptoKeyVersions/1"
+    if (not isinstance(envelope, dict) or set(envelope) != {"payloadType", "payload", "signatures"}
+            or envelope.get("payloadType") != "application/vnd.in-toto+json"
+            or not isinstance(envelope.get("payload"), str) or not envelope["payload"]
+            or not isinstance(envelope.get("signatures"), list) or not 1 <= len(envelope["signatures"]) <= 2):
+        reject("SLSA v1 signature envelope metadata differs")
+    seen = set()
+    try:
+        if json.loads(base64.b64decode(envelope["payload"], validate=True)) != statement:
+            reject("SLSA envelope payload and displayed statement disagree")
+        for signature in envelope["signatures"]:
+            if (not isinstance(signature, dict) or set(signature) != {"keyid", "sig"}
+                    or not isinstance(signature.get("keyid"), str) or signature["keyid"] not in {required, additional}
+                    or signature["keyid"] in seen or not isinstance(signature.get("sig"), str)
+                    or not signature["sig"] or len(signature["sig"]) > 8192):
+                reject("SLSA v1 signature envelope metadata differs")
+            seen.add(signature["keyid"])
+            # URL-safe bytes are emitted by Container Analysis. An added PQ
+            # co-signature never substitutes for the original required signer.
+            decoded = base64.b64decode(signature["sig"], altchars=b"-_", validate=True)
+            if not decoded or signature["sig"] not in (base64.b64encode(decoded).decode(), base64.urlsafe_b64encode(decoded).decode()):
+                reject("SLSA signature is malformed")
+    except (ValueError, UnicodeError):
+        reject("SLSA envelope is malformed")
+    if required not in seen:
+        reject("SLSA original hosted-worker signer is missing")
 
 
 def verify_provenance(provenance, pins):
@@ -213,21 +251,7 @@ def verify_provenance(provenance, pins):
             or occurrence.get("noteName") != f"projects/verified-builder/notes/intoto_slsa_v1_{build_id}"):
         reject("SLSA v1 occurrence identity differs")
     statement = occurrence["build"]["inTotoSlsaProvenanceV1"]
-    envelope = occurrence.get("envelope") or {}
-    signatures = envelope.get("signatures") or []
-    if (envelope.get("payloadType") != "application/vnd.in-toto+json" or len(signatures) != 1
-            or signatures[0].get("keyid") != "projects/verified-builder/locations/global/keyRings/attestor/cryptoKeys/google-hosted-worker/cryptoKeyVersions/1"
-            or not isinstance(signatures[0].get("sig"), str) or not signatures[0]["sig"]):
-        reject("SLSA v1 signature envelope metadata differs")
-    try:
-        if json.loads(base64.b64decode(envelope["payload"], validate=True)) != statement:
-            reject("SLSA envelope payload and displayed statement disagree")
-        # Container Analysis serializes this bytes field with URL-safe base64.
-        # Keep strict alphabet validation; do not silently discard invalid bytes.
-        if not base64.b64decode(signatures[0]["sig"], altchars=b"-_", validate=True):
-            reject("SLSA signature is empty")
-    except (KeyError, ValueError, UnicodeError):
-        reject("SLSA envelope is malformed")
+    verify_provenance_envelope(occurrence.get("envelope"), statement)
     if (statement.get("_type") != "https://in-toto.io/Statement/v1"
             or statement.get("predicateType") != "https://slsa.dev/provenance/v1"
             or statement.get("subject") != [{"digest": {"sha256": digest.removeprefix("sha256:")}, "name": f"https://{IMAGE}:{commit}"}]):

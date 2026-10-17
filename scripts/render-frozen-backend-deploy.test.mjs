@@ -459,6 +459,27 @@ print("source fixtures passed")
     assert.equal(result.status, 0, result.stderr);
 });
 
+test('only completed exact source builds accept the documented legacy worker default', () => {
+    const result = python(fixtureCode + String.raw`
+completed=deepcopy(build); completed["options"]["workerRelease"]="legacy"
+verify_source(completed,trigger,pins,now)
+fails(lambda: safe_options(completed["options"],require_provenance=True))
+fails(lambda: safe_options(completed["options"],allow_completed_source_defaults=True))
+for status in ["PENDING","QUEUED","WORKING"]:
+    changed=deepcopy(completed); changed["status"]=status
+    fails(lambda: verify_source(changed,trigger,pins,now))
+for value in [None,"regular","rapid","stable","2026.09","LEGACY","legacy ",True,{},[]]:
+    changed=deepcopy(completed); changed["options"]["workerRelease"]=value
+    fails(lambda: verify_source(changed,trigger,pins,now))
+for key,value in [("requestedVerifyOption","NOT_VERIFIED"),("logging","LEGACY"),
+        ("env",["UNREVIEWED=1"]),("secretEnv",["UNREVIEWED"]),("volumes",[]),
+        ("pool",{"name":"untrusted"}),("automapSubstitutions",True),("dynamicSubstitutions",False)]:
+    changed=deepcopy(completed); changed["options"][key]=value
+    fails(lambda: verify_source(changed,trigger,pins,now))
+`, { pins: validateFrozenPins(pins) });
+    assert.equal(result.status, 0, result.stderr);
+});
+
 test('stable explicit traffic rejects latest, unresolved state, duplicate tags and incomplete allocations', () => {
     const code = String.raw`
 from copy import deepcopy
@@ -529,6 +550,13 @@ occurrence={"kind":"BUILD","resourceUri":f"https://{target}","noteName":f"projec
 provenance={"image_summary":{"digest":digest,"fully_qualified_digest":target,"registry":"us-central1-docker.pkg.dev","repository":"cloud-run-source-deploy","slsa_build_level":3},
  "provenance_summary":{"provenance":[occurrence]}}
 verify_provenance(provenance,pins)
+co_signed=deepcopy(provenance)
+co_signed["provenance_summary"]["provenance"][0]["envelope"]["signatures"].append({
+ "keyid":"projects/verified-builder/locations/global/keyRings/attestor/cryptoKeys/pqcProvenanceSigner/cryptoKeyVersions/1",
+ "sig":base64.b64encode(bytes([42])*3309).decode()})
+verify_provenance(co_signed,pins)
+co_signed["provenance_summary"]["provenance"][0]["envelope"]["signatures"].reverse()
+verify_provenance(co_signed,pins)
 for path,value in [(("image_summary","digest"),"sha256:"+"d"*64),
  (("provenance_summary","provenance",0,"envelope","payload"),base64.b64encode(b"{}").decode()),
  (("provenance_summary","provenance",0,"envelope","signatures",0,"keyid"),"wrong"),
@@ -552,5 +580,52 @@ for dependencies in [
 print("provenance fixtures passed")
 `;
     const result = python(code, { pins: validateFrozenPins(pins) });
+    assert.equal(result.status, 0, result.stderr);
+});
+
+const envelopeFixture = String.raw`
+from copy import deepcopy
+statement={"synthetic":"bound payload"}
+original={"keyid":"projects/verified-builder/locations/global/keyRings/attestor/cryptoKeys/google-hosted-worker/cryptoKeyVersions/1",
+ "sig":base64.urlsafe_b64encode(bytes([251,255])*36).decode()}
+pqc={"keyid":"projects/verified-builder/locations/global/keyRings/attestor/cryptoKeys/pqcProvenanceSigner/cryptoKeyVersions/1",
+ "sig":base64.b64encode(bytes([42])*3309).decode()}
+envelope={"payloadType":"application/vnd.in-toto+json","payload":base64.b64encode(json.dumps(statement).encode()).decode(),
+ "signatures":[original,pqc]}
+def fails(value):
+    try: verify_provenance_envelope(value,statement)
+    except SystemExit: return
+    raise AssertionError("unsafe signature envelope accepted")
+`;
+
+test('provenance requires the original signer once and permits only its exact optional PQ co-signer', () => {
+    const result = python(envelopeFixture + String.raw`
+for signatures in [[original],[original,pqc],[pqc,original]]:
+    verify_provenance_envelope({**envelope,"signatures":signatures},statement)
+for signatures in [[],[pqc],[original,original],[pqc,pqc],[original,pqc,pqc],
+        [original,{**pqc,"keyid":"unknown"}],[original,{**pqc,"keyid":original["keyid"]}],
+        [{**original,"keyid":original["keyid"]+"-spoof"},pqc],
+        [original,{**pqc,"extra":"unreviewed"}], [None], [original,None]]:
+    fails({**envelope,"signatures":signatures})
+for signatures in [None,{},True,"not a list"]:
+    fails({**envelope,"signatures":signatures})
+fails({**envelope,"extra":"unreviewed"})
+fails({key:value for key,value in envelope.items() if key!="payloadType"})
+`, {});
+    assert.equal(result.status, 0, result.stderr);
+});
+
+test('every provenance signature and its exact payload must be well formed even when the original signer remains', () => {
+    const result = python(envelopeFixture + String.raw`
+for value in [None,"","bad!signature","AA===","Zg===",True,{},[],"A"*8193]:
+    for index in [0,1]:
+        changed=deepcopy(envelope); changed["signatures"][index]["sig"]=value
+        fails(changed)
+for payload in [None,"","bad!payload",base64.b64encode(b"{}").decode(),
+        base64.b64encode(b"malformed json").decode(),True,{},[]]:
+    fails({**envelope,"payload":payload})
+fails({**envelope,"payloadType":"application/json"})
+fails(None); fails([])
+`, {});
     assert.equal(result.status, 0, result.stderr);
 });
