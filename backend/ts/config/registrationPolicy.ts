@@ -6,8 +6,9 @@ export type RegistrationPolicy = Readonly<{
     version: string;
     digest: Buffer;
     countries: Readonly<Record<string, Readonly<{ parentRequiredBelow: number }>>>;
+    mode?: 'general-audience';
 }>;
-export type RegistrationDecision = Readonly<{ allowed: true; country: string; ageBand: 'minor' | 'adult' }>
+export type RegistrationDecision = Readonly<{ allowed: true; country: string | null; ageBand: 'minor' | 'adult' | null }>
     | Readonly<{ allowed: false; reason: 'REGISTRATION_CLOSED' | 'INVALID_REGISTRATION' | 'PARENT_REQUIRED' }>;
 
 /** Country rules are reviewed product configuration, never inferred from IP or a provider profile. */
@@ -15,7 +16,13 @@ export function loadRegistrationPolicy(env: Readonly<Record<string, string | und
     if (env.REGISTRATION_ENABLED !== 'true') return undefined;
     if (env.REGISTRATION_POLICY_REVIEWED !== 'true') throw new Error('Registration requires a reviewed country policy.');
     try {
-        const version = env.REGISTRATION_POLICY_VERSION ?? '';
+        const enabled = env.REGISTRATION_GENERAL_AUDIENCE_ENABLED;
+        if (enabled !== undefined && enabled !== 'false' && enabled !== 'true') throw new Error();
+        const generalAudience = enabled === 'true';
+        const originalVersion = env.REGISTRATION_POLICY_VERSION ?? '';
+        const version = generalAudience ? env.REGISTRATION_GENERAL_AUDIENCE_POLICY_VERSION ?? '' : originalVersion;
+        if (generalAudience && (env.REGISTRATION_GENERAL_AUDIENCE_POLICY_REVIEWED !== 'true'
+            || version === originalVersion)) throw new Error();
         if (!/^[A-Za-z0-9._-]{1,64}$/u.test(version)) throw new Error();
         const raw: unknown = JSON.parse(env.REGISTRATION_COUNTRY_RULES ?? '');
         if (!isRecord(raw) || Object.keys(raw).length < 1 || Object.keys(raw).length > 249) throw new Error();
@@ -29,8 +36,10 @@ export function loadRegistrationPolicy(env: Readonly<Record<string, string | und
             countries[country] = Object.freeze({ parentRequiredBelow: Number(rule.parentRequiredBelow) });
         }
         // A rule change invalidates outstanding approvals even if the operator forgets to change the version.
-        const digest = createHash('sha256').update(JSON.stringify([version, countries])).digest();
-        return Object.freeze({ version, digest, countries: Object.freeze(countries) });
+        const digest = createHash('sha256').update(JSON.stringify(generalAudience
+            ? [version, countries, 'general-audience'] : [version, countries])).digest();
+        return Object.freeze({ version, digest, countries: Object.freeze(countries),
+            ...(generalAudience ? { mode: 'general-audience' as const } : {}) });
     } catch { throw new Error('Registration policy requires an explicit version and valid country rules.'); }
 }
 
@@ -46,6 +55,13 @@ export function registrationPolicyForCreation(policy: RegistrationPolicy | undef
 
 export function decideRegistration(policy: RegistrationPolicy | undefined, input: unknown): RegistrationDecision {
     if (!policy) return { allowed: false, reason: 'REGISTRATION_CLOSED' };
+    if (policy.mode === 'general-audience') {
+        if (!isRecord(input) || Object.keys(input).join(',') !== 'policyVersion'
+            || input.policyVersion !== policy.version) {
+            return { allowed: false, reason: 'INVALID_REGISTRATION' };
+        }
+        return { allowed: true, country: null, ageBand: null };
+    }
     if (!isRecord(input) || Object.keys(input).sort().join(',') !== 'ageBand,country,policyVersion'
         || input.policyVersion !== policy.version || typeof input.country !== 'string'
         || !Object.prototype.hasOwnProperty.call(policy.countries, input.country)

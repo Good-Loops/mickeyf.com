@@ -26,6 +26,12 @@ for (const scenario of scenarios) {
         const calls = [];
         t.mock.method(globalThis, 'fetch', async (url, init) => {
             calls.push({ url, init });
+            if (url === `${scenario.apiBase}/auth/registration/config`) return Response.json({ enabled: true,
+                mode: 'general-audience', policyVersion: 'synthetic-general', optionalDetails: false, parentRegistrationAvailable: false });
+            if (url === `${scenario.apiBase}/auth/registration/begin`) {
+                assert.deepEqual(JSON.parse(init.body), { policyVersion: 'synthetic-general' });
+                return Response.json({ authorized: true, expiresInSeconds: 300, scoreVisibility: 'private' });
+            }
             if (url === `${scenario.apiBase}/auth/verify-token`) {
                 assert.equal(init.method, 'GET');
                 return Response.json({ loggedIn: true, user_name: 'synthetic-player' });
@@ -79,6 +85,7 @@ for (const scenario of scenarios) {
             assert.equal(calls.at(-1).url, `${scenario.apiBase}/auth/verify-token`);
             await auth.logoutRequest();
             assert.ok(calls.every(({ init }) => init.credentials === 'include'));
+            const callsBeforeRendering = calls.length;
 
             const { AuthProvider } = await server.ssrLoadModule('/ts/context/AuthContext.tsx');
             const render = (Component, props = {}) => renderToStaticMarkup(
@@ -89,8 +96,8 @@ for (const scenario of scenarios) {
                 const module = await server.ssrLoadModule(`/ts/pages/${page}.tsx`);
                 if (page === 'SignUp') {
                     const entry = render(module.default);
-                    assert.match(entry, /Checking registration availability/);
-                    assert.doesNotMatch(entry, /type="password"|signup-email|Continue with Apple/);
+                    assert.match(entry, /type="password"|signup-email/);
+                    assert.doesNotMatch(entry, /registration-country|registration-for|>Cancel<|>Create account<\/button>/);
                 }
                 const markup = render(page === 'SignUp' ? module.SignupCredentials : module.default,
                     { reset() {}, scoreVisibility: 'private' });
@@ -99,7 +106,12 @@ for (const scenario of scenarios) {
                 assert.equal(markup.includes('Accounts and scores are saved to the live service.'), scenario.preview);
                 assert.equal(markup.includes('Renewable sign-in is enabled; provider options appear when available.'),
                     scenario.preview && !scenario.legacy);
-                assert.doesNotMatch(markup, /Continue with Google|Continue with Apple/, 'no dead provider button before discovery');
+                if (scenario.legacy) assert.doesNotMatch(markup, /Continue with Google|Continue with Apple/);
+                else {
+                    assert.match(markup, /provider-sign-in" aria-busy="true"/);
+                    assert.equal((markup.match(/type="button" disabled=""/g) ?? []).length, 2,
+                        'provider placeholders cannot start authentication before capability discovery');
+                }
                 assert.match(markup, /type="password"/);
             }
 
@@ -116,7 +128,7 @@ for (const scenario of scenarios) {
             assert.equal(render(ProviderSignInButtons, {
                 clients: [google], action: 'link', busyClient: null, disabled: false, onSelect() {},
             }).includes('Link a sign-in method'), !scenario.legacy);
-            assert.equal(calls.length, 5, 'Rendering must not make additional network requests');
+            assert.equal(calls.length, callsBeforeRendering, 'Rendering must not make additional network requests');
         } finally {
             await server.close();
         }

@@ -32,8 +32,15 @@ async function fixture(t, mode = 'success') {
         const request = route.request(); const url = new URL(request.url());
         if (request.url() === sdkUrl) return route.fulfill({ contentType: 'application/javascript', body: `
             window.__appleMode = ${JSON.stringify(mode)};
+            window.__appleSignInCalls = 0;
+            document.addEventListener('click', event => {
+                if (event.target.closest('button')?.textContent.includes('Continue with Apple')) {
+                    window.__appleClickTrusted = event.isTrusted;
+                    window.__appleControlClicks = (window.__appleControlClicks ?? 0) + 1;
+                }
+            }, { capture: true });
             window.AppleID = { auth: { init(input) { window.__appleInit = input; }, signIn() {
-                window.__appleClickTrusted = !!window.event?.isTrusted;
+                window.__appleSignInCalls += 1;
                 window.__appleClickActive = navigator.userActivation.isActive;
                 const result = { authorization: { state: window.__appleMode === 'wrong-state' ? 'wrong' : window.__appleInit.state,
                     id_token: 'synthetic.identity.signature', code: 'synthetic-code' }, user: { email: 'ignored@example.test' } };
@@ -60,16 +67,15 @@ async function fixture(t, mode = 'success') {
 }
 async function openApple(page) {
     await page.getByRole('button', { name: 'Continue with Apple', exact: true }).click();
-    await page.locator('.swal2-popup').getByRole('button', { name: 'Continue with Apple', exact: true }).waitFor();
+    await page.waitForFunction(() => window.__appleSignInCalls === 1);
 }
 
-test('real browser click reaches the popup adapter then completes through the serialized auth transport', async t => {
+test('one real browser click reaches Apple directly and completes through the serialized auth transport', async t => {
     const { page, calls } = await fixture(t);
     await openApple(page);
-    assert.equal(calls.filter(call => call.path.endsWith('/complete')).length, 0);
-    await page.locator('.swal2-popup').getByRole('button', { name: 'Continue with Apple', exact: true }).click();
-    await page.waitForFunction(() => !document.querySelector('.swal2-popup'));
     await page.waitForFunction(() => document.body.textContent.includes('Player'));
+    assert.equal(await page.locator('.swal2-popup').count(), 0);
+    assert.equal(await page.evaluate(() => window.__appleControlClicks), 1);
     assert.equal(await page.evaluate(() => window.__appleClickActive), true);
     assert.equal(await page.evaluate(() => window.__appleClickTrusted), true);
     assert.deepEqual(await page.evaluate(() => window.__appleInit), { clientId: 'com.example.web',
@@ -85,19 +91,18 @@ test('real browser click reaches the popup adapter then completes through the se
 for (const mode of ['blocked', 'wrong-state']) test(`browser ${mode} sends no credential completion and restores the login controls`, async t => {
     const { page, calls } = await fixture(t, mode);
     await openApple(page);
-    await page.locator('.swal2-popup').getByRole('button', { name: 'Continue with Apple', exact: true }).click();
     await page.getByRole('alert').filter({ hasText: 'We could not confirm sign-in.' }).waitFor();
     assert.equal(calls.filter(call => call.path.endsWith('/complete')).length, 0);
     assert.equal(await page.locator('input[type=password]').count(), 1);
+    assert.equal(await page.locator('.swal2-popup').count(), 0);
 });
 
-test('browser cancellation ignores a delayed SDK success without storing or submitting its credentials', async t => {
+test('navigating away cancels Apple and ignores delayed SDK success without storing or submitting credentials', async t => {
     const { page, calls } = await fixture(t, 'pending');
     await openApple(page);
-    await page.locator('.swal2-popup').getByRole('button', { name: 'Continue with Apple', exact: true }).click();
-    await page.locator('.swal2-popup').getByRole('button', { name: 'Cancel', exact: true }).click();
+    await page.getByRole('link', { name: 'Home', exact: true }).click();
+    await page.waitForURL(url => url.pathname === '/');
     await page.evaluate(() => window.__finishApple());
-    await page.getByRole('button', { name: 'Continue with Apple', exact: true }).waitFor();
     assert.equal(calls.filter(call => call.path.endsWith('/complete')).length, 0);
     assert.equal(await page.evaluate(() => localStorage.length + sessionStorage.length), 0);
 });

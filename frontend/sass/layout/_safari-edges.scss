@@ -10,6 +10,9 @@ html[data-safari-edges] {
         overflow: visible;
     }
 
+    // This browser-only backdrop intentionally paints beyond the locked shell.
+    .app-shell { overflow: visible; }
+
     .app-shell > .space-background {
         position: absolute;
         inset: 0;

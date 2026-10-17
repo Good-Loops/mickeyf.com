@@ -20,7 +20,6 @@ export default function RegistrationGate({ children }: {
     const [retry, setRetry] = useState(0);
     const [country, setCountry] = useState('');
     const [ageBand, setAgeBand] = useState<RegistrationAgeBand | ''>('');
-    const [forChild, setForChild] = useState(false);
     const [parentStep, setParentStep] = useState(false);
     const [busy, setBusy] = useState(false);
     const [feedback, setFeedback] = useState<string | null>(null);
@@ -28,6 +27,7 @@ export default function RegistrationGate({ children }: {
     const operation = useRef(false);
     const began = useRef(false);
     const generation = useRef(0);
+    const countryPolicy = config?.enabled && 'countries' in config ? config : null;
 
     useEffect(() => {
         let active = true;
@@ -46,7 +46,7 @@ export default function RegistrationGate({ children }: {
 
     const reset = () => {
         generation.current++;
-        setGrant(null); setAgeBand(''); setCountry(''); setParentStep(false); setForChild(false);
+        setGrant(null); setAgeBand(''); setCountry(''); setParentStep(false);
         if (began.current) {
             began.current = false;
             // Wait for any in-flight begin before revoking its grant; neither request is abandoned.
@@ -63,13 +63,13 @@ export default function RegistrationGate({ children }: {
 
     async function submit(event: React.FormEvent) {
         event.preventDefault();
-        if (operation.current || !config?.enabled || !ageBand || !config.countries.some(item => item.country === country)) return;
-        if (forChild || ageBand === 'parent-required') { setParentStep(true); return; }
+        if (operation.current || !countryPolicy || !ageBand || !countryPolicy.countries.some(item => item.country === country)) return;
+        if (ageBand === 'parent-required') { setParentStep(true); return; }
         operation.current = true; setBusy(true); setFeedback(null); began.current = true;
         const current = ++generation.current;
         const started = Date.now();
         try {
-            const result = await beginRegistration({ country, ageBand, policyVersion: config.policyVersion });
+            const result = await beginRegistration({ country, ageBand, policyVersion: countryPolicy.policyVersion });
             if (current !== generation.current) return;
             if ('authorized' in result) {
                 const expiresAt = started + result.expiresInSeconds * 1000;
@@ -83,27 +83,20 @@ export default function RegistrationGate({ children }: {
     }
 
     if (grant) return children(reset, grant.visibility);
-    const rule = config?.enabled ? config.countries.find(item => item.country === country) : undefined;
-    const countries = config?.enabled ? config.countries : [];
+    const rule = countryPolicy?.countries.find(item => item.country === country);
+    const countries = countryPolicy?.countries ?? [];
     const names = new Intl.DisplayNames(['en'], { type: 'region' });
     return <section className="signup" aria-labelledby="registration-title">
         <div className="signup__form-wrapper">
-            <h1 id="registration-title">Create an account</h1>
+            <h1 id="registration-title">Check eligibility</h1>
             {loading ? <p role="status">Checking registration availability…</p>
-                : !config?.enabled ? <div role="status">
+                : !countryPolicy ? <div role="status">
                     <p>{config ? 'New registrations are currently paused.' : 'Registration availability could not be confirmed.'}</p>
                     <button type="button" onClick={() => setRetry(value => value + 1)}>Check again</button>
                 </div>
                 : parentStep ? <><ParentRegistrationUnavailable /><button type="button" onClick={reset}>Back to registration</button></>
                 : <form className="signup__form" onSubmit={submit} aria-busy={busy}>
-                    <p>Choose the account holder’s country and age range before entering any account details. We do not ask for a date of birth.</p>
-                    <label className="signup__field" htmlFor="registration-for"><span>Who is this account for?</span>
-                        <select id="registration-for" className="signup__input" disabled={busy} value={forChild ? 'child' : 'self'}
-                            onChange={event => { setForChild(event.target.value === 'child'); setAgeBand(''); }}>
-                            <option value="self">Myself</option><option value="child">My child — I am their parent or guardian</option>
-                        </select>
-                    </label>
-                    <label className="signup__field" htmlFor="registration-country"><span>Country where the account holder lives</span>
+                    <label className="signup__field" htmlFor="registration-country"><span className="signup__label">Country where you live</span>
                         <select id="registration-country" className="signup__input" required disabled={busy} value={country}
                             onChange={event => { setCountry(event.target.value); setAgeBand(''); setFeedback(null); }}>
                             <option value="">Choose a country</option>
@@ -112,7 +105,7 @@ export default function RegistrationGate({ children }: {
                         </select>
                     </label>
                     {country === 'unavailable' && <p role="status">Registration is not available for that country yet. Please do not choose a different country.</p>}
-                    {rule && <label className="signup__field" htmlFor="registration-age"><span>Account holder’s age range</span>
+                    {rule && <label className="signup__field" htmlFor="registration-age"><span className="signup__label">Your age range</span>
                         <select id="registration-age" className="signup__input" required disabled={busy} value={ageBand}
                             onChange={event => setAgeBand(event.target.value as RegistrationAgeBand)}>
                             <option value="">Choose an age range</option>
@@ -121,14 +114,13 @@ export default function RegistrationGate({ children }: {
                             <option value="adult">18 or older</option>
                         </select>
                     </label>}
-                    {ageBand === 'minor' && !forChild && <p>Your account’s scores will be private and will not appear on public leaderboards.</p>}
+                    {ageBand === 'minor' && <p>Your account’s scores will be private and will not appear on public leaderboards.</p>}
                     <button className="signup__submit" type="submit" disabled={busy || !rule || !ageBand}>
-                        {busy ? 'Checking…' : forChild || ageBand === 'parent-required' ? 'Continue to parent-led registration' : 'Continue'}
+                        {busy ? 'Checking…' : ageBand === 'parent-required' ? 'Continue with a parent' : 'Continue'}
                     </button>
                 </form>}
             {feedback && <p role="alert">{feedback}</p>}
-            <p><Link to="/login">Already have an account? Log in</Link></p>
-            <Link to="/">Cancel</Link>
+            <p className="signup__account-link">Already have an account? <Link to="/login">Log in</Link></p>
         </div>
     </section>;
 }

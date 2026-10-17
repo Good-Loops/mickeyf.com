@@ -7,12 +7,14 @@ import { Capacitor } from '@capacitor/core';
 
 const appleSession = createNativeAppleSession(API_BASE, apiFetch);
 const nativeAppleChecks = Capacitor.isNativePlatform() && Capacitor.getPlatform() === 'ios';
-const authApi = createAuthApi(API_BASE, apiFetch, nativeAppleChecks ? appleSession.check : undefined);
+const authApi = createAuthApi(API_BASE, apiFetch, nativeAppleChecks ? appleSession.check : undefined,
+    { prepareGeneralRegistration: !LEGACY_PUBLIC_API_PREVIEW });
 export const watchAppleCredentialChanges = appleSession.subscribe;
 
 export const {
     loginRequest,
     signupRequest,
+    prepareSignupRegistration,
     registrationConfigRequest,
     beginRegistration,
     cancelRegistration,

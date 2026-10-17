@@ -3,8 +3,11 @@
 .app-shell {
     position: relative;
     isolation: isolate;
-
-    min-height: 100svh;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
     // Let the fixed sky reach the display edges, while keeping interactive
     // content clear of the notch and home indicator in either orientation.
     padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
@@ -12,11 +15,17 @@
 
     > .main {
         min-width: 0;
-        min-height: calc(90svh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+        min-height: 0;
+        overflow: auto;
+        overscroll-behavior: contain;
+        justify-content: flex-start;
 
-        > * { max-width: 100%; }
+        // Center short pages while allowing long forms to start at a reachable top edge.
+        > * { max-width: 100%; flex-shrink: 0; margin-block: auto; }
     }
 }
+
+html.canvas-fullscreen-fallback-active .app-shell > .main { overflow: visible; }
 
 @include compact-viewport {
     // Mobile browser chrome can change the large viewport while the visible

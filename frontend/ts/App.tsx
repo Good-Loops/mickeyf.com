@@ -100,8 +100,9 @@ const App: React.FC = () => {
 			<p className="footer__text">
 			© 2024 Michel Fingergut {/* · Portfolio */}
 			<> · {privacyNoticeUrl ? <PrivacyNoticeLink url={privacyNoticeUrl} />
-				: <a href="/privacy" target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">
-					Privacy notice <span>(opens in a new tab)</span>
+				: <a href="/privacy" target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer"
+                    aria-label="Privacy notice (opens in a new tab)">
+					Privacy notice
 				</a>}</>
 			</p>
 		</footer>

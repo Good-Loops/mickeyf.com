@@ -63,3 +63,42 @@ test('policy digest is canonical and changes with either rule or version', () =>
     assert(!original.digest.equals(loadRegistrationPolicy({ ...env,
         REGISTRATION_COUNTRY_RULES: '{"XY":{"parentRequiredBelow":18},"ZZ":{"parentRequiredBelow":16}}' })!.digest));
 });
+
+const generalEnv = { ...env, REGISTRATION_GENERAL_AUDIENCE_ENABLED: 'true',
+    REGISTRATION_GENERAL_AUDIENCE_POLICY_REVIEWED: 'true', REGISTRATION_GENERAL_AUDIENCE_POLICY_VERSION: 'synthetic-general-v1' };
+
+test('general audience mode is explicit, separately reviewed and separately versioned', () => {
+    assert.equal(loadRegistrationPolicy(env)!.mode, undefined);
+    assert.equal(loadRegistrationPolicy({ ...generalEnv, REGISTRATION_GENERAL_AUDIENCE_ENABLED: 'false' })!.mode, undefined);
+    const policy = loadRegistrationPolicy(generalEnv)!;
+    assert.equal(policy.mode, 'general-audience');
+    assert.equal(policy.version, generalEnv.REGISTRATION_GENERAL_AUDIENCE_POLICY_VERSION);
+    for (const changes of [{ REGISTRATION_GENERAL_AUDIENCE_ENABLED: 'TRUE' },
+        { REGISTRATION_GENERAL_AUDIENCE_POLICY_REVIEWED: undefined },
+        { REGISTRATION_GENERAL_AUDIENCE_POLICY_REVIEWED: 'false' },
+        { REGISTRATION_GENERAL_AUDIENCE_POLICY_VERSION: undefined },
+        { REGISTRATION_GENERAL_AUDIENCE_POLICY_VERSION: env.REGISTRATION_POLICY_VERSION }]) {
+        assert.throws(() => loadRegistrationPolicy({ ...generalEnv, ...changes }));
+    }
+    assert.equal(registrationPolicyForCreation(policy, { REGISTRATION_CREATION_ENABLED: 'false' }), undefined);
+});
+
+test('general signup accepts the current version alone without inventing country or age', () => {
+    const policy = loadRegistrationPolicy(generalEnv)!;
+    const request = { policyVersion: policy.version };
+    assert.deepEqual(decideRegistration(policy, request), { allowed: true, country: null, ageBand: null });
+    for (const body of [null, [], {}, { policyVersion: env.REGISTRATION_POLICY_VERSION },
+        { ...request, country: 'ZZ' }, { ...request, ageBand: 'adult' }, { ...request, parentApproved: true },
+        { ...request, dateOfBirth: '2000-01-01' }]) {
+        assert.deepEqual(decideRegistration(policy, body), { allowed: false, reason: 'INVALID_REGISTRATION' });
+    }
+});
+
+test('mode and version changes invalidate previous grants while preserving management country rules', () => {
+    const general = loadRegistrationPolicy(generalEnv)!;
+    const sameVersionLegacy = loadRegistrationPolicy({ ...env, REGISTRATION_POLICY_VERSION: general.version })!;
+    assert(!general.digest.equals(sameVersionLegacy.digest));
+    assert(!general.digest.equals(loadRegistrationPolicy({ ...generalEnv,
+        REGISTRATION_GENERAL_AUDIENCE_POLICY_VERSION: 'synthetic-general-v2' })!.digest));
+    assert.deepEqual(general.countries, loadRegistrationPolicy(env)!.countries);
+});

@@ -2,4 +2,26 @@
 
 .signup {
     @include account-form;
+
+    h1:not(.u-visually-hidden) { margin: 0 0 1.8rem; font-size: 2.2rem; font-weight: 600; line-height: 1.25; }
+
+    a, a:visited {
+        color: rgba($white, .9);
+        text-decoration: underline;
+        text-decoration-color: rgba($white, .35);
+        text-underline-offset: .2em;
+    }
+
+    a:hover { text-decoration-color: currentColor; }
+    a:focus-visible { outline: 2px solid $primary-light; outline-offset: 4px; border-radius: 2px; }
+
+    &__account-link {
+        margin-top: 2rem;
+        padding-top: 1.6rem;
+        border-top: 1px solid rgba($white, .12);
+        color: rgba($white, .65);
+        font-size: 1.4rem;
+        text-align: center;
+    }
+
 }

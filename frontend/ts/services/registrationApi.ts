@@ -1,8 +1,10 @@
 export type RegistrationAgeBand = 'parent-required' | 'minor' | 'adult';
-export type RegistrationInput = Readonly<{ country: string; ageBand: RegistrationAgeBand; policyVersion: string }>;
+export type RegistrationInput = Readonly<{ policyVersion: string }> | Readonly<{ country: string; ageBand: RegistrationAgeBand; policyVersion: string }>;
 export type RegistrationCountry = Readonly<{ country: string; parentRequiredBelow: number; adultFrom: 18 }>;
 export type RegistrationConfig = Readonly<{ enabled: false }> | Readonly<{
     enabled: true; policyVersion: string; countries: readonly RegistrationCountry[]; parentRegistrationAvailable: false;
+}> | Readonly<{
+    enabled: true; mode: 'general-audience'; policyVersion: string; optionalDetails: false; parentRegistrationAvailable: false;
 }>;
 export type RegistrationResult = Readonly<{ authorized: true; expiresInSeconds: number; scoreVisibility: 'private' | 'public' }>
     | Readonly<{ error: string }>;
@@ -15,6 +17,13 @@ const keys = (value: Record<string, unknown>, expected: string) => Object.keys(v
 export function readRegistrationConfig(value: unknown): RegistrationConfig | null {
     if (!record(value)) return null;
     if (value.enabled === false && keys(value, 'enabled')) return { enabled: false };
+    if (value.enabled === true && value.mode === 'general-audience'
+        && keys(value, 'enabled,mode,optionalDetails,parentRegistrationAvailable,policyVersion')
+        && value.optionalDetails === false && value.parentRegistrationAvailable === false
+        && typeof value.policyVersion === 'string' && /^[A-Za-z0-9._-]{1,64}$/u.test(value.policyVersion)) {
+        return { enabled: true, mode: 'general-audience', policyVersion: value.policyVersion,
+            optionalDetails: false, parentRegistrationAvailable: false };
+    }
     if (!keys(value, 'countries,enabled,parentRegistrationAvailable,policyVersion') || value.enabled !== true
         || value.parentRegistrationAvailable !== false || typeof value.policyVersion !== 'string'
         || !/^[A-Za-z0-9._-]{1,64}$/u.test(value.policyVersion) || !Array.isArray(value.countries)
@@ -32,7 +41,7 @@ export function readRegistrationConfig(value: unknown): RegistrationConfig | nul
     return { enabled: true, policyVersion: value.policyVersion, countries, parentRegistrationAvailable: false };
 }
 
-/** No browser storage, date of birth or credentials; authApi serializes cookie-changing calls. */
+/** No browser storage or credentials; the explicit server policy selects the anonymous grant contract. */
 export function createRegistrationApi(apiBase: string, fetchRequest: typeof fetch = fetch) {
     return {
         async config(signal?: AbortSignal): Promise<RegistrationConfig | null> {
@@ -44,7 +53,9 @@ export function createRegistrationApi(apiBase: string, fetchRequest: typeof fetc
         async begin(input: RegistrationInput): Promise<RegistrationResult> {
             try {
                 const response = await fetchRequest(`${apiBase}/auth/registration/begin`, { method: 'POST', credentials: 'include',
-                    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ country: input.country, ageBand: input.ageBand, policyVersion: input.policyVersion }) });
+                    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify('country' in input
+                        ? { country: input.country, ageBand: input.ageBand, policyVersion: input.policyVersion }
+                        : { policyVersion: input.policyVersion }) });
                 const result: unknown = await response.json();
                 if (!record(result)) return { error: 'UNAVAILABLE' };
                 if (response.status === 200 && keys(result, 'authorized,expiresInSeconds,scoreVisibility') && result.authorized === true

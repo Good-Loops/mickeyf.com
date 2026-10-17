@@ -1,4 +1,3 @@
-import type { SweetAlertOptions } from 'sweetalert2';
 import type { AppleProviderCredential, ProviderAuthenticationChallenge } from './authApi.ts';
 
 export type AppleWebIdentity = { auth: {
@@ -8,15 +7,14 @@ export type AppleWebIdentity = { auth: {
 type Dependencies = {
     document: Pick<Document, 'createElement' | 'head'>;
     apple(): AppleWebIdentity | undefined;
-    alert: { fire(options: SweetAlertOptions): Promise<unknown>; getPopup(): HTMLElement | null;
-        isVisible(): boolean; close(): void };
+    hasUserActivation?(): boolean;
 };
 const SCRIPT = 'https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js';
 const failure = (code: 'CANCELLED' | 'UNAVAILABLE') => Object.assign(new Error('Apple sign-in could not be completed.'), { code });
 const record = (value: unknown): value is Record<string, unknown> => value !== null && typeof value === 'object' && !Array.isArray(value);
 
 /** Apple's popup promise is the callback. Credentials never enter URLs, storage or user-profile objects. */
-export function createAppleWebCredential({ document: dom, apple, alert }: Dependencies) {
+export function createAppleWebCredential({ document: dom, apple, hasUserActivation }: Dependencies) {
     let loading: Promise<AppleWebIdentity> | undefined;
     let providerPopupPending = false;
 
@@ -51,72 +49,64 @@ export function createAppleWebCredential({ document: dom, apple, alert }: Depend
         return loading;
     }
 
-    return function acquire(client: { clientId: string; redirectUri: string }, challenge: ProviderAuthenticationChallenge,
+    function acquire(client: { clientId: string; redirectUri: string }, challenge: ProviderAuthenticationChallenge,
         signal: AbortSignal): Promise<AppleProviderCredential> {
         if (signal.aborted) return Promise.reject(failure('CANCELLED'));
-        if (alert.isVisible() || providerPopupPending) return Promise.reject(failure('UNAVAILABLE'));
+        if (providerPopupPending) return Promise.reject(failure('UNAVAILABLE'));
         return new Promise((resolve, reject) => {
-            const host = dom.createElement('div');
-            host.textContent = 'Loading Apple sign-in.';
-            let popup: HTMLElement | null = null;
-            let button: HTMLButtonElement | undefined;
             let settled = false;
-            const finish = (credential?: AppleProviderCredential, error?: Error, close = true) => {
+            const finish = (credential?: AppleProviderCredential, error?: Error) => {
                 if (settled) return;
                 settled = true;
                 signal.removeEventListener('abort', abort);
-                if (button) button.onclick = null;
-                host.replaceChildren();
-                if (close && popup && alert.getPopup() === popup) alert.close();
                 if (error) reject(error); else resolve(credential!);
             };
             const abort = () => finish(undefined, failure('CANCELLED'));
-            const dismiss = () => finish(undefined, failure('CANCELLED'), false);
             signal.addEventListener('abort', abort, { once: true });
+            const launch = (sdk: AppleWebIdentity) => {
+                if (settled || signal.aborted) return;
+                let pending: Promise<unknown>;
+                try {
+                    // Discovery preloads only the SDK. The original button click
+                    // supplies a fresh server challenge; slow setup can be retried
+                    // from that same control without adding another confirmation.
+                    if (hasUserActivation?.() === false || providerPopupPending) {
+                        finish(undefined, failure('UNAVAILABLE')); return;
+                    }
+                    providerPopupPending = true;
+                    sdk.auth.init({ clientId: client.clientId, redirectURI: client.redirectUri,
+                        scope: 'email', state: challenge.state, nonce: challenge.nonce, usePopup: true });
+                    pending = sdk.auth.signIn();
+                } catch { providerPopupPending = false; finish(undefined, failure('UNAVAILABLE')); return; }
+                void Promise.resolve(pending).then(result => {
+                    if (settled || signal.aborted) return;
+                    const authorization = record(result) ? result.authorization : undefined;
+                    if (!record(authorization) || authorization.state !== challenge.state
+                        || typeof authorization.id_token !== 'string' || authorization.id_token.length > 16_384
+                        || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(authorization.id_token)
+                        || typeof authorization.code !== 'string' || !/^[\x21-\x7e]{1,4096}$/.test(authorization.code)) {
+                        finish(undefined, failure('UNAVAILABLE')); return;
+                    }
+                    finish(Object.freeze({ idToken: authorization.id_token, authorizationCode: authorization.code }));
+                }).catch(error => {
+                    if (!settled) finish(undefined, failure(record(error)
+                        && (error.error === 'popup_closed_by_user' || error.error === 'user_cancelled_authorize')
+                        ? 'CANCELLED' : 'UNAVAILABLE'));
+                }).finally(() => { providerPopupPending = false; });
+            };
             try {
-                const showing = alert.fire({ title: 'Continue with Apple', html: host,
-                    showConfirmButton: false, showCancelButton: true, cancelButtonText: 'Cancel', allowOutsideClick: false,
-                    didOpen(element) {
-                        popup = element;
-                        void load(signal).then(sdk => {
-                            if (settled || signal.aborted) return;
-                            button = dom.createElement('button');
-                            button.type = 'button';
-                            button.className = 'provider-sign-in__button';
-                            button.textContent = 'Continue with Apple';
-                            button.onclick = () => {
-                                if (settled || signal.aborted || providerPopupPending) return;
-                                button!.disabled = true;
-                                providerPopupPending = true;
-                                let pending: Promise<unknown>;
-                                try {
-                                    sdk.auth.init({ clientId: client.clientId, redirectURI: client.redirectUri,
-                                        scope: 'email', state: challenge.state, nonce: challenge.nonce, usePopup: true });
-                                    // A real click is needed here: opening after SDK/network awaits loses user activation.
-                                    pending = sdk.auth.signIn();
-                                } catch { providerPopupPending = false; finish(undefined, failure('UNAVAILABLE')); return; }
-                                void Promise.resolve(pending).then(result => {
-                                    if (settled || signal.aborted) return;
-                                    const authorization = record(result) ? result.authorization : undefined;
-                                    if (!record(authorization) || authorization.state !== challenge.state
-                                        || typeof authorization.id_token !== 'string' || authorization.id_token.length > 16_384
-                                        || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(authorization.id_token)
-                                        || typeof authorization.code !== 'string' || !/^[\x21-\x7e]{1,4096}$/.test(authorization.code)) {
-                                        finish(undefined, failure('UNAVAILABLE')); return;
-                                    }
-                                    finish(Object.freeze({ idToken: authorization.id_token, authorizationCode: authorization.code }));
-                                }).catch(error => {
-                                    if (!settled) finish(undefined, failure(record(error) && error.error === 'popup_closed_by_user'
-                                        ? 'CANCELLED' : 'UNAVAILABLE'));
-                                }).finally(() => { providerPopupPending = false; });
-                            };
-                            host.replaceChildren(button);
-                        }).catch(() => finish(undefined, failure(signal.aborted ? 'CANCELLED' : 'UNAVAILABLE')));
-                    }, willClose: dismiss, didDestroy: dismiss,
-                });
-                popup = alert.getPopup();
-                void showing.then(dismiss).catch(() => finish(undefined, failure('UNAVAILABLE')));
+                if (signal.aborted) { abort(); return; }
+                const sdk = apple();
+                if (sdk) launch(sdk);
+                else void load(signal).then(launch).catch(() =>
+                    finish(undefined, failure(signal.aborted ? 'CANCELLED' : 'UNAVAILABLE')));
             } catch { finish(undefined, failure('UNAVAILABLE')); }
         });
-    };
+    }
+
+    return Object.assign(acquire, { async preload(signal: AbortSignal): Promise<void> {
+        if (signal.aborted) throw failure('CANCELLED');
+        await load(signal);
+        if (signal.aborted) throw failure('CANCELLED');
+    } });
 }

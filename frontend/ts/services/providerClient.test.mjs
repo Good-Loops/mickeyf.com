@@ -4,6 +4,8 @@ import { createProviderClient, ProviderCredentialError } from './providerClient.
 
 const google = { clientKey: 'google-web', provider: 'google', platform: 'web', clientId: 'synthetic.apps.googleusercontent.com' };
 const apple = { clientKey: 'apple-ios', provider: 'apple', platform: 'ios', clientId: 'com.example.synthetic' };
+const appleWeb = { clientKey: 'apple-web', provider: 'apple', platform: 'web', clientId: 'com.example.synthetic.web',
+    redirectUri: 'https://example.test/auth/apple/return', signup: true };
 const challenge = { state: Buffer.alloc(32, 1).toString('base64url'),
     nonce: Buffer.alloc(32, 2).toString('base64url'), expiresInSeconds: 300 };
 const token = 'synthetic.header.signature';
@@ -73,7 +75,7 @@ function fixture(overrides = {}) {
         ...overrides,
         identity,
     });
-    return { client, controls, calls, scripts, sdk, alert,
+    return { client, controls, calls, scripts, sdk, alert, document,
         loadGoogle() { controls.sdk = sdk; scripts.at(-1).onload(); },
         completeGoogle(value = { credential: token, state: challenge.state }) { controls.initialization.callback(value); } };
 }
@@ -107,6 +109,73 @@ test('temporarily unavailable issuance retains the exact client for deletion pro
             fetchRequest: async () => Response.json({ clients: [{ ...apple, ...changed }] }) });
         assert.deepEqual(await invalid.client.getAvailableProviderClients(), []);
     }
+});
+
+test('Apple discovery preloads only its public SDK, without authentication or replacing Google attempts', async () => {
+    let sdk;
+    const f = fixture({ apple: () => sdk,
+        fetchRequest: async () => Response.json({ clients: [google, appleWeb] }) });
+    const available = f.client.getAvailableProviderClients();
+    await nextTurn();
+    assert.equal(f.scripts.length, 1);
+    assert.equal(f.scripts[0].src, 'https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js');
+    let init = 0, signIn = 0;
+    sdk = { auth: { init() { init++; }, async signIn() { signIn++; } } };
+    f.scripts[0].onload();
+    assert.deepEqual(await available, [google, appleWeb]);
+    assert.equal(init, 0);
+    assert.equal(signIn, 0);
+    assert.equal(f.controls.alertOptions, null);
+    assert.equal(f.calls.length, 0, 'discovery alone cannot begin a provider challenge');
+});
+
+test('Google can load and render independently while Apple discovery is still waiting for its SDK', async () => {
+    let appleSdk;
+    const early = [];
+    const f = fixture({ apple: () => appleSdk,
+        fetchRequest: async () => Response.json({ clients: [google, appleWeb] }) });
+    const final = f.client.getAvailableProviderClients(clients => early.push(clients));
+    await nextTurn();
+    assert.deepEqual(early, [[google]]);
+    assert.equal(f.scripts.length, 1);
+    const appleScript = f.scripts[0];
+    const googleReady = f.client.preloadProviderCredential(google, signal());
+    await nextTurn();
+    assert.equal(f.scripts.length, 2);
+    f.loadGoogle();
+    await googleReady;
+    assert.equal(f.controls.initialization, null, 'public SDK preload does not prepare or authenticate');
+    appleSdk = { auth: { init() {}, signIn() {} } };
+    appleScript.onload();
+    assert.deepEqual(await final, [google, appleWeb]);
+});
+
+test('a blocked Apple SDK retains deletion metadata, withholds issuance and leaves Google available for retry', async () => {
+    const f = fixture({ fetchRequest: async () => Response.json({ clients: [google, appleWeb] }) });
+    const first = f.client.getAvailableProviderClients();
+    await nextTurn();
+    f.scripts[0].onerror();
+    const { signup, ...metadata } = appleWeb;
+    assert.deepEqual(await first, [google, { ...metadata, issuance: false }]);
+    assert.equal(f.controls.alertOptions, null);
+    const retry = f.client.getAvailableProviderClients();
+    await nextTurn();
+    assert.equal(f.scripts.length, 2, 'a later configuration check can retry the SDK');
+    f.scripts[1].onerror();
+    assert.equal((await retry)[1].issuance, false);
+});
+
+test('a stalled Apple SDK has a deadline without discarding Google capabilities', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const f = fixture({ fetchRequest: async () => Response.json({ clients: [google, appleWeb] }) });
+    const available = f.client.getAvailableProviderClients();
+    await nextTurn();
+    t.mock.timers.tick(10_000);
+    const result = await available;
+    assert.deepEqual(result[0], google);
+    assert.equal(result[1].issuance, false);
+    assert.equal('signup' in result[1], false);
+    assert.equal(f.scripts[0].removed, true);
 });
 
 test('disabled, malformed and duplicate discovery configurations fail closed', async () => {
@@ -165,7 +234,7 @@ test('explicit Google acquisition loads only the official script and renders a n
     const credential = f.client.acquireProviderCredential(google, challenge, signal());
     await nextTurn();
     assert.equal(f.scripts.length, 1);
-    assert.equal(f.scripts[0].src, 'https://accounts.google.com/gsi/client');
+    assert.equal(f.scripts[0].src, 'https://accounts.google.com/gsi/client?hl=en');
     assert.equal(f.scripts[0].async, true);
     assert.equal(f.controls.alertOptions.showConfirmButton, false);
     assert.equal(f.controls.alertOptions.showCancelButton, true);
@@ -178,8 +247,8 @@ test('explicit Google acquisition loads only the official script and renders a n
     assert.equal(options.ux_mode, 'popup');
     assert.equal(options.auto_select, false);
     assert.equal(options.button_auto_select, false);
-    assert.deepEqual(f.controls.rendered.options, { type: 'standard', theme: 'outline', size: 'large',
-        text: 'continue_with', state: challenge.state });
+    assert.deepEqual(f.controls.rendered.options, { type: 'standard', theme: 'outline', size: 'large', shape: 'pill',
+        width: '320', logo_alignment: 'left', text: 'continue_with', locale: 'en', state: challenge.state });
     assert.equal(f.controls.closeCount, 0);
     f.completeGoogle();
     assert.equal(await credential, token);
@@ -201,7 +270,7 @@ test('inline Google renders the official button directly, with no selector dialo
     await nextTurn();
     assert.equal(f.controls.popup, null);
     assert.equal(f.controls.alertOptions, null);
-    assert.equal(f.scripts[0].src, 'https://accounts.google.com/gsi/client');
+    assert.equal(f.scripts[0].src, 'https://accounts.google.com/gsi/client?hl=en');
     f.loadGoogle();
     await nextTurn();
     assert.equal(ready, 1);
@@ -209,12 +278,43 @@ test('inline Google renders the official button directly, with no selector dialo
     assert.equal(f.controls.initialization.nonce, challenge.nonce);
     assert.equal(f.controls.initialization.auto_select, false);
     assert.equal(f.controls.rendered.host, host);
-    assert.deepEqual(f.controls.rendered.options, { type: 'standard', theme: 'outline', size: 'large',
-        text: 'continue_with', state: challenge.state });
+    assert.deepEqual(f.controls.rendered.options, { type: 'standard', theme: 'outline', size: 'large', shape: 'pill',
+        width: '320', logo_alignment: 'left', text: 'continue_with', locale: 'en', state: challenge.state });
     f.completeGoogle();
     assert.equal(await credential, token);
     assert.equal(host.clears, 2, 'remove the used button as soon as its credential is delivered');
     assert.equal(f.controls.closeCount, 0);
+});
+
+test('official Google readiness waits for its injected stylesheet so an unstyled control cannot flash', async () => {
+    const f = fixture();
+    f.controls.sdk = f.sdk;
+    const stylesheet = Object.assign(new EventTarget(), { href: 'https://accounts.google.com/gsi/style', sheet: null });
+    f.document.head.querySelectorAll = () => [stylesheet];
+    let ready = 0;
+    const credential = f.client.acquireGoogleCredentialInline(google, challenge, inlineHost(), signal(), () => ready++);
+    await nextTurn();
+    assert(f.controls.rendered);
+    assert.equal(ready, 0);
+    stylesheet.sheet = {};
+    stylesheet.dispatchEvent(new Event('load'));
+    await nextTurn();
+    assert.equal(ready, 1);
+    f.completeGoogle();
+    assert.equal(await credential, token);
+});
+
+test('a failed Google stylesheet leaves the widget unavailable instead of advertising a ready control', async () => {
+    const f = fixture();
+    f.controls.sdk = f.sdk;
+    const stylesheet = Object.assign(new EventTarget(), { href: 'https://accounts.google.com/gsi/style', sheet: null });
+    f.document.head.querySelectorAll = () => [stylesheet];
+    let ready = 0;
+    const credential = f.client.acquireGoogleCredentialInline(google, challenge, inlineHost(), signal(), () => ready++);
+    await nextTurn();
+    stylesheet.dispatchEvent(new Event('error'));
+    await rejectsCode(credential, 'UNAVAILABLE');
+    assert.equal(ready, 0);
 });
 
 test('inline cleanup ignores late Google callbacks and permits a fresh nonce-bound render', async () => {

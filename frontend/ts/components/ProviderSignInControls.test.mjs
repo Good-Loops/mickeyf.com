@@ -24,10 +24,15 @@ function markup(options = {}) {
     }));
 }
 
-test('provider controls remain absent until capability discovery supplies a supported client', () => {
+test('discovery shows disabled placeholders without advertising a ready provider', () => {
     assert.equal(markup({ clients: [] }), '');
-    assert.equal(renderToStaticMarkup(React.createElement(AuthProvider, null,
-        React.createElement(ProviderSignInControls, { action: 'login' }))), '');
+    const pending = renderToStaticMarkup(React.createElement(AuthProvider, null,
+        React.createElement(ProviderSignInControls, { action: 'login' })));
+    assert.match(pending, /aria-busy="true"/);
+    assert.equal((pending.match(/type="button" disabled=""/g) ?? []).length, 2);
+    assert.match(pending, /Continue with Google/);
+    assert.match(pending, /Continue with Apple/);
+    assert.doesNotMatch(pending, /<iframe|<script|google-sign-in|apple-sign-in/);
 });
 
 test('Google login has a direct official-widget host and no extra selector, heading or popup markup', () => {
@@ -35,8 +40,9 @@ test('Google login has a direct official-widget host and no extra selector, head
     const rendered = renderToStaticMarkup(React.createElement(AuthProvider, null,
         React.createElement(InlineGoogleSignIn, { client: google })));
     assert.match(rendered, /class="provider-sign-in__google-host" role="group" aria-label="Continue with Google"/);
-    assert.match(rendered, /role="status">Loading Google sign-in…/);
-    assert.doesNotMatch(rendered, /Or sign in with|<h2|<button|<form|<iframe|<script|dialog|synthetic\.apps/);
+    assert.match(rendered, /provider-sign-in__button--placeholder" type="button" disabled="">Continue with Google<\/button>/);
+    assert.match(rendered, /class="u-visually-hidden" role="status">Preparing Google sign-in/);
+    assert.doesNotMatch(rendered, /Loading Google|Or sign in with|<h2|<form|<iframe|<script|dialog|synthetic\.apps/);
 });
 
 test('both entry pages render the same direct Google control without an upfront username prompt', () => {
@@ -50,13 +56,15 @@ test('direct Google host is inert while password login is busy and does not star
     const rendered = renderToStaticMarkup(React.createElement(AuthProvider, null,
         React.createElement(InlineGoogleSignIn, { client: google, disabled: true })));
     assert.match(rendered, /inert="" aria-disabled="true"/);
-    assert.doesNotMatch(rendered, /<button|Loading Google sign-in|Or sign in with/);
+    assert.match(rendered, /provider-sign-in__button--placeholder" type="button" disabled=""/);
+    assert.doesNotMatch(rendered, /Loading Google sign-in|Or sign in with/);
 });
 
 test('native login has a Continue with Apple control without a login heading', () => {
     const rendered = markup({ clients: [apple] });
     assert.match(rendered, /aria-label="Other sign-in methods"/);
-    assert.match(rendered, />Continue with Apple<\/button>/);
+    assert.match(rendered, />Continue with Apple<\/span>/);
+    assert.match(rendered, /apple-sign-in-logo-white\.png/);
     assert.doesNotMatch(rendered, /<h2|Or sign in with|google/);
 });
 
@@ -72,7 +80,7 @@ test('unavailable Apple issuance never renders a login, signup or linking button
 test('Apple signup requires the explicit server capability and does not add another Google selector', () => {
     assert.equal(markup({ clients: [google, apple], action: 'signup' }), '');
     const rendered = markup({ clients: [google, { ...apple, signup: true }], action: 'signup' });
-    assert.match(rendered, />Continue with Apple<\/button>/);
+    assert.match(rendered, />Continue with Apple<\/span>/);
     assert.match(rendered, /aria-label="Other sign-in methods"/);
     assert.equal((rendered.match(/<button/g) ?? []).length, 1);
     assert.doesNotMatch(rendered, /Google|google|Link a sign-in method|<h2/);
@@ -98,12 +106,10 @@ test('provider activity announces progress and disables all other choices', () =
     assert.equal((rendered.match(/ disabled=""/g) ?? []).length, 2);
 });
 
-test('signup-disabled guidance keeps password login and linking explicitly optional', () => {
+test('unlinked login guidance stays compact and does not imply automatic signup or matching by email', () => {
     const message = providerSignInErrorMessage('NOT_LINKED', 'login');
-    assert.match(message, /not available/);
-    assert.match(message, /password/);
-    assert.match(message, /Manage account/);
-    assert.match(message, /optional/);
+    assert.match(message, /isn’t linked yet/);
+    assert(message.length < 60);
     assert.doesNotMatch(message, /automatically|email/i);
 });
 
@@ -113,7 +119,7 @@ test('Apple onboarding and deletion failures name Apple without prescribing Goog
         assert.match(message, /Apple/);
         assert.doesNotMatch(message, /Google|Gmail|Workspace/);
     }
-    assert.match(providerSignInErrorMessage('NOT_LINKED', 'login', 'apple'), /optional/);
+    assert.match(providerSignInErrorMessage('NOT_LINKED', 'login', 'apple'), /isn’t linked yet/);
 });
 
 for (const [provider, expectedName] of [['google', 'Google'], ['apple', 'Apple']]) {

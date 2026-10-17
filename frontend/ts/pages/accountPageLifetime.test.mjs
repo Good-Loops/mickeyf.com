@@ -15,7 +15,8 @@ const mocks = {
     'jsx-dev-runtime': 'export const jsxDEV = (type, props) => ({type, props});',
     'react-router-dom': `export const useNavigate = () => path => ${scope}.navigations.push(path);`,
     AuthContext: `export const useAuth = () => ({ login: (...args) => ${scope}.login(...args) });`,
-    authService: `export const signupRequest = (...args) => ${scope}.signup(...args);`,
+    authService: `export const signupRequest = (...args) => ${scope}.signup(...args);
+        export const prepareSignupRegistration = async () => null;`,
     apiConfig: 'export const LEGACY_PUBLIC_API_PREVIEW = false;',
     scopedAlert: `export const showScopedAlert = (...args) => ${scope}.alert(...args);`,
     ...Object.fromEntries(['StaySignedInCheckbox', 'ProviderSignInControls', 'PublicAccountPreviewNotice']

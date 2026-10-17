@@ -40,6 +40,36 @@ test('preparation is explicit and closed; active policies have no implicit count
     assert.throws(() => providerReleaseEnvironment(config), /keep.*closed/);
 });
 
+test('general signup has a separate version, no new parent-account creation, and retains rollback filtering', () => {
+    const config = JSON.parse(read('./provider-release-general.json'));
+    const environment = providerReleaseEnvironment(config);
+    assert.equal(environment.REGISTRATION_GENERAL_AUDIENCE_ENABLED, 'true');
+    assert.equal(environment.PARENT_REGISTRATION_CREATION_ENABLED, 'false');
+    assert.equal(environment.PARENT_SIGNED_FORMS_ENABLED, 'true');
+    assert.equal(environment.PUBLIC_SCORE_PARTICIPATION_ENABLED, 'true');
+    const rollback = providerReleaseEnvironment(config, true);
+    for (const name of PROVIDER_CREATION_FLAGS) assert.equal(rollback[name], 'false');
+    assert.equal(rollback.REGISTRATION_GENERAL_AUDIENCE_ENABLED, 'true');
+    for (const changes of [
+        { REGISTRATION_GENERAL_AUDIENCE_ENABLED: 'false' },
+        { REGISTRATION_GENERAL_AUDIENCE_POLICY_REVIEWED: 'false' },
+        { REGISTRATION_GENERAL_AUDIENCE_POLICY_VERSION: environment.REGISTRATION_POLICY_VERSION },
+        { PARENT_REGISTRATION_CREATION_ENABLED: 'true' },
+    ]) {
+        const changed = structuredClone(config);
+        Object.assign(changed.environment, changes);
+        assert.throws(() => providerReleaseEnvironment(changed));
+    }
+    const incomplete = structuredClone(config);
+    delete incomplete.environment.REGISTRATION_GENERAL_AUDIENCE_POLICY_VERSION;
+    assert.throws(() => providerReleaseEnvironment(incomplete));
+    const pins = fixture().pins.candidate.deployment;
+    pins.providerRelease = config;
+    const smoke = render(pins).steps[7].args.slice(3).join('');
+    assert.match(smoke, /"mode":"general-audience"/u);
+    python('compile(data["smoke"],"general-smoke","exec")', { smoke });
+});
+
 test('provider rendering retains canonical scan/no-traffic checks and transports consent only as data', () => {
     const pins = fixture().pins.candidate.deployment; const config = render(pins);
     const bundle = JSON.parse(Buffer.from(config.steps[0].args.slice(3).join(''), 'base64'));

@@ -14,7 +14,8 @@ const mocks = {
     'jsx-runtime': 'export const jsx = (type, props) => ({ type, props }); export const jsxs = jsx;',
     'jsx-dev-runtime': 'export const jsxDEV = (type, props) => ({ type, props });',
     AuthContext: `export const useAuth = () => ${scope}.auth;`,
-    providerClient: `export const getAvailableProviderClients = () => ${scope}.clients();
+    providerClient: `export const getAvailableProviderClients = (...args) => ${scope}.clients(...args);
+        export const preloadProviderCredential = async () => {};
         export const acquireGoogleCredentialInline = (...args) => ${scope}.acquire(...args);
         export const acquireProviderCredential = (...args) => ${scope}.acquire(...args);`,
     providerSignupPrompt: `export const requestProviderUsername = (...args) => ${scope}.username(...args);`,
@@ -206,6 +207,26 @@ test('unmount during Google preparation aborts and ignores a late prepared attem
     assert.deepEqual(view.busy, []);
 });
 
+test('unlinked Google login removes the widget gap and offers explicit account creation without another signup attempt', async t => {
+    const view = mount(t);
+    view.render();
+    await view.giveCredential();
+    view.completions[0].resolve({ error: 'REGISTRATION_REQUIRED' });
+    await view.settle();
+    assert.equal(view.find(node => node.props?.className === 'provider-sign-in__google-host'), undefined);
+    assert.equal(view.find(node => node.props?.role === 'alert').props.children, 'This Google account isn’t linked yet.');
+    const signup = view.find(node => node.props?.to === '/signup');
+    assert(signup);
+    assert.equal(signup.props.children, 'Create account');
+    assert.equal(view.preparation.length, 1);
+    assert.equal(view.completions.length, 1, 'showing the next action cannot create or authenticate an account');
+    view.find(node => node.type === 'button' && node.props.children === 'Retry Google sign-in').props.onClick();
+    await view.settle();
+    assert.equal(view.preparation.length, 2, 'retry remounts the widget host before preparing a new attempt');
+    assert(view.find(node => node.props?.className === 'provider-sign-in__google-host'));
+    assert.equal(view.preparation[1].action, 'login');
+});
+
 test('an initial Apple maintenance outage preserves Google and restores Apple controls after checking recovered capabilities', async t => {
     const view = mount(t, ProviderSignInControls, { action: 'login' });
     const apple = { clientKey: 'apple-web', provider: 'apple', platform: 'web', clientId: 'com.example.web',
@@ -226,6 +247,21 @@ test('an initial Apple maintenance outage preserves Google and restores Apple co
     assert.equal(restored.issuance, undefined);
     assert.equal(restored.signup, true);
     assert.equal(view.preparation.length, 0, 'checking public capability availability cannot start a provider attempt');
+});
+
+test('Google controls are available before the independent Apple SDK preload finishes', async t => {
+    const view = mount(t, ProviderSignInControls, { action: 'login' });
+    const final = deferred();
+    view.hooks.clients = onAvailable => { onAvailable([google]); return final.promise; };
+    view.render(); await view.settle();
+    assert(view.find(node => node.type === InlineGoogleSignIn));
+    const pendingApple = view.find(node => node.type === 'button' && node.props.disabled
+        && node.props.children === 'Continue with Apple');
+    assert(pendingApple);
+    assert.equal(view.find(node => node.type === 'button' && node.props.children === 'Check again'), undefined);
+    final.resolve([google]); await view.settle();
+    assert.equal(view.find(node => node.type === 'button' && node.props.children === 'Continue with Apple'), undefined);
+    assert.equal(view.find(node => node.type === InlineGoogleSignIn).props.client, google);
 });
 
 test('unmount during Google completion releases the lock and ignores late success', async t => {

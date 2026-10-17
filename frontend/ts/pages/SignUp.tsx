@@ -2,21 +2,19 @@
  * Sign-up page ("/signup").
  * Creates an account, then signs in through the existing cookie-based login flow.
  */
-import { useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useEffect, useRef, useState } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { showScopedAlert } from "@/components/scopedAlert";
 import { usePageLifetime } from "@/hooks/usePageLifetime";
 import StaySignedInCheckbox from "@/components/StaySignedInCheckbox";
 import ProviderSignInControls from "@/components/ProviderSignInControls";
-import { signupRequest } from "@/services/authService";
+import { prepareSignupRegistration, signupRequest } from "@/services/authService";
 import { useAuth } from "@/context/AuthContext";
 import { signupAndLogin } from "./signupFlow.ts";
 import PublicAccountPreviewNotice from '@/components/PublicAccountPreviewNotice';
 import { LEGACY_PUBLIC_API_PREVIEW } from '@/config/apiConfig';
 
-import RegistrationGate from '@/components/RegistrationGate';
-
-export const SignupCredentials: React.FC<{ reset: () => void; scoreVisibility: 'private' | 'public' }> = ({ reset, scoreVisibility }) => {
+export const SignupCredentials: React.FC = () => {
     const [userName, setUserName] = useState("");
     const [email, setEmail] = useState("");
     const [userPassword, setUserPassword] = useState("");
@@ -28,6 +26,13 @@ export const SignupCredentials: React.FC<{ reset: () => void; scoreVisibility: '
     const { login } = useAuth();
     const navigate = useNavigate();
     const pageLifetime = usePageLifetime();
+    useEffect(() => {
+        if (LEGACY_PUBLIC_API_PREVIEW) return;
+        const controller = new AbortController();
+        // Prepare only the server-advertised anonymous grant; this never supplies eligibility answers.
+        void prepareSignupRegistration(controller.signal);
+        return () => controller.abort();
+    }, []);
     const showSignupSuccess = async (signal = pageLifetime.current) => {
         if (!signal || signal.aborted) return;
         await showScopedAlert({ title: "You're all set!",
@@ -60,7 +65,8 @@ export const SignupCredentials: React.FC<{ reset: () => void; scoreVisibility: '
             if (result.status === "rejected") {
                 switch (result.error) {
                 case "REGISTRATION_REQUIRED":
-                    reset();
+                    await showScopedAlert({ title: "Registration unavailable",
+                        text: "We could not confirm this registration step. Please try again shortly.", icon: "info" }, signal);
                     return;
                 case "INVALID_EMAIL":
                     await showScopedAlert({ title: "Invalid email", icon: "warning" }, signal);
@@ -123,8 +129,6 @@ export const SignupCredentials: React.FC<{ reset: () => void; scoreVisibility: '
             <h1 id="signup-title" className="u-visually-hidden">Sign up</h1>
             <div className="signup__form-wrapper">
                 <PublicAccountPreviewNotice />
-                <p>{scoreVisibility === 'private' ? 'Your scores will stay off public leaderboards.' : 'Your scores can appear on public leaderboards.'}</p>
-                <button type="button" disabled={busy} onClick={reset}>Back to country and age range</button>
                 <form className="signup__form" onSubmit={handleSubmit} aria-busy={busy}>
                     <label className="signup__field" htmlFor="signup-username">
                         <span className="signup__label">Username</span>
@@ -181,12 +185,12 @@ export const SignupCredentials: React.FC<{ reset: () => void; scoreVisibility: '
                 {!LEGACY_PUBLIC_API_PREVIEW && <ProviderSignInControls action="signup" userName={userName} rememberMe={rememberMe}
                     disabled={loading} operationLock={submitting} onBusyChange={setProviderBusy}
                     onSuccess={() => { void showSignupSuccess(); }} />}
+                <p className="signup__account-link">Already have an account? <Link to="/login">Log in</Link></p>
             </div>
         </section>
     );
 };
 
-const SignUp: React.FC = () => <RegistrationGate>{(reset, scoreVisibility) =>
-    <SignupCredentials reset={reset} scoreVisibility={scoreVisibility} />}</RegistrationGate>;
+const SignUp: React.FC = () => <SignupCredentials />;
 
 export default SignUp;

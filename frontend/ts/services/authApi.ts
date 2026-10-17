@@ -180,10 +180,11 @@ async function acquireProviderProof(clientKey: string, challenge: ProviderAuthen
 }
 
 export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetch,
-    checkAppleSession?: () => Promise<AppleSessionState>) {
+    checkAppleSession?: () => Promise<AppleSessionState>, options: { prepareGeneralRegistration?: boolean } = {}) {
     let pendingMutation: Promise<void> = Promise.resolve();
     let providerLoginGeneration = 0;
     let appleRevocationPending = false;
+    let generalRegistrationDeadline = 0;
     type PreparedLogin = {
         clientKey: string; state: string; nonce: string; deadline: number;
         action: 'login' | 'signup';
@@ -206,6 +207,24 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
         const result = pendingMutation.then(operation);
         pendingMutation = result.then(() => undefined, () => undefined);
         return result;
+    }
+
+    async function ensureGeneralRegistration(signal?: AbortSignal): Promise<string | null> {
+        if (signal?.aborted) return 'CANCELLED';
+        if (!options.prepareGeneralRegistration) return null;
+        if (generalRegistrationDeadline > Date.now() + 10_000) return null;
+        const policy = await registration.config(signal);
+        if (signal?.aborted) return 'CANCELLED';
+        if (!policy) return 'UNAVAILABLE';
+        if (!policy.enabled) return 'REGISTRATION_REQUIRED';
+        // Older staged policies keep their existing explicit grant contract.
+        if (!('mode' in policy) || policy.mode !== 'general-audience') return null;
+        const startedAt = Date.now();
+        const result = await registration.begin({ policyVersion: policy.policyVersion });
+        if ('error' in result) return result.error;
+        if (result.scoreVisibility !== 'private') return 'UNAVAILABLE';
+        generalRegistrationDeadline = startedAt + result.expiresInSeconds * 1000;
+        return generalRegistrationDeadline > Date.now() + 10_000 ? null : 'REGISTRATION_REQUIRED';
     }
 
     async function postUserOperation(body: UserOperation): Promise<Response> {
@@ -396,6 +415,10 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
     async function runProviderAuthentication(input: ProviderAuthenticationInput, acquireCredential: AcquireProviderCredential,
         signal?: AbortSignal): Promise<ProviderAuthenticationResult> {
         if (signal?.aborted) return { error: 'CANCELLED' };
+        if (input.action === 'signup') {
+            const error = await ensureGeneralRegistration(signal);
+            if (error) return { error };
+        } else generalRegistrationDeadline = 0;
         const beginning = await postProviderOperation('begin', { action: input.action, clientKey: input.clientKey });
         if (signal?.aborted) return { error: 'CANCELLED' };
         if (!beginning.ok) return { error: beginning.error };
@@ -423,6 +446,7 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
                 : input.action === 'link' ? { password: input.password } : { confirmation: 'DELETE' }),
             ...(input.action === 'signup' ? { userName: input.userName } : {}),
         });
+        if (input.action === 'signup') generalRegistrationDeadline = 0;
         if (!completion.ok) {
             // UNAVAILABLE includes an uncertain transport result: its cookie may
             // already belong to a new session. Definite rejection cannot replace it.
@@ -470,6 +494,11 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
         const generation = ++providerLoginGeneration;
         return enqueueMutation(async () => {
             if (signal?.aborted || generation !== providerLoginGeneration) return { error: 'CANCELLED' };
+            if (action === 'signup') {
+                const error = await ensureGeneralRegistration(signal);
+                if (error) return { error };
+                if (signal?.aborted || generation !== providerLoginGeneration) return { error: 'CANCELLED' };
+            } else generalRegistrationDeadline = 0;
             const startedAt = Date.now();
             // Begin changes the cookie too. Even an abandoned render must wait
             // for this response before a password login can use the queue.
@@ -528,24 +557,35 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
     const registration = createRegistrationApi(apiBase, fetchRequest);
     return {
         registrationConfigRequest: registration.config,
+        // A general grant contains no country, age, account details or provider credential.
+        // Keep its cookie mutation in the same queue as signup and provider challenges.
+        prepareSignupRegistration: (signal?: AbortSignal) => enqueueMutation(() => ensureGeneralRegistration(signal)),
         beginRegistration: (input: RegistrationInput) => {
             invalidatePreparedLogins();
+            generalRegistrationDeadline = 0;
             const request = { ...input };
             return enqueueMutation(() => registration.begin(request));
         },
         cancelRegistration: () => {
             invalidatePreparedLogins();
+            generalRegistrationDeadline = 0;
             return enqueueMutation(registration.cancel);
         },
         loginRequest: (payload: LoginPayload) => {
             invalidatePreparedLogins();
+            generalRegistrationDeadline = 0;
             const request = { ...payload };
             return enqueueMutation(() => loginRequest(request));
         },
         signupRequest: (payload: SignupPayload) => {
             invalidatePreparedLogins();
             const request = { ...payload };
-            return enqueueMutation(() => signupRequest(request));
+            return enqueueMutation(async () => {
+                const error = await ensureGeneralRegistration();
+                if (error) return { error };
+                try { return await signupRequest(request); }
+                finally { generalRegistrationDeadline = 0; }
+            });
         },
         // A guarded read can cause logout. Plain web readers keep their existing
         // non-mutating behavior, including during an open provider dialog.
@@ -556,7 +596,7 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
                 const result = await renewRequest();
                 // Anonymous renewal leaves the provider binding untouched.
                 // Authenticated/uncertain renewal may have rotated its cookie.
-                if (result.loggedIn) invalidatePreparedLogins();
+                if (result.loggedIn) { invalidatePreparedLogins(); generalRegistrationDeadline = 0; }
                 return result;
             } catch (error) {
                 invalidatePreparedLogins();
@@ -565,6 +605,7 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
         }),
         logoutRequest: () => {
             invalidatePreparedLogins();
+            generalRegistrationDeadline = 0;
             return enqueueMutation(logoutRequest);
         },
         deleteFamilyRequest: (grant: string, childAccountIds: readonly string[]) => {

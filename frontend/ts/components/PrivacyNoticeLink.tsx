@@ -4,7 +4,8 @@ import { parsePrivacyNoticeUrl } from '@/config/privacyNoticeUrl';
 export default function PrivacyNoticeLink({ url = import.meta.env.VITE_PRIVACY_NOTICE_URL }: { url?: string }) {
     const href = parsePrivacyNoticeUrl(url);
     if (!href) return null;
-    return <a href={href} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">
-        Privacy notice <span>(opens in a new tab)</span>
+    return <a href={href} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer"
+        aria-label="Privacy notice (opens in a new tab)">
+        Privacy notice
     </a>;
 }

@@ -2,9 +2,10 @@
  * Header component with navigation links.
  * Shows different links based on authentication status.
  */
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { NavLink, useLocation } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
+import { trackNavigationIndicator } from './components/navigationIndicator';
 
 type NavGroup = 'entertainment' | 'account';
 
@@ -12,6 +13,8 @@ const Header: React.FC = () => {
     const { isAuthenticated, userName, logout } = useAuth();
     const { pathname } = useLocation();
     const navRef = useRef<HTMLElement | null>(null);
+    const indicatorTrack = useRef<HTMLLIElement | null>(null);
+    const indicator = useRef<HTMLSpanElement | null>(null);
     const [openGroup, setOpenGroup] = useState<NavGroup | null>(null);
 
     const routeBelongsTo = (basePath: string) => (
@@ -20,7 +23,13 @@ const Header: React.FC = () => {
 
     const entertainmentIsActive = ['/animations', '/games', '/leaderboards']
         .some(routeBelongsTo);
-    const accountIsActive = ['/login', '/signup', '/account'].some(routeBelongsTo);
+    const accountIsActive = ['/login', '/signup', '/account', '/parent-accounts'].some(routeBelongsTo);
+
+    useLayoutEffect(() => {
+        if (navRef.current && indicatorTrack.current && indicator.current) {
+            return trackNavigationIndicator(navRef.current, indicatorTrack.current, indicator.current);
+        }
+    }, [pathname, isAuthenticated]);
 
     useEffect(() => {
         setOpenGroup(null);
@@ -73,6 +82,9 @@ const Header: React.FC = () => {
         <header className="header">
             <nav className="nav" aria-label="Primary navigation" ref={navRef}>
                 <ul className="nav__list">
+                    <li className="nav__indicator-track" aria-hidden="true" ref={indicatorTrack}>
+                        <span className="nav__indicator" ref={indicator} />
+                    </li>
                     <li className="nav__item">
                         <NavLink className="nav__link" to="/" end>
                             Home

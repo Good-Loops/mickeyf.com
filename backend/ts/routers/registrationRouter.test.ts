@@ -14,12 +14,25 @@ import { asyncHandler } from '../middleware/errorHandling';
 
 const secret = 'synthetic-registration-http-session-secret';
 const origin = 'https://mickeyf.com';
-async function fixture(run: (url: string, queries: string[]) => Promise<void>, enabled = true) {
+async function fixture(run: (url: string, queries: string[]) => Promise<void>, enabled = true, generalAudience = false) {
     const queries: string[] = [];
     const database = { async query({ sql }: { sql: string }) { queries.push(sql); return [{ affectedRows: 1 }]; },
-        async getConnection() { assert.fail('HTTP preflight must not create an account'); } } as unknown as Pool;
+        async getConnection() {
+            assert(generalAudience, 'legacy HTTP preflight must not borrow an account connection');
+            return { async query({ sql }: { sql: string }) {
+                queries.push(sql);
+                if (sql.includes('GET_LOCK')) return [[{ acquired: 1 }]];
+                if (sql.includes('RELEASE_LOCK')) return [[{ released: 1 }]];
+                if (sql.startsWith('SELECT COUNT(*)')) return [[{ pendingCount: 0 }]];
+                assert(!/\b(?:users|account_registration_profiles|account_score_permissions)\b/u.test(sql));
+                return [{ affectedRows: 1 }];
+            }, release() {}, destroy() {} };
+        } } as unknown as Pool;
     const policy = enabled ? loadRegistrationPolicy({ REGISTRATION_ENABLED: 'true', REGISTRATION_POLICY_REVIEWED: 'true',
-        REGISTRATION_POLICY_VERSION: 'synthetic', REGISTRATION_COUNTRY_RULES: '{"ZZ":{"parentRequiredBelow":15}}' }) : undefined;
+        REGISTRATION_POLICY_VERSION: 'synthetic', REGISTRATION_COUNTRY_RULES: '{"ZZ":{"parentRequiredBelow":15}}',
+        ...(generalAudience ? { REGISTRATION_GENERAL_AUDIENCE_ENABLED: 'true',
+            REGISTRATION_GENERAL_AUDIENCE_POLICY_REVIEWED: 'true',
+            REGISTRATION_GENERAL_AUDIENCE_POLICY_VERSION: 'synthetic-general' } : {}) }) : undefined;
     const registration = createRegistrationAuthorization(database, policy);
     const app = express();
     app.use(cookieParser(secret));
@@ -93,3 +106,40 @@ test('HTTP cancellation is origin-bound, idempotent and cannot create or clear a
     assert.equal(queries.length, 2);
     for (const sql of queries) assert.match(sql, /binding_hash = \? AND consumed_at IS NULL/u);
 }));
+
+test('general config and begin require no country or age and preserve the existing provider binding on refresh', async () => fixture(async (url, queries) => {
+    const config = await fetch(`${url}/auth/registration/config`);
+    assert.deepEqual(await config.json(), { enabled: true, mode: 'general-audience', policyVersion: 'synthetic-general',
+        optionalDetails: false, parentRegistrationAvailable: false });
+    assert.equal(config.headers.get('cache-control'), 'no-store');
+    const first = await begin(url, { policyVersion: 'synthetic-general' });
+    assert.equal(first.status, 200);
+    assert.deepEqual(await first.json(), { authorized: true, expiresInSeconds: 300, scoreVisibility: 'private' });
+    const cookie = first.headers.get('set-cookie')!.split(';')[0];
+    assert.match(cookie, /^__session=/u);
+    assert.match(first.headers.get('set-cookie')!, /HttpOnly; Secure/u);
+    queries.length = 0;
+    const refreshed = await fetch(`${url}/auth/registration/begin`, { method: 'POST',
+        headers: { origin, cookie, 'content-type': 'application/json' }, body: JSON.stringify({ policyVersion: 'synthetic-general' }) });
+    assert.equal(refreshed.status, 200);
+    const result = await refreshed.json() as { authorized: boolean; expiresInSeconds: number; scoreVisibility: string };
+    assert.equal(result.authorized, true); assert.equal(result.scoreVisibility, 'private');
+    assert(result.expiresInSeconds >= 295 && result.expiresInSeconds <= 300);
+    assert.equal(refreshed.headers.get('set-cookie'), null, 'refresh must preserve an already prepared Google nonce binding');
+    assert(queries.some(sql => sql.startsWith('INSERT INTO provider_auth_attempts')));
+    assert(queries.every(sql => !/registration_profiles|registration_authorizations/u.test(sql)));
+}, true, true));
+
+test('general begin rejects invented age/country, stale policy and untrusted origin without SQL or cookie changes', async () => fixture(async (url, queries) => {
+    for (const [body, requestOrigin, error] of [
+        [{ policyVersion: 'synthetic-general', ageBand: 'adult' }, origin, 'INVALID_REGISTRATION'],
+        [{ policyVersion: 'synthetic-general', country: 'ZZ' }, origin, 'INVALID_REGISTRATION'],
+        [{ policyVersion: 'synthetic' }, origin, 'INVALID_REGISTRATION'],
+        [{ policyVersion: 'synthetic-general' }, 'https://attacker.example', 'INVALID_CONTEXT'],
+    ] as const) {
+        const response = await begin(url, body, requestOrigin);
+        assert.deepEqual(await response.json(), { error });
+        assert.equal(response.headers.get('set-cookie'), null);
+    }
+    assert.deepEqual(queries, []);
+}, true, true));

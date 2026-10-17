@@ -6,9 +6,9 @@ import { fileURLToPath } from 'node:url';
 import test from 'node:test';
 import { localProviderEnvironment, startLocalProviderDevelopment } from './start-local-provider-backend.mjs';
 
-const configuration = JSON.parse(await readFile(new URL('./provider-release-us-br.json', import.meta.url), 'utf8'));
+const configuration = JSON.parse(await readFile(new URL('./provider-release-general.json', import.meta.url), 'utf8'));
 
-test('local profile retains the approved country/consent controls and exact database identity', () => {
+test('local profile uses general signup policy and keeps production-database creation closed for reader compatibility', () => {
     const environment = localProviderEnvironment(configuration, { NODE_ENV: 'development' });
     assert.equal(environment.DB_HOST, '127.0.0.1');
     assert.equal(environment.DB_NAME, 'cms');
@@ -17,6 +17,11 @@ test('local profile retains the approved country/consent controls and exact data
     assert.equal(environment.LUDOLUME_LOCAL_PROVIDER_MAINTENANCE_ENABLED, 'true');
     assert.equal(environment.LUDOLUME_LOCAL_PROVIDER_EXPECTED_SERVER_UUID, configuration.environment.APPLE_MAINTENANCE_EXPECTED_SERVER_UUID);
     assert.equal(environment.SSLKEYLOGFILE, '');
+    assert.equal(environment.REGISTRATION_GENERAL_AUDIENCE_ENABLED, 'true');
+    assert.equal(environment.REGISTRATION_CREATION_ENABLED, 'false');
+    assert.equal(environment.PROVIDER_GOOGLE_SIGNUP_ENABLED, 'false');
+    assert.equal(environment.PROVIDER_APPLE_SIGNUP_ENABLED, 'false');
+    assert.equal(environment.PARENT_REGISTRATION_CREATION_ENABLED, 'false');
     assert.equal(environment.PARENT_SIGNED_FORMS_ENABLED, 'true');
     assert.deepEqual(JSON.parse(environment.PARENT_REGISTRATION_COUNTRIES), ['US']);
     assert.deepEqual(JSON.parse(environment.PUBLIC_SCORE_COUNTRY_RULES).BR.selfAgeBands, ['adult']);

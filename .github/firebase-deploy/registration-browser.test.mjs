@@ -6,141 +6,113 @@ import { createViteTestServer } from '../../frontend/ts/testSupport/createViteTe
 
 const { chromium } = createRequire(import.meta.url)('playwright-core');
 const root = fileURLToPath(new URL('../../frontend/', import.meta.url));
-const policy = { enabled: true, policyVersion: 'synthetic', parentRegistrationAvailable: false,
-    countries: [{ country: 'ZZ', parentRequiredBelow: 15, adultFrom: 18 }] };
+const policy = { enabled: true, mode: 'general-audience', policyVersion: 'synthetic-general',
+    optionalDetails: false, parentRegistrationAvailable: false };
 let server, browser, origin;
-
 before(async () => {
     server = await createViteTestServer({ root, configFile: false,
         resolve: { alias: { '@': `${root}/ts` } }, esbuild: { jsx: 'automatic' },
         define: { 'import.meta.env.VITE_USE_PUBLIC_API': '"0"', 'import.meta.env.VITE_DEV_API_URL': '""' },
-        logLevel: 'error', server: { host: '127.0.0.1', port: 0, strictPort: false } }, { browser: true });
-    await server.listen();
-    origin = `http://127.0.0.1:${server.httpServer.address().port}`;
-    // A new, ephemeral headless profile; never connects to the user's open Chrome.
+        logLevel: 'error', server: { host: '127.0.0.1', port: 0 } }, { browser: true });
+    await server.listen(); origin = `http://127.0.0.1:${server.httpServer.address().port}`;
     browser = await chromium.launch({ channel: 'chrome', headless: true });
 });
 after(async () => { await browser?.close(); await server?.close(); });
 
-async function fixture(t, { config = policy, begin } = {}) {
-    const context = await browser.newContext();
-    t.after(() => context.close());
-    const page = await context.newPage();
-    page.on('pageerror', error => t.diagnostic(error.message));
-    page.setDefaultTimeout(10_000);
+async function fixture(t, signup = async () => ({ error: 'REGISTRATION_REQUIRED' })) {
+    const context = await browser.newContext(); t.after(() => context.close());
+    const page = await context.newPage(); page.setDefaultTimeout(10_000);
     const calls = [];
     await context.route('**/*', async route => {
-        const url = new URL(route.request().url());
-        // No provider, production API, telemetry or remote assets in these tests.
+        const request = route.request(), url = new URL(request.url());
+        // Every API/provider response is synthetic; no account or production state can change.
         if (url.origin !== origin) return route.abort();
         if (url.pathname.startsWith('/auth/') || url.pathname.startsWith('/api/')) {
-            const body = route.request().postDataJSON();
-            calls.push({ path: url.pathname, body });
+            const body = request.postDataJSON(); calls.push({ path: url.pathname, body });
             let result = { status: 200, body: {} };
-            if (url.pathname === '/auth/registration/config') result.body = config;
-            else if (url.pathname === '/auth/registration/begin') result = begin ? await begin(body) : {
-                status: 200, body: { authorized: true, expiresInSeconds: 300, scoreVisibility: body.ageBand === 'minor' ? 'private' : 'public' },
-            };
-            else if (url.pathname === '/auth/registration/cancel') result.body = { cancelled: true };
-            else if (url.pathname === '/auth/providers/config') result.body = { clients: [] };
+            if (url.pathname === '/auth/providers/config') result.body = { clients: [] };
+            else if (url.pathname === '/auth/registration/config') result.body = policy;
+            else if (url.pathname === '/auth/registration/begin') {
+                assert.deepEqual(body, { policyVersion: policy.policyVersion });
+                result.body = { authorized: true, expiresInSeconds: 300, scoreVisibility: 'private' };
+            }
             else if (url.pathname === '/auth/verify-token' || url.pathname === '/auth/renew') result.body = { loggedIn: false };
+            else if (url.pathname === '/api/users' && body?.type === 'signup') result.body = await signup(body);
             else result = { status: 503, body: { error: 'UNAVAILABLE' } };
             return route.fulfill({ status: result.status, contentType: 'application/json', body: JSON.stringify(result.body) });
         }
         return route.continue();
     });
     await page.goto(`${origin}/signup`);
+    await page.locator('#signup-password').waitFor();
     return { page, calls };
 }
-const noCredentials = async page => assert.equal(await page.locator('#signup-email, #signup-password').count(), 0);
-async function select(page, band = 'minor') {
-    await page.locator('#registration-country').selectOption('ZZ');
-    await page.locator('#registration-age').selectOption(band);
+async function fillSynthetic(page) {
+    await page.locator('#signup-username').fill('Synthetic Layout Player');
+    await page.locator('#signup-email').fill('synthetic@example.test');
+    await page.locator('#signup-password').fill('Synthetic test password 123!');
 }
 
-test('closed registration collects no credentials while existing login remains reachable', async t => {
-    const { page } = await fixture(t, { config: { enabled: false } });
-    await page.getByText('New registrations are currently paused.').waitFor();
-    await noCredentials(page);
-    await page.getByRole('link', { name: 'Already have an account? Log in' }).click();
-    await page.locator('input[type=password]').waitFor();
-});
-
-test('unsupported country and both parent-led entry paths never request authorization or child credentials', async t => {
+test('signup opens the ordinary form without a country, Who selector, Cancel or extra entry action', async t => {
     const { page, calls } = await fixture(t);
-    await page.locator('#registration-country').selectOption('unavailable');
-    await page.getByText('Registration is not available for that country yet.', { exact: false }).waitFor();
-    await noCredentials(page);
-    await select(page, 'parent-required');
-    await page.getByRole('button', { name: 'Continue to parent-led registration' }).click();
-    await page.getByRole('link', { name: 'Continue to parent-led registration' }).waitFor();
-    await noCredentials(page);
-    await page.getByRole('button', { name: 'Back to registration' }).click();
-    await page.locator('#registration-for').selectOption('child');
-    await select(page, 'minor');
-    await page.getByRole('button', { name: 'Continue to parent-led registration' }).click();
-    await page.getByRole('heading', { name: 'A parent or guardian needs to lead this step' }).waitFor();
-    assert.equal(calls.filter(call => call.path.endsWith('/begin')).length, 0);
-    await noCredentials(page);
-});
-
-test('minor preflight precedes credentials; duplicate clicks, back and reload cannot reuse UI authorization', async t => {
-    let release;
-    const pending = new Promise(resolve => { release = resolve; });
-    const { page, calls } = await fixture(t, { begin: async () => {
-        await pending; return { status: 200, body: { authorized: true, expiresInSeconds: 300, scoreVisibility: 'private' } };
-    } });
-    await select(page);
-    await page.getByRole('button', { name: 'Continue', exact: true }).evaluate(button => { button.click(); button.click(); });
-    await page.getByRole('button', { name: 'Checking…', exact: true }).waitFor();
-    await noCredentials(page);
-    release();
-    await page.locator('#signup-email').waitFor();
-    assert.equal(calls.filter(call => call.path.endsWith('/begin')).length, 1);
-    await page.getByText('Your scores will stay off public leaderboards.').waitFor();
-    await page.locator('#signup-email').fill('synthetic@example.test');
-    await page.getByRole('button', { name: 'Back to country and age range' }).click();
-    await page.locator('#registration-country').waitFor();
-    await noCredentials(page);
-    await select(page, 'adult');
-    await page.getByRole('button', { name: 'Continue', exact: true }).click();
-    await page.locator('#signup-email').waitFor();
-    assert.equal(await page.locator('#signup-email').inputValue(), '');
-    await page.reload();
-    await page.locator('#registration-country').waitFor();
-    await noCredentials(page);
-    assert.ok(calls.some(call => call.path.endsWith('/cancel')));
-});
-
-test('server rejection and expiry return to eligibility without claiming an account was created', async t => {
-    let tries = 0;
-    const { page } = await fixture(t, { begin: async () => ++tries === 1
-        ? { status: 503, body: { error: 'UNAVAILABLE' } }
-        : { status: 200, body: { authorized: true, expiresInSeconds: 1, scoreVisibility: 'public' } } });
-    await select(page, 'adult');
-    await page.getByRole('button', { name: 'Continue', exact: true }).click();
-    await page.getByRole('alert').filter({ hasText: 'We could not confirm' }).waitFor();
-    await noCredentials(page);
-    await page.getByRole('button', { name: 'Continue', exact: true }).click();
-    await page.locator('#signup-email').waitFor();
-    await page.getByText('This registration step expired.', { exact: false }).waitFor();
-    await noCredentials(page);
-});
-
-test('leaving while preflight is pending queues cancellation and ignores its late approval', async t => {
-    let release;
-    const pending = new Promise(resolve => { release = resolve; });
-    const { page, calls } = await fixture(t, { begin: async () => {
-        await pending; return { status: 200, body: { authorized: true, expiresInSeconds: 300, scoreVisibility: 'private' } };
-    } });
-    await select(page);
-    await page.getByRole('button', { name: 'Continue', exact: true }).click();
-    await page.getByRole('button', { name: 'Checking…', exact: true }).waitFor();
-    await page.getByRole('link', { name: 'Already have an account? Log in' }).click();
-    await page.locator('input[type=password]').waitFor();
-    release();
-    await page.waitForResponse(response => new URL(response.url()).pathname.endsWith('/cancel'));
-    assert.ok(page.url().endsWith('/login'));
-    assert.equal(calls.filter(call => call.path.endsWith('/begin')).length, 1);
+    assert.equal(await page.locator('#signup-username, #signup-email, #signup-password').count(), 3);
+    assert.equal(await page.locator('select').count(), 0);
+    assert.equal(await page.getByRole('button', { name: 'Create account', exact: true }).count(), 0);
+    assert.equal(await page.getByRole('link', { name: 'Cancel', exact: true }).count(), 0);
     assert.equal(calls.filter(call => call.path === '/api/users').length, 0);
+    assert.equal(calls.some(call => call.body && ('country' in call.body || 'ageBand' in call.body)), false);
+    await page.getByRole('link', { name: 'Log in', exact: true }).click();
+    await page.locator('#login-password').waitFor();
+});
+
+test('server registration rejection does not invent authorization, claim success or start login', async t => {
+    const { page, calls } = await fixture(t);
+    await fillSynthetic(page);
+    await page.getByRole('button', { name: 'Sign up', exact: true }).click();
+    await page.getByRole('heading', { name: 'Registration unavailable', exact: true }).waitFor();
+    assert.equal(calls.filter(call => call.path === '/api/users').length, 1);
+    assert.equal(calls.find(call => call.path === '/api/users').body.type, 'signup');
+    assert.equal(calls.filter(call => call.path === '/auth/registration/begin').length, 1);
+    assert.equal(await page.getByRole('heading', { name: "You're all set!", exact: true }).count(), 0);
+    assert.equal(page.url(), `${origin}/signup`);
+});
+
+test('duplicate submit events send only one signup while the result is unresolved', async t => {
+    let release;
+    const pending = new Promise(resolve => { release = resolve; });
+    const { page, calls } = await fixture(t, async () => { await pending; return { error: 'DUPLICATE_USER' }; });
+    await fillSynthetic(page);
+    await page.locator('.signup__form').evaluate(form => {
+        form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+        form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    });
+    await page.getByRole('button', { name: 'Signing up…', exact: true }).waitFor();
+    assert.equal(calls.filter(call => call.path === '/api/users').length, 1);
+    release();
+    await page.getByRole('heading', { name: 'Duplicate user', exact: true }).waitFor();
+    assert.equal(calls.filter(call => call.path === '/api/users').length, 1);
+});
+
+test('leaving an unresolved signup ignores its late result and does not open a stale dialog', async t => {
+    let release;
+    const pending = new Promise(resolve => { release = resolve; });
+    const { page, calls } = await fixture(t, async () => { await pending; return { error: 'REGISTRATION_REQUIRED' }; });
+    await fillSynthetic(page);
+    await page.getByRole('button', { name: 'Sign up', exact: true }).click();
+    await page.getByRole('button', { name: 'Signing up…', exact: true }).waitFor();
+    await page.getByRole('link', { name: 'Log in', exact: true }).click();
+    await page.locator('#login-password').waitFor();
+    const finished = page.waitForResponse(response => new URL(response.url()).pathname === '/api/users');
+    release(); await finished;
+    assert.equal(calls.filter(call => call.path === '/api/users').length, 1);
+    assert.equal(await page.locator('.swal2-popup').count(), 0);
+    assert.equal(page.url(), `${origin}/login`);
+});
+
+test('parent-led registration remains a separate account-management route', async t => {
+    const { page } = await fixture(t);
+    await page.goto(`${origin}/parent-accounts`);
+    await page.getByRole('heading', { name: 'Parent and child accounts', exact: true }).waitFor();
+    assert.equal(await page.locator('#signup-password').count(), 0);
+    await page.getByRole('link', { name: 'Manage your own account', exact: true }).waitFor();
 });

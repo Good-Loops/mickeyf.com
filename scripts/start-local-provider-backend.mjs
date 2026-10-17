@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { providerConfigurationSha256, providerReleaseEnvironment } from './provider-release-config.mjs';
+import { PROVIDER_CREATION_FLAGS, providerConfigurationSha256, providerReleaseEnvironment } from './provider-release-config.mjs';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const expectedServerUuid = 'd1e6865c-ecad-11ee-a6b0-42010a400002';
@@ -31,24 +31,29 @@ export function localProviderEnvironment(configuration, inherited = process.env)
         || inherited.APPLE_SIGN_IN_PRIVATE_KEY !== undefined || inherited.APPLE_TOKEN_ENCRYPTION_KEYS !== undefined) {
         throw new Error('Local provider startup requires development with user ADC and no injected Apple keys.');
     }
-    return { ...inherited, ...providerReleaseEnvironment(configuration), NODE_ENV: 'development',
+    const environment = { ...inherited, ...providerReleaseEnvironment(configuration), NODE_ENV: 'development',
         DB_HOST: '127.0.0.1', DB_PORT: '3306', DB_NAME: 'cms', DB_USER: 'cms_mickeyf',
         LUDOLUME_LOCAL_PROVIDER_RUNTIME: 'true', LUDOLUME_ISOLATED_RUNTIME: 'false',
         LUDOLUME_LOCAL_PROVIDER_EXPECTED_SERVER_UUID: expectedServerUuid,
         LUDOLUME_LOCAL_PROVIDER_MAINTENANCE_ENABLED: 'true', SSLKEYLOGFILE: '',
     };
+    // This profile shares the production database. The old serving readers ignore
+    // private permissions, so local account creation must wait for their replacement.
+    for (const name of PROVIDER_CREATION_FLAGS) environment[name] = 'false';
+    return environment;
 }
 
 export async function main(args) {
     if (args.length !== 1 || !['--plan-only', '--run'].includes(args[0])) {
         throw new Error('Use --plan-only to inspect the public profile, or --run to start local real-account development.');
     }
-    const configuration = JSON.parse(await readFile(new URL('./provider-release-us-br.json', import.meta.url), 'utf8'));
+    const configuration = JSON.parse(await readFile(new URL('./provider-release-general.json', import.meta.url), 'utf8'));
     const environment = localProviderEnvironment(configuration);
     const plan = { mode: 'local-provider-development', publicConfigurationSha256: providerConfigurationSha256(configuration),
         database: { proxy: '127.0.0.1:3306', database: 'cms', account: 'cms_mickeyf@%', expectedServerUuid },
         httpBind: '127.0.0.1:8080', credentials: 'Existing user Application Default Credentials; consumed only by backend',
-        rootEnvModified: false, accountCreation: 'Only through explicit user actions and reviewed US/Brazil rules',
+        rootEnvModified: false, signupMode: 'general-audience; no country or age questions',
+        accountCreation: 'Closed in this production-database dev profile until compatible public leaderboard readers serve all traffic',
         maintenance: 'Initial and periodic bounded expiry cleanup plus due Apple revocations; requires healthy maintenance before Apple issuance',
         privateValuesIncluded: false };
     if (args[0] === '--plan-only') { console.log(JSON.stringify({ planOnly: true, ...plan })); return; }

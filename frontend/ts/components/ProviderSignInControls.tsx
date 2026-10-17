@@ -1,6 +1,7 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
-import { acquireGoogleCredentialInline, acquireProviderCredential, getAvailableProviderClients,
+import { acquireGoogleCredentialInline, acquireProviderCredential, getAvailableProviderClients, preloadProviderCredential,
     type PublicProviderClient } from '@/services/providerClient';
 import Swal from './siteAlert';
 import { requestProviderUsername } from './providerSignupPrompt';
@@ -23,8 +24,8 @@ export function providerSignInErrorMessage(error: string, action: ProviderAction
     const providerName = provider === 'apple' ? 'Apple' : 'Google';
     switch (error) {
         case 'CANCELLED': return null;
-        case 'REGISTRATION_REQUIRED': return 'To create an account, open Sign up and complete the country and age-range step. Existing accounts can still log in.';
-        case 'NOT_LINKED': return `New ${providerName} accounts are not available on this server yet. Existing password accounts can sign in normally; linking ${providerName} in Manage account is optional.`;
+        case 'REGISTRATION_REQUIRED': return action === 'login' ? `This ${providerName} account isn’t linked yet.` : 'Signup is temporarily unavailable. Please try again.';
+        case 'NOT_LINKED': return `This ${providerName} account isn’t linked yet.`;
         case 'ALREADY_LINKED': return `This ${providerName} account already has a Ludolume account. Go to Log in and continue with ${providerName}.`;
         case 'DUPLICATE_USER': return `That username or email is already in use. Choose another username, or log in to your existing account to link ${providerName}.`;
         case 'INVALID_USERNAME': return 'Choose a username with 1–64 characters and no control characters.';
@@ -49,7 +50,7 @@ export function providerSignInErrorMessage(error: string, action: ProviderAction
     }
 }
 
-/** Linking and native flows still use the provider helper's explicit dialog. */
+/** Google web uses its official control; Apple opens its provider popup from this control. */
 export function ProviderSignInButtons({ clients, action, busyClient, disabled, onSelect }: {
     clients: readonly PublicProviderClient[];
     action: ProviderAction;
@@ -67,14 +68,17 @@ export function ProviderSignInButtons({ clients, action, busyClient, disabled, o
             {action === 'link' && <h2 className="provider-sign-in__heading" id={headingId}>Link a sign-in method</h2>}
             <div className="provider-sign-in__buttons">
                 {choices.map(client => (
-                    <button className={`provider-sign-in__button${client.provider === 'google' && client.platform !== 'web' ? ' provider-sign-in__button--native-google' : ''}`}
+                    <button className={`provider-sign-in__button${client.provider === 'google' && client.platform !== 'web' ? ' provider-sign-in__button--native-google' : ''}${client.provider === 'apple' && action !== 'link' ? ' provider-sign-in__button--apple' : ''}`}
                         type="button" key={client.clientKey}
                         disabled={disabled || busyClient !== null} onClick={() => onSelect(client)}>
                         {busyClient === client.clientKey ? 'Please wait…'
                             : client.provider === 'google' ? (client.platform === 'web' ? 'google'
                                 : <img src={`/images/google-sign-in-${client.platform}.png`} alt="Sign in with Google"
                                     height="44" width={client.platform === 'ios' ? 188 : 198} />)
-                                : action === 'link' ? 'Apple account' : 'Continue with Apple'}
+                                : action === 'link' ? 'Apple account' : <>
+                                    <img src="/images/apple-sign-in-logo-white.png" alt="" aria-hidden="true" width="42" height="42" />
+                                    <span>Continue with Apple</span>
+                                </>}
                     </button>
                 ))}
             </div>
@@ -97,6 +101,7 @@ export function InlineGoogleSignIn({ client, action = 'login', userName = '', re
     const [retry, setRetry] = useState(0);
     const [phase, setPhase] = useState<'preparing' | 'ready' | 'completing' | 'retry'>('preparing');
     const [feedback, setFeedback] = useState<string | null>(null);
+    const [needsAccount, setNeedsAccount] = useState(false);
     const previouslyAuthenticated = useRef(isAuthenticated);
 
     useEffect(() => {
@@ -115,18 +120,24 @@ export function InlineGoogleSignIn({ client, action = 'login', userName = '', re
         const active = () => current && !controller.signal.aborted;
         const fail = (code: string) => {
             setPhase('retry');
+            setNeedsAccount(action === 'login' && ['REGISTRATION_REQUIRED', 'NOT_LINKED'].includes(code));
             setFeedback(code === 'CANCELLED'
                 ? 'Google sign-in expired or changed. Please try again.'
                 : providerSignInErrorMessage(code, action));
         };
         setPhase('preparing');
         setFeedback(null);
+        setNeedsAccount(false);
         void (async () => {
             try {
+                // Public SDK loading can overlap the serialized anonymous grant/challenge requests.
+                // Catch immediately so a slow server response never leaves a rejected preload unhandled.
+                const sdkReady = preloadProviderCredential(client, controller.signal).then(() => true, () => false);
                 // Signup preserves the registration preflight cookie; ordinary login retains its existing flow.
                 const prepared = await latest.current.prepareProviderLogin(client.clientKey, { signal: controller.signal }, action);
                 if (!active()) return;
                 if ('error' in prepared) { fail(prepared.error); return; }
+                if (!await sdkReady) { if (active()) fail('UNAVAILABLE'); return; }
                 const idToken = await acquireGoogleCredentialInline(client, prepared.challenge, element,
                     controller.signal, () => { if (active()) setPhase('ready'); });
                 if (!active()) return;
@@ -178,17 +189,25 @@ export function InlineGoogleSignIn({ client, action = 'login', userName = '', re
     if (LEGACY_PUBLIC_API_PREVIEW || client.issuance === false || isAuthenticated) return null;
     return (
         <div className="provider-sign-in__google" aria-busy={phase === 'preparing' || phase === 'completing'}>
-            <div ref={host} className="provider-sign-in__google-host" role="group" aria-label="Continue with Google"
-                inert={disabled || phase !== 'ready'} aria-disabled={disabled || phase !== 'ready'} />
-            {!disabled && phase === 'preparing' && <p className="provider-sign-in__feedback" role="status">Loading Google sign-in…</p>}
-            {phase === 'completing' && <p className="provider-sign-in__feedback" role="status">Signing in…</p>}
-            {phase === 'retry' && <>
+            {phase !== 'retry' && <div ref={host} className="provider-sign-in__google-host" role="group" aria-label="Continue with Google"
+                hidden={phase !== 'ready'}
+                inert={disabled || phase !== 'ready'} aria-disabled={disabled || phase !== 'ready'} />}
+            {(phase === 'preparing' || phase === 'completing') && <button className="provider-sign-in__button provider-sign-in__button--placeholder"
+                type="button" disabled>Continue with Google</button>}
+            {phase === 'preparing' && <span className="u-visually-hidden" role="status">Preparing Google sign-in</span>}
+            {phase === 'completing' && <span className="u-visually-hidden" role="status">Signing in</span>}
+            {phase === 'retry' && <div className="provider-sign-in__retry">
                 {feedback && <p className="provider-sign-in__feedback provider-sign-in__feedback--error" role="alert">{feedback}</p>}
+                {needsAccount && <Link className="provider-sign-in__account-action" to="/signup">Create account</Link>}
                 <button className="provider-sign-in__button" type="button" disabled={disabled}
-                    onClick={() => { if (!latest.current.operationLock?.current) setRetry(value => value + 1); }}>
+                    onClick={() => {
+                        if (latest.current.operationLock?.current) return;
+                        setPhase('preparing');
+                        setRetry(value => value + 1);
+                    }}>
                     Retry Google sign-in
                 </button>
-            </>}
+            </div>}
         </div>
     );
 }
@@ -197,9 +216,10 @@ export default function ProviderSignInControls({ action, userName = '', remember
     operationLock, onBusyChange, onSuccess }: ProviderSignInControlsProps) {
     const { authenticateWithProvider, prepareProviderLogin, completeProviderLogin } = useAuth();
     const [clients, setClients] = useState<PublicProviderClient[]>([]);
+    const [configurationLoading, setConfigurationLoading] = useState(true);
     const [configurationRetry, setConfigurationRetry] = useState(0);
     const [busyClient, setBusyClient] = useState<string | null>(null);
-    const [feedback, setFeedback] = useState<{ text: string; error: boolean } | null>(null);
+    const [feedback, setFeedback] = useState<{ text: string; error: boolean; needsAccount?: boolean } | null>(null);
     const mounted = useRef(false);
     const operation = useRef<AbortController | null>(null);
     const passwordPopup = useRef<HTMLElement | null>(null);
@@ -210,10 +230,13 @@ export default function ProviderSignInControls({ action, userName = '', remember
         if (LEGACY_PUBLIC_API_PREVIEW) return;
         mounted.current = true;
         let current = true;
-        void getAvailableProviderClients().then(available => {
+        setConfigurationLoading(true);
+        void getAvailableProviderClients(available => {
             if (current) setClients(available);
+        }).then(available => {
+            if (current) { setClients(available); setConfigurationLoading(false); }
         }).catch(() => {
-            if (current) setClients([]);
+            if (current) { setClients([]); setConfigurationLoading(false); }
         });
         return () => {
             current = false;
@@ -301,7 +324,8 @@ export default function ProviderSignInControls({ action, userName = '', remember
             if (!mounted.current || controller.signal.aborted) return;
             if ('error' in result) {
                 const text = providerSignInErrorMessage(result.error, action, client.provider);
-                if (text) setFeedback({ text, error: true });
+                if (text) setFeedback({ text, error: true,
+                    needsAccount: action === 'login' && ['REGISTRATION_REQUIRED', 'NOT_LINKED'].includes(result.error) });
                 return;
             }
             if (action === 'link' ? !('linked' in result) : !('user_name' in result)) {
@@ -330,10 +354,18 @@ export default function ProviderSignInControls({ action, userName = '', remember
         }
     };
 
-    if (LEGACY_PUBLIC_API_PREVIEW || clients.length === 0) return null;
+    if (LEGACY_PUBLIC_API_PREVIEW) return null;
+    if (configurationLoading && clients.length === 0 && action !== 'link') return <div className="provider-sign-in" aria-busy="true">
+        <span className="u-visually-hidden" role="status">Checking sign-in methods</span>
+        {['Google', 'Apple'].map(provider => <button key={provider}
+            className="provider-sign-in__button provider-sign-in__button--placeholder" type="button" disabled>
+            Continue with {provider}
+        </button>)}
+    </div>;
+    if (clients.length === 0) return null;
     const inlineGoogle = action !== 'link' ? clients.find(client => client.clientKey === 'google-web'
         && client.issuance !== false && (action !== 'signup' || client.signup === true)) : undefined;
-    const unavailableApple = clients.some(client => client.provider === 'apple' && client.issuance === false);
+    const unavailableApple = !configurationLoading && clients.some(client => client.provider === 'apple' && client.issuance === false);
     return (
         <div className="provider-sign-in">
             {inlineGoogle && <InlineGoogleSignIn client={inlineGoogle} action={action === 'signup' ? 'signup' : 'login'}
@@ -342,6 +374,10 @@ export default function ProviderSignInControls({ action, userName = '', remember
                 onBusyChange={onBusyChange} onSuccess={onSuccess} />}
             <ProviderSignInButtons clients={clients} action={action} busyClient={busyClient}
                 disabled={disabled} onSelect={client => { void selectProvider(client); }} />
+            {configurationLoading && action !== 'link' && <>
+                <span className="u-visually-hidden" role="status">Checking Apple sign-in availability</span>
+                <button className="provider-sign-in__button provider-sign-in__button--placeholder" type="button" disabled>Continue with Apple</button>
+            </>}
             {unavailableApple && <div role="status">
                 <p>Apple sign-in is temporarily unavailable.</p>
                 <button className="provider-sign-in__button" type="button" disabled={disabled || busyClient !== null || operationLock?.current === true}
@@ -349,6 +385,7 @@ export default function ProviderSignInControls({ action, userName = '', remember
             </div>}
             {feedback && <p className={`provider-sign-in__feedback${feedback.error ? ' provider-sign-in__feedback--error' : ''}`}
                 role={feedback.error ? 'alert' : 'status'}>{feedback.text}</p>}
+            {feedback?.needsAccount && <Link className="provider-sign-in__account-action" to="/signup">Create account</Link>}
         </div>
     );
 }

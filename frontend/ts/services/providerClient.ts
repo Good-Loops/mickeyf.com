@@ -19,7 +19,7 @@ type GoogleIdentity = {
     initialize(options: { client_id: string; nonce: string; callback(response: unknown): void;
         ux_mode: 'popup'; auto_select: false; button_auto_select: false }): void;
     renderButton(element: HTMLElement, options: { type: 'standard'; theme: 'outline'; size: 'large';
-        text: 'continue_with'; state: string }): void;
+        shape: 'pill'; width: string; logo_alignment: 'left'; text: 'continue_with'; locale: 'en'; state: string }): void;
 };
 type ProviderClientDependencies = {
     apiBase: string;
@@ -30,11 +30,12 @@ type ProviderClientDependencies = {
     document: Pick<Document, 'createElement' | 'head'>;
     google(): GoogleIdentity | undefined;
     apple?(): AppleWebIdentity | undefined;
+    hasUserActivation?(): boolean;
     alert: { fire(options: SweetAlertOptions): Promise<unknown>; getPopup(): HTMLElement | null;
         isVisible(): boolean; close(): void };
 };
 
-const GOOGLE_SCRIPT = 'https://accounts.google.com/gsi/client';
+const GOOGLE_SCRIPT = 'https://accounts.google.com/gsi/client?hl=en';
 const IO_TIMEOUT_MS = 10_000;
 const RANDOM_VALUE = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
 
@@ -125,17 +126,18 @@ async function cancellable<Result>(operation: (signal: AbortSignal) => Promise<R
 /** Browser/bridge seams keep credential lifecycle tests independent of real providers. */
 export function createProviderClient(dependencies: ProviderClientDependencies) {
     const { apiBase, fetchRequest, identity, alert, document: dom } = dependencies;
-    const appleCredential = createAppleWebCredential({ document: dom, alert, apple: dependencies.apple ?? (() => undefined) });
+    const appleCredential = createAppleWebCredential({ document: dom, apple: dependencies.apple ?? (() => undefined),
+        hasUserActivation: dependencies.hasUserActivation });
     const web = !dependencies.isNative && dependencies.platform === 'web';
     const native = dependencies.isNative && ['ios', 'android'].includes(dependencies.platform);
     let googleLoad: Promise<GoogleIdentity> | undefined;
     let acquiring = false;
     let nativeCancellationUnconfirmed = false;
 
-    async function getAvailableProviderClients(): Promise<PublicProviderClient[]> {
+    async function getAvailableProviderClients(onAvailable?: (clients: PublicProviderClient[]) => void): Promise<PublicProviderClient[]> {
         if (!web && !native) return [];
         try {
-            return await cancellable(async signal => {
+            const available = await cancellable(async signal => {
                 const response = await fetchRequest(`${apiBase}/auth/providers/config`, {
                     method: 'GET', credentials: 'include', signal,
                 });
@@ -152,6 +154,18 @@ export function createProviderClient(dependencies: ProviderClientDependencies) {
                     ? clients.filter((client): client is PublicProviderClient => client !== null
                         && client.platform === dependencies.platform && capabilities[client.provider] === true) : [];
             }, IO_TIMEOUT_MS);
+            // Loading public SDK code does not prepare a provider attempt or replace Google's binding.
+            // A blocked Apple script must not remove otherwise available Google sign-in.
+            if (web && available.some(client => client.clientKey === 'apple-web' && client.issuance !== false)) {
+                onAvailable?.(available.filter(client => client.clientKey !== 'apple-web'));
+                try { await cancellable(signal => appleCredential.preload(signal), IO_TIMEOUT_MS); }
+                catch {
+                    return available.map(client => client.clientKey === 'apple-web'
+                        ? Object.freeze({ clientKey: client.clientKey, provider: client.provider, platform: client.platform,
+                            clientId: client.clientId, redirectUri: client.redirectUri, issuance: false as const }) : client);
+                }
+            }
+            return available;
         } catch { return []; }
     }
 
@@ -187,6 +201,33 @@ export function createProviderClient(dependencies: ProviderClientDependencies) {
         return googleLoad;
     }
 
+    function waitForGoogleButtonStyles(signal: AbortSignal): Promise<void> {
+        // GIS injects a normal stylesheet link before rendering its public control.
+        // Wait for that resource rather than exposing an unstyled, briefly grey button.
+        const links = Array.from(dom.head.querySelectorAll?.<HTMLLinkElement>('link[rel="stylesheet"]') ?? [])
+            .filter(link => {
+                try { const url = new URL(link.href); return url.origin === 'https://accounts.google.com' && url.pathname === '/gsi/style'; }
+                catch { return false; }
+            });
+        return Promise.all(links.map(link => link.sheet ? Promise.resolve() : new Promise<void>((resolve, reject) => {
+            let finished = false;
+            const finish = (error?: ProviderCredentialError) => {
+                if (finished) return;
+                finished = true; clearTimeout(timer);
+                link.removeEventListener('load', loaded); link.removeEventListener('error', failed);
+                signal.removeEventListener('abort', aborted);
+                if (error) reject(error); else resolve();
+            };
+            const loaded = () => finish();
+            const failed = () => finish(new ProviderCredentialError('UNAVAILABLE'));
+            const aborted = () => finish(new ProviderCredentialError('CANCELLED'));
+            const timer = setTimeout(failed, IO_TIMEOUT_MS);
+            link.addEventListener('load', loaded, { once: true }); link.addEventListener('error', failed, { once: true });
+            signal.addEventListener('abort', aborted, { once: true });
+            if (signal.aborted) aborted(); else if (link.sheet) loaded();
+        }))).then(() => undefined);
+    }
+
     function renderGoogleCredential(client: PublicProviderClient, challenge: ProviderAuthenticationChallenge,
         host: HTMLElement, signal: AbortSignal, onReady?: () => void): Promise<string> {
         return new Promise((resolve, reject) => {
@@ -218,9 +259,12 @@ export function createProviderClient(dependencies: ProviderClientDependencies) {
                 });
                 host.replaceChildren();
                 // Only a real click on Google's official control opens sign-in; never One Tap or a synthetic click.
-                sdk.renderButton(host, { type: 'standard', theme: 'outline', size: 'large',
-                    text: 'continue_with', state: challenge.state });
-                onReady?.();
+                const width = Math.max(200, Math.min(400, Math.round(host.clientWidth || host.parentElement?.clientWidth || 320)));
+                sdk.renderButton(host, { type: 'standard', theme: 'outline', size: 'large', shape: 'pill',
+                    width: String(width), logo_alignment: 'left', text: 'continue_with', locale: 'en', state: challenge.state });
+                void waitForGoogleButtonStyles(signal).then(() => {
+                    if (!settled && !signal.aborted) onReady?.();
+                }).catch(error => finish(undefined, sanitizedError(error)));
             }).catch(error => finish(undefined, sanitizedError(error)));
         });
     }
@@ -327,6 +371,14 @@ export function createProviderClient(dependencies: ProviderClientDependencies) {
 
     return {
         getAvailableProviderClients,
+        preloadProviderCredential: (client: PublicProviderClient, signal: AbortSignal) =>
+            cancellable(async activeSignal => {
+                const selected = readClient(client);
+                if (!web || selected?.clientKey !== 'google-web' || selected.issuance === false) {
+                    throw new ProviderCredentialError('UNAVAILABLE');
+                }
+                await loadGoogle(activeSignal);
+            }, IO_TIMEOUT_MS, signal),
         acquireProviderCredential,
         acquireGoogleCredentialInline: (client: PublicProviderClient, challenge: ProviderAuthenticationChallenge,
             host: HTMLElement, signal: AbortSignal, onReady?: () => void) =>
@@ -342,6 +394,7 @@ function configuredClient() {
         return createProviderClient({ apiBase: config.API_BASE, fetchRequest: transport.apiFetch,
             platform: capacitor.Capacitor.getPlatform(), isNative: capacitor.Capacitor.isNativePlatform(),
             identity, alert: alerts.default, document,
+            hasUserActivation: () => navigator.userActivation?.isActive !== false,
             google: () => {
                 const sdk = (window as Window & { google?: { accounts?: { id?: GoogleIdentity } } }).google?.accounts?.id;
                 return sdk && typeof sdk.initialize === 'function' && typeof sdk.renderButton === 'function' ? sdk : undefined;
@@ -355,9 +408,14 @@ function configuredClient() {
     return configured;
 }
 
-export async function getAvailableProviderClients(): Promise<PublicProviderClient[]> {
-    try { return await (await configuredClient()).getAvailableProviderClients(); }
+export async function getAvailableProviderClients(onAvailable?: (clients: PublicProviderClient[]) => void): Promise<PublicProviderClient[]> {
+    try { return await (await configuredClient()).getAvailableProviderClients(onAvailable); }
     catch { return []; }
+}
+
+export async function preloadProviderCredential(client: PublicProviderClient, signal: AbortSignal): Promise<void> {
+    try { await (await configuredClient()).preloadProviderCredential(client, signal); }
+    catch (error) { throw sanitizedError(error); }
 }
 
 export async function acquireProviderCredential(client: PublicProviderClient, challenge: ProviderAuthenticationChallenge,

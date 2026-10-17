@@ -30,6 +30,8 @@ const noticeNames = ['PARENT_PRIVACY_NOTICE_URL', 'PUBLIC_SCORE_PRIVACY_NOTICE_U
 const texts = ['PARENT_CONSENT_TEXT', 'PUBLIC_SCORE_CONSENT_TEXT'];
 const documents = ['REGISTRATION_COUNTRY_RULES', 'PARENT_REGISTRATION_COUNTRIES', 'PUBLIC_SCORE_COUNTRY_RULES'];
 const policyKeys = [...versions, ...noticeNames, ...texts, ...documents];
+const generalPolicyKeys = ['REGISTRATION_GENERAL_AUDIENCE_ENABLED', 'REGISTRATION_GENERAL_AUDIENCE_POLICY_REVIEWED',
+    'REGISTRATION_GENERAL_AUDIENCE_POLICY_VERSION'];
 export const PROVIDER_CREATION_FLAGS = Object.freeze(['REGISTRATION_CREATION_ENABLED', 'PROVIDER_GOOGLE_SIGNUP_ENABLED',
     'PROVIDER_APPLE_SIGNUP_ENABLED', 'PARENT_REGISTRATION_CREATION_ENABLED']);
 
@@ -45,16 +47,28 @@ export function providerReleaseEnvironment(config, rollback = false) {
     keys(config, ['phase', 'environment'], 'configuration');
     if (!['prepare', 'active'].includes(config.phase)) fail('phase must be prepare or active');
     const env = config.environment;
-    keys(env, [...Object.keys(PROVIDER_FIXED_ENV), ...flags, ...(config.phase === 'active' ? policyKeys : [])], 'environment');
+    const generalAudience = record(env) && generalPolicyKeys.some(name => Object.hasOwn(env, name));
+    keys(env, [...Object.keys(PROVIDER_FIXED_ENV), ...flags, ...(config.phase === 'active' ? policyKeys : []),
+        ...(generalAudience ? generalPolicyKeys : [])], 'environment');
     for (const [name, value] of Object.entries(env)) {
         if (typeof value !== 'string' || value.length > 16_384 || value.includes('\0')) fail(`${name} must be bounded public text`);
     }
     for (const [name, value] of Object.entries(PROVIDER_FIXED_ENV)) if (env[name] !== value) fail(`fixed pin differs: ${name}`);
     for (const name of flags) if (!['true', 'false'].includes(env[name])) fail(`${name} must be an exact boolean`);
     if (config.phase === 'prepare') {
+        if (generalAudience) fail('general signup requires an explicit active policy bundle');
         for (const name of flags) if (env[name] !== 'false') fail(`preparation must keep ${name} closed`);
     } else {
-        for (const name of flags) if (env[name] !== 'true') fail(`active release requires explicit ${name}`);
+        for (const name of flags) {
+            const expected = generalAudience && name === 'PARENT_REGISTRATION_CREATION_ENABLED' ? 'false' : 'true';
+            if (env[name] !== expected) fail(`active release requires explicit ${name}=${expected}`);
+        }
+        if (generalAudience && (env.REGISTRATION_GENERAL_AUDIENCE_ENABLED !== 'true'
+            || env.REGISTRATION_GENERAL_AUDIENCE_POLICY_REVIEWED !== 'true'
+            || !/^[A-Za-z0-9._-]{1,64}$/u.test(env.REGISTRATION_GENERAL_AUDIENCE_POLICY_VERSION)
+            || env.REGISTRATION_GENERAL_AUDIENCE_POLICY_VERSION === env.REGISTRATION_POLICY_VERSION)) {
+            fail('general signup requires its own reviewed version');
+        }
         for (const name of versions) if (!/^[A-Za-z0-9._-]{1,64}$/u.test(env[name])) fail(`${name} must be an explicit version`);
         for (const name of texts) if (!env[name].trim() || env[name].length > 8000) fail(`${name} is empty or too long`);
         for (const name of noticeNames) {

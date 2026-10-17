@@ -8,6 +8,24 @@ const config = { enabled: true, policyVersion: 'synthetic', parentRegistrationAv
 const input = { country: 'ZZ', ageBand: 'minor', policyVersion: 'synthetic' };
 const response = (body, status = 200) => new Response(JSON.stringify(body), { status });
 const approved = { authorized: true, expiresInSeconds: 300, scoreVisibility: 'private' };
+const general = { enabled: true, mode: 'general-audience', policyVersion: 'synthetic-general',
+    optionalDetails: false, parentRegistrationAvailable: false };
+
+test('general-audience configuration is explicit and does not accept implied eligibility or optional details', () => {
+    assert.deepEqual(readRegistrationConfig(general), general);
+    for (const invalid of [{ ...general, mode: 'general' }, { ...general, optionalDetails: true },
+        { ...general, parentRegistrationAvailable: true }, { ...general, countries: config.countries },
+        { ...general, ageBand: 'adult' }, { ...general, policyVersion: '' }]) assert.equal(readRegistrationConfig(invalid), null);
+});
+
+test('general-audience begin sends only the reviewed policy version, never fabricated country or age', async () => {
+    const api = createRegistrationApi('', async (_url, options) => {
+        assert.deepEqual(JSON.parse(options.body), { policyVersion: general.policyVersion });
+        assert.equal(options.credentials, 'include');
+        return response(approved);
+    });
+    assert.deepEqual(await api.begin({ policyVersion: general.policyVersion, email: 'must-not-send@example.test' }), approved);
+});
 
 test('configuration fails closed for absent/unreviewed policy and unsupported parent capability', () => {
     assert.deepEqual(readRegistrationConfig({ enabled: false }), { enabled: false });

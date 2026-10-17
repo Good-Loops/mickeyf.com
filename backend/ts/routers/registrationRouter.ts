@@ -11,6 +11,8 @@ export function createRegistrationRouter(registration: RegistrationAuthorization
     router.use((_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
     router.get('/config', (_req, res) => {
         const policy = registration.policy;
+        if (policy?.mode === 'general-audience') return res.json({ enabled: true, mode: policy.mode,
+            policyVersion: policy.version, optionalDetails: false, parentRegistrationAvailable: false });
         return res.json(policy ? { enabled: true, policyVersion: policy.version,
             countries: Object.entries(policy.countries).map(([country, rule]) => ({ country,
                 parentRequiredBelow: rule.parentRequiredBelow, adultFrom: 18 })), parentRegistrationAvailable: false }
@@ -32,17 +34,22 @@ export function createRegistrationRouter(registration: RegistrationAuthorization
         standardHeaders: 'draft-8', legacyHeaders: false, passOnStoreError: false,
         message: { error: 'RATE_LIMITED' } }), json({ limit: '1kb', strict: true }), asyncHandler(async (req, res) => {
         try {
-            // Reject unknown/parent-led policy cases before collecting provider or account credentials.
+            // Check policy before collecting provider or account credentials.
             if (!registration.policy) return res.status(503).json({ error: 'REGISTRATION_CLOSED' });
-            const context = await readContext(req, 'begin');
-            if (!context || context.account !== null || !context.anonymousCookie) {
+            // A refresh must not invalidate an already prepared provider nonce on this browser.
+            const existing = registration.policy.mode === 'general-audience' ? await readContext(req, 'complete') : null;
+            const context = existing ?? await readContext(req, 'begin');
+            if (!context || context.account !== null || context.session !== null
+                || (registration.policy.mode !== 'general-audience' && !context.anonymousCookie)) {
                 return res.status(403).json({ error: 'INVALID_CONTEXT' });
             }
             const result = await registration.begin(context, req.body);
             if (!result.allowed) return res.status(result.reason === 'PARENT_REQUIRED' ? 403 : 400).json({ error: result.reason });
             const cookie = context.anonymousCookie;
-            res.cookie(cookie.name, cookie.value, { ...sessionCookieOptions(isProduction, cookie.name), maxAge: cookie.maxAge });
-            return res.json({ authorized: true, expiresInSeconds: Math.floor(cookie.maxAge / 1000),
+            if (cookie) res.cookie(cookie.name, cookie.value,
+                { ...sessionCookieOptions(isProduction, cookie.name), maxAge: cookie.maxAge });
+            const remaining = cookie ? cookie.maxAge : Math.max(0, (context.bindingExpiresAt ?? 0) - Date.now());
+            return res.json({ authorized: true, expiresInSeconds: Math.floor(remaining / 1000),
                 scoreVisibility: 'private' });
         } catch (error) {
             return res.status(error instanceof RegistrationRequiredError ? 403 : 503)

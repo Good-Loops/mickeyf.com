@@ -1,6 +1,8 @@
 @use '../abstracts' as *;
 
 .provider-sign-in {
+    display: grid;
+    gap: 1.2rem;
     margin-block: 2.4rem;
     padding-top: 2rem;
     border-top: 1px solid rgba($white, .16);
@@ -16,20 +18,22 @@
     }
 
     &__buttons {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 1rem;
+        display: grid;
+        gap: 1.2rem;
     }
 
     &__google-host {
         display: flex;
         justify-content: center;
-        min-height: 44px;
+        min-height: 40px;
+
+        &[hidden] { display: none; }
 
         &[inert] { opacity: .55; pointer-events: none; }
     }
 
     &__button {
+        width: 100%;
         flex: 1 1 15rem;
         min-height: 44px;
         padding: 1rem 1.6rem;
@@ -46,6 +50,46 @@
         &:disabled { opacity: .55; cursor: wait; }
     }
 
+    &__button--apple, &__button--placeholder {
+        position: relative;
+        overflow: hidden;
+        min-height: 40px;
+        padding: 0 12px 0 38px;
+        border: 1px solid #dadce0;
+        border-radius: 999px;
+        background: #fff;
+        color: #3c4043;
+        font-family: 'Google Sans', Arial, sans-serif;
+        font-size: 14px;
+        font-weight: 500;
+        line-height: 21px;
+        letter-spacing: .25px;
+
+        &:hover:not(:disabled) { background: #f8faff; }
+    }
+
+    // The supplied logo contains white margins; align its visible ink with the GIS logo slot.
+    &__button--apple img { position: absolute; inset: .5px auto auto 0; width: 42px; height: 42px; }
+
+    &__button--placeholder:disabled {
+        background: transparent;
+        border-color: rgba($white, .25);
+        color: rgba($white, .8);
+        opacity: 1;
+    }
+
+    &__retry { display: grid; gap: 1rem; }
+
+    &__account-action, &__account-action:visited {
+        width: fit-content;
+        color: $white;
+        font-weight: 600;
+        text-decoration: underline;
+        text-underline-offset: .2em;
+    }
+
+    &__account-action:focus-visible { outline: 2px solid $primary-light; outline-offset: 4px; }
+
     // Preserve the aspect ratio and colors of Google's supplied platform artwork.
     &__button--native-google {
         flex: 0 1 auto;
@@ -59,7 +103,7 @@
     }
 
     &__feedback {
-        margin-top: 1.2rem;
+        margin: 0;
         overflow-wrap: anywhere;
 
         &--error { color: #ffd5db; }

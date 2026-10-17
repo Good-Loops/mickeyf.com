@@ -15,7 +15,9 @@ test('notice is a native accessible link with an announced new tab, opener isola
     assert.match(html, /href="https:\/\/notice.example.test\/privacy#children"/u);
     assert.match(html, /target="_blank"/u); assert.match(html, /rel="noopener noreferrer"/u);
     assert.match(html, /referrerPolicy="no-referrer"/u);
-    assert.match(html, /Privacy notice <span>\(opens in a new tab\)<\/span>/u);
+    assert.match(html, /aria-label="Privacy notice \(opens in a new tab\)"/u);
+    assert.match(html, />Privacy notice<\/a>/u);
+    assert.doesNotMatch(html, /<span>/u);
 });
 test('an unset or invalid notice is omitted, never replaced by a guessed route or executable link', () => {
     for (const value of [undefined, '', 'javascript:alert(1)', '/privacy', 'https://u:p@notice.example.test']) assert.equal(render(value), '');
