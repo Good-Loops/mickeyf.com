@@ -160,6 +160,15 @@ function unchangedTemplateService(service) {
     for (const key of ['template', 'latestReadyRevision', 'latestCreatedRevision']) delete result[key];
     return result;
 }
+function unchangedTrafficService(service) {
+    const result = serviceConfiguration(service);
+    // Untagged zero-traffic revisions can retire; this pointer follows the serving revision.
+    delete result.latestReadyRevision;
+    return result;
+}
+function expectedServingPointer(service, before, target) {
+    return [before.latestReadyRevision, `${SERVICE}/revisions/${target}`].includes(service.latestReadyRevision);
+}
 function validatePreparedReceipt(receipt, pins, kind) {
     keys(receipt, ['schemaVersion', 'operation', 'plan', 'planSha256', 'after', 'revisionSha256'], 'Preparation receipt');
     requireThat(receipt.schemaVersion === 1 && receipt.operation === 'provider-active-prepared'
@@ -171,8 +180,8 @@ function validatePreparedReceipt(receipt, pins, kind) {
     requireThat(receipt.after.generation === String(BigInt(receipt.plan.before.generation) + 1n)
         && receipt.after.etag !== receipt.plan.before.etag
         && same(receipt.after.template, receipt.plan.request.template)
-        && receipt.after.latestReadyRevision === `${SERVICE}/revisions/${receipt.plan.request.template.revision}`
-        && receipt.after.latestCreatedRevision === receipt.after.latestReadyRevision
+        && expectedServingPointer(receipt.after, receipt.plan.before, receipt.plan.request.template.revision)
+        && receipt.after.latestCreatedRevision === `${SERVICE}/revisions/${receipt.plan.request.template.revision}`
         && same(trafficShape(receipt.after.traffic), trafficShape(receipt.plan.before.traffic))
         && same(unchangedTemplateService(receipt.after), unchangedTemplateService(receipt.plan.before)),
         'Preparation receipt does not prove an exact zero-traffic template deployment');
@@ -273,7 +282,8 @@ export async function planProviderActiveTraffic(provider, receipt, operation, no
         && fingerprint(revisionConfiguration(fallback)) === receipt.plan.fallbackReceipt.revisionSha256, 'Prepared active revisions drifted');
     exactTraffic(state.service, operation === 'activate' ? sessionRevisionName(pins.closed.candidate.deployment) : activeRevisionName(pins));
     requireThat(same(state.service.template, receipt.after.template)
-        && same(serviceConfiguration(state.service), serviceConfiguration(receipt.after)), 'Active service configuration drifted');
+        && same(unchangedTrafficService(state.service), unchangedTrafficService(receipt.after))
+        && expectedServingPointer(state.service, receipt.after, activeRevisionName(pins)), 'Active service configuration drifted');
     if (operation === 'activate') requireThat(same(state.service, receipt.after), 'Service changed after active preparation');
     const target = operation === 'activate' ? activeRevisionName(pins) : activeRollbackRevisionName(pins);
     return { schemaVersion: 1, operation, createdAt: new Date(now).toISOString(), receipt, before: state.service,
@@ -296,7 +306,8 @@ export async function applyProviderActiveTraffic(provider, plan, confirmation, n
         const after = await provider.waitForActiveTraffic(plan);
         exactTraffic(after, plan.request.traffic[0].revision);
         requireThat(after.generation === String(BigInt(plan.before.generation) + 1n) && after.etag !== plan.before.etag
-            && same(serviceConfiguration(after), serviceConfiguration(plan.before)), 'Unexpected service state after active traffic change');
+            && same(unchangedTrafficService(after), unchangedTrafficService(plan.before))
+            && expectedServingPointer(after, plan.before, plan.request.traffic[0].revision), 'Unexpected service state after active traffic change');
         const pins = plan.receipt.plan.pins;
         const state = await checked(provider, pins, plan.operation === 'activate');
         const [active, fallback] = await Promise.all([provider.getRevision(activeRevisionName(pins)), provider.getRevision(activeRollbackRevisionName(pins))]);
@@ -404,7 +415,8 @@ export function createProviderActivationCloudProvider(token, fetcher = fetch) {
             requireThat([plan.before.generation, String(BigInt(plan.before.generation) + 1n)].includes(service.generation), 'Concurrent service generation change');
             requireThat(template ? same(unchangedTemplateService(service), unchangedTemplateService(plan.before))
                 && same(trafficShape(service.traffic), trafficShape(plan.before.traffic))
-                : same(serviceConfiguration(service), serviceConfiguration(plan.before)), 'Service drift during active reconciliation');
+                : same(unchangedTrafficService(service), unchangedTrafficService(plan.before))
+                    && expectedServingPointer(service, plan.before, plan.request.traffic[0].revision), 'Service drift during active reconciliation');
             requireThat(service.terminalCondition?.state !== 'CONDITION_FAILED', 'Active reconciliation failed');
             if (service.generation !== plan.before.generation && !service.reconciling && service.observedGeneration === service.generation) return service;
             await new Promise(resolve => setTimeout(resolve, 1000));

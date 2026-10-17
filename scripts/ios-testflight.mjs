@@ -11,6 +11,7 @@ const SIGNING_BRANCHES = new Set(['refs/heads/main', 'refs/heads/feature/auth-fa
 const TEAM = 'AX4Z7T24C9';
 const BUNDLE = 'com.mickeyf.app';
 const APP = '6810735137';
+const APPLE_SIGN_IN_ENTITLEMENT = 'com.apple.developer.applesignin';
 const SECRET_NAMES = ['IOS_DISTRIBUTION_P12_BASE64', 'IOS_DISTRIBUTION_P12_PASSWORD',
     'IOS_PROVISION_PROFILE_BASE64', 'ASC_PRIVATE_KEY_P8'];
 const requireThat = (condition, message) => { if (!condition) throw new Error(message); };
@@ -37,6 +38,12 @@ export function exportOptions(signing, distribution = 'internal-only') {
         testFlightInternalTestingOnly: uploadDistribution(distribution) === 'internal-only', stripSwiftSymbols: true };
 }
 
+function requireAppleSignIn(entitlements, artifact) {
+    const value = entitlements?.[APPLE_SIGN_IN_ENTITLEMENT];
+    requireThat(Array.isArray(value) && value.length === 1 && value[0] === 'Default',
+        `${artifact} must grant the Sign in with Apple Default entitlement.`);
+}
+
 export function validateProfile(profile, now = Date.now()) {
     const entitlements = profile.entitlements;
     requireThat(UUID.test(profile.uuid) && profile.teams?.length === 1 && profile.teams[0] === TEAM,
@@ -50,9 +57,34 @@ export function validateProfile(profile, now = Date.now()) {
     requireThat(entitlements?.['application-identifier'] === `${TEAM}.${BUNDLE}`
         && entitlements?.['com.apple.developer.team-identifier'] === TEAM,
     'Provisioning profile must explicitly match AX4Z7T24C9.com.mickeyf.app.');
+    requireAppleSignIn(entitlements, 'Provisioning profile');
     requireThat(Array.isArray(profile.certificates) && profile.certificates.length > 0,
         'Provisioning profile has no distribution certificate.');
     return profile;
+}
+
+export function validateSignedEntitlements(entitlements, profile) {
+    requireAppleSignIn(profile?.entitlements, 'Embedded provisioning profile');
+    requireThat(entitlements?.['application-identifier'] === `${TEAM}.${BUNDLE}`
+        && entitlements?.['com.apple.developer.team-identifier'] === TEAM
+        && entitlements?.['get-task-allow'] === false,
+    'Signed IPA entitlements must match the Ludolume distribution identity.');
+    requireAppleSignIn(entitlements, 'Signed IPA');
+    return entitlements;
+}
+
+export function verifySignedEntitlements(app, profile, runCommand = run) {
+    // The profile authorizes capabilities; only the exported app signature proves they were claimed.
+    const xml = runCommand('Inspect signed application entitlements', 'codesign',
+        ['--display', '--entitlements', '-', '--xml', app]).stdout;
+    let entitlements;
+    try {
+        entitlements = JSON.parse(runCommand('Read signed entitlement metadata', 'plutil',
+            ['-convert', 'json', '-o', '-', '-'], { input: xml }).stdout);
+    } catch {
+        throw new Error('Signed IPA entitlement metadata could not be decoded; raw output was not logged.');
+    }
+    return validateSignedEntitlements(entitlements, profile);
 }
 
 function configuration() {
@@ -214,6 +246,7 @@ export function applySigningSettings(project, config, signing) {
         .find(value => value.name === 'Release');
     requireThat(release, 'App Release configuration is missing from the Xcode project.');
     Object.assign(release.buildSettings, { CODE_SIGN_STYLE: 'Manual', DEVELOPMENT_TEAM: TEAM,
+        CODE_SIGN_ENTITLEMENTS: 'App/App.entitlements',
         CODE_SIGN_IDENTITY: signing.fingerprint, PROVISIONING_PROFILE_SPECIFIER: signing.profile.uuid,
         CURRENT_PROJECT_VERSION: config.build });
 }
@@ -254,6 +287,7 @@ function verifyIpa(config, signing, ipa) {
     run('Verify signed application and embedded frameworks', 'codesign', ['--verify', '--deep', '--strict', app]);
     const embedded = readProfile(join(app, 'embedded.mobileprovision'));
     requireThat(embedded.uuid === signing.profile.uuid, 'Exported IPA uses a different provisioning profile.');
+    verifySignedEntitlements(app, embedded);
     const certificatePrefix = join(config.root, 'signed-certificate-');
     // This optional argument must use '='; a separate prefix is interpreted as another app path.
     run('Inspect application signing certificate', 'codesign', ['-d', `--extract-certificates=${certificatePrefix}`, app]);

@@ -8,7 +8,7 @@ import { observeProviderReaderBoundary, planProviderActiveRevision, applyProvide
     createProviderActivationCloudProvider, validateProviderActivationPins, validateProviderActivationSource, READER_DRAIN_MS } from './provider-backend-activation.mjs';
 
 const activeConfiguration = JSON.parse(readFileSync(new URL('./provider-release-general.json', import.meta.url), 'utf8'));
-function activationFixture() {
+function activationFixture({ retireUnrouted = false } = {}) {
     const f = fixture('prepare');
     f.candidate.launchStage = f.rollback.launchStage = f.service.launchStage = 'GA';
     const pins = { closed: f.pins, activeConfiguration: structuredClone(activeConfiguration) };
@@ -26,9 +26,14 @@ function activationFixture() {
         const revision = { ...structuredClone(f.candidate), ...structuredClone(body.template),
             name: `${SERVICE}/revisions/${body.template.revision}`, uid: `${body.template.revision}-uid` };
         delete revision.revision;
+        if (retireUnrouted) revision.conditions = [
+            { type: 'Ready', state: 'CONDITION_SUCCEEDED', revisionReason: 'RETIRED' },
+            { type: 'Active', state: 'CONDITION_FAILED', severity: 'INFO', revisionReason: 'RETIRED' },
+        ];
         revisions[body.template.revision] = revision;
         f.service.template = structuredClone(body.template);
-        f.service.latestCreatedRevision = f.service.latestReadyRevision = revision.name;
+        f.service.latestCreatedRevision = revision.name;
+        if (!retireUnrouted) f.service.latestReadyRevision = revision.name;
         advance();
     };
     const advance = () => {
@@ -41,6 +46,7 @@ function activationFixture() {
         f.patches.push(structuredClone(body));
         f.service.traffic = structuredClone(body.traffic);
         f.service.trafficStatuses = structuredClone(body.traffic);
+        if (retireUnrouted) f.service.latestReadyRevision = `${SERVICE}/revisions/${body.traffic[0].revision}`;
         advance();
     };
     f.provider.waitForActiveTraffic = async () => structuredClone(f.service);
@@ -83,6 +89,57 @@ test('drained closed readers lead to untagged active/fallback revisions and cond
     assert.equal(closed.revision, activeRollbackRevisionName(f.activationPins));
     assert.equal(closed.freshSignInRequired, true);
     assert.equal(f.patches.length, 4);
+});
+
+test('retired zero-traffic templates retain the exact serving pointer until activation and closure', async () => {
+    const f = activationFixture({ retireUnrouted: true });
+    const serving = f.service.latestReadyRevision;
+    const { active, fallback, when } = await prepared(f);
+    assert.equal(active.after.latestReadyRevision, serving);
+    assert.equal(fallback.after.latestReadyRevision, serving);
+    assert.equal(active.after.latestCreatedRevision, `${SERVICE}/revisions/${activeRevisionName(f.activationPins)}`);
+    assert.equal(f.patches.length, 2, 'retirement requires no second template mutation');
+    const activation = await planProviderActiveTraffic(f.provider, active, 'activate', when);
+    await applyProviderActiveTraffic(f.provider, activation, fingerprint(activation), when);
+    assert.equal(f.service.latestReadyRevision, `${SERVICE}/revisions/${activeRevisionName(f.activationPins)}`);
+    const closure = await planProviderActiveTraffic(f.provider, active, 'close-active', when + 1000);
+    await applyProviderActiveTraffic(f.provider, closure, fingerprint(closure), when + 1000);
+    assert.equal(f.service.latestReadyRevision, `${SERVICE}/revisions/${activeRollbackRevisionName(f.activationPins)}`);
+    assert.equal(f.patches.length, 4);
+});
+
+for (const field of ['latestReadyRevision', 'latestCreatedRevision']) test(`foreign ${field} cannot pass retired-template verification`, async () => {
+    const f = activationFixture({ retireUnrouted: true });
+    const originalWait = f.provider.waitForActiveTemplate;
+    f.provider.waitForActiveTemplate = async () => {
+        f.service[field] = `${SERVICE}/revisions/mickeyf-org-foreign`;
+        return originalWait();
+    };
+    await assert.rejects(prepared(f), /mutation attempted/);
+    assert.equal(f.patches.length, 1);
+});
+
+test('a foreign serving pointer after a traffic write fails without retry', async () => {
+    const f = activationFixture({ retireUnrouted: true });
+    const { active, when } = await prepared(f);
+    const activation = await planProviderActiveTraffic(f.provider, active, 'activate', when);
+    f.provider.waitForActiveTraffic = async () => {
+        f.service.latestReadyRevision = `${SERVICE}/revisions/mickeyf-org-foreign`;
+        return structuredClone(f.service);
+    };
+    await assert.rejects(applyProviderActiveTraffic(f.provider, activation, fingerprint(activation), when), /mutation attempted/);
+    assert.equal(f.patches.length, 3);
+});
+
+test('retirement compatibility never accepts a failed revision Ready condition', async () => {
+    const f = activationFixture({ retireUnrouted: true });
+    const originalWait = f.provider.waitForActiveTemplate;
+    f.provider.waitForActiveTemplate = async () => {
+        f.revisions[activeRollbackRevisionName(f.activationPins)].conditions[0].state = 'CONDITION_FAILED';
+        return originalWait();
+    };
+    await assert.rejects(prepared(f), /Frozen revision is not Ready/);
+    assert.equal(f.patches.length, 1);
 });
 
 for (const [label, mutate] of [
@@ -265,8 +322,8 @@ test('closing new creation remains possible after source expiry or candidate sig
     assert.equal(f.patches.length, 4);
 });
 
-test('HTTP adapter executes only the four exact template/traffic patches and rechecks security before activation', async () => {
-    const f = activationFixture();
+for (const retireUnrouted of [false, true]) test(`HTTP adapter keeps exact writes and security checks when retired=${retireUnrouted}`, async () => {
+    const f = activationFixture({ retireUnrouted });
     const sourcePins = f.pins.candidate.deployment;
     const source = { url: 'https://github.com/Good-Loops/mickeyf.com.git', revision: sourcePins.sourceCommit };
     const packageName = `projects/${PROJECT}/locations/${REGION}/repositories/cloud-run-source-deploy/packages/cloud-run-source-deploy`;

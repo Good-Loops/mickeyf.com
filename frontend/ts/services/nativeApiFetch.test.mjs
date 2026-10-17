@@ -176,6 +176,17 @@ test('the release enables registered native provider capabilities while retainin
     assert.ok(target);
     const sources = project.pbxSourcesBuildPhaseObj(target[0]).files;
     assert.ok(sources.some(({ comment }) => comment === 'LudolumeIdentityPlugin.swift in Sources'));
+    const configurations = project.pbxXCConfigurationList()[target[1].buildConfigurationList].buildConfigurations
+        .map(({ value }) => project.pbxXCBuildConfigurationSection()[value]);
+    assert.deepEqual(configurations.map(({ name }) => name).sort(), ['Debug', 'Release']);
+    for (const configuration of configurations) {
+        assert.equal(configuration.buildSettings.CODE_SIGN_ENTITLEMENTS, 'App/App.entitlements');
+    }
+    assert.equal(project.getFirstProject().firstProject.attributes.TargetAttributes[target[0]]
+        .SystemCapabilities['com.apple.SignInWithApple'].enabled, 1);
+    const { default: plist } = await import('plist');
+    const entitlements = plist.parse(await readFile(new URL('../../ios/App/App/App.entitlements', import.meta.url), 'utf8'));
+    assert.deepEqual(entitlements, { 'com.apple.developer.applesignin': ['Default'] });
 });
 
 test('Apple credential state remains gated, bounded and separate from sign-in', async () => {

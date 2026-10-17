@@ -1,9 +1,80 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import test from 'node:test';
-import { buildNumber, exportOptions, uploadArguments, uploadDistribution, signingBranchAllowed } from './ios-testflight.mjs';
+import { buildNumber, exportOptions, uploadArguments, uploadDistribution, signingBranchAllowed,
+    applySigningSettings, validateProfile, validateSignedEntitlements, verifySignedEntitlements } from './ios-testflight.mjs';
 
 const signing = { fingerprint: 'TEST_CERTIFICATE', profile: { uuid: 'TEST_PROFILE' } };
+
+const appleEntitlements = {
+    'application-identifier': 'AX4Z7T24C9.com.mickeyf.app',
+    'com.apple.developer.team-identifier': 'AX4Z7T24C9',
+    'get-task-allow': false,
+    'beta-reports-active': true,
+    'com.apple.developer.applesignin': ['Default'],
+};
+const profile = () => ({ uuid: '10000000-0000-4000-8000-000000000000', teams: ['AX4Z7T24C9'],
+    expires: '2030-01-01T00:00:00Z', platforms: ['iOS'], hasDevices: false, allDevices: false,
+    entitlements: structuredClone(appleEntitlements), certificates: ['SYNTHETIC_CERTIFICATE'] });
+
+test('distribution profile must explicitly authorize native Apple sign-in', () => {
+    assert.equal(validateProfile(profile(), Date.parse('2026-10-17T00:00:00Z')).uuid, profile().uuid);
+    for (const value of [undefined, true, 'Default', [], ['default'], ['Default', 'Other']]) {
+        const invalid = profile();
+        invalid.entitlements['com.apple.developer.applesignin'] = value;
+        assert.throws(() => validateProfile(invalid), /Provisioning profile must grant.*Apple Default/);
+    }
+});
+
+test('exported signed IPA must actually claim Apple sign-in and the distribution identity', () => {
+    assert.deepEqual(validateSignedEntitlements(appleEntitlements, profile()), appleEntitlements);
+    for (const value of [undefined, true, 'Default', [], ['default'], ['Default', 'Other']]) {
+        assert.throws(() => validateSignedEntitlements({ ...appleEntitlements,
+            'com.apple.developer.applesignin': value }, profile()), /Signed IPA must grant.*Apple Default/);
+    }
+    for (const changed of [{ 'application-identifier': 'OTHER.com.mickeyf.app' },
+        { 'com.apple.developer.team-identifier': 'OTHER' }, { 'get-task-allow': true }]) {
+        assert.throws(() => validateSignedEntitlements({ ...appleEntitlements, ...changed }, profile()),
+            /distribution identity/);
+    }
+    const missingGrant = profile();
+    delete missingGrant.entitlements['com.apple.developer.applesignin'];
+    assert.throws(() => validateSignedEntitlements(appleEntitlements, missingGrant),
+        /Embedded provisioning profile must grant/);
+});
+
+test('signed entitlement verification reads the exported app signature, not the source or profile alone', () => {
+    const calls = [];
+    const run = (label, command, args, options) => {
+        calls.push({ command, args, options });
+        return { stdout: command === 'codesign' ? '<synthetic-signed-entitlements/>' : JSON.stringify(appleEntitlements) };
+    };
+    assert.deepEqual(verifySignedEntitlements('/synthetic/Payload/App.app', profile(), run), appleEntitlements);
+    assert.deepEqual(calls, [
+        { command: 'codesign', args: ['--display', '--entitlements', '-', '--xml', '/synthetic/Payload/App.app'], options: undefined },
+        { command: 'plutil', args: ['-convert', 'json', '-o', '-', '-'], options: { input: '<synthetic-signed-entitlements/>' } },
+    ]);
+    assert.throws(() => verifySignedEntitlements('/synthetic/Payload/App.app', profile(),
+        (label, command) => ({ stdout: command === 'codesign' ? '<synthetic/>' : '{"private-fixture":' })),
+    error => /raw output was not logged/.test(error.message) && !error.message.includes('private-fixture'));
+});
+
+test('manual release signing retains the app entitlement binding without changing framework or Debug signing', () => {
+    const debug = { name: 'Debug', buildSettings: { CODE_SIGN_STYLE: 'Automatic', CODE_SIGN_ENTITLEMENTS: 'App/App.entitlements' } };
+    const release = { name: 'Release', buildSettings: {} };
+    const framework = { name: 'Release', buildSettings: { CODE_SIGN_STYLE: 'Automatic' } };
+    const project = {
+        pbxNativeTargetSection: () => ({ APP: { name: 'App', buildConfigurationList: 'APP_CONFIGS' } }),
+        pbxXCConfigurationList: () => ({ APP_CONFIGS: { buildConfigurations: [{ value: 'DEBUG' }, { value: 'RELEASE' }] } }),
+        pbxXCBuildConfigurationSection: () => ({ DEBUG: debug, RELEASE: release, FRAMEWORK: framework }),
+    };
+    applySigningSettings(project, { build: '20.1.0' }, signing);
+    assert.equal(release.buildSettings.CODE_SIGN_ENTITLEMENTS, 'App/App.entitlements');
+    assert.equal(release.buildSettings.CURRENT_PROJECT_VERSION, '20.1.0');
+    assert.equal(release.buildSettings.CODE_SIGN_STYLE, 'Manual');
+    assert.equal(debug.buildSettings.CODE_SIGN_STYLE, 'Automatic');
+    assert.deepEqual(framework.buildSettings, { CODE_SIGN_STYLE: 'Automatic' });
+});
 
 test('upload distribution stays internal-only unless the draft option is explicit', () => {
     assert.equal(uploadDistribution(), 'internal-only');
