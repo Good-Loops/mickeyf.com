@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { createRequire } from 'node:module';
-import { mkdir } from 'node:fs/promises';
-import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createViteTestServer } from '../../frontend/ts/testSupport/createViteTestServer.mjs';
 
@@ -51,19 +49,11 @@ async function positionSheens(page, milliseconds) {
     }, milliseconds);
 }
 
-async function capture(page, name) {
-    const directory = process.env.LUDOLUME_NAV_SCREENSHOT_DIR;
-    if (!directory) return;
-    await mkdir(directory, { recursive: true });
-    await page.locator('.nav__list').screenshot({ path: path.join(directory, `nav-sheen-${name}.png`) });
-}
-
 test('opposing border sheens complete a continuous full orbit without moving or covering navigation', async t => {
     const page = await fixture(t);
     const start = await positionSheens(page, 0);
     assert.equal(start.animations, 2);
     assert.deepEqual(start.styles.map(style => style.angle), [0, 180]);
-    await capture(page, '0');
     for (const style of start.styles) {
         assert.deepEqual(style.inset, ['0px', '0px', '0px', '0px']);
         assert.equal(style.pointerEvents, 'none');
@@ -76,7 +66,6 @@ test('opposing border sheens complete a continuous full orbit without moving or 
         assert.equal(current.styles[0].angle, angle);
         assert.equal(current.styles[1].angle, (angle + 180) % 360);
         assert.deepEqual(current.bounds, start.bounds);
-        if (time < 9000) await capture(page, String(angle));
     }
     const beforeWrap = await positionSheens(page, 8999);
     const afterWrap = await positionSheens(page, 9001);
@@ -113,6 +102,5 @@ test('reduced motion keeps the border traces static and disables slider motion',
     const current = await positionSheens(page, 2250);
     assert.equal(current.animations, 0);
     assert.deepEqual(current.styles.map(style => style.angle), [0, 180]);
-    await capture(page, 'reduced-motion');
     assert.equal(await page.locator('.nav__indicator').evaluate(slider => getComputedStyle(slider).transitionDuration), '0s');
 });

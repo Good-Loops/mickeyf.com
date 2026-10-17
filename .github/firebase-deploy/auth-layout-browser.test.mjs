@@ -1,8 +1,6 @@
 import assert from 'node:assert/strict';
 import { after, before, test } from 'node:test';
 import { createRequire } from 'node:module';
-import { mkdir } from 'node:fs/promises';
-import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createViteTestServer } from '../../frontend/ts/testSupport/createViteTestServer.mjs';
 
@@ -155,13 +153,6 @@ test('the viewport contains the shell while short screens can scroll to every ac
     assert.deepEqual(measurements.filter(item => item.documentWidth > item.width || item.documentHeight > item.height), []);
 });
 
-async function capture(page, name) {
-    const directory = process.env.LUDOLUME_AUTH_SCREENSHOT_DIR;
-    if (!directory) return;
-    await mkdir(directory, { recursive: true });
-    await page.screenshot({ path: path.join(directory, `${name}.png`), fullPage: true });
-}
-
 for (const width of [1280, 390]) {
     test(`signup opens the ordinary form and provider choices at ${width}px without country or an extra entry screen`, async t => {
         const { page, calls } = await fixture(t, width);
@@ -180,7 +171,6 @@ for (const width of [1280, 390]) {
         assert.equal(await privacy.evaluate(link => getComputedStyle(link).color), 'rgb(234, 234, 251)');
         assert.equal(calls.filter(call => call.path === '/api/users').length, 0);
         assert.equal(calls.some(call => call.body && ('country' in call.body || 'ageBand' in call.body)), false);
-        await capture(page, `auth-signup-form-synthetic-google-${width}`);
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
     });
 
@@ -195,7 +185,6 @@ for (const width of [1280, 390]) {
         assert.ok(Math.abs(googleBox.width - appleBox.width) < 2);
         assert.ok(Math.abs(googleBox.height - appleBox.height) < 2);
         assert.ok(appleBox.y - googleBox.y - googleBox.height >= 8);
-        await capture(page, `auth-login-ready-synthetic-google-${width}`);
         await page.getByTestId('synthetic-google-sdk').click();
         await page.getByRole('alert').filter({ hasText: 'This Google account isn’t linked yet.' }).waitFor();
         assert.equal(await page.locator('.provider-sign-in__google-host').count(), 0);
@@ -211,7 +200,6 @@ for (const width of [1280, 390]) {
         assert.ok((await page.locator('.provider-sign-in__google').boundingBox()).height < 160);
         assert.equal(calls.filter(call => call.path === '/auth/providers/complete').length, 1);
         assert.equal(calls.filter(call => call.path.includes('/registration/')).length, 0);
-        await capture(page, `auth-login-unlinked-${width}`);
         await retry.click();
         await page.getByTestId('synthetic-google-sdk').waitFor();
         assert.equal(calls.filter(call => call.path === '/auth/providers/begin').length, 2);
