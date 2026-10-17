@@ -20,7 +20,7 @@ function fixture({ inspect = value => value, existing = '', testError, cleanupEr
         if (args.includes('down')) { if (cleanupError) throw cleanupError; return ''; }
         if (args.includes('--all')) return existing;
         if (args.includes('up')) return '';
-        if (args[0] === 'inspect') {
+        if (args.includes('inspect')) {
             const compose = calls.find(call => call.args.includes('--project-name'));
             return JSON.stringify([inspect(container(compose.args[compose.args.indexOf('--project-name') + 1]))]);
         }
@@ -84,7 +84,7 @@ test('identity guards reject wrong image, container, labels, health and all non-
 test('orchestration verifies a fresh project before exactly one test and always scoped cleanup', async () => {
     const f = fixture();
     const result = await runHandoffTests({ run: f.run, platform: 'win32', report() {},
-        environment: { PATH: 'safe', DB_HOST: 'production', NODE_OPTIONS: '--require private' } });
+        environment: { PATH: 'safe', DOCKER_CONTEXT: 'desktop-linux', DB_HOST: 'production', NODE_OPTIONS: '--require private' } });
     assert.match(result.project, /^mickeyf-apple-handoff-[0-9]+-[a-f0-9]{12}$/u);
     assert.equal(result.port, '49152');
     const testCall = f.calls.find(call => call.executable === process.execPath);
@@ -92,6 +92,8 @@ test('orchestration verifies a fresh project before exactly one test and always 
     assert.match(testCall.options.cwd.replaceAll('\\', '/'), /\/backend$/u);
     assert.equal(testCall.options.env.DB_HOST, undefined);
     assert.equal(testCall.options.env.NODE_OPTIONS, undefined);
+    assert.equal(testCall.options.env.DOCKER_CONTEXT, undefined);
+    assert.equal(f.calls[0].options.env.DOCKER_CONTEXT, 'desktop-linux');
     assert.deepEqual(Object.fromEntries(Object.entries(testCall.options.env).filter(([key]) => key.startsWith('APPLE_'))), {
         APPLE_ANDROID_HANDOFF_TEST_ENABLED: '1', APPLE_ANDROID_HANDOFF_TEST_CONTAINER: id,
         APPLE_ANDROID_HANDOFF_TEST_PORT: '49152' });
@@ -99,6 +101,10 @@ test('orchestration verifies a fresh project before exactly one test and always 
     const up = f.calls.find(call => call.args.includes('up'));
     assert.deepEqual(up.args.slice(-8), ['up', '--detach', '--wait', '--wait-timeout', '90', '--pull', 'never', 'mysql']);
     for (const call of f.calls.filter(call => call.executable !== process.execPath)) assert.equal(call.executable, 'docker.exe');
+    for (const call of f.calls.slice(1).filter(call => call.executable !== process.execPath)) {
+        assert.deepEqual(call.args.slice(0, 2), ['--host', 'unix:///var/run/docker.sock']);
+        assert.equal(call.options.env.DOCKER_CONTEXT, undefined);
+    }
     const cleanup = f.calls.at(-1);
     assert.deepEqual(cleanup.args.slice(-5), ['down', '--volumes', '--remove-orphans', '--timeout', '30']);
     assert.equal(cleanup.args[cleanup.args.indexOf('--project-name') + 1], result.project);

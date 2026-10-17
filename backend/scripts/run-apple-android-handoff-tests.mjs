@@ -77,8 +77,9 @@ export async function runHandoffTests({ run = runProcess, environment = process.
     signal, report = console.log } = {}) {
     // A remote daemon could publish its loopback port on another machine.
     if (Object.keys(environment).some(key => /^DOCKER_HOST$/iu.test(key))) throw new Error('DOCKER_HOST_OVERRIDE_FORBIDDEN');
-    const env = isolatedEnvironment(environment);
+    let env = isolatedEnvironment(environment);
     const docker = dockerExecutable(platform);
+    const dockerHost = [];
     const project = `mickeyf-apple-handoff-${process.pid}-${randomBytes(6).toString('hex')}`;
     const compose = ['compose', '--project-name', project, '--file', COMPOSE_FILE];
     const deadline = Date.now() + 300_000;
@@ -94,12 +95,15 @@ export async function runHandoffTests({ run = runProcess, environment = process.
     try {
         const endpoint = JSON.parse(await invoke(docker, ['context', 'inspect', '--format', '{{json .Endpoints.docker.Host}}']));
         assertLocalDockerEndpoint(endpoint);
-        if ((await invoke(docker, [...compose, 'ps', '--all', '--quiet'])).trim()) throw new Error('DISPOSABLE_PROJECT_NOT_EMPTY');
+        // A concurrent context switch must not redirect creation, inspection or cleanup.
+        dockerHost.push('--host', endpoint);
+        env = Object.fromEntries(Object.entries(env).filter(([key]) => !/^DOCKER_CONTEXT$/iu.test(key)));
+        if ((await invoke(docker, [...dockerHost, ...compose, 'ps', '--all', '--quiet'])).trim()) throw new Error('DISPOSABLE_PROJECT_NOT_EMPTY');
         started = true;
-        await invoke(docker, [...compose, 'up', '--detach', '--wait', '--wait-timeout', '90', '--pull', 'never', 'mysql']);
-        const id = (await invoke(docker, [...compose, 'ps', '--quiet', 'mysql'])).trim();
+        await invoke(docker, [...dockerHost, ...compose, 'up', '--detach', '--wait', '--wait-timeout', '90', '--pull', 'never', 'mysql']);
+        const id = (await invoke(docker, [...dockerHost, ...compose, 'ps', '--quiet', 'mysql'])).trim();
         if (!/^[a-f0-9]{64}$/u.test(id)) throw new Error('ISOLATED_MYSQL_IDENTITY_REQUIRED');
-        port = verifyContainer(JSON.parse(await invoke(docker, ['inspect', '--type', 'container', id])), project, id);
+        port = verifyContainer(JSON.parse(await invoke(docker, [...dockerHost, 'inspect', '--type', 'container', id])), project, id);
         report(`Verified fresh isolated MySQL on 127.0.0.1:${port}.`);
         const testEnv = { ...env, NODE_ENV: 'test', APPLE_ANDROID_HANDOFF_TEST_ENABLED: '1',
             APPLE_ANDROID_HANDOFF_TEST_CONTAINER: id, APPLE_ANDROID_HANDOFF_TEST_PORT: port };
@@ -115,7 +119,7 @@ export async function runHandoffTests({ run = runProcess, environment = process.
         if (started) {
             try {
                 // Cleanup has its own deadline and remains possible after cancellation or test timeout.
-                await run(docker, [...compose, 'down', '--volumes', '--remove-orphans', '--timeout', '30'],
+                await run(docker, [...dockerHost, ...compose, 'down', '--volumes', '--remove-orphans', '--timeout', '30'],
                     { cwd: REPOSITORY_DIRECTORY, env, timeoutMs: 45_000 });
                 report('Disposable MySQL cleanup completed.');
             } catch { failure = new Error('DISPOSABLE_MYSQL_CLEANUP_FAILED'); }
