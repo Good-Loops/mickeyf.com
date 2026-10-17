@@ -35,11 +35,11 @@ public final class LudolumeIdentityPlugin extends Plugin {
             && id.length() <= 255 && id.matches("[A-Za-z0-9_-]+\\.apps\\.googleusercontent\\.com");
     }
 
-    private String appleBrowser() {
+    private String supportedAppleBrowser() {
         if (!getContext().getResources().getBoolean(R.bool.ludolume_apple_sign_in_enabled)
             || !LudolumeAppleAuthSession.CLIENT_ID.equals(getContext().getString(R.string.apple_android_services_id))
             || !LudolumeAppleAuthSession.CALLBACK.equals(getContext().getString(R.string.apple_android_redirect_uri))
-            || !(getActivity() instanceof MainActivity) || !((MainActivity) getActivity()).appleBrowserAvailable()) return null;
+            || !(getActivity() instanceof MainActivity)) return null;
         String browser = CustomTabsClient.getPackageName(getContext(), null);
         return browser != null && CustomTabsClient.isAuthTabSupported(getContext(), browser) ? browser : null;
     }
@@ -48,7 +48,7 @@ public final class LudolumeIdentityPlugin extends Plugin {
     public void getCapabilities(PluginCall call) {
         JSObject result = new JSObject();
         result.put("google", enabled());
-        result.put("apple", appleBrowser() != null);
+        result.put("apple", supportedAppleBrowser() != null);
         call.resolve(result);
     }
 
@@ -56,7 +56,7 @@ public final class LudolumeIdentityPlugin extends Plugin {
     public void signIn(PluginCall call) {
         getActivity().runOnUiThread(() -> {
             boolean apple = "apple".equals(call.getString("provider"));
-            String browser = apple ? appleBrowser() : null;
+            String browser = apple ? supportedAppleBrowser() : null;
             if ((apple ? browser == null
                     || !LudolumeAppleAuthSession.CLIENT_ID.equals(call.getString("clientId"))
                     || !LudolumeAppleAuthSession.CALLBACK.equals(call.getString("redirectUri"))
@@ -67,7 +67,7 @@ public final class LudolumeIdentityPlugin extends Plugin {
                     : "Native Google sign-in is unavailable.", "UNAVAILABLE");
                 return;
             }
-            if (pending != null) {
+            if (pending != null || (getActivity() instanceof MainActivity && !((MainActivity) getActivity()).appleBrowserAvailable())) {
                 call.reject("A native sign-in request is already active.", "BUSY");
                 return;
             }

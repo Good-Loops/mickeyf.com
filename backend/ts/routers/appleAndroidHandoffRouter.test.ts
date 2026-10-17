@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import test from 'node:test';
@@ -16,6 +16,7 @@ import type { createAppleAndroidHandoffRepository } from '../auth/appleAndroidHa
 import { createProviderAuthRouter } from './providerAuthRouter';
 import { APPLE_ANDROID_RETURN_URI } from '../config/appleAndroidConfig';
 import { createAuthRouter } from './authRouter';
+import { createAppleAndroidHandoffRouter } from './appleAndroidHandoffRouter';
 
 const native = 'capacitor://localhost';
 const web = 'https://mickeyf.com';
@@ -74,19 +75,43 @@ async function fixture(enabled = true) {
         async link() { throw new Error('Unused'); }, async saveAppleToken() { events.push('save-refresh'); } } });
     const readContext = createProviderAuthContextReader({ database, sessionSecret: 'synthetic-test-secret', allowedOrigins: [native, web] });
     const app = express();
+    // Apple's form POST is stateless and must never inherit the native cookie boundary.
+    const callbackBoundary = express.Router();
+    callbackBoundary.use((req, _res, next) => {
+        if (req.method !== 'POST' || req.path !== '/callback') return next('router');
+        assert.equal(req.cookies, undefined);
+        assert.equal(req.signedCookies, undefined);
+        next();
+    });
+    if (enabled) callbackBoundary.use(createAppleAndroidHandoffRouter(handoff,
+        async () => assert.fail('The browser callback must not read cookie context'), () => true));
+    callbackBoundary.use((_req, res) => res.sendStatus(404));
+    app.use('/auth/providers/apple-android', callbackBoundary);
+    const csrfToken = randomBytes(32).toString('base64url');
     app.use(cookieParser('synthetic-test-secret'));
+    // Protect this loopback fixture itself; production Origin and signed-cookie checks still run below.
+    app.use((req, res, next) => {
+        if (!['GET', 'HEAD', 'OPTIONS'].includes(req.method)
+            && (req.cookies.fixtureCsrf !== csrfToken || req.cookies.fixtureCsrf !== req.headers['x-fixture-csrf'])) {
+            return res.status(403).json({ error: 'INVALID_FIXTURE_CSRF' });
+        }
+        next();
+    });
     app.use('/auth/providers', createProviderAuthRouter({ database, sessionSecret: 'synthetic-test-secret', isProduction: true,
         allowedOrigins: [native, web], clients, enabled, ...(enabled ? { appleAndroidHandoff: handoff } : {}),
         services: { flow, readContext, async establishSession() { events.push('session'); return true; },
             async readAccountMethods() { return null; } } }));
     const server = app.listen(0, '127.0.0.1'); await once(server, 'listening');
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/auth/providers`;
-    const request = (path: string, body: unknown, cookie?: string, origin = native) => fetch(base + path, {
+    const request = (path: string, body: unknown, cookie?: string, origin = native,
+        csrf: 'valid' | 'missing-header' | 'wrong-header' | 'missing-cookie' = 'valid') => fetch(base + path, {
         method: 'POST', redirect: 'manual', headers: { 'Content-Type': 'application/json', Origin: origin,
-            ...(cookie ? { Cookie: cookie } : {}) }, body: JSON.stringify(body),
+            ...(csrf !== 'missing-header' ? { 'X-Fixture-CSRF': csrf === 'wrong-header' ? 'invalid' : csrfToken } : {}),
+            Cookie: [csrf !== 'missing-cookie' ? `fixtureCsrf=${csrfToken}` : '', cookie].filter(Boolean).join('; ') }, body: JSON.stringify(body),
     });
-    const callback = (body: Record<string, string>) => fetch(base + '/apple-android/callback', { method: 'POST',
-        redirect: 'manual', headers: { 'Content-Type': 'application/x-www-form-urlencoded' }, body: new URLSearchParams(body) });
+    const callback = (body: Record<string, string>, cookie?: string) => fetch(base + '/apple-android/callback', { method: 'POST',
+        redirect: 'manual', headers: { 'Content-Type': 'application/x-www-form-urlencoded', ...(cookie ? { Cookie: cookie } : {}) },
+        body: new URLSearchParams(body) });
     async function begin() {
         const response = await request('/begin', { clientKey: 'apple-android', action: 'login' });
         assert.equal(response.status, 200);
@@ -95,6 +120,32 @@ async function fixture(enabled = true) {
     return { events, attempts, handoffs, base, request, callback, begin,
         async close() { server.closeAllConnections(); await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); } };
 }
+
+test('fixture rejects missing or wrong CSRF credentials without replacing native Origin and signed-cookie validation', async () => {
+    const f = await fixture();
+    try {
+        for (const csrf of ['missing-header', 'wrong-header', 'missing-cookie'] as const) {
+            const response = await f.request('/begin', { clientKey: 'apple-android', action: 'login' }, undefined, native, csrf);
+            assert.equal(response.status, 403);
+            assert.deepEqual(await response.json(), { error: 'INVALID_FIXTURE_CSRF' });
+        }
+        assert.deepEqual(f.events, []);
+        const { challenge, cookie } = await f.begin();
+        const callback = await f.callback({ state: challenge.state, id_token: accepted.idToken, code: accepted.authorizationCode }, cookie);
+        assert.equal(callback.status, 303, 'the real browser callback needs neither parsed cookies nor a fixture CSRF token');
+        assert.equal(callback.headers.get('set-cookie'), null);
+        const body = { state: challenge.state, proof: returnProof };
+        const wrongOrigin = await f.request('/apple-android/credential', body, cookie, 'https://attacker.test');
+        assert.equal(wrongOrigin.status, 403);
+        assert.deepEqual(await wrongOrigin.json(), { error: 'INVALID_CONTEXT' });
+        const tamperedCookie = cookie.slice(0, -1) + (cookie.endsWith('A') ? 'B' : 'A');
+        const tampered = await f.request('/apple-android/credential', body, tamperedCookie);
+        assert.equal(tampered.status, 400);
+        assert.deepEqual(await tampered.json(), { error: 'INVALID_ATTEMPT' });
+        assert.equal((await f.request('/apple-android/credential', body, cookie)).status, 200,
+            'rejected requests do not consume the original handoff');
+    } finally { await f.close(); }
+});
 
 test('Android return exposes no provider credentials or session cookie; original native binding plus return proof redeems once', async () => {
     const f = await fixture();

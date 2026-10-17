@@ -12,6 +12,97 @@ import { verifyAppleAndroidHandoffSchema, verifyAppleAndroidHandoffReadiness,
 import type { MigrationConnection } from '../migrations/leaderboardSchema';
 import { consumeProviderAttempt, createProviderAttempt } from './providerAttemptRepository';
 
+// Execute only reviewed literals. Filesystem contents are comparison data, never executable SQL.
+const PROVIDER_ATTEMPT_SQL = `CREATE TABLE provider_auth_attempts (
+    state_hash BINARY(32) NOT NULL,
+    binding_hash BINARY(32) NOT NULL,
+    nonce CHAR(43) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    client_key VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    action VARCHAR(8) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    user_id INT NULL,
+    account_uuid CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    expires_at DATETIME(6) NOT NULL COMMENT 'UTC',
+    CONSTRAINT pk_provider_auth_attempts PRIMARY KEY (state_hash),
+    CONSTRAINT uq_provider_auth_attempt_binding UNIQUE (binding_hash),
+    INDEX idx_provider_auth_attempt_account (account_uuid),
+    INDEX idx_provider_auth_attempt_expiry (expires_at),
+    CONSTRAINT fk_provider_auth_attempt_account FOREIGN KEY (account_uuid)
+        REFERENCES users (account_uuid) ON DELETE CASCADE ON UPDATE RESTRICT,
+    CONSTRAINT chk_provider_auth_attempt_action CHECK (
+        CAST(action AS BINARY) IN (CAST('login' AS BINARY), CAST('link' AS BINARY))
+    ),
+    -- MySQL prohibits CHECK on a cascading foreign-key column. The repository
+    -- validates the paired UUID shape when writing and consuming each attempt.
+    CONSTRAINT chk_provider_auth_attempt_user CHECK (
+        CASE WHEN CAST(action AS BINARY) = CAST('login' AS BINARY)
+            THEN user_id IS NULL
+            ELSE COALESCE(user_id > 0, 0)
+        END = 1
+    )
+) ENGINE = InnoDB
+  DEFAULT CHARACTER SET = utf8mb4
+  COLLATE = utf8mb4_unicode_ci;
+`;
+const EXTENDED_ATTEMPT_SQL = `ALTER TABLE provider_auth_attempts
+    DROP CHECK chk_provider_auth_attempt_action,
+    DROP CHECK chk_provider_auth_attempt_user,
+    ADD CONSTRAINT chk_provider_auth_attempt_action CHECK (
+        CAST(action AS BINARY) IN (
+            CAST('login' AS BINARY), CAST('link' AS BINARY),
+            CAST('signup' AS BINARY), CAST('delete' AS BINARY)
+        )
+    ),
+    ADD CONSTRAINT chk_provider_auth_attempt_user CHECK (
+        CASE WHEN CAST(action AS BINARY) IN (CAST('login' AS BINARY), CAST('signup' AS BINARY))
+            THEN user_id IS NULL
+            ELSE COALESCE(user_id > 0, 0)
+        END = 1
+    );
+`;
+const ANDROID_HANDOFF_SQL = `CREATE TABLE apple_android_handoffs (
+    state_hash BINARY(32) NOT NULL,
+    binding_hash BINARY(32) NOT NULL,
+    nonce CHAR(43) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    client_key VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    action VARCHAR(8) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    account_uuid CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    user_id INT NULL,
+    phase ENUM('pending','ready') CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    encrypted_credential VARBINARY(24576) NULL,
+    created_at DATETIME(6) NOT NULL COMMENT 'UTC',
+    expires_at DATETIME(6) NOT NULL COMMENT 'UTC',
+    PRIMARY KEY (state_hash),
+    UNIQUE KEY uq_apple_android_handoff_binding (binding_hash),
+    KEY idx_apple_android_handoff_expiry (expires_at),
+    CONSTRAINT fk_apple_android_handoff_attempt FOREIGN KEY (state_hash)
+        REFERENCES provider_auth_attempts (state_hash) ON DELETE CASCADE ON UPDATE RESTRICT,
+    CONSTRAINT chk_apple_android_handoff_client CHECK (BINARY client_key = BINARY 'apple-android'),
+    CONSTRAINT chk_apple_android_handoff_target CHECK (
+        (BINARY action IN (BINARY 'login', BINARY 'signup') AND account_uuid IS NULL AND user_id IS NULL)
+        OR (BINARY action IN (BINARY 'link', BINARY 'delete') AND account_uuid IS NOT NULL AND user_id IS NOT NULL AND user_id > 0)
+    ),
+    CONSTRAINT chk_apple_android_handoff_phase CHECK (
+        (phase = 'pending' AND encrypted_credential IS NULL)
+        OR (phase = 'ready' AND encrypted_credential IS NOT NULL AND OCTET_LENGTH(encrypted_credential) > 31)
+    ),
+    CONSTRAINT chk_apple_android_handoff_lifetime CHECK (
+        expires_at > created_at AND expires_at <= TIMESTAMPADD(SECOND, 300, created_at)
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+`;
+function assertMigrationFixtureSources() {
+    for (const [filename, literal] of [
+        ['0010_create_provider_auth_attempts.sql', PROVIDER_ATTEMPT_SQL],
+        ['0015_extend_provider_attempt_actions.sql', EXTENDED_ATTEMPT_SQL],
+        ['pending/0027_create_apple_android_handoffs.sql', ANDROID_HANDOFF_SQL],
+    ]) {
+        const source = readFileSync(path.join(__dirname, '../../migrations', filename), 'utf8');
+        assert.equal(source.replace(/\r\n/gu, '\n'), literal, `Reviewed SQL fixture must match ${filename}`);
+    }
+}
+
+test('reviewed literal SQL fixture exactly matches migration sources', assertMigrationFixtureSources);
+
 if (process.env.APPLE_ANDROID_HANDOFF_TEST_ENABLED !== '1') {
     test('Apple Android handoff SQL requires the disposable local harness', { skip: true }, () => {});
 } else {
@@ -51,6 +142,7 @@ if (process.env.APPLE_ANDROID_HANDOFF_TEST_ENABLED !== '1') {
         await pool.query('INSERT INTO apple_android_handoffs VALUES ?', [rows]);
     }
     before(async () => {
+        assertMigrationFixtureSources();
         assert.equal(process.env.NODE_ENV, 'test');
         assert.match(process.env.APPLE_ANDROID_HANDOFF_TEST_CONTAINER ?? '', /^[a-f0-9]{64}$/u);
         for (const key of ['DATABASE_URL','DB_HOST','DB_PORT','DB_NAME','DB_USER','DB_PASS','CLOUD_SQL_CONNECTION_NAME']) {
@@ -67,12 +159,11 @@ if (process.env.APPLE_ANDROID_HANDOFF_TEST_ENABLED !== '1') {
         assert.doesNotMatch(rows[0].comment,/Google/iu);
         const [tables] = await pool.query<RowDataPacket[]>('SHOW TABLES');
         assert.equal(tables.length,0,'new disposable database must be empty before DDL');
-        const sql = readFileSync(path.join(__dirname,'../../migrations/pending/0027_create_apple_android_handoffs.sql'),'utf8');
         await pool.query(`CREATE TABLE users (account_uuid CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY)`);
         await pool.query("INSERT INTO users VALUES ('123e4567-e89b-42d3-a456-426614174000')");
-        await pool.query(readFileSync(path.join(__dirname,'../../migrations/0010_create_provider_auth_attempts.sql'),'utf8'));
-        await pool.query(readFileSync(path.join(__dirname,'../../migrations/0015_extend_provider_attempt_actions.sql'),'utf8'));
-        await pool.query(sql);
+        await pool.query(PROVIDER_ATTEMPT_SQL);
+        await pool.query(EXTENDED_ATTEMPT_SQL);
+        await pool.query(ANDROID_HANDOFF_SQL);
         store = createAppleAndroidHandoffRepository(pool,cipher);
     });
     after(async()=>{await pool?.end();});

@@ -342,17 +342,29 @@ test('unmount cancels discovery backoff before another request', async t => {
     assert.deepEqual(view.busy, []);
 });
 
-test('a thrown discovery failure is retried but a late rejection after unmount cannot restart it', async t => {
+test('a thrown discovery failure is retried but a late rejection after unmount cannot restart it', { timeout: 10_000 }, async t => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
     const view = mount(t, ProviderSignInControls, { action: 'login' });
+    const retryScheduled = deferred(), retryStarted = deferred();
+    const schedule = globalThis.setTimeout;
+    t.mock.method(globalThis, 'setTimeout', (callback, delay, ...args) => {
+        const handle = schedule(callback, delay, ...args);
+        if (delay === 1000) retryScheduled.resolve();
+        return handle;
+    });
     let calls = 0, rejectPending;
     view.hooks.clients = () => {
         calls += 1;
         if (calls === 1) return Promise.reject(new Error('private transport details must not appear'));
-        return new Promise((_resolve, reject) => { rejectPending = reject; });
+        return new Promise((_resolve, reject) => { rejectPending = reject; retryStarted.resolve(); });
     };
-    view.render(); await view.settle();
-    t.mock.timers.tick(1000); await view.settle();
+    view.render();
+    // Hook rendering alone does not prove an asynchronous rejected request installed its retry timer.
+    await retryScheduled.promise;
+    t.mock.timers.tick(999); assert.equal(calls, 1);
+    t.mock.timers.tick(1);
+    await retryStarted.promise;
+    await view.settle();
     assert.equal(calls, 2);
     view.unmount();
     rejectPending(new Error('late private transport details'));
