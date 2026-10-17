@@ -136,19 +136,13 @@ jobs:
       - name: Use project npm version
         run: npm install --global npm@11.6.2 --no-audit --no-fund
 
-      - name: Install locked deployment tool without lifecycle scripts
+      - name: Install and verify locked deployment dependencies without lifecycle scripts
         run: |
           set -euo pipefail
           npm ci --ignore-scripts --no-audit --no-fund
           npm run audit:hosting
           npm ls --omit=dev
-          node --test csv-parse-compat.test.mjs basic-ftp-compat.test.mjs audit-hosting.test.mjs
-
-          version="$(./node_modules/.bin/firebase --version)"
-          if [[ "$version" != "15.32.0" ]]; then
-            echo "Unexpected Firebase CLI version: $version" >&2
-            exit 1
-          fi
+          npm run test:hosting-publisher
         working-directory: .github/firebase-deploy
 
       - name: Download and validate immutable frontend artifact
@@ -422,12 +416,22 @@ jobs:
           fi
           echo "cleanup-authorized=true" >> "$GITHUB_OUTPUT"
 
+          publisher_file="$RUNNER_TEMP/firebase-preview-publisher.json"
           timeout --signal=TERM --kill-after=30s 8m \
-            .github/firebase-deploy/node_modules/.bin/firebase hosting:channel:deploy "$PREVIEW_CHANNEL" \
-              --expires 1h \
-              --no-authorized-domains \
-              --project "$FIREBASE_PROJECT_ID" \
-              --non-interactive
+            node .github/firebase-deploy/publish-hosting-preview.mjs > "$publisher_file"
+          expected_preview_version="$(python3 - "$publisher_file" "$FIREBASE_SITE_ID" "$PREVIEW_CHANNEL" <<'PY'
+          import json, re, sys
+          with open(sys.argv[1], encoding="utf-8") as handle:
+              result = json.load(handle)
+          site, channel = sys.argv[2:]
+          version = result.get("version")
+          if (result.get("channel") != f"sites/{site}/channels/{channel}"
+                  or not isinstance(version, str)
+                  or not re.fullmatch(rf"sites/{re.escape(site)}/versions/[A-Za-z0-9_-]+", version)):
+              raise SystemExit("Publisher returned an unexpected preview identity.")
+          print(version)
+          PY
+          )"
 
           preview_file="$RUNNER_TEMP/firebase-preview-channel.json"
           preview_version=""
@@ -448,7 +452,7 @@ jobs:
               exit 1
             fi
 
-            mapfile -t preview < <(python3 - "$preview_file" "$FIREBASE_SITE_ID" "$PREVIEW_CHANNEL" <<'PY'
+            mapfile -t preview < <(python3 - "$preview_file" "$FIREBASE_SITE_ID" "$PREVIEW_CHANNEL" "$expected_preview_version" <<'PY'
           import datetime
           import json
           import re
@@ -508,6 +512,8 @@ jobs:
               rf"sites/{raw_site}/versions/[A-Za-z0-9_-]+", version_name
           ):
               raise SystemExit("Preview version name is malformed.")
+          if version_name != sys.argv[4]:
+              raise SystemExit("Preview channel no longer references the uploaded version.")
           print(version_name)
           print(url.rstrip("/"))
           PY

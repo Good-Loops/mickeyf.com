@@ -60,6 +60,15 @@ test('native login has a Continue with Apple control without a login heading', (
     assert.doesNotMatch(rendered, /<h2|Or sign in with|google/);
 });
 
+test('unavailable Apple issuance never renders a login, signup or linking button', () => {
+    for (const action of ['login', 'signup', 'link']) {
+        assert.equal(markup({ clients: [{ ...apple, issuance: false }], action }), '');
+    }
+    const rendered = renderToStaticMarkup(React.createElement(AuthProvider, null,
+        React.createElement(InlineGoogleSignIn, { client: { ...google, issuance: false } })));
+    assert.equal(rendered, '');
+});
+
 test('Apple signup requires the explicit server capability and does not add another Google selector', () => {
     assert.equal(markup({ clients: [google, apple], action: 'signup' }), '');
     const rendered = markup({ clients: [google, { ...apple, signup: true }], action: 'signup' });

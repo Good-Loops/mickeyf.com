@@ -1,3 +1,4 @@
+import '../runtime/fetchRuntime';
 import { GoogleAuth } from 'google-auth-library';
 import mysql from 'mysql2/promise';
 import { loadDeletionAuditConfig } from '../config/deletionAuditConfig';

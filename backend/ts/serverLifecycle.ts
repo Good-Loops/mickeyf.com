@@ -11,6 +11,7 @@ type ProcessControl = {
 type ServerLifecycleOptions = {
     server: Server;
     port: number;
+    host?: string;
     prepare(): Promise<void>;
     closeDatabase(): Promise<void>;
     waitForHandlers(): Promise<void>;
@@ -20,7 +21,7 @@ type ServerLifecycleOptions = {
 };
 
 /** Owns the HTTP listener and ordered teardown, not routes or database policy. */
-export async function runHttpServer({ server, port, prepare, closeDatabase,
+export async function runHttpServer({ server, port, host, prepare, closeDatabase,
     waitForHandlers, onListening, processControl = process,
     // Cloud Run allows ten seconds after SIGTERM; leave time for process exit.
     shutdownTimeoutMs = 9_000 }: ServerLifecycleOptions): Promise<void> {
@@ -45,7 +46,8 @@ export async function runHttpServer({ server, port, prepare, closeDatabase,
     const startup = Promise.resolve().then(prepare).then(async () => {
         if (stopping) return;
         const ready = once(server, 'listening');
-        server.listen(port);
+        if (host === undefined) server.listen(port);
+        else server.listen(port, host);
         await ready;
         listening = true;
         if (!stopping) onListening();

@@ -96,6 +96,19 @@ test('discovery selects only server-configured web Google or capability-enabled 
     }
 });
 
+test('temporarily unavailable issuance retains the exact client for deletion proof without advertising signup', async () => {
+    const configured = { ...apple, issuance: false };
+    const f = fixture({ isNative: true, platform: 'ios', fetchRequest: async () => Response.json({ clients: [configured] }) });
+    assert.deepEqual(await f.client.getAvailableProviderClients(), [configured]);
+    assert.deepEqual(f.scripts, []);
+    assert.deepEqual(await f.client.acquireProviderCredential(configured, challenge, signal()), appleCredential);
+    for (const changed of [{ issuance: true }, { issuance: 'false' }, { issuance: 0 }, { issuance: false, signup: true }]) {
+        const invalid = fixture({ isNative: true, platform: 'ios',
+            fetchRequest: async () => Response.json({ clients: [{ ...apple, ...changed }] }) });
+        assert.deepEqual(await invalid.client.getAvailableProviderClients(), []);
+    }
+});
+
 test('disabled, malformed and duplicate discovery configurations fail closed', async () => {
     for (const body of [null, [], {}, { clients: [google], enabled: true }, { clients: 'google' },
         { clients: [google, google] }, { clients: [google, apple, google] }, { clients: [{ ...google, provider: 'apple' }] },

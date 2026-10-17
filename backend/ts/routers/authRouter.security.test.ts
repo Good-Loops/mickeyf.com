@@ -16,6 +16,9 @@ import { issueSessionToken, PERSISTENT_SESSION_SECONDS } from '../security/sessi
 import { verifyRequestToken } from '../security/requestAuthentication';
 import { loadProviderAuthConfig } from '../config/providerAuthConfig';
 import { createAppleTokenRepository } from '../accounts/appleTokenRepository';
+import { createRegistrationAuthorization } from '../accounts/registrationAuthorization';
+import { loadRegistrationPolicy } from '../config/registrationPolicy';
+import type { AppleTokenLifecycle } from '../config/appleTokenConfig';
 
 const secret = 'account-deletion-test-secret-not-a-credential';
 const password = 'unit-test-password';
@@ -45,7 +48,8 @@ type TestState = {
 async function withServer(
     run: (base: string, state: TestState) => Promise<void>,
     options: { accountDeletionEnabled?: boolean; withoutJournal?: boolean;
-        providerAuth?: ReturnType<typeof loadProviderAuthConfig>; immediateRevocation?: boolean } = { accountDeletionEnabled: true }
+        providerAuth?: ReturnType<typeof loadProviderAuthConfig>; immediateRevocation?: boolean;
+        appleIssuanceAvailable?: () => boolean; registrationPolicy?: ReturnType<typeof loadRegistrationPolicy> } = { accountDeletionEnabled: true }
 ) {
     const passwordHash = await bcrypt.hash(password, 4);
     const state: TestState = { exists: true, unavailable: false, writes: [], databaseCalls: 0,
@@ -248,6 +252,8 @@ async function withServer(
     app.use(cookieParser(secret), express.json());
     app.use('/auth', createAuthRouter(database, secret, true, origins, {
         accountDeletionEnabled: options.accountDeletionEnabled,
+        appleIssuanceAvailable: options.appleIssuanceAvailable,
+        registration: options.registrationPolicy ? createRegistrationAuthorization(database, options.registrationPolicy) : undefined,
         providerAuth: options.immediateRevocation ? { enabled: false, clients: {},
             appleTokenLifecycle: { clientId: 'com.example.test', repository: appleRepository,
                 client: { async exchangeCode() { assert.fail('deletion does not exchange another code'); }, async revoke(refreshToken) {
@@ -307,6 +313,44 @@ test('enabled provider discovery returns public identifiers only, without invoki
         assert.equal(response.headers.get('set-cookie'), null);
         assert.equal(state.databaseCalls, 0);
     }, { providerAuth });
+});
+
+test('local maintenance health removes Apple signup capability without hiding deletion identifiers or closing Google signup', async () => {
+    const appleBundle = 'com.example.ios';
+    const client = { async exchangeCode() { assert.fail('public discovery cannot exchange Apple credentials'); },
+        async revoke() { assert.fail('public discovery cannot revoke Apple credentials'); } };
+    const unexpectedCredentialWrite = () => assert.fail('public discovery cannot write Apple credentials');
+    const repository = { decrypt() { assert.fail('public discovery cannot decrypt Apple credentials'); },
+        prepare: unexpectedCredentialWrite, async save() { unexpectedCredentialWrite(); },
+        async markForRevocation() { return unexpectedCredentialWrite(); } };
+    const web = { clientId: 'com.example.web', redirectUri: 'https://example.test/login', client, repository };
+    const lifecycle = { clientId: appleBundle, client, repository, web } as AppleTokenLifecycle;
+    const providerAuth = loadProviderAuthConfig({ PROVIDER_AUTH_ENABLED: 'true',
+        GOOGLE_WEB_CLIENT_ID: 'synthetic.apps.googleusercontent.com', APPLE_IOS_BUNDLE_ID: appleBundle,
+        APPLE_WEB_SERVICES_ID: web.clientId, APPLE_WEB_REDIRECT_URI: web.redirectUri,
+        APPLE_WEB_AUTH_ENABLED: 'true', APPLE_TOKEN_RUNTIME_SECRETS_ENABLED: 'true',
+        APPLE_TOKEN_LIFECYCLE_ENABLED: 'true', APPLE_NOTIFICATIONS_ENABLED: 'true',
+        APPLE_MAINTENANCE_HTTP_ENABLED: 'true', ACCOUNT_DELETION_ENABLED: 'true',
+        PROVIDER_GOOGLE_SIGNUP_ENABLED: 'true', PROVIDER_APPLE_SIGNUP_ENABLED: 'true', PROVIDER_APPLE_DELETION_ENABLED: 'true',
+    }, {}, lifecycle);
+    const registrationPolicy = loadRegistrationPolicy({ REGISTRATION_ENABLED: 'true', REGISTRATION_POLICY_REVIEWED: 'true',
+        REGISTRATION_POLICY_VERSION: 'synthetic-reviewed', REGISTRATION_COUNTRY_RULES: '{"US":{"parentRequiredBelow":13},"BR":{"parentRequiredBelow":18}}' });
+    let healthy = false;
+    await withServer(async (base, state) => {
+        for (const available of [false, true, false]) {
+            healthy = available;
+            const response = await fetch(base + '/auth/providers/config');
+            assert.equal(response.status, 200);
+            const body = await response.json() as { clients: Array<{ provider: string; signup?: true; issuance?: false; clientKey: string }> };
+            assert.equal(body.clients.find(client => client.provider === 'google')?.signup, true);
+            const apple = body.clients.filter(client => client.provider === 'apple');
+            assert.equal(apple.length, 2, 'configured Apple identifiers remain available for account deletion');
+            assert(apple.every(client => client.signup === (available ? true : undefined)));
+            assert(apple.every(client => client.issuance === (available ? undefined : false)));
+            assert.equal(state.databaseCalls, 0);
+            assert.equal(response.headers.get('set-cookie'), null);
+        }
+    }, { providerAuth, registrationPolicy, appleIssuanceAvailable: () => healthy, accountDeletionEnabled: true });
 });
 
 test('renewal requires a trusted explicit Origin, JSON, an empty body and signed-cookie-only transport', async () => {

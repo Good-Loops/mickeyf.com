@@ -2,13 +2,13 @@ import type { SweetAlertOptions } from 'sweetalert2';
 import type { ProviderAuthenticationChallenge, ProviderCredential } from './authApi.ts';
 import { createAppleWebCredential, type AppleWebIdentity } from './appleWebCredential.ts';
 
-export type PublicProviderClient = Readonly<
+export type PublicProviderClient = Readonly<(
     | { clientKey: 'google-web'; provider: 'google'; platform: 'web'; clientId: string; signup?: true }
     | { clientKey: 'google-ios'; provider: 'google'; platform: 'ios'; clientId: string; signup?: true }
     | { clientKey: 'google-android'; provider: 'google'; platform: 'android'; clientId: string; signup?: true }
     | { clientKey: 'apple-ios'; provider: 'apple'; platform: 'ios'; clientId: string; signup?: true }
     | { clientKey: 'apple-web'; provider: 'apple'; platform: 'web'; clientId: string; redirectUri: string; signup?: true }
->;
+) & { issuance?: false }>;
 
 type NativeIdentity = {
     getCapabilities(): Promise<unknown>;
@@ -53,21 +53,23 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 
 function readClient(value: unknown): PublicProviderClient | null {
     if (!isRecord(value)) return null;
-    const keys = value.clientKey === 'apple-web'
-        ? ['clientId,clientKey,platform,provider,redirectUri', 'clientId,clientKey,platform,provider,redirectUri,signup']
-        : ['clientId,clientKey,platform,provider', 'clientId,clientKey,platform,provider,signup'];
-    if (!keys.includes(Object.keys(value).sort().join(','))
+    const keys = ['clientId', 'clientKey', 'platform', 'provider',
+        ...(value.clientKey === 'apple-web' ? ['redirectUri'] : []),
+        ...('signup' in value ? ['signup'] : []), ...('issuance' in value ? ['issuance'] : [])];
+    if (Object.keys(value).sort().join(',') !== keys.sort().join(',')
         || ('signup' in value && value.signup !== true)
+        || ('issuance' in value && (value.issuance !== false || value.signup === true))
         || typeof value.clientId !== 'string' || !/^[\x21-\x7e]{1,255}$/.test(value.clientId)) return null;
+    const availability = value.issuance === false ? { issuance: false as const } : {};
     if (value.provider === 'google' && ((value.clientKey === 'google-web' && value.platform === 'web')
         || (value.clientKey === 'google-ios' && value.platform === 'ios')
         || (value.clientKey === 'google-android' && value.platform === 'android'))) {
         return Object.freeze({ clientKey: value.clientKey, provider: value.provider, platform: value.platform, clientId: value.clientId,
-            ...(value.signup === true ? { signup: true as const } : {}) }) as PublicProviderClient;
+            ...(value.signup === true ? { signup: true as const } : {}), ...availability }) as PublicProviderClient;
     }
     if (value.clientKey === 'apple-ios' && value.provider === 'apple' && value.platform === 'ios') {
         return Object.freeze({ clientKey: value.clientKey, provider: value.provider, platform: value.platform, clientId: value.clientId,
-            ...(value.signup === true ? { signup: true as const } : {}) });
+            ...(value.signup === true ? { signup: true as const } : {}), ...availability });
     }
     if (value.clientKey === 'apple-web' && value.provider === 'apple' && value.platform === 'web'
         && typeof value.redirectUri === 'string' && value.redirectUri.length <= 2048) {
@@ -77,7 +79,8 @@ function readClient(value: unknown): PublicProviderClient | null {
                 || url.hostname.endsWith('.localhost') || url.username || url.password || url.port || url.search || url.hash
                 || url.href !== value.redirectUri) return null;
             return Object.freeze({ clientKey: value.clientKey, provider: value.provider, platform: value.platform,
-                clientId: value.clientId, redirectUri: value.redirectUri, ...(value.signup === true ? { signup: true as const } : {}) });
+                clientId: value.clientId, redirectUri: value.redirectUri,
+                ...(value.signup === true ? { signup: true as const } : {}), ...availability });
         } catch { return null; }
     }
     return null;

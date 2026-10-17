@@ -206,6 +206,28 @@ test('unmount during Google preparation aborts and ignores a late prepared attem
     assert.deepEqual(view.busy, []);
 });
 
+test('an initial Apple maintenance outage preserves Google and restores Apple controls after checking recovered capabilities', async t => {
+    const view = mount(t, ProviderSignInControls, { action: 'login' });
+    const apple = { clientKey: 'apple-web', provider: 'apple', platform: 'web', clientId: 'com.example.web',
+        redirectUri: 'https://example.test/login' };
+    let healthy = false;
+    view.hooks.clients = async () => [google, { ...apple, ...(healthy ? { signup: true } : { issuance: false }) }];
+    view.render();
+    await view.settle();
+    assert(view.find(node => node.type === InlineGoogleSignIn));
+    assert(view.find(node => node.type === ProviderSignInButtons).props.clients.some(client => client.issuance === false));
+    const retry = view.find(node => node.type === 'button' && node.props.children === 'Check again');
+    assert(retry);
+    healthy = true;
+    retry.props.onClick();
+    await view.settle();
+    assert.equal(view.find(node => node.type === 'button' && node.props.children === 'Check again'), undefined);
+    const restored = view.find(node => node.type === ProviderSignInButtons).props.clients.find(client => client.provider === 'apple');
+    assert.equal(restored.issuance, undefined);
+    assert.equal(restored.signup, true);
+    assert.equal(view.preparation.length, 0, 'checking public capability availability cannot start a provider attempt');
+});
+
 test('unmount during Google completion releases the lock and ignores late success', async t => {
     const view = mount(t);
     view.render();

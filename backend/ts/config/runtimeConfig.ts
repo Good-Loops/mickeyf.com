@@ -5,6 +5,7 @@ import type { ParentRegistrationPolicy } from '../accounts/parentRegistrationFlo
 import { DELETION_JOURNAL_BUCKET } from '../accounts/gcsDeletionJournal';
 import { loadProviderAuthConfig, type ProviderAuthConfig } from './providerAuthConfig';
 import { loadAppleMaintenanceConfig, type AppleMaintenanceConfig } from './appleMaintenanceConfig';
+import { loadLocalProviderRuntime, type LocalProviderRuntime } from './localProviderRuntime';
 
 export type RuntimeEnvironment = 'development' | 'test' | 'production';
 
@@ -26,6 +27,7 @@ export type RuntimeConfig = {
     journalBucket: string | undefined;
     providerAuth: ProviderAuthConfig;
     appleMaintenance: AppleMaintenanceConfig | undefined;
+    localProviderRuntime: LocalProviderRuntime | undefined;
 };
 
 export type DatabaseConfig = {
@@ -87,14 +89,15 @@ export function parseRuntimeEnvironment(env: Environment): RuntimeEnvironment {
 
 export function loadRuntimeConfig(env: Environment = process.env): RuntimeConfig {
     const nodeEnv = parseRuntimeEnvironment(env);
+    const localProviderRuntime = loadLocalProviderRuntime(env);
     const sessionSecret = requiredValue(env, 'SESSION_SECRET');
-    const minimumSecretLength = nodeEnv === 'production' ? 32 : 16;
+    const minimumSecretLength = nodeEnv === 'production' || localProviderRuntime ? 32 : 16;
 
     if (sessionSecret.length < minimumSecretLength) {
         throw new Error(`SESSION_SECRET must contain at least ${minimumSecretLength} characters`);
     }
     const accountDeletionEnabled = isExplicitlyEnabled(env.ACCOUNT_DELETION_ENABLED);
-    if (accountDeletionEnabled && nodeEnv !== 'production') {
+    if (accountDeletionEnabled && nodeEnv !== 'production' && !localProviderRuntime) {
         throw new Error('ACCOUNT_DELETION_ENABLED requires production; local tests must inject a fake journal');
     }
     const journalBucket = accountDeletionEnabled
@@ -115,7 +118,7 @@ export function loadRuntimeConfig(env: Environment = process.env): RuntimeConfig
         throw new Error('Apple HTTP maintenance requires runtime secret access without injected Apple keys.');
     }
     const providerAuth = loadProviderAuthConfig(env);
-    if (nodeEnv === 'production' && providerAuth.signupEnabled && !accountDeletionEnabled) {
+    if ((nodeEnv === 'production' || localProviderRuntime) && providerAuth.signupEnabled && !accountDeletionEnabled) {
         throw new Error('Google signup requires account deletion to be enabled in production');
     }
 
@@ -144,6 +147,7 @@ export function loadRuntimeConfig(env: Environment = process.env): RuntimeConfig
         journalBucket,
         providerAuth,
         appleMaintenance,
+        localProviderRuntime,
     });
 }
 

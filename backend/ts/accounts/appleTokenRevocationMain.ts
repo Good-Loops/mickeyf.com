@@ -1,3 +1,4 @@
+import '../runtime/fetchRuntime';
 import { runAppleTokenRevocation } from './runAppleTokenRevocation';
 
 // Dedicated compiled job, never imported by the HTTP server. Hard exit after

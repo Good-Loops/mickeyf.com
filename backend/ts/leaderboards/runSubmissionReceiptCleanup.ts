@@ -1,3 +1,4 @@
+import '../runtime/fetchRuntime';
 import { runReceiptMaintenance } from './receiptMaintenanceOperations';
 
 // This file is a dedicated Cloud Run Job entrypoint, never imported by the API.

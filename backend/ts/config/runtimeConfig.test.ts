@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { loadDatabaseConfig, loadRuntimeConfig } from './runtimeConfig';
 import { DELETION_JOURNAL_BUCKET } from '../accounts/gcsDeletionJournal';
+import { LOCAL_PROVIDER_SERVER_UUID } from './localProviderRuntime';
 
 const productionEnvironment = {
     NODE_ENV: 'production',
@@ -206,4 +207,29 @@ test('HTTP Apple maintenance requires deferred secrets, not container-injected A
         assert.throws(() => loadRuntimeConfig({ ...runtimeEnv, [name]: 'synthetic' }), /without injected Apple keys/);
     }
     assert.equal(loadRuntimeConfig(productionEnvironment).appleMaintenance, undefined);
+});
+
+const localEnvironment = { ...productionEnvironment, NODE_ENV: 'development',
+    DB_HOST: '127.0.0.1', DB_PORT: '3306', DB_USER: 'cms_mickeyf', DB_NAME: 'cms',
+    LUDOLUME_LOCAL_PROVIDER_RUNTIME: 'true', LUDOLUME_LOCAL_PROVIDER_EXPECTED_SERVER_UUID: LOCAL_PROVIDER_SERVER_UUID };
+
+test('explicit local profile retains development transport and journaled deletion without pretending to be production', () => {
+    const config = loadRuntimeConfig({ ...localEnvironment, ACCOUNT_DELETION_ENABLED: 'true',
+        ACCOUNT_DELETION_JOURNAL_BUCKET: DELETION_JOURNAL_BUCKET, ACCOUNT_IDENTITY_EPOCH: '2026-09-12 00:15:39.954172' });
+    assert.equal(config.isProduction, false);
+    assert.equal(config.nodeEnv, 'development');
+    assert.equal(config.accountDeletionEnabled, true);
+    assert.equal(config.localProviderRuntime?.expectedServerUuid, LOCAL_PROVIDER_SERVER_UUID);
+    assert.deepEqual(config.corsOrigins, ['http://localhost:5173']);
+    const database = loadDatabaseConfig(localEnvironment);
+    assert.equal(database.isProduction, false);
+    assert.equal(database.host, '127.0.0.1');
+    assert.equal(database.cloudSqlConnectionName, undefined);
+});
+
+test('real-account local provider profile requires production-strength session signing and available deletion', () => {
+    assert.throws(() => loadRuntimeConfig({ ...localEnvironment, SESSION_SECRET: 'synthetic-16-character-key' }), /32 characters/);
+    assert.throws(() => loadRuntimeConfig({ ...localEnvironment, PROVIDER_AUTH_ENABLED: 'true',
+        GOOGLE_WEB_CLIENT_ID: 'synthetic.apps.googleusercontent.com', PROVIDER_GOOGLE_SIGNUP_ENABLED: 'true' }),
+    /Google signup requires account deletion/);
 });

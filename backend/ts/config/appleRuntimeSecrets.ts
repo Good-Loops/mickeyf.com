@@ -1,8 +1,15 @@
 import { performance } from 'node:perf_hooks';
+import { GoogleAuth, Impersonated, UserRefreshClient } from 'google-auth-library';
 import { loadAppleTokenConfig, type AppleTokenLifecycle } from './appleTokenConfig';
+import { assertLocalProviderSecretVersions, loadLocalProviderRuntime } from './localProviderRuntime';
 
 type Environment = Readonly<Record<string, string | undefined>>;
-type Dependencies = { fetch?: typeof globalThis.fetch; timeoutMs?: number };
+type Dependencies = {
+    fetch?: typeof globalThis.fetch;
+    timeoutMs?: number;
+    verifyLocalTarget?: () => Promise<void>;
+    localAccessToken?: (signal: AbortSignal, timeoutMs: number) => Promise<string>;
+};
 const TIMEOUT_MS = 10_000;
 const RESPONSE_MAX_BYTES = 32_768;
 const SECRET_MAX_BYTES = 16_384;
@@ -80,9 +87,22 @@ function decodeSecret(document: Record<string, unknown>, version: string): strin
     return new TextDecoder('utf-8', { fatal: true }).decode(bytes);
 }
 
+/** ADC is consumed only inside the explicitly enabled local backend, never returned through an API or log. */
+async function localAccessToken(signal: AbortSignal, timeoutMs: number): Promise<string> {
+    const client = await new GoogleAuth({ scopes: ['https://www.googleapis.com/auth/cloud-platform'] }).getClient();
+    if (signal.aborted || !(client instanceof UserRefreshClient || client instanceof Impersonated)) throw new Error();
+    client.transporter.interceptors.request.add({ resolved: async options => ({ ...options, signal, timeout: timeoutMs,
+        retry: false, retryConfig: { retry: 0 }, maxContentLength: RESPONSE_MAX_BYTES, size: RESPONSE_MAX_BYTES,
+        maxRedirects: 0, redirect: 'error' }) });
+    const result = await client.getAccessToken();
+    if (signal.aborted || typeof result.token !== 'string') throw new Error();
+    return result.token;
+}
+
 /** Runtime-only fetch: unavailable Apple secrets cannot prevent the HTTP service or SQL purge from starting. */
 export async function loadAppleRuntimeLifecycle(env: Environment = process.env,
-    { fetch: fetchRequest = globalThis.fetch, timeoutMs = TIMEOUT_MS }: Dependencies = {}): Promise<AppleTokenLifecycle> {
+    { fetch: fetchRequest = globalThis.fetch, timeoutMs = TIMEOUT_MS, verifyLocalTarget,
+        localAccessToken: acquireLocalToken = localAccessToken }: Dependencies = {}): Promise<AppleTokenLifecycle> {
     const controller = new AbortController();
     let timer: ReturnType<typeof setTimeout> | undefined;
     const deadline = performance.now() + timeoutMs;
@@ -90,32 +110,44 @@ export async function loadAppleRuntimeLifecycle(env: Environment = process.env,
         if (controller.signal.aborted || performance.now() >= deadline) throw new Error();
     };
     try {
+        const local = loadLocalProviderRuntime(env);
         if (env.APPLE_TOKEN_RUNTIME_SECRETS_ENABLED !== 'true' || env.APPLE_TOKEN_LIFECYCLE_ENABLED !== 'true'
-            || env.NODE_ENV !== 'production' || env.K_SERVICE !== 'mickeyf-org'
+            || (!local && (env.NODE_ENV !== 'production' || env.K_SERVICE !== 'mickeyf-org'))
             || (env.LUDOLUME_ISOLATED_RUNTIME !== undefined && env.LUDOLUME_ISOLATED_RUNTIME !== 'false')
             || env.APPLE_SIGN_IN_PRIVATE_KEY !== undefined || env.APPLE_TOKEN_ENCRYPTION_KEYS !== undefined
+            || (local && typeof verifyLocalTarget !== 'function')
             || typeof fetchRequest !== 'function' || !Number.isSafeInteger(timeoutMs) || timeoutMs < 1 || timeoutMs > TIMEOUT_MS) {
             throw new Error();
         }
         const signingVersion = secretVersion(env.APPLE_SIGN_IN_PRIVATE_KEY_SECRET_VERSION);
         const encryptionVersion = secretVersion(env.APPLE_TOKEN_ENCRYPTION_KEYS_SECRET_VERSION);
         if (normalizeProject(signingVersion) === normalizeProject(encryptionVersion)) throw new Error();
+        if (local) assertLocalProviderSecretVersions(signingVersion, encryptionVersion);
         const work = async () => {
             assertActive();
-            const response = await fetchRequest(METADATA_TOKEN_URL, {
-                method: 'GET', headers: { 'Metadata-Flavor': 'Google', accept: 'application/json' },
-                redirect: 'error', credentials: 'omit', cache: 'no-store', signal: controller.signal,
-            });
+            let token: string;
+            if (local) {
+                await verifyLocalTarget!();
+                assertActive();
+                token = await acquireLocalToken(controller.signal, Math.max(1, Math.ceil(deadline - performance.now())));
+            } else {
+                const response = await fetchRequest(METADATA_TOKEN_URL, {
+                    method: 'GET', headers: { 'Metadata-Flavor': 'Google', accept: 'application/json' },
+                    redirect: 'error', credentials: 'omit', cache: 'no-store', signal: controller.signal,
+                });
+                assertActive();
+                if (response.headers.get('metadata-flavor') !== 'Google') throw new Error();
+                const metadata = await readDocument(response, controller.signal, assertActive);
+                if (metadata.token_type !== 'Bearer' || typeof metadata.access_token !== 'string'
+                    || !Number.isSafeInteger(metadata.expires_in) || Number(metadata.expires_in) < 1) throw new Error();
+                token = metadata.access_token;
+            }
             assertActive();
-            if (response.headers.get('metadata-flavor') !== 'Google') throw new Error();
-            const metadata = await readDocument(response, controller.signal, assertActive);
-            if (metadata.token_type !== 'Bearer' || typeof metadata.access_token !== 'string'
-                || !/^[\x21-\x7e]{1,8192}(?![\s\S])/u.test(metadata.access_token)
-                || !Number.isSafeInteger(metadata.expires_in) || Number(metadata.expires_in) < 1) throw new Error();
+            if (!/^[\x21-\x7e]{1,8192}(?![\s\S])/u.test(token)) throw new Error();
             const readSecret = async (version: string) => {
                 assertActive();
                 const secretResponse = await fetchRequest(`https://secretmanager.googleapis.com/v1/${version}:access`, {
-                    method: 'GET', headers: { authorization: `Bearer ${metadata.access_token}`, accept: 'application/json' },
+                    method: 'GET', headers: { authorization: `Bearer ${token}`, accept: 'application/json' },
                     redirect: 'error', credentials: 'omit', cache: 'no-store', signal: controller.signal,
                 });
                 return decodeSecret(await readDocument(secretResponse, controller.signal, assertActive), version);

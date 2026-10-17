@@ -1,3 +1,4 @@
+import '../runtime/fetchRuntime';
 import { performance } from 'node:perf_hooks';
 import mysql, { type Pool, type PoolConnection, type PoolOptions, type ResultSetHeader, type RowDataPacket } from 'mysql2/promise';
 import { loadAppleRevocationConfig, loadAppleRevocationLifecycle, type AppleRevocationConfig } from '../config/appleRevocationConfig';

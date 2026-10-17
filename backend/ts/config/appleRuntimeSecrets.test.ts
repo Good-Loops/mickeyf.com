@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import { generateKeyPairSync } from 'node:crypto';
 import test from 'node:test';
 import { loadAppleRuntimeLifecycle } from './appleRuntimeSecrets';
+import { LOCAL_PROVIDER_SERVER_UUID, LOCAL_PROVIDER_SECRET_VERSIONS } from './localProviderRuntime';
 
 const privateKey = generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).privateKey
     .export({ format: 'pem', type: 'pkcs8' }).toString();
@@ -198,4 +199,83 @@ test('a late secret response cannot escape the overall timeout', async () => {
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(f.calls.length, 3);
     assert.equal(f.calls[0].options?.signal?.aborted, true);
+});
+
+const localEnvironment = { ...environment, NODE_ENV: 'development', K_SERVICE: undefined,
+    LUDOLUME_LOCAL_PROVIDER_RUNTIME: 'true', LUDOLUME_LOCAL_PROVIDER_MAINTENANCE_ENABLED: 'true',
+    LUDOLUME_LOCAL_PROVIDER_EXPECTED_SERVER_UUID: LOCAL_PROVIDER_SERVER_UUID,
+    APPLE_MAINTENANCE_HTTP_ENABLED: 'true', APPLE_MAINTENANCE_EXPECTED_SERVER_UUID: LOCAL_PROVIDER_SERVER_UUID,
+    DB_HOST: '127.0.0.1', DB_PORT: '3306', DB_USER: 'cms_mickeyf', DB_NAME: 'cms',
+    APPLE_SIGN_IN_PRIVATE_KEY_SECRET_VERSION: LOCAL_PROVIDER_SECRET_VERSIONS.signing,
+    APPLE_TOKEN_ENCRYPTION_KEYS_SECRET_VERSION: LOCAL_PROVIDER_SECRET_VERSIONS.encryption };
+
+function localFixture() {
+    const sequence: string[] = [];
+    const f = fixture(url => {
+        assert(!url.includes('metadata.google.internal'), 'local ADC must not impersonate the production metadata path');
+        sequence.push('secret');
+        const version = url.replace('https://secretmanager.googleapis.com/v1/', '').replace(':access', '');
+        return json(secretDocument(version, version.includes('signin-private-key') ? privateKey : keyring));
+    });
+    return { ...f, sequence, verifyLocalTarget: async () => { sequence.push('database-verified'); },
+        localAccessToken: async (signal: AbortSignal, timeoutMs: number) => {
+            assert(!signal.aborted); assert(timeoutMs > 0 && timeoutMs <= 10_000);
+            sequence.push('adc-token'); return 'synthetic-local-oauth-token';
+        } };
+}
+
+test('explicit local ADC checks the actual database before obtaining a token and loading only pinned secrets', async () => {
+    const f = localFixture();
+    const original = { ...localEnvironment };
+    const lifecycle = await loadAppleRuntimeLifecycle(localEnvironment, f);
+    assert.equal(lifecycle.clientId, environment.APPLE_IOS_BUNDLE_ID);
+    assert.deepEqual(f.sequence, ['database-verified', 'adc-token', 'secret', 'secret']);
+    assert.deepEqual(localEnvironment, original);
+    assert.equal(f.calls.length, 2);
+    for (const call of f.calls) assert.equal(new Headers(call.options?.headers).get('authorization'),
+        'Bearer synthetic-local-oauth-token');
+});
+
+test('local credentials remain inaccessible without a successful actual-connection check', async () => {
+    for (const verifyLocalTarget of [undefined, async () => { throw new Error('private database diagnostic'); }]) {
+        const f = localFixture();
+        await assert.rejects(loadAppleRuntimeLifecycle(localEnvironment, { ...f, verifyLocalTarget }), failure);
+        assert.equal(f.sequence.length, 0);
+        assert.equal(f.calls.length, 0);
+    }
+});
+
+test('local credential profile rejects substituted secret versions, identities and inline-key fallback before ADC', async () => {
+    for (const override of [
+        { APPLE_SIGN_IN_PRIVATE_KEY_SECRET_VERSION: environment.APPLE_SIGN_IN_PRIVATE_KEY_SECRET_VERSION },
+        { APPLE_TOKEN_ENCRYPTION_KEYS_SECRET_VERSION: `${LOCAL_PROVIDER_SECRET_VERSIONS.encryption}0` },
+        { K_SERVICE: 'mickeyf-org' }, { NODE_ENV: 'production' }, { DB_USER: 'root' },
+        { APPLE_SIGN_IN_PRIVATE_KEY: 'private-inline-key' }, { GOOGLE_APPLICATION_CREDENTIALS: 'private-file' },
+    ]) {
+        const f = localFixture();
+        await assert.rejects(loadAppleRuntimeLifecycle({ ...localEnvironment, ...override }, f), failure);
+        assert.deepEqual(f.sequence, []);
+        assert.equal(f.calls.length, 0);
+    }
+});
+
+test('the local ADC deadline prevents late credentials from initiating secret reads', async () => {
+    const pending = deferred<string>();
+    const f = localFixture();
+    await assert.rejects(loadAppleRuntimeLifecycle(localEnvironment,
+        { ...f, localAccessToken: () => pending.promise, timeoutMs: 15 }), failure);
+    pending.resolve('synthetic-late-local-token');
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(f.calls.length, 0);
+});
+
+test('local ADC errors and malformed bearer tokens stay private without secret reads', async () => {
+    for (const localAccessToken of [async () => 'private-token\n', async () => { throw new Error('private ADC details'); }]) {
+        const f = localFixture();
+        await assert.rejects(loadAppleRuntimeLifecycle(localEnvironment, { ...f, localAccessToken }), error => {
+            assert(error instanceof Error); assert.equal(error.message, failure.message);
+            assert.equal('cause' in error, false); return true;
+        });
+        assert.equal(f.calls.length, 0);
+    }
 });

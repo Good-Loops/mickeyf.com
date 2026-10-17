@@ -1,3 +1,5 @@
+import './runtime/fetchRuntime';
+
 // The isolated launcher supplies its complete environment; loading the root
 // .env afterward could reintroduce provider or cloud settings it deliberately removed.
 if (!(process.env.NODE_ENV === 'development' && process.env.LUDOLUME_ISOLATED_RUNTIME === 'true')) {
@@ -34,6 +36,8 @@ import { createAppleMaintenanceRouter } from './routers/appleMaintenanceRouter';
 import { runAppleMaintenance } from './accounts/runAppleTokenRevocation';
 import { loadAppleRuntimeLifecycle } from './config/appleRuntimeSecrets';
 import { prepareRuntimeProviderAuth } from './config/providerAuthConfig';
+import { verifyLocalProviderIdentity } from './db/localProviderIdentity';
+import { createLocalProviderMaintenance } from './accounts/localProviderMaintenance';
 
 import { createRegistrationAuthorization, cleanupRegistrationAuthorizations } from './accounts/registrationAuthorization';
 import { verifyRegistrationReadiness } from './migrations/registrationSchema';
@@ -48,6 +52,10 @@ const registration = createRegistrationAuthorization(pool, registrationPolicyFor
 const deletionJournal = runtimeConfig.accountDeletionEnabled
     ? createGcsDeletionJournal({ bucket: runtimeConfig.journalBucket }) : undefined;
 const app = express();
+let providerReadiness = { googleWebLogin: false, googleWebSignup: false, appleWebLogin: false, appleWebSignup: false };
+const verifyLocalTarget = runtimeConfig.localProviderRuntime
+    ? () => verifyLocalProviderIdentity(pool, runtimeConfig.localProviderRuntime!) : undefined;
+const loadRuntimeAppleLifecycle = () => loadAppleRuntimeLifecycle(process.env, { verifyLocalTarget });
 
 // Cloud Run supplies one trusted proxy hop. This must be configured before any
 // IP-based security middleware evaluates req.ip.
@@ -71,11 +79,11 @@ app.use(helmet({
 
 // This endpoint accepts only a pinned workload identity, never browser cookies.
 // Mount before CORS/preflight and body parsers so they cannot bypass its checks.
-app.use(APPLE_MAINTENANCE_PATH, createAppleMaintenanceRouter(runtimeConfig.appleMaintenance, async () => {
+async function runConfiguredMaintenance(): Promise<number> {
     // Independent cleanup must still run if Apple's provider request fails.
     const [apple, registrationCleanup, parentCleanup, formCleanup] = await Promise.allSettled([
         runAppleMaintenance({ database: pool, expectedServerUuid: runtimeConfig.appleMaintenance!.expectedServerUuid,
-            loadLifecycle: () => loadAppleRuntimeLifecycle() }),
+            loadLifecycle: loadRuntimeAppleLifecycle }),
         cleanupRegistrationAuthorizations(pool),
         cleanupParentRegistrationAttempts(pool),
         runtimeConfig.parentRegistrationPolicy?.signedFormsEnabled ? cleanupSignedParentForms(pool) : Promise.resolve({ backlog: false }),
@@ -84,7 +92,10 @@ app.use(APPLE_MAINTENANCE_PATH, createAppleMaintenanceRouter(runtimeConfig.apple
         && registrationCleanup.status === 'fulfilled' && !registrationCleanup.value.backlog
         && parentCleanup.status === 'fulfilled' && !parentCleanup.value.backlog
         && formCleanup.status === 'fulfilled' && !formCleanup.value.backlog ? 0 : 1;
-}));
+}
+app.use(APPLE_MAINTENANCE_PATH, createAppleMaintenanceRouter(runtimeConfig.appleMaintenance, runConfiguredMaintenance));
+const localMaintenance = runtimeConfig.localProviderRuntime?.maintenanceEnabled
+    ? createLocalProviderMaintenance(runConfiguredMaintenance) : undefined;
 
 app.use(cors({
     origin: [...runtimeConfig.corsOrigins],
@@ -122,16 +133,19 @@ async function startServer(): Promise<void> {
     await runHttpServer({
         server: createServer(app),
         port: runtimeConfig.port,
-        closeDatabase: closeDatabasePool,
+        ...(runtimeConfig.localProviderRuntime ? { host: '127.0.0.1' } : {}),
+        closeDatabase: async () => { await localMaintenance?.stop(); await closeDatabasePool(); },
         waitForHandlers: waitForPendingHandlers,
         prepare: async () => {
             await verifyDatabaseConnection();
+            await verifyLocalTarget?.();
             await verifyAccountSessionReadiness(pool);
             await verifyRegistrationReadiness(pool);
             await verifyParentRegistrationReadiness(pool);
             await verifyScoreParticipationReadiness(pool);
             if (runtimeConfig.parentRegistrationPolicy?.signedFormsEnabled) await verifySignedParentFormReadiness(pool);
-            const providerAuth = await prepareRuntimeProviderAuth(runtimeConfig.providerAuth);
+            const providerAuth = await prepareRuntimeProviderAuth(runtimeConfig.providerAuth, process.env,
+                { loadLifecycle: loadRuntimeAppleLifecycle });
             if (providerAuth.appleTokenLifecycle) await verifyAppleTokenReadiness(pool);
             if (runtimeConfig.providerAuth.appleNotifications) await verifyAppleRevocationReadiness(pool);
             if (runtimeConfig.providerAuth.signupEnabled) {
@@ -146,11 +160,20 @@ async function startServer(): Promise<void> {
             if (runtimeConfig.accountDeletionEnabled) {
                 await verifyAccountDeletionReadiness(pool, runtimeConfig.accountIdentityEpoch!);
             }
+            // Explicit local maintenance performs real queue cleanup only after all startup schema/identity gates pass.
+            await localMaintenance?.start();
+            const googleWeb = providerAuth.publicClients.find(client => client.clientKey === 'google-web');
+            const appleWeb = providerAuth.publicClients.find(client => client.clientKey === 'apple-web');
+            const appleAvailable = !localMaintenance || localMaintenance.isHealthy();
+            providerReadiness = { googleWebLogin: !!googleWeb, appleWebLogin: !!appleWeb && appleAvailable,
+                googleWebSignup: googleWeb?.signup === true && !!registration.policy,
+                appleWebSignup: appleWeb?.signup === true && !!registration.policy && appleAvailable };
             app.use('/auth', createAuthRouter(
                 pool, runtimeConfig.sessionSecret, runtimeConfig.isProduction, runtimeConfig.corsOrigins,
                 { accountDeletionEnabled: runtimeConfig.accountDeletionEnabled, deletionJournal, providerAuth, registration,
                     parentRegistrationStorageReady: true, parentRegistrationPolicy: runtimeConfig.parentRegistrationPolicy,
-                    scoreParticipationPolicy: runtimeConfig.scoreParticipationPolicy }
+                    scoreParticipationPolicy: runtimeConfig.scoreParticipationPolicy,
+                    ...(localMaintenance ? { appleIssuanceAvailable: () => localMaintenance.isHealthy() } : {}) }
             ));
             app.use(notFoundHandler);
             app.use(requestErrorHandler);
@@ -167,6 +190,8 @@ async function startServer(): Promise<void> {
                         : 'disabled',
                 accountDeletion: runtimeConfig.accountDeletionEnabled ? 'enabled' : 'disabled',
                 providerAuth: runtimeConfig.providerAuth.enabled ? 'enabled' : 'disabled',
+                providers: providerReadiness,
+                ...(localMaintenance ? { localProviderMaintenance: localMaintenance.isHealthy() ? 'ready' : 'unavailable' } : {}),
             });
         },
     });

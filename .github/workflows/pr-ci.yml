@@ -49,7 +49,7 @@ jobs:
       - name: Validate Firebase deploy dependency tree
         run: |
           npm --prefix .github/firebase-deploy ls --omit=dev
-          node --test .github/firebase-deploy/csv-parse-compat.test.mjs .github/firebase-deploy/basic-ftp-compat.test.mjs .github/firebase-deploy/audit-hosting.test.mjs
+          npm --prefix .github/firebase-deploy run test:hosting-publisher
 
       - name: Audit npm dependencies
         run: |
@@ -94,7 +94,7 @@ jobs:
           npm run test:receipt-cleanup
 
       - name: Test backend development and migration launchers
-        run: node --test backend/scripts/dev-isolated.test.cjs backend/scripts/run-migration-tests.test.mjs
+        run: node --test backend/scripts/dev-isolated.test.cjs backend/scripts/run-migration-tests.test.mjs scripts/start-local-provider-backend.test.mjs
 
       - name: Test and build backend
         run: |
@@ -108,6 +108,44 @@ jobs:
 
       - name: Build documentation
         run: npm run docs
+
+  backend-runtime:
+    name: Backend production runtime compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI: "true"
+      NPM_CONFIG_FUND: "false"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up production Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 26.12.0
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install exact project dependencies
+        run: |
+          npm install --global npm@11.6.2 --no-audit --no-fund
+          npm --prefix backend ci --no-audit
+          npm --prefix backend audit --audit-level=low
+
+      - name: Validate backend on the production runtime
+        run: |
+          npm --prefix backend test
+          npm --prefix backend run test:unit
+          npm --prefix backend run test:migrations
+          npm --prefix backend run prod
+
+      - name: Build and probe the final unprivileged image
+        run: |
+          docker build --tag ludolume-runtime-check:ci .
+          docker run --rm -i --network=none --read-only --cap-drop=ALL --security-opt=no-new-privileges --entrypoint=node ludolume-runtime-check:ci < backend/scripts/runtime-smoke.cjs
 
   unity-static:
     name: Unity source integrity

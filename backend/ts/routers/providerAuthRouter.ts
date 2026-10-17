@@ -60,6 +60,7 @@ export type ProviderAuthRouterOptions = Readonly<{
     services?: ProviderAuthRouterServices;
     registration?: RegistrationAuthorization;
     beforeAccountDeletion?: BeforeAccountDeletion;
+    appleIssuanceAvailable?: () => boolean;
 }>;
 
 function createServices(options: ProviderAuthRouterOptions): ProviderAuthRouterServices {
@@ -206,8 +207,16 @@ export function createProviderAuthRouter(options: ProviderAuthRouterOptions): Ro
     if (Object.keys(options.clients).length === 0) throw new TypeError('Enabled provider routes require configured clients.');
     const services = options.services ?? createServices(options);
 
+    function unavailableAppleIssuance(body: unknown): boolean {
+        if (!isRecord(body) || body.action === 'delete' || typeof body.clientKey !== 'string'
+            || options.clients[body.clientKey]?.provider !== 'apple' || !options.appleIssuanceAvailable) return false;
+        try { return options.appleIssuanceAvailable() !== true; }
+        catch { return true; }
+    }
+
     router.post('/begin', rateLimit({ ...limiterOptions, limit: PROVIDER_BEGIN_IP_LIMIT }),
         json({ limit: '32kb', strict: true }), asyncHandler(async (req, res) => {
+            if (unavailableAppleIssuance(req.body)) return fail(res, 'UNAVAILABLE');
             if (isRecord(req.body) && req.body.action === 'signup' && !options.signupEnabled) return fail(res, 'UNAVAILABLE');
             if (isRecord(req.body) && req.body.action === 'delete' && !canDeleteWith(req.body.clientKey)) return fail(res, 'ACCOUNT_DELETION_UNAVAILABLE');
             try {
@@ -230,6 +239,7 @@ export function createProviderAuthRouter(options: ProviderAuthRouterOptions): Ro
 
     router.post('/complete', rateLimit({ ...limiterOptions, limit: PROVIDER_COMPLETE_IP_LIMIT }),
         json({ limit: '32kb', strict: true }), linkPasswordLimiter, asyncHandler(async (req, res) => {
+            if (unavailableAppleIssuance(req.body)) return fail(res, 'UNAVAILABLE');
             if (!isRecord(req.body)) return fail(res, 'INVALID_REQUEST');
             if (req.body.action === 'signup' && !options.signupEnabled) return fail(res, 'UNAVAILABLE');
             if (req.body.action === 'delete' && !canDeleteWith(req.body.clientKey)) return fail(res, 'ACCOUNT_DELETION_UNAVAILABLE');

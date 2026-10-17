@@ -58,8 +58,8 @@ export function ProviderSignInButtons({ clients, action, busyClient, disabled, o
     onSelect: (client: PublicProviderClient) => void;
 }) {
     const headingId = useId();
-    const choices = action === 'link' ? clients : clients.filter(client => client.clientKey !== 'google-web'
-        && (action !== 'signup' || client.signup === true));
+    const choices = clients.filter(client => client.issuance !== false && (action === 'link'
+        || (client.clientKey !== 'google-web' && (action !== 'signup' || client.signup === true))));
     if (LEGACY_PUBLIC_API_PREVIEW || choices.length === 0) return null;
     return (
         <div className="provider-sign-in__choices" role="group" aria-labelledby={action === 'link' ? headingId : undefined}
@@ -106,7 +106,7 @@ export function InlineGoogleSignIn({ client, action = 'login', userName = '', re
     }, [isAuthenticated]);
 
     useEffect(() => {
-        if (LEGACY_PUBLIC_API_PREVIEW || disabled || loading || !host.current || latest.current.isAuthenticated) return;
+        if (LEGACY_PUBLIC_API_PREVIEW || client.issuance === false || disabled || loading || !host.current || latest.current.isAuthenticated) return;
         const element = host.current;
         const controller = new AbortController();
         let current = true;
@@ -175,7 +175,7 @@ export function InlineGoogleSignIn({ client, action = 'login', userName = '', re
         // Callback identities, typing and remember-me changes must not create new attempts.
     }, [client, action, disabled, loading, retry]);
 
-    if (LEGACY_PUBLIC_API_PREVIEW || isAuthenticated) return null;
+    if (LEGACY_PUBLIC_API_PREVIEW || client.issuance === false || isAuthenticated) return null;
     return (
         <div className="provider-sign-in__google" aria-busy={phase === 'preparing' || phase === 'completing'}>
             <div ref={host} className="provider-sign-in__google-host" role="group" aria-label="Continue with Google"
@@ -197,6 +197,7 @@ export default function ProviderSignInControls({ action, userName = '', remember
     operationLock, onBusyChange, onSuccess }: ProviderSignInControlsProps) {
     const { authenticateWithProvider, prepareProviderLogin, completeProviderLogin } = useAuth();
     const [clients, setClients] = useState<PublicProviderClient[]>([]);
+    const [configurationRetry, setConfigurationRetry] = useState(0);
     const [busyClient, setBusyClient] = useState<string | null>(null);
     const [feedback, setFeedback] = useState<{ text: string; error: boolean } | null>(null);
     const mounted = useRef(false);
@@ -226,10 +227,10 @@ export default function ProviderSignInControls({ action, userName = '', remember
                 busyCallback.current?.(false);
             }
         };
-    }, []);
+    }, [configurationRetry]);
 
     const selectProvider = async (client: PublicProviderClient) => {
-        if (LEGACY_PUBLIC_API_PREVIEW || (action === 'signup' && client.signup !== true)) return;
+        if (LEGACY_PUBLIC_API_PREVIEW || client.issuance === false || (action === 'signup' && client.signup !== true)) return;
         if (disabled || operation.current || operationLock?.current) return;
         if (operationLock) operationLock.current = true;
         const controller = new AbortController();
@@ -330,7 +331,9 @@ export default function ProviderSignInControls({ action, userName = '', remember
     };
 
     if (LEGACY_PUBLIC_API_PREVIEW || clients.length === 0) return null;
-    const inlineGoogle = action !== 'link' ? clients.find(client => client.clientKey === 'google-web' && (action !== 'signup' || client.signup === true)) : undefined;
+    const inlineGoogle = action !== 'link' ? clients.find(client => client.clientKey === 'google-web'
+        && client.issuance !== false && (action !== 'signup' || client.signup === true)) : undefined;
+    const unavailableApple = clients.some(client => client.provider === 'apple' && client.issuance === false);
     return (
         <div className="provider-sign-in">
             {inlineGoogle && <InlineGoogleSignIn client={inlineGoogle} action={action === 'signup' ? 'signup' : 'login'}
@@ -339,6 +342,11 @@ export default function ProviderSignInControls({ action, userName = '', remember
                 onBusyChange={onBusyChange} onSuccess={onSuccess} />}
             <ProviderSignInButtons clients={clients} action={action} busyClient={busyClient}
                 disabled={disabled} onSelect={client => { void selectProvider(client); }} />
+            {unavailableApple && <div role="status">
+                <p>Apple sign-in is temporarily unavailable.</p>
+                <button className="provider-sign-in__button" type="button" disabled={disabled || busyClient !== null || operationLock?.current === true}
+                    onClick={() => { if (!operationLock?.current && busyClient === null) setConfigurationRetry(value => value + 1); }}>Check again</button>
+            </div>}
             {feedback && <p className={`provider-sign-in__feedback${feedback.error ? ' provider-sign-in__feedback--error' : ''}`}
                 role={feedback.error ? 'alert' : 'status'}>{feedback.text}</p>}
         </div>

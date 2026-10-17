@@ -46,13 +46,14 @@ export function createAuthRouter(
     isProduction: boolean,
     allowedMutationOrigins: readonly string[],
     { accountDeletionEnabled = false, deletionJournal, providerAuth, registration = createRegistrationAuthorization(database),
-        parentRegistrationStorageReady = false, parentRegistrationPolicy, scoreParticipationPolicy }: {
+        parentRegistrationStorageReady = false, parentRegistrationPolicy, scoreParticipationPolicy, appleIssuanceAvailable }: {
         scoreParticipationPolicy?: ScoreParticipationPolicy;
         parentRegistrationStorageReady?: boolean;
         parentRegistrationPolicy?: ParentRegistrationPolicy;
         registration?: RegistrationAuthorization;
         accountDeletionEnabled?: boolean;
         deletionJournal?: AccountDeletionJournal;
+        appleIssuanceAvailable?: () => boolean;
         providerAuth?: {
             enabled: boolean;
             signupEnabled?: boolean;
@@ -98,15 +99,24 @@ export function createAuthRouter(
         notification => applyAppleNotification(database, notification)));
 
     // Only public identifiers are exposed, never verifier configuration or credentials.
+    function canIssueApple(): boolean {
+        if (!appleIssuanceAvailable) return true;
+        try { return appleIssuanceAvailable() === true; }
+        catch { return false; }
+    }
     router.get('/providers/config', (_request, response) => {
         response.setHeader('Cache-Control', 'no-store');
+        const appleAvailable = canIssueApple();
         response.json({ clients: providerAuth?.enabled ? (providerAuth.publicClients ?? []).map(({ signup, ...client }) => ({ ...client,
-            ...(signup === true && registration.policy !== undefined ? { signup: true } : {}) })) : [] });
+            ...(client.provider === 'apple' && !appleAvailable ? { issuance: false } : {}),
+            ...(signup === true && registration.policy !== undefined
+                && (client.provider !== 'apple' || appleAvailable) ? { signup: true } : {}) })) : [] });
     });
 
     router.use('/providers', createProviderAuthRouter({
         database, sessionSecret, isProduction, allowedOrigins: allowedMutationOrigins,
         clients: providerAuth?.clients ?? {}, enabled: providerAuth?.enabled === true,
+        appleIssuanceAvailable,
         signupEnabled: providerAuth?.signupEnabled, accountDeletionEnabled, deletionJournal,
         appleTokenRepository: providerAuth?.appleTokenLifecycle?.repository,
         appleTokenRepositories: appleLifecycle ? Object.freeze({ [appleLifecycle.clientId]: appleLifecycle.repository,

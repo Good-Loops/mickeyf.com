@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { APPLE_MAINTENANCE_AUDIENCE, APPLE_MAINTENANCE_CALLER_EMAIL,
     APPLE_MAINTENANCE_PATH, APPLE_MAINTENANCE_URL, loadAppleMaintenanceConfig } from './appleMaintenanceConfig';
+import { LOCAL_PROVIDER_SERVER_UUID } from './localProviderRuntime';
 
 const configured = { NODE_ENV: 'production', APPLE_MAINTENANCE_HTTP_ENABLED: 'true',
     // Synthetic subject only: activation must obtain the actual service-account uniqueId.
@@ -35,4 +36,15 @@ test('activation rejects development, isolation and missing or malformed identit
     ]) assert.throws(() => loadAppleMaintenanceConfig({ ...configured, ...override }),
         error => error instanceof Error && error.message ===
             'Apple maintenance requires explicit production identity and database configuration.');
+});
+
+test('explicit local profile preserves signed maintenance caller checks with the pinned production database', () => {
+    const local = { ...configured, NODE_ENV: 'development', DB_HOST: '127.0.0.1', DB_PORT: '3306',
+        DB_USER: 'cms_mickeyf', DB_NAME: 'cms', LUDOLUME_LOCAL_PROVIDER_RUNTIME: 'true',
+        LUDOLUME_LOCAL_PROVIDER_EXPECTED_SERVER_UUID: LOCAL_PROVIDER_SERVER_UUID,
+        APPLE_MAINTENANCE_EXPECTED_SERVER_UUID: LOCAL_PROVIDER_SERVER_UUID };
+    assert.deepEqual(loadAppleMaintenanceConfig(local), { audience: APPLE_MAINTENANCE_AUDIENCE,
+        callerEmail: APPLE_MAINTENANCE_CALLER_EMAIL, callerSubject: configured.APPLE_MAINTENANCE_CALLER_SUBJECT,
+        expectedServerUuid: LOCAL_PROVIDER_SERVER_UUID });
+    assert.throws(() => loadAppleMaintenanceConfig({ ...local, DB_USER: 'root' }), /explicit loopback database/);
 });

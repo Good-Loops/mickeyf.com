@@ -62,6 +62,16 @@ test('startup waits for preparation; SIGINT drains and releases signal listeners
     assert.equal(f.processControl.listenerCount('SIGTERM'), 0);
 });
 
+test('an explicit local host binds only the loopback interface', { timeout: 2_000 }, async context => {
+    const f = fixture(context);
+    await runHttpServer({ ...f.options, host: '127.0.0.1' });
+    const address = f.server.address();
+    assert(address && typeof address !== 'string');
+    assert.equal(address.address, '127.0.0.1');
+    f.processControl.emit('SIGINT');
+    assert.equal(await f.exited, 0);
+});
+
 test('preparation failure closes the database without exposing diagnostics', { timeout: 2_000 }, async context => {
     const f = fixture(context);
     await runHttpServer({ ...f.options, prepare: async () => { throw new Error('private database credentials'); } });

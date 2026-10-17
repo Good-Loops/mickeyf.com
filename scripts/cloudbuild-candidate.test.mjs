@@ -108,3 +108,16 @@ test('candidate image patches only the reviewed Alpine OpenSSL and zlib packages
 
     assert.doesNotMatch(dockerfileWithoutReviewedPatch, /\bapk\s+(?:add|fix|update|upgrade)\b/iu);
 });
+
+test('production runtime pins the supported patched binary and has no embedded OpenSSL exception', async () => {
+    const dockerfile = await readNormalizedFile(dockerfilePath);
+    assert.match(dockerfile, /^FROM node:26\.12\.0-alpine@sha256:6f08a523443ddedf52941874c203475b0ad503e859ad70cb26ab8be9a517dbd5 AS node-runtime-base$/mu);
+    const gate = /^RUN node -e '([^\n]+)'$/mu.exec(dockerfile)?.[1];
+    assert.ok(gate);
+    const { runInNewContext } = await import('node:vm');
+    for (const [version, accepted] of [['3.5.8', false], ['3.5.9', true], ['3.5.10', true], ['3.6.0', false], ['invalid', false]]) {
+        let rejected = false;
+        runInNewContext(gate, { process: { versions: { openssl: version }, exit: () => { rejected = true; } }, console: { error() {} } });
+        assert.equal(!rejected, accepted, version);
+    }
+});

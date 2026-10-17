@@ -1,3 +1,5 @@
+import { loadLocalProviderRuntime } from './localProviderRuntime';
+
 type Environment = Readonly<Record<string, string | undefined>>;
 
 export const APPLE_MAINTENANCE_AUDIENCE = 'https://mickeyf-org-j7yuum4tiq-uc.a.run.app';
@@ -18,7 +20,8 @@ export function loadAppleMaintenanceConfig(env: Environment = process.env): Appl
     if (env.APPLE_MAINTENANCE_HTTP_ENABLED !== 'true') return undefined;
     const callerSubject = env.APPLE_MAINTENANCE_CALLER_SUBJECT;
     const expectedServerUuid = env.APPLE_MAINTENANCE_EXPECTED_SERVER_UUID;
-    if (env.NODE_ENV !== 'production'
+    const local = loadLocalProviderRuntime(env);
+    if ((env.NODE_ENV !== 'production' && !local)
         || (env.LUDOLUME_ISOLATED_RUNTIME !== undefined && env.LUDOLUME_ISOLATED_RUNTIME !== 'false')
         || !callerSubject || !/^[1-9][0-9]{5,29}$/u.test(callerSubject)
         || !expectedServerUuid || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/u.test(expectedServerUuid)) {

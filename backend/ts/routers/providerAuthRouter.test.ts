@@ -36,7 +36,8 @@ function signedCookie(value: string, name = '__session') {
 }
 
 type Features = { signupEnabled?: boolean; accountDeletionEnabled?: boolean; withJournal?: boolean; missingProviderTable?: boolean;
-    appleDeletionEnabled?: boolean; appleTokens?: boolean; appleStorage?: boolean; immediateRevocation?: boolean };
+    appleDeletionEnabled?: boolean; appleTokens?: boolean; appleStorage?: boolean; immediateRevocation?: boolean;
+    appleIssuanceAvailable?: () => boolean };
 
 function fixture(features: Features = {}) {
     const state = {
@@ -180,6 +181,7 @@ async function withServer(run: (base: string, setup: ReturnType<typeof fixture>)
     app.use('/auth/providers', createProviderAuthRouter({ ...setup, sessionSecret: secret,
         isProduction: true, allowedOrigins: [origin, 'capacitor://localhost'], enabled,
         signupEnabled: features.signupEnabled, accountDeletionEnabled: features.accountDeletionEnabled,
+        appleIssuanceAvailable: features.appleIssuanceAvailable,
         ...(features.withJournal ? { deletionJournal: { async recordAccountDeletion() { assert.fail('fixture flow owns deletion'); } } } : {}),
     }));
     app.use(requestErrorHandler);
@@ -193,6 +195,26 @@ async function post(base: string, path: string, body: unknown, headers: Record<s
     return fetch(`${base}/${path}`, { method: 'POST', headers: { origin, 'content-type': 'application/json', ...headers },
         body: JSON.stringify(body) });
 }
+
+test('unavailable local Apple maintenance blocks issuance before context or database work and recovers independently of Google', async () => {
+    let available = false;
+    await withServer(async (base, { state }) => {
+        for (const action of ['login', 'signup', 'link']) {
+            for (const path of ['begin', 'complete']) {
+                const response = await post(base, path, { action, clientKey: 'apple-ios' });
+                assert.equal(response.status, 503);
+                assert.deepEqual(await response.json(), { error: 'UNAVAILABLE' });
+            }
+        }
+        assert.equal(state.contextReads, 0);
+        assert.equal(state.databaseReads, 0);
+        const google = await post(base, 'begin', { action: 'login', clientKey: 'google-web' });
+        assert.equal(google.status, 200);
+        available = true;
+        const apple = await post(base, 'begin', { action: 'login', clientKey: 'apple-ios' }, { origin: 'capacitor://localhost' });
+        assert.equal(apple.status, 200);
+    }, true, { appleTokens: true, appleStorage: true, appleIssuanceAvailable: () => available });
+});
 
 async function challenge(base: string, action = 'login', headers: Record<string, string> = {}) {
     if (action === 'signup' && !headers.cookie) {
@@ -678,7 +700,7 @@ test('Google and Apple deletion revoke only the authenticated account and retain
                 assert.equal(replay.status, 400);
                 assert.equal(state.revocationAccounts.length, 1);
             }, true, { accountDeletionEnabled: true, withJournal: true, immediateRevocation: true,
-                appleDeletionEnabled: true, appleTokens: true, appleStorage: true });
+                appleDeletionEnabled: true, appleTokens: true, appleStorage: true, appleIssuanceAvailable: () => false });
         }
     }
     assert.deepEqual(warnings, [
