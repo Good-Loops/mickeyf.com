@@ -224,6 +224,34 @@ test('Google legacy issuer and only the explicitly configured authorized present
     assert.deepEqual(await hybrid.verify('google', signedToken({ ...claims(), azp: googleAudience }), nonce), invalidToken);
 });
 
+test('native presenter sets are captured immutably and never accept absent or foreign authorized parties', async () => {
+    const presenters = ['android-current.apps.googleusercontent.com', 'android-legacy.apps.googleusercontent.com'];
+    const originals = [...presenters];
+    const { verifier } = fixture({ configuration: { googleAudience, googleAuthorizedParties: presenters } });
+    presenters[0] = 'later-mutation.apps.googleusercontent.com';
+    presenters.push('later-addition.apps.googleusercontent.com');
+    for (const azp of originals) assert.equal((await verifier.verify('google', signedToken({ ...claims(), azp }), nonce)).verified, true);
+    for (const azp of [undefined, googleAudience, 'ios.apps.googleusercontent.com', ...presenters.filter(id => !originals.includes(id))]) {
+        assert.deepEqual(await verifier.verify('google', signedToken({ ...claims(), azp }), nonce), invalidToken);
+    }
+});
+
+test('native presenter lists reject ambiguous, unbounded and malformed server configuration', () => {
+    const native = 'android.apps.googleusercontent.com';
+    const options = [
+        { googleAuthorizedParties: [native] },
+        { googleAudience, googleAuthorizedParty: native, googleAuthorizedParties: [native] },
+        ...[[], Array(1), [native, native], [googleAudience], [null], [''], ['bad client'], [`${native}\n`], ['x'.repeat(256)],
+            Array.from({ length: 9 }, (_, index) => `android-${index}`), native, null].map(googleAuthorizedParties => ({ googleAudience, googleAuthorizedParties })),
+    ];
+    for (const configuration of options) {
+        assert.throws(() => createProviderTokenVerifier(configuration as Parameters<typeof createProviderTokenVerifier>[0]),
+            { message: 'Invalid provider verification configuration.' });
+    }
+    const eight = Array.from({ length: 8 }, (_, index) => `android-${index}.apps.googleusercontent.com`);
+    assert.doesNotThrow(() => createProviderTokenVerifier({ googleAudience, googleAuthorizedParties: eight }));
+});
+
 test('malformed tokens, unsupported headers, algorithms and nonce inputs reject before fetching keys', async () => {
     const { verifier, calls } = fixture();
     const normalHeader = { alg: 'RS256', kid: 'provider-key-1', typ: 'JWT' };

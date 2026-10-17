@@ -29,6 +29,7 @@ export type ProviderAuthConfig = Readonly<{
 const disabledConfig: ProviderAuthConfig = Object.freeze({
     enabled: false, signupEnabled: false, clients: Object.freeze({}), publicClients: Object.freeze([]),
 });
+const googleClientIdPattern = /^[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/;
 
 function optionalClientId(env: Environment, name: string, pattern: RegExp): string | undefined {
     const value = env[name];
@@ -38,6 +39,26 @@ function optionalClientId(env: Environment, name: string, pattern: RegExp): stri
         throw new Error(`${name} must be one exact, nonempty provider client identifier without whitespace`);
     }
     return value;
+}
+
+function googleAndroidClientIds(env: Environment): readonly string[] {
+    const name = 'GOOGLE_ANDROID_CLIENT_IDS';
+    const encoded = env[name];
+    if (encoded === undefined) {
+        const singular = optionalClientId(env, 'GOOGLE_ANDROID_CLIENT_ID', googleClientIdPattern);
+        return singular === undefined ? [] : [singular];
+    }
+    if (env.GOOGLE_ANDROID_CLIENT_ID !== undefined || encoded.length > 4096) {
+        throw new Error('Google Android requires either one client ID or one bounded client ID list');
+    }
+    let parsed: unknown;
+    try { parsed = JSON.parse(encoded); } catch { throw new Error(`${name} must be valid JSON`); }
+    if (!Array.isArray(parsed) || parsed.length < 1 || parsed.length > 8
+        || parsed.some(value => typeof value !== 'string' || value.length > 255 || value !== value.trim() || !googleClientIdPattern.test(value))
+        || new Set(parsed).size !== parsed.length) {
+        throw new Error(`${name} must contain 1–8 distinct exact Google client identifiers`);
+    }
+    return parsed;
 }
 
 /** Server-owned client selection; constructing verifiers never fetches provider keys. */
@@ -50,10 +71,10 @@ export function loadProviderAuthConfig(
         ? Object.freeze({ ...disabledConfig, appleNotifications }) : disabledConfig;
     const appleWeb = loadAppleWebConfig(env);
     const appleWebEnabled = env.APPLE_WEB_AUTH_ENABLED === 'true';
-    const googleWebId = optionalClientId(env, 'GOOGLE_WEB_CLIENT_ID', /^[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/);
-    const googleIosId = optionalClientId(env, 'GOOGLE_IOS_CLIENT_ID', /^[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/);
-    const googleAndroidId = optionalClientId(env, 'GOOGLE_ANDROID_CLIENT_ID', /^[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/);
-    const nativeGoogleIds = [googleIosId, googleAndroidId].filter(id => id !== undefined);
+    const googleWebId = optionalClientId(env, 'GOOGLE_WEB_CLIENT_ID', googleClientIdPattern);
+    const googleIosId = optionalClientId(env, 'GOOGLE_IOS_CLIENT_ID', googleClientIdPattern);
+    const googleAndroidIds = googleAndroidClientIds(env);
+    const nativeGoogleIds = [...(googleIosId === undefined ? [] : [googleIosId]), ...googleAndroidIds];
     if (nativeGoogleIds.length && !googleWebId) throw new Error('Native Google requires GOOGLE_WEB_CLIENT_ID as its server audience');
     if (new Set([googleWebId, ...nativeGoogleIds]).size !== 1 + nativeGoogleIds.length) {
         throw new Error('Google web, iOS and Android require distinct client identifiers');
@@ -96,13 +117,13 @@ export function loadProviderAuthConfig(
         publicClients.push(Object.freeze({ clientKey: 'google-web', provider: 'google', platform: 'web', clientId: googleWebId,
             ...(googleSignupEnabled ? { signup: true as const } : {}) }));
     }
-    for (const [clientKey, presenter] of [
-        ['google-ios', googleIosId], ['google-android', googleAndroidId],
+    for (const [clientKey, presenters] of [
+        ['google-ios', googleIosId === undefined ? [] : [googleIosId]], ['google-android', googleAndroidIds],
     ] as const) {
-        if (presenter === undefined || googleWebId === undefined) continue;
-        // Native tokens name the server audience and the exact native authorized presenter.
+        if (!presenters.length || googleWebId === undefined) continue;
+        // Each native token must name the server audience and an exact approved platform presenter.
         clients[clientKey] = Object.freeze({ provider: 'google', signupEnabled: googleSignupEnabled,
-            verifier: createProviderTokenVerifier({ googleAudience: googleWebId, googleAuthorizedParty: presenter }, verifierDependencies) });
+            verifier: createProviderTokenVerifier({ googleAudience: googleWebId, googleAuthorizedParties: presenters }, verifierDependencies) });
         publicClients.push(Object.freeze({ ...(clientKey === 'google-ios'
             ? { clientKey, platform: 'ios' as const } : { clientKey, platform: 'android' as const }), provider: 'google' as const, clientId: googleWebId,
             ...(googleSignupEnabled ? { signup: true as const } : {}) }));

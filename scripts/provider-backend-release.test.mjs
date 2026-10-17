@@ -4,8 +4,9 @@ import { readFileSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { providerConfig, fixture, deploymentFixture, now } from './test-support/provider-release-fixture.mjs';
-import { providerReleaseEnvironment, PROVIDER_CREATION_FLAGS } from './provider-release-config.mjs';
+import { providerConfig, fixture, deploymentFixture, now, androidPresenterPins } from './test-support/provider-release-fixture.mjs';
+import { providerReleaseEnvironment, providerConfigurationSha256, PROVIDER_CREATION_FLAGS,
+    PROVIDER_ANDROID_PRESENTER_PINS, validateAndroidPresenterPins } from './provider-release-config.mjs';
 import { providerDeploymentApproval, renderProviderBackendDeployConfig, resolveProviderDeploymentSteps,
     renderSessionBackendDeployConfig, sessionDeploymentApproval, validateProviderPins, frozenDeploymentStepsSha256 } from './render-frozen-backend-deploy.mjs';
 import { fingerprint, SERVICE, sessionRevisionName, revisionConfiguration } from './frozen-backend-traffic.mjs';
@@ -38,6 +39,56 @@ test('preparation is explicit and closed; active policies have no implicit count
     }
     const config = providerConfig('prepare'); config.environment.APPLE_WEB_AUTH_ENABLED = 'true';
     assert.throws(() => providerReleaseEnvironment(config), /keep.*closed/);
+});
+
+test('Android release activation remains blocked without actual reviewed Play certificate/OAuth pins', () => {
+    assert.deepEqual(PROVIDER_ANDROID_PRESENTER_PINS, []);
+    assert.equal(Object.isFrozen(PROVIDER_ANDROID_PRESENTER_PINS), true);
+    const config = JSON.parse(read('./provider-release-general.json'));
+    assert.equal(providerConfigurationSha256(config), 'cd57fc2f92f300610d21a98c5fa88476ccd20f8ed82e3974c4e0e96a09b95d01');
+    const approvedOnlyInTests = androidPresenterPins();
+    for (const changes of [
+        { GOOGLE_ANDROID_CLIENT_ID: approvedOnlyInTests[0].clientId },
+        { GOOGLE_ANDROID_CLIENT_IDS: JSON.stringify(approvedOnlyInTests.map(pin => pin.clientId)) },
+        { GOOGLE_ANDROID_CLIENT_IDS: '[]' },
+    ]) {
+        const changed = structuredClone(config); Object.assign(changed.environment, changes);
+        assert.notEqual(providerConfigurationSha256(changed), providerConfigurationSha256(config));
+        assert.throws(() => providerReleaseEnvironment(changed, false, approvedOnlyInTests), /reviewed Play certificate/);
+        assert.throws(() => providerReleaseEnvironment(changed, true), /reviewed Play certificate/);
+        for (const property of ['providerRelease', 'previousProviderRelease']) {
+            const pins = fixture('active', providerConfig('prepare')).pins.candidate.deployment;
+            pins[property] = changed;
+            assert.throws(() => render(pins), /reviewed Play certificate/);
+        }
+    }
+});
+
+test('public Android pin validation binds distinct package, Play certificates and exact OAuth presenters', () => {
+    const env = providerConfig().environment;
+    for (const count of [1, 8]) {
+        const pins = androidPresenterPins(count), ids = pins.map(pin => pin.clientId);
+        assert.deepEqual(validateAndroidPresenterPins({ ...env, GOOGLE_ANDROID_CLIENT_IDS: JSON.stringify(ids) }, pins), ids);
+        assert.deepEqual(validateAndroidPresenterPins({ ...env, GOOGLE_ANDROID_CLIENT_ID: ids[0] }, pins), [ids[0]]);
+    }
+    const pins = androidPresenterPins(), ids = pins.map(pin => pin.clientId);
+    for (const additions of [
+        { GOOGLE_ANDROID_CLIENT_ID: ids[0], GOOGLE_ANDROID_CLIENT_IDS: JSON.stringify(ids) },
+        ...['not json', 'null', '{}', JSON.stringify(ids[0]), '[]', JSON.stringify([...ids, ids[0]]),
+            ' '.repeat(4097) + JSON.stringify(ids),
+            JSON.stringify([env.GOOGLE_WEB_CLIENT_ID]), JSON.stringify([env.GOOGLE_IOS_CLIENT_ID]),
+            JSON.stringify([`${ids[0]}\n`]), JSON.stringify([null]), JSON.stringify(['foreign.apps.googleusercontent.com'])]
+            .map(GOOGLE_ANDROID_CLIENT_IDS => ({ GOOGLE_ANDROID_CLIENT_IDS })),
+    ]) assert.throws(() => validateAndroidPresenterPins({ ...env, ...additions }, pins));
+    for (const changed of [null, androidPresenterPins(9), [pins[0], pins[0]],
+        ...[{ packageName: 'com.other.app' }, { signer: 'upload' }, { certificateSha1: 'AA:BB' },
+            { certificateSha256: 'b'.repeat(64) }, { certificateSha1: null }, { certificateSha1: 'A'.repeat(40) + '\n' },
+            { certificateSha256: 'B'.repeat(64) + '\n' }, { extra: 'unknown' },
+            { clientId: '999999999999-other.apps.googleusercontent.com' }, { clientId: env.GOOGLE_IOS_CLIENT_ID }]
+            .map(change => [{ ...pins[0], ...change }]),
+        [pins[0], { ...pins[1], certificateSha1: pins[0].certificateSha1 }],
+        [pins[0], { ...pins[1], certificateSha256: pins[0].certificateSha256 }],
+    ]) assert.throws(() => validateAndroidPresenterPins({ ...env, GOOGLE_ANDROID_CLIENT_ID: ids[0] }, changed));
 });
 
 test('general signup has a separate version, no new parent-account creation, and retains rollback filtering', () => {
@@ -167,6 +218,50 @@ try: exec(compile(data['probe'],'public-probe','exec'),ns)
 except ValueError as error: assert 'runtime credential loading' in str(error)
 else: raise AssertionError('Missing Apple capability passed the active release gate')
 `, { pins, probe });
+});
+
+test('public smoke expects exactly one Android capability only when Android configuration is present', () => {
+    // Exercise the offline HTTP contract with synthetic settings. The real renderer above refuses
+    // these settings while the reviewed Android pin table is empty.
+    const pins = fixture().pins.candidate.deployment;
+    const smoke = render(pins).steps[7].args.slice(3).join('');
+    const start = smoke.indexOf('with open("/workspace/session-pins.json"');
+    const probe = smoke.slice(start, smoke.indexOf('print("Tagged candidate anonymous HTTP and public capability checks', start));
+    python(String.raw`
+from io import StringIO
+from email.message import Message
+env=data['pins']['providerRelease']['environment']
+base=[{'clientKey':'google-web','provider':'google','platform':'web','clientId':env['GOOGLE_WEB_CLIENT_ID'],'signup':True},
+    {'clientKey':'google-ios','provider':'google','platform':'ios','clientId':env['GOOGLE_WEB_CLIENT_ID'],'signup':True},
+    {'clientKey':'apple-ios','provider':'apple','platform':'ios','clientId':env['APPLE_IOS_BUNDLE_ID'],'signup':True},
+    {'clientKey':'apple-web','provider':'apple','platform':'web','clientId':env['APPLE_WEB_SERVICES_ID'],'redirectUri':env['APPLE_WEB_REDIRECT_URI'],'signup':True}]
+android={'clientKey':'google-android','provider':'google','platform':'android','clientId':env['GOOGLE_WEB_CLIENT_ID'],'signup':True}
+clients=base[:]
+def reject(message): raise ValueError(message)
+def request(path,status):
+    assert status==200
+    body={'clients':clients} if path=='/auth/providers/config' else {'enabled':True,'policyVersion':env['REGISTRATION_POLICY_VERSION'],
+        'parentRegistrationAvailable':False,'countries':[{'country':'ZZ','parentRequiredBelow':15,'adultFrom':18}]}
+    return body,Message()
+ns={'json':json,'request':request,'reject':reject,'no_store':lambda headers:True,'open':lambda *a,**kw:StringIO(json.dumps(data['pins']))}
+def verify(expected):
+    try: exec(compile(data['probe'],'public-probe','exec'),ns)
+    except ValueError:
+        assert not expected
+    else: assert expected
+verify(True)
+clients.append(android); verify(False)
+for name,value in [('GOOGLE_ANDROID_CLIENT_ID',data['androidIds'][0]),('GOOGLE_ANDROID_CLIENT_IDS',json.dumps(data['androidIds']))]:
+    env[name]=value; verify(True)
+    clients[:]=base; verify(False)
+    clients[:]=base+[dict(android,clientId=data['androidIds'][0])]; verify(False)
+    clients[:]=base+[android,android]; verify(False)
+    clients[:]=base+[dict(android,signup=False)]; verify(False)
+    clients[:]=base+[android,dict(android,clientKey='foreign')]; verify(False)
+    clients[:]=base+[android]; del env[name]
+verify(False)
+clients[:]=base; verify(True)
+`, { pins, probe, androidIds: androidPresenterPins(8).map(pin => pin.clientId) });
 });
 
 test('full-size consent and country configuration stay within Cloud Build argument limits', () => {

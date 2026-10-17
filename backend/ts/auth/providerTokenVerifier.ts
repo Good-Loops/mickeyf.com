@@ -28,6 +28,8 @@ export type ProviderTokenVerifierConfiguration = Readonly<{
     appleAudience?: string;
     /** Defaults to googleAudience; an explicit presenter supports one known native client. */
     googleAuthorizedParty?: string;
+    /** Exact native presenters for multiple signing certificates; mutually exclusive with the singular option. */
+    googleAuthorizedParties?: readonly string[];
 }>;
 
 export type ProviderTokenVerificationResult =
@@ -228,7 +230,7 @@ export function createProviderKeyResolver(fetcher: typeof globalThis.fetch, now:
 
 function validClaims(
     claims: unknown, provider: IdentityProvider, audience: string,
-    authorizedParty: string | undefined, expectedNonce: string, nowSeconds: number
+    authorizedParties: ReadonlySet<string>, expectedNonce: string, nowSeconds: number
 ): claims is { sub: string; iat: number } {
     if (!isRecord(claims) || claims.aud !== audience || !isIdentifier(claims.sub, 255)
         || !Number.isSafeInteger(claims.exp) || !Number.isSafeInteger(claims.iat)
@@ -245,7 +247,8 @@ function validClaims(
     // A single audience is mandatory. For Google hybrid flows the presenter is
     // configured separately; all other azp values (or a missing hybrid azp) fail.
     return provider !== 'google'
-        || (claims.azp === undefined ? authorizedParty === audience : claims.azp === authorizedParty);
+        || (claims.azp === undefined ? authorizedParties.size === 1 && authorizedParties.has(audience)
+            : typeof claims.azp === 'string' && authorizedParties.has(claims.azp));
 }
 
 function verifiedProviderEmail(provider: IdentityProvider, claims: unknown): string | undefined {
@@ -277,11 +280,20 @@ export function createProviderTokenVerifier(
             throw new TypeError('Invalid provider verification configuration.');
         }
     }
-    if (configuration.googleAuthorizedParty && !configuration.googleAudience) {
+    const configuredParties = configuration.googleAuthorizedParties;
+    if (configuredParties !== undefined && (!Array.isArray(configuredParties)
+        || configuredParties.length < 1 || configuredParties.length > 8
+        || Array.from(configuredParties).some(value => !isIdentifier(value, 255) || value !== value.trim() || value === configuration.googleAudience)
+        || new Set(configuredParties).size !== configuredParties.length
+        || configuration.googleAuthorizedParty !== undefined)
+        || (configuration.googleAuthorizedParty !== undefined || configuredParties !== undefined)
+            && !configuration.googleAudience) {
         throw new TypeError('Invalid provider verification configuration.');
     }
     const audiences = { google: configuration.googleAudience, apple: configuration.appleAudience };
-    const authorizedParty = configuration.googleAuthorizedParty ?? configuration.googleAudience;
+    // Copy the server-owned list so later configuration mutations cannot admit a presenter.
+    const authorizedParties = new Set(configuredParties
+        ?? [configuration.googleAuthorizedParty ?? configuration.googleAudience].filter((value): value is string => value !== undefined));
     const now = dependencies.now ?? Date.now;
     const resolveKey = createProviderKeyResolver(dependencies.fetch ?? globalThis.fetch, now);
     return {
@@ -308,7 +320,7 @@ export function createProviderTokenVerifier(
                     algorithms: ['RS256'], issuer: [...PROVIDERS[provider].issuers],
                     audience, clockTimestamp: nowSeconds, maxAge: PROVIDER_TOKEN_MAX_AGE_SECONDS,
                 });
-                if (!validClaims(claims, provider, audience, authorizedParty, expectedNonce, nowSeconds)) {
+                if (!validClaims(claims, provider, audience, authorizedParties, expectedNonce, nowSeconds)) {
                     return { verified: false, reason: 'INVALID_PROVIDER_TOKEN' };
                 }
                 const email = verifiedProviderEmail(provider, claims);

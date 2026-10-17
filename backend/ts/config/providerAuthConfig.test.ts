@@ -300,3 +300,47 @@ test('native Google verifies exact audience, presenter and nonce with cross-plat
         assert.equal((await config.clients['google-web'].verifier.verify('google', token('google', { azp: presenter }), nonce)).verified, false);
     }
 });
+
+test('Android signing-client list is bounded, exact, distinct and exclusive with the legacy option', () => {
+    const ids = Array.from({ length: 8 }, (_, index) => `syntheticAndroid${index}.apps.googleusercontent.com`);
+    const env = { ...enabledEnvironment, GOOGLE_IOS_CLIENT_ID: googleIosId };
+    for (const value of ['', 'not json', 'null', '{}', JSON.stringify(googleAndroidId), '[]',
+        JSON.stringify([...ids, 'ninth.apps.googleusercontent.com']), JSON.stringify([googleAndroidId, googleAndroidId]),
+        JSON.stringify([null]), JSON.stringify([17]), JSON.stringify(['']), JSON.stringify(['bad client']),
+        JSON.stringify([`${googleAndroidId}\n`]), JSON.stringify([` ${googleAndroidId}`]),
+        JSON.stringify(['x'.repeat(256) + '.apps.googleusercontent.com']), JSON.stringify([googleWebId]), JSON.stringify([googleIosId]),
+        ' '.repeat(4097)]) {
+        assert.throws(() => loadProviderAuthConfig({ ...env, GOOGLE_ANDROID_CLIENT_IDS: value }), /Google|GOOGLE/);
+    }
+    assert.throws(() => loadProviderAuthConfig({ ...env, GOOGLE_ANDROID_CLIENT_ID: googleAndroidId,
+        GOOGLE_ANDROID_CLIENT_IDS: JSON.stringify([googleAndroidId]) }), /either/);
+    assert.throws(() => loadProviderAuthConfig({ ...env, GOOGLE_WEB_CLIENT_ID: undefined,
+        GOOGLE_ANDROID_CLIENT_IDS: JSON.stringify([googleAndroidId]) }), /server audience/);
+    for (const allowed of [[googleAndroidId], ids]) {
+        const config = loadProviderAuthConfig({ ...env, GOOGLE_ANDROID_CLIENT_IDS: JSON.stringify(allowed) });
+        assert.deepEqual(config.publicClients.filter(client => client.platform === 'android'), [
+            { clientKey: 'google-android', platform: 'android', provider: 'google', clientId: googleWebId },
+        ]);
+    }
+});
+
+test('each approved Android presenter works only for Android with the web audience and current nonce', async () => {
+    const ids = [googleAndroidId, 'syntheticPlayLegacy.apps.googleusercontent.com'];
+    const { config, token } = verifierFixture({ ...enabledEnvironment, GOOGLE_IOS_CLIENT_ID: googleIosId,
+        GOOGLE_ANDROID_CLIENT_IDS: JSON.stringify(ids), PROVIDER_GOOGLE_SIGNUP_ENABLED: 'true' });
+    const android = config.clients['google-android'];
+    assert.equal(android.signupEnabled, true);
+    assert.equal(config.publicClients.filter(client => client.clientKey === 'google-android').length, 1);
+    for (const azp of ids) {
+        assert.equal((await android.verifier.verify('google', token('google', { azp }), nonce)).verified, true);
+        for (const clientKey of ['google-web', 'google-ios']) {
+            assert.equal((await config.clients[clientKey].verifier.verify('google', token('google', { azp }), nonce)).verified, false);
+        }
+        for (const extra of [{ aud: azp }, { aud: [googleWebId] }, { aud: 'other.apps.googleusercontent.com' }, { nonce: 'wrong' }]) {
+            assert.equal((await android.verifier.verify('google', token('google', { azp, ...extra }), nonce)).verified, false);
+        }
+    }
+    for (const extra of [{}, { azp: googleWebId }, { azp: googleIosId }, { azp: 'foreign.apps.googleusercontent.com' }, { azp: ids }]) {
+        assert.equal((await android.verifier.verify('google', token('google', extra), nonce)).verified, false);
+    }
+});

@@ -430,6 +430,7 @@ function renderBackendDeployConfig({ canonical, candidate, preflight, pins: requ
         steps[5].args[1] = replaceExactly(steps[5].args[1],
             'print(",".join(f"{key}={value}" for key, value in sorted(contract["environment"].items())))',
             'print("provider-environment-file-verified")');
+        // Candidate-only HTTP smoke: active candidates require signup; closed fallback templates are verified separately.
         const publicProbe = [
             'with open("/workspace/session-pins.json", encoding="utf-8") as handle: provider = json.load(handle)["providerRelease"]',
             'active = provider["phase"] == "active"',
@@ -442,6 +443,8 @@ function renderBackendDeployConfig({ canonical, candidate, preflight, pins: requ
             '        {"clientKey":"apple-ios","provider":"apple","platform":"ios","clientId":settings["APPLE_IOS_BUNDLE_ID"],"signup":True},',
             '        {"clientKey":"apple-web","provider":"apple","platform":"web","clientId":settings["APPLE_WEB_SERVICES_ID"],"redirectUri":settings["APPLE_WEB_REDIRECT_URI"],"signup":True},',
             '    ]',
+            '    if "GOOGLE_ANDROID_CLIENT_ID" in settings or "GOOGLE_ANDROID_CLIENT_IDS" in settings:',
+            '        expected_clients.append({"clientKey":"google-android","provider":"google","platform":"android","clientId":settings["GOOGLE_WEB_CLIENT_ID"],"signup":True})',
             'providers, provider_headers = request("/auth/providers/config", 200)',
             'if (not isinstance(providers, dict) or set(providers) != {"clients"} or not isinstance(providers["clients"], list)',
             '        or sorted(providers["clients"], key=lambda client:client.get("clientKey", "")) != sorted(expected_clients, key=lambda client:client["clientKey"])):',

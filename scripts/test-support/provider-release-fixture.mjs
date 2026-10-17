@@ -5,6 +5,16 @@ import { SERVICE, fingerprint, revisionConfiguration, sessionRevisionName } from
 import { rollbackRevisionName } from '../session-backend-traffic.mjs';
 export { now } from './session-release-fixture.mjs';
 
+// Synthetic public metadata only; never imported by release entry points.
+export function androidPresenterPins(count = 2) {
+    return Array.from({ length: count }, (_, index) => ({
+        packageName: 'com.mickeyf.app', signer: 'play-app-signing',
+        certificateSha1: index.toString(16).toUpperCase().padStart(40, 'A'),
+        certificateSha256: index.toString(16).toUpperCase().padStart(64, 'B'),
+        clientId: `1012884798546-syntheticAndroid${index}.apps.googleusercontent.com`,
+    }));
+}
+
 export function providerConfig(phase = 'active') {
     const environment = { ...PROVIDER_FIXED_ENV };
     for (const key of ['PROVIDER_AUTH_ENABLED', 'APPLE_WEB_AUTH_ENABLED', 'PROVIDER_GOOGLE_SIGNUP_ENABLED', 'PROVIDER_APPLE_SIGNUP_ENABLED',

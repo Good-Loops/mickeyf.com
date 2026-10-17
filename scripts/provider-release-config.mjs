@@ -20,6 +20,12 @@ export const PROVIDER_FIXED_ENV = Object.freeze({
     APPLE_SIGN_IN_PRIVATE_KEY_SECRET_VERSION: 'projects/1012884798546/secrets/ludolume-apple-signin-private-key/versions/1',
     APPLE_TOKEN_ENCRYPTION_KEYS_SECRET_VERSION: 'projects/1012884798546/secrets/ludolume-apple-token-encryption-keys/versions/1',
 });
+// Remains empty until actual Play app-signing certificates and their OAuth clients are reviewed.
+// Upload/debug certificates do not identify apps delivered by Play.
+export const PROVIDER_ANDROID_PRESENTER_PINS = Object.freeze([]);
+const androidEnvironmentKeys = ['GOOGLE_ANDROID_CLIENT_ID', 'GOOGLE_ANDROID_CLIENT_IDS'];
+const googleClientId = value => typeof value === 'string' && value.length <= 255 && value === value.trim()
+    && /^[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/u.test(value);
 const flags = ['PROVIDER_AUTH_ENABLED', 'APPLE_WEB_AUTH_ENABLED', 'PROVIDER_GOOGLE_SIGNUP_ENABLED', 'PROVIDER_APPLE_SIGNUP_ENABLED',
     'PROVIDER_APPLE_DELETION_ENABLED', 'REGISTRATION_ENABLED', 'REGISTRATION_CREATION_ENABLED', 'REGISTRATION_POLICY_REVIEWED',
     'PARENT_REGISTRATION_ENABLED', 'PARENT_REGISTRATION_CREATION_ENABLED', 'PARENT_REGISTRATION_POLICY_REVIEWED', 'PARENT_SIGNED_FORMS_ENABLED',
@@ -42,6 +48,34 @@ function keys(value, expected, label) {
     if (!record(value) || Object.keys(value).sort().join() !== [...expected].sort().join()) fail(`${label} has missing or unexpected fields`);
 }
 
+/** Pure public-metadata validation; release entry points always supply the source-owned reviewed table. */
+export function validateAndroidPresenterPins(env, reviewedPins) {
+    if (!Array.isArray(reviewedPins) || reviewedPins.length > 8) fail('invalid reviewed Android presenter table');
+    const clients = new Set(), sha1s = new Set(), sha256s = new Set();
+    for (const pin of reviewedPins) {
+        keys(pin, ['packageName', 'signer', 'certificateSha1', 'certificateSha256', 'clientId'], 'Android presenter pin');
+        if (pin.packageName !== 'com.mickeyf.app' || pin.signer !== 'play-app-signing'
+            || typeof pin.certificateSha1 !== 'string' || pin.certificateSha1.length !== 40 || !/^[A-F0-9]{40}$/u.test(pin.certificateSha1)
+            || typeof pin.certificateSha256 !== 'string' || pin.certificateSha256.length !== 64 || !/^[A-F0-9]{64}$/u.test(pin.certificateSha256)
+            || !googleClientId(pin.clientId) || !pin.clientId.startsWith('1012884798546-')
+            || [env.GOOGLE_WEB_CLIENT_ID, env.GOOGLE_IOS_CLIENT_ID].includes(pin.clientId)
+            || clients.has(pin.clientId) || sha1s.has(pin.certificateSha1) || sha256s.has(pin.certificateSha256)) {
+            fail('Android presenter pins require distinct exact Play certificate/OAuth mappings');
+        }
+        clients.add(pin.clientId); sha1s.add(pin.certificateSha1); sha256s.add(pin.certificateSha256);
+    }
+    const names = androidEnvironmentKeys.filter(name => Object.hasOwn(env, name));
+    if (!names.length) return [];
+    if (names.length !== 1) fail('Android client ID options are mutually exclusive');
+    if (typeof env[names[0]] !== 'string' || env[names[0]].length > 4096) fail('Android client IDs must be bounded public text');
+    const ids = names[0] === 'GOOGLE_ANDROID_CLIENT_ID' ? [env[names[0]]] : document(env, names[0]);
+    if (!Array.isArray(ids) || ids.length < 1 || ids.length > 8 || new Set(ids).size !== ids.length
+        || ids.some(id => !googleClientId(id) || !clients.has(id))) {
+        fail('Android requires 1–8 distinct OAuth clients with reviewed Play certificate mappings');
+    }
+    return [...ids];
+}
+
 /** Preparation runs lifecycle/notifications with issuance closed. Activation requires the complete explicit policy bundle. */
 export function providerReleaseEnvironment(config, rollback = false) {
     keys(config, ['phase', 'environment'], 'configuration');
@@ -49,11 +83,12 @@ export function providerReleaseEnvironment(config, rollback = false) {
     const env = config.environment;
     const generalAudience = record(env) && generalPolicyKeys.some(name => Object.hasOwn(env, name));
     keys(env, [...Object.keys(PROVIDER_FIXED_ENV), ...flags, ...(config.phase === 'active' ? policyKeys : []),
-        ...(generalAudience ? generalPolicyKeys : [])], 'environment');
+        ...(generalAudience ? generalPolicyKeys : []), ...androidEnvironmentKeys.filter(name => record(env) && Object.hasOwn(env, name))], 'environment');
     for (const [name, value] of Object.entries(env)) {
         if (typeof value !== 'string' || value.length > 16_384 || value.includes('\0')) fail(`${name} must be bounded public text`);
     }
     for (const [name, value] of Object.entries(PROVIDER_FIXED_ENV)) if (env[name] !== value) fail(`fixed pin differs: ${name}`);
+    validateAndroidPresenterPins(env, PROVIDER_ANDROID_PRESENTER_PINS);
     for (const name of flags) if (!['true', 'false'].includes(env[name])) fail(`${name} must be an exact boolean`);
     if (config.phase === 'prepare') {
         if (generalAudience) fail('general signup requires an explicit active policy bundle');
