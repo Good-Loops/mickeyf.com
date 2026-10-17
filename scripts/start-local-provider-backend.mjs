@@ -2,7 +2,7 @@ import { spawn } from 'node:child_process';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { dirname, resolve } from 'node:path';
-import { PROVIDER_CREATION_FLAGS, providerConfigurationSha256, providerReleaseEnvironment } from './provider-release-config.mjs';
+import { providerConfigurationSha256, providerReleaseEnvironment } from './provider-release-config.mjs';
 
 const repository = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const expectedServerUuid = 'd1e6865c-ecad-11ee-a6b0-42010a400002';
@@ -37,9 +37,6 @@ export function localProviderEnvironment(configuration, inherited = process.env)
         LUDOLUME_LOCAL_PROVIDER_EXPECTED_SERVER_UUID: expectedServerUuid,
         LUDOLUME_LOCAL_PROVIDER_MAINTENANCE_ENABLED: 'true', SSLKEYLOGFILE: '',
     };
-    // This profile shares the production database. The old serving readers ignore
-    // private permissions, so local account creation must wait for their replacement.
-    for (const name of PROVIDER_CREATION_FLAGS) environment[name] = 'false';
     return environment;
 }
 
@@ -53,7 +50,7 @@ export async function main(args) {
         database: { proxy: '127.0.0.1:3306', database: 'cms', account: 'cms_mickeyf@%', expectedServerUuid },
         httpBind: '127.0.0.1:8080', credentials: 'Existing user Application Default Credentials; consumed only by backend',
         rootEnvModified: false, signupMode: 'general-audience; no country or age questions',
-        accountCreation: 'Closed in this production-database dev profile until compatible public leaderboard readers serve all traffic',
+        accountCreation: 'General signup enabled by the reviewed bundle after compatible public readers replaced the old serving readers; parent creation remains closed',
         maintenance: 'Initial and periodic bounded expiry cleanup plus due Apple revocations; requires healthy maintenance before Apple issuance',
         privateValuesIncluded: false };
     if (args[0] === '--plan-only') { console.log(JSON.stringify({ planOnly: true, ...plan })); return; }

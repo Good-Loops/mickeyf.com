@@ -8,7 +8,7 @@ import { localProviderEnvironment, startLocalProviderDevelopment } from './start
 
 const configuration = JSON.parse(await readFile(new URL('./provider-release-general.json', import.meta.url), 'utf8'));
 
-test('local profile uses general signup policy and keeps production-database creation closed for reader compatibility', () => {
+test('local profile uses reviewed general signup after compatible-reader cutover while keeping parent creation closed', () => {
     const environment = localProviderEnvironment(configuration, { NODE_ENV: 'development' });
     assert.equal(environment.DB_HOST, '127.0.0.1');
     assert.equal(environment.DB_NAME, 'cms');
@@ -18,9 +18,9 @@ test('local profile uses general signup policy and keeps production-database cre
     assert.equal(environment.LUDOLUME_LOCAL_PROVIDER_EXPECTED_SERVER_UUID, configuration.environment.APPLE_MAINTENANCE_EXPECTED_SERVER_UUID);
     assert.equal(environment.SSLKEYLOGFILE, '');
     assert.equal(environment.REGISTRATION_GENERAL_AUDIENCE_ENABLED, 'true');
-    assert.equal(environment.REGISTRATION_CREATION_ENABLED, 'false');
-    assert.equal(environment.PROVIDER_GOOGLE_SIGNUP_ENABLED, 'false');
-    assert.equal(environment.PROVIDER_APPLE_SIGNUP_ENABLED, 'false');
+    assert.equal(environment.REGISTRATION_CREATION_ENABLED, 'true');
+    assert.equal(environment.PROVIDER_GOOGLE_SIGNUP_ENABLED, 'true');
+    assert.equal(environment.PROVIDER_APPLE_SIGNUP_ENABLED, 'true');
     assert.equal(environment.PARENT_REGISTRATION_CREATION_ENABLED, 'false');
     assert.equal(environment.PARENT_SIGNED_FORMS_ENABLED, 'true');
     assert.deepEqual(JSON.parse(environment.PARENT_REGISTRATION_COUNTRIES), ['US']);
@@ -50,6 +50,7 @@ test('import and offline planning do not start services or expose inherited priv
     assert.equal(plan.planOnly, true);
     assert.equal(plan.rootEnvModified, false);
     assert.equal(plan.privateValuesIncluded, false);
+    assert.match(plan.accountCreation, /General signup enabled.*parent creation remains closed/u);
     assert.ok(!result.stdout.includes(marker));
     const noAction = spawnSync(process.execPath, [path], { encoding: 'utf8', timeout: 10_000 });
     assert.equal(noAction.status, 1);
