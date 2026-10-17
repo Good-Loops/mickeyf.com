@@ -132,6 +132,37 @@ test('auth-route Google resources warm during renewal and config discovery witho
     assert.equal(calls.filter(call => call.path === '/auth/providers/complete').length, 0);
 });
 
+test('the classic auth bootstrap preloads each Google resource once without executing the SDK or calling auth', async t => {
+    const { page, calls } = await fixture(t, 390);
+    const resources = [];
+    page.on('request', request => { if (request.url().startsWith('https://accounts.google.com/gsi/')) resources.push(request.url()); });
+    await page.route(`${origin}/login`, route => route.fulfill({ contentType: 'text/html', body: `<!doctype html>
+        <script defer src="/provider-signin-preload.js" data-google-startup="enabled"></script>
+        <script defer src="/provider-signin-preload.js" data-google-startup="enabled"></script>` }));
+    await page.goto(`${origin}/login`);
+    await page.waitForLoadState('networkidle');
+    assert.deepEqual(resources.sort(), ['https://accounts.google.com/gsi/client?hl=en', 'https://accounts.google.com/gsi/style']);
+    assert.equal(await page.locator('link[data-google-signin-preload]').count(), 2);
+    assert.equal(await page.evaluate(() => Boolean(window.google)), false, 'a preload must not execute the SDK');
+    assert.deepEqual(calls, []);
+});
+
+test('the classic Google bootstrap stays off unrelated routes, disabled legacy preview and native contexts', async t => {
+    for (const sample of [{ path: '/privacy' }, { path: '/login', disabled: true }, { path: '/login', native: true }]) {
+        const { page, calls } = await fixture(t, 390);
+        const resources = [];
+        page.on('request', request => { if (request.url().startsWith('https://accounts.google.com/gsi/')) resources.push(request.url()); });
+        if (sample.native) await page.addInitScript(() => { window.Capacitor = { isNativePlatform: () => true }; });
+        await page.route(`${origin}${sample.path}`, route => route.fulfill({ contentType: 'text/html', body: `<!doctype html>
+            <script defer src="/provider-signin-preload.js" data-google-startup="${sample.disabled ? 'disabled' : 'enabled'}"></script>` }));
+        await page.goto(`${origin}${sample.path}`);
+        await page.waitForLoadState('networkidle');
+        assert.deepEqual(resources, []);
+        assert.equal(await page.locator('link[data-google-signin-preload]').count(), 0);
+        assert.deepEqual(calls, []);
+    }
+});
+
 test('Google SDK loads alongside its challenge and becomes usable before the independent Apple SDK finishes', async t => {
     const { page, releaseBegin, releaseApple } = await fixture(t, 390, { pendingBegin: true, pendingApple: true });
     await page.goto(`${origin}/login`);
