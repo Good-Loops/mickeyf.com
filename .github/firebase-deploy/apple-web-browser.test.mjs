@@ -62,7 +62,8 @@ async function fixture(t, mode = 'success') {
         }
         return route.continue();
     });
-    await page.goto(`${origin}/login`, { waitUntil: 'domcontentloaded' });
+    // A fresh isolated Vite cache compiles the module graph before DOMContentLoaded.
+    await page.goto(`${origin}/login`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
     return { page, calls };
 }
 async function openApple(page) {
