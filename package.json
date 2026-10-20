@@ -42,8 +42,8 @@
 		"unity:yaml:normalize-staged": "node scripts/normalize-unity-yaml-whitespace.mjs --staged"
 	},
 	"devDependencies": {
-		"chokidar-cli": "^3.0.0",
-		"concurrently": "^10.0.4",
+		"chokidar": "^4.0.3",
+		"concurrently": "^10.0.6",
 		"http-server": "^14.1.1",
 		"typedoc": "^0.28.20"
 	}

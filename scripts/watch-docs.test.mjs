@@ -1,12 +1,15 @@
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
-import { readFile } from 'node:fs/promises';
-import { PassThrough } from 'node:stream';
-import { setImmediate } from 'node:timers/promises';
+import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { setImmediate, setTimeout } from 'node:timers/promises';
 import { test } from 'node:test';
+import { watch } from 'chokidar';
 import {
     createRebuildQueue,
-    documentationPatterns,
+    documentationPaths,
+    isDocumentationPath,
     runDocumentationBuild,
     startDocumentationWatcher,
 } from './watch-docs.mjs';
@@ -20,16 +23,20 @@ function deferred() {
 
 function fakeChild() {
     const child = new EventEmitter();
-    child.stdout = new PassThrough();
     child.exitCode = null;
     child.signalCode = null;
     child.kill = () => {
         child.signalCode = 'SIGTERM';
-        child.stdout.end();
         child.emit('close', null, 'SIGTERM');
         return true;
     };
     return child;
+}
+
+function fakeFileWatcher() {
+    const watcher = new EventEmitter();
+    watcher.close = async () => {};
+    return watcher;
 }
 
 test('debounces a burst into one build without building on startup', async (context) => {
@@ -189,76 +196,129 @@ test('build spawn errors reject rather than hanging the queue', async () => {
     await failed;
 });
 
-test('watcher reads chunked event lines, retains globs and shuts down without a new build', async (context) => {
+test('watcher filters file events and shuts down without a new build', async (context) => {
     context.mock.timers.enable({ apis: ['setTimeout'] });
-    const watchChild = fakeChild();
+    const fileWatcher = fakeFileWatcher();
     const buildChild = fakeChild();
     const invocations = [];
     const errors = [];
+    let watched;
     const watcher = startDocumentationWatcher({
         npmCli: '/fixture/npm-cli.js',
-        spawnProcess: (...args) => {
-            invocations.push(args);
-            return invocations.length === 1 ? watchChild : buildChild;
-        },
+        watchFiles: (...args) => { watched = args; return fileWatcher; },
+        spawnProcess: (...args) => { invocations.push(args); return buildChild; },
         report: () => {},
         reportError: (error) => errors.push(error),
     });
-    assert.deepEqual(invocations[0][1].slice(1), documentationPatterns);
-    assert.equal(invocations[0][1].includes('-c'), false);
-    watchChild.stdout.write('Watching fixture\nchan');
-    watchChild.stdout.write('ge:C:\\fixture\\file.ts\r\nadd:another.ts\n');
+    assert.deepEqual(watched[0], documentationPaths);
+    assert.equal(watched[1].ignoreInitial, true);
+    assert.equal(watched[1].ignored('frontend/ts/data.json', { isFile: () => true }), true);
+    assert.equal(watched[1].ignored('frontend/ts/nested', { isFile: () => false }), false);
+    fileWatcher.emit('all', 'change', 'frontend/ts/data.json');
+    fileWatcher.emit('all', 'change', 'docs/types/generated.html');
     context.mock.timers.tick(400);
     await setImmediate();
-    assert.equal(invocations.length, 2);
+    assert.equal(invocations.length, 0);
+    fileWatcher.emit('all', 'change', 'frontend/ts/nested/component.tsx');
+    fileWatcher.emit('all', 'add', 'backend/ts/another.ts');
+    context.mock.timers.tick(400);
+    await setImmediate();
+    assert.equal(invocations.length, 1);
     const stopping = watcher.stop();
     buildChild.emit('close', 0, null);
     await stopping;
     assert.equal(await watcher.done, 0);
-    assert.equal(watchChild.signalCode, 'SIGTERM');
     assert.deepEqual(errors, []);
 });
 
 test('watcher failure exits nonzero without attempting a build', async () => {
-    const child = fakeChild();
+    const fileWatcher = fakeFileWatcher();
     const errors = [];
     const watcher = startDocumentationWatcher({
         npmCli: '/fixture/npm-cli.js',
-        spawnProcess: () => child,
+        watchFiles: () => fileWatcher,
+        spawnProcess: () => { throw new Error('Unexpected build'); },
         reportError: (error) => errors.push(error),
     });
-    child.exitCode = 2;
-    child.stdout.end();
-    child.emit('close', 2, null);
+    fileWatcher.emit('error', new Error('fixture filesystem failure'));
     assert.equal(await watcher.done, 1);
-    assert.match(errors[0], /stopped unexpectedly.*exit 2/);
+    assert.match(errors[0], /fixture filesystem failure/);
 });
 
-test('stop waits for the owned file-watcher process to close', async () => {
-    const child = fakeChild();
-    child.kill = () => { child.signalCode = 'SIGTERM'; return true; };
+test('stop waits for the file watcher to close and closes it once', async () => {
+    const fileWatcher = fakeFileWatcher();
+    const closed = deferred();
+    let closes = 0;
+    fileWatcher.close = () => { closes++; return closed.promise; };
     const watcher = startDocumentationWatcher({
         npmCli: '/fixture/npm-cli.js',
-        spawnProcess: () => child,
+        watchFiles: () => fileWatcher,
     });
     let stopped = false;
     const stopping = watcher.stop().then(() => { stopped = true; });
     await setImmediate();
     assert.equal(stopped, false);
-    child.stdout.end();
-    child.emit('close', null, 'SIGTERM');
+    assert.equal(watcher.stop(), watcher.stop());
+    closed.resolve();
     await stopping;
     assert.equal(stopped, true);
     assert.equal(await watcher.done, 0);
+    assert.equal(closes, 1);
 });
+
+test('file selection preserves the previous paths and TypeScript extensions', () => {
+    for (const path of ['typedoc.merge.json', 'docs-src/index.md', 'docs-src/typedoc.css',
+        'docs-src/assets/image.png', 'frontend/ts/file.ts', 'frontend/ts/nested/file.tsx',
+        'backend/ts/nested/file.ts']) assert.equal(isDocumentationPath(path), true, path);
+    for (const path of ['frontend/ts/data.json', 'frontend/ts/file.js', 'backend/ts/file.tsx',
+        'frontend/other.ts', 'docs/types/file.html', '../outside.ts']) {
+        assert.equal(isDocumentationPath(path), false, path);
+    }
+});
+
+test('real file watcher ignores initial and unrelated files, then rebuilds for edits and removal',
+    { timeout: 10000 }, async (context) => {
+        const cwd = await mkdtemp(join(tmpdir(), 'ludolume-docs-watch-'));
+        await mkdir(join(cwd, 'frontend/ts/nested'), { recursive: true });
+        const source = join(cwd, 'frontend/ts/nested/source.ts');
+        await writeFile(source, 'initial');
+        let fileWatcher;
+        let builds = 0;
+        const watcher = startDocumentationWatcher({
+            cwd, npmCli: '/fixture/npm-cli.js', report: () => {},
+            watchFiles: (...args) => { fileWatcher = watch(...args); return fileWatcher; },
+            spawnProcess: () => {
+                builds++;
+                const child = fakeChild();
+                void setImmediate().then(() => child.emit('close', 0, null));
+                return child;
+            },
+        });
+        context.after(async () => {
+            await watcher.stop();
+            assert.ok(cwd.startsWith(join(tmpdir(), 'ludolume-docs-watch-')));
+            await rm(cwd, { recursive: true, force: true });
+        });
+        await new Promise(resolve => fileWatcher.once('ready', resolve));
+        await writeFile(join(cwd, 'frontend/ts/nested/data.json'), '{}');
+        await setTimeout(600);
+        assert.equal(builds, 0);
+        const waitForBuilds = async (count) => {
+            for (let attempt = 0; attempt < 100 && builds < count; attempt++) await setTimeout(50);
+            assert.equal(builds, count);
+        };
+        await writeFile(source, 'changed');
+        await waitForBuilds(1);
+        await rm(source);
+        await waitForBuilds(2);
+    });
 
 test('direct invocation requires npm context and root scripts retain the intended workflow', async () => {
     assert.throws(() => startDocumentationWatcher({ npmCli: '' }), /npm run docs:watch/);
     const manifest = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
-    assert.deepEqual(documentationPatterns, [
+    assert.deepEqual(documentationPaths, [
         'typedoc.merge.json', 'docs-src/index.md', 'docs-src/typedoc.css',
-        'docs-src/assets/**/*', 'frontend/ts/**/*.ts', 'frontend/ts/**/*.tsx',
-        'backend/ts/**/*.ts',
+        'docs-src/assets', 'frontend/ts', 'backend/ts',
     ]);
     assert.equal(manifest.scripts['docs:watch'], 'node scripts/watch-docs.mjs');
     assert.equal(manifest.scripts['docs:dev:fresh'], 'npm run docs && npm run docs:dev');

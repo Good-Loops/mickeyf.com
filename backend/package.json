@@ -20,7 +20,7 @@
         "runtime-grants:apply": "ts-node ts/security/runRuntimeGrants.ts apply",
         "watch": "webpack --mode development --watch",
         "prod": "webpack --mode production",
-        "dev": "nodemon dist/server.min.js",
+        "dev": "node --watch --watch-preserve-output dist/server.min.js",
         "migrations:receipts:plan": "ts-node ts/migrations/runMigrations.ts receipts-plan",
         "migrations:receipts:apply": "ts-node ts/migrations/runMigrations.ts receipts-apply",
         "migrations:receipts:verify": "ts-node ts/migrations/runMigrations.ts receipts-verify"
@@ -47,7 +47,6 @@
         "@types/jsonwebtoken": "^9.0.10",
         "@types/node": "^20.12.5",
         "node-loader": "^2.0.0",
-        "nodemon": "^3.1.0",
         "ts-loader": "^9.4.2",
         "ts-node": "^10.9.1",
         "typescript": "^5.9.3",
