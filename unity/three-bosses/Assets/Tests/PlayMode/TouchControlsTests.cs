@@ -512,7 +512,7 @@ namespace ThreeBosses.Tests
             Vector4 buttonHitPadding = new(-20f, -20f, -20f, -20f);
             AssertGlassControl(
                 jump,
-                new Vector2(64f, 64f),
+                new Vector2(128f, 128f),
                 "Jump",
                 jump.GetComponent<OnScreenButton>(),
                 true,
@@ -520,7 +520,7 @@ namespace ThreeBosses.Tests
                 sceneName);
             AssertGlassControl(
                 dash,
-                new Vector2(64f, 64f),
+                new Vector2(128f, 128f),
                 "Dash",
                 dash.GetComponent<OnScreenButton>(),
                 true,
@@ -528,12 +528,14 @@ namespace ThreeBosses.Tests
                 sceneName);
             AssertGlassControl(
                 fire,
-                new Vector2(72f, 72f),
+                new Vector2(144f, 144f),
                 "Fire",
                 fire.GetComponent<OnScreenButton>(),
                 true,
                 buttonHitPadding,
                 sceneName);
+
+            AssertSeparateActionHitTargets(new[] { jump, dash, fire }, sceneName);
 
             Type textType = Type.GetType("TMPro.TMP_Text, Unity.TextMeshPro");
             Assert.That(textType, Is.Not.Null);
@@ -598,6 +600,35 @@ namespace ThreeBosses.Tests
             Assert.That(style.GetValue(graphic).ToString(), Is.EqualTo(expectedStyle), sceneName);
             Assert.That(inputSource.GetValue(graphic), Is.SameAs(expectedInputSource), sceneName);
             Assert.That(isPressed.GetValue(graphic), Is.False, sceneName);
+        }
+
+        private static void AssertSeparateActionHitTargets(Transform[] buttons, string sceneName)
+        {
+            Rect[] hitTargets = buttons.Select(button =>
+            {
+                var rect = (RectTransform)button;
+                Vector4 padding = button.GetComponent<Image>().raycastPadding;
+                Vector2 center = rect.anchoredPosition;
+                Vector2 halfSize = rect.sizeDelta * 0.5f;
+                Assert.That(rect.anchorMin, Is.EqualTo(new Vector2(1f, 0f)), sceneName);
+                Assert.That(rect.anchorMax, Is.EqualTo(rect.anchorMin), sceneName);
+                return Rect.MinMaxRect(
+                    center.x - halfSize.x + padding.x,
+                    center.y - halfSize.y + padding.y,
+                    center.x + halfSize.x - padding.z,
+                    center.y + halfSize.y - padding.w);
+            }).ToArray();
+
+            for (int index = 0; index < hitTargets.Length; index++)
+            {
+                Assert.That(hitTargets[index].xMax, Is.LessThanOrEqualTo(0f),
+                    $"{sceneName}: {buttons[index].name} must stay inside the safe right edge.");
+                Assert.That(hitTargets[index].yMin, Is.GreaterThanOrEqualTo(0f),
+                    $"{sceneName}: {buttons[index].name} must stay inside the safe bottom edge.");
+                for (int other = index + 1; other < hitTargets.Length; other++)
+                    Assert.That(hitTargets[index].Overlaps(hitTargets[other]), Is.False,
+                        $"{sceneName}: {buttons[index].name} and {buttons[other].name} must not share a touch target.");
+            }
         }
 
         private static void AssertAnchors(
