@@ -12,13 +12,13 @@
     "test:three-bosses-webgl-smoke": "node --test smoke-three-bosses-webgl-preview.test.mjs"
   },
   "dependencies": {
-    "firebase-tools": "15.28.1",
+    "firebase-tools": "15.34.0",
     "picomatch": "4.0.4",
     "playwright-core": "1.62.1"
   },
   "overrides": {
-    "firebase-tools@15.28.1": {
-      "csv-parse": "7.0.2"
+    "firebase-tools@15.34.0": {
+      "chokidar": "4.0.3"
     },
     "qs": "6.16.0",
     "re2": "1.26.1",

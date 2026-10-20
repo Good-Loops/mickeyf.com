@@ -24,6 +24,9 @@ env:
 
 jobs:
   build:
+    # Source-only maintenance can preserve a newer live release without skipping CI.
+    # Manual dispatch always remains available for a deliberate Hosting release.
+    if: ${{ github.event_name == 'workflow_dispatch' || !contains(github.event.head_commit.message, '[skip hosting]') }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     permissions:
@@ -145,7 +148,7 @@ jobs:
           node --test csv-parse-compat.test.mjs
 
           version="$(./node_modules/.bin/firebase --version)"
-          if [[ "$version" != "15.28.1" ]]; then
+          if [[ "$version" != "15.34.0" ]]; then
             echo "Unexpected Firebase CLI version: $version" >&2
             exit 1
           fi
@@ -1300,7 +1303,7 @@ jobs:
     needs:
       - build
       - build_and_deploy
-    if: ${{ always() }}
+    if: ${{ always() && (github.event_name == 'workflow_dispatch' || !contains(github.event.head_commit.message, '[skip hosting]')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions: {}
