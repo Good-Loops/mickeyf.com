@@ -50,7 +50,7 @@
         &:disabled { opacity: .55; cursor: wait; }
     }
 
-    &__button--apple, &__button--placeholder, &__button--availability {
+    &__button--google, &__button--apple, &__button--placeholder, &__button--availability {
         position: relative;
         overflow: hidden;
         min-height: 40px;
@@ -100,18 +100,6 @@
     }
 
     &__account-action:focus-visible { outline: 2px solid $primary-light; outline-offset: 4px; }
-
-    // Preserve the aspect ratio and colors of Google's supplied platform artwork.
-    &__button--native-google {
-        flex: 0 1 auto;
-        padding: 0;
-        border: 0;
-        background: transparent;
-        min-width: 188px;
-
-        img { display: block; max-width: 100%; height: auto; }
-        &:hover:not(:disabled) { background: transparent; }
-    }
 
     &__feedback {
         margin: 0;

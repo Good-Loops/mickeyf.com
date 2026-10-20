@@ -62,7 +62,7 @@ async function fixture(t, mode = 'success') {
         }
         return route.continue();
     });
-    await page.goto(`${origin}/login`);
+    await page.goto(`${origin}/login`, { waitUntil: 'domcontentloaded' });
     return { page, calls };
 }
 async function openApple(page) {

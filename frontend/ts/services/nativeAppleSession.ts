@@ -11,7 +11,13 @@ type IdentityLoader = () => Promise<AppleSessionIdentity | null>;
 async function loadNativeIdentity(): Promise<AppleSessionIdentity | null> {
     const { Capacitor, registerPlugin } = await import('@capacitor/core');
     if (!Capacitor.isNativePlatform() || Capacitor.getPlatform() !== 'ios') return null;
-    return registerPlugin<AppleSessionIdentity>('LudolumeIdentity');
+    const plugin = registerPlugin<AppleSessionIdentity>('LudolumeIdentity');
+    // Capacitor proxies manufacture a method for `then`; resolving the proxy would call native code.
+    return Object.freeze({
+        getCapabilities: () => plugin.getCapabilities(),
+        getCredentialState: input => plugin.getCredentialState(input),
+        addListener: (event, callback) => plugin.addListener(event, callback),
+    } satisfies AppleSessionIdentity);
 }
 
 function unavailable(): Error { return new Error('Could not check Apple authorization.'); }

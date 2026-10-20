@@ -16,13 +16,17 @@ class ElementFixture extends Events {
     focusVisible = false;
     active = false;
     groupActive = false;
+    expanded = false;
     dataset = {};
     properties = new Map();
     style = { setProperty: (name, value) => this.properties.set(name, value) };
     classList = { contains: name => name === 'nav__link--group-active' && this.groupActive };
     closest() { return this.item; }
     querySelector() { return this.link; }
-    getAttribute(name) { return name === 'aria-current' && this.active ? 'page' : null; }
+    getAttribute(name) {
+        if (name === 'aria-expanded') return String(this.expanded);
+        return name === 'aria-current' && this.active ? 'page' : null;
+    }
     matches(selector) { assert.equal(selector, ':focus-visible'); return this.focusVisible; }
     getBoundingClientRect() { return { ...this.bounds, right: this.bounds.left + this.bounds.width, bottom: this.bounds.top + this.bounds.height }; }
 }
@@ -113,6 +117,21 @@ test('routes without a selected top-level group hide the slider after hover ends
     assert.equal(f.track.dataset.visible, 'true');
     f.navigation.fire('pointerleave'); f.flush();
     assert.equal(f.track.dataset.visible, 'false');
+});
+
+test('an opened dropdown keeps the slider after touch hover ends and yields to another opened group', t => {
+    const f = fixture(t, 0);
+    f.links[1].expanded = true;
+    f.navigation.fire('pointerover', f.links[1]); f.flush();
+    f.navigation.fire('pointerleave'); f.flush();
+    assert.equal(f.position()['--nav-indicator-x'], 80);
+    f.links[1].expanded = false;
+    f.links[3].expanded = true;
+    f.view.fire('resize'); f.flush();
+    assert.equal(f.position()['--nav-indicator-x'], 232);
+    f.links[3].expanded = false;
+    f.view.fire('resize'); f.flush();
+    assert.equal(f.position()['--nav-indicator-x'], 4);
 });
 
 test('teardown disconnects observers, listeners and queued animation work', async t => {

@@ -1,11 +1,25 @@
 import Foundation
 import Capacitor
 import WebKit
+import UIKit
 
 class LudolumeBridgeViewController: CAPBridgeViewController {
+    let presentationPolicy = LudolumePresentationPolicy()
+
+    override var supportedInterfaceOrientations: UIInterfaceOrientationMask {
+        presentationPolicy.orientations(for: UIDevice.current.userInterfaceIdiom)
+    }
+
+    override var preferredInterfaceOrientationForPresentation: UIInterfaceOrientation {
+        guard UIDevice.current.userInterfaceIdiom == .phone else { return super.preferredInterfaceOrientationForPresentation }
+        guard presentationPolicy.fullscreen else { return .portrait }
+        return viewIfLoaded?.window?.windowScene?.interfaceOrientation ?? .portrait
+    }
+
     override func capacitorDidLoad() {
         bridge?.registerPluginInstance(LudolumeApiPlugin())
         bridge?.registerPluginInstance(LudolumeIdentityPlugin())
+        bridge?.registerPluginInstance(LudolumePresentationPlugin())
     }
 }
 

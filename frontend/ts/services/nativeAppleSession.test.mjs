@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { createNativeAppleSession } from './nativeAppleSession.ts';
+import { createViteTestServer } from '../testSupport/createViteTestServer.mjs';
 
 const apiBase = 'https://api.example.test';
 const unavailable = { message: 'Could not check Apple authorization.' };
@@ -127,5 +129,62 @@ test('unavailable observer and failed cleanup do not prevent later credential ch
         const remove = await session.subscribe(() => {});
         remove();
         assert.equal(await session.check(), 'unchanged');
+    }
+});
+
+test('the default iOS loader never resolves a Capacitor plugin proxy as a promise value', async () => {
+    const key = '__nativeAppleSessionLoader';
+    const previous = Object.getOwnPropertyDescriptor(globalThis, key);
+    const calls = [];
+    let thenReads = 0, removeCount = 0, notification;
+    const methods = {
+        async getCapabilities() { calls.push('capabilities'); return { apple: true }; },
+        async getCredentialState(input) { calls.push(['state', input]); return { state: 'authorized' }; },
+        async addListener(event, callback) { notification = callback; calls.push(event);
+            return { async remove() { removeCount++; } }; },
+    };
+    const proxy = new Proxy(methods, { get(target, property) {
+        if (property === 'then') { thenReads++; throw new Error('LudolumeIdentity.then is not implemented on iOS'); }
+        return Reflect.get(target, property);
+    } });
+    const fixture = { native: true, platform: 'ios', register(name) {
+        assert.equal(name, 'LudolumeIdentity'); return proxy;
+    } };
+    Object.defineProperty(globalThis, key, { configurable: true, value: fixture });
+    const root = fileURLToPath(new URL('../../', import.meta.url));
+    const server = await createViteTestServer({ root, configFile: `${root}/vite.config.ts`, appType: 'custom',
+        logLevel: 'silent', server: { middlewareMode: true }, ssr: { noExternal: ['@capacitor/core'] }, plugins: [{
+            name: 'native-apple-session-loader-fixture', enforce: 'pre',
+            resolveId(source) { if (source === '@capacitor/core') return '\0native-session-capacitor'; },
+            load(id) { if (id === '\0native-session-capacitor') return `
+                const fixture = () => globalThis.${key};
+                export const Capacitor = { isNativePlatform: () => fixture().native, getPlatform: () => fixture().platform };
+                export const registerPlugin = name => fixture().register(name);`; },
+        }] });
+    try {
+        const module = await server.ssrLoadModule('/ts/services/nativeAppleSession.ts');
+        const requests = [];
+        const session = module.createNativeAppleSession(apiBase, async (...args) => {
+            requests.push(args); return Response.json({ userId: 'synthetic-apple-subject' });
+        });
+        assert.equal(await session.check(), 'unchanged');
+        let changes = 0;
+        const remove = await session.subscribe(() => { changes++; });
+        notification(); remove();
+        assert.equal(changes, 1); assert.equal(removeCount, 1);
+        assert.equal(thenReads, 0, 'async loaders and capability checks must return a plain method facade');
+        assert.deepEqual(calls, ['capabilities', ['state', { userId: 'synthetic-apple-subject' }],
+            'capabilities', 'appleCredentialChanged']);
+        assert.equal(requests.length, 1);
+        for (const [native, platform] of [[false, 'web'], [true, 'android']]) {
+            Object.assign(fixture, { native, platform });
+            assert.equal(await session.check(), 'unchanged');
+            (await session.subscribe(() => assert.fail('unsupported platform cannot subscribe')))();
+        }
+        assert.equal(calls.length, 4); assert.equal(requests.length, 1); assert.equal(thenReads, 0);
+    } finally {
+        await server.close();
+        if (previous) Object.defineProperty(globalThis, key, previous);
+        else delete globalThis[key];
     }
 });

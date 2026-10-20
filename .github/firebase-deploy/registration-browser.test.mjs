@@ -43,7 +43,7 @@ async function fixture(t, signup = async () => ({ error: 'REGISTRATION_REQUIRED'
         }
         return route.continue();
     });
-    await page.goto(`${origin}/signup`);
+    await page.goto(`${origin}/signup`, { waitUntil: 'domcontentloaded' });
     await page.locator('#signup-password').waitFor();
     return { page, calls };
 }

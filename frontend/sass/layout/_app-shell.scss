@@ -105,6 +105,25 @@ html[data-native-app].canvas-fullscreen-fallback-active .app-shell > .main {
     overflow: visible;
 }
 
+// A short landscape viewport needs its height for content, rather than outer spacing.
+@media (orientation: landscape) and (max-height: 500px) {
+    .app-shell > .header {
+        min-height: 0;
+        padding-block: .35rem 0;
+    }
+
+    .app-shell > .main,
+    html[data-native-app] .app-shell > .main {
+        padding-block: .6rem;
+    }
+
+    .app-shell > .footer {
+        min-height: 0;
+
+        .footer__text { padding-block: .35rem; }
+    }
+}
+
 .space-background {
     position: fixed;
     inset: 0;

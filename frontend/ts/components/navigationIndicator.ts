@@ -20,7 +20,9 @@ export function trackNavigationIndicator(navigation: HTMLElement, track: HTMLEle
     function measure() {
         frame = undefined;
         if (stopped) return;
-        const target = hovered ?? keyboardTarget() ?? links.find(link =>
+        const target = hovered ?? keyboardTarget()
+            ?? links.find(link => link.getAttribute('aria-expanded') === 'true')
+            ?? links.find(link =>
             link.getAttribute('aria-current') === 'page' || link.classList.contains('nav__link--group-active'));
         if (!target) { track.dataset.visible = 'false'; return; }
         const bounds = track.getBoundingClientRect();

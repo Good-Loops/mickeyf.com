@@ -65,6 +65,25 @@ test('locked pages, detached canvases and invalid deltas are ignored', () => {
     assert.equal(f.scrolls.length, 0);
 });
 
+test('a locked native document still allows its main scroll region without leaking the remainder', () => {
+    for (const overflowY of ['hidden', 'clip']) {
+        const f = fixture();
+        const main = { scrollTop: 20, scrollHeight: 200, clientHeight: 160, parentElement: f.page.documentElement };
+        f.canvas.parentElement = main;
+        f.browser.getComputedStyle = element => ({ overflowY: element === main ? 'auto' : overflowY });
+        bindUnityPageScroll(f.canvas);
+        f.browser.MickeyfThreeBossesScrollPage(0.25);
+        assert.equal(main.scrollTop, 40, overflowY);
+        assert.equal(f.scrolls.length, 0, overflowY);
+        f.browser.MickeyfThreeBossesScrollPage(-0.1);
+        assert.equal(main.scrollTop, 20, overflowY);
+        assert.equal(f.scrolls.length, 0, overflowY);
+        f.page.fullscreenElement = f.wrapper;
+        f.browser.MickeyfThreeBossesScrollPage(-0.1);
+        assert.equal(main.scrollTop, 20, 'fullscreen must still keep the entire scroll chain stationary');
+    }
+});
+
 test('disposal restores the previous callback and does not clear another owner', () => {
     const f = fixture();
     const prior = () => {};

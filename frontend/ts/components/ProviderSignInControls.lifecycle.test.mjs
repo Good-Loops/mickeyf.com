@@ -297,9 +297,17 @@ test('a trusted empty provider configuration stays empty without automatic retri
     assert.equal(view.find(node => node.props?.role === 'alert'), undefined);
 });
 
-test('persistent discovery failure is bounded and exposes an explicit safe retry for native signup', async t => {
+test('persistent discovery failure is bounded and exposes an explicit safe retry for native signup', { timeout: 10_000 }, async t => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
     const view = mount(t, ProviderSignInControls, { action: 'signup' });
+    const firstRetryScheduled = deferred(), secondRetryScheduled = deferred();
+    const schedule = globalThis.setTimeout;
+    t.mock.method(globalThis, 'setTimeout', (callback, delay, ...args) => {
+        const handle = schedule(callback, delay, ...args);
+        if (delay === 1000) firstRetryScheduled.resolve();
+        if (delay === 2000) secondRetryScheduled.resolve();
+        return handle;
+    });
     const native = { clientKey: 'apple-ios', provider: 'apple', platform: 'ios', clientId: 'com.example.app', signup: true };
     let healthy = false, calls = 0;
     view.hooks.clients = async (_onAvailable, onUnavailable) => {
@@ -307,9 +315,13 @@ test('persistent discovery failure is bounded and exposes an explicit safe retry
         if (healthy) return [native];
         onUnavailable?.(); return [];
     };
-    view.render(); await view.settle();
-    t.mock.timers.tick(1000); await view.settle();
-    t.mock.timers.tick(2000); await view.settle();
+    view.render();
+    await firstRetryScheduled.promise;
+    t.mock.timers.tick(999); assert.equal(calls, 1);
+    t.mock.timers.tick(1);
+    await secondRetryScheduled.promise;
+    t.mock.timers.tick(1999); assert.equal(calls, 2);
+    t.mock.timers.tick(1); await view.settle();
     assert.equal(calls, 3);
     assert.equal(view.find(node => node.props?.role === 'status').props.children, 'Sign-in options are temporarily unavailable.');
     const retry = view.find(node => node.type === 'button' && node.props.children === 'Retry sign-in options');

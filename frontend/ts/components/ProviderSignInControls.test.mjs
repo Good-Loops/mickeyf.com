@@ -96,10 +96,12 @@ test('signup keeps configured availability choices visible while active Google s
     assert.doesNotMatch(rendered, /Google|google|Link a sign-in method|<h2/);
 });
 
-test('native Apple entry is a neutral account selector and link controls have a distinct heading', () => {
+test('Apple linking keeps its explicit heading while matching the branded entry control', () => {
     const rendered = markup({ clients: [apple], action: 'link' });
     assert.match(rendered, /Link a sign-in method/);
-    assert.match(rendered, />Apple account<\/button>/);
+    assert.match(rendered, />Continue with Apple<\/span>/);
+    assert.match(rendered, /provider-sign-in__button--apple/);
+    assert.match(rendered, /apple-sign-in-logo-white\.png/);
     assert.doesNotMatch(rendered, /Sign in with Apple|>google<|Delete account|Create account|Sign up/);
 });
 
@@ -112,7 +114,9 @@ test('external form activity disables every linking choice', () => {
 test('provider activity announces progress and disables all other choices', () => {
     const rendered = markup({ clients: [google, apple], action: 'link', busyClient: google.clientKey });
     assert.match(rendered, /aria-busy="true"/);
-    assert.match(rendered, />Please wait…<\/button>/);
+    assert.match(rendered, /aria-busy="true"/);
+    assert.match(rendered, />Continue with Google<\/span>/);
+    assert.match(rendered, /Signing in/);
     assert.equal((rendered.match(/ disabled=""/g) ?? []).length, 2);
 });
 
@@ -180,11 +184,21 @@ test('cancellation is quiet and unknown errors cannot inject provider details or
 });
 
 
-test('native Google uses an explicit button and signup stays capability gated on both platforms', () => {
+test('native Google keeps the same labeled logo control for login, signup, linking and busy states', () => {
     for (const platform of ['ios', 'android']) {
         const client = { ...google, clientKey: `google-${platform}`, platform };
-        assert.match(markup({ clients: [client] }), /alt="Sign in with Google"/);
         assert.equal(markup({ clients: [client], action: 'signup' }), '');
-        assert.match(markup({ clients: [{ ...client, signup: true }], action: 'signup' }), /alt="Sign in with Google"/);
+        for (const action of ['login', 'signup', 'link']) {
+            const options = { clients: [{ ...client, signup: true }], action };
+            const ready = markup(options), busy = markup({ ...options, busyClient: client.clientKey });
+            for (const rendered of [ready, busy]) {
+                assert.match(rendered, /provider-sign-in__button--google/);
+                assert.match(rendered, /google-sign-in-logo\.svg/);
+                assert.match(rendered, />Continue with Google<\/span>/);
+                assert.doesNotMatch(rendered, /google-sign-in-(ios|android)\.png|Sign in with Google|Please wait/);
+            }
+            assert.match(busy, /disabled=""/);
+            assert.match(busy, /role="status">Signing in/);
+        }
     }
 });

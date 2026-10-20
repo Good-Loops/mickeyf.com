@@ -487,21 +487,21 @@
     }
 }
 
-// The native shell provides a finite main size. Share a controls row in portrait
-// and fit the scene into the remaining height instead of scrolling the game page.
+// Keep the notice, scene and controls together inside the native shell's finite main region.
 html[data-native-app] .p4-vega {
     --p4-safe-width: calc(100vw - env(safe-area-inset-left) - env(safe-area-inset-right));
     --p4-page-width: min(94vw, var(--p4-safe-width), 145rem);
     --p4-canvas-width: var(--p4-page-width);
 
     grid-template-columns: minmax(0, 1fr) 8.6rem;
-    grid-template-rows: auto minmax(0, 1fr) auto auto;
+    grid-template-rows: auto auto auto auto;
     grid-template-areas:
         'notice notice'
         'canvas canvas'
         'ui joystick'
         'preference preference';
     align-items: center;
+    align-content: center;
     gap: .6rem;
     width: var(--p4-page-width);
     height: 100%;
@@ -514,8 +514,8 @@ html[data-native-app] .p4-vega {
         // Keep the frame outside the scene's 16:9 content box, so its padding
         // cannot crop the canvas's bottom edge or its rounded lower corners.
         box-sizing: content-box;
-        width: auto;
-        height: calc(100% - 1.1rem);
+        width: calc(100% - 1.1rem);
+        height: auto;
         max-width: calc(100% - 1.1rem);
         max-height: calc((var(--p4-canvas-width) - 1.1rem) * 9 / 16);
         min-width: 0;
@@ -554,19 +554,23 @@ html[data-native-app] .p4-vega {
     &__orientation-hint { display: none; }
 
     @media (orientation: landscape) {
-        --p4-settings-width: min(22rem, calc(var(--p4-safe-width) * .4));
+        --p4-settings-width: min(14rem, calc(var(--p4-safe-width) * .24));
+        --p4-page-width: min(
+            88vw, var(--p4-safe-width), 105rem,
+            calc(max(12rem, 100dvh - 16rem) * 16 / 9 + var(--p4-settings-width) + 9.8rem)
+        );
         --p4-canvas-width: calc(var(--p4-page-width) - var(--p4-settings-width) - 9.8rem);
 
         grid-template-columns: var(--p4-settings-width) minmax(0, 1fr) 8.6rem;
-        grid-template-rows: auto minmax(0, 1fr) auto;
+        grid-template-rows: auto auto auto;
         grid-template-areas:
-            'notice notice joystick'
+            'notice notice notice'
             'ui canvas joystick'
-            'preference preference joystick';
+            'preference preference preference';
 
-        &__ui { gap: .4rem; padding: .5rem; }
+        &__ui { grid-template-columns: minmax(0, 1fr); gap: .4rem; padding: .5rem; }
         &__ui--option,
         &__ui--dropdown-btn { padding: .5rem; }
-        &__ui--dropdown-grid { gap: .4rem; }
+        &__ui--dropdown-grid { grid-template-columns: minmax(0, 1fr); gap: .4rem; }
     }
 }

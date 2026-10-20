@@ -299,6 +299,28 @@ test('direct Three Bosses route renders success, empty, and error states', () =>
     assert.match(errorHtml, />Try again<\/button>/);
 });
 
+test('game results preserve table semantics, entry order and every supporting metric in compact rows', () => {
+    for (const [game, leaderboard] of [[p4VegaGame, p4VegaLeaderboard], [threeBossesGame, threeBossesLeaderboard]]) {
+        const entries = [...leaderboard.entries, { ...leaderboard.entries[0], position: 2, userName: 'Second <pilot>' }];
+        const html = renderDetail(`/leaderboards/${game.gameId}`, { status: 'success', game, leaderboard: { ...leaderboard, entries } });
+        assert.equal((html.match(/<th scope="col"/g) ?? []).length, 3);
+        assert.equal((html.match(/class="leaderboard__position-badge"/g) ?? []).length, 2);
+        assert.ok(html.indexOf(leaderboard.entries[0].userName) < html.indexOf('Second &lt;pilot&gt;'));
+        assert.doesNotMatch(html, /data-label=/);
+        assert.match(html, /<caption>/);
+        assert.match(html, /<thead>/);
+        assert.match(html, /<tbody>/);
+        if (game.gameId === 'three-bosses') {
+            assert.match(html, /<dt>Score<\/dt><dd>163,308<\/dd>/);
+            assert.match(html, /<dt>Rank<\/dt><dd>A<\/dd>/);
+            assert.match(html, /<strong class="leaderboard__result-value">1:01\.234<\/strong>/);
+        } else {
+            assert.doesNotMatch(html, /leaderboard__secondary/);
+            assert.match(html, /<strong class="leaderboard__result-value">12,345<\/strong>/);
+        }
+    }
+});
+
 test('unknown direct route renders not-found recovery links', () => {
     const html = renderDetail('/leaderboards/not-a-game', {
         status: 'not-found',

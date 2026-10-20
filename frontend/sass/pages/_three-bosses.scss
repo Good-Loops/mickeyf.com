@@ -566,6 +566,27 @@ $three-bosses-fullscreen-button-size: 3.4rem;
     .three-bosses__controls { display: none; }
 }
 
+html[data-native-app] .three-bosses__controls {
+    display: none;
+}
+
+@media (any-pointer: coarse) {
+    .three-bosses__controls { display: none; }
+}
+
+// Leave room for the surrounding page in landscape; fullscreen keeps its own sizing.
+@media (orientation: landscape) {
+    html[data-native-app] .three-bosses__canvas-wrapper:not(:is(:fullscreen, :-webkit-full-screen, [data-canvas-fullscreen])) {
+        width: min(calc(100% - 1.1rem), calc(max(12rem, 100dvh - 17rem) * 1672 / 941));
+    }
+
+    @media (any-pointer: coarse) {
+        .three-bosses__canvas-wrapper:not(:is(:fullscreen, :-webkit-full-screen, [data-canvas-fullscreen])) {
+            width: min(calc(100% - 1.1rem), calc(max(12rem, 100dvh - 17rem) * 1672 / 941));
+        }
+    }
+}
+
 @media (prefers-reduced-motion: reduce) {
     .three-bosses {
         &__loading-boss,

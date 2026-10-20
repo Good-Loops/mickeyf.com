@@ -5,6 +5,7 @@
  */
 import React, { lazy, useEffect, useRef } from "react";
 import { useSafariBackgroundEdges } from '@/hooks/useSafariBackgroundEdges';
+import { useNativePresentation } from '@/hooks/useNativePresentation';
 import { Routes, Route, useLocation } from "react-router-dom";
 import RouteContentBoundary from '@/components/RouteContentBoundary';
 import PrivacyNoticeLink from '@/components/PrivacyNoticeLink';
@@ -45,6 +46,7 @@ const App: React.FC = () => {
 	const { pathname } = useLocation();
 	useEffect(() => preloadGoogleSignInForRoute(pathname), [pathname]);
 	useSafariBackgroundEdges(shellRef);
+	useNativePresentation(pathname);
 	const threeBossesAvailable = isThreeBossesEnabled
 		&& isThreeBossesAvailableInCurrentBrowser(undefined, isThreeBossesReleaseEnabled);
 

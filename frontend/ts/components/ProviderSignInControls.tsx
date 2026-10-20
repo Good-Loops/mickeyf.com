@@ -95,14 +95,12 @@ export function ProviderSignInButtons({ clients, action, busyClient, disabled, o
             {action === 'link' && <h2 className="provider-sign-in__heading" id={headingId}>Link a sign-in method</h2>}
             <div className="provider-sign-in__buttons">
                 {choices.map(client => (
-                    <button className={`provider-sign-in__button${client.provider === 'google' && client.platform !== 'web' ? ' provider-sign-in__button--native-google' : ''}${client.provider === 'apple' && action !== 'link' ? ' provider-sign-in__button--apple' : ''}${client.clientKey === 'google-web' && action === 'signup' ? ' provider-sign-in__button--availability' : ''}`}
+                    <button className={`provider-sign-in__button provider-sign-in__button--${client.provider}${client.clientKey === 'google-web' && action === 'signup' ? ' provider-sign-in__button--availability' : ''}`}
                         type="button" key={client.clientKey}
+                        aria-busy={busyClient === client.clientKey}
                         disabled={disabled || busyClient !== null} onClick={() => onSelect(client)}>
-                        {busyClient === client.clientKey ? 'Please wait…'
-                            : client.provider === 'google' ? (client.platform === 'web' ? action === 'signup' ? providerButtonLabel('google') : 'google'
-                                : <img src={`/images/google-sign-in-${client.platform}.png`} alt="Sign in with Google"
-                                    height="44" width={client.platform === 'ios' ? 188 : 198} />)
-                                : action === 'link' ? 'Apple account' : providerButtonLabel('apple')}
+                        {providerButtonLabel(client.provider)}
+                        {busyClient === client.clientKey && <span className="u-visually-hidden" role="status">Signing in</span>}
                     </button>
                 ))}
             </div>

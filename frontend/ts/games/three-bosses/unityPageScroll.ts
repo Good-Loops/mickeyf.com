@@ -18,10 +18,6 @@ export function bindUnityPageScroll(canvas: HTMLCanvasElement): () => void {
         if (!canvas.isConnected || !Number.isFinite(normalizedDelta)
             || Math.abs(normalizedDelta) > 1 || isCanvasFullscreen(wrapper, page)) return;
 
-        // Keep the site's viewport lock: no scrolling into Safari's background extensions.
-        const overflow = browser.getComputedStyle(page.documentElement).overflowY;
-        if (overflow === 'hidden' || overflow === 'clip') return;
-
         let remaining = normalizedDelta * canvas.getBoundingClientRect().height;
         if (!Number.isFinite(remaining)) return;
 
@@ -35,6 +31,10 @@ export function bindUnityPageScroll(canvas: HTMLCanvasElement): () => void {
             remaining -= ancestor.scrollTop - before;
             if (Math.abs(remaining) < 0.5) return;
         }
+        // The native shell locks the document while its main region still scrolls.
+        // Respect that outer lock only after the inner scroll chain has consumed the drag.
+        const overflow = browser.getComputedStyle(page.documentElement).overflowY;
+        if (overflow === 'hidden' || overflow === 'clip') return;
         browser.scrollBy({ top: remaining, behavior: 'instant' });
     };
     browser.MickeyfThreeBossesScrollPage = scrollPage;

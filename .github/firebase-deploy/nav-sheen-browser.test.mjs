@@ -17,8 +17,8 @@ before(async () => {
 });
 after(async () => { await browser?.close(); await server?.close(); });
 
-async function fixture(t, reducedMotion = 'no-preference', width = 1440) {
-    const context = await browser.newContext({ reducedMotion, viewport: { width, height: 900 } });
+async function fixture(t, reducedMotion = 'no-preference', width = 1440, touch = false) {
+    const context = await browser.newContext({ reducedMotion, viewport: { width, height: 900 }, hasTouch: touch, isMobile: touch });
     t.after(() => context.close());
     await context.route('**/*', route => {
         const url = new URL(route.request().url());
@@ -124,14 +124,45 @@ for (const width of [1440, 390]) test(`sheen movement is faster across the cente
     const side = await projectedSpeed(page, 2250);
     assert.ok(center > nearEnd * 1.15, `center ${center} must move faster than the long-edge end ${nearEnd}`);
     assert.ok(nearEnd > side * 5 && side > 0, `side ${side} must slow down without stopping or reversing`);
-    const previousSidePixelsPerSecond = width === 1440 ? 3 : 2;
-    assert.ok(side * 1000 >= previousSidePixelsPerSecond * 3 && side * 1000 <= previousSidePixelsPerSecond * 5,
-        'the lighter slowdown keeps side motion near four times its previous measured speed');
+    const previousMotion = await page.addStyleTag({ content: `@keyframes nav-sheen-orbit {
+        0% { --nav-sheen-angle: 0deg; animation-timing-function: cubic-bezier(.02,.98,.02,.92); }
+        25% { --nav-sheen-angle: 90deg; animation-timing-function: cubic-bezier(.98,.08,.98,.02); }
+        50% { --nav-sheen-angle: 180deg; animation-timing-function: cubic-bezier(.02,.98,.02,.92); }
+        75% { --nav-sheen-angle: 270deg; animation-timing-function: cubic-bezier(.98,.08,.98,.02); }
+        100% { --nav-sheen-angle: 360deg; }
+    }` });
+    const previousSide = await projectedSpeed(page, 2250);
+    await previousMotion.evaluate(style => style.remove());
+    assert.ok(side >= previousSide * 1.2 && side <= previousSide * 1.55,
+        'rounded-end motion increases moderately from the previous accepted curve');
     const bottomCenter = await projectedSpeed(page, 4500);
     assert.ok(Math.abs(center - bottomCenter) < .005, 'opposite centers retain matching speed');
     t.diagnostic(JSON.stringify({ viewport: width, pixelsPerSecond: {
         center: Math.round(center * 1000), nearEnd: Math.round(nearEnd * 1000), side: Math.round(side * 1000),
     } }));
+});
+
+test('touch opens either dropdown and keeps the slider on its trigger until the menu closes', async t => {
+    const page = await fixture(t, 'no-preference', 390, true);
+    await page.getByRole('link', { name: 'Home', exact: true }).tap();
+    for (const name of ['Entertainment', 'Account']) {
+        const trigger = page.getByRole('button', { name, exact: true });
+        await trigger.tap();
+        assert.equal(await trigger.getAttribute('aria-expanded'), 'true');
+        await page.waitForFunction(label => {
+            const trigger = [...document.querySelectorAll('.nav__dropdown-trigger')].find(button => button.textContent.includes(label));
+            const target = trigger.getBoundingClientRect();
+            const slider = document.querySelector('.nav__indicator').getBoundingClientRect();
+            return Math.abs(target.x - slider.x) < 1 && Math.abs(target.width - slider.width) < 1;
+        }, name);
+        await page.touchscreen.tap(5, 180);
+        assert.equal(await trigger.getAttribute('aria-expanded'), 'false');
+        await page.waitForFunction(() => {
+            const target = document.querySelector('.nav__link[aria-current="page"]').getBoundingClientRect();
+            const slider = document.querySelector('.nav__indicator').getBoundingClientRect();
+            return Math.abs(target.x - slider.x) < 1;
+        });
+    }
 });
 
 test('border masks leave dropdowns visible and the inset selection slider usable at mobile width', async t => {

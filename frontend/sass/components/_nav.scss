@@ -357,19 +357,19 @@
     // Mirrored curves keep the join speed continuous while easing through the sides.
     0% {
         --nav-sheen-angle: 0deg;
-        animation-timing-function: cubic-bezier(.02, .98, .02, .92);
+        animation-timing-function: cubic-bezier(.02, .98, .02, .89);
     }
     25% {
         --nav-sheen-angle: 90deg;
-        animation-timing-function: cubic-bezier(.98, .08, .98, .02);
+        animation-timing-function: cubic-bezier(.98, .11, .98, .02);
     }
     50% {
         --nav-sheen-angle: 180deg;
-        animation-timing-function: cubic-bezier(.02, .98, .02, .92);
+        animation-timing-function: cubic-bezier(.02, .98, .02, .89);
     }
     75% {
         --nav-sheen-angle: 270deg;
-        animation-timing-function: cubic-bezier(.98, .08, .98, .02);
+        animation-timing-function: cubic-bezier(.98, .11, .98, .02);
     }
     100% { --nav-sheen-angle: 360deg; }
 }

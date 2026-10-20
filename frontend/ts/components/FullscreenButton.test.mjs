@@ -11,10 +11,16 @@ const server = await createViteTestServer({
     plugins: [{
         name: 'fullscreen-button-hook-fixture', enforce: 'pre',
         resolveId(source) {
+            if (source.endsWith('/services/nativePresentation') || source === '@/services/nativePresentation') return '\0fullscreen-presentation';
             if (source === 'react') return '\0fullscreen-react';
             if (source.startsWith('react/jsx-')) return '\0fullscreen-jsx';
         },
         load(id) {
+            if (id === '\0fullscreen-presentation') return `export const nativePresentation = { acquire() {
+                const owner = { released: false };
+                return { setFullscreen(active) { if (!owner.released) globalThis.${fixtureKey}.presentation.push(active); },
+                    release() { owner.released = true; globalThis.${fixtureKey}.presentation.push('release'); } };
+            } };`;
             if (id === '\0fullscreen-jsx') return `export const jsxDEV = (type, props) => ({ type, props });
                 export const jsx = jsxDEV; export const jsxs = jsxDEV;`;
             if (id !== '\0fullscreen-react') return;
@@ -30,7 +36,7 @@ after(() => server.close());
 const { default: FullscreenButton } = await server.ssrLoadModule('/ts/components/FullscreenButton.tsx');
 
 function mount(t, { previousFocus = 'button' } = {}) {
-    const listeners = new Map(), focused = [], hooks = { effects: [], states: [] };
+    const listeners = new Map(), focused = [], hooks = { effects: [], states: [], presentation: [] };
     let finishExit, cleanups = [];
     class Element {
         isConnected = true;
@@ -136,4 +142,36 @@ test('unmount consumes restoration and ignores the pending exit completion', asy
     view.emitExit();
     assert.deepEqual(view.focused, ['button']);
     assert.equal(view.hooks.states.length, updates);
+});
+
+test('only confirmed fullscreen unlocks rotation, and exit relocks before its promise resolves', async t => {
+    const view = mount(t);
+    assert.deepEqual(view.hooks.presentation, []);
+    await view.click();
+    assert.deepEqual(view.hooks.presentation, [true]);
+    const exit = view.click();
+    assert.deepEqual(view.hooks.presentation, [true, false]);
+    view.finishExit(); await exit;
+    assert.equal(view.hooks.presentation.at(-1), false);
+    view.unmount();
+    assert.equal(view.hooks.presentation.at(-1), 'release');
+});
+
+test('pending entry completion after unmount cannot reclaim rotation', async t => {
+    const view = mount(t);
+    let finishEntry;
+    view.target.requestFullscreen = () => new Promise(resolve => { finishEntry = () => {
+        view.page.fullscreenElement = view.target; resolve();
+    }; });
+    const entering = view.click(); view.unmount(); finishEntry(); await entering;
+    assert.deepEqual(view.hooks.presentation, ['release']);
+});
+
+test('a denied browser fullscreen request never unlocks native rotation', async t => {
+    const view = mount(t), previous = console.warn;
+    console.warn = () => {};
+    t.after(() => { console.warn = previous; });
+    view.target.requestFullscreen = async () => { throw new Error('permission denied'); };
+    await view.click();
+    assert.deepEqual(view.hooks.presentation, []);
 });

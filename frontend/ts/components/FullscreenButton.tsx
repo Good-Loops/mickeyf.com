@@ -4,6 +4,7 @@
  * Subscribes to fullscreen and keyboard events and unregisters on unmount.
  */
 import React, { useCallback, useEffect, useRef, useState } from "react";
+import { nativePresentation } from '@/services/nativePresentation';
 import {
     clearCanvasFullscreenFallback,
     isCanvasFullscreen,
@@ -74,6 +75,7 @@ const FullscreenButton: React.FC<FullscreenButtonProps> = ({
     const [isFullscreen, setIsFullscreen] = useState(false);
     const focusRestorationRef = useRef<{ previousElement: HTMLElement | null } | null>(null);
     const transitionVersionRef = useRef(0);
+    const presentationRef = useRef<ReturnType<typeof nativePresentation.acquire> | null>(null);
 
     const restorePreviousFocus = useCallback(() => {
         const restoration = focusRestorationRef.current;
@@ -97,6 +99,7 @@ const FullscreenButton: React.FC<FullscreenButtonProps> = ({
 
         try {
             const wasFullscreen = isCanvasFullscreen(target);
+            if (wasFullscreen) presentationRef.current?.setFullscreen(false);
             if (!wasFullscreen) {
                 focusRestorationRef.current = {
                     previousElement: document.activeElement instanceof HTMLElement
@@ -107,6 +110,7 @@ const FullscreenButton: React.FC<FullscreenButtonProps> = ({
 
             const nextFullscreen = await toggleCanvasFullscreen(target);
             if (version !== transitionVersionRef.current || !target.isConnected) return;
+            presentationRef.current?.setFullscreen(nextFullscreen);
             setIsFullscreen(nextFullscreen);
             if (nextFullscreen) focusRef?.current?.focus({ preventScroll: true });
             else restorePreviousFocus();
@@ -120,9 +124,12 @@ const FullscreenButton: React.FC<FullscreenButtonProps> = ({
 
     useEffect(() => {
         const target = targetRef?.current ?? document.documentElement;
+        const presentation = nativePresentation.acquire();
+        presentationRef.current = presentation;
 
         const update = () => {
             const nextFullscreen = isCanvasFullscreen(target);
+            presentation.setFullscreen(nextFullscreen);
             setIsFullscreen(nextFullscreen);
             if (!nextFullscreen) restorePreviousFocus();
         };
@@ -141,6 +148,8 @@ const FullscreenButton: React.FC<FullscreenButtonProps> = ({
 
         return () => {
             transitionVersionRef.current += 1;
+            presentationRef.current = null;
+            presentation.release();
             document.removeEventListener("fullscreenchange", update);
             document.removeEventListener("webkitfullscreenchange", update);
             document.removeEventListener('keydown', exitFallbackWithEscape);

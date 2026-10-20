@@ -61,39 +61,7 @@ function LeaderboardTable({
         );
     }
 
-    if (leaderboard.gameId === 'p4-vega') {
-        return (
-            <div
-                className="leaderboard__table-wrapper"
-                role="region"
-                aria-label={`${game.displayName} leaderboard results`}
-                tabIndex={0}
-            >
-                <table className="leaderboard__table">
-                    <caption>{game.displayName} top scores</caption>
-                    <thead>
-                        <tr>
-                            <th scope="col">Position</th>
-                            <th scope="col">Player</th>
-                            <th scope="col">{game.labels.score}</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {leaderboard.entries.map((entry) => (
-                            <tr key={entry.position}>
-                                <td data-label="Position">#{entry.position}</td>
-                                <td data-label="Player">{entry.userName}</td>
-                                <td data-label={game.labels.score}>
-                                    {numberFormatter.format(entry.score)}
-                                </td>
-                            </tr>
-                        ))}
-                    </tbody>
-                </table>
-            </div>
-        );
-    }
-
+    const timedLeaderboard = leaderboard.gameId === 'three-bosses';
     return (
         <div
             className="leaderboard__table-wrapper"
@@ -102,30 +70,43 @@ function LeaderboardTable({
             tabIndex={0}
         >
             <table className="leaderboard__table">
-                <caption>{game.displayName} top completion times</caption>
+                <caption>{game.displayName} {timedLeaderboard ? 'top completion times' : 'top scores'}</caption>
                 <thead>
                     <tr>
-                        <th scope="col">Position</th>
-                        <th scope="col">Player</th>
-                        <th scope="col">{game.labels.completionTime ?? 'Time'}</th>
-                        <th scope="col">{game.labels.score}</th>
-                        <th scope="col">{game.labels.rank ?? 'Rank'}</th>
+                        <th scope="col" className="leaderboard__position">
+                            <span aria-hidden="true">#</span><span className="u-visually-hidden">Position</span>
+                        </th>
+                        <th scope="col" className="leaderboard__player">Player</th>
+                        <th scope="col" className="leaderboard__primary">
+                            {timedLeaderboard ? game.labels.completionTime ?? 'Time' : game.labels.score}
+                        </th>
                     </tr>
                 </thead>
                 <tbody>
-                    {leaderboard.entries.map((entry) => (
-                        <tr key={entry.position}>
-                            <td data-label="Position">#{entry.position}</td>
-                            <td data-label="Player">{entry.userName}</td>
-                            <td data-label={game.labels.completionTime ?? 'Time'}>
-                                {formatCompletionTime(entry.completionTimeMs)}
-                            </td>
-                            <td data-label={game.labels.score}>
-                                {numberFormatter.format(entry.score)}
-                            </td>
-                            <td data-label={game.labels.rank ?? 'Rank'}>{entry.rank}</td>
-                        </tr>
-                    ))}
+                    {leaderboard.entries.map((entry) => {
+                        const timedEntry = 'completionTimeMs' in entry ? entry : null;
+                        return (
+                            <tr key={entry.position}>
+                                <td className="leaderboard__position">
+                                    <span className="leaderboard__position-badge">{entry.position}</span>
+                                </td>
+                                <td className="leaderboard__player">
+                                    <span className="leaderboard__player-name">{entry.userName}</span>
+                                    {timedEntry && (
+                                        <dl className="leaderboard__secondary">
+                                            <div><dt>{game.labels.score}</dt><dd>{numberFormatter.format(entry.score)}</dd></div>
+                                            <div><dt>{game.labels.rank ?? 'Rank'}</dt><dd>{timedEntry.rank}</dd></div>
+                                        </dl>
+                                    )}
+                                </td>
+                                <td className="leaderboard__primary">
+                                    <strong className="leaderboard__result-value">
+                                        {timedEntry ? formatCompletionTime(timedEntry.completionTimeMs) : numberFormatter.format(entry.score)}
+                                    </strong>
+                                </td>
+                            </tr>
+                        );
+                    })}
                 </tbody>
             </table>
         </div>

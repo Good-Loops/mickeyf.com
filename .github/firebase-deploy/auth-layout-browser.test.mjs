@@ -11,11 +11,36 @@ const nonce = Buffer.alloc(32, 2).toString('base64url');
 const policy = { enabled: true, mode: 'general-audience', policyVersion: 'synthetic-layout',
     optionalDetails: false, parentRegistrationAvailable: false };
 let server, browser, origin;
+const nativeControlFixture = `
+    import React, { useState } from 'react';
+    import { createRoot } from 'react-dom/client';
+    import { ProviderSignInButtons } from '/ts/components/ProviderSignInControls.tsx';
+    import '/sass/style.scss';
+    const clients = [
+        {clientKey:'google-ios',provider:'google',platform:'ios',clientId:'synthetic.apps.googleusercontent.com',signup:true},
+        {clientKey:'apple-ios',provider:'apple',platform:'ios',clientId:'com.example.synthetic',signup:true},
+    ];
+    function Controls() {
+        const [busyClient, setBusyClient] = useState(null);
+        return React.createElement('div', {className:'app-shell'},
+            React.createElement('main', {className:'main'},
+                React.createElement('section', {className:'login',style:{width:'min(35rem, calc(100% - 2rem))'}},
+                    React.createElement('div', {className:'login__container'},
+                        React.createElement(ProviderSignInButtons, {
+                            clients, action:new URLSearchParams(location.search).get('action') || 'login',
+                            busyClient, disabled:false, onSelect:client => setBusyClient(client.clientKey),
+                        })))));
+    }
+    createRoot(document.getElementById('root')).render(React.createElement(Controls));
+`;
 
 before(async () => {
     server = await createViteTestServer({ root, configFile: false,
         resolve: { alias: { '@': `${root}/ts` } }, esbuild: { jsx: 'automatic' },
         define: { 'import.meta.env.VITE_USE_PUBLIC_API': '"0"', 'import.meta.env.VITE_DEV_API_URL': '""' },
+        plugins: [{ name: 'native-provider-control-test',
+            resolveId: id => id === '/__native-provider-control.mjs' ? '\0native-provider-control' : undefined,
+            load: id => id === '\0native-provider-control' ? nativeControlFixture : undefined }],
         logLevel: 'error', server: { host: '127.0.0.1', port: 0 } }, { browser: true });
     await server.listen(); origin = `http://127.0.0.1:${server.httpServer.address().port}`;
     // Disposable browser, synthetic SDK and transport only; never attach to owner Chrome.
@@ -245,6 +270,72 @@ test('the viewport contains the shell while short screens can scroll to every ac
     }
     t.diagnostic(JSON.stringify(measurements));
     assert.deepEqual(measurements.filter(item => item.documentWidth > item.width || item.documentHeight > item.height), []);
+});
+
+test('native Google and Apple retain aligned pill geometry and Continue labels through pending sign-in', async t => {
+    for (const [width, height] of [[393, 852], [852, 393]]) {
+        for (const action of ['login', 'signup', 'link']) {
+            const { page } = await fixture(t, width, { height });
+            await page.route(`${origin}/__native-controls*`, route => route.fulfill({ contentType: 'text/html', body: `<!doctype html>
+                <meta name="viewport" content="width=device-width, initial-scale=1">
+                <html data-native-app="ios"><body><div id="root"></div>
+                <script type="module" src="/__native-provider-control.mjs"></script></body></html>` }));
+            await page.goto(`${origin}/__native-controls?action=${action}`);
+            const google = page.locator('.provider-sign-in__button--google');
+            const apple = page.locator('.provider-sign-in__button--apple');
+            await google.waitFor(); await apple.waitFor();
+            await page.evaluate(() => document.fonts.ready);
+            await page.evaluate(() => Promise.all([...document.images].map(image => image.decode())));
+            const measure = () => page.evaluate(() => {
+                const rect = element => { const r = element.getBoundingClientRect(); return { x:r.x,y:r.y,width:r.width,height:r.height }; };
+                const read = selector => {
+                    const button = document.querySelector(selector);
+                    const label = [...button.children].find(child => child.textContent.startsWith('Continue with'));
+                    const image = button.querySelector('img');
+                    const pixels = document.createElement('canvas');
+                    pixels.width = image.naturalWidth; pixels.height = image.naturalHeight;
+                    const context = pixels.getContext('2d'); context.drawImage(image, 0, 0);
+                    const data = context.getImageData(0, 0, pixels.width, pixels.height).data;
+                    let left = pixels.width, top = pixels.height, right = -1, bottom = -1;
+                    for (let y = 0; y < pixels.height; y++) for (let x = 0; x < pixels.width; x++) {
+                        const offset = (y * pixels.width + x) * 4;
+                        if (data[offset + 3] > 128 && Math.min(...data.slice(offset, offset + 3)) < 210) {
+                            left = Math.min(left, x); top = Math.min(top, y); right = Math.max(right, x); bottom = Math.max(bottom, y);
+                        }
+                    }
+                    const imageBox = image.getBoundingClientRect();
+                    const ink = { x:imageBox.x + left / pixels.width * imageBox.width,
+                        y:imageBox.y + top / pixels.height * imageBox.height,
+                        width:(right - left + 1) / pixels.width * imageBox.width,
+                        height:(bottom - top + 1) / pixels.height * imageBox.height };
+                    return { button:rect(button), icon:ink, label:rect(label), text:label.textContent };
+                };
+                return { google:read('.provider-sign-in__button--google'),apple:read('.provider-sign-in__button--apple') };
+            });
+            const before = await measure();
+            assert.equal(before.google.text, 'Continue with Google');
+            assert.equal(before.apple.text, 'Continue with Apple');
+            assert.equal(before.google.button.width, before.apple.button.width);
+            assert.equal(before.google.button.height, 40);
+            assert.equal(before.apple.button.height, 40);
+            const centerX = box => box.x + box.width / 2;
+            assert.ok(Math.abs(centerX(before.google.icon) - centerX(before.apple.icon)) < .75);
+            assert.ok(Math.abs(centerX(before.google.label) - centerX(before.apple.label)) < .1);
+            for (const provider of Object.values(before)) {
+                const centerY = box => box.y + box.height / 2;
+                assert.ok(Math.abs(centerY(provider.icon) - centerY(provider.button)) < .75, JSON.stringify(before));
+                assert.ok(Math.abs(centerY(provider.label) - centerY(provider.button)) <= .5, JSON.stringify(before));
+            }
+            await google.click();
+            assert.equal(await google.isDisabled(), true);
+            assert.equal(await apple.isDisabled(), true);
+            const pending = await measure();
+            assert.deepEqual(pending, before, `${width} ${action}: starting native authentication cannot change the visible controls`);
+            assert.equal(await page.getByText('Sign in with Google', { exact: true }).count(), 0);
+            assert.equal(await page.locator('img[src*="google-sign-in-ios"]').count(), 0);
+            await page.context().close();
+        }
+    }
 });
 
 for (const width of [1280, 390]) {

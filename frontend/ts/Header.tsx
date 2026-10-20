@@ -29,7 +29,7 @@ const Header: React.FC = () => {
         if (navRef.current && indicatorTrack.current && indicator.current) {
             return trackNavigationIndicator(navRef.current, indicatorTrack.current, indicator.current);
         }
-    }, [pathname, isAuthenticated]);
+    }, [pathname, isAuthenticated, openGroup]);
 
     useEffect(() => {
         setOpenGroup(null);
