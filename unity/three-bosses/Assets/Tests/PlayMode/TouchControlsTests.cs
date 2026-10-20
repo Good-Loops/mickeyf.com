@@ -625,6 +625,9 @@ namespace ThreeBosses.Tests
                     $"{sceneName}: {buttons[index].name} must stay inside the safe right edge.");
                 Assert.That(hitTargets[index].yMin, Is.GreaterThanOrEqualTo(0f),
                     $"{sceneName}: {buttons[index].name} must stay inside the safe bottom edge.");
+                // The browser owns the fullscreen toggle in this corner of the embedded canvas.
+                Assert.That(hitTargets[index].Overlaps(Rect.MinMaxRect(-160f, 0f, 0f, 160f)), Is.False,
+                    $"{sceneName}: {buttons[index].name} must leave the fullscreen corner available.");
                 for (int other = index + 1; other < hitTargets.Length; other++)
                     Assert.That(hitTargets[index].Overlaps(hitTargets[other]), Is.False,
                         $"{sceneName}: {buttons[index].name} and {buttons[other].name} must not share a touch target.");
