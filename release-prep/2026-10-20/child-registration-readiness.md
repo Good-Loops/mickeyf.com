@@ -38,3 +38,30 @@ Strict config includes `creationEnabled`: closing new accounts still permits sta
 Fonts are served locally using 28 unmodified official WOFF2 files with licenses/provenance. Fresh guest browser tests confirmed no Google Fonts request attempts. A two-pixel landscape row-gap correction keeps the real-font p4-Vega notice near its scene without changing target sizes or centering. All 15 game layout cases passed.
 
 Commands and detailed changed-file inventories are in [frontend validation](child-frontend-validation.md) and [backend validation](parent-registration-backend.md). The pending schema migration and draft policy are deliberately not an approved production operation. The original 36 captured working-tree files in the primary checkout remained byte-for-byte unchanged during isolated implementation, including all 22 unrelated dirty documentation/generated files.
+
+## Consolidated local qualification
+
+The final source passed **755 frontend tests**, **981 backend unit tests**, **75 browser cases**, and the TypeScript checks. The broad disposable migration suite passed **159 tests**; after the login-continuity change, the affected real parent HTTP/React/MySQL suite was repeated with **35/35 passing** and cleanup confirmed. Provider release validation passed **26/26**. Frontend/backend production builds passed during this implementation; hosted qualification of the pushed source remains separate.
+
+Exact commands from the repository root:
+
+```powershell
+npm --prefix frontend test
+npm --prefix backend test
+npm --prefix backend run test:unit
+npm --prefix backend run test:migrations
+npm --prefix .github/firebase-deploy run test:auth-browser
+node --test scripts/provider-backend-release.test.mjs
+node --test scripts/ios-store-screenshots.test.mjs scripts/ios-testflight.test.mjs
+$env:VITE_PROD_API_URL='https://mickeyf-org-j7yuum4tiq-uc.a.run.app'
+$env:VITE_ENABLE_THREE_BOSSES_RELEASE='1'
+npm --prefix frontend run build
+npm --prefix backend run prod
+git diff --check
+```
+
+An existing Apple-revocation deadline test assumed its synthetic provider request would start within 15ms, which failed under concurrent load. Its scoped mocked clock now waits for that request before advancing exactly to the same deadline; all no-late-write/no-retry assertions remain. The full backend suite then passed. A full browser run exposed stale paused-message wording in one fixture; the corrected exact message and complete 75-case rerun passed.
+
+The main local checkout was fast-forwarded to the new source. All **22** original dirty file paths and their exact uncommitted added/removed content were verified unchanged. Twenty-one complete files remained byte-identical; the release ledger additionally received the new committed hold sections. A recoverable stash and external patch/manifest backup remain available. Original edits were excluded from all release commits. Official font/license hashes also passed after a fresh checkout; upstream CRLF license bytes are explicitly preserved.
+
+Public launch is still held by the operational/regional/schema/native gates above. Keeping this code in a draft PR does not close the currently live general signup.
