@@ -22,6 +22,52 @@ currently 0 are opted in. No build/test release is uploaded. No merge,
 deployment, traffic change, store submission/publication or visibility change
 was performed in this closeout.
 
+## Historical proxy-addr remediation — 2026-10-20
+
+This entry records the security-only PR #350 merge. Its Firebase CLI details
+and `[skip hosting]` instruction apply to that historical merge. The current
+public release retains the branch REST Hosting publisher without Firebase CLI,
+the main dependency patches and the optional Hosting skip guard. A deliberate
+website publication omits the skip marker.
+
+This scoped update supersedes the October 20 alert's production assumption.
+The backend and Firebase deployment lockfiles now resolve `proxy-addr` 2.0.8,
+which fixes [CVE-2026-90711](https://github.com/jshttp/proxy-addr/security/advisories/GHSA-jqcg-44mw-7w3h).
+PR #350 also repairs dependency audit failures that previously prevented its
+required CI check from reaching the backend tests; audit thresholds are unchanged.
+
+**Fixed in production, verified from the exact serving image.** Cloud Run
+generation 156 serves 100% traffic to
+`mickeyf-org-session-active-f4ae47fd8ef44467b5041c42041b3c11`, image
+`sha256:03fb4f80809f377dbda060e5fa03e8905a95189084be36f2cb08157afae2fb96`.
+Approved build `f4ae47fd-8ef4-4467-b504-1c42041b3c11` resolves source
+`d0c04cf1052cbc65fccd986e346654218f55e06a` and finished October 17. An isolated,
+non-root execution of that exact image, with networking disabled, a read-only
+filesystem and all capabilities dropped, verified installed and locked
+`proxy-addr` 2.0.8. A final service readback confirmed unchanged image and traffic.
+No backend deployment, secret access, database mutation or traffic update was
+needed. Deploying the older default branch would revert live functionality.
+
+**Deployment tooling scope.** Firebase CLI 15.34.0 uses Chokidar 4.0.3 through
+an override scoped to that CLI. Its Chokidar imports are confined to emulator
+modules; the existing workflow publishes static Hosting files. Emulator and
+framework watch behavior is outside this compatibility claim. Root docs
+watching uses explicit paths and filtering for Chokidar 4; backend development
+uses Node's native watch mode instead of the vulnerable nodemon watcher tree.
+
+**Preserve the newer live website.** Firebase's October 17 live release names
+source `454f8170624ab571a208796b9fb8a105291245ce`, version
+`65e2e66f73a81522`. Default-branch frontend and Firebase configuration predate
+that release. The security merge must include `[skip hosting]` in its commit
+message: the Hosting build and notification jobs honor this explicit opt-out,
+while PR checks continue normally and manual Hosting dispatch remains available.
+This avoids reverting the live authentication UI, API/auth rewrites and provider
+security headers when updating dependencies on the older default branch.
+
+GitHub alert closure remains a post-merge readback. This entry addresses the
+named CVE and its required CI prerequisites; unrelated historical ledger entries
+below retain their own dates and dispositions.
+
 ## Historical September 30 checkpoint
 
 Current dispositions refreshed 2026-09-30 against draft PR #341's successful
