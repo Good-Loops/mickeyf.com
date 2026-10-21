@@ -2,6 +2,8 @@
 
 Owner decision: intentionally include children under 13; finish parent-led child registration before public launch. Free store downloads and BR/US availability remain approved. This is a technical readiness record, not a legal compliance certification.
 
+The owner subsequently confirmed that he will personally review returned parent forms. No registration-removal change was made. The [operator guide](parent-form-operator-guide.md) records the review steps; [the rehearsal](synthetic-parent-consent-rehearsal.md), [regional policy review](child-policy-review.md) and [cutover plan](production-cutover-plan.md) distinguish demonstrated behavior from the remaining release gates. Review staffing alone does not approve the regional policy or activate registration.
+
 ## Live baseline and hold
 
 The existing live site/backend still expose general signup without country/age screening, while new parent-led registration is disabled and its configured countries are US only. No live creation flags, traffic, database or notice have been changed. The candidate public launch is on hold. Guest games/animations remain available.
@@ -31,7 +33,7 @@ The existing live site/backend still expose general signup without country/age s
 
 ## Validation
 
-Technical implementation is complete in the candidate worktree. Full frontend qualification passed TypeScript and **755/755 tests**. Backend focused qualification passed **188/188**, deployment validation **26/26**, and the final real parent HTTP/React/MySQL suite **35/35** with disposable cleanup confirmed. The broader migration suite passed **159/159** before the final provider-login continuity change; the affected parent suite was then repeated successfully. Full browser and final combined backend results are recorded below when available. Independent review found and resolved the managed-child parent-provider entry bypass, and found no remaining P0/P1 in the final continuity delta.
+The parent-account flow is implemented in the candidate worktree; overall age assurance and production tooling are not complete. See the linked policy and cutover reports for the native store-age integration, age-screen retry and strict creation-closed rollout gaps. Full frontend qualification passed TypeScript and **755/755 tests**. Backend focused qualification passed **188/188**, deployment validation **26/26**, and the final real parent HTTP/React/MySQL suite **35/35** with disposable cleanup confirmed. The broader migration suite passed **159/159** before the final provider-login continuity change; the affected parent suite was then repeated successfully. Full browser and final combined backend results are recorded below when available. Independent review found and resolved the managed-child parent-provider entry bypass, and found no remaining P0/P1 in the final continuity delta. Those checks do not cover the newly identified age-assurance and rollout-planner gaps.
 
 Strict config includes `creationEnabled`: closing new accounts still permits staged eligibility for existing adult provider sign-in; Signup mounts no collection fields, and both authorization and transactional account creation reject the closed state. Parent-created children retain nickname/password login. This is source/test evidence, not live acceptance.
 

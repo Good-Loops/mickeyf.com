@@ -18,6 +18,10 @@ The mixed-audience implementation must screen country/coarse age before new acco
 
 [Child registration readiness](child-registration-readiness.md) records technical evidence, pending operations and the guarded deployment order. Existing owner iPhone acceptance predates this account-flow change; validate the new flow explicitly.
 
+The owner has now confirmed that he will personally review returned parent forms; no registration-removal change was made and no hire is required by this plan. The [synthetic operator rehearsal](synthetic-parent-consent-rehearsal.md) passed both BR/US scenarios with 16 actual review-CLI invocations, and [the operator guide](parent-form-operator-guide.md) explains the private review steps and published deletion schedule.
+
+The [current primary-source policy review](child-policy-review.md) identified missing native store-age integration and an unresolved age-screen retry path. The [fresh production cutover plan](production-cutover-plan.md) identified four bounded rollout-tooling gaps, including the lack of a strict creation-closed preparation contract and an exact 0028 operation. These remain release gates; the parent-account tests alone do not prove overall age-assurance or production readiness. Production metadata is unchanged, and no real parent form, email, deployment, schema or publication action occurred in this preparation pass.
+
 ## Current channel status
 
 | Channel | Current evidence | Remaining public-release work |
