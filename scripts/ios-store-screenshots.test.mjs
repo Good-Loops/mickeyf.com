@@ -7,7 +7,7 @@ import { cleanupTarget, configuration, inside, selectDevices, validateGeometry, 
 
 const env = { GITHUB_ACTIONS: 'true', GITHUB_EVENT_NAME: 'workflow_dispatch',
     LUDOLUME_CAPTURE_STORE_SCREENSHOTS: 'true', LUDOLUME_UPLOAD_TESTFLIGHT: 'false', LUDOLUME_COMPILE_ONLY: 'false',
-    RUNNER_TEMP: tmpdir(), GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '1', GITHUB_SHA: 'a'.repeat(40) };
+    RUNNER_TEMP: '/Users/runner/work/_temp', GITHUB_RUN_ID: '123', GITHUB_RUN_ATTEMPT: '1', GITHUB_SHA: 'a'.repeat(40) };
 const runtime = { identifier: 'com.apple.CoreSimulator.SimRuntime.iOS-26-6', version: '26.6', isAvailable: true };
 const type = (name, productFamily, identifier) => ({ name, productFamily,
     identifier: `com.apple.CoreSimulator.SimDeviceType.${identifier}`, minRuntimeVersion: 26 * 65536, maxRuntimeVersion: 0xffffffff });
@@ -22,7 +22,7 @@ test('capture requires manual unsigned opt-in and never accepts signing material
     assert.ok(inside(env.RUNNER_TEMP, config.root));
     for (const [key, value] of [['LUDOLUME_CAPTURE_STORE_SCREENSHOTS', 'false'], ['LUDOLUME_UPLOAD_TESTFLIGHT', 'true'],
         ['LUDOLUME_COMPILE_ONLY', 'true'], ['GITHUB_EVENT_NAME', 'push'], ['RUNNER_TEMP', 'relative'],
-        ['GITHUB_RUN_ID', '../123'], ['GITHUB_SHA', 'HEAD'], ['IOS_DISTRIBUTION_P12_BASE64', 'synthetic']]) {
+        ['RUNNER_TEMP', '/tmp/other-runner'], ['GITHUB_RUN_ID', '9007199254740992'], ['GITHUB_RUN_ID', '../123'], ['GITHUB_SHA', 'HEAD'], ['IOS_DISTRIBUTION_P12_BASE64', 'synthetic']]) {
         assert.throws(() => configuration({ ...env, [key]: value }, 'darwin'), undefined, key);
     }
     assert.throws(() => configuration(env, 'win32'), /macOS/);

@@ -1,11 +1,13 @@
 // Unsigned, guest-only Home captures. This helper never signs, uploads to Apple, or opens account forms.
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { appendFileSync, lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const BUNDLE = 'com.mickeyf.app';
+// Only the reviewed GitHub-hosted macOS layout is accepted; environment paths never become I/O targets.
+const RUNNER_TEMP = '/Users/runner/work/_temp';
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/iu;
 const secretNames = ['IOS_DISTRIBUTION_P12_BASE64', 'IOS_DISTRIBUTION_P12_PASSWORD',
     'IOS_PROVISION_PROFILE_BASE64', 'ASC_PRIVATE_KEY_P8'];
@@ -23,15 +25,18 @@ export function configuration(env = process.env, platform = process.platform) {
     requireThat(env.LUDOLUME_CAPTURE_STORE_SCREENSHOTS === 'true' && env.LUDOLUME_UPLOAD_TESTFLIGHT === 'false'
         && env.LUDOLUME_COMPILE_ONLY === 'false' && !secretNames.some(name => Object.hasOwn(env, name)),
     'Screenshots require explicit unsigned mode without signing material.');
-    requireThat(isAbsolute(env.RUNNER_TEMP ?? '') && /^[1-9]\d*$/u.test(env.GITHUB_RUN_ID ?? '')
+    requireThat(env.RUNNER_TEMP === RUNNER_TEMP && /^[1-9]\d*$/u.test(env.GITHUB_RUN_ID ?? '')
         && /^[1-9]\d*$/u.test(env.GITHUB_RUN_ATTEMPT ?? '') && /^[0-9a-f]{40}$/u.test(env.GITHUB_SHA ?? ''),
     'Invalid runner path, run identity, or source commit.');
-    const temporary = resolve(env.RUNNER_TEMP);
-    const root = join(temporary, `ludolume-store-screenshots-${env.GITHUB_RUN_ID}-${env.GITHUB_RUN_ATTEMPT}`);
+    const runId = Number(env.GITHUB_RUN_ID);
+    const attempt = Number(env.GITHUB_RUN_ATTEMPT);
+    requireThat(Number.isSafeInteger(runId) && Number.isSafeInteger(attempt), 'Run identity exceeds safe bounds.');
+    const temporary = resolve(RUNNER_TEMP);
+    const root = join(temporary, `ludolume-store-screenshots-${runId}-${attempt}`);
     const app = join(temporary, 'ludolume-derived-data/Build/Products/Release-iphonesimulator/App.app');
     requireThat(inside(temporary, root) && inside(temporary, app), 'Capture paths must stay in the runner temporary directory.');
     return { temporary, root, app, work: join(root, 'work'), output: join(root, 'screenshots'),
-        source: env.GITHUB_SHA, owner: `${env.GITHUB_RUN_ID}-${env.GITHUB_RUN_ATTEMPT}` };
+        source: env.GITHUB_SHA, owner: `${runId}-${attempt}` };
 }
 
 function versionNumber(value) {
@@ -193,8 +198,6 @@ export async function main() {
         unsignedSimulatorBuild: true, signedBuildEquivalence: 'Same source; simulator architecture is not the signed IPA.',
         scope: 'Two actual guest Home screenshots only; visual review required. No gameplay or provider acceptance.',
         xcode, capturedAt: new Date().toISOString(), captures }, null, 2) + '\n', { flag: 'wx', mode: 0o600 });
-    if (process.env.GITHUB_STEP_SUMMARY) appendFileSync(process.env.GITHUB_STEP_SUMMARY,
-        `### Native Home screenshots captured\n\nSource: ${config.source}\n\nActual unsigned iPhone and iPad simulator frames passed Home text recognition twice. Visual review remains required; gameplay, authentication, and signed device behavior were not tested.\n`);
     console.log('Captured two native guest Home screenshots; visual review remains required.');
 }
 
