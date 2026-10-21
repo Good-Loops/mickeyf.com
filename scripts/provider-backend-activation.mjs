@@ -1,7 +1,7 @@
 // Complete the reviewed provider release with conditional template/traffic writes only.
-import { createHash } from 'node:crypto';
-import { readFileSync } from 'node:fs';
-import { providerReleaseEnvironment, PROVIDER_FIXED_ENV } from './provider-release-config.mjs';
+import { createChildSchemaVerifier, validateChildSchemaReceipt as validateLiveChildSchemaReceipt } from './child-schema-verifier.mjs';
+export { CHILD_SIGNED_FORM_SQL_SHA256 } from './child-schema-verifier.mjs';
+import { providerReleaseEnvironment } from './provider-release-config.mjs';
 import { SERVICE, PROJECT, REGION, IMAGE, REVISION_TYPE, fingerprint, revisionConfiguration, serviceConfiguration,
     sessionRevisionName, validateService, validateProviderRevision, trafficShape, createSessionCloudProvider,
     createCloudRequest } from './frozen-backend-traffic.mjs';
@@ -11,8 +11,6 @@ import { validateProviderTrafficPins, checkedProviderCandidate, validateProvider
 const MAX_PLAN_AGE = 300_000;
 export const READER_DRAIN_MS = 300_000;
 const SHA = /^[0-9a-f]{64}$/u;
-export const CHILD_SIGNED_FORM_SQL_SHA256 = createHash('sha256').update(readFileSync(
-    new URL('../backend/migrations/pending/0028_extend_child_signed_parent_forms.sql', import.meta.url))).digest('hex');
 const BASE_ENVIRONMENT = ['NODE_ENV', 'CLOUD_SQL_CONNECTION_NAME', 'DB_USER', 'DB_NAME',
     'P4_VEGA_SCORE_SUBMISSIONS_ENABLED', 'THREE_BOSSES_RUN_SUBMISSIONS_ENABLED', 'DB_PASS', 'SESSION_SECRET'];
 const TEMPLATE_FIELDS = ['labels', 'annotations', 'scaling', 'timeout', 'serviceAccount', 'containers',
@@ -50,23 +48,7 @@ export function validateProviderActivationPins(pins) {
 
 /** A reviewed input, not live proof: apply separately requires the real metadata verifier. */
 export function validateChildSchemaReceipt(receipt, pins, now) {
-    keys(receipt, ['schemaVersion', 'operation', 'verifiedAt', 'sourceCommit', 'sqlSha256', 'target',
-        'capability', 'runtimeGrantProfile', 'schemaSha256', 'grantsSha256'], 'Child schema receipt');
-    keys(receipt.target, ['project', 'instance', 'database', 'serverUuid'], 'Child schema target');
-    const verified = Date.parse(receipt.verifiedAt);
-    requireThat(receipt.schemaVersion === 1 && receipt.operation === 'verify-child-signed-form-schema'
-        && receipt.sourceCommit === pins.closed.candidate.deployment.sourceCommit
-        && receipt.sqlSha256 === CHILD_SIGNED_FORM_SQL_SHA256
-        && same(receipt.target, { project: PROJECT, instance: 'cms-mickeyf', database: 'cms',
-            serverUuid: PROVIDER_FIXED_ENV.APPLE_MAINTENANCE_EXPECTED_SERVER_UUID })
-        && receipt.capability === 'nullable-parent-request-us-br'
-        && receipt.runtimeGrantProfile === 'google-apple-parent-signed'
-        && SHA.test(receipt.schemaSha256) && SHA.test(receipt.grantsSha256)
-        && Number.isFinite(verified) && new Date(verified).toISOString() === receipt.verifiedAt,
-    'Child schema receipt identity, SQL, capability or metadata differs');
-    if (now !== undefined) requireThat(Number.isFinite(now) && now - verified <= MAX_PLAN_AGE && verified - now <= 5000,
-        'Child schema receipt is stale or future-dated; reverify live metadata');
-    return receipt;
+    return validateLiveChildSchemaReceipt(receipt, pins.closed.candidate.deployment.sourceCommit, now);
 }
 function freshChildSchema(pins, now) {
     if (pins.childSchemaReceipt) validateChildSchemaReceipt(pins.childSchemaReceipt, pins, now);
@@ -78,11 +60,12 @@ function readerPinsSha256(pins) {
     delete stable.childSchemaReceipt.verifiedAt;
     return fingerprint(stable);
 }
-async function verifyLiveChildSchema(provider, pins, now) {
+async function verifyLiveChildSchema(provider, pins, clock) {
     if (!pins.childSchemaReceipt) return;
     requireThat(typeof provider.verifyChildSchemaReceipt === 'function', 'Live child schema metadata verifier is required before activation writes');
     const observed = await provider.verifyChildSchemaReceipt(structuredClone(pins.childSchemaReceipt));
-    validateChildSchemaReceipt(observed, pins, now);
+    validateChildSchemaReceipt(observed, pins, clock());
+    freshChildSchema(pins, clock());
     requireThat(same({ ...observed, verifiedAt: pins.childSchemaReceipt.verifiedAt }, pins.childSchemaReceipt),
         'Live child schema or runtime grants changed after review');
 }
@@ -307,7 +290,7 @@ export async function applyProviderActiveRevision(provider, plan, confirmation, 
     const fresh = await planProviderActiveRevision(provider, plan.pins, plan.boundary, plan.kind, plan.fallbackReceipt, Date.parse(plan.createdAt));
     requireThat(same(plan, fresh), 'Active preparation plan drifted');
     await provider.assertAutomationPaused();
-    await verifyLiveChildSchema(provider, plan.pins, now);
+    await verifyLiveChildSchema(provider, plan.pins, () => now + performance.now() - started);
     requireThat(age + performance.now() - started <= MAX_PLAN_AGE, 'Plan expired during preflight');
     try {
         await provider.patchActiveTemplate(plan.request, plan, Date.now() + MAX_PLAN_AGE - age - (performance.now() - started));
@@ -359,7 +342,7 @@ export async function applyProviderActiveTraffic(provider, plan, confirmation, n
     const fresh = await planProviderActiveTraffic(provider, plan.receipt, plan.operation, Date.parse(plan.createdAt));
     requireThat(same(plan, fresh), 'Active traffic plan drifted');
     await provider.assertAutomationPaused();
-    if (plan.operation === 'activate') await verifyLiveChildSchema(provider, plan.receipt.plan.pins, now);
+    if (plan.operation === 'activate') await verifyLiveChildSchema(provider, plan.receipt.plan.pins, () => now + performance.now() - started);
     requireThat(age + performance.now() - started <= MAX_PLAN_AGE, 'Plan expired during preflight');
     try {
         await provider.patchActiveTraffic(plan.request, plan, Date.now() + MAX_PLAN_AGE - age - (performance.now() - started));
@@ -380,7 +363,7 @@ export async function applyProviderActiveTraffic(provider, plan, confirmation, n
     } catch (error) { throw new Error(`Active traffic mutation attempted; inspect live state before any retry or rollback. ${error.message}`); }
 }
 
-export function createProviderActivationCloudProvider(token, fetcher = fetch, { verifyChildSchema } = {}) {
+export function createProviderActivationCloudProvider(token, fetcher = fetch, { verifyChildSchema = createChildSchemaVerifier() } = {}) {
     const reads = createSessionCloudProvider(token, fetcher);
     const request = createCloudRequest(token, fetcher);
     const run = (path, method, body, missing) => request('https://run.googleapis.com/v2/', path, method, body, missing);
@@ -414,7 +397,7 @@ export function createProviderActivationCloudProvider(token, fetcher = fetch, { 
             const fresh = await planProviderActiveRevision(provider, plan.pins, plan.boundary, plan.kind, plan.fallbackReceipt, Date.parse(plan.createdAt));
             requireThat(same(fresh, plan), 'Active template adapter detected plan drift');
             await provider.assertAutomationPaused();
-            await verifyLiveChildSchema(provider, plan.pins, Date.now());
+            await verifyLiveChildSchema(provider, plan.pins, Date.now);
             requireThat(Number.isFinite(expiresAt) && Date.now() <= expiresAt, 'Plan expired before template write');
             await patch('template', body);
         },
@@ -422,7 +405,7 @@ export function createProviderActivationCloudProvider(token, fetcher = fetch, { 
             const fresh = await planProviderActiveTraffic(provider, plan.receipt, plan.operation, Date.parse(plan.createdAt));
             requireThat(same(fresh, plan) && same(body, plan.request), 'Active traffic adapter detected plan drift');
             await provider.assertAutomationPaused();
-            if (plan.operation === 'activate') await verifyLiveChildSchema(provider, plan.receipt.plan.pins, Date.now());
+            if (plan.operation === 'activate') await verifyLiveChildSchema(provider, plan.receipt.plan.pins, Date.now);
             requireThat(Number.isFinite(expiresAt) && Date.now() <= expiresAt, 'Plan expired before traffic write');
             await patch('traffic', body);
         },

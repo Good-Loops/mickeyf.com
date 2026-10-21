@@ -16,9 +16,10 @@ acceptance evidence.
 Source follow-up: the first three configuration/activation/smoke findings below
 have now received the bounded implementation and 233-test qualification described
 in [rollout-config-safeguards.md](rollout-config-safeguards.md). The original
-findings remain as the inspected baseline. Strict writes still fail closed until
-the real schema metadata verifier is wired; the target-bound0028 operation and
-all production/policy approvals remain pending. No production state changed.
+findings remain as the inspected baseline. The subsequent source implementation
+of the exact0028 operation and real activation metadata verifier is described in
+[child-schema-operation.md](child-schema-operation.md). Production execution and
+policy gates remain pending. No production state changed.
 
 ## Fresh production readback
 
@@ -84,11 +85,11 @@ runtime privileges, accounts, credentials, history rows or child records.
 
 It is deliberately outside the ordinary migration manifest. Existing
 `migrations:signed-parent-forms:plan` / `:apply` operate on **0026**, not this
-extension; they must not be repurposed or rerun as an 0028 operation. No exact
-target-bound 0028 apply/receipt command exists yet. A small separately reviewed
-operation must bind the SQL bytes, source, target identity, baseline schema and
-postconditions before execution is authorized. Never fabricate an applied 0028
-history row to satisfy readiness.
+extension; they must not be repurposed or rerun as an 0028 operation. The new
+separate `migrations:child-signed-forms:plan`, `:apply` and `:verify` commands bind
+the SQL bytes, clean source, target identity, baseline schema, recovery and
+postconditions. See the operation guide before preparing any execution request.
+Never fabricate an applied0028 history row to satisfy readiness.
 
 The new source's `verifySignedParentFormReadiness` checks the 0026 receipt and exact
 observed capability: table engine/collation, all columns and nullability, indexes,

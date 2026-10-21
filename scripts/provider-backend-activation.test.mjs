@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
+import { createChildSchemaVerifier } from './child-schema-verifier.mjs';
 import { fixture, childProviderConfig, now } from './test-support/provider-release-fixture.mjs';
 import { SERVICE, PROJECT, REGION, IMAGE, REVISION_TYPE, fingerprint, sessionRevisionName } from './frozen-backend-traffic.mjs';
 import { observeProviderReaderBoundary, planProviderActiveRevision, applyProviderActiveRevision, activeRevisionTemplate,
@@ -20,7 +21,7 @@ function activationFixture({ retireUnrouted = false, child = false } = {}) {
                 serverUuid: pins.activeConfiguration.environment.APPLE_MAINTENANCE_EXPECTED_SERVER_UUID },
             capability: 'nullable-parent-request-us-br', runtimeGrantProfile: 'google-apple-parent-signed',
             schemaSha256: 'a'.repeat(64), grantsSha256: 'b'.repeat(64) };
-        // Synthetic verifier only: production adapter has no metadata verifier configured by default.
+        // Synthetic verifier only: release entry points use the isolated read-only SQL subprocess.
         f.provider.verifyChildSchemaReceipt = async () => structuredClone(pins.childSchemaReceipt);
     }
     const revisions = {};
@@ -275,7 +276,8 @@ test('receipt-shaped input alone cannot authorize a strict write without fresh m
         await assert.rejects(applyProviderActiveRevision(f.provider,plan,fingerprint(plan),when),/schema|grants/);
     }
     assert.equal(f.patches.length,0);
-    const adapter=createProviderActivationCloudProvider('synthetic-token-with-sufficient-length',async()=>assert.fail('No cloud request needed'));
+    const adapter=createProviderActivationCloudProvider('synthetic-token-with-sufficient-length',async()=>assert.fail('No cloud request needed'),
+        { verifyChildSchema: createChildSchemaVerifier({ environment: () => ({}) }) });
     await assert.rejects(adapter.verifyChildSchemaReceipt(plan.pins.childSchemaReceipt),/not configured/);
 });
 

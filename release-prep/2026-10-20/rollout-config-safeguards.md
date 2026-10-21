@@ -63,12 +63,14 @@ do not edit a prepared receipt or reuse its old confirmation.
 Strict template/activation writes separately require a fresh live metadata
 verification result with every material field matching the reviewed receipt.
 Both the apply functions and the direct Cloud Run adapter enforce this. The
-adapter accepts the future bounded SQL metadata dependency as
+adapter accepts the bounded SQL metadata dependency as
 `createProviderActivationCloudProvider(token, fetcher, { verifyChildSchema })`.
-**No verifier is configured by default, and the current CLI therefore refuses
-strict activation writes.** The later0028 operation/metadata verifier must be
-implemented and independently reviewed before wiring that dependency. A
-receipt-shaped JSON file or arbitrary digest cannot substitute for that verifier.
+The default now runs the real read-only SQL verifier through an isolated process,
+with explicit private migration configuration and a clean matching source
+checkout. Missing configuration, a failed query or changed metadata blocks the
+write. See [child-schema-operation.md](child-schema-operation.md) for the concrete
+operation and verification contract. A receipt-shaped JSON file or arbitrary
+digest cannot substitute for that verifier.
 
 Incident `close-active` keeps the existing exact runtime/fallback/traffic/etag and
 fresh plan guards, but does not require a fresh activation schema receipt or a
