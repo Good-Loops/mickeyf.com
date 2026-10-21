@@ -12,6 +12,18 @@ const context = () => ({ bindingHash: Buffer.alloc(32, 7), account: null, sessio
     bindingExpiresAt: Date.now() + 300_000, anonymousCookie: null }) as ProviderAuthContext;
 const accountId = '123e4567-e89b-42d3-a456-426614174000';
 
+test('a trusted parent restriction rejects changed age and surviving grants without SQL; cancellation cannot clear it', async () => {
+    const f = fixture('adult');
+    const restricted = { ...context(), parentRequired: true as const };
+    assert.deepEqual(await f.service.begin(restricted, { country: 'ZZ', ageBand: 'adult', policyVersion: 'synthetic' }),
+        { allowed: false, reason: 'PARENT_REQUIRED' });
+    await f.service.cancel(restricted);
+    await assert.rejects(f.service.assertAvailable(restricted), RegistrationRequiredError);
+    await assert.rejects(f.service.assertLoginAvailable(restricted), RegistrationRequiredError);
+    await assert.rejects(f.service.consume(f.connection, restricted, accountId), RegistrationRequiredError);
+    assert.deepEqual(f.calls, []);
+});
+
 test('creation pause rejects new and outstanding signup grants without disabling parent management policy', async () => {
     const f = fixture();
     const environment = { REGISTRATION_CREATION_ENABLED: 'false', PARENT_REGISTRATION_ENABLED: 'true',

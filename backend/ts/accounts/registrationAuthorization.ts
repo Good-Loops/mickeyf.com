@@ -28,7 +28,7 @@ export class RegistrationRequiredError extends Error {
 }
 
 function anonymousBinding(context: ProviderAuthContext | null): Buffer {
-    if (!context || context.account !== null || context.session !== null
+    if (!context || context.parentRequired || context.account !== null || context.session !== null
         || !Buffer.isBuffer(context.bindingHash) || context.bindingHash.length !== 32
         || context.bindingExpiresAt === null || context.bindingExpiresAt <= Date.now()) {
         throw new RegistrationRequiredError();
@@ -89,6 +89,7 @@ export function createRegistrationAuthorization(database: Pick<Pool, 'query'> & 
             return children.length === 0;
         },
         async cancel(context: ProviderAuthContext): Promise<void> {
+            if (context.parentRequired) return;
             if (policy?.mode === 'general-audience') {
                 const grant = generalGrant(context);
                 await database.query({ sql: `DELETE FROM provider_auth_attempts WHERE binding_hash = ?
@@ -101,6 +102,7 @@ export function createRegistrationAuthorization(database: Pick<Pool, 'query'> & 
         async begin(context: ProviderAuthContext | null, input: unknown) {
             const decision = decideRegistration(policy, input);
             if (!decision.allowed) return decision;
+            if (context?.parentRequired) return { allowed: false as const, reason: 'PARENT_REQUIRED' as const };
             if (policy?.mode === 'general-audience') {
                 const grant = generalGrant(context);
                 if (typeof database.getConnection !== 'function') throw new Error('Registration authorization is unavailable.');

@@ -50,6 +50,26 @@ async function fixture(run: (url: string, queries: string[]) => Promise<void>, e
 function begin(url: string, body: unknown, requestOrigin = origin) {
     return fetch(`${url}/auth/registration/begin`, { method: 'POST', headers: { origin: requestOrigin, 'content-type': 'application/json' }, body: JSON.stringify(body) });
 }
+
+test('strict parent-required response binds a signed24h restriction across adult retry, cancellation and credential signup', async () => fixture(async (url, queries) => {
+    const initial = await begin(url, { country: 'ZZ', ageBand: 'parent-required', policyVersion: 'synthetic' });
+    assert.equal(initial.status, 403); assert.deepEqual(await initial.json(), { error: 'PARENT_REQUIRED' });
+    const header = initial.headers.get('set-cookie')!;
+    assert.match(header, /Max-Age=86400/u); assert.match(header, /HttpOnly; Secure/u);
+    const cookie = header.split(';')[0];
+    const post = (route: string, body: unknown) => fetch(`${url}${route}`, { method: 'POST',
+        headers: { origin, cookie, 'content-type': 'application/json' }, body: JSON.stringify(body) });
+    for (let retry = 0; retry < 2; retry++) {
+        const result = await post('/auth/registration/begin', { country: 'ZZ', ageBand: 'adult', policyVersion: 'synthetic' });
+        assert.equal(result.status, 403); assert.deepEqual(await result.json(), { error: 'PARENT_REQUIRED' });
+        assert.equal(result.headers.get('set-cookie')!.split(';')[0], cookie, 'retry must not rotate or extend the marker');
+        const cancelled = await post('/auth/registration/cancel', {});
+        assert.deepEqual(await cancelled.json(), { cancelled: true }); assert.equal(cancelled.headers.get('set-cookie'), null);
+    }
+    const signup = await post('/api/users', { type: 'signup', user_name: 'premature', email: 'invalid', user_password: 'short' });
+    assert.equal(signup.status, 403); assert.deepEqual(await signup.json(), { error: 'REGISTRATION_REQUIRED' });
+    assert.deepEqual(queries, [], 'restriction cannot reach provider/account identifiers or credential hashing');
+}, true, false, true));
 test('HTTP policy is closed by default and cannot touch SQL', async () => fixture(async (url, queries) => {
     const config = await fetch(`${url}/auth/registration/config`);
     assert.deepEqual(await config.json(), { enabled: false });

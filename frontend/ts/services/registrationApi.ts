@@ -68,7 +68,7 @@ export function createRegistrationApi(apiBase: string, fetchRequest: typeof fetc
             } catch { return null; }
         },
         async begin(input: RegistrationInput): Promise<RegistrationResult> {
-            if (options.requireChildAudience && (!('country' in input) || input.ageBand === 'parent-required')) {
+            if (options.requireChildAudience && !('country' in input)) {
                 return { error: 'REGISTRATION_REQUIRED' };
             }
             try {
@@ -79,6 +79,7 @@ export function createRegistrationApi(apiBase: string, fetchRequest: typeof fetc
                 const result: unknown = await response.json();
                 if (!record(result)) return { error: 'UNAVAILABLE' };
                 if (response.status === 200 && keys(result, 'authorized,expiresInSeconds,scoreVisibility') && result.authorized === true
+                    && (!('country' in input) || input.ageBand !== 'parent-required')
                     && Number.isInteger(result.expiresInSeconds) && Number(result.expiresInSeconds) > 0 && Number(result.expiresInSeconds) <= 300
                     && (result.scoreVisibility === 'private' || !options.requireChildAudience && result.scoreVisibility === 'public')) return result as RegistrationResult;
                 const statuses: Record<string, number> = { REGISTRATION_CLOSED: 503, INVALID_REGISTRATION: 400,

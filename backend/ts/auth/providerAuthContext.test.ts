@@ -5,7 +5,7 @@ import { issueSessionToken } from '../security/sessionPolicy';
 import { authenticateRequest, verifyRequestToken } from '../security/requestAuthentication';
 import { NATIVE_SESSION_COOKIE, WEB_SESSION_COOKIE } from '../security/sessionCookie';
 import type { Pool } from 'mysql2/promise';
-import { createProviderAuthContextReader, type ProviderAuthContext } from './providerAuthContext';
+import { createProviderAuthContextReader, PARENT_BINDING_LIFETIME_MS, type ProviderAuthContext } from './providerAuthContext';
 
 const secret = 'synthetic-context-test-only';
 const accountId = '11111111-2222-4333-8444-555555555555';
@@ -18,6 +18,35 @@ const session = issued.token;
 const bindingLifetime = 5 * 60 * 1000;
 const bindingValue = (issuedAt = Date.now(), byte = 1) =>
     ['provider', 'v1', issuedAt, Buffer.alloc(32, byte).toString('base64url')].join(':');
+
+test('parent-required canonical marker survives ordinary begin/complete without becoming account authentication', async t => {
+    let now = Date.now(); t.mock.method(Date, 'now', () => now);
+    const { read, calls } = fixture();
+    const startedAt = now;
+    for (const requestOrigin of [origin, nativeOrigin]) {
+        now = startedAt;
+        const restricted = await read(request(undefined, requestOrigin), 'parent-required');
+        assert(restricted?.parentRequired); assert(restricted.anonymousCookie);
+        const cookie = restricted.anonymousCookie;
+        assert.equal(cookie.maxAge, PARENT_BINDING_LIFETIME_MS);
+        assert.match(cookie.value, /:parent-required$/u);
+        assert.equal(verifyRequestToken(cookie.value, secret).authenticated, false);
+        now += 1000;
+        for (const mode of ['begin', 'complete', 'parent-required'] as const) {
+            const retry = await read(request(cookie.value, requestOrigin), mode);
+            assert(retry?.parentRequired); assert.equal(retry.account, null);
+            assert.equal(retry.anonymousCookie?.value, cookie.value);
+            assert.equal(retry.anonymousCookie?.maxAge, PARENT_BINDING_LIFETIME_MS - 1000);
+        }
+        const adult = await read(request(session, requestOrigin), 'parent-required');
+        assert.equal(adult?.parentRequired, undefined);
+        assert.deepEqual(adult?.account, { userId: row.userId, accountId });
+        now += PARENT_BINDING_LIFETIME_MS;
+        assert.equal(await read(request(cookie.value, requestOrigin)), null);
+        assert.equal((await read(request(cookie.value, requestOrigin), 'begin'))?.parentRequired, undefined);
+    }
+    assert(calls.length > 0, 'only the authenticated parent session should require SQL');
+});
 
 function request(token?: unknown, requestOrigin = origin) {
     const name = requestOrigin === nativeOrigin ? NATIVE_SESSION_COOKIE : WEB_SESSION_COOKIE;

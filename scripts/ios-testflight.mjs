@@ -6,12 +6,14 @@ import { homedir } from 'node:os';
 import { createRequire } from 'node:module';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { verifyAgeFrameworkLinkage } from './ios-age-linkage.mjs';
 
 const SIGNING_BRANCHES = new Set(['refs/heads/main', 'refs/heads/feature/auth-family-leaderboards']);
 const TEAM = 'AX4Z7T24C9';
 const BUNDLE = 'com.mickeyf.app';
 const APP = '6810735137';
 const APPLE_SIGN_IN_ENTITLEMENT = 'com.apple.developer.applesignin';
+const DECLARED_AGE_RANGE_ENTITLEMENT = 'com.apple.developer.declared-age-range';
 const SECRET_NAMES = ['IOS_DISTRIBUTION_P12_BASE64', 'IOS_DISTRIBUTION_P12_PASSWORD',
     'IOS_PROVISION_PROFILE_BASE64', 'ASC_PRIVATE_KEY_P8'];
 const requireThat = (condition, message) => { if (!condition) throw new Error(message); };
@@ -44,6 +46,11 @@ function requireAppleSignIn(entitlements, artifact) {
         `${artifact} must grant the Sign in with Apple Default entitlement.`);
 }
 
+function requireDeclaredAgeRange(entitlements, artifact) {
+    requireThat(entitlements?.[DECLARED_AGE_RANGE_ENTITLEMENT] === true,
+        `${artifact} must grant the Declared Age Range entitlement as Boolean true.`);
+}
+
 export function validateProfile(profile, now = Date.now()) {
     const entitlements = profile.entitlements;
     requireThat(UUID.test(profile.uuid) && profile.teams?.length === 1 && profile.teams[0] === TEAM,
@@ -58,6 +65,7 @@ export function validateProfile(profile, now = Date.now()) {
         && entitlements?.['com.apple.developer.team-identifier'] === TEAM,
     'Provisioning profile must explicitly match AX4Z7T24C9.com.mickeyf.app.');
     requireAppleSignIn(entitlements, 'Provisioning profile');
+    requireDeclaredAgeRange(entitlements, 'Provisioning profile');
     requireThat(Array.isArray(profile.certificates) && profile.certificates.length > 0,
         'Provisioning profile has no distribution certificate.');
     return profile;
@@ -65,11 +73,13 @@ export function validateProfile(profile, now = Date.now()) {
 
 export function validateSignedEntitlements(entitlements, profile) {
     requireAppleSignIn(profile?.entitlements, 'Embedded provisioning profile');
+    requireDeclaredAgeRange(profile?.entitlements, 'Embedded provisioning profile');
     requireThat(entitlements?.['application-identifier'] === `${TEAM}.${BUNDLE}`
         && entitlements?.['com.apple.developer.team-identifier'] === TEAM
         && entitlements?.['get-task-allow'] === false,
     'Signed IPA entitlements must match the Ludolume distribution identity.');
     requireAppleSignIn(entitlements, 'Signed IPA');
+    requireDeclaredAgeRange(entitlements, 'Signed IPA');
     return entitlements;
 }
 
@@ -282,12 +292,13 @@ function verifyIpa(config, signing, ipa) {
     requireThat(apps.length === 1, 'Expected one application in the IPA.');
     const app = join(unpacked, 'Payload', apps[0]);
     const info = readPlist(join(app, 'Info.plist'));
-    requireThat(info.CFBundleIdentifier === BUNDLE && info.CFBundleVersion === config.build
+    requireThat(info.CFBundleIdentifier === BUNDLE && info.CFBundleVersion === config.build && info.CFBundleExecutable === 'App'
         && info.CFBundleSupportedPlatforms?.includes('iPhoneOS'), 'Exported app identity, build number or platform is wrong.');
     run('Verify signed application and embedded frameworks', 'codesign', ['--verify', '--deep', '--strict', app]);
     const embedded = readProfile(join(app, 'embedded.mobileprovision'));
     requireThat(embedded.uuid === signing.profile.uuid, 'Exported IPA uses a different provisioning profile.');
     verifySignedEntitlements(app, embedded);
+    verifyAgeFrameworkLinkage(run('Inspect optional age framework linkage', 'otool', ['-l', join(app, 'App')]).stdout);
     const certificatePrefix = join(config.root, 'signed-certificate-');
     // This optional argument must use '='; a separate prefix is interpreted as another app path.
     run('Inspect application signing certificate', 'codesign', ['-d', `--extract-certificates=${certificatePrefix}`, app]);

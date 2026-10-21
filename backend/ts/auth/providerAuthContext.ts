@@ -10,6 +10,17 @@ import { readLiveSession } from './accountSessionRepository';
 
 const BINDING_PREFIX = 'provider:v1';
 const BINDING_LIFETIME_MS = 5 * 60 * 1000;
+export const PARENT_BINDING_LIFETIME_MS = 24 * 60 * 60 * 1000;
+
+/** Accept only cookie-parser-authenticated values; this helper does not verify signatures. */
+export function isUnexpiredParentBinding(token: unknown, now = Date.now()): boolean {
+    if (typeof token !== 'string') return false;
+    const parts = token.split(':');
+    const issuedAt = Number(parts[2]);
+    return parts.length === 5 && parts[0] === 'provider' && parts[1] === 'v1' && parts[4] === 'parent-required'
+        && /^\d{13}$/u.test(parts[2]) && isSessionId(parts[3]) && Number.isSafeInteger(issuedAt)
+        && issuedAt <= now && issuedAt + PARENT_BINDING_LIFETIME_MS > now;
+}
 declare const trustedProviderContext: unique symbol;
 
 /** Constructed from verified server cookies, never from a request body. */
@@ -19,6 +30,7 @@ export type ProviderAuthContext = Readonly<{
     session: SessionProof | null;
     bindingExpiresAt: number | null;
     anonymousCookie: Readonly<{ name: SessionCookieName; value: string; maxAge: number }> | null;
+    parentRequired?: true;
     [trustedProviderContext]: true;
 }>;
 
@@ -32,7 +44,7 @@ export function createProviderAuthContextReader({ database, sessionSecret, allow
     if (!sessionSecret) throw new TypeError('Provider authentication requires session configuration.');
     const origins = new Set(allowedOrigins);
     return async function readProviderAuthContext(
-        req: ContextRequest, mode: 'begin' | 'complete' = 'complete',
+        req: ContextRequest, mode: 'begin' | 'complete' | 'parent-required' = 'complete',
     ): Promise<ProviderAuthContext | null> {
         const origin = req.headers.origin;
         // Unlike existing bearer-compatible mutations, even anonymous login must
@@ -48,16 +60,19 @@ export function createProviderAuthContextReader({ database, sessionSecret, allow
         let session: SessionProof | null = null;
         let bindingExpiresAt: number | null = null;
         let anonymousCookie: ProviderAuthContext['anonymousCookie'] = null;
+        let parentRequired = false;
         const now = Date.now();
         if (typeof token === 'string' && token.startsWith(`${BINDING_PREFIX}:`)) {
             // Only cookie-parser's authenticated signedCookies reach here. This
             // purpose-separated value is NOT a JWT and cannot authenticate a user.
             const parts = token.split(':');
             const issuedAt = Number(parts[2]);
-            if (parts.length !== 4 || !/^\d{13}$/.test(parts[2]) || !isSessionId(parts[3])
+            const parentMarker = parts.length === 5 && parts[4] === 'parent-required';
+            if ((!parentMarker && parts.length !== 4) || !/^\d{13}$/.test(parts[2]) || !isSessionId(parts[3])
                 || !Number.isSafeInteger(issuedAt) || issuedAt > now) return null;
-            bindingExpiresAt = issuedAt + BINDING_LIFETIME_MS;
+            bindingExpiresAt = issuedAt + (parentMarker ? PARENT_BINDING_LIFETIME_MS : BINDING_LIFETIME_MS);
             if (mode === 'complete' && bindingExpiresAt <= now) return null;
+            parentRequired = parentMarker && bindingExpiresAt > now;
         } else if (token !== undefined) {
             if (typeof token !== 'string' || token.length === 0 || token.length > 8192) return null;
             const authentication = verifyRequestToken(token, sessionSecret);
@@ -70,11 +85,16 @@ export function createProviderAuthContextReader({ database, sessionSecret, allow
                 session = Object.freeze({ accountId, sessionId });
             } catch { throw new ProviderAccountUnavailableError(); }
         }
-        if (account === null && mode === 'begin') {
-            const binding = `${BINDING_PREFIX}:${now}:${randomBytes(32).toString('base64url')}`;
+        if (account === null && parentRequired) {
+            // A fresh begin/cancel cannot erase an observed parent requirement. No age or account is encoded.
+            anonymousCookie = Object.freeze({ name, value: token as string, maxAge: bindingExpiresAt! - now });
+        } else if (account === null && mode !== 'complete') {
+            parentRequired = mode === 'parent-required';
+            const lifetime = parentRequired ? PARENT_BINDING_LIFETIME_MS : BINDING_LIFETIME_MS;
+            const binding = `${BINDING_PREFIX}:${now}:${randomBytes(32).toString('base64url')}${parentRequired ? ':parent-required' : ''}`;
             token = binding;
-            bindingExpiresAt = now + BINDING_LIFETIME_MS;
-            anonymousCookie = Object.freeze({ name, value: binding, maxAge: BINDING_LIFETIME_MS });
+            bindingExpiresAt = now + lifetime;
+            anonymousCookie = Object.freeze({ name, value: binding, maxAge: lifetime });
         }
         if (token === undefined) return null;
         // Length-framed fields avoid ambiguity and bind the CURRENT session and account.
@@ -83,6 +103,7 @@ export function createProviderAuthContextReader({ database, sessionSecret, allow
         const bindingHash = createHash('sha256').update(JSON.stringify([
             'provider-auth-v2', origin, token, account,
         ])).digest();
-        return Object.freeze({ bindingHash, account, session, bindingExpiresAt, anonymousCookie }) as ProviderAuthContext;
+        return Object.freeze({ bindingHash, account, session, bindingExpiresAt, anonymousCookie,
+            ...(parentRequired ? { parentRequired: true } : {}) }) as ProviderAuthContext;
     };
 }

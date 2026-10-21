@@ -105,6 +105,12 @@ jobs:
             CODE_SIGNING_ALLOWED=NO \
             build
 
+      - name: Verify optional age framework linkage
+        if: ${{ inputs.compile_only }}
+        run: |
+          node --test ../scripts/ios-age-linkage.test.mjs
+          xcrun otool -l "$RUNNER_TEMP/ludolume-derived-data/Build/Products/Release-iphonesimulator/App.app/App" | node ../scripts/ios-age-linkage.mjs
+
       - name: Report resolved CocoaPods lock
         if: ${{ always() && inputs.compile_only }}
         run: |

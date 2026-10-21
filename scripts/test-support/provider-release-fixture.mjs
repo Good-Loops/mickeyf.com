@@ -33,9 +33,22 @@ export function providerConfig(phase = 'active') {
     return { phase, environment };
 }
 
+// Fully reviewed only inside synthetic tests; never a production policy or schema receipt.
+export function childProviderConfig(phase = 'active') {
+    const config = providerConfig('active');
+    config.phase = phase;
+    Object.assign(config.environment, { REGISTRATION_AUDIENCE: 'children-included',
+        REGISTRATION_COUNTRY_RULES: '{"US":{"parentRequiredBelow":13},"BR":{"parentRequiredBelow":18}}',
+        PARENT_REGISTRATION_COUNTRIES: '["US","BR"]', PARENT_SIGNED_FORM_COUNTRIES: '["BR","US"]',
+        PUBLIC_SCORE_COUNTRY_RULES: '{"US":{"selfAgeBands":["adult"],"parentManaged":true},"BR":{"selfAgeBands":["adult"],"parentManaged":false}}' });
+    if (phase === 'prepare-child') for (const name of ['REGISTRATION_CREATION_ENABLED', 'PROVIDER_GOOGLE_SIGNUP_ENABLED',
+        'PROVIDER_APPLE_SIGNUP_ENABLED', 'PARENT_REGISTRATION_CREATION_ENABLED']) config.environment[name] = 'false';
+    return config;
+}
+
 export function fixture(phase = 'active', previousProvider) {
     const f = sessionFixture();
-    f.pins.candidate.deployment.providerRelease = providerConfig(phase);
+    f.pins.candidate.deployment.providerRelease = phase === 'prepare-child' ? childProviderConfig(phase) : providerConfig(phase);
     function setEnvironment(revision, config, rollback = false) {
         const additions = providerReleaseEnvironment(config, rollback);
         const base = revision.containers[0].env.filter(item => ['NODE_ENV', 'CLOUD_SQL_CONNECTION_NAME', 'DB_USER', 'DB_NAME',

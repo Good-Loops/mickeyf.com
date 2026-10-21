@@ -77,8 +77,8 @@ test('new source never sends credentials, general grants or provider requests wi
     assert.deepEqual(calls, []);
 });
 
-test('old general backend and fabricated/parent-required selections cannot issue a new-source grant', async () => {
-    for (const selection of [{ policyVersion: input.policyVersion }, { ...input, ageBand: 'parent-required' },
+test('old general backend and fabricated selections cannot issue a new-source grant', async () => {
+    for (const selection of [{ policyVersion: input.policyVersion },
         { ...input, country: 'ZZ' }, { ...input, policyVersion: 'stale' }, { ...input, country: 'BR', ageBand: 'minor' }]) {
         const { api, calls } = fixture();
         assert.deepEqual(await api.beginRegistration(selection), { error: 'REGISTRATION_REQUIRED' });
@@ -89,6 +89,17 @@ test('old general backend and fabricated/parent-required selections cannot issue
     assert.deepEqual(await api.beginRegistration(input), { error: 'REGISTRATION_REQUIRED' });
     assert.deepEqual(await api.signupRequest(credentials), { error: 'REGISTRATION_REQUIRED' });
     assert.equal(calls.length, 1);
+});
+
+test('parent-required observation reaches only the restriction endpoint and cannot authorize credential/provider collection', async () => {
+    for (const response of [Response.json({ error: 'PARENT_REQUIRED' }, { status: 403 }), Response.json(approved)]) {
+        const { api, calls } = fixture(call => call.url.endsWith('/registration/begin') ? response : undefined);
+        const result = await api.beginRegistration({ ...input, ageBand: 'parent-required' });
+        assert('error' in result); assert(['PARENT_REQUIRED', 'UNAVAILABLE'].includes(result.error));
+        assert.deepEqual(await api.signupRequest(credentials), { error: 'REGISTRATION_REQUIRED' });
+        assert.deepEqual(await api.prepareProviderLogin('google-web'), { error: 'REGISTRATION_REQUIRED' });
+        assert.deepEqual(calls.map(call => call.url), ['/auth/registration/config', '/auth/registration/begin']);
+    }
 });
 
 test('a staged private grant permits one password signup, then requires a fresh eligibility step', async () => {

@@ -186,7 +186,10 @@ test('the release enables registered native provider capabilities while retainin
         .SystemCapabilities['com.apple.SignInWithApple'].enabled, 1);
     const { default: plist } = await import('plist');
     const entitlements = plist.parse(await readFile(new URL('../../ios/App/App/App.entitlements', import.meta.url), 'utf8'));
-    assert.deepEqual(entitlements, { 'com.apple.developer.applesignin': ['Default'] });
+    assert.deepEqual(entitlements, {
+        'com.apple.developer.applesignin': ['Default'],
+        'com.apple.developer.declared-age-range': true,
+    });
 });
 
 test('Apple credential state remains gated, bounded and separate from sign-in', async () => {

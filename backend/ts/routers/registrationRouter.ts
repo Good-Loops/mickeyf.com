@@ -46,7 +46,15 @@ export function createRegistrationRouter(registration: RegistrationAuthorization
                 return res.status(403).json({ error: 'INVALID_CONTEXT' });
             }
             const result = await registration.begin(context, req.body);
-            if (!result.allowed) return res.status(result.reason === 'PARENT_REQUIRED' ? 403 : 400).json({ error: result.reason });
+            if (!result.allowed) {
+                if (result.reason === 'PARENT_REQUIRED' && registration.audience === 'children-included') {
+                    const restricted = await readContext(req, 'parent-required');
+                    const marker = restricted?.anonymousCookie;
+                    if (!restricted?.parentRequired || !marker) return res.status(503).json({ error: 'UNAVAILABLE' });
+                    res.cookie(marker.name, marker.value, { ...sessionCookieOptions(isProduction, marker.name), maxAge: marker.maxAge });
+                }
+                return res.status(result.reason === 'PARENT_REQUIRED' ? 403 : 400).json({ error: result.reason });
+            }
             const cookie = context.anonymousCookie;
             if (cookie) res.cookie(cookie.name, cookie.value,
                 { ...sessionCookieOptions(isProduction, cookie.name), maxAge: cookie.maxAge });

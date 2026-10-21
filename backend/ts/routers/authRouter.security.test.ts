@@ -35,6 +35,21 @@ function signedCookie(value: string, name = '__session') {
 const cookie = signedCookie(token);
 const deletion = { password, confirmation: 'DELETE' };
 
+test('anonymous logout preserves a current signed parent restriction for web/native without SQL', async () => {
+    await withServer(async (base, state) => {
+        for (const [origin, name] of [[origins[0], '__session'], [origins[1], 'session']]) {
+            const marker = `provider:v1:${Date.now()}:${Buffer.alloc(32, 1).toString('base64url')}:parent-required`;
+            const response = await post(base, {}, { Cookie: signedCookie(marker, name), Origin: origin }, '/auth/logout');
+            assert.equal(response.status, 200); assert.deepEqual(await response.json(), { loggedOut: true });
+            assert.equal(response.headers.get('set-cookie'), null);
+        }
+        assert.equal(state.databaseCalls, 0);
+        const expired = `provider:v1:${Date.now() - 86_400_001}:${Buffer.alloc(32, 1).toString('base64url')}:parent-required`;
+        const response = await post(base, {}, { Cookie: signedCookie(expired) }, '/auth/logout');
+        assert.match(response.headers.get('set-cookie')!, /Expires=Thu, 01 Jan 1970/u);
+    });
+});
+
 // In-memory HTTP boundary fixture only: no dbConfig import, credentials, or real connection.
 type TestState = {
     exists: boolean; unavailable: boolean; writes: string[]; databaseCalls: number;

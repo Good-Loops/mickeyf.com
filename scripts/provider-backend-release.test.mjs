@@ -4,7 +4,7 @@ import { readFileSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { providerConfig, fixture, deploymentFixture, now, androidPresenterPins } from './test-support/provider-release-fixture.mjs';
+import { providerConfig, childProviderConfig, fixture, deploymentFixture, now, androidPresenterPins } from './test-support/provider-release-fixture.mjs';
 import { providerReleaseEnvironment, providerConfigurationSha256, PROVIDER_CREATION_FLAGS,
     PROVIDER_ANDROID_PRESENTER_PINS, validateAndroidPresenterPins } from './provider-release-config.mjs';
 import { providerDeploymentApproval, renderProviderBackendDeployConfig, resolveProviderDeploymentSteps,
@@ -75,6 +75,35 @@ test('the child-audience proposal stays an unreviewed closed draft and cannot be
     assert.equal(Object.keys(env).some(name => name.startsWith('REGISTRATION_GENERAL_AUDIENCE')), false);
     assert.throws(() => providerReleaseEnvironment(draft));
     assert.throws(() => providerReleaseEnvironment(draft.policyProposal), /requires explicit/u);
+    assert.throws(() => providerReleaseEnvironment({ ...draft.policyProposal, phase: 'prepare-child' }), /requires explicit/u);
+});
+
+test('reviewed child preparation preserves login and management while every creation path stays closed', () => {
+    const closed = childProviderConfig('prepare-child');
+    const environment = providerReleaseEnvironment(closed);
+    assert.deepEqual(environment, providerReleaseEnvironment(childProviderConfig(), true));
+    for (const name of PROVIDER_CREATION_FLAGS) assert.equal(environment[name], 'false');
+    for (const name of ['PROVIDER_AUTH_ENABLED', 'APPLE_WEB_AUTH_ENABLED', 'PROVIDER_APPLE_DELETION_ENABLED',
+        'ACCOUNT_DELETION_ENABLED', 'REGISTRATION_ENABLED', 'REGISTRATION_POLICY_REVIEWED', 'PARENT_REGISTRATION_ENABLED',
+        'PARENT_REGISTRATION_POLICY_REVIEWED', 'PARENT_SIGNED_FORMS_ENABLED', 'APPLE_TOKEN_LIFECYCLE_ENABLED',
+        'APPLE_NOTIFICATIONS_ENABLED', 'APPLE_MAINTENANCE_HTTP_ENABLED']) assert.equal(environment[name], 'true');
+    for (const name of [...PROVIDER_CREATION_FLAGS, 'PROVIDER_AUTH_ENABLED', 'APPLE_WEB_AUTH_ENABLED',
+        'REGISTRATION_POLICY_REVIEWED', 'PARENT_REGISTRATION_POLICY_REVIEWED', 'PARENT_SIGNED_FORMS_ENABLED']) {
+        const changed = structuredClone(closed);
+        changed.environment[name] = environment[name] === 'true' ? 'false' : 'true';
+        assert.throws(() => providerReleaseEnvironment(changed));
+    }
+    for (const patch of [{ PARENT_SIGNED_FORM_COUNTRIES: '["US"]' }, { REGISTRATION_AUDIENCE: 'general-audience' },
+        { REGISTRATION_GENERAL_AUDIENCE_ENABLED: 'true' }]) {
+        const changed = structuredClone(closed); Object.assign(changed.environment, patch);
+        assert.throws(() => providerReleaseEnvironment(changed));
+    }
+    assert.throws(() => providerReleaseEnvironment({ ...providerConfig('prepare'), phase: 'prepare-child' }));
+    assert.throws(() => providerReleaseEnvironment({ ...closed, phase: 'prepare' }));
+    const privateScores = structuredClone(closed);
+    for (const name of ['PUBLIC_SCORE_PARTICIPATION_ENABLED', 'PUBLIC_SCORE_POLICY_REVIEWED', 'PUBLIC_SCORE_ASSURANCE_REVIEWED']) privateScores.environment[name] = 'false';
+    assert.equal(providerReleaseEnvironment(privateScores).PUBLIC_SCORE_PARTICIPATION_ENABLED, 'false');
+    assert.ok(render(fixture('prepare-child').pins.candidate.deployment).steps.length);
 });
 
 test('Android release activation remains blocked without actual reviewed Play certificate/OAuth pins', () => {
@@ -245,7 +274,7 @@ def reject(message): raise ValueError(message)
 def request(path,status):
     assert status==200
     body={'clients':clients} if path=='/auth/providers/config' else {'enabled':True,'policyVersion':env['REGISTRATION_POLICY_VERSION'],
-        'parentRegistrationAvailable':False,'countries':[{'country':'ZZ','parentRequiredBelow':15,'adultFrom':18}]}
+        'parentRegistrationAvailable':True,'countries':[{'country':'ZZ','parentRequiredBelow':15,'adultFrom':18}]}
     return body,Message()
 ns={'json':json,'request':request,'reject':reject,'no_store':lambda headers:True,'open':lambda *a,**kw:StringIO(json.dumps(data['pins']))}
 exec(compile(data['probe'],'public-probe','exec'),ns)
@@ -277,7 +306,7 @@ def reject(message): raise ValueError(message)
 def request(path,status):
     assert status==200
     body={'clients':clients} if path=='/auth/providers/config' else {'enabled':True,'policyVersion':env['REGISTRATION_POLICY_VERSION'],
-        'parentRegistrationAvailable':False,'countries':[{'country':'ZZ','parentRequiredBelow':15,'adultFrom':18}]}
+        'parentRegistrationAvailable':True,'countries':[{'country':'ZZ','parentRequiredBelow':15,'adultFrom':18}]}
     return body,Message()
 ns={'json':json,'request':request,'reject':reject,'no_store':lambda headers:True,'open':lambda *a,**kw:StringIO(json.dumps(data['pins']))}
 def verify(expected):
@@ -298,6 +327,67 @@ for name,value in [('GOOGLE_ANDROID_CLIENT_ID',data['androidIds'][0]),('GOOGLE_A
 verify(False)
 clients[:]=base; verify(True)
 `, { pins, probe, androidIds: androidPresenterPins(8).map(pin => pin.clientId) });
+});
+
+for (const phase of ['prepare-child', 'active']) test(`exact ${phase} child HTTP smoke rejects collection, policy and capability drift`, () => {
+    const pins = fixture().pins.candidate.deployment;
+    pins.providerRelease = childProviderConfig(phase);
+    const smoke = render(pins).steps[7].args.slice(3).join('');
+    const start = smoke.indexOf('with open("/workspace/session-pins.json"');
+    const probe = smoke.slice(start, smoke.indexOf('print("Tagged candidate anonymous HTTP and public capability checks', start));
+    python(String.raw`
+import copy
+from io import StringIO
+from email.message import Message
+env=data['pins']['providerRelease']['environment']
+creation=data['pins']['providerRelease']['phase']=='active'
+clients=[{'clientKey':'google-web','provider':'google','platform':'web','clientId':env['GOOGLE_WEB_CLIENT_ID']},
+    {'clientKey':'google-ios','provider':'google','platform':'ios','clientId':env['GOOGLE_WEB_CLIENT_ID']},
+    {'clientKey':'apple-ios','provider':'apple','platform':'ios','clientId':env['APPLE_IOS_BUNDLE_ID']},
+    {'clientKey':'apple-web','provider':'apple','platform':'web','clientId':env['APPLE_WEB_SERVICES_ID'],'redirectUri':env['APPLE_WEB_REDIRECT_URI']}]
+if creation:
+    for client in clients: client['signup']=True
+registration={'enabled':True,'audience':'children-included','creationEnabled':creation,
+    'policyVersion':env['REGISTRATION_POLICY_VERSION'],'parentRegistrationAvailable':creation,
+    'countries':[{'country':'BR','parentRequiredBelow':18,'adultFrom':18},{'country':'US','parentRequiredBelow':13,'adultFrom':18}]}
+original={'/auth/providers/config':{'clients':clients},'/auth/registration/config':registration}
+responses=copy.deepcopy(original)
+headers=Message()
+safe=True
+def reject(message): raise ValueError(message)
+def request(path,status):
+    assert status==200 and path in responses
+    return responses[path],headers
+ns={'json':json,'request':request,'reject':reject,'no_store':lambda headers:safe,
+    'open':lambda *a,**kw:StringIO(json.dumps(data['pins']))}
+def verify(expected):
+    try: exec(compile(data['probe'],'strict-public-probe','exec'),ns)
+    except ValueError: assert not expected
+    else: assert expected
+verify(True)
+for name,value in [('audience',None),('audience','general-audience'),('creationEnabled',not creation),('creationEnabled',int(creation)),
+    ('creationEnabled',None),('parentRegistrationAvailable',not creation),('policyVersion','stale'),('extra',True),
+    ('countries',[{'country':'US','parentRequiredBelow':13,'adultFrom':18}])]:
+    responses=copy.deepcopy(original)
+    if value is None: del responses['/auth/registration/config'][name]
+    else: responses['/auth/registration/config'][name]=value
+    verify(False)
+for change in ['missing-apple','unexpected-signup','numeric-signup','wrong-google-id','apple-outage','duplicate','foreign']:
+    responses=copy.deepcopy(original)
+    current=responses['/auth/providers/config']['clients']
+    if change=='missing-apple': current[:]=[c for c in current if c['provider']=='google']
+    elif change=='unexpected-signup':
+        if creation: del current[0]['signup']
+        else: current[0]['signup']=True
+    elif change=='numeric-signup': current[0]['signup']=int(creation)
+    elif change=='wrong-google-id': current[1]['clientId']='unreviewed.apps.googleusercontent.com'
+    elif change=='apple-outage': current[2]['issuance']=False
+    elif change=='duplicate': current.append(copy.deepcopy(current[0]))
+    else: current.append({'clientKey':'google-android','provider':'google','platform':'android','clientId':env['GOOGLE_WEB_CLIENT_ID']})
+    verify(False)
+responses=copy.deepcopy(original); safe=False; verify(False)
+safe=True; headers['Set-Cookie']='unreviewed=1'; verify(False)
+`, { pins, probe });
 });
 
 test('full-size consent and country configuration stay within Cloud Build argument limits', () => {
@@ -383,8 +473,8 @@ test('promotion then a fresh rollback plan changes traffic once per approved ope
     assert.equal(f.patches.length, 2); assert.equal(f.service.traffic[0].revision, f.rollback.name.split('/').at(-1));
 });
 
-test('Ready retired provider fallback retains its prior serving pointer and can be promoted and rolled back', async () => {
-    const f = deploymentFixture();
+for (const phase of ['active', 'prepare-child']) test(`${phase} Ready retired provider fallback preserves its pointer through deployment, promotion and rollback`, async () => {
+    const f = deploymentFixture(phase);
     const serving = f.service.latestReadyRevision;
     const patch = f.provider.patchRollbackTemplate;
     f.provider.patchRollbackTemplate = async (...args) => {

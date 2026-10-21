@@ -22,6 +22,8 @@ The owner has now confirmed that he will personally review returned parent forms
 
 The [current primary-source policy review](child-policy-review.md) identified missing native store-age integration and an unresolved age-screen retry path. The [fresh production cutover plan](production-cutover-plan.md) identified four bounded rollout-tooling gaps, including the lack of a strict creation-closed preparation contract and an exact 0028 operation. These remain release gates; the parent-account tests alone do not prove overall age-assurance or production readiness. Production metadata is unchanged, and no real parent form, email, deployment, schema or publication action occurred in this preparation pass.
 
+Subsequent source work implements [native age eligibility and retry protection](age-eligibility-guard.md), [Android SDK integration](native-age-validation.md), [iOS integration/signing gates](ios-native-age-range.md) and [strict closed rollout configuration](rollout-config-safeguards.md). These supersede the source-absence findings above, without establishing real-device or legal acceptance. The exact 0028 operation and live metadata verifier remain open; actual strict activation is refused. No production registration, traffic, schema, website or store state changed.
+
 ## Current channel status
 
 | Channel | Current evidence | Remaining public-release work |

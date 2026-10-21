@@ -13,6 +13,13 @@ verification standards, retention, public disclosure or a production schema
 operation. The synthetic rehearsal and the operational runbook remain separate
 acceptance evidence.
 
+Source follow-up: the first three configuration/activation/smoke findings below
+have now received the bounded implementation and 233-test qualification described
+in [rollout-config-safeguards.md](rollout-config-safeguards.md). The original
+findings remain as the inspected baseline. Strict writes still fail closed until
+the real schema metadata verifier is wired; the target-bound0028 operation and
+all production/policy approvals remain pending. No production state changed.
+
 ## Fresh production readback
 
 | Item | Observed metadata |

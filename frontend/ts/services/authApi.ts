@@ -581,11 +581,11 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
                 if (registrationOptions.requireChildAudience) {
                     const policy = await registration.config();
                     if (!supportsChildAudience(policy) || !('country' in request)
-                        || request.policyVersion !== policy.policyVersion || request.ageBand === 'parent-required') {
+                        || request.policyVersion !== policy.policyVersion) {
                         return { error: 'REGISTRATION_REQUIRED' } as const;
                     }
                     const rule = policy.countries.find(item => item.country === request.country);
-                    if (!rule || !['minor', 'adult'].includes(request.ageBand)
+                    if (!rule || !['parent-required', 'minor', 'adult'].includes(request.ageBand)
                         || request.ageBand === 'minor' && rule.parentRequiredBelow >= 18) return { error: 'REGISTRATION_REQUIRED' } as const;
                     creationEnabled = policy.creationEnabled;
                 }

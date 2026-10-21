@@ -2,12 +2,14 @@ import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { registrationConfigRequest, beginRegistration, cancelRegistration } from '@/services/authService';
 import { supportsChildAudience, type RegistrationAgeBand, type RegistrationConfig } from '@/services/registrationApi';
+import { registrationAge } from '@/services/registrationAge';
 
 export function ParentRegistrationUnavailable() {
     return <div role="status">
         <h2>A parent or guardian needs to lead this step</h2>
         <p><Link to="/parent-accounts">Continue to parent-led registration</Link> to check availability and sign in to your own parent account.</p>
         <p>No child name, email, password or identity document is needed here. Please do not enter an adult age range for a child.</p>
+        <p>A parent can use their own device and account for registration. For an incorrect age result, <Link to="/privacy#privacy-children">contact us for help</Link>. You can keep exploring without an account.</p>
     </div>;
 }
 
@@ -48,7 +50,7 @@ export default function RegistrationGate({ children, purpose = 'signup' }: {
 
     const reset = () => {
         generation.current++;
-        setGrant(null); setAgeBand(''); setCountry(''); setParentStep(false);
+        setGrant(null); setAgeBand(''); setCountry(''); setParentStep(registrationAge.parentRequired());
         if (began.current) {
             began.current = false;
             // Wait for any in-flight begin before revoking its grant; neither request is abandoned.
@@ -66,13 +68,21 @@ export default function RegistrationGate({ children, purpose = 'signup' }: {
     async function submit(event: React.FormEvent) {
         event.preventDefault();
         if (operation.current || creationPaused || !countryPolicy || !ageBand || !countryPolicy.countries.some(item => item.country === country)) return;
-        if (ageBand === 'parent-required') { setParentStep(true); return; }
         operation.current = true; setBusy(true); setFeedback(null); began.current = true;
         const current = ++generation.current;
         const started = Date.now();
         try {
-            const result = await beginRegistration({ country, ageBand, policyVersion: countryPolicy.policyVersion });
+            const rule = countryPolicy.countries.find(item => item.country === country)!;
+            const effectiveAge = await registrationAge.check(ageBand, rule.parentRequiredBelow);
             if (current !== generation.current) return;
+            if (!effectiveAge) {
+                setFeedback('Your device could not confirm an age range. You can keep exploring without an account. A parent can use their own device for parent-led registration, or contact us through the privacy page for help.');
+                return;
+            }
+            if (effectiveAge === 'parent-required') setParentStep(true);
+            const result = await beginRegistration({ country, ageBand: effectiveAge, policyVersion: countryPolicy.policyVersion });
+            if (current !== generation.current) return;
+            if (effectiveAge === 'parent-required') return;
             if ('authorized' in result) {
                 const expiresAt = started + result.expiresInSeconds * 1000;
                 if (expiresAt > Date.now()) { setGrant({ expiresAt, visibility: result.scoreVisibility }); return; }
@@ -99,7 +109,7 @@ export default function RegistrationGate({ children, purpose = 'signup' }: {
                     <p>{config?.enabled === false ? 'New registrations are currently paused.' : 'Registration eligibility could not be confirmed. You can keep exploring without an account.'}</p>
                     <button type="button" onClick={() => setRetry(value => value + 1)}>Check again</button>
                 </div>
-                : parentStep ? <><ParentRegistrationUnavailable /><button type="button" onClick={reset}>Back to registration</button></>
+                : parentStep || registrationAge.parentRequired() ? <ParentRegistrationUnavailable />
                 : <form className="signup__form" onSubmit={submit} aria-busy={busy}>
                     <label className="signup__field" htmlFor="registration-country"><span className="signup__label">Country where you live</span>
                         <select id="registration-country" className="signup__input" required disabled={busy} value={country}

@@ -14,6 +14,8 @@ const mocks = {
     authService: `export const registrationConfigRequest = (...args) => ${scope}.config(...args);
         export const beginRegistration = (...args) => ${scope}.begin(...args);
         export const cancelRegistration = (...args) => ${scope}.cancel(...args);`,
+    registrationAge: `export const registrationAge = { parentRequired: () => ${scope}.parentRequired,
+        check: async selected => { if (selected === 'parent-required') ${scope}.parentRequired = true; return selected; } };`,
 };
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const server = await createViteTestServer({ root, configFile: `${root}/vite.config.ts`, appType: 'custom', logLevel: 'silent',
@@ -32,6 +34,7 @@ function mount(t, policy, purpose = 'signup') {
     let cursor = 0, dirty = false, tree;
     const previous = Object.getOwnPropertyDescriptor(globalThis, key);
     const hooks = {
+        parentRequired: false,
         state(initial) {
             const slot = slots[cursor++] ??= { value: initial };
             return [slot.value, value => { slot.value = typeof value === 'function' ? value(slot.value) : value; dirty = true; }];
@@ -87,15 +90,16 @@ test('credentials remain unavailable until explicit reviewed eligibility receive
     assert.equal(view.children[0][1], 'private');
 });
 
-test('under-threshold signup preserves the parent route without attempting self-service authorization', async t => {
+test('under-threshold signup records the protective server context without mounting self-service credentials', async t => {
     const view = mount(t); view.render(); await view.start();
     await view.change('registration-country', 'BR');
     await view.change('registration-age', 'parent-required');
     await view.find(node => node.type === 'form').props.onSubmit({ preventDefault() {} });
     view.render(); await view.settle();
-    assert.equal(view.calls.some(call => call[0] === 'begin'), false);
+    assert.deepEqual(view.calls[1], ['begin', { country: 'BR', ageBand: 'parent-required', policyVersion: 'synthetic-reviewed' }]);
     assert.equal(view.children.length, 0);
     assert(view.find(node => typeof node.type === 'function' && node.type.name === 'ParentRegistrationUnavailable'));
+    assert.equal(view.find(node => node.type === 'button' && node.props.children === 'Back to registration'), undefined);
 });
 
 test('an older general backend cannot mount credentials or provider controls in the new source', async t => {

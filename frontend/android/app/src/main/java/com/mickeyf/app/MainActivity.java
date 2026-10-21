@@ -54,6 +54,7 @@ public class MainActivity extends BridgeActivity {
         registerPlugin(LudolumeApiPlugin.class);
         registerPlugin(LudolumeIdentityPlugin.class);
         registerPlugin(LudolumePresentationPlugin.class);
+        registerPlugin(LudolumeAgePlugin.class);
         applyPresentationOrientation();
         super.onCreate(savedInstanceState);
         addOnMultiWindowModeChangedListener(info -> applyPresentationOrientation());

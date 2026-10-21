@@ -36,8 +36,14 @@ async function fixture(t, signup = async () => ({ error: 'REGISTRATION_REQUIRED'
             if (url.pathname === '/auth/providers/config') result.body = { clients: [] };
             else if (url.pathname === '/auth/registration/config') result.body = config;
             else if (url.pathname === '/auth/registration/begin') {
-                assert.deepEqual(body, { country: 'US', ageBand: 'adult', policyVersion: policy.policyVersion });
-                result.body = { authorized: true, expiresInSeconds: 300, scoreVisibility: 'private' };
+                if (body.ageBand === 'parent-required') {
+                    assert(['US', 'BR'].includes(body.country));
+                    assert.deepEqual(Object.keys(body).sort(), ['ageBand', 'country', 'policyVersion']);
+                    result = { status: 403, body: { error: 'PARENT_REQUIRED' } };
+                } else {
+                    assert.deepEqual(body, { country: 'US', ageBand: 'adult', policyVersion: policy.policyVersion });
+                    result.body = { authorized: true, expiresInSeconds: 300, scoreVisibility: 'private' };
+                }
             }
             else if (url.pathname === '/auth/verify-token' || url.pathname === '/auth/renew') result.body = { loggedIn: false };
             else if (url.pathname === '/api/users' && body?.type === 'signup') result.body = await signup(body);
@@ -78,15 +84,31 @@ test('signup collects country and coarse age before mounting account credentials
     await page.locator('#login-password').waitFor();
 });
 
-for (const country of ['US', 'BR']) test(`${country} parent-required signup collects no child credentials or registration grant`, async t => {
+for (const country of ['US', 'BR']) test(`${country} parent-required signup preserves restriction across reload and navigation without credentials or a grant`, async t => {
     const { page, calls } = await fixture(t, undefined, { eligible: false });
     await page.locator('#registration-country').selectOption(country);
     await page.locator('#registration-age').selectOption('parent-required');
+    const restricted = page.waitForResponse(response => new URL(response.url()).pathname === '/auth/registration/begin');
     await page.getByRole('button', { name: 'Continue with a parent', exact: true }).click();
+    await restricted;
     await page.getByRole('link', { name: 'Continue to parent-led registration', exact: true }).waitFor();
     assert.equal(await page.locator('#signup-username, #signup-email, #signup-password').count(), 0);
-    assert.equal(calls.filter(call => ['/auth/registration/begin', '/auth/providers/begin', '/api/users'].includes(call.path)).length, 0);
-    assert.equal(await page.evaluate(() => localStorage.length + sessionStorage.length), 0);
+    assert.equal(calls.filter(call => ['/auth/providers/begin', '/api/users'].includes(call.path)).length, 0);
+    assert.equal(calls.filter(call => call.path === '/auth/registration/begin').length, 1);
+    const stored = await page.evaluate(() => ({ local: localStorage.length, session: Object.entries(sessionStorage) }));
+    assert.equal(stored.local, 0); assert.equal(stored.session.length, 1);
+    assert.equal(stored.session[0][0], 'ludolume.parent-registration-until');
+    assert.match(stored.session[0][1], /^[0-9]{13}$/u);
+    assert.equal(await page.getByRole('button', { name: 'Back to registration', exact: true }).count(), 0);
+    await page.reload();
+    await page.getByRole('link', { name: 'Continue to parent-led registration', exact: true }).waitFor();
+    assert.equal(await page.locator('#registration-age, #signup-password').count(), 0);
+    await page.getByRole('link', { name: 'Log in', exact: true }).click();
+    await page.locator('#login-password').waitFor();
+    assert.equal(await page.locator('#registration-age').count(), 0);
+    await page.goto(`${origin}/signup`);
+    await page.getByRole('link', { name: 'Continue to parent-led registration', exact: true }).waitFor();
+    assert.equal(calls.filter(call => call.path === '/auth/registration/begin').length, 1);
 });
 
 test('a general-audience backend cannot authorize the new child-audience credential form', async t => {

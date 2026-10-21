@@ -4,6 +4,8 @@ Keep the parent-led path and complete the owner's synthetic review rehearsal. Be
 
 The owner has agreed to review returned forms. That assigns an operator; it does not establish a parent's age/authority, approve a regional policy, or prove native-device behavior. No external reviewer, paid verification service, or additional employee is prescribed here.
 
+**Source follow-up:** [native age eligibility and retry protection](age-eligibility-guard.md) now implements the bridges and normal retry restriction described as missing in this original review. Its receipts distinguish source/compile tests from real-device and regional assurance acceptance; the legal/operational qualification items below remain open.
+
 ## What the existing source establishes
 
 The candidate gates account/provider collection behind country/coarse-age eligibility, routes parent-required users to signed forms, defers child credentials until approval, and creates private child accounts. Account permission and optional public-score permission are separate. Paused creation preserves eligible existing-account login. Local fonts remove unconditional Google Fonts requests.

@@ -12,6 +12,7 @@ const appleEntitlements = {
     'get-task-allow': false,
     'beta-reports-active': true,
     'com.apple.developer.applesignin': ['Default'],
+    'com.apple.developer.declared-age-range': true,
 };
 const profile = () => ({ uuid: '10000000-0000-4000-8000-000000000000', teams: ['AX4Z7T24C9'],
     expires: '2030-01-01T00:00:00Z', platforms: ['iOS'], hasDevices: false, allDevices: false,
@@ -23,6 +24,15 @@ test('distribution profile must explicitly authorize native Apple sign-in', () =
         const invalid = profile();
         invalid.entitlements['com.apple.developer.applesignin'] = value;
         assert.throws(() => validateProfile(invalid), /Provisioning profile must grant.*Apple Default/);
+    }
+});
+
+test('distribution profile must authorize Declared Age Range before signing material can be installed', () => {
+    assert.equal(validateProfile(profile(), Date.parse('2026-10-20T00:00:00Z')).uuid, profile().uuid);
+    for (const value of [undefined, null, false, 0, 1, 'true', 'Default', [], {}]) {
+        const invalid = profile();
+        invalid.entitlements['com.apple.developer.declared-age-range'] = value;
+        assert.throws(() => validateProfile(invalid), /Provisioning profile must grant the Declared Age Range entitlement as Boolean true/);
     }
 });
 
@@ -41,6 +51,18 @@ test('exported signed IPA must actually claim Apple sign-in and the distribution
     delete missingGrant.entitlements['com.apple.developer.applesignin'];
     assert.throws(() => validateSignedEntitlements(appleEntitlements, missingGrant),
         /Embedded provisioning profile must grant/);
+});
+
+test('both embedded authorization and exported signature must include Declared Age Range', () => {
+    assert.deepEqual(validateSignedEntitlements(appleEntitlements, profile()), appleEntitlements);
+    for (const value of [undefined, null, false, 0, 1, 'true', [], {}]) {
+        const invalid = { ...appleEntitlements, 'com.apple.developer.declared-age-range': value };
+        assert.throws(() => validateSignedEntitlements(invalid, profile()), /Signed IPA must grant the Declared Age Range/);
+        const unauthorized = profile();
+        unauthorized.entitlements['com.apple.developer.declared-age-range'] = value;
+        assert.throws(() => validateSignedEntitlements(appleEntitlements, unauthorized),
+            /Embedded provisioning profile must grant the Declared Age Range/);
+    }
 });
 
 test('signed entitlement verification reads the exported app signature, not the source or profile alone', () => {

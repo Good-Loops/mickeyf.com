@@ -4,6 +4,8 @@ Owner decision: intentionally include children under 13; finish parent-led child
 
 The owner subsequently confirmed that he will personally review returned parent forms. No registration-removal change was made. The [operator guide](parent-form-operator-guide.md) records the review steps; [the rehearsal](synthetic-parent-consent-rehearsal.md), [regional policy review](child-policy-review.md) and [cutover plan](production-cutover-plan.md) distinguish demonstrated behavior from the remaining release gates. Review staffing alone does not approve the regional policy or activate registration.
 
+Follow-up source qualification adds [native age eligibility/retry guards](age-eligibility-guard.md) and [strict closed rollout safeguards](rollout-config-safeguards.md). Native device acceptance, final regional/operational policy and the exact production schema operation remain open. The candidate notice/form versions are now `privacy-2026-10-20.3` / `signed-parent-form-2026-10-20.2`; earlier validation sections below describe their original checkpoints.
+
 ## Live baseline and hold
 
 The existing live site/backend still expose general signup without country/age screening, while new parent-led registration is disabled and its configured countries are US only. No live creation flags, traffic, database or notice have been changed. The candidate public launch is on hold. Guest games/animations remain available.

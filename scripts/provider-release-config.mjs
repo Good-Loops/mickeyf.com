@@ -77,19 +77,20 @@ export function validateAndroidPresenterPins(env, reviewedPins) {
     return [...ids];
 }
 
-/** Preparation runs lifecycle/notifications with issuance closed. Activation requires the complete explicit policy bundle. */
+/** Child preparation preserves reviewed login/management while every new-account path is closed. */
 export function providerReleaseEnvironment(config, rollback = false) {
     keys(config, ['phase', 'environment'], 'configuration');
-    if (!['prepare', 'active'].includes(config.phase)) fail('phase must be prepare or active');
+    if (!['prepare', 'prepare-child', 'active'].includes(config.phase)) fail('phase must be prepare, prepare-child or active');
     const env = config.environment;
     const generalAudience = record(env) && generalPolicyKeys.some(name => Object.hasOwn(env, name));
     const childAudience = record(env) && childPolicyKeys.some(name => Object.hasOwn(env, name));
-    keys(env, [...Object.keys(PROVIDER_FIXED_ENV), ...flags, ...(config.phase === 'active' ? policyKeys : []),
+    keys(env, [...Object.keys(PROVIDER_FIXED_ENV), ...flags, ...(config.phase !== 'prepare' ? policyKeys : []),
         ...(generalAudience ? generalPolicyKeys : []), ...(childAudience ? childPolicyKeys : []),
         ...androidEnvironmentKeys.filter(name => record(env) && Object.hasOwn(env, name))], 'environment');
-    if (childAudience && (config.phase !== 'active' || generalAudience || env.REGISTRATION_AUDIENCE !== 'children-included')) {
-        fail('children-included registration requires its staged active policy, without general signup');
+    if (childAudience && (config.phase === 'prepare' || generalAudience || env.REGISTRATION_AUDIENCE !== 'children-included')) {
+        fail('children-included registration requires its reviewed staged policy, without general signup');
     }
+    if (config.phase === 'prepare-child' && !childAudience) fail('prepare-child requires the explicit children-included policy');
     for (const [name, value] of Object.entries(env)) {
         if (typeof value !== 'string' || value.length > 16_384 || value.includes('\0')) fail(`${name} must be bounded public text`);
     }
@@ -103,8 +104,9 @@ export function providerReleaseEnvironment(config, rollback = false) {
         for (const name of flags) {
             const publicClosed = childAudience && env.PUBLIC_SCORE_PARTICIPATION_ENABLED === 'false'
                 && ['PUBLIC_SCORE_PARTICIPATION_ENABLED', 'PUBLIC_SCORE_POLICY_REVIEWED', 'PUBLIC_SCORE_ASSURANCE_REVIEWED'].includes(name);
-            const expected = generalAudience && name === 'PARENT_REGISTRATION_CREATION_ENABLED' || publicClosed ? 'false' : 'true';
-            if (env[name] !== expected) fail(`active release requires explicit ${name}=${expected}`);
+            const creationClosed = config.phase === 'prepare-child' && PROVIDER_CREATION_FLAGS.includes(name);
+            const expected = generalAudience && name === 'PARENT_REGISTRATION_CREATION_ENABLED' || publicClosed || creationClosed ? 'false' : 'true';
+            if (env[name] !== expected) fail(`${config.phase} release requires explicit ${name}=${expected}`);
         }
         if (generalAudience && (env.REGISTRATION_GENERAL_AUDIENCE_ENABLED !== 'true'
             || env.REGISTRATION_GENERAL_AUDIENCE_POLICY_REVIEWED !== 'true'

@@ -1,17 +1,28 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
-import { fixture, now } from './test-support/provider-release-fixture.mjs';
+import { fixture, childProviderConfig, now } from './test-support/provider-release-fixture.mjs';
 import { SERVICE, PROJECT, REGION, IMAGE, REVISION_TYPE, fingerprint, sessionRevisionName } from './frozen-backend-traffic.mjs';
 import { observeProviderReaderBoundary, planProviderActiveRevision, applyProviderActiveRevision, activeRevisionTemplate,
     planProviderActiveTraffic, applyProviderActiveTraffic, activeRevisionName, activeRollbackRevisionName,
-    createProviderActivationCloudProvider, validateProviderActivationPins, validateProviderActivationSource, READER_DRAIN_MS } from './provider-backend-activation.mjs';
+    createProviderActivationCloudProvider, validateProviderActivationPins, validateProviderActivationSource, READER_DRAIN_MS,
+    CHILD_SIGNED_FORM_SQL_SHA256 } from './provider-backend-activation.mjs';
 
 const activeConfiguration = JSON.parse(readFileSync(new URL('./provider-release-general.json', import.meta.url), 'utf8'));
-function activationFixture({ retireUnrouted = false } = {}) {
-    const f = fixture('prepare');
+function activationFixture({ retireUnrouted = false, child = false } = {}) {
+    const f = fixture(child ? 'prepare-child' : 'prepare');
     f.candidate.launchStage = f.rollback.launchStage = f.service.launchStage = 'GA';
-    const pins = { closed: f.pins, activeConfiguration: structuredClone(activeConfiguration) };
+    const pins = { closed: f.pins, activeConfiguration: child ? childProviderConfig() : structuredClone(activeConfiguration) };
+    if (child) {
+        pins.childSchemaReceipt = { schemaVersion: 1, operation: 'verify-child-signed-form-schema',
+            verifiedAt: new Date(now).toISOString(), sourceCommit: f.pins.candidate.deployment.sourceCommit,
+            sqlSha256: CHILD_SIGNED_FORM_SQL_SHA256, target: { project: PROJECT, instance: 'cms-mickeyf', database: 'cms',
+                serverUuid: pins.activeConfiguration.environment.APPLE_MAINTENANCE_EXPECTED_SERVER_UUID },
+            capability: 'nullable-parent-request-us-br', runtimeGrantProfile: 'google-apple-parent-signed',
+            schemaSha256: 'a'.repeat(64), grantsSha256: 'b'.repeat(64) };
+        // Synthetic verifier only: production adapter has no metadata verifier configured by default.
+        f.provider.verifyChildSchemaReceipt = async () => structuredClone(pins.childSchemaReceipt);
+    }
     const revisions = {};
     const oldGet = f.provider.getRevision;
     f.provider.getRevision = async name => revisions[name] ? structuredClone(revisions[name]) : oldGet(name);
@@ -55,6 +66,7 @@ function activationFixture({ retireUnrouted = false } = {}) {
 async function prepared(f) {
     const boundary = await observeProviderReaderBoundary(f.provider, f.activationPins, now);
     const when = now + READER_DRAIN_MS;
+    if (f.activationPins.childSchemaReceipt) f.activationPins.childSchemaReceipt.verifiedAt = new Date(when).toISOString();
     const fallbackPlan = await planProviderActiveRevision(f.provider, f.activationPins, boundary, 'fallback', null, when);
     const fallback = await applyProviderActiveRevision(f.provider, fallbackPlan, fingerprint(fallbackPlan), when);
     const activePlan = await planProviderActiveRevision(f.provider, f.activationPins, boundary, 'candidate', fallback, when + 1000);
@@ -188,6 +200,93 @@ test('active configuration, complete runtime and safe fallback are pinned', asyn
     }
     f.candidate.unreviewedSetting = 'silently discard me';
     assert.throws(() => activeRevisionTemplate(f.candidate, f.activationPins), /unreviewed runtime field/);
+});
+
+test('strict child activation retains the reviewed policy, compatible closure and exact schema receipt through traffic changes', async () => {
+    const f = activationFixture({ child: true, retireUnrouted: true });
+    const { active, fallback, when } = await prepared(f);
+    const environment = receipt => Object.fromEntries(receipt.plan.request.template.containers[0].env.map(e => [e.name,e.value]));
+    for (const key of ['REGISTRATION_CREATION_ENABLED','PROVIDER_GOOGLE_SIGNUP_ENABLED','PROVIDER_APPLE_SIGNUP_ENABLED','PARENT_REGISTRATION_CREATION_ENABLED']) {
+        assert.equal(environment(active)[key], 'true'); assert.equal(environment(fallback)[key], 'false');
+    }
+    assert.equal(environment(fallback).PROVIDER_AUTH_ENABLED, 'true');
+    assert.equal(environment(fallback).REGISTRATION_AUDIENCE, 'children-included');
+    assert.deepEqual(active.plan.pins.childSchemaReceipt, f.activationPins.childSchemaReceipt);
+    const activate = await planProviderActiveTraffic(f.provider, active, 'activate', when);
+    await applyProviderActiveTraffic(f.provider, activate, fingerprint(activate), when);
+    // Incident closure must remain possible when activation freshness/live metadata is unavailable.
+    delete f.provider.verifyChildSchemaReceipt;
+    const close = await planProviderActiveTraffic(f.provider, active, 'close-active', when + 7_200_001);
+    await applyProviderActiveTraffic(f.provider, close, fingerprint(close), when + 7_200_001);
+    assert.equal(f.service.traffic[0].revision, activeRollbackRevisionName(f.activationPins));
+});
+
+test('strict activation rejects absent, foreign, unreviewed and incomplete policy or schema pins', () => {
+    const f = activationFixture({ child: true });
+    validateProviderActivationPins(f.activationPins);
+    for (const mutate of [p => { delete p.childSchemaReceipt; }, p => { p.childSchemaReceipt.target.database='other'; },
+        p => { p.childSchemaReceipt.target.serverUuid='00000000-0000-4000-8000-000000000001'; },
+        p => { p.childSchemaReceipt.target.instance='other'; }, p => { p.childSchemaReceipt.sqlSha256='0'.repeat(64); },
+        p => { p.childSchemaReceipt.sourceCommit='0'.repeat(40); }, p => { p.childSchemaReceipt.capability='nullable-only'; },
+        p => { p.childSchemaReceipt.runtimeGrantProfile='google'; }, p => { delete p.childSchemaReceipt.grantsSha256; },
+        p => { p.childSchemaReceipt.extra=true; }, p => { p.childSchemaReceipt.verifiedAt='not-a-date'; },
+        p => { p.closed.candidate.deployment.providerRelease.phase='prepare'; },
+        p => { p.activeConfiguration.environment.REGISTRATION_GENERAL_AUDIENCE_ENABLED='true'; },
+        p => { p.activeConfiguration.environment.PARENT_SIGNED_FORM_COUNTRIES='["US"]'; },
+        p => { p.activeConfiguration.environment.REGISTRATION_POLICY_REVIEWED='false'; },
+        p => { p.activeConfiguration.environment.PARENT_REGISTRATION_POLICY_REVIEWED='false'; },
+        p => { p.activeConfiguration.environment.REGISTRATION_COUNTRY_RULES='{"US":{"parentRequiredBelow":14},"BR":{"parentRequiredBelow":18}}'; }]) {
+        const changed=structuredClone(f.activationPins); mutate(changed);
+        assert.throws(() => validateProviderActivationPins(changed));
+    }
+});
+
+test('reader drain permits only timestamp refresh of identical schema evidence and plans bind the full fresh receipt', async () => {
+    const f = activationFixture({ child: true });
+    const boundary = await observeProviderReaderBoundary(f.provider,f.activationPins,now);
+    const when=now+READER_DRAIN_MS+1;
+    await assert.rejects(planProviderActiveRevision(f.provider,f.activationPins,boundary,'fallback',null,when), /schema receipt is stale/);
+    f.activationPins.childSchemaReceipt.verifiedAt=new Date(when).toISOString();
+    const plan=await planProviderActiveRevision(f.provider,f.activationPins,boundary,'fallback',null,when);
+    const changed=structuredClone(plan); changed.pins.childSchemaReceipt.verifiedAt=new Date(when+1).toISOString();
+    assert.notEqual(fingerprint(changed),fingerprint(plan));
+    for (const field of ['schemaSha256','grantsSha256']) {
+        const pins=structuredClone(f.activationPins); pins.childSchemaReceipt[field]='c'.repeat(64);
+        await assert.rejects(planProviderActiveRevision(f.provider,pins,boundary,'fallback',null,when), /different release/);
+    }
+    for (const offset of [-300001,5001]) {
+        const pins=structuredClone(f.activationPins); pins.childSchemaReceipt.verifiedAt=new Date(when+offset).toISOString();
+        await assert.rejects(planProviderActiveRevision(f.provider,pins,boundary,'fallback',null,when), /schema receipt is stale or future/);
+    }
+    assert.equal(f.patches.length,0);
+});
+
+test('receipt-shaped input alone cannot authorize a strict write without fresh matching live metadata', async () => {
+    const f=activationFixture({ child:true });
+    const boundary=await observeProviderReaderBoundary(f.provider,f.activationPins,now);
+    const when=now+READER_DRAIN_MS;
+    f.activationPins.childSchemaReceipt.verifiedAt=new Date(when).toISOString();
+    const plan=await planProviderActiveRevision(f.provider,f.activationPins,boundary,'fallback',null,when);
+    delete f.provider.verifyChildSchemaReceipt;
+    await assert.rejects(applyProviderActiveRevision(f.provider,plan,fingerprint(plan),when),/Live child schema metadata verifier/);
+    for (const patch of [{schemaSha256:'c'.repeat(64)},{grantsSha256:'c'.repeat(64)},
+        {verifiedAt:new Date(when-300001).toISOString()}]) {
+        f.provider.verifyChildSchemaReceipt=async()=>({...structuredClone(f.activationPins.childSchemaReceipt),...patch});
+        await assert.rejects(applyProviderActiveRevision(f.provider,plan,fingerprint(plan),when),/schema|grants/);
+    }
+    assert.equal(f.patches.length,0);
+    const adapter=createProviderActivationCloudProvider('synthetic-token-with-sufficient-length',async()=>assert.fail('No cloud request needed'));
+    await assert.rejects(adapter.verifyChildSchemaReceipt(plan.pins.childSchemaReceipt),/not configured/);
+});
+
+test('strict traffic activation rechecks schema and grants before writing', async () => {
+    const f=activationFixture({ child:true });
+    const {active,when}=await prepared(f);
+    const plan=await planProviderActiveTraffic(f.provider,active,'activate',when);
+    f.provider.verifyChildSchemaReceipt=async()=>({...structuredClone(f.activationPins.childSchemaReceipt),grantsSha256:'c'.repeat(64)});
+    await assert.rejects(applyProviderActiveTraffic(f.provider,plan,fingerprint(plan),when),/grants changed/);
+    await assert.rejects(planProviderActiveTraffic(f.provider,active,'activate',when+300001),/schema receipt is stale/);
+    assert.equal(f.patches.length,2);
 });
 
 test('preparation plans reject stale approvals, tampering, duplicate deployments and missing metadata', async () => {
@@ -334,8 +433,8 @@ test('closing new creation remains possible after source expiry or candidate sig
     assert.equal(f.patches.length, 4);
 });
 
-for (const retireUnrouted of [false, true]) test(`HTTP adapter keeps exact writes and security checks when retired=${retireUnrouted}`, async () => {
-    const f = activationFixture({ retireUnrouted });
+for (const {retireUnrouted,child} of [{retireUnrouted:false,child:false},{retireUnrouted:true,child:false},{retireUnrouted:true,child:true}]) test(`HTTP adapter keeps exact writes and security checks when retired=${retireUnrouted}, child=${child}`, async () => {
+    const f = activationFixture({ retireUnrouted, child });
     const sourcePins = f.pins.candidate.deployment;
     const source = { url: 'https://github.com/Good-Loops/mickeyf.com.git', revision: sourcePins.sourceCommit };
     const packageName = `projects/${PROJECT}/locations/${REGION}/repositories/cloud-run-source-deploy/packages/cloud-run-source-deploy`;
@@ -349,6 +448,7 @@ for (const retireUnrouted of [false, true]) test(`HTTP adapter keeps exact write
         discovery: { analysisStatus: 'FINISHED_SUCCESS', continuousAnalysis: 'ACTIVE', lastScanTime: timestamp,
             analysisCompleted: { analysisType: ['OS', 'NPM', 'SECRET'] } } };
     const calls = [];
+    let liveVerifications = 0;
     let listingProblem = '';
     let listingPage = 0;
     const provider = createProviderActivationCloudProvider('synthetic-token-with-sufficient-length', async (raw, options) => {
@@ -391,17 +491,25 @@ for (const retireUnrouted of [false, true]) test(`HTTP adapter keeps exact write
             return revision ? ok(revision) : new Response('{}', { status: 404 });
         }
         assert.fail(`Unexpected read ${url.pathname}`);
-    });
+    }, child ? { verifyChildSchema: async receipt => {
+        liveVerifications++;
+        return { ...structuredClone(receipt), verifiedAt: new Date().toISOString() };
+    } } : {});
     const time = Date.now();
+    if (child) f.activationPins.childSchemaReceipt.verifiedAt = new Date(time - READER_DRAIN_MS - 1000).toISOString();
     const boundary = await observeProviderReaderBoundary(provider, f.activationPins, time - READER_DRAIN_MS - 1000);
+    if (child) f.activationPins.childSchemaReceipt.verifiedAt = new Date(time).toISOString();
     const fallbackPlan = await planProviderActiveRevision(provider, f.activationPins, boundary, 'fallback');
     const fallback = await applyProviderActiveRevision(provider, fallbackPlan, fingerprint(fallbackPlan));
     const activePlan = await planProviderActiveRevision(provider, f.activationPins, boundary, 'candidate', fallback);
     const active = await applyProviderActiveRevision(provider, activePlan, fingerprint(activePlan));
     const traffic = await planProviderActiveTraffic(provider, active, 'activate');
     await applyProviderActiveTraffic(provider, traffic, fingerprint(traffic));
+    const beforeCloseVerifications = liveVerifications;
     const close = await planProviderActiveTraffic(provider, active, 'close-active');
     await applyProviderActiveTraffic(provider, close, fingerprint(close));
+    if (child) assert.equal(liveVerifications, 6, 'apply functions and direct adapters each reverify all three activation writes');
+    assert.equal(liveVerifications, beforeCloseVerifications, 'incident closure does not depend on activation schema verification');
     assert.deepEqual(calls.filter(call => call.method === 'PATCH').map(call => call.url.searchParams.get('updateMask')), ['template', 'template', 'traffic', 'traffic']);
     assert.ok(calls.filter(call => call.url.hostname === 'containeranalysis.googleapis.com').length > 4);
     assert.equal(calls.some(call => call.url.href.includes(':access') || call.url.searchParams.get('filter')?.includes('kind="SECRET"')), false);

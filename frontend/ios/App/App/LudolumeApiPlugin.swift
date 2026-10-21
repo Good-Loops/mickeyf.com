@@ -20,6 +20,7 @@ class LudolumeBridgeViewController: CAPBridgeViewController {
         bridge?.registerPluginInstance(LudolumeApiPlugin())
         bridge?.registerPluginInstance(LudolumeIdentityPlugin())
         bridge?.registerPluginInstance(LudolumePresentationPlugin())
+        bridge?.registerPluginInstance(LudolumeAgePlugin())
     }
 }
 
