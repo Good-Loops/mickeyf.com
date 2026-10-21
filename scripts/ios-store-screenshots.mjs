@@ -108,7 +108,7 @@ export function cleanupTarget(owned, inventory) {
 
 function command(label, binary, args, timeout = 60_000) {
     const result = spawnSync(binary, args, { encoding: 'utf8', timeout, maxBuffer: 2 * 1024 * 1024 });
-    requireThat(!result.error && result.status === 0, `${label} failed or timed out; no raw process/app output was logged.`);
+    requireThat(!result.error && result.status === 0, `${label} failed or timed out (status ${result.status ?? 'none'}, code ${result.error?.code ?? 'none'}); no raw process/app output was logged.`);
     return result.stdout.trim();
 }
 const simctl = (label, ...args) => command(label, 'xcrun', ['simctl', ...args], 180_000);
@@ -122,7 +122,8 @@ async function captureHome(config, selected, owned, ocr) {
     const record = { udid, name, type: selected.type.identifier, runtime: selected.runtime.identifier };
     owned.push(record);
     simctl('Boot screenshot simulator', 'boot', udid);
-    simctl('Wait for simulator boot', 'bootstatus', udid, '-b');
+    // First boots on shared hosted Macs can take more than the ordinary simctl budget.
+    command('Wait for simulator boot', 'xcrun', ['simctl', 'bootstatus', udid, '-b'], 360_000);
     simctl('Install unsigned simulator app', 'install', udid, config.app);
     simctl('Verify installed app container', 'get_app_container', udid, BUNDLE, 'app');
     simctl('Set clean system status bar', 'status_bar', udid, 'override', '--time', '9:41',
@@ -175,6 +176,7 @@ export async function main() {
     const inventory = { ...json(simctl('Inventory installed device types', 'list', 'devicetypes', '--json')),
         ...json(simctl('Inventory installed runtimes', 'list', 'runtimes', '--json')) };
     const selected = selectDevices(inventory);
+    for (const device of selected) console.log(`Screenshot device: ${device.type.name}; iOS ${device.runtime.version}.`);
     const ocr = join(config.work, 'check-native-home');
     command('Compile host-only Apple Vision readiness check', 'xcrun', ['swiftc', fileURLToPath(new URL('./ios-store-screenshots-ocr.swift', import.meta.url)), '-o', ocr], 120_000);
     const owned = [];
