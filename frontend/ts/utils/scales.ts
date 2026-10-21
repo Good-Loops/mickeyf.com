@@ -3,7 +3,7 @@
  * 
  * @interface Scale
  * @property {string} description - A brief description of the scale.
- * @property {number[]} notes - An array of MIDI note numbers that make up the scale.
+ * @property {number[]} notes - The scale's note frequencies in Hz.
  */
 export interface Scale {
     description: string;
@@ -62,7 +62,7 @@ export const scales: { [key: string]: Scale } = {
     },
     'Blues': {
         description: 'Gritty, soulful, and expressive. Central to blues, rock, and jazz music. Known for its "blue notes" which add a sense of longing and emotion.',
-        notes: [261.63, 293.66, 311.13, 349.23, 391.99, 415.30, 523.25] // C Blues
+        notes: [261.63, 293.66, 311.13, 349.23, 392.00, 415.30, 523.25] // C Blues
     },
     'Dorian': {
         description: 'Mellow, jazzy, and slightly brighter than the natural minor scale. Common in jazz, rock, and folk music.',
@@ -166,6 +166,6 @@ export const scales: { [key: string]: Scale } = {
     },
     'Blues Heptatonic': {
         description: 'Rich, soulful, and expressive. Extends the traditional blues scale with added notes for more melodic options.',
-        notes: [261.63, 293.66, 311.13, 349.23, 391.99, 415.30, 523.25] // C Blues Heptatonic
+        notes: [261.63, 293.66, 311.13, 349.23, 392.00, 415.30, 523.25] // C Blues Heptatonic
     }
 };

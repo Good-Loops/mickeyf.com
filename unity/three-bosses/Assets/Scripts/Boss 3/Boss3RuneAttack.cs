@@ -17,6 +17,7 @@ public sealed class Boss3RuneAttack : MonoBehaviour
 
     private bool isPaused;
     private bool isCancelled;
+    private int executionVersion;
     private List<GameObject> activeWarnings = new();
 
     private void Awake()
@@ -32,19 +33,19 @@ public sealed class Boss3RuneAttack : MonoBehaviour
 
     private void OnDisable()
     {
-        DestroyActiveWarnings();
+        CancelAttack();
     }
 
     public void BeginAttack()
     {
+        CancelAttack();
         isCancelled = false;
         isPaused = false;
-        DestroyActiveWarnings();
     }
 
     public IEnumerator Execute(bool isPhaseTwo)
     {
-        if (isPaused || isCancelled) yield break;
+        if (!isActiveAndEnabled || isPaused || isCancelled) yield break;
 
         if (playerTarget == null || runeWarningPrefab == null || runeExplosionPrefab == null)
         {
@@ -59,13 +60,16 @@ public sealed class Boss3RuneAttack : MonoBehaviour
             yield break;
         }
 
+        // The controller owns this coroutine. A newer cast must invalidate its
+        // continuation without letting the old cast clean up the new warnings.
+        int version = ++executionVersion;
+        DestroyActiveWarnings();
         activeWarnings = SpawnWarnings(selectedAnchors);
 
         yield return new WaitForSeconds(warningDuration);
 
-        if (isPaused || isCancelled)
+        if (version != executionVersion || isPaused || isCancelled)
         {
-            DestroyActiveWarnings();
             yield break;
         }
 
@@ -74,7 +78,7 @@ public sealed class Boss3RuneAttack : MonoBehaviour
 
         yield return new WaitForSeconds(explosionDuration);
 
-        if (isPaused || isCancelled)
+        if (version != executionVersion || isPaused || isCancelled)
         {
             yield break;
         }
@@ -272,12 +276,14 @@ public sealed class Boss3RuneAttack : MonoBehaviour
 
         if (paused)
         {
+            executionVersion++;
             DestroyActiveWarnings();
         }
     }
 
     public void CancelAttack()
     {
+        executionVersion++;
         isCancelled = true;
         DestroyActiveWarnings();
     }

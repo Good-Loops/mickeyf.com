@@ -28,7 +28,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: 22.23.2
+          node-version: 22.23.3
           cache: npm
           cache-dependency-path: |
             package-lock.json
@@ -49,14 +49,14 @@ jobs:
       - name: Validate Firebase deploy dependency tree
         run: |
           npm --prefix .github/firebase-deploy ls --omit=dev
-          node --test .github/firebase-deploy/csv-parse-compat.test.mjs
+          npm --prefix .github/firebase-deploy run test:hosting-publisher
 
       - name: Audit npm dependencies
         run: |
           npm audit --audit-level=low
           npm --prefix frontend audit --audit-level=low
           npm --prefix backend audit --audit-level=low
-          npm --prefix .github/firebase-deploy audit --audit-level=high --omit=dev
+          npm --prefix .github/firebase-deploy run audit:hosting
 
       - name: Validate packaged Three Bosses WebGL release
         run: npm run three-bosses:webgl:release:validate
@@ -79,6 +79,9 @@ jobs:
             exit 1
           fi
 
+      - name: Verify signup, provider controls, and navigation in Chrome
+        run: npm --prefix .github/firebase-deploy run test:auth-browser
+
       - name: Test local WebGL tooling
         run: |
           npm run test:three-bosses-webgl-build
@@ -93,11 +96,16 @@ jobs:
           npm run test:frozen-backend
           npm run test:receipt-cleanup
 
+      - name: Test backend development and migration launchers
+        run: node --test backend/scripts/dev-isolated.test.cjs backend/scripts/run-migration-tests.test.mjs backend/scripts/run-apple-android-handoff-tests.test.mjs backend/scripts/run-child-schema-tests.test.mjs scripts/start-local-provider-backend.test.mjs
+
       - name: Test and build backend
         run: |
           npm --prefix backend test
           npm --prefix backend run test:unit
           npm --prefix backend run test:migrations
+          node backend/scripts/run-apple-android-handoff-tests.mjs
+          node backend/scripts/run-child-schema-tests.mjs
           npm --prefix backend run prod
 
       - name: Test documentation watcher scheduling
@@ -105,6 +113,61 @@ jobs:
 
       - name: Build documentation
         run: npm run docs
+
+  backend-runtime:
+    name: Backend production runtime compatibility
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI: "true"
+      NPM_CONFIG_FUND: "false"
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js for browser test dependencies
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.23.3
+          cache: npm
+          cache-dependency-path: |
+            frontend/package-lock.json
+            .github/firebase-deploy/package-lock.json
+
+      - name: Install the real-browser integration fixture dependencies
+        run: |
+          npm install --global npm@11.6.2 --no-audit --no-fund
+          npm --prefix frontend ci --no-audit
+          npm --prefix .github/firebase-deploy ci --ignore-scripts --no-audit --no-fund
+
+      - name: Set up production Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 26.12.0
+          cache: npm
+          cache-dependency-path: backend/package-lock.json
+
+      - name: Install exact project dependencies
+        run: |
+          npm install --global npm@11.6.2 --no-audit --no-fund
+          npm --prefix backend ci --no-audit
+          npm --prefix backend audit --audit-level=low
+
+      - name: Validate backend on the production runtime
+        run: |
+          npm --prefix backend test
+          npm --prefix backend run test:unit
+          npm --prefix backend run test:migrations
+          node backend/scripts/run-apple-android-handoff-tests.mjs
+          node backend/scripts/run-child-schema-tests.mjs
+          npm --prefix backend run prod
+
+      - name: Build and probe the final unprivileged image
+        run: |
+          docker build --tag ludolume-runtime-check:ci .
+          docker run --rm -i --network=none --read-only --cap-drop=ALL --security-opt=no-new-privileges --entrypoint=node ludolume-runtime-check:ci < backend/scripts/runtime-smoke.cjs
 
   unity-static:
     name: Unity source integrity
@@ -115,6 +178,9 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+
+      - name: Test Unity source integrity checker
+        run: python3 -B -m unittest discover -s .github/scripts -p test_check_unity_project.py
 
       - name: Check Unity source integrity
         run: python3 .github/scripts/check-unity-project.py

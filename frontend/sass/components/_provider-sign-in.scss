@@ -1,0 +1,110 @@
+@use '../abstracts' as *;
+
+.provider-sign-in {
+    display: grid;
+    gap: 1.2rem;
+    margin-block: 2.4rem;
+    padding-top: 2rem;
+    border-top: 1px solid rgba($white, .16);
+    color: rgba($white, .9);
+    font-size: 1.4rem;
+    line-height: 1.5;
+
+    &__heading {
+        margin-bottom: 1.2rem;
+        color: rgba($white, .8);
+        font-size: 1.5rem;
+        font-weight: 500;
+    }
+
+    &__buttons {
+        display: grid;
+        gap: 1.2rem;
+    }
+
+    &__google-host {
+        display: flex;
+        justify-content: center;
+        min-height: 40px;
+
+        &[hidden] { display: none; }
+
+        &[inert] { opacity: .55; pointer-events: none; }
+    }
+
+    &__button {
+        width: 100%;
+        flex: 1 1 15rem;
+        min-height: 44px;
+        padding: 1rem 1.6rem;
+        border: 1px solid rgba($primary-light, .45);
+        border-radius: 2.4rem;
+        background: rgba($white, .08);
+        color: $white;
+        font: inherit;
+        line-height: 1.4;
+        cursor: pointer;
+
+        &:hover:not(:disabled) { background: rgba($white, .16); }
+        &:focus-visible { outline: 2px solid $primary-light; outline-offset: 3px; }
+        &:disabled { opacity: .55; cursor: wait; }
+    }
+
+    &__button--google, &__button--apple, &__button--placeholder, &__button--availability {
+        position: relative;
+        overflow: hidden;
+        min-height: 40px;
+        padding: 0 12px 0 38px;
+        border: 1px solid #dadce0;
+        border-radius: 999px;
+        background: #fff;
+        color: #3c4043;
+        font-family: 'Google Sans', Arial, sans-serif;
+        font-size: 14px;
+        font-weight: 500;
+        line-height: 21px;
+        letter-spacing: .25px;
+
+        &:hover:not(:disabled) { background: #f8faff; }
+    }
+
+    // The supplied logo contains white margins; align its visible ink with the GIS logo slot.
+    &__button--apple img { position: absolute; inset: .5px auto auto 0; width: 42px; height: 42px; }
+
+    &__google-mark {
+        position: absolute;
+        inset: 9px auto auto 11px;
+        display: grid;
+        place-items: center;
+        width: 20px;
+        height: 20px;
+
+        img { display: block; width: 18px; height: 18px; }
+    }
+
+    &__button--placeholder:disabled {
+        background: #fff;
+        border-color: #dadce0;
+        color: #3c4043;
+        opacity: 1;
+    }
+
+    &__retry { display: grid; gap: 1rem; }
+
+    &__account-action, &__account-action:visited {
+        width: fit-content;
+        color: $white;
+        font-weight: 600;
+        text-decoration: underline;
+        text-underline-offset: .2em;
+    }
+
+    &__account-action:focus-visible { outline: 2px solid $primary-light; outline-offset: 4px; }
+
+    &__feedback {
+        margin: 0;
+        overflow-wrap: anywhere;
+
+        &--error { color: #ffd5db; }
+    }
+}

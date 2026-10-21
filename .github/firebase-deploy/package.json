@@ -3,28 +3,20 @@
   "version": "1.0.0",
   "private": true,
   "engines": {
-    "node": "22.23.2",
+    "node": "22.23.3",
     "npm": "11.6.2"
   },
   "packageManager": "npm@11.6.2",
   "scripts": {
+    "audit:hosting": "npm audit --omit=dev --audit-level=low",
+    "test:hosting-publisher": "node --test publish-hosting-preview.test.mjs",
+    "test:auth-browser": "node --test --test-concurrency=1 app-fonts-browser.test.mjs registration-browser.test.mjs parent-registration-browser.test.mjs apple-web-browser.test.mjs auth-layout-browser.test.mjs nav-sheen-browser.test.mjs animation-connect-layout-browser.test.mjs leaderboard-layout-browser.test.mjs game-layout-browser.test.mjs",
     "three-bosses:webgl:preview:smoke": "node smoke-three-bosses-webgl-preview.mjs",
     "test:three-bosses-webgl-smoke": "node --test smoke-three-bosses-webgl-preview.test.mjs"
   },
   "dependencies": {
-    "firebase-tools": "15.34.0",
     "picomatch": "4.0.4",
-    "playwright-core": "1.62.1"
-  },
-  "overrides": {
-    "firebase-tools@15.34.0": {
-      "chokidar": "4.0.3"
-    },
-    "qs": "6.16.0",
-    "re2": "1.26.1",
-    "@opentelemetry/core": "2.8.0",
-    "gaxios": {
-      "uuid": "11.1.1"
-    }
+    "playwright-core": "1.62.1",
+    "undici": "7.30.1"
   }
 }

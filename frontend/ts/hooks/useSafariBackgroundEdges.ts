@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, type RefObject } from 'react';
+import { Capacitor } from '@capacitor/core';
 import { useLocation } from 'react-router-dom';
 import { createSafariBackgroundEdges, supportsSafariBackgroundEdges } from '../layout/safariBackgroundEdges';
 
@@ -11,7 +12,7 @@ export function useSafariBackgroundEdges(shell: RefObject<HTMLDivElement | null>
     useLayoutEffect(() => {
         const standalone = window.matchMedia('(display-mode: standalone)').matches
             || Boolean((navigator as Navigator & { standalone?: boolean }).standalone);
-        if (!shell.current || !window.visualViewport
+        if (Capacitor.isNativePlatform() || !shell.current || !window.visualViewport
             || !supportsSafariBackgroundEdges(navigator.userAgent, standalone)) return;
         controller.current = createSafariBackgroundEdges(shell.current);
         return () => {

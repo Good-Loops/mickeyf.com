@@ -21,6 +21,8 @@ credentials.json
 *.p12
 *.pfx
 *.mobileprovision
+*.jks
+*.keystore
 
 # Ignore docker compose file
 docker-compose.yml

@@ -165,12 +165,20 @@ namespace ThreeBosses.Tests
         [TestCase(-1d, "00:00.000")]
         [TestCase(double.NaN, "00:00.000")]
         [TestCase(double.PositiveInfinity, "00:00.000")]
+        [TestCase(double.NegativeInfinity, "00:00.000")]
+        [TestCase(86400d, "1440:00.000")]
+        // Adjacent double values straddle the long millisecond limit.
+        [TestCase(9223372036854774d, "153722867280912:53.760", TestName = "FormatterPreservesValueBelowMillisecondLimit")]
+        [TestCase(9223372036854776d, "153722867280912:55.807", TestName = "FormatterClampsAtMillisecondLimit")]
+        [TestCase(9223372036854778d, "153722867280912:55.807", TestName = "FormatterClampsAboveMillisecondLimit")]
+        [TestCase(double.MaxValue, "153722867280912:55.807", TestName = "FormatterClampsMultiplicationOverflow")]
         public void FormatterProducesCanonicalTime(double elapsedSeconds, string expected)
         {
             Assert.That(FormatTime(elapsedSeconds), Is.EqualTo(expected));
         }
 
         [UnityTest]
+        [Category("ScreenUI")]
         public IEnumerator TransitionScenesShowTheJustDefeatedBossSplit()
         {
             Type serviceType = RequireRuntimeType("RunSessionService");
@@ -271,31 +279,27 @@ namespace ThreeBosses.Tests
 
         private static void AssertTransitionSplit(string sceneName, string expectedTime)
         {
-            Type textType = RequireType("TMPro.TextMeshProUGUI, Unity.TextMeshPro");
-            GameObject captionObject = GameObject.Find("Boss Split Caption");
-            GameObject valueObject = GameObject.Find("Boss Split Value");
-            Assert.That(captionObject, Is.Not.Null, sceneName);
-            Assert.That(valueObject, Is.Not.Null, sceneName);
-
-            Component caption = captionObject.GetComponent(textType);
-            Component value = valueObject.GetComponent(textType);
-            Assert.That(GetProperty<string>(caption, "text"), Is.EqualTo("SPLIT"), sceneName);
-            Assert.That(GetProperty<string>(value, "text"), Is.EqualTo(expectedTime), sceneName);
-            Assert.That(GetProperty<bool>(caption, "raycastTarget"), Is.False, sceneName);
-            Assert.That(GetProperty<bool>(value, "raycastTarget"), Is.False, sceneName);
-
-            UnityEngine.Object font = GetProperty<UnityEngine.Object>(value, "font");
-            Assert.That(font, Is.Not.Null, sceneName);
-            Assert.That(font.name, Is.EqualTo("Oxanium-Bold Timer SDF"), sceneName);
+            var document = UnityEngine.Object.FindFirstObjectByType<UnityEngine.UIElements.UIDocument>();
+            Assert.That(document, Is.Not.Null, sceneName);
+            var caption = UnityEngine.UIElements.UQueryExtensions.Q<UnityEngine.UIElements.Label>(
+                document.rootVisualElement, "split-caption");
+            var value = UnityEngine.UIElements.UQueryExtensions.Q<UnityEngine.UIElements.Label>(
+                document.rootVisualElement, "time-value");
+            Assert.That(caption, Is.Not.Null, sceneName);
+            Assert.That(value, Is.Not.Null, sceneName);
+            Assert.That(caption.text, Is.EqualTo("SPLIT"), sceneName);
+            Assert.That(value.text, Is.EqualTo(expectedTime), sceneName);
+            Assert.That(caption.pickingMode, Is.EqualTo(UnityEngine.UIElements.PickingMode.Ignore));
+            Assert.That(value.pickingMode, Is.EqualTo(UnityEngine.UIElements.PickingMode.Ignore));
 
             Type controllerType = RequireRuntimeType("BossTransitionScreenController");
             Component controller = UnityEngine.Object.FindFirstObjectByType(controllerType) as Component;
-            FieldInfo splitField = controllerType.GetField(
-                "splitTimeLabel",
+            FieldInfo viewField = controllerType.GetField(
+                "view",
                 BindingFlags.Instance | BindingFlags.NonPublic);
             Assert.That(controller, Is.Not.Null, sceneName);
-            Assert.That(splitField, Is.Not.Null, sceneName);
-            Assert.That(splitField.GetValue(controller), Is.SameAs(value), sceneName);
+            Assert.That(viewField, Is.Not.Null, sceneName);
+            Assert.That(viewField.GetValue(controller), Is.Not.Null, sceneName);
         }
 
         private static Type RequireRuntimeType(string name)

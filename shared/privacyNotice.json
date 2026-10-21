@@ -1,0 +1,81 @@
+{
+  "version": "privacy-2026-10-20.3",
+  "noticeUrl": "https://mickeyf.com/privacy",
+  "operatorName": "Michel Silveira Dias Fingergut",
+  "contactEmail": "mickeyf.plays@gmail.com",
+  "operatorAddress": "Avenida Santa Luzia, 379, Horto Florestal, Salvador, Bahia, CEP 40295-050, Brazil",
+  "operatorTelephone": "+55 71 99910 2221",
+  "signedParentForm": {
+    "version": "signed-parent-form-2026-10-20.2",
+    "requestLifetimeDays": 14,
+    "notice": "Your permission is required before the child account is created. Before approval, we ask you, the parent, for your own verified account contact information and the child's country, and assign a form request reference. Do not include the child's name, nickname, email, birth date, identity document or password in the form or message. After the signed permission has been reviewed and approved, you choose the child's nickname and password. The child account then stores the nickname, password hash, account identifier and private game results. Connection and session information protects sign-ins and prevents abuse. Google Cloud and Firebase process hosting and account/result data; Google or Apple establishes control of your linked parent account; Gmail processes the signed form you return. These service providers support the account and verification process. We do not sell personal information or use it for targeted advertising. Public disclosure of the nickname and qualifying results is optional and requires the separate signed choice below; declining it does not prevent a private account. Print this form, sign it by hand, and return a scan or photograph from the verified parent email shown on the form to mickeyf.plays@gmail.com. Do not include passwords or identity documents. We review the signature, parent declaration, sender and exact request before approving it. No child account is created if approval is missing. Unused requests expire after 14 days and are removed; incomplete or rejected form messages are deleted within 14 days. Approved signed forms are retained privately while the managed child account remains active, then deleted within 14 days after account-consent withdrawal or child-account deletion. Parents can review the child's information, withdraw public display alone, or withdraw account permission and delete the child through parent account controls or by contacting us. See the linked privacy notice for account and service information. Where native age-range sharing is available, Apple or Google Play may provide a coarse range for the person using that device; this does not establish guardianship or replace your separate signed permission. A parent-required result is retained as a temporary registration restriction for up to 24 hours; parents can use their own device/account or contact us about an incorrect result."
+  },
+  "availabilityText": "Feature availability can vary by platform and account. If an account or privacy control described below is unavailable, contact us for help. Separate permission is required before optional public leaderboard participation.",
+  "sections": [
+    {
+      "id": "operator",
+      "title": "Who operates Ludolume",
+      "text": "Ludolume is operated by Michel Silveira Dias Fingergut. For privacy questions or requests, contact mickeyf.plays@gmail.com, +55 71 99910 2221, or Avenida Santa Luzia, 379, Horto Florestal, Salvador, Bahia, CEP 40295-050, Brazil. You can explore games and animations without an account. This notice explains account, game and support information; accepting it is not blanket consent to optional uses."
+    },
+    {
+      "id": "accounts",
+      "title": "Account information",
+      "text": "An account lets you save eligible game results. We process your chosen nickname, an internal account identifier and the credentials needed for your selected sign-in method. Password accounts store a password hash. Google or Apple sign-in supplies a provider identifier and verified email, which can be an Apple private relay address; we do not receive your Google or Apple password. Matching email addresses alone do not merge accounts."
+    },
+    {
+      "id": "children",
+      "title": "Country, age and parent-led accounts",
+      "text": "Before new account registration, we ask for country and a coarse age range to determine the available account path. We do not ask for a birth date or identity document in this screen. Where a parent-led account is required, the parent uses their own account and completes the applicable permission process. Parent-led registration for Brazil and the United States requires a signed parent form, returned as a scan or photograph from the parent's verified email and reviewed before child credentials are requested or a child account is created. Before approval, the form identifies the parent's account, country and request reference; it does not collect the child's nickname or password. A separate signed choice is required for optional public leaderboard disclosure. After approval, the parent chooses a child nickname and password; this flow does not request a child email. Provider sign-in establishes account control, not age or guardianship. Account creation remains unavailable where the required process is not enabled. Unused form requests expire and are removed after 14 days. Incomplete or rejected form messages are deleted within 14 days; approved forms are retained privately while the child account is active and deleted within 14 days after account withdrawal or deletion."
+    },
+    {
+      "id": "age-assurance",
+      "title": "Device age ranges and registration restrictions",
+      "text": "When you continue through native account eligibility, the app can request an age range from Apple or Google Play. The platform may ask you or a parent whether to share. We use only the range to choose a protective account path; it is not proof of identity, guardianship or consent. Raw age bounds, store install identifiers and age-verification documents are not sent to our backend or retained by this feature. If sharing is declined, verification is needed or the device cannot provide a range, native self-service account/provider entry stays unavailable; guest content and nickname/password login remain available. A parent may use their own device and account. When a parent-required result is observed, this browser tab retains only a temporary expiry marker, and the server can retain a signed anonymous registration restriction in its functional session cookie, each for at most 24 hours. They contain no birth date, age range, email or account identifier. Reloading or retrying with an older age does not remove that restriction. Contact mickeyf.plays@gmail.com to ask about an incorrect age result; do not send identity documents or passwords."
+    },
+    {
+      "id": "leaderboards",
+      "title": "Private scores and public leaderboards",
+      "text": "New accounts save scores privately by default. Where available and permitted, public leaderboard participation is a separate optional choice. It displays the nickname and qualifying game result, including relevant completion time or rank. Other people can view or copy public information. Choose a nickname that does not reveal a real name or contact details. Public permission can be withdrawn while retaining private results. Parent-managed participation requires the parent's separate permission where applicable. Existing accounts created before these registration controls retain their previously applicable visibility."
+    },
+    {
+      "id": "sessions",
+      "title": "Sessions and device storage",
+      "text": "We use account and session records to authenticate requests, associate results and prevent abuse. Standard sessions last four hours; an optional remembered session can be renewed for up to thirty days at a time. Signing out invalidates the session. Clearing local data or uninstalling the app does not delete the server account. Functional preferences and cached game assets may remain on your device until cleared."
+    },
+    {
+      "id": "deletion",
+      "title": "Account and family deletion",
+      "text": "You can request permanent account deletion through the account controls. Deleting a parent account requires confirmation of the listed dependent child accounts and deletes those accounts and results too. Parents can separately withdraw permission and delete a managed child account. Deletion invalidates old sign-ins. Removing public permission alone keeps private results; account deletion removes them."
+    },
+    {
+      "id": "apple",
+      "title": "Apple authorization and account changes",
+      "text": "Apple authorization credentials are encrypted so the service can revoke the app's authorization when an account is deleted. A failed revocation can be retried after deletion under a seven-day authorization deadline. Signed Apple account-change notifications help invalidate affected sign-ins. Minimal security records and independent deletion records help prevent retries or restored backups from reviving revoked access or deleted accounts."
+    },
+    {
+      "id": "operations",
+      "title": "Game receipts, hosting and support",
+      "text": "We process temporary game-submission receipts to recognize retries and prevent duplicate or abusive submissions. Hosting services also process connection information, including IP addresses and request information, to deliver and secure the service. If you email us, we receive your message and any attachments you choose to send. Do not send passwords or sign-in codes."
+    },
+    {
+      "id": "services",
+      "title": "Music and service providers",
+      "text": "Selected music is played and analyzed on your device; this feature does not upload the music file, its name or analysis results to our server or request microphone access. Google Cloud and Firebase host the service and account/result storage; the backend and database are in the United States, while delivery and support processing can occur elsewhere. App fonts are bundled and served with the app; loading them does not contact Google Fonts. Google/Apple sign-in, Gmail and, for beta testers, Apple TestFlight have their respective service and privacy roles. We do not sell personal information or use it for targeted advertising."
+    },
+    {
+      "id": "retention",
+      "title": "Retention, choices and privacy requests",
+      "text": "We retain account data for the purposes described here while the account remains active, subject to deletion and applicable obligations. Recovery copies and security records have separate limited purposes and retention schedules. Contact us to request access, correction, deletion or other applicable privacy rights, including withdrawal of consent where processing relies on it. We use proportionate verification to protect against impersonation. You may also complain to the relevant data-protection authority. Changes to optional collection or public disclosure require the applicable new permission; they are not authorized merely by updating this notice."
+    }
+  ],
+  "consent": {
+    "parent": {
+      "version": "parent-consent-2026-10-02.1",
+      "text": "I am the child's parent or legal guardian and am authorized to make this choice. I have read the privacy notice. I authorize a separate child account with a chosen nickname and password, private game results, and the described account/security processing. I understand how to review the account or withdraw permission and delete it. Public leaderboard participation is optional and is authorized separately below. Any additional verification required for this account must be completed before activation."
+    },
+    "publicScores": {
+      "version": "public-scores-consent-2026-10-02.1",
+      "text": "I choose to display this account's nickname and qualifying game results on public leaderboards. Other people may view or copy them. I understand that public display is optional and I can withdraw this permission while keeping private results. For a managed child account, I confirm I am the parent or legal guardian and have completed any required additional verification. This choice is separate from permission to create or use the account."
+    }
+  }
+}

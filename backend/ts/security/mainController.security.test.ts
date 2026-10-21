@@ -1,12 +1,18 @@
 import assert from 'node:assert/strict';
+import { createRegistrationAuthorization } from '../accounts/registrationAuthorization';
 import test from 'node:test';
+import { createHash } from 'node:crypto';
 import bcrypt from 'bcryptjs';
 import { CookieOptions, Request, Response } from 'express';
 import jwt from 'jsonwebtoken';
 import { Pool, PoolConnection } from 'mysql2/promise';
 import { createMainController } from '../controllers/mainController';
+import { issueSessionToken, sessionSigningKey } from './sessionPolicy';
 
 const sessionSecret = 'unit-test-session-secret-that-is-not-a-credential';
+const origins = ['https://mickeyf.com', 'capacitor://localhost'];
+const account = { userId: 42, userName: 'player', accountId: '123e4567-e89b-42d3-a456-426614174000' };
+const session = issueSessionToken(account, sessionSecret);
 
 function responseRecorder() {
     const state: {
@@ -27,14 +33,17 @@ function responseRecorder() {
             state.cookie = { name, value, options };
             return this;
         },
+        clearCookie() { return this; },
+        setHeader(name: string, value: string) { assert.equal(name, 'Cache-Control'); assert.equal(value, 'no-store'); return this; },
     } as unknown as Response;
     return { response, state };
 }
 
-function request(body: unknown, authorization?: string): Request {
+function request(body: unknown, authorization?: string, headers: Request['headers'] = {}): Request {
     return {
         body,
-        headers: authorization ? { authorization } : {},
+        headers: { 'content-type': 'application/json', origin: origins[0],
+            ...(authorization ? { authorization } : {}), ...headers },
         signedCookies: {},
     } as Request;
 }
@@ -48,6 +57,8 @@ function createTestController(
         sessionSecret,
         isProduction: false,
         p4VegaScoreSubmissionsEnabled,
+        allowedMutationOrigins: origins,
+        registration: { ...createRegistrationAuthorization(database), assertAvailable: async () => undefined },
     });
 }
 
@@ -66,6 +77,52 @@ test('invalid signup input is rejected before any database or bcrypt work', asyn
 
     assert.equal(queryCount, 0);
     assert.deepEqual(state.body, { error: 'EMPTY_FIELDS' });
+});
+
+test('a Google-only NULL-password account cannot enter through password login', async () => {
+    let queryCount = 0;
+    const database = { async query() {
+        queryCount++;
+        return [[{ user_id: account.userId, account_uuid: account.accountId,
+            user_name: account.userName, user_password: null }]];
+    }, async getConnection() { throw new Error('No session should be created'); } } as unknown as Pool;
+    const { response, state } = responseRecorder();
+    await createTestController(database)(request({ type: 'login', user_name: 'player', user_password: 'anything' }), response);
+    assert.equal(queryCount, 1);
+    assert.deepEqual(state.body, { error: 'AUTH_FAILED' });
+    assert.equal(state.cookie, undefined);
+});
+
+test('signup preflight stops before hashing or insertion when an identifier is taken', async (context) => {
+    context.mock.method(bcrypt, 'hash', () => assert.fail('duplicate signup must not hash'));
+    let queryCount = 0;
+    const database = { async query(options: { sql: string }, values: unknown[]) {
+        queryCount++;
+        assert.match(options.sql, /^SELECT 1 FROM users/);
+        assert.deepEqual(values, ['player', 'player@example.test']);
+        return [[{ '1': 1 }], []];
+    } } as unknown as Pool;
+    const { response, state } = responseRecorder();
+    await createTestController(database)(request({ type: 'signup', user_name: 'player',
+        email: 'player@example.test', user_password: 'long-password-123' }), response);
+    assert.equal(queryCount, 1);
+    assert.equal(state.status, 200);
+    assert.deepEqual(state.body, { error: 'DUPLICATE_USER', status: 409 });
+    assert.equal(state.cookie, undefined);
+});
+
+test('a concurrent signup unique-key collision retains the existing duplicate response', async () => {
+    let queryCount = 0;
+    const database = { async query() {
+        if (++queryCount === 1) return [[]];
+        throw Object.assign(new Error('synthetic duplicate'), { errno: 1062 });
+    }, async getConnection() { return { query: async (options: { sql: string }) => options.sql.startsWith('INSERT')
+        ? database.query(options) : [[]], release() {}, destroy() {} }; } } as unknown as Pool;
+    const { response, state } = responseRecorder();
+    await createTestController(database)(request({ type: 'signup', user_name: 'player',
+        email: 'player@example.test', user_password: 'long-password-123' }), response);
+    assert.equal(queryCount, 2);
+    assert.deepEqual(state.body, { error: 'DUPLICATE_USER', status: 409 });
 });
 
 test('invalid login input returns the generic authentication failure before persistence', async () => {
@@ -106,45 +163,109 @@ test('database failures reject for the async wrapper and central error handler',
     );
 });
 
-test('successful login keeps the JWT only in the signed session cookie', async () => {
-    const passwordHash = await bcrypt.hash('valid-password', 4);
+test('untrusted login origins, non-JSON bodies and malformed persistence choices make no database calls', async () => {
     const database = {
-        query: async () => [[{
-            user_id: 42,
-            user_name: 'player',
-            user_password: passwordHash,
-        }], []],
+        async query() { assert.fail('invalid login must not query'); },
+        async getConnection() { assert.fail('invalid login must not acquire'); },
     } as unknown as Pick<Pool, 'getConnection' | 'query'>;
-    const controller = createTestController(database, false);
-    const { response, state } = responseRecorder();
-
-    await controller(request({
-        type: 'login',
-        user_name: 'player',
-        user_password: 'valid-password',
-    }), response);
-
-    assert.deepEqual(state.body, { success: true, user_name: 'player' });
-    assert.equal(state.cookie?.name, 'session');
-    assert.deepEqual(state.cookie?.options, {
-        httpOnly: true,
-        secure: false,
-        sameSite: 'lax',
-        signed: true,
-        priority: 'high',
-        path: '/',
-        maxAge: 4 * 60 * 60 * 1000,
-    });
-    const cookieToken = state.cookie?.value;
-    assert.equal(typeof cookieToken, 'string');
-    const decoded = jwt.verify(cookieToken as string, sessionSecret, {
-        algorithms: ['HS256'],
-    });
-    if (typeof decoded === 'string') {
-        assert.fail('expected JWT object payload');
+    const controller = createTestController(database);
+    const body = { type: 'login', user_name: 'player', user_password: 'valid-password' };
+    for (const headers of [{ origin: undefined }, { origin: 'null' }, { origin: 'https://attacker.example' }, { 'content-type': 'text/plain' }]) {
+        const { response, state } = responseRecorder();
+        await controller(request(body, undefined, headers), response);
+        assert.equal(state.status, 403);
+        assert.deepEqual(state.body, { error: 'AUTH_FAILED' });
+        assert.equal(state.cookie, undefined);
     }
-    assert.equal(decoded.user_id, 42);
-    assert.equal(decoded.user_name, 'player');
+    for (const rememberMe of ['true', 1, null]) {
+        const { response, state } = responseRecorder();
+        await controller(request({ ...body, remember_me: rememberMe }), response);
+        assert.deepEqual(state.body, { error: 'AUTH_FAILED' });
+        assert.equal(state.cookie, undefined);
+    }
+});
+
+test('login commits a revocable session before its signed cookie, with matching four-hour or thirty-day expiry', async () => {
+    const passwordHash = await bcrypt.hash('valid-password', 4);
+    for (const [rememberMe, seconds, origin] of [
+        [undefined, 4 * 60 * 60, origins[0]],
+        [false, 4 * 60 * 60, origins[0]],
+        [true, 30 * 24 * 60 * 60, origins[0]],
+        [false, 4 * 60 * 60, origins[1]],
+    ] as const) {
+        const { response, state } = responseRecorder();
+        let inserted: unknown[] | undefined;
+        let committed = false;
+        let isolationConfigured = false;
+        const database = {
+            async query(options: { sql: string; timeout: number }, values: unknown[]) {
+                assert.match(options.sql.replace(/\s+/g, ' '), /SELECT user_id, account_uuid, user_name, user_password FROM users WHERE user_name = \? LIMIT 1/);
+                assert.equal(options.timeout, 10_000);
+                assert.deepEqual(values, ['player']);
+                return [[{ user_id: 42, user_name: 'player', account_uuid: account.accountId, user_password: passwordHash }], []];
+            },
+            async getConnection() {
+                return {
+                    async query(options: { sql: string; timeout: number }, values?: unknown[]) {
+                        const sql = options.sql.replace(/\s+/g, ' ').trim();
+                        assert.equal(options.timeout, 10_000);
+                        if (sql.includes('GET_LOCK')) { assert.deepEqual(values, [42, 5]); return [[{ lockResult: 1 }], []]; }
+                        if (sql.includes('RELEASE_LOCK')) { assert.deepEqual(values, [42]); return [[{ lockResult: 1 }], []]; }
+                        if (sql === 'SET TRANSACTION ISOLATION LEVEL READ COMMITTED') {
+                            assert.equal(values, undefined);
+                            assert.equal(isolationConfigured, false);
+                            assert.equal(inserted, undefined);
+                            isolationConfigured = true;
+                            return [{ affectedRows: 0 }, []];
+                        }
+                        if (sql === 'START TRANSACTION') {
+                            assert.equal(isolationConfigured, true, 'session creation explicitly avoids cross-account gap locks');
+                            return [{ affectedRows: 0 }, []];
+                        }
+                        if (sql === 'COMMIT') {
+                            assert.equal(state.cookie, undefined, 'never expose a cookie before the session commit');
+                            assert.ok(inserted);
+                            committed = true;
+                            return [{ affectedRows: 0 }, []];
+                        }
+                        if (sql.startsWith('SELECT account_uuid AS accountId, user_password AS passwordHash')) {
+                            assert.deepEqual(values, [42]);
+                            return [[{ accountId: account.accountId, passwordHash }], []];
+                        }
+                        if (sql.startsWith('DELETE FROM account_sessions WHERE account_uuid = ? AND expires_at')) {
+                            assert.deepEqual(values, [account.accountId]);
+                            return [{ affectedRows: 0 }, []];
+                        }
+                        if (sql.startsWith('SELECT session_hash FROM account_sessions')) {
+                            assert.deepEqual(values, [account.accountId]);
+                            return [[], []];
+                        }
+                        assert.match(sql, /^INSERT INTO account_sessions /);
+                        inserted = values;
+                        return [{ affectedRows: 1 }, []];
+                    },
+                    release() {}, destroy() {},
+                };
+            },
+        } as unknown as Pick<Pool, 'getConnection' | 'query'>;
+        await createTestController(database, false)(request({ type: 'login', user_name: 'player',
+            user_password: 'valid-password', ...(rememberMe === undefined ? {} : { remember_me: rememberMe }) },
+            undefined, { origin }), response);
+
+        assert.equal(committed, true);
+        assert.deepEqual(state.body, { success: true, user_name: 'player' });
+        assert.equal(state.cookie?.name, origin === origins[1] ? 'session' : '__session');
+        assert.deepEqual(state.cookie?.options, { httpOnly: true, secure: false, sameSite: 'lax', signed: true,
+            priority: 'high', path: '/', maxAge: seconds * 1000 });
+        const decoded = jwt.verify(state.cookie!.value, sessionSigningKey(sessionSecret), { algorithms: ['HS256'] });
+        if (typeof decoded === 'string') assert.fail('expected JWT object payload');
+        assert.equal(decoded.user_id, 42);
+        assert.equal(decoded.user_name, 'player');
+        assert.equal(decoded.account_uuid, account.accountId);
+        assert.equal(decoded.exp! - decoded.iat!, seconds);
+        assert.deepEqual(inserted, [createHash('sha256').update(decoded.jti!, 'ascii').digest(), account.accountId,
+            decoded.exp, rememberMe === true ? 1 : 0, decoded.exp, decoded.exp]);
+    }
 });
 
 test('the submission freeze rejects anonymous and authenticated scores before database work', async () => {
@@ -161,10 +282,7 @@ test('the submission freeze rejects anonymous and authenticated scores before da
         },
     } as unknown as Pick<Pool, 'getConnection' | 'query'>;
     const controller = createTestController(database, false);
-    const token = jwt.sign({ user_id: 42, user_name: 'player' }, sessionSecret, {
-        algorithm: 'HS256',
-        expiresIn: '5m',
-    });
+    const token = session.token;
 
     for (const authorization of [undefined, `Bearer ${token}`]) {
         const { response, state } = responseRecorder();
@@ -179,6 +297,23 @@ test('the submission freeze rejects anonymous and authenticated scores before da
 
     assert.equal(queryCount, 0);
     assert.equal(acquisitionCount, 0);
+});
+
+test('failed durable session creation cannot issue a login cookie or return success', async () => {
+    const passwordHash = await bcrypt.hash('valid-password', 4);
+    const database = {
+        async query(options: { sql: string }, values: unknown[]) {
+            assert.match(options.sql, /SELECT user_id, account_uuid, user_name, user_password/);
+            assert.deepEqual(values, ['player']);
+            return [[{ user_id: 42, account_uuid: account.accountId, user_name: 'player', user_password: passwordHash }], []];
+        },
+        async getConnection() { throw new Error('private-driver-failure'); },
+    } as unknown as Pick<Pool, 'getConnection' | 'query'>;
+    const { response, state } = responseRecorder();
+    await assert.rejects(createTestController(database)(request({ type: 'login', user_name: 'player',
+        user_password: 'valid-password', remember_me: true }), response), { name: 'AccountSessionUnavailableError' });
+    assert.equal(state.cookie, undefined);
+    assert.equal(state.body, undefined);
 });
 
 test('enabled score submission rejects an anonymous request before database work', async () => {
@@ -208,6 +343,23 @@ test('enabled score submission rejects an anonymous request before database work
     assert.equal(acquisitionCount, 0);
 });
 
+test('p4 submissions reject cross-origin cookies and Bearer tokens before database acquisition', async () => {
+    const database = {
+        async query() { assert.fail('untrusted score submission must not query'); },
+        async getConnection() { assert.fail('untrusted score submission must not acquire'); },
+    } as unknown as Pick<Pool, 'getConnection' | 'query'>;
+    const controller = createTestController(database);
+    for (const bearer of [false, true]) {
+        const req = request({ type: 'submit_score', p4_score: 900 }, bearer ? `Bearer ${session.token}` : undefined,
+            { origin: 'https://attacker.example' });
+        if (!bearer) req.signedCookies = { __session: session.token };
+        const { response, state } = responseRecorder();
+        await controller(req, response);
+        assert.equal(state.status, 403);
+        assert.deepEqual(state.body, { error: 'UNAUTHORIZED' });
+    }
+});
+
 test('a completed 1000-point run accepts the Bearer fallback and improves the former 990-point maximum', async () => {
     const transactionEvents: string[] = [];
     const queryValues: Array<unknown[] | undefined> = [];
@@ -224,9 +376,15 @@ test('a completed 1000-point run accepts the Bearer fallback and improves the fo
             if (sql.includes('GET_LOCK') || sql.includes('RELEASE_LOCK')) {
                 return [[{ lockResult: 1 }], []];
             }
+            if (sql.includes('FROM account_sessions AS s')) {
+                const hash = createHash('sha256').update(session.sessionId, 'ascii').digest();
+                assert.deepEqual(values, [42, account.accountId, hash, hash]);
+                return [[{ userName: account.userName }], []];
+            }
             if (sql.includes('SELECT') && sql.includes('users.user_id AS userId')) {
                 return [[{ userId: 42, score: 990 }], []];
             }
+            assert.match(sql, /INSERT INTO game_personal_bests/);
             return [{ affectedRows: 2 }, []];
         },
         async commit() {
@@ -247,10 +405,7 @@ test('a completed 1000-point run accepts the Bearer fallback and improves the fo
     } as unknown as Pick<Pool, 'getConnection' | 'query'>;
     const controller = createTestController(database);
     const { response, state } = responseRecorder();
-    const token = jwt.sign({ user_id: 42, user_name: 'player' }, sessionSecret, {
-        algorithm: 'HS256',
-        expiresIn: '5m',
-    });
+    const token = session.token;
 
     await controller(request({
         type: 'submit_score',
@@ -265,12 +420,15 @@ test('a completed 1000-point run accepts the Bearer fallback and improves the fo
         'begin',
         'query',
         'query',
+        'query',
         'commit',
         'query',
         'release',
     ]);
     assert.deepEqual(queryValues, [
         [42, 5],
+        [42, account.accountId, createHash('sha256').update(session.sessionId, 'ascii').digest(),
+            createHash('sha256').update(session.sessionId, 'ascii').digest()],
         ['p4-vega', 1, 42],
         ['p4-vega', 1, 42, 1000],
         [42],
@@ -288,9 +446,7 @@ test('scores above the completion limit are rejected before database acquisition
         async getConnection() { assert.fail('invalid score must not acquire a connection'); },
     } as unknown as Pick<Pool, 'getConnection' | 'query'>;
     const controller = createTestController(database);
-    const token = jwt.sign({ user_id: 42, user_name: 'player' }, sessionSecret, {
-        algorithm: 'HS256', expiresIn: '5m',
-    });
+    const token = session.token;
 
     for (const score of [1001, 1010]) {
         const { response, state } = responseRecorder();
@@ -304,11 +460,17 @@ test('non-improving score preserves the exact legacy success response', async ()
     let queryCount = 0;
     const connection = {
         async beginTransaction() {},
-        async query(options: { sql: string }) {
+        async query(options: { sql: string }, values?: unknown[]) {
             queryCount += 1;
             if (options.sql.includes('GET_LOCK') || options.sql.includes('RELEASE_LOCK')) {
                 return [[{ lockResult: 1 }], []];
             }
+            if (options.sql.includes('FROM account_sessions AS s')) {
+                const hash = createHash('sha256').update(session.sessionId, 'ascii').digest();
+                assert.deepEqual(values, [42, account.accountId, hash, hash]);
+                return [[{ userName: account.userName }], []];
+            }
+            assert.match(options.sql, /users.user_id AS userId/);
             return [[{ userId: 42, score: 900 }], []];
         },
         async commit() {},
@@ -323,10 +485,7 @@ test('non-improving score preserves the exact legacy success response', async ()
     } as unknown as Pick<Pool, 'getConnection' | 'query'>;
     const controller = createTestController(database);
     const { response, state } = responseRecorder();
-    const token = jwt.sign({ user_id: 42, user_name: 'player' }, sessionSecret, {
-        algorithm: 'HS256',
-        expiresIn: '5m',
-    });
+    const token = session.token;
 
     await controller(request({
         type: 'submit_score',
@@ -335,7 +494,7 @@ test('non-improving score preserves the exact legacy success response', async ()
 
     assert.equal(state.status, 200);
     assert.deepEqual(state.body, { success: true, personalBest: false });
-    assert.equal(queryCount, 3);
+    assert.equal(queryCount, 4);
 });
 
 test('legacy leaderboard operation adapts the bounded generic read', async () => {
@@ -361,7 +520,7 @@ test('legacy leaderboard operation adapts the bounded generic read', async () =>
     assert.equal(options.timeout, 10_000);
     assert.equal(
         options.sql?.replace(/\s+/g, ' ').trim(),
-        'SELECT users.user_name AS userName, game_personal_bests.score AS score FROM game_personal_bests INNER JOIN users ON users.user_id = game_personal_bests.user_id WHERE game_personal_bests.game_id = ? AND game_personal_bests.rules_version = ? ORDER BY game_personal_bests.score DESC, game_personal_bests.recorded_at ASC, game_personal_bests.user_id ASC LIMIT 10'
+        'SELECT users.user_name AS userName, game_personal_bests.score AS score FROM game_personal_bests INNER JOIN users ON users.user_id = game_personal_bests.user_id LEFT JOIN account_registration_profiles AS registration ON registration.account_uuid = users.account_uuid WHERE (registration.account_uuid IS NULL OR registration.score_visibility = \'public\') AND game_personal_bests.game_id = ? AND game_personal_bests.rules_version = ? ORDER BY game_personal_bests.score DESC, game_personal_bests.recorded_at ASC, game_personal_bests.user_id ASC LIMIT 10'
     );
     assert.deepEqual(state.body, {
         success: true,

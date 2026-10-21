@@ -1,5 +1,11 @@
 @use '../abstracts' as *;
 
+@property --nav-sheen-angle {
+    syntax: '<angle>';
+    inherits: false;
+    initial-value: 0deg;
+}
+
 .nav {
     display: flex;
     justify-content: center;
@@ -34,21 +40,30 @@
             content: '';
             position: absolute;
             z-index: 1;
-            width: 2.8rem;
-            height: .1rem;
+            inset: 0;
+            padding: .1rem;
+            border-radius: inherit;
             pointer-events: none;
+            // Mask only this decoration so dropdowns can still extend outside the nav.
+            -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+            mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+            -webkit-mask-composite: xor;
+            mask-composite: exclude;
+            animation: nav-sheen-orbit 9s linear infinite;
         }
 
         &::before {
-            top: -.1rem;
-            left: 1.1rem;
-            background: linear-gradient(90deg, rgba($primary-light, .62), transparent);
+            background: conic-gradient(from var(--nav-sheen-angle),
+                transparent 328deg, rgba($primary-light, .12) 345deg,
+                rgba($primary-light, .72) 355deg, rgba($white, .88) 359deg, transparent);
         }
 
         &::after {
-            right: 1.1rem;
-            bottom: -.1rem;
-            background: linear-gradient(90deg, transparent, rgba($secondary-light, .46));
+            --nav-sheen-angle: 180deg;
+            background: conic-gradient(from var(--nav-sheen-angle),
+                transparent 328deg, rgba($secondary-light, .1) 345deg,
+                rgba($secondary-light, .6) 355deg, rgba($white, .74) 359deg, transparent);
+            animation-delay: -4.5s;
         }
     }
 
@@ -64,10 +79,50 @@
         }
     }
 
+    &__indicator-track {
+        position: absolute;
+        z-index: 0;
+        inset: .35rem;
+        overflow: hidden;
+        border-radius: .7rem;
+        pointer-events: none;
+    }
+
+    &__indicator {
+        position: absolute;
+        top: 0;
+        left: 0;
+        width: var(--nav-indicator-width, 0px);
+        height: var(--nav-indicator-height, 0px);
+        border: .1rem solid rgba($primary-light, .12);
+        border-radius: .65rem;
+        background: linear-gradient(135deg, rgba($primary-light, .09), rgba($white, .035));
+        opacity: 0;
+        transform: translate3d(var(--nav-indicator-x, 0px), var(--nav-indicator-y, 0px), 0);
+        transition:
+            transform .28s cubic-bezier(.22, .75, .25, 1),
+            width .28s cubic-bezier(.22, .75, .25, 1),
+            height .28s cubic-bezier(.22, .75, .25, 1),
+            opacity .18s ease;
+
+        &::after {
+            content: '';
+            position: absolute;
+            right: 24%;
+            bottom: .25rem;
+            left: 24%;
+            height: .1rem;
+            background: linear-gradient(90deg, transparent, rgba($primary-light, .82), rgba($secondary-light, .56), transparent);
+        }
+    }
+
+    &__indicator-track[data-visible='true'] &__indicator { opacity: 1; }
+
     &__link {
         @include nav-link;
 
         position: relative;
+        z-index: 1;
         display: block;
         padding: .7rem .9rem .75rem;
 
@@ -78,47 +133,22 @@
 
         transition:
             color .25s ease,
-            background-color .25s ease,
-            text-shadow .25s ease,
-            transform .25s ease;
-
-        &::after {
-            content: '';
-            position: absolute;
-            right: 24%;
-            bottom: .28rem;
-            left: 24%;
-            height: .1rem;
-            background: linear-gradient(90deg, transparent, rgba($primary-light, .82), rgba($secondary-light, .56), transparent);
-            transform: scaleX(0);
-            transition: transform .25s ease;
-        }
+            text-shadow .25s ease;
 
         &:hover,
         &:focus-visible {
             color: rgba($white, .94);
-            background-color: rgba($white, .045);
             text-shadow: 0 0 1.2rem rgba($primary-light, .3);
-            transform: translateY(-.1rem);
         }
 
         &:focus-visible {
             outline: .1rem solid rgba($primary-light, .58);
-            outline-offset: .15rem;
+            outline-offset: -.15rem;
         }
 
         &[aria-current='page'],
         &--group-active {
             color: rgba($white, .96);
-            background-color: rgba($primary-light, .045);
-
-            &::after {
-                transform: scaleX(1);
-            }
-        }
-
-        &:active {
-            transform: translateY(0) scale(.97);
         }
     }
 
@@ -286,6 +316,11 @@
             letter-spacing: .015em;
         }
 
+        &__indicator-track {
+            inset: .25rem;
+            border-radius: .55rem;
+        }
+
         &__dropdown-trigger {
             gap: .38rem;
         }
@@ -294,15 +329,56 @@
             min-width: 14rem;
         }
 
+        &__dropdown:last-child &__dropdown-menu {
+            right: 0;
+            left: auto;
+            transform: none;
+            animation-name: nav-dropdown-enter-edge;
+
+            &::before {
+                right: 2.5rem;
+                left: auto;
+                transform: rotate(45deg);
+            }
+        }
+
         &__dropdown-link {
             padding: .68rem .75rem;
         }
     }
 }
 
+@keyframes nav-dropdown-enter-edge {
+    from { opacity: 0; transform: translateY(-.65rem) scale(.98); }
+    to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@keyframes nav-sheen-orbit {
+    // Mirrored curves keep the join speed continuous while easing through the sides.
+    0% {
+        --nav-sheen-angle: 0deg;
+        animation-timing-function: cubic-bezier(.02, .98, .02, .89);
+    }
+    25% {
+        --nav-sheen-angle: 90deg;
+        animation-timing-function: cubic-bezier(.98, .11, .98, .02);
+    }
+    50% {
+        --nav-sheen-angle: 180deg;
+        animation-timing-function: cubic-bezier(.02, .98, .02, .89);
+    }
+    75% {
+        --nav-sheen-angle: 270deg;
+        animation-timing-function: cubic-bezier(.98, .11, .98, .02);
+    }
+    100% { --nav-sheen-angle: 360deg; }
+}
+
 @media (prefers-reduced-motion: reduce) {
+    .nav__list::before,
+    .nav__list::after,
     .nav__link,
-    .nav__link::after,
+    .nav__indicator,
     .nav__dropdown-chevron,
     .nav__dropdown-link,
     .nav__dropdown-menu {

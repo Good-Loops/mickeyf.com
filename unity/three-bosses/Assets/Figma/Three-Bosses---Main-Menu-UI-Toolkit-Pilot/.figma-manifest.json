@@ -1,0 +1,192 @@
+{
+    "fileName": "Three Bosses — Main Menu UI Toolkit Pilot",
+    "screens": [
+        {
+            "assetName": "MainMenuPilot",
+            "rootNodeId": "3:2",
+            "contentHash": "25b8b00e1607493",
+            "generated": [
+                "images/audio-enabled.png",
+                "MainMenuPilot.uss",
+                "MainMenuPilot.uxml"
+            ],
+            "tokens": [],
+            "nodes": [
+                {
+                    "figmaNodeId": "3:2",
+                    "cssClass": "",
+                    "styleClass": "",
+                    "doc": "MainMenuPilot",
+                    "path": "1",
+                    "props": [
+                        {
+                            "k": "width",
+                            "v": "1672px"
+                        },
+                        {
+                            "k": "height",
+                            "v": "941px"
+                        },
+                        {
+                            "k": "display",
+                            "v": "flex"
+                        },
+                        {
+                            "k": "flex-direction",
+                            "v": "column"
+                        },
+                        {
+                            "k": "align-items",
+                            "v": "center"
+                        },
+                        {
+                            "k": "justify-content",
+                            "v": "center"
+                        },
+                        {
+                            "k": "background-color",
+                            "v": "rgba(0,0,0,1)"
+                        }
+                    ]
+                },
+                {
+                    "figmaNodeId": "3:3",
+                    "cssClass": "",
+                    "styleClass": "",
+                    "doc": "MainMenuPilot",
+                    "path": "1/1",
+                    "props": [
+                        {
+                            "k": "width",
+                            "v": "1672px"
+                        },
+                        {
+                            "k": "height",
+                            "v": "941px"
+                        }
+                    ]
+                },
+                {
+                    "figmaNodeId": "3:4",
+                    "cssClass": "",
+                    "styleClass": "",
+                    "doc": "MainMenuPilot",
+                    "path": "1/1/1",
+                    "props": [
+                        {
+                            "k": "width",
+                            "v": "490px"
+                        },
+                        {
+                            "k": "height",
+                            "v": "125px"
+                        },
+                        {
+                            "k": "display",
+                            "v": "flex"
+                        },
+                        {
+                            "k": "flex-direction",
+                            "v": "row"
+                        },
+                        {
+                            "k": "align-items",
+                            "v": "center"
+                        },
+                        {
+                            "k": "justify-content",
+                            "v": "center"
+                        },
+                        {
+                            "k": "position",
+                            "v": "absolute"
+                        },
+                        {
+                            "k": "left",
+                            "v": "590px"
+                        },
+                        {
+                            "k": "top",
+                            "v": "735px"
+                        },
+                        {
+                            "k": "color",
+                            "v": "rgba(226.94999635219574,232.05000668764114,239.69999939203262,1)"
+                        },
+                        {
+                            "k": "-unity-font-definition",
+                            "v": "url(\"project://database/Assets/Art/UI/Fonts/Oxanium-Bold.ttf?fileID=12800000&guid=6341ea8089ce3704bb3c46592bcf56be&type=3#Oxanium-Bold\")"
+                        },
+                        {
+                            "k": "font-size",
+                            "v": "58px"
+                        },
+                        {
+                            "k": "-unity-font-style",
+                            "v": "bold"
+                        },
+                        {
+                            "k": "-unity-text-align",
+                            "v": "middle-center"
+                        },
+                        {
+                            "k": "white-space",
+                            "v": "normal"
+                        }
+                    ]
+                },
+                {
+                    "figmaNodeId": "3:6",
+                    "cssClass": "",
+                    "styleClass": "",
+                    "doc": "MainMenuPilot",
+                    "path": "1/1/2",
+                    "props": [
+                        {
+                            "k": "width",
+                            "v": "142px"
+                        },
+                        {
+                            "k": "height",
+                            "v": "78px"
+                        },
+                        {
+                            "k": "display",
+                            "v": "flex"
+                        },
+                        {
+                            "k": "flex-direction",
+                            "v": "row"
+                        },
+                        {
+                            "k": "align-items",
+                            "v": "center"
+                        },
+                        {
+                            "k": "justify-content",
+                            "v": "center"
+                        },
+                        {
+                            "k": "position",
+                            "v": "absolute"
+                        },
+                        {
+                            "k": "left",
+                            "v": "1472px"
+                        },
+                        {
+                            "k": "top",
+                            "v": "74px"
+                        }
+                    ]
+                }
+            ],
+            "components": [],
+            "states": []
+        }
+    ],
+    "matchedMappings": [
+        "playbutton",
+        "audiobutton"
+    ]
+}

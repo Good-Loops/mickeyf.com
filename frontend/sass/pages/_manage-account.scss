@@ -1,0 +1,53 @@
+@use '../abstracts' as *;
+
+.manage-account {
+    @include account-form;
+    width: min(90vw, 52rem);
+    padding-block: 2rem;
+    color: rgba($white, .86);
+    font-size: 1.4rem;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+
+    &__title {
+        margin-bottom: 1rem;
+        color: $primary-light;
+        font-size: clamp(2.2rem, 4vw, 2.8rem);
+        line-height: 1.2;
+
+        &:focus-visible {
+            outline: .15rem solid rgba($primary-light, .65);
+            outline-offset: .35rem;
+            border-radius: .3rem;
+        }
+    }
+
+    &__identity {
+        margin-bottom: 2rem;
+    }
+
+    &__subtitle {
+        margin-bottom: .8rem;
+        font-size: 1.8rem;
+    }
+
+    &__form {
+        margin-top: 1.8rem;
+    }
+
+    &__submit {
+        min-height: 4.4rem;
+        border-color: rgba(#ffb3bd, .5);
+        color: #ffd5db;
+        background: rgba(#9a2941, .18);
+    }
+
+    &__error {
+        color: #ffd5db;
+    }
+
+    a {
+        color: $primary-light;
+        text-decoration: underline;
+    }
+}

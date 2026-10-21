@@ -118,7 +118,8 @@ export class MusicFeatureExtractor {
         const beat = this.deps.beatEnvelope.step({
             dtMs: deltaMs,
             nowMs,
-            isBeat: audioState.beat.isBeat,
+            // Paused/ended audio retains its last analysis snapshot.
+            isBeat: hasMusic && audioState.beat.isBeat,
             strength: audioState.beat.strength,
         });
 

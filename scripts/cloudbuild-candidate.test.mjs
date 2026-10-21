@@ -45,13 +45,15 @@ const expectedConfig = [
     '',
 ].join('\n');
 
-const expectedAlpineOpenSslPatch = [
+const expectedAlpineLibraryPatch = [
     'RUN apk update \\',
     '    && apk add --no-cache --upgrade \\',
-    '        libcrypto3=3.5.8-r0 \\',
-    '        libssl3=3.5.8-r0 \\',
-    "    && apk info --exists 'libcrypto3=3.5.8-r0' > /dev/null \\",
-    "    && apk info --exists 'libssl3=3.5.8-r0' > /dev/null \\",
+    '        libcrypto3=3.5.9-r0 \\',
+    '        libssl3=3.5.9-r0 \\',
+    '        zlib=1.3.2-r1 \\',
+    "    && apk info --exists 'libcrypto3=3.5.9-r0' > /dev/null \\",
+    "    && apk info --exists 'libssl3=3.5.9-r0' > /dev/null \\",
+    "    && apk info --exists 'zlib=1.3.2-r1' > /dev/null \\",
     '    && rm -rf /var/cache/apk/*',
 ].join('\n');
 
@@ -89,10 +91,10 @@ test('candidate configuration contains no production rollout capabilities', asyn
     }
 });
 
-test('candidate image patches only the reviewed Alpine OpenSSL packages', async () => {
+test('candidate image patches only the reviewed Alpine OpenSSL and zlib packages', async () => {
     const dockerfile = await readNormalizedFile(dockerfilePath);
-    const patchOccurrences = dockerfile.split(expectedAlpineOpenSslPatch).length - 1;
-    const patchIndex = dockerfile.indexOf(expectedAlpineOpenSslPatch);
+    const patchOccurrences = dockerfile.split(expectedAlpineLibraryPatch).length - 1;
+    const patchIndex = dockerfile.indexOf(expectedAlpineLibraryPatch);
     const sharedBaseIndex = dockerfile.indexOf(' AS node-runtime-base');
     const nextStageIndex = dockerfile.indexOf('FROM node-runtime-base AS npm-base');
 
@@ -102,7 +104,20 @@ test('candidate image patches only the reviewed Alpine OpenSSL packages', async 
     assert.ok(nextStageIndex > patchIndex);
     assert.match(dockerfile, /^FROM node-runtime-base AS runtime$/mu);
 
-    const dockerfileWithoutReviewedPatch = dockerfile.replace(expectedAlpineOpenSslPatch, '');
+    const dockerfileWithoutReviewedPatch = dockerfile.replace(expectedAlpineLibraryPatch, '');
 
     assert.doesNotMatch(dockerfileWithoutReviewedPatch, /\bapk\s+(?:add|fix|update|upgrade)\b/iu);
+});
+
+test('production runtime pins the supported patched binary and has no embedded OpenSSL exception', async () => {
+    const dockerfile = await readNormalizedFile(dockerfilePath);
+    assert.match(dockerfile, /^FROM node:26\.12\.0-alpine@sha256:6f08a523443ddedf52941874c203475b0ad503e859ad70cb26ab8be9a517dbd5 AS node-runtime-base$/mu);
+    const gate = /^RUN node -e '([^\n]+)'$/mu.exec(dockerfile)?.[1];
+    assert.ok(gate);
+    const { runInNewContext } = await import('node:vm');
+    for (const [version, accepted] of [['3.5.8', false], ['3.5.9', true], ['3.5.10', true], ['3.6.0', false], ['invalid', false]]) {
+        let rejected = false;
+        runInNewContext(gate, { process: { versions: { openssl: version }, exit: () => { rejected = true; } }, console: { error() {} } });
+        assert.equal(!rejected, accepted, version);
+    }
 });

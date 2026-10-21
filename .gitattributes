@@ -19,7 +19,6 @@ Dockerfile text eol=lf
 *.scss text eol=lf
 *.svg text eol=lf
 *.md text eol=lf
-/resources/project-structure.txt text eol=lf
 
 # Content-addressed Unity release bytes must survive checkout unchanged.
 # The stable build manifest remains ordinary normalized JSON outside this tree.
@@ -96,3 +95,8 @@ unity/three-bosses/**/*.txt text eol=lf
 
 # Unity CLI skill files are generated verbatim by `unity skill refresh`.
 .agents/skills/unity-cli/** whitespace=-trailing-space
+
+# Preserve official font and license bytes, including upstream whitespace, for provenance hashes.
+/frontend/public/fonts/*.woff2 -text
+/frontend/public/fonts/licenses/*.txt -text -eol whitespace=-trailing-space
+/frontend/public/fonts/app-fonts.css text eol=lf

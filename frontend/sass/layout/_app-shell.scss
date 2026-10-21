@@ -3,8 +3,11 @@
 .app-shell {
     position: relative;
     isolation: isolate;
-
-    min-height: 100svh;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    height: 100dvh;
+    min-height: 0;
+    overflow: hidden;
     // Let the fixed sky reach the display edges, while keeping interactive
     // content clear of the notch and home indicator in either orientation.
     padding: env(safe-area-inset-top, 0px) env(safe-area-inset-right, 0px)
@@ -12,11 +15,17 @@
 
     > .main {
         min-width: 0;
-        min-height: calc(90svh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px));
+        min-height: 0;
+        overflow: auto;
+        overscroll-behavior: contain;
+        justify-content: flex-start;
 
-        > * { max-width: 100%; }
+        // Center short pages while allowing long forms to start at a reachable top edge.
+        > * { max-width: 100%; flex-shrink: 0; margin-block: auto; }
     }
 }
+
+html.canvas-fullscreen-fallback-active .app-shell > .main { overflow: visible; }
 
 @include compact-viewport {
     // Mobile browser chrome can change the large viewport while the visible
@@ -37,6 +46,81 @@
         > .footer {
             min-height: 0;
         }
+    }
+}
+
+// Native screens have no Safari toolbar to paint behind. Lock the outer page,
+// not every scrollable control: long content still needs an accessible viewport.
+html[data-native-app] {
+    height: 100%;
+    overflow: hidden;
+    overscroll-behavior: none;
+
+    body,
+    #root {
+        height: 100%;
+        min-height: 0;
+        overflow: hidden;
+        overscroll-behavior: none;
+    }
+}
+
+html[data-native-app] .app-shell {
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    height: 100dvh;
+    min-height: 0;
+
+    > .header { height: auto; }
+    > .footer { min-height: 0; }
+
+    > .main {
+        min-height: 0;
+        padding-block: 1.6rem;
+        overflow: auto;
+        overscroll-behavior: contain;
+        justify-content: flex-start;
+
+        // Auto margins center short content and collapse for long content,
+        // unlike unsafe flex centering which can hide the first controls.
+        > * { flex-shrink: 0; margin-block: auto; }
+    }
+
+    // Gameplay fits the available screen; forms and other long routes still scroll.
+    > .main:has(> .p4-vega) {
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        grid-template-rows: minmax(0, 1fr);
+        align-items: stretch;
+        justify-items: center;
+        padding-block: .8rem;
+        overflow: hidden;
+
+        > .p4-vega { margin-block: 0; }
+    }
+}
+
+// Inline gameplay stays clipped to its layout; fullscreen must cover that boundary.
+html[data-native-app].canvas-fullscreen-fallback-active .app-shell > .main {
+    overflow: visible;
+}
+
+// A short landscape viewport needs its height for content, rather than outer spacing.
+@media (orientation: landscape) and (max-height: 500px) {
+    .app-shell > .header {
+        min-height: 0;
+        padding-block: .35rem 0;
+    }
+
+    .app-shell > .main,
+    html[data-native-app] .app-shell > .main {
+        padding-block: .6rem;
+    }
+
+    .app-shell > .footer {
+        min-height: 0;
+
+        .footer__text { padding-block: .35rem; }
     }
 }
 
