@@ -2,6 +2,11 @@
 
 Source preparation, 2026-10-20 local. No production activation or public upload is performed by this change. Parent-led child registration stays in scope, with the owner handling real form reviews.
 
+Checkpoint update, 21 October: unsigned iOS/Android qualification at `a8a1c384`
+completed, and source `05a0da0f` supplies the [real schema operation/verifier](child-schema-operation.md).
+The validation list below records the original source change. Current open
+policy/operational items are in the [BR/US decision package](../2026-10-21/br-us-policy-decision-package.md).
+
 ## Implemented behavior
 
 `registrationAge.ts` requests the platform age range after a user continues through account eligibility. Web retains its neutral country/coarse-age screen. Android requests Play access before querying a shared range; iOS uses Declared Age Range on supported systems. Guest content does not start this request. A user already selecting the parent path goes directly to that protective path without needing a native prompt.
@@ -24,7 +29,7 @@ The candidate notice is `privacy-2026-10-20.3`; the form is `signed-parent-form-
 - Targeted real-browser signup/parent suites: **11/11**, including US/BR restriction persistence through reload/navigation, no credentials/provider requests, and retained password login.
 - Android release Java compile and **37 JVM tests** passed. See [Android receipt](native-age-validation.md).
 - iOS source/signing gates: [iOS receipt](ios-native-age-range.md). Windows checks cannot replace unsigned SDK compilation or real-device proof.
-- Rollout guard suites: **233/233**. See [rollout safeguards](rollout-config-safeguards.md). The real schema verifier is intentionally unwired, so strict production writes fail closed.
+- Original rollout guard suites: **233/233**. See [rollout safeguards](rollout-config-safeguards.md). The subsequently implemented real verifier is documented in the checkpoint update above; missing or changed live evidence still blocks strict writes.
 - Frontend/backend production builds passed. No signing/upload. Independent review found and resolved anonymous logout clearing the restriction; no remaining concrete blocker was found in the bounded source delta.
 
 Commands run from `frontend`: `npm test`, `npm run build`, and focused `node --experimental-strip-types --test` runs for the changed services/components. Build environment: `VITE_PROD_API_URL=https://mickeyf-org-j7yuum4tiq-uc.a.run.app`, `VITE_ENABLE_THREE_BOSSES_RELEASE=1`.
@@ -35,4 +40,10 @@ From root: `node backend/scripts/run-migration-tests.mjs --parent-registration`.
 
 ## Remaining qualification
 
-Run final-source unsigned Xcode compilation and verify weak linkage/minimum OS, then actual prompts/range boundaries, refusal/errors, resume and account paths on supported devices. Signing needs Declared Age Range in the real profile; local entitlement text is not proof. Play acceptance needs the actual Play-delivered signed app. Complete regional/operational review, the exact 0028 operation and live schema verifier, then qualify a compatible creation-closed backend/fallback before publication. Existing general signup remains live while this candidate is held.
+Unsigned Xcode compilation and actual weak-link/minimum-OS inspection passed at
+`a8a1c384`. Qualify actual prompts/range boundaries, refusal/errors, resume and
+account paths on supported devices. Signing needs a compatible real profile;
+Play acceptance needs the Play-delivered signed app. The exact0028 tooling/live
+verifier is implemented; production schema execution and compatible closed
+backend/fallback qualification remain separate gates. Existing general signup
+remains live while this candidate is held.

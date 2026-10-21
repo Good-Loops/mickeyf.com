@@ -4,6 +4,11 @@ Preparation checked 2026-10-20 (2026-10-21 UTC). The owner has confirmed that he
 
 This guide does not activate registration, approve a real request, send email, certify guardianship or establish regional compliance. Operational storage/retention, regional policy and age assurance still require qualification before launch. See [policy review](child-policy-review.md), [synthetic rehearsal](synthetic-parent-consent-rehearsal.md) and [production cutover plan](production-cutover-plan.md).
 
+The 21 October [decision package](../2026-10-21/br-us-policy-decision-package.md)
+proposes the all-status retention reconciliation procedure, approved-unused attachment
+case, consumer-mail terms and Apple relay qualification. Its private register and
+security program are drafts; no mailbox/storage control is presumed completed.
+
 ## What the reviewer checks
 
 1. Open the returned scan or photograph in the private operator environment. The published return address is `mickeyf.plays@gmail.com`. The parent must return it from the exact verified contact recorded for the request; a matching display name or forwarded message alone is insufficient. Do not change the recorded contact to fit a message.

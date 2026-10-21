@@ -11,6 +11,7 @@ import { observeChildSignedFormMetadata, createChildSignedFormSchemaReceipt,
     type ChildSignedFormMetadataSettings } from './childSignedFormMetadata';
 import { CHILD_SIGNED_FORM_SQL_SHA256, childSignedFormFingerprint, planChildSignedFormOperation, applyChildSignedFormOperation,
     verifyChildSignedFormOperation, type ChildReleaseSafety, type ChildSignedFormOperationDependencies } from './childSignedFormOperation';
+import { observeSignedParentFormRetention } from '../accounts/signedParentFormRetention';
 
 const config = loadMigrationConfig();
 let admin: Connection;
@@ -18,6 +19,8 @@ let runtime: Connection;
 let settings: ChildSignedFormMetadataSettings;
 const parentId = randomUUID();
 const requestId = randomUUID();
+const retentionChildId = randomUUID();
+const retentionReferences = { approved: randomUUID(), rejected: randomUUID(), expired: randomUUID(), used: randomUUID(), missing: randomUUID() };
 const metadataConnection = (connection: Connection) => connection as unknown as MigrationConnection;
 
 before(async () => {
@@ -82,6 +85,14 @@ test('wrong database/server/operator/version pins fail before any migration or d
         { ...settings, expectedCurrentUser: 'wrong@%' }, { ...settings, expectedServerVersion: '8.0.31-wrong' },
         { ...settings, expectedVersionComment: 'wrong vendor' },
     ]) await assert.rejects(observeChildSignedFormMetadata(metadataConnection(admin), changed));
+});
+
+test('retention observation works on the exact legacy schema before pending 0028 is applied', async () => {
+    const missingReference = randomUUID();
+    const report = await observeSignedParentFormRetention({ connection: metadataConnection(admin), settings,
+        source: { sourceCommit: 'a'.repeat(40), sqlSha256: CHILD_SIGNED_FORM_SQL_SHA256 } }, [requestId, missingReference]);
+    assert.deepEqual(report.requests.map(request => request.state), ['pending', 'not-found']);
+    assert.equal((await observeChildSignedFormMetadata(metadataConnection(admin), settings)).capability, 'legacy-us');
 });
 
 test('unexpected history or a checksum change is rejected without applying an unrelated migration', async () => {
@@ -170,4 +181,55 @@ test('reviewed operation executes one exact ALTER, preserves legacy requests/his
     assert.equal(alters, 1, 'old plan cannot replay an already extended schema');
     assert.throws(() => createChildSignedFormSchemaReceipt(JSON.parse(JSON.stringify(after)), deps.source),
         'a serialized snapshot cannot be promoted into live SQL evidence');
+});
+
+test('real retention observation includes all requested statuses without contacts, credentials, writes or child identifiers', async () => {
+    await admin.query('INSERT INTO users (user_name,email,user_password,account_uuid) VALUES (?,NULL,?,?)',
+        ['SYNTHETIC RETENTION CHILD', 'SYNTHETIC-NOT-A-REAL-PASSWORD-HASH', retentionChildId]);
+    for (const [kind, reference] of Object.entries(retentionReferences)) {
+        if (kind === 'missing') continue;
+        const status = kind === 'expired' ? 'approved' : kind;
+        await admin.query(`INSERT INTO parent_signed_forms (reference,parent_uuid,country_code,user_name,policy_digest,consent_version,
+            policy_version,provider,subject,verified_contact,status,submitted_at,expires_at,reviewed_at,reviewer,form_sha256,child_uuid)
+            VALUES (?,?,'US',NULL,?,'synthetic-consent','synthetic-policy','google',?,'synthetic@example.test',?,UTC_TIMESTAMP(6),
+                UTC_TIMESTAMP(6)+INTERVAL ? DAY,UTC_TIMESTAMP(6),'SYNTHETIC-OWNER',?,?)`,
+        [reference, parentId, Buffer.alloc(32, 1), Buffer.from('SYNTHETIC-RETENTION-SUBJECT'), status,
+            kind === 'expired' || kind === 'used' ? -1 : 1, Buffer.alloc(32, 5), kind === 'used' ? retentionChildId : null]);
+    }
+    const statements: string[] = [];
+    const connection: MigrationConnection = { async query(sql, parameters) {
+        statements.push(sql.trim()); return metadataConnection(admin).query(sql, parameters);
+    } };
+    const references = [requestId, ...Object.values(retentionReferences)];
+    const report = await observeSignedParentFormRetention({ connection, settings,
+        source: { sourceCommit: 'a'.repeat(40), sqlSha256: CHILD_SIGNED_FORM_SQL_SHA256 } }, references);
+    const states = new Map(report.requests.map(request => [request.reference, request.state]));
+    assert.equal(states.get(requestId), 'pending');
+    assert.equal(states.get(retentionReferences.approved), 'approved');
+    assert.equal(states.get(retentionReferences.rejected), 'rejected');
+    assert.equal(states.get(retentionReferences.expired), 'expired-unused');
+    assert.equal(states.get(retentionReferences.used), 'used', 'used consent must survive the original request expiry');
+    assert.equal(states.get(retentionReferences.missing), 'not-found');
+    assert.equal(report.requests.length, references.length);
+    for (const sql of statements) assert.match(sql, /^(?:SELECT|SHOW)\b/u);
+    const encoded = JSON.stringify(report);
+    for (const privateValue of ['synthetic@example.test', 'SYNTHETIC-OWNER', 'SYNTHETIC RETENTION CHILD', retentionChildId, parentId]) {
+        assert.equal(encoded.includes(privateValue), false, 'retention report must not copy identity/contact/evidence data');
+    }
+});
+
+test('real retention report detects cascaded form absence and rejects a failed lookup instead of claiming deletion', async () => {
+    await admin.query('DELETE FROM users WHERE account_uuid=?', [retentionChildId]);
+    const deps = { connection: metadataConnection(admin), settings,
+        source: { sourceCommit: 'a'.repeat(40), sqlSha256: CHILD_SIGNED_FORM_SQL_SHA256 } };
+    const report = await observeSignedParentFormRetention(deps, [retentionReferences.used]);
+    assert.equal(report.requests[0].state, 'not-found');
+    assert.equal(report.requests[0].expiresAt, null);
+    const unavailable: MigrationConnection = { async query(sql, parameters) {
+        if (/FROM parent_signed_forms\b/u.test(sql)) throw new Error('SYNTHETIC PRIVATE LOOKUP FAILURE');
+        return metadataConnection(admin).query(sql, parameters);
+    } };
+    await assert.rejects(observeSignedParentFormRetention({ ...deps, connection: unavailable }, [retentionReferences.used]));
+    const [[unchanged]] = await admin.query<RowDataPacket[]>('SELECT status FROM parent_signed_forms WHERE reference=?', [requestId]);
+    assert.equal(unchanged.status, 'pending', 'observation must leave unrelated requests untouched');
 });
