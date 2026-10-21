@@ -15,6 +15,11 @@ on:
         type: boolean
         required: false
         default: false
+      capture_store_screenshots:
+        description: Capture actual unsigned iPhone/iPad Home screens; requires compile_only=false and upload_testflight=false
+        type: boolean
+        required: false
+        default: false
       upload_testflight:
         description: Sign and upload a build (requires ios-testflight approval; never submits for review)
         type: boolean
@@ -70,6 +75,12 @@ jobs:
           xcodebuild -version
           pod --version
 
+      - name: Check optional screenshot mode
+        if: ${{ inputs.capture_store_screenshots }}
+        run: |
+          test "${{ inputs.compile_only }}" != "true"
+          node --test ../scripts/ios-store-screenshots.test.mjs
+
       - name: Install locked frontend dependencies
         run: |
           npm install --global npm@11.6.2 --no-audit --no-fund
@@ -106,8 +117,28 @@ jobs:
             git diff --exit-code -- ios/App/Podfile.lock
           fi
 
+      - name: Capture actual native Home screenshots
+        if: ${{ inputs.capture_store_screenshots && !inputs.compile_only && !inputs.upload_testflight }}
+        env:
+          LUDOLUME_CAPTURE_STORE_SCREENSHOTS: "true"
+          LUDOLUME_UPLOAD_TESTFLIGHT: "false"
+          LUDOLUME_COMPILE_ONLY: "false"
+        run: node ../scripts/ios-store-screenshots.mjs
+
+      - name: Upload actual native Home screenshots
+        if: ${{ inputs.capture_store_screenshots && !inputs.compile_only && !inputs.upload_testflight }}
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: ludolume-store-home-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            ${{ runner.temp }}/ludolume-store-screenshots-${{ github.run_id }}-${{ github.run_attempt }}/screenshots/iphone-home.jpg
+            ${{ runner.temp }}/ludolume-store-screenshots-${{ github.run_id }}-${{ github.run_attempt }}/screenshots/ipad-home.jpg
+            ${{ runner.temp }}/ludolume-store-screenshots-${{ github.run_id }}-${{ github.run_attempt }}/screenshots/manifest.json
+          if-no-files-found: error
+          retention-days: 3
+
       - name: Package simulator app
-        if: ${{ !inputs.compile_only }}
+        if: ${{ !inputs.compile_only && !inputs.capture_store_screenshots }}
         run: |
           ditto -c -k --sequesterRsrc --keepParent \
             "$RUNNER_TEMP/ludolume-derived-data/Build/Products/Release-iphonesimulator/App.app" \
@@ -120,7 +151,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload simulator app
-        if: ${{ !inputs.compile_only }}
+        if: ${{ !inputs.compile_only && !inputs.capture_store_screenshots }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ludolume-ios-simulator-${{ github.run_id }}-${{ github.run_attempt }}
@@ -129,7 +160,7 @@ jobs:
           retention-days: 1
 
       - name: Upload Xcode diagnostics on failure
-        if: ${{ failure() && !inputs.compile_only }}
+        if: ${{ failure() && !inputs.compile_only && !inputs.capture_store_screenshots }}
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: ludolume-ios-diagnostics-${{ github.run_id }}-${{ github.run_attempt }}

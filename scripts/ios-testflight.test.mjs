@@ -130,8 +130,8 @@ test('workflow keeps the default and protected branch gate for both upload modes
 test('compile-only workflow uses existing hosted tools and never signs or uploads app artifacts', async () => {
     const workflow = await readFile(new URL('../.github/workflows/ios-build.yml', import.meta.url), 'utf8');
     assert.match(workflow, /compile_only:[\s\S]*?type: boolean\s+required: false\s+default: false/);
-    assert.match(workflow, /Package simulator app\s+if: \$\{\{ !inputs\.compile_only \}\}/);
-    assert.match(workflow, /Upload simulator app\s+if: \$\{\{ !inputs\.compile_only \}\}/);
+    assert.match(workflow, /Package simulator app\s+if: \$\{\{ !inputs\.compile_only && !inputs\.capture_store_screenshots \}\}/);
+    assert.match(workflow, /Upload simulator app\s+if: \$\{\{ !inputs\.compile_only && !inputs\.capture_store_screenshots \}\}/);
     const android = workflow.slice(workflow.indexOf('  android:'));
     assert.match(android, /inputs\.compile_only && !inputs\.upload_testflight/);
     assert.match(android, /runs-on: ubuntu-24.04/);
