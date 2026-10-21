@@ -9,6 +9,16 @@ export default function Privacy() {
         {notice.sections.map(section => <section key={section.id} aria-labelledby={`privacy-${section.id}`}>
             <h2 id={`privacy-${section.id}`}>{section.title}</h2>
             <p>{section.text}</p>
+            {section.id === 'deletion' && <>
+                <p>In a browser, open <a href="/account">Account</a> or, where available,{' '}
+                    <a href="/parent-accounts">Parent accounts</a> to use the deletion controls.</p>
+                <p>To request deletion of your Ludolume account and associated data as described above without
+                    reinstalling the app,{' '}
+                    <a href={`mailto:${notice.contactEmail}?subject=${encodeURIComponent('Ludolume account deletion request')}`}>
+                        email an account deletion request to {notice.contactEmail}</a>.
+                    Account ownership must be verified before an emailed deletion request can be completed.
+                    Do not send passwords or sign-in codes.</p>
+            </>}
         </section>)}
         <section aria-labelledby="privacy-permissions">
             <h2 id="privacy-permissions">Separate permissions</h2>

@@ -1,5 +1,5 @@
 {
-  "version": "privacy-2026-10-06.1",
+  "version": "privacy-2026-10-20.1",
   "noticeUrl": "https://mickeyf.com/privacy",
   "operatorName": "Michel Silveira Dias Fingergut",
   "contactEmail": "mickeyf.plays@gmail.com",
@@ -25,7 +25,7 @@
     {
       "id": "children",
       "title": "Country, age and parent-led accounts",
-      "text": "Registration asks for country and a coarse age range, rather than a birth date or identity document. Where a parent-led account is required, the parent uses their own account and completes the applicable permission process. US parent-managed accounts require a signed parent form, returned as a scan or photograph from the parent's verified email and reviewed before the child account is created. A separate signed choice is required for optional public leaderboard disclosure. The child has a separate chosen nickname and password; this flow does not request a child email. Provider sign-in establishes account control, not age or guardianship. Unused form requests expire and are removed after 14 days. Incomplete or rejected form messages are deleted within 14 days; approved forms are retained privately while the child account is active and deleted within 14 days after account withdrawal or deletion."
+      "text": "General signup does not ask for country, age, birth date or an identity document. Where a country-and-age-based parent-led flow is available, it asks for country and a coarse age range. Where a parent-led account is required, the parent uses their own account and completes the applicable permission process. US parent-managed accounts require a signed parent form, returned as a scan or photograph from the parent's verified email and reviewed before the child account is created. A separate signed choice is required for optional public leaderboard disclosure. The child has a separate chosen nickname and password; this flow does not request a child email. Provider sign-in establishes account control, not age or guardianship. Unused form requests expire and are removed after 14 days. Incomplete or rejected form messages are deleted within 14 days; approved forms are retained privately while the child account is active and deleted within 14 days after account withdrawal or deletion."
     },
     {
       "id": "leaderboards",

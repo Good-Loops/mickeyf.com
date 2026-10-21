@@ -1,5 +1,28 @@
 # Ludolume iOS cloud builds
 
+## Current public-release preparation — 2026-10-20
+
+The latest delivered internal build is **1.0 (28.1.0)** from `2fd2b831`, processed
+and Testing in the existing Ludolume Internal group. The owner now reports the
+app works on their iPhone; carry forward that acceptance for the behavior they
+exercised. The exact installed build was not independently read from the device.
+
+The release goal includes the **public App Store, website and Google Play**,
+with free store downloads initially in Brazil and the United States. Live App
+Store Connect still shows version 1.0 Prepare for Submission attached to old
+build **10.1.0**. Internal-only **28.1.0** is not an App Store candidate: use the
+existing protected `upload_distribution=app-store-draft` workflow for a final
+reviewed build, then complete metadata/assets/privacy/rating/reviewer access.
+Upload, draft association, review submission and release remain separate steps.
+
+See [the public release plan](../../release-prep/2026-10-20/README.md) and
+[current iOS readiness](../../release-prep/2026-10-20/ios-readiness.md).
+Later source corrections require their own validation; earlier hosted results
+and phone acceptance do not certify untested provider lifecycle cases. No signed
+workflow, draft save, submission or public release was performed in this pass.
+
+The dated build/session checkpoints below are retained as history.
+
 ## First stage: unsigned simulator compilation
 
 `.github/workflows/ios-build.yml` is manual-only. It uses a standard GitHub-hosted

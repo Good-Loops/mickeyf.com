@@ -113,6 +113,31 @@ test('a post-write configuration change is reported without another mutation', a
     assert.equal(f.patches.length, 1);
 });
 
+for (const pointer of ['previous', 'foreign']) test(`settled ${pointer} serving pointer refuses promotion after one write`, async () => {
+    const f = fixture();
+    const plan = await planSessionTraffic(f.provider, f.pins, 'promote', now);
+    f.provider.waitForService = async () => ({ ...copy(f.service), latestReadyRevision: pointer === 'previous'
+        ? plan.before.latestReadyRevision : `${SERVICE}/revisions/mickeyf-org-foreign` });
+    await assert.rejects(applySessionTraffic(f.provider, plan, fingerprint(plan), now), /Unexpected state after traffic change/);
+    assert.equal(f.patches.length, 1);
+});
+
+test('traffic adapter accepts only the prior or exact target pointer while preserving template checks', async () => {
+    const f = fixture();
+    const plan = await planSessionTraffic(f.provider, f.pins, 'promote', now);
+    await f.provider.patchTraffic({ name: SERVICE, etag: f.service.etag, traffic: plan.desiredTraffic });
+    const provider = createSessionCloudProvider('fixture-token-with-sufficient-length', async () =>
+        new Response(JSON.stringify(f.service)));
+    assert.equal((await provider.waitForService(plan)).latestReadyRevision,
+        `${SERVICE}/revisions/${sessionRevisionName(f.pins.candidate.deployment)}`);
+    f.service.latestReadyRevision = `${SERVICE}/revisions/mickeyf-org-foreign`;
+    await assert.rejects(provider.waitForService(plan), /Serving revision drifted/);
+    f.service.latestReadyRevision = `${SERVICE}/revisions/${sessionRevisionName(f.pins.candidate.deployment)}`;
+    f.service.template.revision = 'mickeyf-org-foreign';
+    await assert.rejects(provider.waitForService(plan), /Service configuration drifted/);
+    assert.equal(f.patches.length, 1);
+});
+
 test('session adapter only permits a single exact session/rollback revision with updateMask=traffic', async () => {
     const f = fixture();
     const requests = [];

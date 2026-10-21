@@ -177,9 +177,10 @@ export function validateService(service) {
 }
 
 // Output-only fields can settle after a traffic PATCH; all configuration must stay unchanged.
+// Check latestReadyRevision separately against the exact old/new serving revisions.
 export function serviceConfiguration(service) {
     const volatile = new Set(['generation', 'observedGeneration', 'etag', 'updateTime', 'lastModifier', 'traffic',
-        'trafficStatuses', 'conditions', 'terminalCondition', 'reconciling', 'urls']);
+        'trafficStatuses', 'conditions', 'terminalCondition', 'reconciling', 'urls', 'latestReadyRevision']);
     return Object.fromEntries(Object.entries(service).filter(([key]) => !volatile.has(key)));
 }
 export function revisionConfiguration(revision) {
@@ -252,7 +253,8 @@ export async function planFrozenTraffic(provider, pins, now = Date.now()) {
     return {
         schemaVersion: 1, createdAt: new Date(now).toISOString(), pins: structuredClone(pins),
         before: { etag: service.etag, generation: service.generation, sha256: fingerprint(service),
-            configurationSha256: fingerprint(serviceConfiguration(service)), traffic: service.traffic },
+            configurationSha256: fingerprint(serviceConfiguration(service)), traffic: service.traffic,
+            latestReadyRevision: service.latestReadyRevision },
         targetRevisionSha256: fingerprint(revisionConfiguration(revision)),
         desiredTraffic: [{ type: REVISION_TYPE, revision: revisionName(pins), percent: 100 }],
         removeTags: service.traffic.filter(t => t.tag).map(t => t.tag).sort(),
@@ -276,6 +278,7 @@ export async function applyFrozenTraffic(provider, plan, confirmation, now = Dat
         requireThat(BigInt(result.generation) === BigInt(plan.before.generation) + 1n
             && result.etag !== plan.before.etag
             && fingerprint(serviceConfiguration(result)) === plan.before.configurationSha256
+            && result.latestReadyRevision === `${SERVICE}/revisions/${plan.desiredTraffic[0].revision}`
             && same(trafficShape(result.traffic), trafficShape(plan.desiredTraffic)), 'Unexpected state after traffic change');
         const revision = validateFrozenRevision(await provider.getRevision(revisionName(plan.pins)), plan.pins);
         requireThat(fingerprint(revisionConfiguration(revision)) === plan.targetRevisionSha256, 'Target revision changed after traffic mutation');
@@ -380,6 +383,8 @@ function cloudProvider(token, fetcher, allowedRevision) {
                     || generation === String(BigInt(plan.before.generation) + 1n), 'Concurrent generation change');
                 requireThat(fingerprint(serviceConfiguration(service)) === plan.before.configurationSha256,
                     'Service configuration drifted during traffic reconciliation');
+                requireThat([plan.before.latestReadyRevision, `${SERVICE}/revisions/${plan.desiredTraffic[0].revision}`]
+                    .includes(service.latestReadyRevision), 'Serving revision drifted during traffic reconciliation');
                 if (generation !== plan.before.generation && !service.reconciling
                     && service.observedGeneration === generation) return service;
                 if (service.terminalCondition?.state === 'CONDITION_FAILED') fail('Traffic reconciliation failed');

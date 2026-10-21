@@ -178,7 +178,8 @@ async function planTraffic(provider, pins, operation, now, providerRelease) {
     return {
         schemaVersion: providerRelease ? 2 : 1, operation, createdAt: new Date(now).toISOString(), pins: structuredClone(pins),
         before: { etag: service.etag, generation: service.generation, sha256: fingerprint(service),
-            configurationSha256: fingerprint(serviceConfiguration(service)), traffic: service.traffic },
+            configurationSha256: fingerprint(serviceConfiguration(service)), traffic: service.traffic,
+            latestReadyRevision: service.latestReadyRevision },
         revisionSha256: Object.fromEntries(Object.entries(revisions).map(([key, revision]) => [key, fingerprint(revisionConfiguration(revision))])),
         desiredTraffic: [{ type: REVISION_TYPE, revision: target, percent: 100 }],
         removeTags: service.traffic.filter(item => item.tag).map(item => item.tag).sort(),
@@ -204,6 +205,7 @@ async function applyTraffic(provider, plan, confirmation, now, providerRelease) 
         validateService(service);
         requireThat(BigInt(service.generation) === BigInt(plan.before.generation) + 1n && service.etag !== plan.before.etag
             && fingerprint(serviceConfiguration(service)) === plan.before.configurationSha256
+            && service.latestReadyRevision === `${SERVICE}/revisions/${plan.desiredTraffic[0].revision}`
             && same(trafficShape(service.traffic), trafficShape(plan.desiredTraffic)), 'Unexpected state after traffic change');
         const revisions = await checkedRevisions(provider, plan.pins, providerRelease);
         requireThat(Object.entries(revisions).every(([key, revision]) =>

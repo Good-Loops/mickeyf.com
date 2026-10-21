@@ -1,10 +1,14 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import { PROJECT, REGION, SERVICE, fingerprint, revisionConfiguration, sessionRevisionName } from './frozen-backend-traffic.mjs';
 import { rollbackRevisionName, planSessionTraffic } from './session-backend-traffic.mjs';
 import { rollbackTemplate, planRollbackDeployment, applyRollbackDeployment,
+    planProviderRollbackDeployment, applyProviderRollbackDeployment,
     createRollbackDeploymentProvider, main } from './session-backend-rollback.mjs';
 import { fixture, now } from './test-support/session-release-fixture.mjs';
+import { deploymentFixture as providerDeploymentFixture } from './test-support/provider-release-fixture.mjs';
 
 function deploymentFixture() {
     const f = fixture();
@@ -66,6 +70,67 @@ test('equivalent traffic ordering and explicit zero percentages do not look like
     assert.equal(f.patches.length, 1);
 });
 
+test('a Ready retired rollback preserves the exact prior serving pointer without another write', async () => {
+    const f = deploymentFixture();
+    const serving = f.service.latestReadyRevision;
+    const patch = f.provider.patchRollbackTemplate;
+    f.provider.patchRollbackTemplate = async (...args) => {
+        await patch(...args);
+        f.service.latestReadyRevision = serving;
+        f.rollback.conditions = [
+            { type: 'Ready', state: 'CONDITION_SUCCEEDED' },
+            { type: 'Active', state: 'CONDITION_FAILED', severity: 'INFO', revisionReason: 'RETIRED' },
+        ];
+    };
+    const plan = await planRollbackDeployment(f.provider, f.pins, now);
+    const result = await applyRollbackDeployment(f.provider, plan, fingerprint(plan), now);
+    assert.equal(result.trafficUnchanged, true);
+    assert.equal(f.service.latestReadyRevision, serving);
+    assert.equal(f.service.latestCreatedRevision, `${SERVICE}/revisions/${rollbackRevisionName(f.pins)}`);
+    assert.equal(f.patches.length, 1);
+    await planSessionTraffic(f.provider, f.pins, 'promote', now + 1000);
+});
+
+for (const [kind, fixtureFactory, planDeployment, applyDeployment] of [
+    ['session', deploymentFixture, planRollbackDeployment, applyRollbackDeployment],
+    ['provider', providerDeploymentFixture, planProviderRollbackDeployment, applyProviderRollbackDeployment],
+]) test(`${kind} rollback planning accepts the exact baseline pointer accepted by generated preflight`, async () => {
+    const f = fixtureFactory();
+    const candidate = sessionRevisionName(f.pins.candidate.deployment);
+    f.service.latestReadyRevision = `${SERVICE}/revisions/${f.pins.baseline.revisionName}`;
+    const snapshot = {
+        generation: Number(f.service.generation),
+        traffic: f.service.traffic.map(entry => [entry.revision, entry.percent ?? 0, entry.tag ?? '']).sort(),
+        latestCreatedRevisionName: candidate, latestReadyRevisionName: f.pins.baseline.revisionName,
+    };
+    const before = { ...snapshot, generation: snapshot.generation - 1,
+        traffic: snapshot.traffic.filter(([revision]) => revision !== candidate),
+        latestCreatedRevisionName: f.pins.baseline.revisionName };
+    const source = readFileSync(new URL('./render-frozen-backend-deploy.preflight.py', import.meta.url), 'utf8');
+    const verification = spawnSync(process.platform === 'win32' ? 'python' : 'python3', ['-B', '-c',
+        'import json,sys\np=json.load(sys.stdin)\nns={"__name__":"test"}\n'
+        + 'exec(compile(p["source"],"preflight.py","exec"),ns)\n'
+        + 'ns["verify_deployed_service"](p["snapshot"],p["before"],p["revision"],p["tag"])'], {
+        input: JSON.stringify({ source, snapshot, before, revision: candidate,
+            tag: f.service.traffic.find(entry => entry.revision === candidate).tag }),
+        encoding: 'utf8', timeout: 20_000,
+    });
+    assert.equal(verification.error, undefined);
+    assert.equal(verification.status, 0, verification.stderr);
+    const containers = structuredClone(f.service.template.containers);
+    const plan = await planDeployment(f.provider, f.pins, now);
+    assert.deepEqual(f.service.template.containers, containers);
+    assert.equal(plan.before.latestReadyRevision, f.service.latestReadyRevision);
+    const patch = f.provider.patchRollbackTemplate;
+    f.provider.patchRollbackTemplate = async (...args) => {
+        await patch(...args);
+        f.service.latestReadyRevision = plan.before.latestReadyRevision;
+    };
+    const result = await applyDeployment(f.provider, plan, fingerprint(plan), now);
+    assert.equal(result.trafficUnchanged, true);
+    assert.equal(f.patches.length, 1);
+});
+
 for (const [label, mutate, expected] of [
     ['existing revision', f => { f.provider.getRollbackIfExists = async () => f.rollback; }, /already exists/],
     ['lookup permission error', f => { f.provider.getRollbackIfExists = async () => { throw new Error('HTTP 403'); }; }, /403/],
@@ -73,6 +138,16 @@ for (const [label, mutate, expected] of [
     ['secret wrong identity', f => { f.secret.name = f.secret.name.replace('/18', '/17'); }, /wrong identity/],
     ['candidate receipt changed', f => { f.build.substitutions._APPROVAL = 'changed'; }, /approval differs/],
     ['candidate not newest template', f => { f.service.template.revision = f.pins.baseline.revisionName; }, /candidate first/],
+    ['foreign candidate serving pointer', f => { f.service.latestReadyRevision = `${SERVICE}/revisions/mickeyf-org-foreign`; }, /candidate first/],
+    ['unrelated old candidate serving pointer', f => { f.service.latestReadyRevision = `${SERVICE}/revisions/mickeyf-org-previous-unreviewed`; }, /candidate first/],
+    ['changed candidate template with captured baseline pointer', f => {
+        f.service.latestReadyRevision = `${SERVICE}/revisions/${f.pins.baseline.revisionName}`;
+        f.service.template.containers[0].image += '-changed';
+    }, /candidate first/],
+    ['failed candidate Ready with captured baseline pointer', f => {
+        f.service.latestReadyRevision = `${SERVICE}/revisions/${f.pins.baseline.revisionName}`;
+        f.candidate.conditions = [{ type: 'Ready', state: 'CONDITION_FAILED' }];
+    }, /not Ready/],
     ['mutable traffic', f => { f.service.traffic[0].type = 'TRAFFIC_TARGET_ALLOCATION_TYPE_LATEST'; f.service.trafficStatuses = structuredClone(f.service.traffic); }, /LATEST/],
     ['launch stage drift', f => { f.service.launchStage = 'BETA'; }, /launch stages differ/],
     ['unknown runtime field', f => { f.baseline.unknownRuntimeSetting = true; f.pins.baseline.configurationSha256 = fingerprint(revisionConfiguration(f.baseline)); }, /unreviewed revision field/],
@@ -111,6 +186,11 @@ for (const [label, mutate] of [
     ['service IAM setting', f => { f.service.invokerIamDisabled = true; }],
     ['generation', f => { f.service.generation = f.service.observedGeneration = '148'; }],
     ['rollback runtime', f => { f.rollback.timeout = '301s'; }],
+    ['serving pointer', f => { f.service.latestReadyRevision = `${SERVICE}/revisions/mickeyf-org-foreign`; }],
+    ['created pointer', f => { f.service.latestCreatedRevision = `${SERVICE}/revisions/mickeyf-org-foreign`; }],
+    ['failed rollback Ready condition', f => { f.rollback.conditions = [
+        { type: 'Ready', state: 'CONDITION_FAILED', revisionReason: 'RETIRED' },
+    ]; }],
 ]) test(`post-write ${label} drift fails verification without another mutation`, async () => {
     const f = deploymentFixture();
     const plan = await planRollbackDeployment(f.provider, f.pins, now);

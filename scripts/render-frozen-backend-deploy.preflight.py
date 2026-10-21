@@ -317,6 +317,17 @@ def stable_service(service):
             "latestReadyRevisionName": status.get("latestReadyRevisionName")}
 
 
+def verify_deployed_service(snapshot, before, revision, tag):
+    expected_traffic = sorted(before["traffic"] + [[revision, 0, tag]])
+    pointer = snapshot["latestReadyRevisionName"]
+    # Dormant revisions may retire while the service still points to its prior serving revision.
+    if (snapshot["traffic"] != expected_traffic or int(snapshot["generation"]) != int(before["generation"]) + 1
+            or snapshot["latestCreatedRevisionName"] != revision
+            or not isinstance(pointer, str) or re.fullmatch(r"mickeyf-org-[a-z0-9-]+", pointer) is None
+            or pointer not in (before["latestReadyRevisionName"], revision)):
+        reject("post-deploy state changed anything beyond the exact new candidate tag/revision")
+
+
 def verify_exclusion(stage_a, stage_b, active_builds, deploy_build, deploy_trigger, triggers, pins, build_id, trigger_id):
     for record, expected_id, expected_name in ((stage_a, STAGE_A, "main-push-mickeyf-com"),
             (stage_b, pins["canonicalDeployTriggerId"], pins["canonicalDeployTriggerName"])):
@@ -437,10 +448,7 @@ def main():
             if snapshot != before:
                 reject("service changed during scan/preflight; regenerate/review the one-shot deployment")
         else:
-            expected_traffic = sorted(before["traffic"] + [[revision, 0, tag]])
-            if (snapshot["traffic"] != expected_traffic or int(snapshot["generation"]) != int(before["generation"]) + 1
-                    or snapshot["latestCreatedRevisionName"] != revision or snapshot["latestReadyRevisionName"] != revision):
-                reject("post-deploy state changed anything beyond the exact new candidate tag/revision")
+            verify_deployed_service(snapshot, before, revision, tag)
     print(f"Candidate trust/exclusion preflight passed ({phase}); no production mutation performed by preflight.")
 
 

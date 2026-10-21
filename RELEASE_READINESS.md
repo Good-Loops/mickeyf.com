@@ -1,5 +1,29 @@
 # Release readiness and cumulative security ledger
 
+## Current public-release closeout — 2026-10-20
+
+The owner confirms the app now works on their iPhone and wants **the website,
+public Apple App Store and public Google Play** released. Both store apps are
+**free**, initially **Brazil and United States**. The current plan and scoped
+fixed/accepted/deferred/pending ledger are in
+[the public release plan](release-prep/2026-10-20/README.md).
+
+PR #342 at `2fd2b831` has green hosted checks. Local release-verifier and notice
+corrections prepared afterward need review and fresh hosted validation. Live
+readback confirms general signup is already active on the healthy D0 backend;
+Hosting still serves frontend `454f8170`. The old session-only activation hold
+below is historical, not an instruction to repeat that cutover.
+
+Latest internal iOS build is 1.0 (28.1.0); the public App Store draft still selects
+10.1.0 and needs an eligible current build and completed metadata. Google Play
+draft app `4974292717500321843` was created after the owner's explicit acceptance
+authorization. Its dashboard requires 12 closed testers for at least 14 days;
+currently 0 are opted in. No build/test release is uploaded. No merge,
+deployment, traffic change, store submission/publication or visibility change
+was performed in this closeout.
+
+## Historical September 30 checkpoint
+
 Current dispositions refreshed 2026-09-30 against draft PR #341's successful
 candidate `6c28939d` and the owner-accepted S8 runtime exception below.
 The previous wait-for-upstream hold is superseded. Subsequent hosted results are recorded on

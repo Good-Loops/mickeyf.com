@@ -66,16 +66,18 @@ async function planDeployment(provider, pins, now, providerRelease) {
     requireThat(existing === null && !service.traffic.some(entry => entry.revision === rollbackRevisionName(pins)),
         'Rollback revision already exists or is referenced; inspect it instead of redeploying');
     const candidateName = sessionRevisionName(pins.candidate.deployment);
+    // The independent candidate checks above prove Ready/runtime even when its serving pointer has not advanced.
     requireThat(service.template.revision === candidateName
-        && service.latestReadyRevision === `${SERVICE}/revisions/${candidateName}`
-        && service.latestCreatedRevision === service.latestReadyRevision
+        && [candidateName, pins.baseline.revisionName].some(name => service.latestReadyRevision === `${SERVICE}/revisions/${name}`)
+        && service.latestCreatedRevision === `${SERVICE}/revisions/${candidateName}`
         && same(service.template.containers, revisions.candidate.containers), 'Deploy the exact reviewed candidate first');
     requireThat(service.launchStage === revisions.baseline.launchStage, 'Service and baseline launch stages differ');
     const template = rollbackTemplate(providerRelease ? revisions.candidate : revisions.baseline, pins, providerRelease);
     requireThat(same(service, await provider.getService()), 'Service changed during rollback planning');
     return { schemaVersion: providerRelease ? 2 : 1, operation: 'prepare-rollback', createdAt: new Date(now).toISOString(), pins: structuredClone(pins),
         before: { sha256: fingerprint(service), generation: service.generation,
-            configurationSha256: fingerprint(unchangedServiceConfiguration(service)), traffic: service.traffic },
+            configurationSha256: fingerprint(unchangedServiceConfiguration(service)), traffic: service.traffic,
+            latestReadyRevision: service.latestReadyRevision },
         revisionSha256: Object.fromEntries(Object.entries(revisions).map(([name, revision]) => [name, fingerprint(revisionConfiguration(revision))])),
         secretSha256: fingerprint(secret),
         request: { name: SERVICE, etag: service.etag, template } };
@@ -89,9 +91,11 @@ export function verifyRollbackService(service, plan, settled = false) {
     if (!settled) return;
     validateService(service);
     const name = `${SERVICE}/revisions/${rollbackRevisionName(plan.pins)}`;
+    // An untagged zero-traffic revision may retire while the serving pointer stays unchanged.
     requireThat(service.generation === String(BigInt(plan.before.generation) + 1n)
         && service.etag !== plan.request.etag && same(service.template, plan.request.template)
-        && service.latestReadyRevision === name && service.latestCreatedRevision === name,
+        && [plan.before.latestReadyRevision, name].includes(service.latestReadyRevision)
+        && service.latestCreatedRevision === name,
     'Rollback revision did not become the exact Ready template');
 }
 

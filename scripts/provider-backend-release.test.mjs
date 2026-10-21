@@ -347,6 +347,29 @@ test('promotion then a fresh rollback plan changes traffic once per approved ope
     assert.equal(f.patches.length, 2); assert.equal(f.service.traffic[0].revision, f.rollback.name.split('/').at(-1));
 });
 
+test('Ready retired provider fallback retains its prior serving pointer and can be promoted and rolled back', async () => {
+    const f = deploymentFixture();
+    const serving = f.service.latestReadyRevision;
+    const patch = f.provider.patchRollbackTemplate;
+    f.provider.patchRollbackTemplate = async (...args) => {
+        await patch(...args);
+        f.service.latestReadyRevision = serving;
+        f.rollback.conditions = [
+            { type: 'Ready', state: 'CONDITION_SUCCEEDED' },
+            { type: 'Active', state: 'CONDITION_FAILED', severity: 'INFO', revisionReason: 'RETIRED' },
+        ];
+    };
+    const preparation = await planProviderRollbackDeployment(f.provider, f.pins, now);
+    await applyProviderRollbackDeployment(f.provider, preparation, fingerprint(preparation), now);
+    assert.equal(f.service.latestReadyRevision, serving);
+    const promotion = await planProviderTraffic(f.provider, f.pins, 'promote', now + 1000);
+    await applyProviderTraffic(f.provider, promotion, fingerprint(promotion), now + 1000);
+    const rollback = await planProviderTraffic(f.provider, f.pins, 'rollback', now + 2000);
+    await applyProviderTraffic(f.provider, rollback, fingerprint(rollback), now + 2000);
+    assert.equal(f.service.latestReadyRevision, f.rollback.name);
+    assert.equal(f.patches.length, 3);
+});
+
 for (const [name, mutate] of [
     ['old image', f => { f.rollback.containers[0].image = f.baseline.containers[0].image; }],
     ['management disabled', f => { f.rollback.containers[0].env.find(e => e.name === 'PARENT_REGISTRATION_ENABLED').value = 'false'; }],

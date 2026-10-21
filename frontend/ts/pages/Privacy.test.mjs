@@ -38,6 +38,20 @@ test('public contact contains the owner-approved operator details without local 
     assert.doesNotMatch(markup, /tel:|C:\\Users\\|privateDraft|postalAddress|phoneNumber/u);
 });
 
+test('public deletion section offers browser controls and a scoped email request without an authenticated session', () => {
+    const deletion = markup.match(/<section aria-labelledby="privacy-deletion">([\s\S]*?)<\/section>/u)?.[1];
+    assert.ok(deletion, 'the public notice must include a directly linkable deletion section');
+    assert.match(deletion, /id="privacy-deletion"/u);
+    assert.match(deletion, /href="\/account"/u);
+    assert.match(deletion, /href="\/parent-accounts"/u);
+    assert.ok(deletion.includes(`href="mailto:${notice.contactEmail}?subject=${encodeURIComponent('Ludolume account deletion request')}"`));
+    assert.match(deletion, /Ludolume account and associated data/u);
+    assert.match(deletion, /without reinstalling the app/u);
+    assert.match(deletion, /Account ownership must be verified/u);
+    assert.match(deletion, /Do not send passwords or sign-in codes/u);
+    assert.doesNotMatch(deletion, /<(?:form|input|button)\b/u);
+});
+
 test('offline consent fragment matches the displayed text and adds no activation, country or assurance setting', async () => {
     const environment = await approvedPrivacyConsentEnvironment();
     assert.deepEqual(Object.keys(environment).sort(), ['PARENT_CONSENT_TEXT', 'PARENT_CONSENT_VERSION', 'PARENT_PRIVACY_NOTICE_URL',

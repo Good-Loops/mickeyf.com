@@ -56,7 +56,8 @@ export function fixture() {
     const service = { name: SERVICE, uid: 'service-uid', generation: '146', observedGeneration: '146', etag: 'etag-146',
         terminalCondition: { type: 'Ready', state: 'CONDITION_SUCCEEDED' }, reconciling: false,
         template: { revision: rollbackRevisionName(pins), containers: copy(rollback.containers) },
-        latestReadyRevision: rollbackRevisionName(pins), latestCreatedRevision: rollbackRevisionName(pins),
+        latestReadyRevision: `${SERVICE}/revisions/${rollbackRevisionName(pins)}`,
+        latestCreatedRevision: `${SERVICE}/revisions/${rollbackRevisionName(pins)}`,
         ingress: 'INGRESS_TRAFFIC_ALL', traffic, trafficStatuses: copy(traffic) };
     const receipt = pins.candidate.receipt;
     const build = { id: receipt.buildId, projectId: PROJECT, buildTriggerId: receipt.triggerId,
@@ -76,6 +77,7 @@ export function fixture() {
             patches.push(copy(body));
             service.traffic = copy(body.traffic);
             service.trafficStatuses = copy(body.traffic);
+            service.latestReadyRevision = `${SERVICE}/revisions/${body.traffic[0].revision}`;
             service.generation = service.observedGeneration = String(BigInt(service.generation) + 1n);
             service.etag = `etag-${service.generation}`;
         },

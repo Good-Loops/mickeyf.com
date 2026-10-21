@@ -503,6 +503,32 @@ print("traffic fixtures passed")
     assert.equal(result.status, 0, result.stderr);
 });
 
+test('post-deploy preflight permits only the captured or new serving pointer with the exact candidate addition', () => {
+    const result = python(String.raw`
+from copy import deepcopy
+before={"generation":10,"traffic":[["mickeyf-org-serving",100,""]],
+    "latestReadyRevisionName":"mickeyf-org-serving","latestCreatedRevisionName":"mickeyf-org-serving"}
+revision="mickeyf-org-session-candidate"; tag="s-candidate"
+snapshot={"generation":11,"traffic":sorted(before["traffic"]+[[revision,0,tag]]),
+    "latestReadyRevisionName":revision,"latestCreatedRevisionName":revision}
+verify_deployed_service(snapshot,before,revision,tag)
+snapshot["latestReadyRevisionName"]=before["latestReadyRevisionName"]
+verify_deployed_service(snapshot,before,revision,tag)
+cases=[]
+for key,value in [("latestReadyRevisionName","mickeyf-org-foreign"),("latestReadyRevisionName",None),
+        ("latestCreatedRevisionName","mickeyf-org-foreign"),("generation",10),("generation",12)]:
+    changed=deepcopy(snapshot); changed[key]=value; cases.append(changed)
+for traffic in [before["traffic"],[["mickeyf-org-serving",99,""],[revision,1,tag]],
+        before["traffic"]+[[revision,0,"foreign-tag"]],before["traffic"]+[[revision,0,tag],[revision,0,"extra"]]]:
+    changed=deepcopy(snapshot); changed["traffic"]=sorted(traffic); cases.append(changed)
+for changed in cases:
+    try: verify_deployed_service(changed,before,revision,tag)
+    except SystemExit: continue
+    raise AssertionError("post-deploy drift accepted")
+`, {});
+    assert.equal(result.status, 0, result.stderr);
+});
+
 test('exclusion rejects active canonical triggers, other builds, unknown enabled triggers and unsafe deploy identity', () => {
     const code = fixtureCode + String.raw`
 bid=payload["buildId"]; tid=payload["deploymentTriggerId"]

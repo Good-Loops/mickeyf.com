@@ -58,7 +58,8 @@ function fixture() {
         name: SERVICE, uid: 'service-uid', generation: '126', observedGeneration: '126', etag: 'etag-before',
         terminalCondition: { type: 'Ready', state: 'CONDITION_SUCCEEDED' }, reconciling: false,
         template: { revision: revisionName(pins), containers: copy(revision.containers) },
-        latestReadyRevision: revisionName(pins), latestCreatedRevision: revisionName(pins),
+        latestReadyRevision: `${SERVICE}/revisions/${revisionName(pins)}`,
+        latestCreatedRevision: `${SERVICE}/revisions/${revisionName(pins)}`,
         ingress: 'INGRESS_TRAFFIC_ALL', traffic, trafficStatuses: traffic.map(t => ({ ...t, uri: 'https://example.run.app' })),
     };
     const build = {
@@ -84,6 +85,7 @@ function fixture() {
             assert.equal(body.etag, 'etag-before');
             service.traffic = copy(body.traffic);
             service.trafficStatuses = copy(body.traffic);
+            service.latestReadyRevision = `${SERVICE}/revisions/${body.traffic[0].revision}`;
             service.generation = service.observedGeneration = '127';
             service.etag = 'etag-after';
         },
@@ -111,6 +113,20 @@ test('fresh plan supports frozen service rollback, not an old enabled revision',
     assert.equal(f.patches(), 1);
     f.revision.containers[0].env.find(e => e.name === 'THREE_BOSSES_RUN_SUBMISSIONS_ENABLED').value = 'true';
     await assert.rejects(planFrozenTraffic(f.provider, pins, now), /Frozen environment differs/);
+});
+
+test('frozen promotion advances the serving pointer and rejects a foreign settled pointer', async () => {
+    const f = fixture();
+    f.service.latestReadyRevision = `${SERVICE}/revisions/mickeyf-org-old-enabled`;
+    const plan = await planFrozenTraffic(f.provider, pins, now);
+    await applyFrozenTraffic(f.provider, plan, fingerprint(plan), now);
+    assert.equal(f.service.latestReadyRevision, `${SERVICE}/revisions/${revisionName(pins)}`);
+    const changed = fixture();
+    const changedPlan = await planFrozenTraffic(changed.provider, pins, now);
+    changed.provider.waitForService = async () => ({ ...copy(changed.service),
+        latestReadyRevision: `${SERVICE}/revisions/mickeyf-org-foreign` });
+    await assert.rejects(applyFrozenTraffic(changed.provider, changedPlan, fingerprint(changedPlan), now), /Unexpected state/);
+    assert.equal(changed.patches(), 1);
 });
 
 test('an explicitly reviewed nondefault session-secret version supports the normal traffic approval flow', async () => {
