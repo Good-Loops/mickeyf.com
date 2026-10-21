@@ -55,12 +55,14 @@ test('browser Apple discovery is explicit and malformed redirects fail closed wi
     }
 });
 
-test('discovery preloads only the SDK and one acquisition opens Apple directly with the exact server challenge', async () => {
+test('discovery stays metadata-only; explicit eligible preload permits one Apple popup with the exact server challenge', async () => {
     const f = fixture({ sdkPresent: false });
-    const discovery = f.api.getAvailableProviderClients(); await tick();
+    assert.deepEqual(await f.api.getAvailableProviderClients(), [client]);
+    assert.deepEqual(f.state.scripts, []);
+    const preload = f.api.preloadProviderCredential(client, f.controller.signal); await tick();
     assert.equal(f.state.scripts[0].src, 'https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js');
     assert.deepEqual(f.state.calls, []);
-    f.load(); assert.deepEqual(await discovery, [client]);
+    f.load(); await preload;
     assert.deepEqual(f.state.calls, []);
     assert.deepEqual(await f.begin(), { idToken: proof.authorization.id_token, authorizationCode: proof.authorization.code });
     assert.deepEqual(f.state.calls, [['init', { clientId: client.clientId, redirectURI: client.redirectUri,

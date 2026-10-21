@@ -4,8 +4,9 @@ import notice from '../../../shared/privacyNotice.json' with { type: 'json' };
 
 export type ParentConfig = Readonly<{ enabled: false }> | Readonly<{ enabled: true; policyVersion: string;
     consentVersion: string; consentText: string; privacyNoticeUrl: string; countries: readonly string[]; creationEnabled: boolean;
-    signedFormCountries?: readonly string[]; signedFormVersion?: string }>;
-export type SignedParentFormRequest = Readonly<{ reference: string; parentAccountId: string; country: string; userName: string;
+    signedFormCountries?: readonly string[]; signedFormVersion?: string;
+    audience?: 'children-included'; credentialsAfterApproval?: true }>;
+export type SignedParentFormRequest = Readonly<{ reference: string; parentAccountId: string; country: string; userName: string | null;
     verifiedContact: string; policyVersion: string; consentVersion: string; status: 'pending' | 'approved' | 'rejected';
     expiresAt: string; publicPolicyDigest: string | null; publicConsentText: string | null; publicConsentVersion: string | null }>;
 export type ScoreParticipationConfig = Readonly<{ enabled: false }> | Readonly<{ enabled: true; policyVersion: string;
@@ -17,16 +18,17 @@ export class ParentRegistrationError extends Error {
     constructor(code: string) { super('The parent operation could not be confirmed.'); this.code = code; }
 }
 const record = (value: unknown): value is Record<string, unknown> => !!value && typeof value === 'object' && !Array.isArray(value);
-const keys = (value: Record<string, unknown>, expected: string) => Object.keys(value).sort().join(',') === expected;
+const keys = (value: Record<string, unknown>, expected: string) => Object.keys(value).sort().join(',') === expected.split(',').sort().join(',');
 const token = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/u.test(value);
 const version = (value: unknown): value is string => typeof value === 'string' && /^[A-Za-z0-9._-]{1,64}$/u.test(value);
 const expiry = (value: unknown): value is number => Number.isInteger(value) && Number(value) > 0 && Number(value) <= 300;
 const accountId = (value: unknown): value is string => typeof value === 'string' && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(value);
-function form(value: unknown): SignedParentFormRequest {
+function form(value: unknown, countries: readonly string[] = ['US']): SignedParentFormRequest {
     if (!record(value) || !keys(value, 'consentVersion,country,expiresAt,parentAccountId,policyVersion,publicConsentText,publicConsentVersion,publicPolicyDigest,reference,status,userName,verifiedContact')
-        || !accountId(value.reference) || !accountId(value.parentAccountId) || value.country !== 'US'
+        || !accountId(value.reference) || !accountId(value.parentAccountId) || !countries.includes(String(value.country))
         || !version(value.policyVersion) || !version(value.consentVersion) || !['pending', 'approved', 'rejected'].includes(String(value.status))
-        || typeof value.userName !== 'string' || !value.userName.trim() || value.userName.length > 64
+        || !(countries.includes('BR') && value.userName === null
+            || typeof value.userName === 'string' && value.userName.trim() && value.userName.length <= 64)
         || typeof value.verifiedContact !== 'string' || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(value.verifiedContact) || value.verifiedContact.length > 254
         || typeof value.expiresAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/u.test(value.expiresAt) || !Number.isFinite(Date.parse(value.expiresAt))
         || !(value.publicPolicyDigest === null || typeof value.publicPolicyDigest === 'string' && /^[0-9a-f]{64}$/u.test(value.publicPolicyDigest))
@@ -38,7 +40,9 @@ function form(value: unknown): SignedParentFormRequest {
 }
 
 /** Grant/state stay in component memory. No child email, exact DOB, browser storage or session replacement. */
-export function createParentRegistrationApi(apiBase: string, fetchRequest: typeof fetch) {
+export function createParentRegistrationApi(apiBase: string, fetchRequest: typeof fetch,
+    options: { requireChildAudience?: boolean } = {}) {
+    const readForm = (value: unknown) => form(value, options.requireChildAudience ? ['BR', 'US'] : ['US']);
     async function request(path: string, body?: unknown, signal?: AbortSignal): Promise<Record<string, unknown>> {
         const controller = new AbortController();
         const abort = () => controller.abort();
@@ -73,9 +77,14 @@ export function createParentRegistrationApi(apiBase: string, fetchRequest: typeo
             const value = await request('/config', undefined, signal);
             if (keys(value, 'enabled') && value.enabled === false) return { enabled: false };
             const fields = 'consentText,consentVersion,countries,creationEnabled,enabled,policyVersion,privacyNoticeUrl';
-            if (!(keys(value, fields) || keys(value, `${fields},signedFormCountries,signedFormVersion`)) || value.enabled !== true || typeof value.creationEnabled !== 'boolean'
+            const childAudience = keys(value, `audience,${fields},credentialsAfterApproval,signedFormCountries,signedFormVersion`)
+                && value.audience === 'children-included' && value.credentialsAfterApproval === true
+                && Array.isArray(value.signedFormCountries) && Array.isArray(value.countries)
+                && [...value.signedFormCountries].sort().join(',') === [...value.countries].sort().join(',')
+                && value.countries.every(country => country === 'BR' || country === 'US');
+            if (!(childAudience || keys(value, fields) || keys(value, `${fields},signedFormCountries,signedFormVersion`)) || value.enabled !== true || typeof value.creationEnabled !== 'boolean'
                 || (value.signedFormCountries !== undefined && (!Array.isArray(value.signedFormCountries)
-                    || value.signedFormCountries.join(',') !== 'US' || value.signedFormVersion !== notice.signedParentForm.version))
+                    || !childAudience && value.signedFormCountries.join(',') !== 'US' || value.signedFormVersion !== notice.signedParentForm.version))
                 || !version(value.policyVersion) || !version(value.consentVersion) || typeof value.consentText !== 'string'
                 || !parsePrivacyNoticeUrl(value.privacyNoticeUrl) || !value.consentText.trim() || value.consentText.length > 8000 || !Array.isArray(value.countries)
                 || value.countries.length < 1 || value.countries.length > 249
@@ -112,15 +121,16 @@ export function createParentRegistrationApi(apiBase: string, fetchRequest: typeo
             }
             return { accountId: value.child.accountId, userName: value.child.userName, scoreVisibility: 'private' as const };
         },
-        async requestSignedForm(state: string, idToken: string, userName: string, signal?: AbortSignal) {
-            const value = await request('/forms/request', { state, idToken, userName }, signal);
+        async requestSignedForm(state: string, idToken: string, userName: string | undefined, signal?: AbortSignal) {
+            const value = await request('/forms/request', { state, idToken,
+                ...(!options.requireChildAudience ? { userName } : {}) }, signal);
             if (!keys(value, 'form')) throw new ParentRegistrationError('UNAVAILABLE');
-            return form(value.form);
+            return readForm(value.form);
         },
         async listSignedForms(signal?: AbortSignal) {
             const value = await request('/forms/list', {}, signal);
             if (!keys(value, 'forms') || !Array.isArray(value.forms) || value.forms.length > 50) throw new ParentRegistrationError('UNAVAILABLE');
-            return value.forms.map(form);
+            return value.forms.map(readForm);
         },
         async cancelSignedForm(reference: string, signal?: AbortSignal) {
             const value = await request('/forms/cancel', { reference }, signal);

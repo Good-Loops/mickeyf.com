@@ -54,6 +54,14 @@ async function fixture(t, mode = 'success') {
             let response = {};
             if (url.pathname === '/auth/providers/config') response = { clients: [{ clientKey: 'apple-web', provider: 'apple',
                 platform: 'web', clientId: 'com.example.web', redirectUri: 'https://example.test/login' }] };
+            else if (url.pathname === '/auth/registration/config') response = {
+                enabled: true, audience: 'children-included', creationEnabled: true, policyVersion: 'synthetic-reviewed', parentRegistrationAvailable: true,
+                countries: [{ country: 'US', parentRequiredBelow: 13, adultFrom: 18 }],
+            };
+            else if (url.pathname === '/auth/registration/begin') {
+                assert.deepEqual(body, { country: 'US', ageBand: 'adult', policyVersion: 'synthetic-reviewed' });
+                response = { authorized: true, expiresInSeconds: 300, scoreVisibility: 'private' };
+            }
             else if (url.pathname.endsWith('/providers/begin')) response = { state, nonce, expiresInSeconds: 300 };
             else if (url.pathname.endsWith('/providers/complete')) { loggedIn = true; response = { success: true, user_name: 'Player' }; }
             else if (url.pathname === '/auth/verify-token' || url.pathname === '/auth/renew') response = loggedIn
@@ -64,6 +72,9 @@ async function fixture(t, mode = 'success') {
     });
     // A fresh isolated Vite cache compiles the module graph before DOMContentLoaded.
     await page.goto(`${origin}/login`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await page.locator('#registration-country').selectOption('US');
+    await page.locator('#registration-age').selectOption('adult');
+    await page.getByRole('button', { name: 'Continue', exact: true }).click();
     return { page, calls };
 }
 async function openApple(page) {

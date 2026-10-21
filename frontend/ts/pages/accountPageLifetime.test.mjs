@@ -19,7 +19,7 @@ const mocks = {
         export const prepareSignupRegistration = async () => null;`,
     apiConfig: 'export const LEGACY_PUBLIC_API_PREVIEW = false;',
     scopedAlert: `export const showScopedAlert = (...args) => ${scope}.alert(...args);`,
-    ...Object.fromEntries(['StaySignedInCheckbox', 'ProviderSignInControls', 'PublicAccountPreviewNotice']
+    ...Object.fromEntries(['StaySignedInCheckbox', 'ProviderSignInControls', 'PublicAccountPreviewNotice', 'RegistrationGate']
         .map(name => [name, `export default '${name}';`])),
 };
 const server = await createViteTestServer({
@@ -35,7 +35,7 @@ const server = await createViteTestServer({
 });
 after(() => server.close());
 const { default: Login } = await server.ssrLoadModule('/ts/pages/Login.tsx');
-const { SignupCredentials: SignUp } = await server.ssrLoadModule('/ts/pages/SignUp.tsx');
+const { SignupCredentials: SignUp, default: GatedSignUp } = await server.ssrLoadModule('/ts/pages/SignUp.tsx');
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const deferred = () => {
     let resolve, reject;
@@ -44,7 +44,7 @@ const deferred = () => {
 };
 
 // A hook fixture, not a browser/layout test. Transport and alerts are controlled promises.
-function fixture(t, Page) {
+function fixture(t, Page, props = {}) {
     const slots = [], effects = [], navigations = [], logins = [], alerts = [];
     const registration = deferred(), authentication = deferred(), feedback = deferred();
     let cursor = 0, view, mounted = true;
@@ -70,7 +70,7 @@ function fixture(t, Page) {
         },
     };
     globalThis[key] = hooks;
-    const render = () => { cursor = 0; view = Page({ reset() {}, scoreVisibility: 'private' }); };
+    const render = () => { cursor = 0; view = Page({ reset() {}, scoreVisibility: 'private', ...props }); };
     render();
     let cleanups = effects.map(effect => effect());
     const unmount = () => { mounted = false; cleanups.forEach(cleanup => cleanup?.()); };
@@ -80,7 +80,7 @@ function fixture(t, Page) {
         return [node, ...[node.props?.children].flat(Infinity).flatMap(nodes)];
     }
     const find = predicate => nodes(view).find(predicate)?.props;
-    return { render, unmount, registration, authentication, feedback, logins, alerts, navigations,
+    return { render, unmount, registration, authentication, feedback, logins, alerts, navigations, find,
         submit: () => find(node => node.type === 'form').onSubmit({ preventDefault() {} }),
         remember: () => { find(node => node.type === 'StaySignedInCheckbox').onChange(true); render(); },
         replayEffects: () => {
@@ -96,6 +96,17 @@ test('login preserves stay-signed-in and normal successful navigation', async t 
     assert.equal(f.logins[0][2].feedbackSignal.aborted, false);
     f.authentication.resolve(true); await submitted;
     assert.deepEqual(f.navigations, ['/']);
+});
+
+test('signup credentials and login provider controls are children of eligibility rather than early mounts', t => {
+    const signup = GatedSignUp();
+    assert.equal(signup.type, 'RegistrationGate');
+    assert.equal(typeof signup.props.children, 'function');
+    const view = fixture(t, Login);
+    assert.equal(view.find(node => node.type === 'ProviderSignInControls'), undefined);
+    assert.equal(view.find(node => node.type === 'RegistrationGate').purpose, 'provider-login');
+    // The existing password form remains immediately usable for parent-managed children.
+    assert.equal(view.find(node => node.props?.id === 'login-password').type, 'password');
 });
 
 test('leaving login aborts feedback and prevents its late redirect', async t => {
@@ -125,6 +136,18 @@ test('leaving during signup prevents automatic login, feedback and navigation', 
     assert.deepEqual(f.logins, []);
     assert.deepEqual(f.alerts, []);
     assert.deepEqual(f.navigations, []);
+});
+
+test('a rejected signup keeps validation feedback, then returns to eligibility before another credential attempt', async t => {
+    const reset = t.mock.fn();
+    const view = fixture(t, SignUp, { onEligibilityRequired: reset });
+    const submitted = view.submit();
+    view.registration.resolve({ error: 'DUPLICATE_USER' }); await flush();
+    assert.equal(view.alerts[0].title, 'Duplicate user');
+    assert.equal(reset.mock.callCount(), 0);
+    view.feedback.resolve(); await submitted;
+    assert.equal(reset.mock.callCount(), 1);
+    assert.deepEqual(view.logins, []);
 });
 
 test('leaving during signup automatic login suppresses its late feedback', async t => {

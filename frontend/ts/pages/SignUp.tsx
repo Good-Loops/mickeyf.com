@@ -2,19 +2,20 @@
  * Sign-up page ("/signup").
  * Creates an account, then signs in through the existing cookie-based login flow.
  */
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { showScopedAlert } from "@/components/scopedAlert";
 import { usePageLifetime } from "@/hooks/usePageLifetime";
 import StaySignedInCheckbox from "@/components/StaySignedInCheckbox";
 import ProviderSignInControls from "@/components/ProviderSignInControls";
-import { prepareSignupRegistration, signupRequest } from "@/services/authService";
+import { signupRequest } from "@/services/authService";
+import RegistrationGate from '@/components/RegistrationGate';
 import { useAuth } from "@/context/AuthContext";
 import { signupAndLogin } from "./signupFlow.ts";
 import PublicAccountPreviewNotice from '@/components/PublicAccountPreviewNotice';
 import { LEGACY_PUBLIC_API_PREVIEW } from '@/config/apiConfig';
 
-export const SignupCredentials: React.FC = () => {
+export const SignupCredentials: React.FC<{ onEligibilityRequired?: () => void }> = ({ onEligibilityRequired } = {}) => {
     const [userName, setUserName] = useState("");
     const [email, setEmail] = useState("");
     const [userPassword, setUserPassword] = useState("");
@@ -26,13 +27,6 @@ export const SignupCredentials: React.FC = () => {
     const { login } = useAuth();
     const navigate = useNavigate();
     const pageLifetime = usePageLifetime();
-    useEffect(() => {
-        if (LEGACY_PUBLIC_API_PREVIEW) return;
-        const controller = new AbortController();
-        // Prepare only the server-advertised anonymous grant; this never supplies eligibility answers.
-        void prepareSignupRegistration(controller.signal);
-        return () => controller.abort();
-    }, []);
     const showSignupSuccess = async (signal = pageLifetime.current) => {
         if (!signal || signal.aborted) return;
         await showScopedAlert({ title: "You're all set!",
@@ -67,7 +61,7 @@ export const SignupCredentials: React.FC = () => {
                 case "REGISTRATION_REQUIRED":
                     await showScopedAlert({ title: "Registration unavailable",
                         text: "We could not confirm this registration step. Please try again shortly.", icon: "info" }, signal);
-                    return;
+                    break;
                 case "INVALID_EMAIL":
                     await showScopedAlert({ title: "Invalid email", icon: "warning" }, signal);
                     break;
@@ -92,6 +86,7 @@ export const SignupCredentials: React.FC = () => {
                     }, signal);
                     break;
                 }
+                if (!signal.aborted) onEligibilityRequired?.();
             } else {
                 setUserName("");
                 setEmail("");
@@ -115,9 +110,10 @@ export const SignupCredentials: React.FC = () => {
             // Do not log a transport error that may include submitted credentials.
             await showScopedAlert({
                 title: "Network/server error",
-                text: "Could not reach the server.",
+                text: "Signup could not be confirmed. If the account was created, log in before trying to create it again.",
                 icon: "error",
             }, signal);
+            if (!signal.aborted) onEligibilityRequired?.();
         } finally {
             submitting.current = false;
             if (!signal.aborted) setLoading(false);
@@ -183,6 +179,7 @@ export const SignupCredentials: React.FC = () => {
                     </button>
                 </form>
                 {!LEGACY_PUBLIC_API_PREVIEW && <ProviderSignInControls action="signup" userName={userName} rememberMe={rememberMe}
+                    onEligibilityRequired={onEligibilityRequired}
                     disabled={loading} operationLock={submitting} onBusyChange={setProviderBusy}
                     onSuccess={() => { void showSignupSuccess(); }} />}
                 <p className="signup__account-link">Already have an account? <Link to="/login">Log in</Link></p>
@@ -191,6 +188,7 @@ export const SignupCredentials: React.FC = () => {
     );
 };
 
-const SignUp: React.FC = () => <SignupCredentials />;
+const SignUp: React.FC = () => LEGACY_PUBLIC_API_PREVIEW ? <SignupCredentials />
+    : <RegistrationGate>{reset => <SignupCredentials onEligibilityRequired={reset} />}</RegistrationGate>;
 
 export default SignUp;

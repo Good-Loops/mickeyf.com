@@ -24,6 +24,8 @@ export type ParentRegistrationPolicy = Readonly<{
     countries: readonly string[];
     creationEnabled?: boolean;
     signedFormsEnabled?: boolean;
+    audience?: 'children-included';
+    signedFormCountries?: readonly string[];
 }>;
 export type ParentOperation = Readonly<{ purpose: 'create-child'; country: string }>
     | Readonly<{ purpose: 'withdraw-child'; childAccountId: string }>
@@ -67,7 +69,7 @@ export type ParentRegistrationStore = {
     deleteFamily?(grantHash: Buffer, context: ProviderAuthContext, policyDigest: Buffer, familyDigest: Buffer): Promise<void>;
     listChildren(context: ProviderAuthContext): Promise<ParentChild[]>;
     requestSignedForm?(challenge: ParentChallenge, identity: VerifiedProviderIdentity, context: ProviderAuthContext,
-        userName: string, policy: ParentRegistrationPolicy): Promise<SignedParentFormRequest>;
+        userName: string | null, policy: ParentRegistrationPolicy): Promise<SignedParentFormRequest>;
     listSignedForms?(context: ProviderAuthContext, policyDigest: Buffer): Promise<SignedParentFormRequest[]>;
     cancelSignedForm?(context: ProviderAuthContext, reference: string): Promise<void>;
 };
@@ -87,9 +89,18 @@ function readPolicy(policy: ParentRegistrationPolicy | undefined) {
         || !Array.isArray(policy.countries) || policy.countries.length < 1 || policy.countries.length > 249
         || policy.countries.some(value => !/^[A-Z]{2}$/u.test(value))
         || new Set(policy.countries).size !== policy.countries.length) throw new TypeError('Invalid reviewed parent registration policy.');
-    const copy = Object.freeze({ ...policy, privacyNoticeUrl, countries: Object.freeze([...policy.countries].sort()) });
+    const signedCountries = policy.signedFormCountries ?? ['US'];
+    if (!Array.isArray(signedCountries) || new Set(signedCountries).size !== signedCountries.length
+        || signedCountries.some(country => !['BR', 'US'].includes(country))
+        || policy.audience === 'children-included' && (!policy.signedFormsEnabled
+            || policy.countries.some(country => !signedCountries.includes(country)))) {
+        throw new TypeError('Child creation requires an explicit supported signed-parent-form policy.');
+    }
+    const copy = Object.freeze({ ...policy, privacyNoticeUrl, countries: Object.freeze([...policy.countries].sort()),
+        ...(policy.signedFormCountries ? { signedFormCountries: Object.freeze([...signedCountries].sort()) } : {}) });
     const terms = [copy.version, copy.consentVersion, copy.consentText, copy.privacyNoticeUrl, copy.countries];
     if (copy.signedFormsEnabled) terms.push(signedFormNoticeDigest().toString('hex'));
+    if (copy.audience) terms.push(copy.audience, [...signedCountries].sort(), 'credentials-after-approval');
     return { ...copy, digest: hash(JSON.stringify(terms)) };
 }
 
@@ -119,6 +130,7 @@ export function createParentRegistrationFlow({ policy: inputPolicy, publicationP
     now?: () => number;
 }) {
     const policy = readPolicy(inputPolicy);
+    const requiresSignedForm = (country: string) => signedFormRequired(country, policy?.signedFormCountries);
     const configuredClients = new Map(Object.entries(clients).filter(([key, value]) =>
         (['google-web', 'google-ios', 'google-android'].includes(key) && value.provider === 'google')
         || (['apple-web', 'apple-ios'].includes(key) && value.provider === 'apple')));
@@ -128,7 +140,8 @@ export function createParentRegistrationFlow({ policy: inputPolicy, publicationP
             return policy ? { enabled: true as const, policyVersion: policy.version, consentVersion: policy.consentVersion,
                 consentText: policy.consentText, privacyNoticeUrl: policy.privacyNoticeUrl,
                 countries: [...policy.countries], creationEnabled: policy.creationEnabled !== false,
-                ...(policy.signedFormsEnabled ? { signedFormCountries: ['US'], signedFormVersion: SIGNED_FORM_VERSION } : {}) } : { enabled: false as const };
+                ...(policy.audience ? { audience: policy.audience, credentialsAfterApproval: true as const } : {}),
+                ...(policy.signedFormsEnabled ? { signedFormCountries: [...(policy.signedFormCountries ?? ['US'])], signedFormVersion: SIGNED_FORM_VERSION } : {}) } : { enabled: false as const };
         },
         async begin(context: ProviderAuthContext | null, input: unknown) {
             const publishing = isRecord(input) && input.purpose === 'publish-scores';
@@ -145,7 +158,7 @@ export function createParentRegistrationFlow({ policy: inputPolicy, publicationP
                     ? { purpose: 'publish-scores', childAccountId: input.childAccountId as string | null ?? context.account!.accountId } : null
                 : readOperation(input, policy!);
             if (operation?.purpose === 'create-child' && policy?.creationEnabled === false) return failure('CLOSED');
-            if (operation?.purpose === 'create-child' && signedFormRequired(operation.country) && !policy?.signedFormsEnabled) return failure('CLOSED');
+            if (operation?.purpose === 'create-child' && requiresSignedForm(operation.country) && !policy?.signedFormsEnabled) return failure('CLOSED');
             if (!operation || (operation.purpose === 'withdraw-child' && operation.childAccountId === context.account!.accountId)) {
                 return failure('INVALID_REQUEST');
             }
@@ -198,7 +211,8 @@ export function createParentRegistrationFlow({ policy: inputPolicy, publicationP
         async createChild(context: ProviderAuthContext | null, input: unknown) {
             if (!policy || policy?.creationEnabled === false) return failure('CLOSED');
             if (!authenticated(context)) return failure('INVALID_CONTEXT');
-            if (!isRecord(input) || !(keys(input, 'grant,password,userName') || keys(input, 'formReference,grant,password,userName'))
+            if (!isRecord(input) || !(keys(input, 'formReference,grant,password,userName')
+                || policy.audience !== 'children-included' && keys(input, 'grant,password,userName'))
                 || (input.formReference !== undefined && (typeof input.formReference !== 'string' || !ACCOUNT.test(input.formReference)))
                 || typeof input.grant !== 'string' || !TOKEN.test(input.grant)
                 || typeof input.userName !== 'string' || !input.userName.trim() || input.userName.trim().length > 64
@@ -216,16 +230,17 @@ export function createParentRegistrationFlow({ policy: inputPolicy, publicationP
         async requestSignedForm(context: ProviderAuthContext | null, input: unknown) {
             if (!policy?.signedFormsEnabled || policy.creationEnabled === false || !store.requestSignedForm) return failure('CLOSED');
             if (!authenticated(context)) return failure('INVALID_CONTEXT');
-            if (!isRecord(input) || !keys(input, 'idToken,state,userName') || typeof input.state !== 'string' || !TOKEN.test(input.state)
+            const parentOnly = policy.audience === 'children-included';
+            if (!isRecord(input) || !keys(input, parentOnly ? 'idToken,state' : 'idToken,state,userName') || typeof input.state !== 'string' || !TOKEN.test(input.state)
                 || typeof input.idToken !== 'string' || !input.idToken || input.idToken.length > PROVIDER_TOKEN_MAX_LENGTH
-                || typeof input.userName !== 'string' || !input.userName.trim() || input.userName.trim().length > 64
-                || /[\u0000-\u001f\u007f]/u.test(input.userName)) return failure('INVALID_REQUEST');
+                || !parentOnly && (typeof input.userName !== 'string' || !input.userName.trim() || input.userName.trim().length > 64
+                    || /[\u0000-\u001f\u007f]/u.test(input.userName))) return failure('INVALID_REQUEST');
             try {
                 const attempt = await store.consumeChallenge(hash(input.state), context);
                 if (!attempt || !attempt.bindingHash.equals(context.bindingHash) || !attempt.policyDigest.equals(policy.digest)
                     || attempt.parentAccountId !== context.account!.accountId || attempt.parentUserId !== context.account!.userId
                     || attempt.expiresAt <= now() || attempt.operation.purpose !== 'create-child'
-                    || !signedFormRequired(attempt.operation.country)) return failure('INVALID_ATTEMPT');
+                    || !requiresSignedForm(attempt.operation.country)) return failure('INVALID_ATTEMPT');
                 const client = configuredClients.get(attempt.clientKey);
                 if (!client) return failure('INVALID_ATTEMPT');
                 const proof = await client.verifier.verify(client.provider, input.idToken, attempt.nonce);
@@ -234,7 +249,7 @@ export function createParentRegistrationFlow({ policy: inputPolicy, publicationP
                 if (!await store.isLinkedParent(context, proof.identity)) return failure('PROVIDER_NOT_LINKED');
                 if (!proof.identity.email) return failure('VERIFIED_CONTACT_REQUIRED');
                 if (attempt.expiresAt <= now()) return failure('INVALID_ATTEMPT');
-                const form = await store.requestSignedForm(attempt, proof.identity, context, input.userName.trim(), policy);
+                const form = await store.requestSignedForm(attempt, proof.identity, context, parentOnly ? null : (input.userName as string).trim(), policy);
                 return { form };
             } catch { return failure('UNAVAILABLE'); }
         },

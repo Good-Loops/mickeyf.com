@@ -54,15 +54,22 @@ async function transaction<T>(lock: UserSubmissionLockContext, operation: (conne
 
 /** Only short-lived proof metadata and the minimal current consent relationship are persisted. */
 export function createParentRegistrationRepository(database: Database, journal: AccountDeletionJournal, publicationPolicy?: ScoreParticipationPolicy,
-    signedFormsEnabled = false): ParentRegistrationStore {
+    signedFormsEnabled = false, { countries = ['US'], credentialsAfterApproval = false }: {
+        countries?: readonly string[]; credentialsAfterApproval?: boolean;
+    } = {}): ParentRegistrationStore {
     if (!journal || typeof journal.recordAccountDeletion !== 'function') throw new TypeError('Parent registration requires deletion journaling.');
-    async function currentParent(connection: PoolConnection, context: ProviderAuthContext, creation = false) {
+    const requiresSignedForm = (country: string) => signedFormRequired(country, countries);
+    async function currentParent(connection: PoolConnection, context: ProviderAuthContext, creation = false, providerCollection = false) {
         const parent = context.account; const session = context.session;
         if (!parent || !session || parent.accountId !== session.accountId) throw new Error('Invalid parent context.');
         const accounts = await rows(connection, 'SELECT account_uuid FROM users WHERE user_id = ? AND account_uuid = ? LIMIT 1 FOR UPDATE',
             [parent.userId, parent.accountId]);
         if (accounts.length !== 1 || !await readLiveSession(connection, parent.userId, parent.accountId, session.sessionId)) {
             throw new Error('Parent session is no longer live.');
+        }
+        if (credentialsAfterApproval && (creation || providerCollection) && (await rows(connection,
+            'SELECT child_uuid FROM parent_child_consents WHERE child_uuid = ? LIMIT 1', [parent.accountId])).length) {
+            throw new Error('Managed child accounts cannot initiate parent identity verification.');
         }
         if (creation) {
             const profiles = await rows(connection, 'SELECT age_band FROM account_registration_profiles WHERE account_uuid = ? LIMIT 1', [parent.accountId]);
@@ -130,7 +137,7 @@ export function createParentRegistrationRepository(database: Database, journal: 
         return formProjection(form);
     }
     async function signedPublicPermission(connection: PoolConnection, target: RowDataPacket): Promise<boolean> {
-        if (!target.parent_uuid || !signedFormRequired(target.country_code)) return true;
+        if (!target.parent_uuid || !requiresSignedForm(target.country_code)) return true;
         if (!signedFormsEnabled || !publicationPolicy) return false;
         return (await rows(connection, `SELECT reference FROM parent_signed_forms WHERE child_uuid=? AND parent_uuid=?
             AND status='used' AND public_approved=1 AND public_withdrawn=0 AND public_policy_digest=? LIMIT 1`,
@@ -141,7 +148,7 @@ export function createParentRegistrationRepository(database: Database, journal: 
             // Expiry rejects independently; opportunistic bounded cleanup stores no identity after expiry.
             await command(database, 'DELETE FROM parent_registration_attempts WHERE expires_at <= UTC_TIMESTAMP(6) LIMIT 100');
             return locked(context, async connection => {
-                await currentParent(connection, context, attempt.operation.purpose === 'create-child');
+                await currentParent(connection, context, attempt.operation.purpose === 'create-child', true);
                 let profileDigest: Buffer | null = null;
                 if (attempt.operation.purpose === 'publish-scores') {
                     const target = await scoreParticipationTarget(connection, context, attempt.operation.childAccountId);
@@ -170,7 +177,7 @@ export function createParentRegistrationRepository(database: Database, journal: 
             });
         },
         consumeChallenge: (stateHash, context) => locked(context, async connection => {
-            await currentParent(connection, context);
+            await currentParent(connection, context, false, true);
             const found = await rows(connection, `SELECT state_hash, binding_hash, parent_uuid, parent_user_id, client_key, nonce, policy_digest,
                 purpose, country_code, child_uuid, family_digest, ROUND(TIMESTAMPDIFF(MICROSECOND, '1970-01-01', expires_at) / 1000) AS expiresAt FROM parent_registration_attempts
                 WHERE state_hash = ? AND binding_hash = ? AND parent_uuid = ? AND phase = 'pending' AND expires_at > UTC_TIMESTAMP(6) LIMIT 1 FOR UPDATE`,
@@ -200,21 +207,21 @@ export function createParentRegistrationRepository(database: Database, journal: 
             [stateHash, context.bindingHash, context.account!.accountId]);
         }),
         async createChild(grantHash, context, policyDigest, credentials) {
-            // Hash outside locks. Transactional grant validation still precedes any insertion.
-            const passwordHash = await bcrypt.hash(credentials.password, 12);
             return locked(context, async connection => {
                 const approval = await grant(connection, grantHash, context, policyDigest, 'create-child');
                 let formReference: string | null = null;
-                if (signedFormRequired(approval.country_code)) {
+                if (requiresSignedForm(approval.country_code)) {
                     if (!signedFormsEnabled || !credentials.formReference) throw new SignedParentFormRequiredError();
                     const [form] = await rows(connection, `SELECT reference, user_name, provider, subject FROM parent_signed_forms
                         WHERE reference=? AND parent_uuid=? AND country_code=? AND policy_digest=? AND consent_version=? AND policy_version=?
                         AND status='approved' AND expires_at>UTC_TIMESTAMP(6) LIMIT 1 FOR UPDATE`,
                     [credentials.formReference, context.account!.accountId, approval.country_code, policyDigest, approval.consent_version, approval.policy_version]);
-                    if (!form || form.user_name !== credentials.userName || form.provider !== approval.provider
+                    if (!form || (credentialsAfterApproval ? form.user_name !== null : form.user_name !== credentials.userName) || form.provider !== approval.provider
                         || !Buffer.isBuffer(form.subject) || !form.subject.equals(approval.subject)) throw new SignedParentFormRequiredError();
                     formReference = form.reference;
                 } else if (credentials.formReference) throw new SignedParentFormRequiredError();
+                // Do not process a child's password until the current parent grant and signed approval are verified.
+                const passwordHash = await bcrypt.hash(credentials.password, 12);
                 const [insert] = await connection.query<ResultSetHeader>({ sql: 'INSERT INTO users (user_name, email, user_password) VALUES (?, NULL, ?)', timeout },
                     [credentials.userName, passwordHash]);
                 const [child] = await rows(connection, 'SELECT account_uuid FROM users WHERE user_id = ?', [insert.insertId]);
@@ -317,8 +324,9 @@ export function createParentRegistrationRepository(database: Database, journal: 
             return children.map(child => ({ accountId: child.account_uuid, userName: child.user_name, scoreVisibility: 'private' })) as ParentChild[];
         }),
         requestSignedForm: (attempt, identity, context, userName, policy) => locked(context, async connection => {
-            if (!signedFormsEnabled || attempt.operation.purpose !== 'create-child' || !signedFormRequired(attempt.operation.country)
+            if (!signedFormsEnabled || attempt.operation.purpose !== 'create-child' || !requiresSignedForm(attempt.operation.country)
                 || !identity.email || !policy.signedFormsEnabled) throw new Error('Signed forms are closed.');
+            if (credentialsAfterApproval ? userName !== null : typeof userName !== 'string') throw new Error('Signed form credential timing differs from policy.');
             await currentParent(connection, context, true);
             if (!await linked(connection, context, identity)) throw new Error('Parent provider is no longer linked.');
             await command(connection, "DELETE FROM parent_signed_forms WHERE parent_uuid=? AND status <> 'used' AND expires_at<=UTC_TIMESTAMP(6)", [context.account!.accountId]);
@@ -330,8 +338,8 @@ export function createParentRegistrationRepository(database: Database, journal: 
             const reference = randomUUID();
             await command(connection, `INSERT INTO parent_signed_forms (reference, parent_uuid, country_code, user_name,
                 policy_digest, consent_version, policy_version, provider, subject, verified_contact, status, submitted_at, expires_at, public_policy_digest)
-                VALUES (?, ?, 'US', ?, ?, ?, ?, ?, ?, ?, 'pending', UTC_TIMESTAMP(6), UTC_TIMESTAMP(6)+INTERVAL ? DAY, ?)`,
-            [reference, context.account!.accountId, userName, attempt.policyDigest, policy.consentVersion, policy.version,
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', UTC_TIMESTAMP(6), UTC_TIMESTAMP(6)+INTERVAL ? DAY, ?)`,
+            [reference, context.account!.accountId, attempt.operation.country, userName, attempt.policyDigest, policy.consentVersion, policy.version,
                 identity.provider, Buffer.from(identity.subject, 'ascii'), identity.email, SIGNED_FORM_LIFETIME_DAYS, publicationPolicy?.digest ?? null]);
             return readForm(connection, reference, context.account!.accountId);
         }),

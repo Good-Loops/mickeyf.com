@@ -72,6 +72,8 @@ async function fixture(t, width, height, native = true) {
 async function open(page, game, native = true) {
     await page.goto(`${origin}/games/${game}?three-bosses-mobile-preview=1`);
     await page.locator('.score-submission-notice').waitFor();
+    // The font stylesheet is added asynchronously; fonts.ready alone can resolve before it arrives.
+    await page.waitForFunction(() => [...document.styleSheets].some(sheet => sheet.href?.endsWith('/fonts/app-fonts.css')));
     await page.evaluate(() => document.fonts.ready);
     assert.equal(await page.locator('html').getAttribute('data-native-app'), native ? 'ios' : null);
 }
@@ -105,7 +107,7 @@ for (const [width, height] of [[393, 852], [852, 393], [390, 844], [390, 667], [
             const centered = game === 'p4-Vega' && width > height ? data.page : data.canvas;
             assert.ok(Math.abs(centered.x + centered.width / 2 - width / 2) < 2, 'Composition is centered');
             if (game === 'p4-Vega') {
-                assert.ok(data.canvas.y - data.notice.bottom <= (width < height ? 7 : 14), 'Notice stays near the scene');
+                assert.ok(data.canvas.y - data.notice.bottom <= (width < height ? 7 : 14), `Notice stays near the scene: ${JSON.stringify(data)}`);
                 if (width < height) assert.ok(data.controls.y - data.canvas.bottom <= 7, 'Portrait controls stay near the scene');
                 assert.ok(Math.abs(data.preference.x + data.preference.width / 2 - width / 2) < 2, 'Joystick preference is centered');
                 assert.ok(data.notice.y >= data.main.y - 1 && data.preference.bottom <= data.main.bottom + 1,

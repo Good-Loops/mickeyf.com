@@ -27,7 +27,7 @@ after(() => server.close());
 const { default: Component } = await server.ssrLoadModule('/ts/components/RegistrationGate.tsx');
 const nodes = node => !node || typeof node !== 'object' ? [] : [node, ...[node.props?.children].flat(Infinity).flatMap(nodes)];
 
-function mount(t) {
+function mount(t, policy, purpose = 'signup') {
     const slots = [], effects = [], calls = [], children = [];
     let cursor = 0, dirty = false, tree;
     const previous = Object.getOwnPropertyDescriptor(globalThis, key);
@@ -45,15 +45,16 @@ function mount(t) {
                 effects.push(() => { slot.cleanup?.(); slot.cleanup = callback(); });
             }
         },
-        async config() { calls.push(['config']); return { enabled: true, policyVersion: 'synthetic-reviewed',
-            countries: [{ country: 'US', parentRequiredBelow: 13 }, { country: 'BR', parentRequiredBelow: 18 }] }; },
+        async config() { calls.push(['config']); return policy ?? { enabled: true, audience: 'children-included', creationEnabled: true,
+            policyVersion: 'synthetic-reviewed', parentRegistrationAvailable: true,
+            countries: [{ country: 'US', parentRequiredBelow: 13, adultFrom: 18 }, { country: 'BR', parentRequiredBelow: 18, adultFrom: 18 }] }; },
         async begin(input) { calls.push(['begin', input]); return { authorized: true, expiresInSeconds: 300, scoreVisibility: 'private' }; },
         async cancel() { calls.push(['cancel']); },
     };
     Object.defineProperty(globalThis, key, { configurable: true, value: hooks });
     t.after(() => { slots.forEach(slot => slot.cleanup?.());
         if (previous) Object.defineProperty(globalThis, key, previous); else delete globalThis[key]; });
-    const render = () => { cursor = 0; dirty = false; tree = Component({ children: (...args) => {
+    const render = () => { cursor = 0; dirty = false; tree = Component({ purpose, children: (...args) => {
         children.push(args); return { type: 'credentials', props: {} }; } }); effects.splice(0).forEach(run => run()); return tree; };
     const settle = async () => { for (let index = 0; index < 8; index++) {
         await new Promise(resolve => setImmediate(resolve)); if (!dirty) return; render();
@@ -95,4 +96,37 @@ test('under-threshold signup preserves the parent route without attempting self-
     assert.equal(view.calls.some(call => call[0] === 'begin'), false);
     assert.equal(view.children.length, 0);
     assert(view.find(node => typeof node.type === 'function' && node.type.name === 'ParentRegistrationUnavailable'));
+});
+
+test('an older general backend cannot mount credentials or provider controls in the new source', async t => {
+    const view = mount(t, { enabled: true, mode: 'general-audience', policyVersion: 'old-general',
+        parentRegistrationAvailable: false, optionalDetails: false });
+    view.render(); await view.settle();
+    assert.equal(view.children.length, 0);
+    assert.equal(view.find(node => node.type === 'form'), undefined);
+    assert.deepEqual(view.calls, [['config']]);
+});
+
+const creationPaused = { enabled: true, audience: 'children-included', creationEnabled: false,
+    policyVersion: 'synthetic-reviewed', parentRegistrationAvailable: false,
+    countries: [{ country: 'US', parentRequiredBelow: 13, adultFrom: 18 }] };
+
+test('paused creation never mounts signup credentials, providers or an eligibility form', async t => {
+    const view = mount(t, creationPaused); view.render(); await view.settle();
+    assert.equal(view.children.length, 0);
+    assert.equal(view.find(node => node.type === 'form' || node.type === 'input' || node.type === 'select'), undefined);
+    assert(view.find(node => node.type === 'p' && node.props.role === 'status'
+        && node.props.children.startsWith('New registrations are currently paused.')));
+    assert.deepEqual(view.calls, [['config']]);
+});
+
+test('paused creation still mounts existing-account provider login after explicit eligibility approval', async t => {
+    const view = mount(t, creationPaused, 'provider-login'); view.render(); await view.settle();
+    assert.equal(view.children.length, 0);
+    await view.change('registration-country', 'US');
+    await view.change('registration-age', 'adult');
+    await view.find(node => node.type === 'form').props.onSubmit({ preventDefault() {} });
+    view.render(); await view.settle();
+    assert.deepEqual(view.calls[1], ['begin', { country: 'US', ageBand: 'adult', policyVersion: 'synthetic-reviewed' }]);
+    assert(view.find(node => node.type === 'credentials'));
 });

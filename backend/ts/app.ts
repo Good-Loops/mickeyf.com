@@ -49,7 +49,10 @@ import { verifySignedParentFormReadiness } from './migrations/signedParentFormSc
 import { cleanupSignedParentForms } from './accounts/signedParentFormReview';
 
 const runtimeConfig = loadRuntimeConfig();
-const registration = createRegistrationAuthorization(pool, registrationPolicyForCreation(runtimeConfig.registrationPolicy));
+const creationPolicy = registrationPolicyForCreation(runtimeConfig.registrationPolicy);
+const registration = createRegistrationAuthorization(pool,
+    runtimeConfig.registrationAudience === 'children-included' ? runtimeConfig.registrationPolicy : creationPolicy,
+    runtimeConfig.registrationAudience, !!creationPolicy);
 const deletionJournal = runtimeConfig.accountDeletionEnabled
     ? createGcsDeletionJournal({ bucket: runtimeConfig.journalBucket }) : undefined;
 const app = express();
@@ -144,7 +147,8 @@ async function startServer(): Promise<void> {
             await verifyRegistrationReadiness(pool);
             await verifyParentRegistrationReadiness(pool);
             await verifyScoreParticipationReadiness(pool);
-            if (runtimeConfig.parentRegistrationPolicy?.signedFormsEnabled) await verifySignedParentFormReadiness(pool);
+            if (runtimeConfig.parentRegistrationPolicy?.signedFormsEnabled) await verifySignedParentFormReadiness(pool,
+                runtimeConfig.parentRegistrationPolicy.audience === 'children-included' && runtimeConfig.parentRegistrationPolicy.creationEnabled === true);
             const providerAuth = await prepareRuntimeProviderAuth(runtimeConfig.providerAuth, process.env,
                 { loadLifecycle: loadRuntimeAppleLifecycle });
             if (providerAuth.appleTokenLifecycle) await verifyAppleTokenReadiness(pool);
@@ -168,8 +172,8 @@ async function startServer(): Promise<void> {
             const appleWeb = providerAuth.publicClients.find(client => client.clientKey === 'apple-web');
             const appleAvailable = !localMaintenance || localMaintenance.isHealthy();
             providerReadiness = { googleWebLogin: !!googleWeb, appleWebLogin: !!appleWeb && appleAvailable,
-                googleWebSignup: googleWeb?.signup === true && !!registration.policy,
-                appleWebSignup: appleWeb?.signup === true && !!registration.policy && appleAvailable };
+                googleWebSignup: googleWeb?.signup === true && registration.creationEnabled,
+                appleWebSignup: appleWeb?.signup === true && registration.creationEnabled && appleAvailable };
             app.use('/auth', createAuthRouter(
                 pool, runtimeConfig.sessionSecret, runtimeConfig.isProduction, runtimeConfig.corsOrigins,
                 { accountDeletionEnabled: runtimeConfig.accountDeletionEnabled, deletionJournal, providerAuth, registration,

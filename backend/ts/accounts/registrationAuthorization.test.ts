@@ -120,3 +120,39 @@ test('cancellation targets only the trusted anonymous unconsumed binding', async
     assert.match(f.calls[0].sql, /WHERE binding_hash = \? AND consumed_at IS NULL$/u);
     assert.deepEqual(f.calls[0].values, [context().bindingHash]);
 });
+
+test('strict provider collection excludes managed children and fails closed on inconsistent relationship results', async () => {
+    for (const children of [[], [{ child_uuid: accountId }], [{ child_uuid: 'another-account' }],
+        [{ child_uuid: accountId }, { child_uuid: accountId }]]) {
+        let calls = 0;
+        const database = { async query(options: { sql: string; timeout: number }, values: unknown[]) {
+            calls++; assert.equal(options.timeout, 10_000);
+            assert.match(options.sql, /WHERE child_uuid=\? LIMIT 2$/u); assert.deepEqual(values, [accountId]);
+            return [children];
+        } } as unknown as Pick<Pool, 'query'>;
+        const service = createRegistrationAuthorization(database, undefined, 'children-included');
+        if (children.length > 1 || children.some(child => child.child_uuid !== accountId)) {
+            await assert.rejects(service.providerCollectionAllowed(accountId), RegistrationRequiredError);
+        } else assert.equal(await service.providerCollectionAllowed(accountId), children.length === 0);
+        assert.equal(calls, 1);
+        assert.equal(await createRegistrationAuthorization(database).providerCollectionAllowed(accountId), true);
+        assert.equal(calls, 1, 'legacy behavior requires no new SQL');
+    }
+});
+
+test('a strict creation pause keeps staged login eligibility while preventing all new-account consumption', async () => {
+    const f = fixture('adult');
+    const childPolicy = { ...policy, audience: 'children-included' as const };
+    const paused = createRegistrationAuthorization(f.database, childPolicy, childPolicy.audience, false);
+    assert.equal(paused.creationEnabled, false); assert.equal(paused.policy, childPolicy);
+    assert.deepEqual(await paused.begin(context(), { country: 'ZZ', ageBand: 'parent-required', policyVersion: policy.version }),
+        { allowed: false, reason: 'PARENT_REQUIRED' });
+    assert.deepEqual(f.calls, []);
+    assert.deepEqual(await paused.begin(context(), { country: 'ZZ', ageBand: 'adult', policyVersion: policy.version }),
+        { allowed: true, country: 'ZZ', ageBand: 'adult' });
+    await paused.assertLoginAvailable(context());
+    const before = f.calls.length;
+    await assert.rejects(paused.assertAvailable(context()), RegistrationRequiredError);
+    await assert.rejects(paused.consume(f.connection, context(), accountId), RegistrationRequiredError);
+    assert.equal(f.calls.length, before, 'creation pause rejects before any new account transaction writes or reads');
+});

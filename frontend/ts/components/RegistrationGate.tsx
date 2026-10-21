@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import { Link } from 'react-router-dom';
 import { registrationConfigRequest, beginRegistration, cancelRegistration } from '@/services/authService';
-import type { RegistrationAgeBand, RegistrationConfig } from '@/services/registrationApi';
+import { supportsChildAudience, type RegistrationAgeBand, type RegistrationConfig } from '@/services/registrationApi';
 
 export function ParentRegistrationUnavailable() {
     return <div role="status">
@@ -12,8 +12,9 @@ export function ParentRegistrationUnavailable() {
 }
 
 /** Credentials mount only after the server approves this browser's short-lived preflight. */
-export default function RegistrationGate({ children }: {
+export default function RegistrationGate({ children, purpose = 'signup' }: {
     children: (reset: () => void, scoreVisibility: 'private' | 'public') => ReactNode;
+    purpose?: 'signup' | 'provider-login';
 }) {
     const [config, setConfig] = useState<RegistrationConfig | null>(null);
     const [loading, setLoading] = useState(true);
@@ -27,7 +28,8 @@ export default function RegistrationGate({ children }: {
     const operation = useRef(false);
     const began = useRef(false);
     const generation = useRef(0);
-    const countryPolicy = config?.enabled && 'countries' in config ? config : null;
+    const countryPolicy = supportsChildAudience(config) ? config : null;
+    const creationPaused = purpose === 'signup' && countryPolicy?.creationEnabled === false;
 
     useEffect(() => {
         let active = true;
@@ -63,7 +65,7 @@ export default function RegistrationGate({ children }: {
 
     async function submit(event: React.FormEvent) {
         event.preventDefault();
-        if (operation.current || !countryPolicy || !ageBand || !countryPolicy.countries.some(item => item.country === country)) return;
+        if (operation.current || creationPaused || !countryPolicy || !ageBand || !countryPolicy.countries.some(item => item.country === country)) return;
         if (ageBand === 'parent-required') { setParentStep(true); return; }
         operation.current = true; setBusy(true); setFeedback(null); began.current = true;
         const current = ++generation.current;
@@ -86,12 +88,15 @@ export default function RegistrationGate({ children }: {
     const rule = countryPolicy?.countries.find(item => item.country === country);
     const countries = countryPolicy?.countries ?? [];
     const names = new Intl.DisplayNames(['en'], { type: 'region' });
-    return <section className="signup" aria-labelledby="registration-title">
+    const titleId = purpose === 'signup' ? 'registration-title' : 'provider-eligibility-title';
+    return <section className={purpose === 'signup' ? 'signup' : 'provider-eligibility'} aria-labelledby={titleId}>
         <div className="signup__form-wrapper">
-            <h1 id="registration-title">Check eligibility</h1>
+            {purpose === 'signup' ? <h1 id={titleId}>Check eligibility</h1> : <h2 id={titleId}>Use Google or Apple</h2>}
+            {purpose === 'provider-login' && <p>First choose your country and age range. Children with a parent-managed account can use their nickname and password above.</p>}
             {loading ? <p role="status">Checking registration availability…</p>
+                : creationPaused ? <p role="status">New registrations are currently paused. You can keep exploring without an account, or log in to an existing account.</p>
                 : !countryPolicy ? <div role="status">
-                    <p>{config ? 'New registrations are currently paused.' : 'Registration availability could not be confirmed.'}</p>
+                    <p>{config?.enabled === false ? 'New registrations are currently paused.' : 'Registration eligibility could not be confirmed. You can keep exploring without an account.'}</p>
                     <button type="button" onClick={() => setRetry(value => value + 1)}>Check again</button>
                 </div>
                 : parentStep ? <><ParentRegistrationUnavailable /><button type="button" onClick={reset}>Back to registration</button></>
@@ -120,7 +125,7 @@ export default function RegistrationGate({ children }: {
                     </button>
                 </form>}
             {feedback && <p role="alert">{feedback}</p>}
-            <p className="signup__account-link">Already have an account? <Link to="/login">Log in</Link></p>
+            {purpose === 'signup' && <p className="signup__account-link">Already have an account? <Link to="/login">Log in</Link></p>}
         </div>
     </section>;
 }

@@ -16,12 +16,19 @@ export function loadParentRegistrationPolicy(env: Readonly<Record<string, string
         const consentText = env.PARENT_CONSENT_TEXT ?? '';
         const privacyNoticeUrl = parsePrivacyNoticeUrl(env.PARENT_PRIVACY_NOTICE_URL);
         const countries: unknown = JSON.parse(env.PARENT_REGISTRATION_COUNTRIES ?? '');
+        const childAudience = registration.audience === 'children-included';
+        const signedCountries: unknown = childAudience ? JSON.parse(env.PARENT_SIGNED_FORM_COUNTRIES ?? '') : undefined;
         if (![version, consentVersion].every(value => /^[A-Za-z0-9._-]{1,64}$/u.test(value))
             || !privacyNoticeUrl || !consentText.trim() || consentText.length > 8000 || !Array.isArray(countries) || !countries.length || countries.length > 249
             || countries.some(country => typeof country !== 'string' || !Object.prototype.hasOwnProperty.call(registration.countries, country))
-            || new Set(countries).size !== countries.length) throw new Error();
+            || new Set(countries).size !== countries.length
+            || childAudience && (env.PARENT_SIGNED_FORMS_ENABLED !== 'true' || !Array.isArray(signedCountries)
+                || signedCountries.length !== countries.length || new Set(signedCountries).size !== signedCountries.length
+                || signedCountries.some(country => !['BR', 'US'].includes(country) || !countries.includes(country))
+                || Object.keys(registration.countries).some(country => !countries.includes(country)))) throw new Error();
         return Object.freeze({ version, consentVersion, consentText, privacyNoticeUrl, countries: Object.freeze([...countries].sort()),
             creationEnabled: env.PARENT_REGISTRATION_CREATION_ENABLED === 'true',
+            ...(childAudience ? { audience: 'children-included' as const, signedFormCountries: Object.freeze([...(signedCountries as string[])].sort()) } : {}),
             ...(env.PARENT_SIGNED_FORMS_ENABLED === 'true' ? { signedFormsEnabled: true } : {}) });
     } catch { throw new Error('Parent registration requires explicit reviewed countries, policy, consent versions/text and an HTTPS privacy notice URL.'); }
 }

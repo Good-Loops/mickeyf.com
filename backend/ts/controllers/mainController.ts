@@ -55,17 +55,23 @@ export function createMainController({
 }: ControllerDependencies) {
     const readRegistrationContext = createProviderAuthContextReader({ database, sessionSecret, allowedOrigins: allowedMutationOrigins });
     async function addUser(req: Request, res: Response) {
+        let context: Awaited<ReturnType<typeof readRegistrationContext>> = null;
+        const authorize = async () => {
+            context = await readRegistrationContext(req);
+            try { await registration.assertAvailable(context); return true; }
+            catch (error) {
+                if (!(error instanceof RegistrationRequiredError)) throw error;
+                res.status(403).json({ error: 'REGISTRATION_REQUIRED' }); return false;
+            }
+        };
+        const childAudience = registration.audience === 'children-included';
+        if (childAudience && !await authorize()) return res;
         const validation = validateSignupRequest(req.body);
         if (!validation.valid) {
             return res.json({ error: validation.error });
         }
 
-        const context = await readRegistrationContext(req);
-        try { await registration.assertAvailable(context); }
-        catch (error) {
-            if (error instanceof RegistrationRequiredError) return res.status(403).json({ error: 'REGISTRATION_REQUIRED' });
-            throw error;
-        }
+        if (!childAudience && !await authorize()) return res;
 
         const { userName, email, password } = validation.input;
         if (await isAccountIdentifierTaken(database, { userName, email })) {

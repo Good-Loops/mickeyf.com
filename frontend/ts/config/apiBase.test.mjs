@@ -81,7 +81,7 @@ test('one global document policy permits only the required Google GIS and Apple 
         'default-src': ["'self'"],
         'base-uri': ["'self'"],
         'connect-src': ["'self'", 'data:', 'https://mickeyf-org-j7yuum4tiq-uc.a.run.app', 'https://accounts.google.com/gsi/'],
-        'font-src': ["'self'", 'data:', 'https://fonts.gstatic.com'],
+        'font-src': ["'self'", 'data:'],
         'form-action': ["'self'"],
         'frame-ancestors': ["'none'"],
         'frame-src': ['https://accounts.google.com/gsi/'],
@@ -92,7 +92,7 @@ test('one global document policy permits only the required Google GIS and Apple 
         'script-src': ["'self'", "'wasm-unsafe-eval'", 'https://accounts.google.com/gsi/client',
             'https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js'],
         'script-src-attr': ["'none'"],
-        'style-src': ["'self'", "'unsafe-inline'", 'https://fonts.googleapis.com', 'https://accounts.google.com/gsi/style'],
+        'style-src': ["'self'", "'unsafe-inline'", 'https://accounts.google.com/gsi/style'],
         'worker-src': ["'self'", 'blob:'],
         'upgrade-insecure-requests': [],
     });

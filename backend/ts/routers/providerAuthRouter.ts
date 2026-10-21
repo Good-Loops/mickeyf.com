@@ -168,9 +168,12 @@ export function createProviderAuthRouter(options: ProviderAuthRouterOptions): Ro
             const methods = await (options.services?.readAccountMethods ?? readProviderAccountMethods)(database, accountId,
                 { allowMissingProviderTable: options.enabled !== true });
             if (!methods) return res.status(401).json({ error: 'UNAUTHENTICATED' });
+            const childAudience = options.registration?.audience === 'children-included';
+            const providerCollectionAllowed = !childAudience || await options.registration!.providerCollectionAllowed(accountId);
             return res.json({ hasPassword: methods.hasPassword, googleLinked: methods.googleLinked,
-                googleDeletionEnabled: googleDeletionEnabled && methods.googleLinked,
-                appleLinked: methods.appleLinked, appleDeletionEnabled: appleDeletionEnabled && methods.appleLinked });
+                googleDeletionEnabled: providerCollectionAllowed && googleDeletionEnabled && methods.googleLinked,
+                appleLinked: methods.appleLinked, appleDeletionEnabled: providerCollectionAllowed && appleDeletionEnabled && methods.appleLinked,
+                ...(childAudience ? { providerCollectionAllowed } : {}) });
         } catch { return fail(res, 'UNAVAILABLE'); }
     }));
 
@@ -231,8 +234,10 @@ export function createProviderAuthRouter(options: ProviderAuthRouterOptions): Ro
             if (isRecord(req.body) && req.body.action === 'signup' && !options.signupEnabled) return fail(res, 'UNAVAILABLE');
             if (isRecord(req.body) && req.body.action === 'delete' && !canDeleteWith(req.body.clientKey)) return fail(res, 'ACCOUNT_DELETION_UNAVAILABLE');
             try {
-                // Signup retains the cookie that authorized age/country preflight. Login still rotates its binding.
-                const context = await services.readContext(req, isRecord(req.body) && req.body.action === 'signup' ? 'complete' : 'begin');
+                // Child-audience provider login also retains its prior eligibility binding.
+                const retainEligibility = isRecord(req.body) && (req.body.action === 'signup'
+                    || req.body.action === 'login' && options.registration?.audience === 'children-included');
+                const context = await services.readContext(req, retainEligibility ? 'complete' : 'begin');
                 const result = await services.flow.begin(context, req.body);
                 if (!result.ok) return fail(res, result.reason);
                 if (isRecord(req.body) && req.body.clientKey === 'apple-android'

@@ -213,3 +213,41 @@ test('signed form endpoints reject anonymous contexts, extra child fields and un
     assert.deepEqual(await f.flow.requestSignedForm(f.context, { state: challenge.state, idToken: 'token', userName: 'synthetic' }), { error: 'INVALID_ATTEMPT' });
     assert.equal(f.calls.includes('verify'), false);
 });
+
+for (const country of ['US', 'BR']) test(`child-audience ${country} signed requests collect only parent evidence before approval`, async () => {
+    const selected = { ...policy, audience: 'children-included' as const, countries: ['US', 'BR'],
+        signedFormsEnabled: true, signedFormCountries: ['BR', 'US'] };
+    const f = fixture(selected);
+    let requested = false;
+    f.store.requestSignedForm = async (challenge, identity, context, userName, exactPolicy) => {
+        requested = true; assert.equal(userName, null); assert.equal(challenge.operation.purpose, 'create-child');
+        assert.equal(context.account!.accountId, f.context.account!.accountId);
+        return { reference: randomUUID(), parentAccountId: context.account!.accountId, country, userName: null,
+            verifiedContact: identity.email!, policyVersion: exactPolicy.version, consentVersion: exactPolicy.consentVersion,
+            status: 'pending', expiresAt: new Date(Date.now() + 60000).toISOString(), publicPolicyDigest: null,
+            publicConsentText: null, publicConsentVersion: null };
+    };
+    const config = f.flow.config(); assert.ok(config.enabled);
+    assert.equal(config.audience, 'children-included'); assert.equal(config.credentialsAfterApproval, true);
+    assert.deepEqual(config.signedFormCountries, ['BR', 'US']);
+    const challenge = await f.flow.begin(f.context, { ...beginInput, country }); assert.ok('state' in challenge);
+    assert.deepEqual(await f.flow.requestSignedForm(f.context, { state: challenge.state, idToken: 'parent-proof', userName: 'early-child-name' }),
+        { error: 'INVALID_REQUEST' });
+    assert.equal(f.calls.includes('verify'), false);
+    const result = await f.flow.requestSignedForm(f.context, { state: challenge.state, idToken: 'parent-proof' });
+    assert.ok('form' in result); assert.equal(result.form.userName, null); assert.equal(requested, true);
+    assert.deepEqual(await f.flow.createChild(f.context, { grant: 'a'.repeat(42) + 'A', userName: 'child', password: 'child-password' }),
+        { error: 'INVALID_REQUEST' }, 'a signed form reference is mandatory before child credentials can be processed');
+});
+
+test('strict paused parent creation rejects challenges, forms and child credentials before provider or storage work', async () => {
+    const selected = { ...policy, audience: 'children-included' as const, countries: ['US', 'BR'],
+        signedFormsEnabled: true, signedFormCountries: ['BR', 'US'], creationEnabled: false };
+    const f = fixture(selected);
+    const config = f.flow.config(); assert.ok(config.enabled); assert.equal(config.creationEnabled, false);
+    assert.deepEqual(await f.flow.begin(f.context, { ...beginInput, country: 'BR' }), { error: 'CLOSED' });
+    assert.deepEqual(await f.flow.requestSignedForm(f.context, { state: 'a'.repeat(42) + 'A', idToken: 'parent-proof' }), { error: 'CLOSED' });
+    assert.deepEqual(await f.flow.createChild(f.context, { grant: 'a'.repeat(42) + 'A', formReference: randomUUID(),
+        userName: 'child', password: 'child-password' }), { error: 'CLOSED' });
+    assert.deepEqual(f.calls, []);
+});

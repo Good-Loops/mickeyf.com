@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { performance } from 'node:perf_hooks';
 import test, { type TestContext } from 'node:test';
 import type { Pool, PoolConnection, QueryOptions } from 'mysql2/promise';
 import type { AppleTokenLifecycle } from '../config/appleTokenConfig';
@@ -249,12 +250,20 @@ test('a connection arriving after acquisition timeout is destroyed without verif
     assert.equal(f.state.socketDestroyed, 1);
 });
 
-test('a late Apple response cannot write or start another retry after the command deadline', async () => {
+test('a late Apple response cannot write or start another retry after the command deadline', async context => {
+    let now = 0;
+    context.mock.method(performance, 'now', () => now);
+    context.mock.timers.enable({ apis: ['setTimeout'] });
     const f = fixture(0, 0, 2);
     const pending = deferred<void>();
-    f.overrideRevoke(() => pending.promise);
-    assert.equal(await runAppleTokenRevocation(['apply'], { ...f.dependencies, maxDurationMs: 15 }), 1);
+    const started = deferred<void>();
+    f.overrideRevoke(() => { started.resolve(); return pending.promise; });
+    const command = runAppleTokenRevocation(['apply'], { ...f.dependencies, maxDurationMs: 15 });
+    await Promise.race([started.promise, command.then(() => assert.fail('Expected the synthetic Apple request before advancing its deadline.'))]);
     assert.equal(f.state.appleCalls, 1);
+    now = 15;
+    context.mock.timers.tick(15);
+    assert.equal(await command, 1);
     const queryCount = f.queries.length;
     pending.resolve();
     await new Promise(resolve => setImmediate(resolve));

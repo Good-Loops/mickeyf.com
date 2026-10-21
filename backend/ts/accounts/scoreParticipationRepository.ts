@@ -53,7 +53,7 @@ export async function removePublicScoreParticipation(connection: PoolConnection,
         WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='parent_signed_forms'`, []);
     if (![0, 1].includes(Number(schema?.available))) throw new Error('Signed permission withdrawal schema is unavailable.');
     if (Number(schema.available) === 1) {
-        const [child] = await rows(connection, "SELECT child_uuid FROM parent_child_consents WHERE child_uuid=? AND country_code='US' LIMIT 1", [accountId]);
+        const [child] = await rows(connection, 'SELECT child_uuid FROM parent_child_consents WHERE child_uuid=? LIMIT 1', [accountId]);
         if (child) await connection.query({ sql: 'UPDATE parent_signed_forms SET public_withdrawn=1 WHERE child_uuid=?', timeout }, [accountId]);
     }
     await connection.query({ sql: `INSERT INTO account_score_permissions

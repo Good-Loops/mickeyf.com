@@ -17,6 +17,7 @@ type ProviderSignInControlsProps = {
     operationLock?: { current: boolean };
     onBusyChange?: (busy: boolean) => void;
     onSuccess?: () => void;
+    onEligibilityRequired?: () => void;
 };
 
 export function providerSignInErrorMessage(error: string, action: ProviderAction | 'delete',
@@ -110,16 +111,16 @@ export function ProviderSignInButtons({ clients, action, busyClient, disabled, o
 
 /** Preparation does not lock the password form; only a returned credential claims it. */
 export function InlineGoogleSignIn({ client, action = 'login', userName = '', rememberMe = false, disabled = false,
-    operationLock, onBusyChange, onSuccess }: Omit<ProviderSignInControlsProps, 'action'> & {
+    operationLock, onBusyChange, onSuccess, onEligibilityRequired }: Omit<ProviderSignInControlsProps, 'action'> & {
         client: PublicProviderClient;
         action?: 'login' | 'signup';
     }) {
     const { prepareProviderLogin, completeProviderLogin, loading, isAuthenticated } = useAuth();
     const host = useRef<HTMLDivElement>(null);
     const latest = useRef({ prepareProviderLogin, completeProviderLogin, userName, rememberMe, disabled,
-        isAuthenticated, operationLock, onBusyChange, onSuccess });
+        isAuthenticated, operationLock, onBusyChange, onSuccess, onEligibilityRequired });
     latest.current = { prepareProviderLogin, completeProviderLogin, userName, rememberMe, disabled,
-        isAuthenticated, operationLock, onBusyChange, onSuccess };
+        isAuthenticated, operationLock, onBusyChange, onSuccess, onEligibilityRequired };
     const [retry, setRetry] = useState(0);
     const [phase, setPhase] = useState<'preparing' | 'ready' | 'completing' | 'retry'>('preparing');
     const [feedback, setFeedback] = useState<string | null>(null);
@@ -223,10 +224,11 @@ export function InlineGoogleSignIn({ client, action = 'login', userName = '', re
                 <button className="provider-sign-in__button" type="button" disabled={disabled}
                     onClick={() => {
                         if (latest.current.operationLock?.current) return;
+                        if (latest.current.onEligibilityRequired) { latest.current.onEligibilityRequired(); return; }
                         setPhase('preparing');
                         setRetry(value => value + 1);
                     }}>
-                    Retry Google sign-in
+                    {onEligibilityRequired ? 'Check eligibility again' : 'Retry Google sign-in'}
                 </button>
             </div>}
         </div>
@@ -234,7 +236,7 @@ export function InlineGoogleSignIn({ client, action = 'login', userName = '', re
 }
 
 export default function ProviderSignInControls({ action, userName = '', rememberMe = false, disabled = false,
-    operationLock, onBusyChange, onSuccess }: ProviderSignInControlsProps) {
+    operationLock, onBusyChange, onSuccess, onEligibilityRequired }: ProviderSignInControlsProps) {
     const { authenticateWithProvider, prepareProviderLogin, completeProviderLogin } = useAuth();
     const [clients, setClients] = useState<PublicProviderClient[]>([]);
     const [configurationLoading, setConfigurationLoading] = useState(true);
@@ -252,6 +254,7 @@ export default function ProviderSignInControls({ action, userName = '', remember
         if (LEGACY_PUBLIC_API_PREVIEW) return;
         mounted.current = true;
         let current = true;
+        const discovery = new AbortController();
         let retryTimer: ReturnType<typeof setTimeout> | undefined;
         let finishRetryWait: (() => void) | undefined;
         setConfigurationLoading(true);
@@ -263,11 +266,22 @@ export default function ProviderSignInControls({ action, userName = '', remember
                 let available: PublicProviderClient[] = [];
                 try {
                     available = await getAvailableProviderClients(partial => {
-                        if (current) setClients(partial);
+                        if (current) setClients(partial.filter(client => client.clientKey !== 'apple-web' || client.issuance === false));
                     }, () => { unavailable = true; });
                 } catch { unavailable = true; }
                 if (!current) return;
                 if (!unavailable) {
+                    const apple = available.find(client => client.clientKey === 'apple-web' && client.issuance !== false);
+                    if (apple) {
+                        // This surface mounts only after eligibility or explicit adult account permission.
+                        try { await preloadProviderCredential(apple, discovery.signal); }
+                        catch {
+                            const unavailableClient = { ...apple, issuance: false as const };
+                            delete unavailableClient.signup;
+                            available = available.map(client => client === apple ? unavailableClient : client);
+                        }
+                        if (!current) return;
+                    }
                     // A valid empty configuration explicitly disables provider choices.
                     setClients(available);
                     setConfigurationLoading(false);
@@ -291,6 +305,7 @@ export default function ProviderSignInControls({ action, userName = '', remember
         })();
         return () => {
             current = false;
+            discovery.abort();
             if (retryTimer !== undefined) clearTimeout(retryTimer);
             finishRetryWait?.();
             mounted.current = false;
@@ -434,7 +449,7 @@ export default function ProviderSignInControls({ action, userName = '', remember
             {inlineGoogle && <InlineGoogleSignIn client={inlineGoogle} action={action === 'signup' ? 'signup' : 'login'}
                 userName={userName} rememberMe={rememberMe}
                 disabled={disabled || busyClient !== null} operationLock={operationLock}
-                onBusyChange={onBusyChange} onSuccess={onSuccess} />}
+                onBusyChange={onBusyChange} onSuccess={onSuccess} onEligibilityRequired={onEligibilityRequired} />}
             <ProviderSignInButtons clients={clients} action={action} busyClient={busyClient}
                 disabled={disabled} onSelect={client => { void selectProvider(client); }} />
             {configurationLoading && action !== 'link' && <>
@@ -449,6 +464,8 @@ export default function ProviderSignInControls({ action, userName = '', remember
             {feedback && <p className={`provider-sign-in__feedback${feedback.error ? ' provider-sign-in__feedback--error' : ''}`}
                 role={feedback.error ? 'alert' : 'status'}>{feedback.text}</p>}
             {feedback?.needsAccount && <Link className="provider-sign-in__account-action" to="/signup">Create account</Link>}
+            {feedback?.error && action !== 'link' && onEligibilityRequired && <button type="button"
+                disabled={busyClient !== null || operationLock?.current === true} onClick={onEligibilityRequired}>Check eligibility again</button>}
         </div>
     );
 }

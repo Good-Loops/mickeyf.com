@@ -8,6 +8,16 @@ The owner reports the app now works on their iPhone. Carry that acceptance forwa
 
 Preparation started from `2fd2b831391288fabe57f910e0eb2420aa5a3a1e` on `feature/auth-family-leaderboards`, [draft PR #342](https://github.com/Good-Loops/mickeyf.com/pull/342). Hosted checks and CodeQL pass for that committed source. **Local changes prepared in this closeout are not covered by those earlier hosted results.** They require deliberate integration and fresh hosted checks before release.
 
+## Child-audience release hold (latest owner decision)
+
+The owner confirmed that Ludolume intentionally includes children under 13 and selected **finish parent-led child registration before public launch**. This supersedes the earlier website-first readiness recommendation. Guest games and animations remain available. Do not publish the new frontend, submit store review or enable the new parent path until its backend, schema, consent operations and end-to-end validation are qualified together.
+
+The currently live backend still uses general registration without age/country screening and has new parent-account creation disabled. Holding this candidate does **not** disable that existing live signup. No production database, account-creation flag or traffic change has been made during this work.
+
+The mixed-audience implementation must screen country/coarse age before new account credentials or sign-in SDKs, route parent-required users to verified parent consent, and request child nickname/password only after signed-form approval. An old general-audience backend must fail closed for this frontend. Brazil and US signed-form support requires a reviewed source/schema/config cutover; historical US-only schema and current D0 rollback are insufficient for the new nullable pending-form data.
+
+[Child registration readiness](child-registration-readiness.md) records technical evidence, pending operations and the guarded deployment order. Existing owner iPhone acceptance predates this account-flow change; validate the new flow explicitly.
+
 ## Current channel status
 
 | Channel | Current evidence | Remaining public-release work |
@@ -16,7 +26,7 @@ Preparation started from `2fd2b831391288fabe57f910e0eb2420aa5a3a1e` on `feature/
 | Apple App Store | Existing record `6810735137`; latest internal 1.0 (28.1.0) Testing. Public draft still Prepare for Submission and selects old 10.1.0. | App Store eligible build, current draft association, listing/screenshots, privacy/content/age declarations, reviewer access and approved regional/free/manual-release settings; then review submission and eventual public release. |
 | Google Play | **Draft app created with explicit owner authorization**, app ID `4974292717500321843`, `com.mickeyf.app`, en-US, App, Free. Dashboard confirms production access requires a closed test: **12 opted-in testers for at least 14 days**, currently 0 testers. | Upload-key/signing preparation, signed AAB, actual Play certificate/OAuth bindings, Android acceptance, listing/privacy/rating/access forms, required closed testing, production-access application and review. No build uploaded or test release published. |
 
-Detailed evidence: [website](website-readiness.md), [iOS](ios-readiness.md), [Android](android-readiness.md), [verifier validation](verifier-validation.md). Listing copy is in [store-listings.json](store-listings.json); it is a draft, not a saved Console submission.
+Detailed evidence: [website](website-readiness.md), [iOS](ios-readiness.md), [Android](android-readiness.md), [verifier validation](verifier-validation.md). Listing copy is in [store-listings.json](store-listings.json). The English Apple version text/contact and manual release setting are saved in its public draft; other listing/setup work remains pending.
 
 ## Disposition ledger
 
@@ -25,7 +35,7 @@ Detailed evidence: [website](website-readiness.md), [iOS](ios-readiness.md), [An
 | Tested iPhone mobile fixes | Accepted owner evidence | Preserve acceptance; exact installed build was not independently read from the device. Latest delivered internal build is 28.1.0. |
 | RETIRED/latestReady deployment checks | Fixed locally; focused tests pass | Zero-traffic reconciliation permits only the exact captured serving pointer or new revision; settled traffic must point to the approved target. Regenerate saved plans. Cloud behavior was not exercised through a new deployment. |
 | Android key-file ignore rules | Fixed locally | `.jks`/`.keystore` are ignored; actual keys still belong outside the repository in protected storage. No key generated or credential read. |
-| Privacy notice's universal country/age claim | Corrected in local source | General signup no longer asks those questions. Notice version changes to `privacy-2026-10-20.1`; separate consent/form texts and versions remain unchanged. Review and publish the correction with the final source. This is not a legal-sufficiency finding. |
+| Privacy and signed-form notices | Updated in candidate source | `privacy-2026-10-20.2` and `signed-parent-form-2026-10-20.1` describe the new gated BR/US parent path and post-approval child credentials. The notice digest changes; fresh policy/consent binding and operational review are required. Not published or a legal-sufficiency finding. |
 | External deletion request instructions | Prepared in source | Public privacy deletion section provides browser/account and email request paths. Operational ownership-verification/deletion handling must be accepted before entering the URL in Play Console. |
 | Existing finite Clean Code sweep/gameplay acceptance | Complete / retained | No new broad audit, gameplay rewrite or dependency sweep is part of closeout. |
 | Worldwide availability / additional features | Deferred | Launch scope is BR/US. No additional countries or features are silently enabled. |
@@ -42,7 +52,7 @@ Detailed evidence: [website](website-readiness.md), [iOS](ios-readiness.md), [An
 3. Prepare a signed Android internal candidate and safe upload-key backup/recovery. Read the actual Play app-signing certificate set; configure matching OAuth clients and bounded server presenter pins before enabling Android providers. Rebuild with a new unused version code when configuration changes. Validate a Play-installed Android candidate; retain existing iPhone evidence.
 4. Assemble/review any required provider-aware backend candidate, scanned image and compatible rollback using fresh current metadata/pins. Keep the six disabled Cloud Build triggers disabled. A provider rollback preserves private profiles, deletion and Apple maintenance; it is not an old legacy binary. Fresh traffic plans expire quickly and must be regenerated after verifier changes.
 5. Establish backend readiness **before main merge**, because main merge triggers Firebase frontend publication. Use the guarded Hosting preview/live verification path and a short route/config/privacy/asset smoke check. Changes here must not silently broaden signup audience, countries, grants or Android provider flags.
-6. Upload an App Store eligible iOS build through the existing protected `app-store-draft` workflow, capture its source/signing/cleanup evidence and replace the old draft build. Finalize the two store listings with [the prepared copy](store-listings.json), actual assets, truthful forms and working reviewer access. Recommend manual Apple release to coordinate launch; the live draft currently selects automatic release, and was not changed.
+6. Upload an App Store eligible iOS build through the existing protected `app-store-draft` workflow, capture its source/signing/cleanup evidence and replace the old draft build. Finalize the two store listings with [the prepared copy](store-listings.json), actual assets, truthful forms and working reviewer access. The Apple draft now selects manual release; it remains Prepare for Submission with old build 10.1.0. Reviewer username/password remain owner-pending.
 7. Submit each ready store candidate for review, satisfy Play's actual testing/production gate, then publish under the approved channel-specific release plan. A publicly available website is not an App Store or Play release. Do not promise simultaneous approval or a fixed approval date.
 
 ## Created Google Play draft
@@ -61,7 +71,7 @@ App ID: `4974292717500321843`. [Open the created draft](https://play.google.com/
 
 The verifier receipt records **221 passing tests**, zero failures/skips, and preserved negative drift/readiness tests. Independent review also passed all six targeted new integration/negative cases. Focused privacy rendering/consent tests passed **17/17**, and frontend TypeScript passed. The release-enabled production build passed to an isolated temporary output directory; Vite retained its existing mixed static/dynamic import warnings. Both listing localizations passed field-length checks, and all report-relative links resolved.
 
-No new native artifact was built or device-tested in this pass. Current hosted CI applies only to its reported source, not to this uncommitted batch. Existing Android outputs and previous iPhone/CI observations retain their dates and scopes.
+Unsigned native screenshot run [39520334734](https://github.com/Good-Loops/mickeyf.com/actions/runs/39520334734) was dispatched at `877b520d45518a6fca953d0ac02a0fe77f5131e2`; result and visual acceptance remain pending. No signed public candidate was uploaded or device-tested in this pass. Current hosted CI applies only to its reported source. Existing Android outputs and previous iPhone/CI observations retain their dates and scopes.
 
 Safe final local review commands:
 

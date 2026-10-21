@@ -1,11 +1,3 @@
-const fontFamilies = [
-    'Space+Mono:regular,italic,700,700italic',
-    'Roboto:100,100italic,300,300italic,regular,italic,500,500italic,700,700italic,900,900italic',
-    'Space+Grotesk:300,regular,500,600,700',
-    'Work+Sans:100,200,300,regular,500,600,700,800,900,100italic,200italic,300italic,italic,500italic,600italic,700italic,800italic,900italic',
-    'Fira+Sans:100,100italic,200,200italic,300,300italic,regular,italic,500,500italic,600,600italic,700,700italic,800,800italic,900,900italic',
-];
-
 /** Font availability must not delay the application's local layout stylesheet. */
 export function loadAppFonts(documentRoot: Document = document): void {
     if (documentRoot.getElementById('app-fonts')) return;
@@ -14,6 +6,7 @@ export function loadAppFonts(documentRoot: Document = document): void {
     const stylesheet = documentRoot.createElement('link');
     stylesheet.id = 'app-fonts';
     stylesheet.rel = 'stylesheet';
-    stylesheet.href = `https://fonts.googleapis.com/css?family=${fontFamilies.join('|')}&display=swap`;
+    // Guest and child routes load fonts from the app without contacting a third-party font service.
+    stylesheet.href = '/fonts/app-fonts.css';
     documentRoot.head.appendChild(stylesheet);
 }

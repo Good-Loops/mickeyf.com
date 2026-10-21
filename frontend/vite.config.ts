@@ -22,11 +22,7 @@ export default defineConfig(({ command, mode, isPreview }) => {
     && env.VITE_ENABLE_THREE_BOSSES_LOCAL === "1";
 
   return {
-    plugins: [react(), {
-      name: 'provider-startup-mode',
-      transformIndexHtml: html => html.replace('data-google-startup="enabled"',
-        `data-google-startup="${publicAuthProtocol === 'legacy' ? 'disabled' : 'enabled'}"`),
-    }, ...(developmentServer ? [publicLeaderboardsPlugin()] : []),
+    plugins: [react(), ...(developmentServer ? [publicLeaderboardsPlugin()] : []),
       ...(publicApiPreview ? [publicApiPlugin(publicAuthProtocol!)] : [])],
     root: ".",
     resolve: {

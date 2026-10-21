@@ -14,6 +14,18 @@ const productionEnvironment = {
     CLOUD_SQL_CONNECTION_NAME: 'test-project:test-region:test-instance',
 };
 
+test('child-audience runtime retains its contract while creation is closed and refuses opening without signed-parent support', () => {
+    const childEnvironment = { ...productionEnvironment, REGISTRATION_AUDIENCE: 'children-included',
+        REGISTRATION_ENABLED: 'true', REGISTRATION_POLICY_REVIEWED: 'true', REGISTRATION_POLICY_VERSION: 'synthetic-child-v1',
+        REGISTRATION_COUNTRY_RULES: '{"US":{"parentRequiredBelow":13},"BR":{"parentRequiredBelow":18}}' };
+    assert.throws(() => loadRuntimeConfig(childEnvironment), /enabled reviewed signed-parent policy/u);
+    const closed = loadRuntimeConfig({ ...childEnvironment, REGISTRATION_CREATION_ENABLED: 'false' });
+    assert.equal(closed.registrationAudience, 'children-included');
+    assert.equal(closed.parentRegistrationPolicy, undefined);
+    assert.equal(loadRuntimeConfig({ ...productionEnvironment, REGISTRATION_AUDIENCE: 'children-included' }).registrationAudience,
+        'children-included', 'closed policy must still gate provider collection for known managed children');
+});
+
 test('production runtime configuration allows only the website, packaged iOS and exact local preview origins', () => {
     const config = loadRuntimeConfig(productionEnvironment);
 

@@ -13,6 +13,7 @@ type Environment = Readonly<Record<string, string | undefined>>;
 
 export type RuntimeConfig = {
     registrationPolicy: RegistrationPolicy | undefined;
+    registrationAudience?: 'children-included';
     scoreParticipationPolicy: ScoreParticipationPolicy | undefined;
     parentRegistrationPolicy: ParentRegistrationPolicy | undefined;
     nodeEnv: RuntimeEnvironment;
@@ -123,10 +124,19 @@ export function loadRuntimeConfig(env: Environment = process.env): RuntimeConfig
     }
 
     const registrationPolicy = loadRegistrationPolicy(env);
+    const parentRegistrationPolicy = loadParentRegistrationPolicy(env, registrationPolicy);
+    const registrationAudience = env.REGISTRATION_AUDIENCE === 'children-included' ? 'children-included' as const : undefined;
+    if (registrationAudience && (registrationPolicy && env.REGISTRATION_CREATION_ENABLED !== 'false'
+        || env.PROVIDER_GOOGLE_SIGNUP_ENABLED === 'true' || env.PROVIDER_APPLE_SIGNUP_ENABLED === 'true'
+        || env.PARENT_REGISTRATION_CREATION_ENABLED === 'true')
+        && (!parentRegistrationPolicy?.creationEnabled || !parentRegistrationPolicy.signedFormsEnabled)) {
+        throw new Error('Child-audience account creation requires the enabled reviewed signed-parent policy.');
+    }
     return Object.freeze({
         registrationPolicy,
+        registrationAudience,
         scoreParticipationPolicy: loadScoreParticipationPolicy(env, registrationPolicy),
-        parentRegistrationPolicy: loadParentRegistrationPolicy(env, registrationPolicy),
+        parentRegistrationPolicy,
         nodeEnv,
         isProduction: nodeEnv === 'production',
         port: parsePort(env.BACKEND_PORT, 'BACKEND_PORT', 8080),

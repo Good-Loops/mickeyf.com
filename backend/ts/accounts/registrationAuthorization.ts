@@ -36,8 +36,12 @@ function anonymousBinding(context: ProviderAuthContext | null): Buffer {
     return context.bindingHash;
 }
 
-/** Shares one SQL authorization between password and provider account creation. */
-export function createRegistrationAuthorization(database: Pick<Pool, 'query'> & Partial<Pick<Pool, 'getConnection'>>, policy?: RegistrationPolicy) {
+/** Eligibility may support existing provider login while all new-account consumption stays closed. */
+export function createRegistrationAuthorization(database: Pick<Pool, 'query'> & Partial<Pick<Pool, 'getConnection'>>, policy?: RegistrationPolicy,
+    audience: RegistrationPolicy['audience'] = policy?.audience, creationEnabled = true) {
+    if (audience === 'children-included' && policy?.mode === 'general-audience') {
+        throw new TypeError('Child registration requires staged eligibility.');
+    }
     function generalGrant(context: ProviderAuthContext | null) {
         const original = anonymousBinding(context);
         if (policy?.mode !== 'general-audience') throw new RegistrationRequiredError();
@@ -72,6 +76,18 @@ export function createRegistrationAuthorization(database: Pick<Pool, 'query'> & 
     }
     return {
         policy,
+        audience,
+        creationEnabled: !!policy && creationEnabled,
+        async providerCollectionAllowed(accountId: string): Promise<boolean> {
+            if (audience !== 'children-included') return true;
+            assertAccountId(accountId);
+            const [children] = await database.query<RowDataPacket[]>({
+                sql: 'SELECT child_uuid FROM parent_child_consents WHERE child_uuid=? LIMIT 2', timeout: TIMEOUT_MS,
+            }, [accountId]);
+            if (!Array.isArray(children) || children.length > 1
+                || children.some(child => child.child_uuid !== accountId)) throw new RegistrationRequiredError();
+            return children.length === 0;
+        },
         async cancel(context: ProviderAuthContext): Promise<void> {
             if (policy?.mode === 'general-audience') {
                 const grant = generalGrant(context);
@@ -110,11 +126,17 @@ export function createRegistrationAuthorization(database: Pick<Pool, 'query'> & 
             return decision;
         },
         async assertAvailable(context: ProviderAuthContext | null): Promise<void> {
+            if (!creationEnabled) throw new RegistrationRequiredError();
             if (policy?.mode === 'general-audience') await readGeneral(database, context, false);
             else await read(database, context, false);
         },
+        async assertLoginAvailable(context: ProviderAuthContext | null): Promise<void> {
+            if (audience !== 'children-included') throw new RegistrationRequiredError();
+            await read(database, context, false);
+        },
         /** Called inside the NEW account transaction; failures roll back user, identity, privacy and consumption together. */
         async consume(connection: PoolConnection, context: ProviderAuthContext | null, accountId: string): Promise<void> {
+            if (!creationEnabled) throw new RegistrationRequiredError();
             assertAccountId(accountId);
             if (policy?.mode === 'general-audience') {
                 const grant = await readGeneral(connection, context, true);

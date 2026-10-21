@@ -89,13 +89,17 @@ export function createAuthRouter(
     if (parentRegistrationStorageReady && deletionJournal) {
         router.use('/parent-registration', createParentRegistrationRouter(createParentRegistrationFlow({
             policy: parentRegistrationPolicy, publicationPolicy: scoreParticipationPolicy, clients: providerAuth?.clients ?? {},
-            store: createParentRegistrationRepository(database, deletionJournal, scoreParticipationPolicy, parentRegistrationPolicy?.signedFormsEnabled === true),
+            store: createParentRegistrationRepository(database, deletionJournal, scoreParticipationPolicy, parentRegistrationPolicy?.signedFormsEnabled === true,
+                { countries: parentRegistrationPolicy?.signedFormCountries,
+                    credentialsAfterApproval: parentRegistrationPolicy?.audience === 'children-included' }),
         }), createProviderAuthContextReader({ database, sessionSecret, allowedOrigins: allowedMutationOrigins }), isProduction));
     } else router.get('/parent-registration/config', (_req, res) => {
         res.setHeader('Cache-Control', 'no-store'); return res.json({ enabled: false });
     });
     router.use('/registration', createRegistrationRouter(registration,
-        createProviderAuthContextReader({ database, sessionSecret, allowedOrigins: allowedMutationOrigins }), isProduction));
+        createProviderAuthContextReader({ database, sessionSecret, allowedOrigins: allowedMutationOrigins }), isProduction,
+        parentRegistrationStorageReady && parentRegistrationPolicy?.creationEnabled === true
+            && parentRegistrationPolicy.signedFormsEnabled === true));
     const appleLifecycle = providerAuth?.appleTokenLifecycle;
     const appleAccountRevocation = appleLifecycle ? createAppleTokenRevocationWorker({
         database, clientId: appleLifecycle.clientId,

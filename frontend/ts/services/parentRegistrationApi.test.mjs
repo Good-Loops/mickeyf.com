@@ -131,3 +131,24 @@ test('signed form configuration must match the bundled notice and only accepts e
         await assert.rejects(createParentRegistrationApi('', async () => response({ form: { ...form, ...patch } })).requestSignedForm(state, 'proof', form.userName), { code: 'UNAVAILABLE' });
     }
 });
+
+test('strict parent policy covers both reviewed countries and requests a form without child credentials', async () => {
+    const strict = { ...config, audience: 'children-included', credentialsAfterApproval: true,
+        countries: ['BR', 'US'], signedFormCountries: ['BR', 'US'], signedFormVersion: notice.signedParentForm.version };
+    const form = { reference: randomUUID(), parentAccountId: randomUUID(), country: 'BR', userName: null,
+        verifiedContact: 'synthetic-parent@example.test', policyVersion: strict.policyVersion, consentVersion: strict.consentVersion,
+        status: 'pending', expiresAt: new Date(Date.now()+86400000).toISOString(),
+        publicPolicyDigest: null, publicConsentText: null, publicConsentVersion: null };
+    const calls=[];
+    const api=createParentRegistrationApi('',async(url,options)=>{
+        if(url.endsWith('/config'))return response(strict);
+        calls.push(JSON.parse(options.body));return response({form});
+    },{requireChildAudience:true});
+    assert.deepEqual(await api.config(),strict);
+    const state=random();assert.deepEqual(await api.requestSignedForm(state,'synthetic-proof','must-not-transmit-child-name'),form);
+    assert.deepEqual(calls,[{state,idToken:'synthetic-proof'}]);
+    for(const patch of [{credentialsAfterApproval:false},{signedFormCountries:['US']},{countries:['ZZ'],signedFormCountries:['ZZ']},
+        {audience:'general-audience'},{signedFormVersion:'old'}]){
+        await assert.rejects(createParentRegistrationApi('',async()=>response({...strict,...patch}),{requireChildAudience:true}).config(),{code:'UNAVAILABLE'});
+    }
+});

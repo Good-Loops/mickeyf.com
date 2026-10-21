@@ -8,8 +8,11 @@ const { chromium } = createRequire(import.meta.url)('playwright-core');
 const root = fileURLToPath(new URL('../../frontend/', import.meta.url));
 const state = Buffer.alloc(32, 1).toString('base64url');
 const nonce = Buffer.alloc(32, 2).toString('base64url');
-const policy = { enabled: true, mode: 'general-audience', policyVersion: 'synthetic-layout',
-    optionalDetails: false, parentRegistrationAvailable: false };
+const policy = { enabled: true, audience: 'children-included', creationEnabled: true, policyVersion: 'synthetic-layout',
+    parentRegistrationAvailable: true, countries: [
+        { country: 'US', parentRequiredBelow: 13, adultFrom: 18 },
+        { country: 'BR', parentRequiredBelow: 18, adultFrom: 18 },
+    ] };
 let server, browser, origin;
 const nativeControlFixture = `
     import React, { useState } from 'react';
@@ -94,9 +97,9 @@ async function fixture(t, width, { pendingBegin = false, pendingApple = false, p
                 { clientKey: 'apple-web', provider: 'apple', platform: 'web', clientId: 'com.example.synthetic', redirectUri: 'https://example.test/return', ...(closedSignup ? {} : { signup: true }) },
                 ] };
             }
-            else if (url.pathname === '/auth/registration/config') result = closedSignup ? { enabled: false } : policy;
+            else if (url.pathname === '/auth/registration/config') result = closedSignup ? { ...policy, creationEnabled: false } : policy;
             else if (url.pathname === '/auth/registration/begin') {
-                assert.deepEqual(route.request().postDataJSON(), { policyVersion: policy.policyVersion });
+                assert.deepEqual(route.request().postDataJSON(), { country: 'US', ageBand: 'adult', policyVersion: policy.policyVersion });
                 result = { authorized: true, expiresInSeconds: 300, scoreVisibility: 'private' };
             }
             else if (url.pathname === '/auth/providers/begin') {
@@ -116,9 +119,16 @@ async function fixture(t, width, { pendingBegin = false, pendingApple = false, p
     return { page, calls, releaseBegin, releaseApple, releaseRenew, releaseConfig };
 }
 
+async function approveAdult(page) {
+    await page.locator('#registration-country').selectOption('US');
+    await page.locator('#registration-age').selectOption('adult');
+    await page.getByRole('button', { name: 'Continue', exact: true }).click();
+}
+
 test('Google preparation keeps a disabled named pill at the final control height without visible loading copy', async t => {
     const { page, releaseBegin } = await fixture(t, 390, { pendingBegin: true });
     await page.goto(`${origin}/login`);
+    await approveAdult(page);
     await page.locator('.provider-sign-in__google').waitFor();
     const placeholder = page.getByRole('button', { name: 'Continue with Google', exact: true });
     await placeholder.waitFor();
@@ -137,60 +147,41 @@ test('Google preparation keeps a disabled named pill at the final control height
     assert.ok(Math.abs(before.y - after.y) < 2);
 });
 
-test('auth-route Google resources warm during renewal and config discovery without racing their cookie barrier', async t => {
+test('provider SDKs remain unloaded through eligibility and the unresolved session/config barriers', async t => {
     const { page, calls, releaseRenew, releaseConfig } = await fixture(t, 390, { pendingRenew: true, pendingConfig: true });
-    const styleRequested = page.waitForRequest('https://accounts.google.com/gsi/style');
+    const resources = [];
+    page.on('request', request => { if (/accounts.google.com|appleid.cdn-apple.com/.test(request.url())) resources.push(request.url()); });
     await page.goto(`${origin}/login`);
-    await page.waitForFunction(() => Boolean(window.google?.accounts?.id));
-    await styleRequested;
+    await page.locator('#registration-country').waitFor();
+    assert.deepEqual(resources, []);
     assert.equal(calls.filter(call => call.path === '/auth/providers/begin').length, 0);
-    const pending = page.getByRole('button', { name: 'Continue with Google', exact: true });
-    await pending.waitFor(); assert.equal(await pending.isDisabled(), true);
-    assert.equal(await pending.evaluate(button => getComputedStyle(button).opacity), '1');
-    assert.equal(await pending.evaluate(button => getComputedStyle(button).backgroundColor), 'rgb(255, 255, 255)');
-    releaseConfig();
-    await page.locator('.provider-sign-in__google').waitFor();
-    assert.equal(calls.filter(call => call.path === '/auth/providers/begin').length, 0, 'unknown session must not be replaced');
+    await approveAdult(page);
+    assert.deepEqual(resources, [], 'a pending renewal cannot authorize provider loading');
     releaseRenew();
+    await page.getByRole('button', { name: 'Continue with Google', exact: true }).waitFor();
+    assert.deepEqual(resources, [], 'provider metadata is still unresolved');
+    releaseConfig();
     await page.getByTestId('synthetic-google-sdk').waitFor();
     assert.equal(calls.filter(call => call.path === '/auth/providers/begin').length, 1);
     assert.equal(calls.filter(call => call.path === '/auth/providers/complete').length, 0);
 });
 
-test('the classic auth bootstrap preloads each Google resource once without executing the SDK or calling auth', async t => {
+for (const path of ['/login', '/signup', '/parent-accounts']) test(`${path} makes no provider resource request before eligibility`, async t => {
     const { page, calls } = await fixture(t, 390);
     const resources = [];
-    page.on('request', request => { if (request.url().startsWith('https://accounts.google.com/gsi/')) resources.push(request.url()); });
-    await page.route(`${origin}/login`, route => route.fulfill({ contentType: 'text/html', body: `<!doctype html>
-        <script defer src="/provider-signin-preload.js" data-google-startup="enabled"></script>
-        <script defer src="/provider-signin-preload.js" data-google-startup="enabled"></script>` }));
-    await page.goto(`${origin}/login`);
+    page.on('request', request => { if (/accounts.google.com|appleid.cdn-apple.com/.test(request.url())) resources.push(request.url()); });
+    await page.goto(`${origin}${path}`);
     await page.waitForLoadState('networkidle');
-    assert.deepEqual(resources.sort(), ['https://accounts.google.com/gsi/client?hl=en', 'https://accounts.google.com/gsi/style']);
-    assert.equal(await page.locator('link[data-google-signin-preload]').count(), 2);
-    assert.equal(await page.evaluate(() => Boolean(window.google)), false, 'a preload must not execute the SDK');
-    assert.deepEqual(calls, []);
-});
-
-test('the classic Google bootstrap stays off unrelated routes, disabled legacy preview and native contexts', async t => {
-    for (const sample of [{ path: '/privacy' }, { path: '/login', disabled: true }, { path: '/login', native: true }]) {
-        const { page, calls } = await fixture(t, 390);
-        const resources = [];
-        page.on('request', request => { if (request.url().startsWith('https://accounts.google.com/gsi/')) resources.push(request.url()); });
-        if (sample.native) await page.addInitScript(() => { window.Capacitor = { isNativePlatform: () => true }; });
-        await page.route(`${origin}${sample.path}`, route => route.fulfill({ contentType: 'text/html', body: `<!doctype html>
-            <script defer src="/provider-signin-preload.js" data-google-startup="${sample.disabled ? 'disabled' : 'enabled'}"></script>` }));
-        await page.goto(`${origin}${sample.path}`);
-        await page.waitForLoadState('networkidle');
-        assert.deepEqual(resources, []);
-        assert.equal(await page.locator('link[data-google-signin-preload]').count(), 0);
-        assert.deepEqual(calls, []);
-    }
+    assert.deepEqual(resources, []);
+    assert.equal(await page.locator('script[src*="gsi/client"], script[src*="appleid.auth"]').count(), 0);
+    assert.equal(calls.filter(call => call.path === '/auth/providers/begin').length, 0);
+    assert.equal(await page.evaluate(() => localStorage.length + sessionStorage.length), 0);
 });
 
 test('Google SDK loads alongside its challenge and becomes usable before the independent Apple SDK finishes', async t => {
     const { page, releaseBegin, releaseApple } = await fixture(t, 390, { pendingBegin: true, pendingApple: true });
     await page.goto(`${origin}/login`);
+    await approveAdult(page);
     await page.locator('.provider-sign-in__google').waitFor();
     await page.waitForFunction(() => Boolean(window.google?.accounts?.id));
     assert.equal(await page.evaluate(() => Boolean(window.AppleID)), false);
@@ -205,36 +196,18 @@ test('Google SDK loads alongside its challenge and becomes usable before the ind
         .find(button => button.textContent === 'Continue with Apple')?.disabled);
 });
 
-test('closed registration retains both signup choices and explains a click without any auth mutation', async t => {
+test('paused registration exposes no signup credentials or providers and keeps login reachable', async t => {
     const { page, calls } = await fixture(t, 390, { closedSignup: true });
     await page.goto(`${origin}/signup`);
-    const google = page.getByRole('button', { name: 'Continue with Google', exact: true });
-    const apple = page.getByRole('button', { name: 'Continue with Apple', exact: true });
-    await google.waitFor(); await apple.filter({ has: page.locator('img') }).waitFor();
-    const geometry = await page.evaluate(() => {
-        const google = document.querySelector('.provider-sign-in__button--availability');
-        const apple = document.querySelector('.provider-sign-in__button--apple');
-        const rect = element => { const value = element.getBoundingClientRect(); return { x: value.x, y: value.y, width: value.width, height: value.height }; };
-        const text = button => { const range = document.createRange(); range.selectNodeContents(button.querySelector('span:last-child'));
-            const box = range.getBoundingClientRect(); const buttonBox = button.getBoundingClientRect();
-            return { centerX: box.x + box.width / 2, relativeCenterY: box.y + box.height / 2 - buttonBox.y }; };
-        return { google: rect(google), apple: rect(apple), slot: rect(google.querySelector('.provider-sign-in__google-mark')),
-            logo: rect(google.querySelector('img')), googleText: text(google), appleText: text(apple) };
-    });
-    assert.equal(geometry.slot.width, 20); assert.equal(geometry.slot.height, 20);
-    assert.equal(geometry.logo.width, 18); assert.equal(geometry.logo.height, 18);
-    assert.ok(Math.abs(geometry.logo.x + 9 - geometry.google.x - 22) < .1);
-    assert.ok(Math.abs(geometry.logo.y + 9 - geometry.google.y - 20) < .1);
-    assert.equal(geometry.google.width, geometry.apple.width); assert.equal(geometry.google.height, geometry.apple.height);
-    assert.ok(Math.abs(geometry.googleText.centerX - geometry.appleText.centerX) < .1);
-    assert.ok(Math.abs(geometry.googleText.relativeCenterY - geometry.appleText.relativeCenterY) < .1);
-    assert.equal(await page.getByTestId('synthetic-google-sdk').count(), 0);
-    await google.click();
-    await page.getByRole('alert').filter({ hasText: 'Account creation with Google is temporarily unavailable.' }).waitFor();
-    await apple.click();
-    await page.getByRole('alert').filter({ hasText: 'Account creation with Apple is temporarily unavailable.' }).waitFor();
+    await page.getByText('New registrations are currently paused. You can keep exploring without an account, or log in to an existing account.', { exact: true }).waitFor();
+    assert.equal(await page.locator('input, select, .provider-sign-in').count(), 0);
     assert.equal(calls.filter(call => ['/auth/registration/begin', '/auth/providers/begin', '/auth/providers/complete', '/api/users'].includes(call.path)).length, 0);
-    assert.equal(await page.locator('select').count(), 0);
+    await page.getByRole('link', { name: 'Log in', exact: true }).click();
+    await page.locator('#login-password').waitFor();
+    await approveAdult(page);
+    await page.getByTestId('synthetic-google-sdk').waitFor();
+    assert.equal(calls.filter(call => call.path === '/api/users').length, 0);
+    assert.equal(calls.filter(call => call.path === '/auth/providers/begin').length, 1);
 });
 
 test('the viewport contains the shell while short screens can scroll to every account control inside main', async t => {
@@ -244,7 +217,7 @@ test('the viewport contains the shell while short screens can scroll to every ac
         for (const route of ['/', '/login', '/signup']) {
             await page.goto(`${origin}${route}`);
             await page.locator('.main > *').waitFor();
-            if (route !== '/') await page.getByTestId('synthetic-google-sdk').waitFor();
+            if (route !== '/') { await approveAdult(page); await page.getByTestId('synthetic-google-sdk').waitFor(); }
             const result = await page.evaluate(() => {
                 const main = document.querySelector('.main');
                 return { width: innerWidth, height: innerHeight, route: location.pathname,
@@ -339,9 +312,10 @@ test('native Google and Apple retain aligned pill geometry and Continue labels t
 });
 
 for (const width of [1280, 390]) {
-    test(`signup opens the ordinary form and provider choices at ${width}px without country or an extra entry screen`, async t => {
+    test(`eligible signup retains the form and provider geometry at ${width}px`, async t => {
         const { page, calls } = await fixture(t, width);
         await page.goto(`${origin}/signup`);
+        await approveAdult(page);
         await page.locator('#signup-password').waitFor();
         await page.getByTestId('synthetic-google-sdk').waitFor();
         await page.getByRole('button', { name: 'Continue with Apple', exact: true }).waitFor();
@@ -355,13 +329,14 @@ for (const width of [1280, 390]) {
         assert.equal(await privacy.textContent(), 'Privacy notice');
         assert.equal(await privacy.evaluate(link => getComputedStyle(link).color), 'rgb(234, 234, 251)');
         assert.equal(calls.filter(call => call.path === '/api/users').length, 0);
-        assert.equal(calls.some(call => call.body && ('country' in call.body || 'ageBand' in call.body)), false);
+        assert.equal(calls.filter(call => call.path === '/auth/registration/begin').length, 1);
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
     });
 
     test(`unlinked Google feedback has an explicit signup action and no empty widget gap at ${width}px`, async t => {
         const { page, calls } = await fixture(t, width);
         await page.goto(`${origin}/login`);
+        await approveAdult(page);
         await page.getByTestId('synthetic-google-sdk').waitFor();
         const apple = page.getByRole('button', { name: 'Continue with Apple', exact: true });
         await apple.waitFor();
@@ -373,7 +348,7 @@ for (const width of [1280, 390]) {
         await page.getByTestId('synthetic-google-sdk').click();
         await page.getByRole('alert').filter({ hasText: 'This Google account isn’t linked yet.' }).waitFor();
         assert.equal(await page.locator('.provider-sign-in__google-host').count(), 0);
-        const retry = page.getByRole('button', { name: 'Retry Google sign-in', exact: true });
+        const retry = page.getByRole('button', { name: 'Check eligibility again', exact: true });
         const action = page.locator('.provider-sign-in__account-action');
         assert.equal(await action.getAttribute('href'), '/signup');
         assert.equal(await action.textContent(), 'Create account');
@@ -384,9 +359,13 @@ for (const width of [1280, 390]) {
         assert.ok(recoveredAppleBox.y - retryBox.y - retryBox.height >= 8);
         assert.ok((await page.locator('.provider-sign-in__google').boundingBox()).height < 160);
         assert.equal(calls.filter(call => call.path === '/auth/providers/complete').length, 1);
-        assert.equal(calls.filter(call => call.path.includes('/registration/')).length, 0);
+        assert.equal(calls.filter(call => call.path === '/auth/registration/begin').length, 1);
         await retry.click();
+        await page.locator('#registration-country').waitFor();
+        assert.equal(await page.getByTestId('synthetic-google-sdk').count(), 0);
+        await approveAdult(page);
         await page.getByTestId('synthetic-google-sdk').waitFor();
+        assert.equal(calls.filter(call => call.path === '/auth/registration/begin').length, 2);
         assert.equal(calls.filter(call => call.path === '/auth/providers/begin').length, 2);
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
     });

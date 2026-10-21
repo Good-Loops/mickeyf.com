@@ -567,6 +567,9 @@ html[data-native-app] .p4-vega {
             'notice notice notice'
             'ui canvas joystick'
             'preference preference preference';
+        // A wrapped settings label can make its row taller than the centered scene.
+        // Keep the notice close without shrinking controls or moving the composition.
+        row-gap: .4rem;
 
         &__ui { grid-template-columns: minmax(0, 1fr); gap: .4rem; padding: .5rem; }
         &__ui--option,

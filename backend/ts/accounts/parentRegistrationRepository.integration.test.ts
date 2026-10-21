@@ -1,7 +1,9 @@
 import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
 import { once } from 'node:events';
-import { after, before, test } from 'node:test';
+import { after, before, mock, test } from 'node:test';
 import bcrypt from 'bcryptjs';
 import mysql, { type Connection, type Pool, type RowDataPacket, type ResultSetHeader } from 'mysql2/promise';
 import { loadRegistrationPolicy } from '../config/registrationPolicy';
@@ -28,6 +30,7 @@ import { applyDeletionReplay, planDeletionReplay } from './deletionReplay';
 import type { DeletionReplaySettings } from '../config/deletionReplayConfig';
 import { reviewSignedParentForm, cleanupSignedParentForms } from './signedParentFormReview';
 import { verifySignedParentFormReadiness } from '../migrations/signedParentFormSchema';
+import { removePublicScoreParticipation } from './scoreParticipationRepository';
 
 const config = loadMigrationConfig();
 let admin: Connection; let database: Pool; let passwordHash: string;
@@ -72,6 +75,21 @@ before(async () => {
 });
 after(async () => { if (database) await database.end(); if (admin) await admin.end(); });
 
+let childFormSchemaExtended = false;
+async function enableChildFormSchema() {
+    if (childFormSchemaExtended) return;
+    await assert.rejects(verifySignedParentFormReadiness(database as unknown as MigrationConnection, true), /schema is missing/u);
+    const sql = readFileSync(path.join(__dirname, '../../migrations/pending/0028_extend_child_signed_parent_forms.sql'), 'utf8');
+    assert.equal(sql.trim().split(';').filter(Boolean).length, 1, 'the pending extension must be one bounded ALTER');
+    await admin.query('ALTER TABLE parent_signed_forms MODIFY COLUMN user_name VARCHAR(64) NULL');
+    await assert.rejects(verifySignedParentFormReadiness(database as unknown as MigrationConnection, true), /constraint differs/u,
+        'nullable credentials alone must not advertise BR signed form capability');
+    await admin.query(sql);
+    await verifySignedParentFormReadiness(database as unknown as MigrationConnection, true);
+    await verifySignedParentFormReadiness(database as unknown as MigrationConnection);
+    childFormSchemaExtended = true;
+}
+
 async function parent(accountId = randomUUID(), publicationPolicy?: ScoreParticipationPolicy) {
     const name = `parent-${randomUUID()}`;
     const [insert] = await admin.query<ResultSetHeader>('INSERT INTO users (user_name, email, user_password, account_uuid) VALUES (?, ?, ?, ?)', [name, `${name}@example.test`, passwordHash, accountId]);
@@ -112,7 +130,7 @@ async function usForm(p: Awaited<ReturnType<typeof usParent>>) {
     assert.ok('form' in result, JSON.stringify(result));
     return result.form;
 }
-async function formReview(p: Awaited<ReturnType<typeof usParent>>, reference: string, publicApproved = false) {
+async function formReview(p: Pick<Awaited<ReturnType<typeof parent>>, 'account' | 'identity'>, reference: string, publicApproved = false) {
     const [forms] = await admin.query<RowDataPacket[]>('SELECT policy_digest FROM parent_signed_forms WHERE reference=?', [reference]);
     return { reference, parentAccountId: p.account.accountId, verifiedContact: p.identity.email!, policyDigest: forms[0].policy_digest,
         formSha256: Buffer.alloc(32, 71), reviewer: 'Synthetic owner', decision: 'approved' as const, publicApproved };
@@ -490,6 +508,7 @@ test('child accounts cannot create children or transfer their guardian relations
 });
 
 test('browser creates a chosen nickname, separately publishes and removes scores, and confirms exact family deletion through real HTTP and SQL', async () => {
+    await enableChildFormSchema();
     const { createHmac } = await import('node:crypto');
     const { default: express } = await import('express'); const { default: cookieParser } = await import('cookie-parser');
     const { createAuthRouter } = await import('../routers/authRouter'); const { issueSessionToken } = await import('../security/sessionPolicy');
@@ -498,7 +517,15 @@ test('browser creates a chosen nickname, separately publishes and removes scores
     const { createViteTestServer } = await importModule(pathToFileURL(path.resolve('../frontend/ts/testSupport/createViteTestServer.mjs')).href);
     const { createRequire } = await import('node:module');
     const { chromium } = createRequire(path.resolve('../.github/firebase-deploy/registration-browser.test.mjs'))('playwright-core');
-    const p = await parent(randomUUID(), publicPolicy); const sessionSecret = 'synthetic-parent-browser-session-secret';
+    const browserPolicy: ParentRegistrationPolicy = { ...policy, version: 'synthetic-browser-child-parent-v1',
+        audience: 'children-included', countries: ['BR', 'US'], signedFormsEnabled: true, signedFormCountries: ['BR', 'US'], creationEnabled: true };
+    const browserPublicPolicy: ScoreParticipationPolicy = { ...publicPolicy, parentRegistrationVersion: browserPolicy.version,
+        countries: { BR: { selfAgeBands: [], parentManaged: true }, US: { selfAgeBands: [], parentManaged: true } }, digest: Buffer.alloc(32, 28) };
+    const base = await parent(randomUUID(), browserPublicPolicy);
+    const store = createParentRegistrationRepository(database, journal, browserPublicPolicy, true, { countries: ['BR', 'US'], credentialsAfterApproval: true });
+    const p = { ...base, store, flow: createParentRegistrationFlow({ store, clients: base.clients, policy: browserPolicy, publicationPolicy: browserPublicPolicy }) };
+    const browserInput = { ...input, country: 'BR', policyVersion: browserPolicy.version };
+    const sessionSecret = 'synthetic-parent-browser-session-secret';
     const token = issueSessionToken({ ...p.account, userName: p.identity.subject }, sessionSecret);
     await createAccountSession(database, p.account, token.sessionId, token.expiresAt, passwordHash);
     const api = express(); api.use(cookieParser(sessionSecret)); api.use(express.json({ limit: '24kb' }));
@@ -523,7 +550,7 @@ test('browser creates a chosen nickname, separately publishes and removes scores
     try {
         await vite.listen(); const origin = `http://127.0.0.1:${vite.httpServer.address().port}`;
         api.use('/auth', createAuthRouter(database, sessionSecret, false, [origin], { accountDeletionEnabled: true, deletionJournal: journal,
-            providerAuth: { enabled: true, clients: p.clients }, parentRegistrationStorageReady: true, parentRegistrationPolicy: policy, scoreParticipationPolicy: publicPolicy }));
+            providerAuth: { enabled: true, clients: p.clients }, parentRegistrationStorageReady: true, parentRegistrationPolicy: browserPolicy, scoreParticipationPolicy: browserPublicPolicy }));
         browser = await chromium.launch({ channel: 'chrome', headless: true }); const context = await browser.newContext();
         await context.route('**/*', (route: { request: Function; abort: Function; continue: Function }) =>
             new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
@@ -532,10 +559,21 @@ test('browser creates a chosen nickname, separately publishes and removes scores
         const page = await context.newPage(); page.setDefaultTimeout(15_000);
         page.on('pageerror', (error: Error) => console.error(error.message));
         await page.goto(`${origin}/__parent-test`);
-        await page.getByLabel("Child's country").selectOption('ZZ');
+        await page.getByLabel("Child's country").selectOption('BR');
         await page.getByLabel('I am 18 or older.').check(); await page.getByLabel("I am this child's parent or legal guardian and can give this consent.").check();
         await page.getByLabel('I agree to this child-account consent.').check();
         assert.equal(await page.locator('input[type=password]').count(), 0);
+        await page.getByRole('button', { name: 'Confirm with Google', exact: true }).click();
+        await page.getByRole('button', { name: 'Child account request: pending', exact: true }).waitFor();
+        assert.equal(await page.getByLabel("Child's nickname", { exact: true }).count(), 0);
+        assert.equal(await page.locator('input[type=password]').count(), 0);
+        const [pendingForm] = (await admin.query<RowDataPacket[]>('SELECT reference,user_name FROM parent_signed_forms WHERE parent_uuid=? AND status=\'pending\'', [p.account.accountId]))[0];
+        assert.equal(pendingForm.user_name, null);
+        await ownerReview(await formReview(p, pendingForm.reference, true));
+        await page.getByRole('button', { name: 'Refresh signed form requests', exact: true }).click();
+        await page.getByRole('button', { name: 'Child account request: approved', exact: true }).click();
+        await page.getByLabel('I am 18 or older.').check(); await page.getByLabel("I am this child's parent or legal guardian and can give this consent.").check();
+        await page.getByLabel('I agree to this child-account consent.').check();
         await page.getByRole('button', { name: 'Confirm with Google', exact: true }).click();
         const nickname = `browser-${randomUUID()}`; await page.getByLabel("Child's nickname").fill(nickname); await page.getByLabel("Child's password").fill(password);
         await page.getByRole('button', { name: 'Create private child account', exact: true }).click();
@@ -556,15 +594,20 @@ test('browser creates a chosen nickname, separately publishes and removes scores
         await scoreSection.getByLabel(publicPolicy.consentText,{exact:true}).check();
         await scoreSection.getByRole('button',{name:'Join leaderboards with Google',exact:true}).click();
         await scoreSection.getByText('Leaderboard participation is enabled.',{exact:true}).waitFor();
-        assert.ok((await readP4VegaLeaderboard(database,publicPolicy.digest,true)).some(row=>row.userName===nickname));
+        assert.ok((await readP4VegaLeaderboard(database,browserPublicPolicy.digest,true)).some(row=>row.userName===nickname));
         await scoreSection.getByRole('button',{name:'Remove public entries',exact:true}).click();
         await scoreSection.getByText('Public entries have been removed. Your account and private scores are kept.',{exact:true}).waitFor();
-        assert.ok(!(await readP4VegaLeaderboard(database,publicPolicy.digest,true)).some(row=>row.userName===nickname));
+        assert.ok(!(await readP4VegaLeaderboard(database,browserPublicPolicy.digest,true)).some(row=>row.userName===nickname));
         await page.getByLabel('Type WITHDRAW AND DELETE').fill('WITHDRAW AND DELETE');
         await page.getByRole('button', { name: 'Confirm deletion with Google', exact: true }).click();
         await page.getByText('Consent withdrawn and child account deleted. Your parent account is unchanged.', { exact: true }).waitFor();
         assert.deepEqual(await p.store.listChildren(p.context), []);
-        const second=await child(p,`family-browser-${randomUUID()}`);
+        const nextChallenge = await p.flow.begin(p.context, browserInput); assert.ok('state' in nextChallenge);
+        const nextForm = await p.flow.requestSignedForm(p.context, { state: nextChallenge.state, idToken: 'synthetic-owner-proof' }); assert.ok('form' in nextForm);
+        await ownerReview(await formReview(p, nextForm.form.reference));
+        const nextGrant = await approve(p, browserInput);
+        const second = await p.flow.createChild(p.context, { grant: nextGrant.proof.grant, formReference: nextForm.form.reference,
+            userName: `family-browser-${randomUUID()}`, password }); assert.ok('created' in second);
         await page.getByRole('button',{name:'Refresh child accounts',exact:true}).click();
         const familySection=page.getByRole('region',{name:'Delete family accounts'});
         await familySection.getByText(second.child.userName,{exact:true}).waitFor();
@@ -729,4 +772,81 @@ test('restore reconciliation removes public scores and tombstones restored pendi
         assert.ok('error' in await p.flow.complete(p.context,{state:pending.state,idToken:'synthetic'}));
         assert.equal((await applyDeletionReplay(replayPool,reader,settings,plan.sha256)).deletedAccounts,0);
     }finally{await replayPool.end();}
+});
+
+test('pending child-form extension enables parent-only BR/US approval, private child creation and deletion on isolated MySQL', async () => {
+    await enableChildFormSchema();
+    assert.equal((await admin.query<RowDataPacket[]>('SELECT version FROM schema_migrations'))[0].length, 26,
+        'testing the pending extension must not invent an unregistered production-history row');
+    const childPolicy: ParentRegistrationPolicy = { ...policy, version: 'synthetic-child-parent-v1',
+        audience: 'children-included', countries: ['BR', 'US'], signedFormsEnabled: true, signedFormCountries: ['BR', 'US'] };
+    const publicationPolicy: ScoreParticipationPolicy = { ...publicPolicy, parentRegistrationVersion: childPolicy.version,
+        countries: { BR: { selfAgeBands: [], parentManaged: true }, US: { selfAgeBands: [], parentManaged: true } }, digest: Buffer.alloc(32, 29) };
+    for (const country of ['BR', 'US']) {
+        const base = await parent();
+        const store = createParentRegistrationRepository(database, journal, publicationPolicy, true,
+            { countries: childPolicy.signedFormCountries, credentialsAfterApproval: true });
+        const flow = createParentRegistrationFlow({ store, clients: base.clients, policy: childPolicy, publicationPolicy });
+        const p = { ...base, store, flow, publicationPolicy };
+        const request = { ...input, country, policyVersion: childPolicy.version };
+        const challenge = await flow.begin(p.context, request); assert.ok('state' in challenge);
+        assert.deepEqual(await flow.requestSignedForm(p.context, { state: challenge.state, idToken: 'parent-only-proof', userName: 'premature-child' }),
+            { error: 'INVALID_REQUEST' });
+        const requested = await flow.requestSignedForm(p.context, { state: challenge.state, idToken: 'parent-only-proof' });
+        assert.ok('form' in requested, JSON.stringify(requested));
+        const form = requested.form; assert.equal(form.country, country); assert.equal(form.userName, null);
+        const [stored] = (await admin.query<RowDataPacket[]>('SELECT country_code,user_name,status FROM parent_signed_forms WHERE reference=?', [form.reference]))[0];
+        assert.deepEqual(stored, { country_code: country, user_name: null, status: 'pending' });
+        const credentials = { formReference: form.reference, userName: `approved-${country}-${randomUUID()}`, password };
+        const hashing = mock.method(bcrypt, 'hash');
+        try {
+            const pending = await approve(p, request);
+            assert.deepEqual(await flow.createChild(p.context, { ...credentials, grant: pending.proof.grant }), { error: 'SIGNED_FORM_REQUIRED' });
+            assert.equal(hashing.mock.calls.length, 0, 'a pending form cannot process a child password');
+            await ownerReview(await formReview(p, form.reference, country === 'BR'));
+            const listed = await flow.listSignedForms(p.context, {}); assert.ok('forms' in listed);
+            assert.equal(listed.forms.find(item => item.reference === form.reference)?.status, 'approved');
+            const fresh = await approve(p, request);
+            const created = await flow.createChild(p.context, { ...credentials, grant: fresh.proof.grant });
+            assert.ok('created' in created, JSON.stringify(created)); assert.equal(created.child.scoreVisibility, 'private');
+            assert.equal(hashing.mock.calls.length, 1);
+            assert.ok('error' in await flow.createChild(p.context, { ...credentials, grant: fresh.proof.grant }), 'the exact form and grant are single-use');
+            const [accountRow] = (await admin.query<RowDataPacket[]>('SELECT user_id,email FROM users WHERE account_uuid=?', [created.child.accountId]))[0];
+            assert.equal(accountRow.email, null);
+            const childSessionId = randomBytes(32).toString('base64url');
+            const childPassword = (await findPasswordLoginAccount(database, credentials.userName))!.passwordHash!;
+            assert.equal(await createAccountSession(database, { userId: accountRow.user_id, accountId: created.child.accountId },
+                childSessionId, Math.floor(Date.now() / 1000) + 300, childPassword), true);
+            const childContext = { ...p.context, account: { userId: accountRow.user_id, accountId: created.child.accountId },
+                session: { accountId: created.child.accountId, sessionId: childSessionId }, bindingHash: randomBytes(32) };
+            const verifier = mock.method(base.clients['google-web'].verifier, 'verify');
+            try {
+                assert.ok('error' in await flow.begin(childContext, request));
+                assert.ok('error' in await flow.begin(childContext, { purpose: 'delete-family', childAccountIds: [], clientKey: 'google-web',
+                    policyVersion: childPolicy.version, confirmation: 'DELETE MY FAMILY' }));
+                assert.equal((await admin.query<RowDataPacket[]>('SELECT state_hash FROM parent_registration_attempts WHERE parent_uuid=?',
+                    [created.child.accountId]))[0].length, 0, 'managed children cannot initiate any parent identity verification');
+                assert.equal(verifier.mock.calls.length, 0);
+            } finally { verifier.mock.restore(); }
+            assert.equal((await flow.scoreStatus(p.context, { childAccountId: created.child.accountId }) as { visibility: string }).visibility, 'private');
+            if (country === 'BR') {
+                const publication = await approve(p, participation(created.child.accountId));
+                assert.deepEqual(await flow.publishScores(p.context, { grant: publication.proof.grant }), { visibility: 'public' });
+                assert.deepEqual(await flow.withdrawScores(p.context, { childAccountId: created.child.accountId }), { visibility: 'private' });
+                assert.equal((await admin.query<RowDataPacket[]>('SELECT public_withdrawn FROM parent_signed_forms WHERE reference=?', [form.reference]))[0][0].public_withdrawn, 1);
+                await admin.query('UPDATE parent_signed_forms SET public_withdrawn=0 WHERE reference=?', [form.reference]);
+                const recoveryConnection = await database.getConnection();
+                try { await removePublicScoreParticipation(recoveryConnection, created.child.accountId); } finally { recoveryConnection.release(); }
+                assert.equal((await admin.query<RowDataPacket[]>('SELECT public_withdrawn FROM parent_signed_forms WHERE reference=?', [form.reference]))[0][0].public_withdrawn, 1,
+                    'the recovery withdrawal path also invalidates restored BR signed permission');
+                assert.ok('error' in await flow.begin(p.context, participation(created.child.accountId)), 'withdrawn signed permission cannot authorize republication');
+            } else {
+                assert.ok('error' in await flow.begin(p.context, participation(created.child.accountId)), 'account-only consent never grants public child scores');
+            }
+            const deletion = await approve(p, { ...withdrawal(created.child.accountId), policyVersion: childPolicy.version });
+            assert.deepEqual(await flow.withdrawChild(p.context, { grant: deletion.proof.grant, confirmation: 'WITHDRAW AND DELETE' }), { deleted: true });
+            assert.equal((await admin.query<RowDataPacket[]>('SELECT account_uuid FROM users WHERE account_uuid=?', [created.child.accountId]))[0].length, 0);
+            assert.ok(await readLiveSession(database, p.account.userId, p.account.accountId, p.context.session!.sessionId), 'parent remains signed in');
+        } finally { hashing.mock.restore(); }
+    }
 });

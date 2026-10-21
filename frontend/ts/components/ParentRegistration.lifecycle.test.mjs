@@ -83,6 +83,49 @@ test('child credential fields stay absent through consent and provider acquisiti
     assert.equal(view.all(node => node.type === 'input' && node.props.type === 'email').length, 0);
 });
 
+test('strict parent flow requests a signed form without a nickname and collects credentials only after reviewed approval', async t => {
+    const policy = { ...config, audience: 'children-included', credentialsAfterApproval: true,
+        countries: ['US'], signedFormCountries: ['US'] };
+    const pendingForm = { reference: randomUUID(), parentAccountId: randomUUID(), country: 'US', userName: null,
+        verifiedContact: 'synthetic-parent@example.test', status: 'pending', expiresAt: new Date(Date.now()+86400000).toISOString() };
+    const requests=[];let storedForms=[];
+    const view=mount(t,{requireChildAudience:true,api:{config:async()=>policy,listSignedForms:async()=>storedForms,
+        requestSignedForm:async(...args)=>{requests.push(args);storedForms=[pendingForm];return pendingForm;}}});
+    view.render();await view.settle();
+    view.find(node=>node.type==='select').props.onChange({target:{value:'US'}});
+    const agree=()=>view.all(node=>node.type==='input'&&node.props.type==='checkbox').forEach(node=>node.props.onChange({target:{checked:true}}));
+    agree();view.render();
+    assert.equal(view.all(node=>node.type==='input'&&node.props.type!=='checkbox').length,0);
+    view.button('Confirm with Google').props.onClick();await view.settle();
+    view.begins[0].resolve({state:random(),nonce:random(),expiresInSeconds:300});await view.settle();
+    view.acquisitions[0].resolve('synthetic-proof');await view.settle();
+    assert.equal(requests.length,1);assert.equal(requests[0][2],undefined);
+    assert.equal(view.all(node=>node.type==='input'&&node.props.type!=='checkbox').length,0);
+    assert.equal(view.proofs.length,0);assert.equal(view.creations.length,0);
+    storedForms=[{...pendingForm,status:'approved'}];
+    view.button('Refresh signed form').props.onClick();view.render();await view.settle();
+    view.button('approved').props.onClick();view.render();agree();view.render();
+    view.button('Confirm with Google').props.onClick();await view.settle();
+    view.begins[1].resolve({state:random(),nonce:random(),expiresInSeconds:300});await view.settle();
+    view.acquisitions[1].resolve('synthetic-new-proof');await view.settle();
+    const grant=random();view.proofs[0].resolve({grant,purpose:'create-child',expiresInSeconds:300});await view.settle();
+    const nickname=view.find(node=>node.type==='input'&&node.props.type!=='password'&&node.props.type!=='checkbox');
+    assert.equal(nickname.props.disabled,false);assert.equal(nickname.props.value,'');
+    nickname.props.onChange({target:{value:'Synthetic child nickname'}});
+    view.find(node=>node.type==='input'&&node.props.type==='password').props.onChange({target:{value:'synthetic-child-password'}});
+    view.render();const created=view.find(node=>node.type==='form').props.onSubmit({preventDefault(){}});await view.settle();
+    assert.equal(view.creations[0].args[0],grant);assert.equal(view.creations[0].args[1],'Synthetic child nickname');
+    assert.equal(view.creations[0].args[2],'synthetic-child-password');assert.equal(view.creations[0].args[4],pendingForm.reference);
+    view.creations[0].resolve({accountId:randomUUID(),userName:'Synthetic child nickname',scoreVisibility:'private'});await created;
+});
+
+test('the mixed-audience parent surface refuses legacy creation contracts without collecting child details',async t=>{
+    const view=mount(t,{requireChildAudience:true});view.render();await view.settle();
+    assert.match(view.text(),/New child accounts are paused/u);
+    assert.equal(view.all(node=>node.type==='input').length,0);
+    assert.equal(view.begins.length,0);assert.equal(view.acquisitions.length,0);
+});
+
 test('late begin response after cancellation is explicitly cancelled and cannot launch provider collection', async t => {
     const view = mount(t); await view.prepare(); view.button('Cancel parent').props.onClick(); view.render();
     const state = random(); view.begins[0].resolve({ state, nonce: random(), expiresInSeconds: 300 }); await view.settle();

@@ -66,3 +66,9 @@ git diff --check -- .github/workflows/ios-build.yml scripts/ios-testflight.test.
 ```
 
 At this checkpoint, **17 tests passed, zero failed/skipped**. They cover mode/input restrictions, contained paths, installed runtime/device selection, accepted geometry, exact simulator cleanup ownership, app launch identity and workflow artifact/signing boundaries. The Swift Vision helper and CoreSimulator commands cannot run on this Windows host. Their compilation/runtime behavior and actual screenshots remain pending the first authorized macOS run; no captures or public-ready binary are claimed yet.
+
+## Execution update
+
+The owner subsequently confirmed under-13 intended users and selected completion of parent-led registration before public launch. [Child registration readiness](child-registration-readiness.md) supersedes the earlier website-first execution order. English Apple version/contact metadata and manual release are saved; reviewer credentials remain owner-pending. No public submission or signed public candidate upload occurred.
+
+Unsigned native run [39520334734](https://github.com/Good-Loops/mickeyf.com/actions/runs/39520334734) at `877b520d` compiled the simulator app and Swift readiness helper, but the initial simulator boot exceeded its 180-second budget. No screenshots were archived. CodeQL's environment-path findings in the helper were corrected by using only the exact reviewed hosted-Mac temporary layout and parsed numeric run identities; the fresh `c1815498` CodeQL aggregate and all five analyses passed. A bounded 360-second cold-boot retry [39521113272](https://github.com/Good-Loops/mickeyf.com/actions/runs/39521113272) at `7a739d2b` was dispatched unsigned. Its result remains pending. These runs precede the child-flow changes and cannot qualify a final public binary.

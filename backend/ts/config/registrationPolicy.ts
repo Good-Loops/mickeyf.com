@@ -7,12 +7,18 @@ export type RegistrationPolicy = Readonly<{
     digest: Buffer;
     countries: Readonly<Record<string, Readonly<{ parentRequiredBelow: number }>>>;
     mode?: 'general-audience';
+    audience?: 'children-included';
 }>;
 export type RegistrationDecision = Readonly<{ allowed: true; country: string | null; ageBand: 'minor' | 'adult' | null }>
     | Readonly<{ allowed: false; reason: 'REGISTRATION_CLOSED' | 'INVALID_REGISTRATION' | 'PARENT_REQUIRED' }>;
 
 /** Country rules are reviewed product configuration, never inferred from IP or a provider profile. */
 export function loadRegistrationPolicy(env: Readonly<Record<string, string | undefined>> = process.env): RegistrationPolicy | undefined {
+    const audience = env.REGISTRATION_AUDIENCE;
+    if (audience !== undefined && audience !== 'children-included') throw new Error('Registration audience must be children-included when supplied.');
+    if (audience === 'children-included' && env.REGISTRATION_GENERAL_AUDIENCE_ENABLED === 'true') {
+        throw new Error('A children-included audience cannot enable general-audience registration.');
+    }
     if (env.REGISTRATION_ENABLED !== 'true') return undefined;
     if (env.REGISTRATION_POLICY_REVIEWED !== 'true') throw new Error('Registration requires a reviewed country policy.');
     try {
@@ -37,8 +43,9 @@ export function loadRegistrationPolicy(env: Readonly<Record<string, string | und
         }
         // A rule change invalidates outstanding approvals even if the operator forgets to change the version.
         const digest = createHash('sha256').update(JSON.stringify(generalAudience
-            ? [version, countries, 'general-audience'] : [version, countries])).digest();
+            ? [version, countries, 'general-audience'] : audience ? [version, countries, audience] : [version, countries])).digest();
         return Object.freeze({ version, digest, countries: Object.freeze(countries),
+            ...(audience ? { audience } : {}),
             ...(generalAudience ? { mode: 'general-audience' as const } : {}) });
     } catch { throw new Error('Registration policy requires an explicit version and valid country rules.'); }
 }

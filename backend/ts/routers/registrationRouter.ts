@@ -6,7 +6,8 @@ import { asyncHandler } from '../middleware/errorHandling';
 import { sessionCookieOptions } from '../security/sessionCookie';
 
 export function createRegistrationRouter(registration: RegistrationAuthorization,
-    readContext: ReturnType<typeof createProviderAuthContextReader>, isProduction: boolean): Router {
+    readContext: ReturnType<typeof createProviderAuthContextReader>, isProduction: boolean,
+    parentRegistrationAvailable = false): Router {
     const router = Router();
     router.use((_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
     router.get('/config', (_req, res) => {
@@ -14,8 +15,9 @@ export function createRegistrationRouter(registration: RegistrationAuthorization
         if (policy?.mode === 'general-audience') return res.json({ enabled: true, mode: policy.mode,
             policyVersion: policy.version, optionalDetails: false, parentRegistrationAvailable: false });
         return res.json(policy ? { enabled: true, policyVersion: policy.version,
+            ...(policy.audience ? { audience: policy.audience, creationEnabled: registration.creationEnabled } : {}),
             countries: Object.entries(policy.countries).map(([country, rule]) => ({ country,
-                parentRequiredBelow: rule.parentRequiredBelow, adultFrom: 18 })), parentRegistrationAvailable: false }
+                parentRequiredBelow: rule.parentRequiredBelow, adultFrom: 18 })), parentRegistrationAvailable }
             : { enabled: false });
     });
     router.post('/cancel', rateLimit({ windowMs: 15 * 60 * 1000, limit: 30,

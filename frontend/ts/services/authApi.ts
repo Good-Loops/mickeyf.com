@@ -1,4 +1,4 @@
-import { createRegistrationApi, type RegistrationInput } from './registrationApi.ts';
+import { createRegistrationApi, supportsChildAudience, type RegistrationInput } from './registrationApi.ts';
 /** Auth HTTP transport, independent of React and environment configuration. */
 import type { AppleSessionState } from './nativeAppleSession.ts';
 type AccountCredentials = {
@@ -49,6 +49,7 @@ type ProviderCompletionResponse = ProviderAuthenticationResult
 export type ProviderAccountMethods = Readonly<{
     hasPassword: boolean; googleLinked: boolean; googleDeletionEnabled: boolean;
     appleLinked: boolean; appleDeletionEnabled: boolean;
+    providerCollectionAllowed?: boolean;
 }>;
 
 const PROVIDER_TOKEN_MAX_LENGTH = 16_384;
@@ -180,11 +181,12 @@ async function acquireProviderProof(clientKey: string, challenge: ProviderAuthen
 }
 
 export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetch,
-    checkAppleSession?: () => Promise<AppleSessionState>, options: { prepareGeneralRegistration?: boolean } = {}) {
+    checkAppleSession?: () => Promise<AppleSessionState>, registrationOptions: { prepareGeneralRegistration?: boolean; requireChildAudience?: boolean } = {}) {
     let pendingMutation: Promise<void> = Promise.resolve();
     let providerLoginGeneration = 0;
     let appleRevocationPending = false;
     let generalRegistrationDeadline = 0;
+    let registrationAllowsCreation = false;
     type PreparedLogin = {
         clientKey: string; state: string; nonce: string; deadline: number;
         action: 'login' | 'signup';
@@ -209,9 +211,14 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
         return result;
     }
 
-    async function ensureGeneralRegistration(signal?: AbortSignal): Promise<string | null> {
+    async function ensureGeneralRegistration(signal?: AbortSignal, forCreation = true): Promise<string | null> {
         if (signal?.aborted) return 'CANCELLED';
-        if (!options.prepareGeneralRegistration) return null;
+        // This source must not ask an older general-audience backend to manufacture eligibility.
+        if (registrationOptions.requireChildAudience) {
+            if (generalRegistrationDeadline <= Date.now()) return 'REGISTRATION_REQUIRED';
+            return forCreation && !registrationAllowsCreation ? 'REGISTRATION_CLOSED' : null;
+        }
+        if (!registrationOptions.prepareGeneralRegistration) return null;
         if (generalRegistrationDeadline > Date.now() + 10_000) return null;
         const policy = await registration.config(signal);
         if (signal?.aborted) return 'CANCELLED';
@@ -329,7 +336,9 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
                 hasPassword: result.hasPassword, googleLinked: result.googleLinked,
                 googleDeletionEnabled: result.googleDeletionEnabled, appleLinked: false, appleDeletionEnabled: false,
             };
-            return hasKeys(result, 'appleDeletionEnabled,appleLinked,googleDeletionEnabled,googleLinked,hasPassword')
+            return (hasKeys(result, 'appleDeletionEnabled,appleLinked,googleDeletionEnabled,googleLinked,hasPassword')
+                || hasKeys(result, 'appleDeletionEnabled,appleLinked,googleDeletionEnabled,googleLinked,hasPassword,providerCollectionAllowed')
+                    && typeof result.providerCollectionAllowed === 'boolean')
                 && typeof result.appleLinked === 'boolean' && typeof result.appleDeletionEnabled === 'boolean'
                 ? result as ProviderAccountMethods : null;
         } catch { return null; }
@@ -415,8 +424,8 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
     async function runProviderAuthentication(input: ProviderAuthenticationInput, acquireCredential: AcquireProviderCredential,
         signal?: AbortSignal): Promise<ProviderAuthenticationResult> {
         if (signal?.aborted) return { error: 'CANCELLED' };
-        if (input.action === 'signup') {
-            const error = await ensureGeneralRegistration(signal);
+        if (input.action === 'signup' || registrationOptions.requireChildAudience && input.action === 'login') {
+            const error = await ensureGeneralRegistration(signal, input.action === 'signup');
             if (error) return { error };
         } else generalRegistrationDeadline = 0;
         const beginning = await postProviderOperation('begin', { action: input.action, clientKey: input.clientKey });
@@ -446,7 +455,7 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
                 : input.action === 'link' ? { password: input.password } : { confirmation: 'DELETE' }),
             ...(input.action === 'signup' ? { userName: input.userName } : {}),
         });
-        if (input.action === 'signup') generalRegistrationDeadline = 0;
+        if (input.action === 'signup' || registrationOptions.requireChildAudience && input.action === 'login') generalRegistrationDeadline = 0;
         if (!completion.ok) {
             // UNAVAILABLE includes an uncertain transport result: its cookie may
             // already belong to a new session. Definite rejection cannot replace it.
@@ -494,8 +503,8 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
         const generation = ++providerLoginGeneration;
         return enqueueMutation(async () => {
             if (signal?.aborted || generation !== providerLoginGeneration) return { error: 'CANCELLED' };
-            if (action === 'signup') {
-                const error = await ensureGeneralRegistration(signal);
+            if (action === 'signup' || registrationOptions.requireChildAudience && action === 'login') {
+                const error = await ensureGeneralRegistration(signal, action === 'signup');
                 if (error) return { error };
                 if (signal?.aborted || generation !== providerLoginGeneration) return { error: 'CANCELLED' };
             } else generalRegistrationDeadline = 0;
@@ -540,6 +549,7 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
                 ...(login.action === 'signup' ? { userName } : {}) },
                 login.state, proof);
             if (!('signupRequired' in result)) return result;
+            if (registrationOptions.requireChildAudience) return { error: 'REGISTRATION_REQUIRED' };
             const continuationError = preparedLoginError(login, signal);
             if (continuationError) return { error: continuationError };
             if (result.challenge.nonce !== login.nonce || result.challenge.state === login.state) {
@@ -554,7 +564,7 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
         });
     }
 
-    const registration = createRegistrationApi(apiBase, fetchRequest);
+    const registration = createRegistrationApi(apiBase, fetchRequest, { requireChildAudience: registrationOptions.requireChildAudience });
     return {
         registrationConfigRequest: registration.config,
         // A general grant contains no country, age, account details or provider credential.
@@ -562,14 +572,39 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
         prepareSignupRegistration: (signal?: AbortSignal) => enqueueMutation(() => ensureGeneralRegistration(signal)),
         beginRegistration: (input: RegistrationInput) => {
             invalidatePreparedLogins();
+            const generation = providerLoginGeneration;
             generalRegistrationDeadline = 0;
+            registrationAllowsCreation = false;
             const request = { ...input };
-            return enqueueMutation(() => registration.begin(request));
+            return enqueueMutation(async () => {
+                let creationEnabled = false;
+                if (registrationOptions.requireChildAudience) {
+                    const policy = await registration.config();
+                    if (!supportsChildAudience(policy) || !('country' in request)
+                        || request.policyVersion !== policy.policyVersion || request.ageBand === 'parent-required') {
+                        return { error: 'REGISTRATION_REQUIRED' } as const;
+                    }
+                    const rule = policy.countries.find(item => item.country === request.country);
+                    if (!rule || !['minor', 'adult'].includes(request.ageBand)
+                        || request.ageBand === 'minor' && rule.parentRequiredBelow >= 18) return { error: 'REGISTRATION_REQUIRED' } as const;
+                    creationEnabled = policy.creationEnabled;
+                }
+                const startedAt = Date.now();
+                const result = await registration.begin(request);
+                if (registrationOptions.requireChildAudience && generation === providerLoginGeneration && 'authorized' in result) {
+                    generalRegistrationDeadline = startedAt + result.expiresInSeconds * 1000;
+                    registrationAllowsCreation = creationEnabled;
+                }
+                return result;
+            });
         },
         cancelRegistration: () => {
             invalidatePreparedLogins();
             generalRegistrationDeadline = 0;
-            return enqueueMutation(registration.cancel);
+            return enqueueMutation(() => {
+                generalRegistrationDeadline = 0;
+                return registration.cancel();
+            });
         },
         loginRequest: (payload: LoginPayload) => {
             invalidatePreparedLogins();

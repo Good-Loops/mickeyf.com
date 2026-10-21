@@ -271,70 +271,58 @@ test('temporarily unavailable issuance retains the exact client for deletion pro
     }
 });
 
-test('Apple discovery preloads only its public SDK, without authentication or replacing Google attempts', async () => {
+test('provider discovery is metadata-only and cannot load either external SDK', async () => {
+    const f = fixture({ fetchRequest: async () => Response.json({ clients: [google, appleWeb] }) });
+    assert.deepEqual(await f.client.getAvailableProviderClients(), [google, appleWeb]);
+    assert.deepEqual(f.scripts, []);
+    assert.equal(f.controls.alertOptions, null);
+    assert.equal(f.calls.length, 0);
+});
+
+test('an eligible surface can explicitly preload Apple without initialization or authentication', async () => {
     let sdk;
-    const f = fixture({ apple: () => sdk,
-        fetchRequest: async () => Response.json({ clients: [google, appleWeb] }) });
-    const available = f.client.getAvailableProviderClients();
+    const f = fixture({ apple: () => sdk });
+    const loading = f.client.preloadProviderCredential(appleWeb, signal());
     await nextTurn();
     assert.equal(f.scripts.length, 1);
     assert.equal(f.scripts[0].src, 'https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js');
     let init = 0, signIn = 0;
     sdk = { auth: { init() { init++; }, async signIn() { signIn++; } } };
-    f.scripts[0].onload();
-    assert.deepEqual(await available, [google, appleWeb]);
-    assert.equal(init, 0);
-    assert.equal(signIn, 0);
+    f.scripts[0].onload(); await loading;
+    assert.equal(init, 0); assert.equal(signIn, 0);
     assert.equal(f.controls.alertOptions, null);
-    assert.equal(f.calls.length, 0, 'discovery alone cannot begin a provider challenge');
 });
 
-test('Google can load and render independently while Apple discovery is still waiting for its SDK', async () => {
+test('explicit Google preload remains independent of a slow explicit Apple preload', async () => {
     let appleSdk;
-    const early = [];
-    const f = fixture({ apple: () => appleSdk,
-        fetchRequest: async () => Response.json({ clients: [google, appleWeb] }) });
-    const final = f.client.getAvailableProviderClients(clients => early.push(clients));
-    await nextTurn();
-    assert.deepEqual(early, [[google]]);
-    assert.equal(f.scripts.length, 1);
-    const appleScript = f.scripts[0];
+    const f = fixture({ apple: () => appleSdk });
+    const appleReady = f.client.preloadProviderCredential(appleWeb, signal());
+    await nextTurn(); const appleScript = f.scripts[0];
     const googleReady = f.client.preloadProviderCredential(google, signal());
-    await nextTurn();
-    assert.equal(f.scripts.length, 2);
-    f.loadGoogle();
-    await googleReady;
-    assert.equal(f.controls.initialization, null, 'public SDK preload does not prepare or authenticate');
+    await nextTurn(); assert.equal(f.scripts.length, 2);
+    f.loadGoogle(); await googleReady;
+    assert.equal(f.controls.initialization, null);
     appleSdk = { auth: { init() {}, signIn() {} } };
-    appleScript.onload();
-    assert.deepEqual(await final, [google, appleWeb]);
+    appleScript.onload(); await appleReady;
 });
 
-test('a blocked Apple SDK retains deletion metadata, withholds issuance and leaves Google available for retry', async () => {
+test('blocked explicit Apple preload is sanitized and can retry without changing discovery metadata', async () => {
     const f = fixture({ fetchRequest: async () => Response.json({ clients: [google, appleWeb] }) });
-    const first = f.client.getAvailableProviderClients();
-    await nextTurn();
-    f.scripts[0].onerror();
-    const { signup, ...metadata } = appleWeb;
-    assert.deepEqual(await first, [google, { ...metadata, issuance: false }]);
-    assert.equal(f.controls.alertOptions, null);
-    const retry = f.client.getAvailableProviderClients();
-    await nextTurn();
-    assert.equal(f.scripts.length, 2, 'a later configuration check can retry the SDK');
-    f.scripts[1].onerror();
-    assert.equal((await retry)[1].issuance, false);
+    const first = f.client.preloadProviderCredential(appleWeb, signal());
+    const rejected = rejectsCode(first, 'UNAVAILABLE');
+    await nextTurn(); f.scripts[0].onerror(); await rejected;
+    assert.deepEqual(await f.client.getAvailableProviderClients(), [google, appleWeb]);
+    const retry = rejectsCode(f.client.preloadProviderCredential(appleWeb, signal()), 'UNAVAILABLE');
+    await nextTurn(); assert.equal(f.scripts.length, 2); f.scripts[1].onerror(); await retry;
 });
 
-test('a stalled Apple SDK has a deadline without discarding Google capabilities', async t => {
+test('stalled explicit Apple preload has a deadline and discovery never waits for its SDK', async t => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
     const f = fixture({ fetchRequest: async () => Response.json({ clients: [google, appleWeb] }) });
-    const available = f.client.getAvailableProviderClients();
-    await nextTurn();
-    t.mock.timers.tick(10_000);
-    const result = await available;
-    assert.deepEqual(result[0], google);
-    assert.equal(result[1].issuance, false);
-    assert.equal('signup' in result[1], false);
+    assert.deepEqual(await f.client.getAvailableProviderClients(), [google, appleWeb]);
+    assert.equal(f.scripts.length, 0);
+    const loading = rejectsCode(f.client.preloadProviderCredential(appleWeb, signal()), 'CANCELLED');
+    await nextTurn(); t.mock.timers.tick(10_000); await loading;
     assert.equal(f.scripts[0].removed, true);
 });
 

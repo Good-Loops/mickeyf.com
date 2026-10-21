@@ -13,7 +13,8 @@ export default function SignedParentForm({ request, policy }: { request: SignedP
             <dt>Request reference</dt><dd>{request.reference}</dd>
             <dt>Parent account</dt><dd>{request.parentAccountId}</dd>
             <dt>Verified parent email</dt><dd>{request.verifiedContact}</dd>
-            <dt>Child's chosen nickname and country</dt><dd>{request.userName} · {request.country}</dd>
+            {policy.credentialsAfterApproval ? <><dt>Child's country</dt><dd>{request.country}</dd></>
+                : <><dt>Child's chosen nickname and country</dt><dd>{request.userName} · {request.country}</dd></>}
             <dt>Return and activate before</dt><dd>{request.expiresAt}</dd>
             <dt>Account consent version</dt><dd>{request.consentVersion} · {request.policyVersion}</dd>
         </dl>

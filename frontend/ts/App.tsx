@@ -3,7 +3,7 @@
  * Composes the top-level layout (header/footer) and the client-side route table.
  * Ownership: this module wires pages and navigation only; domain logic lives in feature modules, hooks, and services.
  */
-import React, { lazy, useEffect, useRef } from "react";
+import React, { lazy, useRef } from "react";
 import { useSafariBackgroundEdges } from '@/hooks/useSafariBackgroundEdges';
 import { useNativePresentation } from '@/hooks/useNativePresentation';
 import { Routes, Route, useLocation } from "react-router-dom";
@@ -21,7 +21,6 @@ import {
 } from '@/config/featureFlags';
 
 import NotFound from "@/pages/NotFound";
-import { preloadGoogleSignInForRoute } from '@/services/providerClient';
 
 // Home and recovery stay immediate; every destination shares the route loading boundary.
 const Animations = lazy(() => import('@/pages/Animations'));
@@ -44,7 +43,6 @@ const privacyNoticeUrl = parsePrivacyNoticeUrl(import.meta.env.VITE_PRIVACY_NOTI
 const App: React.FC = () => {
 	const shellRef = useRef<HTMLDivElement>(null);
 	const { pathname } = useLocation();
-	useEffect(() => preloadGoogleSignInForRoute(pathname), [pathname]);
 	useSafariBackgroundEdges(shellRef);
 	useNativePresentation(pathname);
 	const threeBossesAvailable = isThreeBossesEnabled

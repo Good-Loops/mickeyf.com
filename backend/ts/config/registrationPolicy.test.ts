@@ -67,6 +67,21 @@ test('policy digest is canonical and changes with either rule or version', () =>
 const generalEnv = { ...env, REGISTRATION_GENERAL_AUDIENCE_ENABLED: 'true',
     REGISTRATION_GENERAL_AUDIENCE_POLICY_REVIEWED: 'true', REGISTRATION_GENERAL_AUDIENCE_POLICY_VERSION: 'synthetic-general-v1' };
 
+test('an explicit child audience rejects general signup and binds staged grants to the audience', () => {
+    for (const patch of [{ REGISTRATION_AUDIENCE: 'children' }, { REGISTRATION_AUDIENCE: '' },
+        { ...generalEnv, REGISTRATION_AUDIENCE: 'children-included' },
+        { ...generalEnv, REGISTRATION_AUDIENCE: 'children-included', REGISTRATION_ENABLED: 'false' }]) {
+        assert.throws(() => loadRegistrationPolicy({ ...env, ...patch }), /audience/u);
+    }
+    const staged = loadRegistrationPolicy(env)!;
+    const child = loadRegistrationPolicy({ ...env, REGISTRATION_AUDIENCE: 'children-included' })!;
+    assert.equal(child.audience, 'children-included');
+    assert.equal(child.mode, undefined);
+    assert(!child.digest.equals(staged.digest), 'old staged grants must not authorize the newly declared audience');
+    assert.deepEqual(decideRegistration(child, { policyVersion: child.version }), { allowed: false, reason: 'INVALID_REGISTRATION' });
+    assert.deepEqual(decideRegistration(child, { ...input, ageBand: 'parent-required' }), { allowed: false, reason: 'PARENT_REQUIRED' });
+});
+
 test('general audience mode is explicit, separately reviewed and separately versioned', () => {
     assert.equal(loadRegistrationPolicy(env)!.mode, undefined);
     assert.equal(loadRegistrationPolicy({ ...generalEnv, REGISTRATION_GENERAL_AUDIENCE_ENABLED: 'false' })!.mode, undefined);

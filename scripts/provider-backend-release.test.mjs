@@ -41,6 +41,42 @@ test('preparation is explicit and closed; active policies have no implicit count
     assert.throws(() => providerReleaseEnvironment(config), /keep.*closed/);
 });
 
+test('declared child audiences reject general signup and missing signed country coverage at the deployment boundary', () => {
+    const config = providerConfig();
+    Object.assign(config.environment, { REGISTRATION_AUDIENCE: 'children-included',
+        REGISTRATION_COUNTRY_RULES: '{"US":{"parentRequiredBelow":13},"BR":{"parentRequiredBelow":18}}',
+        PARENT_REGISTRATION_COUNTRIES: '["US","BR"]', PARENT_SIGNED_FORM_COUNTRIES: '["BR","US"]',
+        PUBLIC_SCORE_COUNTRY_RULES: '{"US":{"selfAgeBands":["adult"],"parentManaged":true},"BR":{"selfAgeBands":["adult"],"parentManaged":false}}' });
+    assert.equal(providerReleaseEnvironment(config).REGISTRATION_AUDIENCE, 'children-included');
+    for (const patch of [{ REGISTRATION_GENERAL_AUDIENCE_ENABLED: 'true', REGISTRATION_GENERAL_AUDIENCE_POLICY_REVIEWED: 'true',
+        REGISTRATION_GENERAL_AUDIENCE_POLICY_VERSION: 'synthetic-general' }, { PARENT_SIGNED_FORM_COUNTRIES: '["US"]' },
+        { PARENT_SIGNED_FORM_COUNTRIES: '["US","US"]' }, { PARENT_SIGNED_FORM_COUNTRIES: '["US","ZZ"]' },
+        { PARENT_SIGNED_FORMS_ENABLED: 'false' }, { PARENT_REGISTRATION_COUNTRIES: '["US"]', PARENT_SIGNED_FORM_COUNTRIES: '["US"]' }]) {
+        assert.throws(() => providerReleaseEnvironment({ ...config, environment: { ...config.environment, ...patch } }));
+    }
+    const privateScores = structuredClone(config);
+    for (const name of ['PUBLIC_SCORE_PARTICIPATION_ENABLED', 'PUBLIC_SCORE_POLICY_REVIEWED', 'PUBLIC_SCORE_ASSURANCE_REVIEWED']) privateScores.environment[name] = 'false';
+    assert.equal(providerReleaseEnvironment(privateScores).PUBLIC_SCORE_PARTICIPATION_ENABLED, 'false');
+    const pins = fixture().pins.candidate.deployment;
+    pins.providerRelease = privateScores;
+    assert.ok(render(pins).steps.length > 0, 'the child contract also survives the frozen deployment renderer');
+    assert.throws(() => providerReleaseEnvironment({ ...privateScores,
+        environment: { ...privateScores.environment, PUBLIC_SCORE_PARTICIPATION_ENABLED: 'true' } }));
+});
+
+test('the child-audience proposal stays an unreviewed closed draft and cannot be passed as deployment approval', () => {
+    const draft = JSON.parse(read('../release-prep/2026-10-20/parent-registration-policy-draft.json'));
+    assert.equal(draft.status, 'DRAFT-NOT-A-DEPLOYMENT-CONFIGURATION');
+    const env = draft.policyProposal.environment;
+    assert.equal(env.REGISTRATION_AUDIENCE, 'children-included');
+    assert.deepEqual(JSON.parse(env.PARENT_SIGNED_FORM_COUNTRIES), ['BR', 'US']);
+    for (const name of [...PROVIDER_CREATION_FLAGS, 'REGISTRATION_POLICY_REVIEWED', 'PARENT_REGISTRATION_POLICY_REVIEWED',
+        'PUBLIC_SCORE_PARTICIPATION_ENABLED', 'PUBLIC_SCORE_POLICY_REVIEWED', 'PUBLIC_SCORE_ASSURANCE_REVIEWED']) assert.equal(env[name], 'false');
+    assert.equal(Object.keys(env).some(name => name.startsWith('REGISTRATION_GENERAL_AUDIENCE')), false);
+    assert.throws(() => providerReleaseEnvironment(draft));
+    assert.throws(() => providerReleaseEnvironment(draft.policyProposal), /requires explicit/u);
+});
+
 test('Android release activation remains blocked without actual reviewed Play certificate/OAuth pins', () => {
     assert.deepEqual(PROVIDER_ANDROID_PRESENTER_PINS, []);
     assert.equal(Object.isFrozen(PROVIDER_ANDROID_PRESENTER_PINS), true);

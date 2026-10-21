@@ -7,8 +7,9 @@ import { createParentRegistrationApi, type ParentConfig } from '@/services/paren
 import { acquireProviderCredential, getAvailableProviderClients, type PublicProviderClient } from '@/services/providerClient';
 import { apiFetch } from '@/services/apiFetch';
 import { API_BASE, LEGACY_PUBLIC_API_PREVIEW } from '@/config/apiConfig';
+import { providerAccountMethodsRequest } from '@/services/authService';
 
-const api = createParentRegistrationApi(API_BASE, apiFetch);
+const api = createParentRegistrationApi(API_BASE, apiFetch, { requireChildAudience: true });
 export default function ParentAccounts() {
     const { isAuthenticated, userName, loading, sessionGeneration, deleteFamily: deleteFamilyAccount, captureAccountAction } = useAuth();
     const [clients, setClients] = useState<PublicProviderClient[]>([]);
@@ -40,7 +41,8 @@ export default function ParentAccounts() {
         const controller = new AbortController();
         setChildrenLoaded(false); setFamilyAcknowledged(false); setFamilyConfirmation('');
         if (!LEGACY_PUBLIC_API_PREVIEW && isAuthenticated && !loading) {
-            void Promise.all([api.config(controller.signal), getAvailableProviderClients()]).then(async ([policy, available]) => {
+            void Promise.all([api.config(controller.signal), providerAccountMethodsRequest()]).then(async ([policy, methods]) => {
+                const available = methods?.providerCollectionAllowed === false ? [] : await getAvailableProviderClients();
                 if (controller.signal.aborted) return;
                 setConfig(policy); setClients(available);
                 if (policy.enabled) {
@@ -100,6 +102,7 @@ export default function ParentAccounts() {
     return <section className="manage-account"><div className="manage-account__form-wrapper">
         <h1>Parent and child accounts</h1>
         {loading ? <p>Checking your session.</p> : <ParentRegistration api={api} authenticated={isAuthenticated}
+            requireChildAudience
             accountKey={userName ?? ''} sessionGeneration={sessionGeneration} clients={clients} acquire={acquireProviderCredential} onCreated={() => setRetry(value => value + 1)} />}
         {isAuthenticated && config?.enabled && <section aria-label="Manage child accounts">
             <h2>Your child accounts</h2>

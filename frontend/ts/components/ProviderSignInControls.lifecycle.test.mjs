@@ -227,6 +227,19 @@ test('unlinked Google login removes the widget gap and offers explicit account c
     assert.equal(view.preparation[1].action, 'login');
 });
 
+test('a failed eligible Google attempt asks for a fresh age step instead of looping on its consumed grant', async t => {
+    const reset = t.mock.fn();
+    const view = mount(t, InlineGoogleSignIn, { onEligibilityRequired: reset });
+    view.render(); await view.settle();
+    view.preparation[0].resolve({ error: 'REGISTRATION_REQUIRED' }); await view.settle();
+    const retry = view.find(node => node.type === 'button' && node.props.children === 'Check eligibility again');
+    assert(retry);
+    retry.props.onClick(); await view.settle();
+    assert.equal(reset.mock.callCount(), 1);
+    assert.equal(view.preparation.length, 1);
+    assert.equal(view.acquisitions.length, 0);
+});
+
 test('an initial Apple maintenance outage preserves Google and restores Apple controls after checking recovered capabilities', async t => {
     const view = mount(t, ProviderSignInControls, { action: 'login' });
     const apple = { clientKey: 'apple-web', provider: 'apple', platform: 'web', clientId: 'com.example.web',

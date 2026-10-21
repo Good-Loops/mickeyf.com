@@ -47,7 +47,8 @@ export type ProviderAuthFlowDependencies = {
     enabled?: boolean;
     signupEnabled?: boolean;
     deletionEnabled?: boolean;
-    registration?: Pick<RegistrationAuthorization, 'assertAvailable'>;
+    registration?: Pick<RegistrationAuthorization, 'assertAvailable'> & Partial<Pick<RegistrationAuthorization,
+        'audience' | 'providerCollectionAllowed' | 'assertLoginAvailable'>>;
 };
 
 function inputClient(input: unknown, clients: ReadonlyMap<string, ProviderAuthClient>) {
@@ -102,6 +103,15 @@ export function createProviderAuthFlow({ attempts, accounts, clients, enabled = 
         if (!registration) throw new RegistrationRequiredError();
         await registration.assertAvailable(context);
     }
+    async function authorizeProviderAction(context: ProviderAuthContext, action: ProviderAttemptAction): Promise<void> {
+        if (action === 'signup') await authorizeRegistration(context);
+        if (action === 'login' && registration?.audience === 'children-included') {
+            await (registration.assertLoginAvailable ?? registration.assertAvailable)(context);
+        }
+        if (registration?.audience === 'children-included' && (action === 'link' || action === 'delete')
+            && (!context.account || !registration.providerCollectionAllowed
+                || !await registration.providerCollectionAllowed(context.account.accountId))) throw new RegistrationRequiredError();
+    }
     function unavailableAction(action: ProviderAttemptAction, clientKey: string, client: ProviderAuthClient): Failure | null {
         if (client.provider === 'apple' && (!client.appleTokens || !accounts.saveAppleToken)) {
             return { ok: false, reason: 'UNAVAILABLE' };
@@ -126,7 +136,9 @@ export function createProviderAuthFlow({ attempts, accounts, clients, enabled = 
             const state = randomBytes(32).toString('base64url');
             const nonce = randomBytes(32).toString('base64url');
             try {
-                if (selection.action === 'signup') await authorizeRegistration(context);
+                if (selection.action === 'signup' || registration?.audience === 'children-included') {
+                    await authorizeProviderAction(context, selection.action);
+                }
                 const created = await attempts.create({
                     stateHash: createHash('sha256').update(state).digest(), bindingHash: context.bindingHash,
                     nonce, clientKey: selection.clientKey, action: selection.action,
@@ -165,7 +177,9 @@ export function createProviderAuthFlow({ attempts, accounts, clients, enabled = 
                 ? validateLoginRequest({ user_name: 'link', user_password: input.password }) : null;
             if (password && !password.valid) return { ok: false, reason: 'INVALID_REQUEST' };
             try {
-                if (selection.action === 'signup') await authorizeRegistration(context);
+                if (selection.action === 'signup' || registration?.audience === 'children-included') {
+                    await authorizeProviderAction(context, selection.action);
+                }
                 // Consumption must commit BEFORE any provider lookup or account work.
                 // Failure/cancellation requires a fresh challenge, never replay of this one.
                 const attempt = await attempts.consume(

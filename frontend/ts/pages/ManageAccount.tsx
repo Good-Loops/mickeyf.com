@@ -37,8 +37,8 @@ export default function ManageAccount() {
         setMethodsLoading(true);
         setMethods(null);
         setDeletionClient(undefined);
-        void Promise.all([providerAccountMethodsRequest(), getAvailableProviderClients().catch(() => [])])
-            .then(([availableMethods, clients]) => {
+        void providerAccountMethodsRequest().then(async availableMethods => {
+                const clients = availableMethods?.providerCollectionAllowed === false ? [] : await getAvailableProviderClients().catch(() => []);
                 if (!active) return;
                 setMethods(availableMethods);
                 setDeletionClient(selectProviderDeletionClient(clients, availableMethods));
@@ -150,7 +150,7 @@ export default function ManageAccount() {
                 ) : (
                     <>
                         <p className="manage-account__identity">Signed in as <strong>{userName}</strong></p>
-                        {methods?.hasPassword && <ProviderSignInControls action="link" disabled={busy}
+                        {methods?.hasPassword && methods.providerCollectionAllowed === true && <ProviderSignInControls action="link" disabled={busy}
                             operationLock={submitting} onBusyChange={setProviderBusy}
                             onSuccess={() => setMethodsRetry(value => value + 1)} />}
                         <ScoreParticipation authenticated={isAuthenticated} accountKey={userName ?? ''} sessionGeneration={sessionGeneration} />

@@ -6,13 +6,13 @@ const notice = require('../../../shared/privacyNotice.json') as {
 
 export const SIGNED_FORM_VERSION = notice.signedParentForm.version;
 export const SIGNED_FORM_LIFETIME_DAYS = notice.signedParentForm.requestLifetimeDays;
-export const signedFormRequired = (country: string) => country === 'US';
+export const signedFormRequired = (country: string, countries: readonly string[] = ['US']) => countries.includes(country);
 export const signedFormNoticeDigest = () => createHash('sha256').update(JSON.stringify([
     notice.version, notice.operatorName, notice.contactEmail, notice.operatorAddress, notice.operatorTelephone,
     notice.signedParentForm,
 ])).digest();
 export type SignedParentFormRequest = Readonly<{
-    reference: string; parentAccountId: string; country: string; userName: string; verifiedContact: string;
+    reference: string; parentAccountId: string; country: string; userName: string | null; verifiedContact: string;
     policyVersion: string; consentVersion: string; status: 'pending' | 'approved' | 'rejected';
     expiresAt: string; publicPolicyDigest: string | null; publicConsentText: string | null; publicConsentVersion: string | null;
 }>;

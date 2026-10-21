@@ -105,7 +105,7 @@ function readToken(value: unknown): string {
 
 /** Discovery already filters platform/capability; issuance outages must not hide a fresh deletion proof. */
 export function selectProviderDeletionClient(clients: readonly PublicProviderClient[], methods: ProviderAccountMethods | null): PublicProviderClient | undefined {
-    return methods ? clients.find(client => client.provider === 'google'
+    return methods && methods.providerCollectionAllowed !== false ? clients.find(client => client.provider === 'google'
         ? methods.googleLinked && methods.googleDeletionEnabled
         : methods.appleLinked && methods.appleDeletionEnabled) : undefined;
 }
@@ -172,17 +172,9 @@ export function createProviderClient(dependencies: ProviderClientDependencies) {
                 return clients.filter((client): client is PublicProviderClient => client !== null
                     && client.platform === dependencies.platform && capabilities[client.provider] === true);
             }, IO_TIMEOUT_MS);
-            // Loading public SDK code does not prepare a provider attempt or replace Google's binding.
-            // A blocked Apple script must not remove otherwise available Google sign-in.
-            if (web && available.some(client => client.clientKey === 'apple-web' && client.issuance !== false)) {
-                onAvailable?.(available.filter(client => client.clientKey !== 'apple-web'));
-                try { await cancellable(signal => appleCredential.preload(signal), IO_TIMEOUT_MS); }
-                catch {
-                    return available.map(client => client.clientKey === 'apple-web'
-                        ? Object.freeze({ clientKey: client.clientKey, provider: client.provider, platform: client.platform,
-                            clientId: client.clientId, redirectUri: client.redirectUri, issuance: false as const }) : client);
-                }
-            }
+            // Discovery is first-party metadata only, including on an existing child's account pages.
+            // An eligible provider surface explicitly loads its SDK after the age/parent boundary.
+            onAvailable?.(available);
             return available;
         } catch { onUnavailable?.(); return []; }
     }
@@ -434,11 +426,12 @@ export function createProviderClient(dependencies: ProviderClientDependencies) {
         preloadProviderCredential: (client: PublicProviderClient, signal: AbortSignal) =>
             cancellable(async activeSignal => {
                 const selected = readClient(client);
-                if (!web || selected?.clientKey !== 'google-web' || selected.issuance === false) {
+                if (!web || !selected || !['google-web', 'apple-web'].includes(selected.clientKey) || selected.issuance === false) {
                     throw new ProviderCredentialError('UNAVAILABLE');
                 }
-                await loadGoogle(activeSignal);
-            }, IO_TIMEOUT_MS, signal),
+                if (selected.clientKey === 'apple-web') await appleCredential.preload(activeSignal);
+                else await loadGoogle(activeSignal);
+            }, IO_TIMEOUT_MS, signal).catch(error => { throw sanitizedError(error); }),
         acquireProviderCredential,
         acquireGoogleCredentialInline: (client: PublicProviderClient, challenge: ProviderAuthenticationChallenge,
             host: HTMLElement, signal: AbortSignal, onReady?: () => void) =>
@@ -477,19 +470,6 @@ export async function getAvailableProviderClients(onAvailable?: (clients: Public
 export async function preloadProviderCredential(client: PublicProviderClient, signal: AbortSignal): Promise<void> {
     try { await (await configuredClient()).preloadProviderCredential(client, signal); }
     catch (error) { throw sanitizedError(error); }
-}
-
-/** Warm public rendering resources on auth routes while the existing session check runs. No auth requests. */
-export function preloadGoogleSignInForRoute(pathname: string): () => void {
-    const controller = new AbortController();
-    if (/^\/(?:login|signup)\/?$/u.test(pathname)) {
-        void Promise.all([configuredClient(), import('../config/apiConfig.ts')]).then(async ([client, config]) => {
-            if (!config.LEGACY_PUBLIC_API_PREVIEW && !controller.signal.aborted) {
-                await client.preloadGoogleSignInResources(controller.signal);
-            }
-        }).catch(() => { /* The visible control owns bounded failure/retry feedback. */ });
-    }
-    return () => controller.abort();
 }
 
 export async function acquireProviderCredential(client: PublicProviderClient, challenge: ProviderAuthenticationChallenge,

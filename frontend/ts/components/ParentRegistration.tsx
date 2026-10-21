@@ -16,10 +16,12 @@ type Props = {
     clients: readonly PublicProviderClient[];
     acquire(client: PublicProviderClient, challenge: ProviderAuthenticationChallenge, signal: AbortSignal): Promise<ProviderCredential>;
     onCreated?(): void;
+    requireChildAudience?: boolean;
 };
 
 /** Child credentials are collected only after a fresh, consent-bound parent approval. */
-export default function ParentRegistration({ api, authenticated, accountKey, sessionGeneration = 0, clients, acquire, onCreated }: Props) {
+export default function ParentRegistration({ api, authenticated, accountKey, sessionGeneration = 0, clients, acquire, onCreated,
+    requireChildAudience = false }: Props) {
     const [config, setConfig] = useState<ParentConfig | null>(null);
     const [retry, setRetry] = useState(0);
     const [country, setCountry] = useState('');
@@ -38,6 +40,10 @@ export default function ParentRegistration({ api, authenticated, accountKey, ses
     const challengeState = useRef<string | null>(null);
     const generation = useRef(0);
     const previousSession = useRef(sessionGeneration);
+    const credentialsAfterApproval = config?.enabled === true && config.audience === 'children-included'
+        && config.credentialsAfterApproval === true;
+    const creationAllowed = config?.enabled === true && config.creationEnabled
+        && (!requireChildAudience || credentialsAfterApproval);
 
     const discard = () => {
         generation.current++;
@@ -94,9 +100,10 @@ export default function ParentRegistration({ api, authenticated, accountKey, ses
         : 'This request could not be confirmed. If you submitted child account details, check the account before trying again.';
 
     const approve = async (client: PublicProviderClient) => {
-        if (operation.current || !authenticated || !config?.enabled || !config.countries.includes(country) || !adult || !guardian || !consent) return;
+        if (operation.current || !authenticated || !config?.enabled || !creationAllowed || !config.countries.includes(country) || !adult || !guardian || !consent) return;
         const needsForm = config.signedFormCountries?.includes(country) === true;
-        if (needsForm && (selectedForm ? selectedForm.status !== 'approved' || Date.parse(selectedForm.expiresAt) <= Date.now() : !userName.trim())) return;
+        if (needsForm && (selectedForm ? selectedForm.status !== 'approved' || Date.parse(selectedForm.expiresAt) <= Date.now()
+            : !credentialsAfterApproval && !userName.trim())) return;
         const controller = new AbortController(); operation.current = controller;
         const current = ++generation.current;
         const active = () => current === generation.current && !controller.signal.aborted;
@@ -109,7 +116,8 @@ export default function ParentRegistration({ api, authenticated, accountKey, ses
             const credential = await acquire(client, challenge, controller.signal);
             if (!active()) return;
             if (needsForm && !selectedForm) {
-                const form = await api.requestSignedForm(challenge.state, typeof credential === 'string' ? credential : credential.idToken, userName, controller.signal);
+                const form = await api.requestSignedForm(challenge.state, typeof credential === 'string' ? credential : credential.idToken,
+                    credentialsAfterApproval ? undefined : userName, controller.signal);
                 if (!active()) return;
                 challengeState.current = null; setSelectedForm(form); setForms(current => [form, ...current]);
                 setFeedback('Print and sign the form, then email the scan from the verified parent address shown. The child account is waiting for review and has not been created.');
@@ -142,7 +150,8 @@ export default function ParentRegistration({ api, authenticated, accountKey, ses
         } } finally { if (current === generation.current && !controller.signal.aborted) { operation.current = null; setBusy(false); } }
     };
     const selectForm = (form: SignedParentFormRequest) => {
-        discard(); setGrant(null); setPassword(''); setBusy(false); setSelectedForm(form); setCountry(form.country); setUserName(form.userName);
+        discard(); setGrant(null); setPassword(''); setBusy(false); setSelectedForm(form); setCountry(form.country);
+        setUserName(credentialsAfterApproval ? '' : form.userName ?? '');
         setAdult(false); setGuardian(false); setConsent(false);
         setFeedback(form.status === 'approved' ? 'Signed form approved. Confirm again with the same linked provider, then choose the child password.' : 'This child account has not been created. Return the signed form and wait for review.');
     };
@@ -166,7 +175,7 @@ export default function ParentRegistration({ api, authenticated, accountKey, ses
         {config?.enabled && <p><PrivacyNoticeLink url={config.privacyNoticeUrl} /></p>}
         {authenticated && config?.enabled && config.signedFormCountries && <div>
             <button type="button" disabled={busy} onClick={() => setFormRefresh(value => value + 1)}>Refresh signed form requests</button>
-            {forms.map(form => <button type="button" key={form.reference} disabled={busy} onClick={() => selectForm(form)}>{form.userName}: {form.status}</button>)}
+            {forms.map(form => <button type="button" key={form.reference} disabled={busy} onClick={() => selectForm(form)}>{form.userName ?? 'Child account request'}: {form.status}</button>)}
             {selectedForm && <>
                 <SignedParentForm request={selectedForm} policy={config} />
                 <button type="button" disabled={busy} onClick={() => void cancelForm()}>Cancel this signed form request</button>
@@ -175,10 +184,10 @@ export default function ParentRegistration({ api, authenticated, accountKey, ses
         {!authenticated ? <p><Link to="/login">Log in to your own Ludolume account with Google or Apple</Link>, then return here.</p>
             : !config ? <button type="button" onClick={() => setRetry(value => value + 1)}>Retry loading parent registration</button>
             : !config.enabled ? <p>Parent registration is not available on this server.</p>
-            : !config.creationEnabled ? <p>New child accounts are paused. Existing child accounts can still be managed below.</p>
+            : !creationAllowed ? <p>New child accounts are paused. Existing child accounts can still be managed below.</p>
             : grant ? <form onSubmit={create}>
                 <p>Scores are private. No child email or date of birth is collected. Choose a nickname, not the child's real name.</p>
-                <label>Child's nickname<input required maxLength={64} value={userName} disabled={busy || !!selectedForm} onChange={event => setUserName(event.target.value)} /></label>
+                <label>Child's nickname<input required maxLength={64} value={userName} disabled={busy || !!selectedForm && !credentialsAfterApproval} onChange={event => setUserName(event.target.value)} /></label>
                 <label>Child's password<input type="password" autoComplete="new-password" required minLength={8} value={password} disabled={busy} onChange={event => setPassword(event.target.value)} /></label>
                 <button type="submit" disabled={busy}>Create private child account</button>
             </form> : <div>
@@ -187,7 +196,8 @@ export default function ParentRegistration({ api, authenticated, accountKey, ses
                 </select></label>
                 {config.signedFormCountries?.includes(country) && <>
                     <p>{notice.signedParentForm.notice}</p>
-                    {!selectedForm && <label>Child's chosen nickname<input maxLength={64} value={userName} disabled={busy} onChange={event => setUserName(event.target.value)} /></label>}
+                    {!selectedForm && !credentialsAfterApproval && <label>Child's chosen nickname<input maxLength={64} value={userName} disabled={busy} onChange={event => setUserName(event.target.value)} /></label>}
+                    {credentialsAfterApproval && <p>The child's nickname and password are chosen only after the signed parent form is approved.</p>}
                     {selectedForm && selectedForm.status !== 'approved' && <p>Awaiting signed form review. The child account is not active.</p>}
                 </>}
                 <label><input type="checkbox" checked={adult} disabled={busy} onChange={event => setAdult(event.target.checked)} />I am 18 or older.</label>
@@ -195,7 +205,7 @@ export default function ParentRegistration({ api, authenticated, accountKey, ses
                 <p>{config.consentText}</p>
                 <label><input type="checkbox" checked={consent} disabled={busy} onChange={event => setConsent(event.target.checked)} />I agree to this child-account consent.</label>
                 {clients.map(client => <button type="button" key={client.clientKey} disabled={busy || !country || !adult || !guardian || !consent
-                    || !!config.signedFormCountries?.includes(country) && (selectedForm ? selectedForm.status !== 'approved' : !userName.trim())}
+                    || !!config.signedFormCountries?.includes(country) && (selectedForm ? selectedForm.status !== 'approved' : !credentialsAfterApproval && !userName.trim())}
                     onClick={() => void approve(client)}>Confirm with {client.provider === 'google' ? 'Google' : 'Apple'}</button>)}
                 {clients.length === 0 && <p>No supported provider is available here. No child details are needed.</p>}
             </div>}

@@ -2,6 +2,7 @@ import { isDeepStrictEqual } from 'node:util';
 import type { MigrationConnection } from './leaderboardSchema';
 
 export const SIGNED_FORM_MIGRATION = '0026_create_signed_parent_forms';
+export const CHILD_SIGNED_FORM_MIGRATION = '0028_extend_child_signed_parent_forms';
 type ColumnMetadata = Readonly<{ name: string; type: string; nullable: string; charset: string | null;
     collation: string | null; defaultValue: string | null; extra: string; generation: string }>;
 
@@ -39,7 +40,18 @@ async function verifyColumns(connection: MigrationConnection, expected: readonly
     }
 }
 
-export async function verifySignedParentFormSchema(connection: MigrationConnection): Promise<void> {
+async function childFormSchemaPresent(connection: MigrationConnection): Promise<boolean> {
+    const [columns] = await connection.query(`SELECT IS_NULLABLE AS nullable FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='parent_signed_forms' AND COLUMN_NAME='user_name'`);
+    if (!Array.isArray(columns) || columns.length !== 1 || !['YES', 'NO'].includes(columns[0].nullable)) {
+        throw new Error('Signed parent form credential timing schema is unavailable.');
+    }
+    return columns[0].nullable === 'YES';
+}
+
+export async function verifySignedParentFormSchema(connection: MigrationConnection, requireChildCreation = false): Promise<void> {
+    const childForms = await childFormSchemaPresent(connection);
+    if (requireChildCreation && !childForms) throw new Error('Child signed parent form schema is missing.');
     const table = 'parent_signed_forms';
     async function exact(sql: string, expected: unknown) {
         const [rows] = await connection.query(sql, [table]);
@@ -51,7 +63,7 @@ export async function verifySignedParentFormSchema(connection: MigrationConnecti
         charset, collation: charset === 'ascii' ? 'ascii_bin' : charset === 'utf8mb4' ? 'utf8mb4_unicode_ci' : null, defaultValue, extra: '', generation: '' });
     await verifyColumns(connection, [
         col('reference', 'char(36)', 'ascii'), col('parent_uuid', 'char(36)', 'ascii'), col('country_code', 'char(2)', 'ascii'),
-        col('user_name', 'varchar(64)', 'utf8mb4'), col('policy_digest', 'binary(32)'), col('consent_version', 'varchar(64)', 'ascii'),
+        col('user_name', 'varchar(64)', 'utf8mb4', childForms ? 'YES' : 'NO'), col('policy_digest', 'binary(32)'), col('consent_version', 'varchar(64)', 'ascii'),
         col('policy_version', 'varchar(64)', 'ascii'), col('provider', "enum('google','apple')", 'ascii'), col('subject', 'varbinary(255)'),
         col('verified_contact', 'varchar(254)', 'utf8mb4'), col('status', "enum('pending','approved','rejected','used')", 'ascii'),
         col('submitted_at', 'datetime(6)'), col('expires_at', 'datetime(6)'), col('reviewed_at', 'datetime(6)', null, 'YES'),
@@ -77,11 +89,14 @@ export async function verifySignedParentFormSchema(connection: MigrationConnecti
         WHERE CONSTRAINT_SCHEMA=DATABASE() AND CONSTRAINT_NAME='chk_signed_form_status'`);
     const normalized = Array.isArray(checks) ? checks.map(row => String(row.clause).replace(/[`\s\\]/gu, '').replace(/_(?:ascii|utf8mb4)/gu, '')) : null;
     const expected = "((country_code='US')and(public_approvedin(0,1))and(public_withdrawnin(0,1))and((public_approved=0)or(public_policy_digestisnotnull))and(((status='pending')and(reviewed_atisnull)and(reviewerisnull)and(form_sha256isnull)and(child_uuidisnull)and(public_approved=0))or((statusin('approved','rejected'))and(reviewed_atisnotnull)and(reviewerisnotnull)and(form_sha256isnotnull)and(child_uuidisnull))or((status='used')and(reviewed_atisnotnull)and(reviewerisnotnull)and(form_sha256isnotnull)and(child_uuidisnotnull))))";
-    if (!isDeepStrictEqual(normalized, [expected])) throw new Error('Signed parent form constraint differs from its reviewed definition.');
+    const reviewed = childForms ? expected.replace("(country_code='US')", "(country_codein('US','BR'))") : expected;
+    if (!isDeepStrictEqual(normalized, [reviewed])) throw new Error('Signed parent form constraint differs from its reviewed definition.');
     await exact('SELECT TRIGGER_NAME AS name FROM information_schema.TRIGGERS WHERE TRIGGER_SCHEMA=DATABASE() AND EVENT_OBJECT_TABLE=?', []);
 }
-export async function verifySignedParentFormReadiness(connection: MigrationConnection): Promise<void> {
+export async function verifySignedParentFormReadiness(connection: MigrationConnection, requireChildCreation = false): Promise<void> {
     const [rows] = await connection.query('SELECT version FROM schema_migrations WHERE version=?', [SIGNED_FORM_MIGRATION]);
     if (!Array.isArray(rows) || rows.length !== 1 || rows[0].version !== SIGNED_FORM_MIGRATION) throw new Error('Signed parent form migration is missing.');
-    await verifySignedParentFormSchema(connection);
+    // The pending extension is not registered in the ordinary migration manifest.
+    // Verify its exact capability instead of inventing an applied history row.
+    await verifySignedParentFormSchema(connection, requireChildCreation);
 }

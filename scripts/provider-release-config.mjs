@@ -38,6 +38,7 @@ const documents = ['REGISTRATION_COUNTRY_RULES', 'PARENT_REGISTRATION_COUNTRIES'
 const policyKeys = [...versions, ...noticeNames, ...texts, ...documents];
 const generalPolicyKeys = ['REGISTRATION_GENERAL_AUDIENCE_ENABLED', 'REGISTRATION_GENERAL_AUDIENCE_POLICY_REVIEWED',
     'REGISTRATION_GENERAL_AUDIENCE_POLICY_VERSION'];
+const childPolicyKeys = ['REGISTRATION_AUDIENCE', 'PARENT_SIGNED_FORM_COUNTRIES'];
 export const PROVIDER_CREATION_FLAGS = Object.freeze(['REGISTRATION_CREATION_ENABLED', 'PROVIDER_GOOGLE_SIGNUP_ENABLED',
     'PROVIDER_APPLE_SIGNUP_ENABLED', 'PARENT_REGISTRATION_CREATION_ENABLED']);
 
@@ -82,8 +83,13 @@ export function providerReleaseEnvironment(config, rollback = false) {
     if (!['prepare', 'active'].includes(config.phase)) fail('phase must be prepare or active');
     const env = config.environment;
     const generalAudience = record(env) && generalPolicyKeys.some(name => Object.hasOwn(env, name));
+    const childAudience = record(env) && childPolicyKeys.some(name => Object.hasOwn(env, name));
     keys(env, [...Object.keys(PROVIDER_FIXED_ENV), ...flags, ...(config.phase === 'active' ? policyKeys : []),
-        ...(generalAudience ? generalPolicyKeys : []), ...androidEnvironmentKeys.filter(name => record(env) && Object.hasOwn(env, name))], 'environment');
+        ...(generalAudience ? generalPolicyKeys : []), ...(childAudience ? childPolicyKeys : []),
+        ...androidEnvironmentKeys.filter(name => record(env) && Object.hasOwn(env, name))], 'environment');
+    if (childAudience && (config.phase !== 'active' || generalAudience || env.REGISTRATION_AUDIENCE !== 'children-included')) {
+        fail('children-included registration requires its staged active policy, without general signup');
+    }
     for (const [name, value] of Object.entries(env)) {
         if (typeof value !== 'string' || value.length > 16_384 || value.includes('\0')) fail(`${name} must be bounded public text`);
     }
@@ -95,7 +101,9 @@ export function providerReleaseEnvironment(config, rollback = false) {
         for (const name of flags) if (env[name] !== 'false') fail(`preparation must keep ${name} closed`);
     } else {
         for (const name of flags) {
-            const expected = generalAudience && name === 'PARENT_REGISTRATION_CREATION_ENABLED' ? 'false' : 'true';
+            const publicClosed = childAudience && env.PUBLIC_SCORE_PARTICIPATION_ENABLED === 'false'
+                && ['PUBLIC_SCORE_PARTICIPATION_ENABLED', 'PUBLIC_SCORE_POLICY_REVIEWED', 'PUBLIC_SCORE_ASSURANCE_REVIEWED'].includes(name);
+            const expected = generalAudience && name === 'PARENT_REGISTRATION_CREATION_ENABLED' || publicClosed ? 'false' : 'true';
             if (env[name] !== expected) fail(`active release requires explicit ${name}=${expected}`);
         }
         if (generalAudience && (env.REGISTRATION_GENERAL_AUDIENCE_ENABLED !== 'true'
@@ -125,6 +133,15 @@ export function providerReleaseEnvironment(config, rollback = false) {
         const parents = document(env, 'PARENT_REGISTRATION_COUNTRIES');
         if (!Array.isArray(parents) || !parents.length || parents.length > 249 || new Set(parents).size !== parents.length
             || parents.some(country => typeof country !== 'string' || !Object.hasOwn(rules, country))) fail('parent countries must be a reviewed registration subset');
+        if (childAudience) {
+            const signedCountries = document(env, 'PARENT_SIGNED_FORM_COUNTRIES');
+            if (!Array.isArray(signedCountries) || signedCountries.length !== parents.length
+                || new Set(signedCountries).size !== signedCountries.length
+                || signedCountries.some(country => !['BR', 'US'].includes(country) || !parents.includes(country))
+                || Object.keys(rules).some(country => !parents.includes(country))) {
+                fail('every child country requires an explicit supported signed-parent-form policy');
+            }
+        }
         const publicRules = document(env, 'PUBLIC_SCORE_COUNTRY_RULES');
         if (!record(publicRules) || !Object.keys(publicRules).length) fail('public disclosure rules must be explicit');
         for (const [country, rule] of Object.entries(publicRules)) {

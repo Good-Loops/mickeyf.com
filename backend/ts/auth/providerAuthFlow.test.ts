@@ -12,6 +12,8 @@ import type { ProviderAttempt, ProviderAttemptAction } from './providerAttemptRe
 import type { IdentityProvider } from './providerIdentity';
 import { createProviderTokenVerifier, PROVIDER_TOKEN_MAX_LENGTH, type ProviderTokenVerificationResult } from './providerTokenVerifier';
 import { AppleTokenClientError, type AppleTokenClient } from './appleTokenClient';
+import { createRegistrationAuthorization, RegistrationRequiredError } from '../accounts/registrationAuthorization';
+import { loadRegistrationPolicy } from '../config/registrationPolicy';
 
 const secret = 'provider-flow-tests-only-session-secret';
 const origin = 'capacitor://localhost';
@@ -28,6 +30,58 @@ const appleSession = { authenticationMethod: 'apple', appleSessionProof: {
     subject: appleIdentity.subject, clientId: appleIdentity.appleClientId, issuedAt: appleIdentity.appleIssuedAt,
 } };
 const hash = (value: string) => createHash('sha256').update(value).digest();
+
+test('child-audience provider login requires current eligibility before creating challenges or verifying tokens', async () => {
+    const f = await fixture();
+    let eligible = false;
+    const flow = createProviderAuthFlow({ ...f.dependencies, enabled: true,
+        registration: { audience: 'children-included', async assertAvailable() { if (!eligible) throw new RegistrationRequiredError(); } } });
+    assert.deepEqual(await flow.begin(f.context, { action: 'login', clientKey: 'google-web' }), { ok: false, reason: 'REGISTRATION_REQUIRED' });
+    assert.deepEqual(f.events, []);
+    eligible = true;
+    const challenge = await flow.begin(f.context, { action: 'login', clientKey: 'google-web' }); assert.ok(challenge.ok);
+    f.events.length = 0; eligible = false;
+    assert.deepEqual(await flow.complete(f.context, { action: 'login', clientKey: 'google-web', state: challenge.state,
+        idToken: signedToken(challenge.nonce) }), { ok: false, reason: 'REGISTRATION_REQUIRED' });
+    assert.deepEqual(f.events, [], 'an expired or withdrawn eligibility grant must stop before token verification and account lookup');
+});
+
+test('managed child accounts cannot start or complete external provider linking', async () => {
+    const f = await fixture(account);
+    const prior = await f.challenge('link');
+    const flow = createProviderAuthFlow({ ...f.dependencies, enabled: true,
+        registration: { audience: 'children-included', async assertAvailable() {}, async providerCollectionAllowed() { return false; } } });
+    assert.deepEqual(await flow.begin(f.context, { action: 'link', clientKey: 'google-web' }), { ok: false, reason: 'REGISTRATION_REQUIRED' });
+    assert.deepEqual(await flow.complete(f.context, prior.input), { ok: false, reason: 'REGISTRATION_REQUIRED' });
+    assert.deepEqual(f.events, []);
+});
+
+test('strict paused creation allows eligible adult provider login without allowing provider signup or unknown-identity continuation', async () => {
+    for (const existing of [true, false]) {
+        const f = await fixture(undefined, true);
+        const policy = loadRegistrationPolicy({ REGISTRATION_ENABLED: 'true', REGISTRATION_POLICY_REVIEWED: 'true',
+            REGISTRATION_AUDIENCE: 'children-included', REGISTRATION_POLICY_VERSION: 'synthetic-paused-child-v1',
+            REGISTRATION_COUNTRY_RULES: '{"US":{"parentRequiredBelow":13}}' })!;
+        let eligible = false;
+        const database = { async query({ sql }: { sql: string }) {
+            assert.match(sql, /^SELECT country_code AS country/u);
+            return [eligible ? [{ country: 'US', ageBand: 'adult' }] : []];
+        } } as unknown as Pick<Pool, 'query'>;
+        const registration = createRegistrationAuthorization(database, policy, policy.audience, false);
+        const flow = createProviderAuthFlow({ ...f.dependencies, enabled: true, signupEnabled: true, registration });
+        assert.deepEqual(await flow.begin(f.context, { action: 'login', clientKey: 'google-web' }), { ok: false, reason: 'REGISTRATION_REQUIRED' });
+        assert.deepEqual(f.events, []);
+        eligible = true;
+        assert.deepEqual(await flow.begin(f.context, { action: 'signup', clientKey: 'google-web' }), { ok: false, reason: 'REGISTRATION_REQUIRED' });
+        assert.deepEqual(f.events, []);
+        f.controls.foundAccount = existing ? account : null;
+        const challenge = await flow.begin(f.context, { action: 'login', clientKey: 'google-web' }); assert.ok(challenge.ok);
+        const result = await flow.complete(f.context, { action: 'login', clientKey: 'google-web', state: challenge.state,
+            idToken: signedToken(challenge.nonce, 'google', { email: 'synthetic@example.test', email_verified: true }) });
+        assert.deepEqual(result, existing ? { ok: true, type: 'account-verified', account } : { ok: false, reason: 'REGISTRATION_REQUIRED' });
+        assert.deepEqual(f.createdAccounts, []); assert.equal(f.created.length, 1, 'login never creates a signup continuation when creation is paused');
+    }
+});
 
 function signedToken(nonce: string, provider: IdentityProvider = 'google', extra: Record<string, unknown> = {}): string {
     return jwt.sign({

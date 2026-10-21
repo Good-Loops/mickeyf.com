@@ -9,6 +9,12 @@ import { createViteTestServer } from '../testSupport/createViteTestServer.mjs';
 
 const frontendRoot = fileURLToPath(new URL('../../', import.meta.url));
 const google = { clientKey: 'google-web', provider: 'google', platform: 'web', clientId: 'synthetic.apps.googleusercontent.com' };
+const legacyRegistration = { enabled: true, mode: 'general-audience', policyVersion: 'synthetic-general',
+    optionalDetails: false, parentRegistrationAvailable: false };
+const childRegistration = { enabled: true, audience: 'children-included', creationEnabled: true, policyVersion: 'synthetic-children',
+    parentRegistrationAvailable: true, countries: [{ country: 'US', parentRequiredBelow: 13, adultFrom: 18 }] };
+const eligibility = { country: 'US', ageBand: 'adult', policyVersion: childRegistration.policyVersion };
+const approval = { authorized: true, expiresInSeconds: 300, scoreVisibility: 'private' };
 const scenarios = [
     { name: 'default legacy public preview', mode: 'development', flag: '1', preview: true, legacy: true, apiBase: '/__public-api' },
     { name: 'explicit legacy public preview', mode: 'development', flag: '1', protocol: 'legacy', preview: true, legacy: true, apiBase: '/__public-api' },
@@ -24,13 +30,14 @@ for (const scenario of scenarios) {
     test(`${scenario.name} keeps authentication and UI within the selected backend capabilities`, async (t) => {
         t.mock.method(Capacitor, 'isNativePlatform', () => scenario.native === true);
         const calls = [];
+        let registrationConfig = legacyRegistration;
         t.mock.method(globalThis, 'fetch', async (url, init) => {
             calls.push({ url, init });
-            if (url === `${scenario.apiBase}/auth/registration/config`) return Response.json({ enabled: true,
-                mode: 'general-audience', policyVersion: 'synthetic-general', optionalDetails: false, parentRegistrationAvailable: false });
+            if (url === `${scenario.apiBase}/auth/registration/config`) return Response.json(registrationConfig);
             if (url === `${scenario.apiBase}/auth/registration/begin`) {
-                assert.deepEqual(JSON.parse(init.body), { policyVersion: 'synthetic-general' });
-                return Response.json({ authorized: true, expiresInSeconds: 300, scoreVisibility: 'private' });
+                assert.notEqual(scenario.legacy, true, 'legacy preview does not issue staged grants');
+                assert.deepEqual(JSON.parse(init.body), eligibility);
+                return Response.json(approval);
             }
             if (url === `${scenario.apiBase}/auth/verify-token`) {
                 assert.equal(init.method, 'GET');
@@ -76,15 +83,32 @@ for (const scenario of scenarios) {
             assert.equal(auth.renewRequest === auth.verifyRequest, scenario.legacy === true);
             assert.deepEqual(await auth.renewRequest(), { loggedIn: true, user_name: 'synthetic-player' });
             assert.equal(calls[0].url, `${scenario.apiBase}/auth/${scenario.legacy ? 'verify-token' : 'renew'}`);
-            assert.deepEqual(await auth.signupRequest({
+            const credentials = {
                 user_name: 'synthetic-player', email: 'synthetic@example.test', user_password: 'synthetic-password',
-            }), { success: true });
+            };
+            if (!scenario.legacy) {
+                const beforeEligibility = calls.length;
+                assert.deepEqual(await auth.signupRequest(credentials), { error: 'REGISTRATION_REQUIRED' });
+                assert.equal(calls.length, beforeEligibility, 'credentials stay local before eligibility');
+                assert.deepEqual(await auth.beginRegistration(eligibility), { error: 'REGISTRATION_REQUIRED' });
+                assert.deepEqual(calls.slice(beforeEligibility).map(call => call.url),
+                    [`${scenario.apiBase}/auth/registration/config`], 'an old general backend cannot issue a modern grant');
+                registrationConfig = childRegistration;
+                assert.deepEqual(await auth.beginRegistration(eligibility), approval);
+            }
+            assert.deepEqual(await auth.signupRequest(credentials), { success: true });
+            if (!scenario.legacy) {
+                const afterSignup = calls.length;
+                assert.deepEqual(await auth.signupRequest(credentials), { error: 'REGISTRATION_REQUIRED' });
+                assert.equal(calls.length, afterSignup, 'one staged grant authorizes only one creation attempt');
+            }
             assert.deepEqual(await auth.loginRequest({
                 user_name: 'synthetic-player', user_password: 'synthetic-password',
             }), { success: true, user_name: 'synthetic-player' });
             assert.equal(calls.at(-1).url, `${scenario.apiBase}/auth/verify-token`);
             await auth.logoutRequest();
             assert.ok(calls.every(({ init }) => init.credentials === 'include'));
+            if (scenario.legacy) assert.equal(calls.some(call => call.url.includes('/registration/')), false);
             const callsBeforeRendering = calls.length;
 
             const { AuthProvider } = await server.ssrLoadModule('/ts/context/AuthContext.tsx');
@@ -96,9 +120,13 @@ for (const scenario of scenarios) {
                 const module = await server.ssrLoadModule(`/ts/pages/${page}.tsx`);
                 if (page === 'SignUp') {
                     const entry = render(module.default);
-                    assert.match(entry, /type="password"|signup-email/);
-                    assert.doesNotMatch(entry, /registration-country|registration-for|>Cancel<|>Create account<\/button>/);
+                    if (scenario.legacy) assert.match(entry, /type="password"|signup-email/);
+                    else {
+                        assert.match(entry, /Check eligibility|Checking registration availability/);
+                        assert.doesNotMatch(entry, /type="password"|signup-email|signup-username|provider-sign-in|Continue with Google|Continue with Apple/);
+                    }
                 }
+                // The exported credential leaf represents the post-approval signup surface.
                 const markup = render(page === 'SignUp' ? module.SignupCredentials : module.default,
                     { reset() {}, scoreVisibility: 'private' });
                 assert.equal(markup.includes('name="remember_me"'), !scenario.legacy);
@@ -107,10 +135,14 @@ for (const scenario of scenarios) {
                 assert.equal(markup.includes('Renewable sign-in is enabled; provider options appear when available.'),
                     scenario.preview && !scenario.legacy);
                 if (scenario.legacy) assert.doesNotMatch(markup, /Continue with Google|Continue with Apple/);
-                else {
+                else if (page === 'SignUp') {
                     assert.match(markup, /provider-sign-in" aria-busy="true"/);
                     assert.equal((markup.match(/type="button" disabled=""/g) ?? []).length, 2,
                         'provider placeholders cannot start authentication before capability discovery');
+                } else {
+                    assert.match(markup, /Use Google or Apple|Checking registration availability/);
+                    assert.doesNotMatch(markup, /class="provider-sign-in"|Continue with Google|Continue with Apple/,
+                        'password login remains available while external provider controls await eligibility');
                 }
                 assert.match(markup, /type="password"/);
             }

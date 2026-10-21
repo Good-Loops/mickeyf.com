@@ -14,9 +14,10 @@ const mocks = {
     AuthContext: `export const useAuth = () => ${scope}.auth;`,
     ParentRegistration: 'export default "ParentRegistration";',
     parentRegistrationApi: `export const createParentRegistrationApi = () => new Proxy({}, {get: (_target, key) => (...args) => ${scope}.api[key](...args)});`,
-    providerClient: `export const getAvailableProviderClients = async () => [{clientKey:'google-web',provider:'google'}]; export const acquireProviderCredential = (...args) => ${scope}.acquire(...args);`,
+    providerClient: `export const getAvailableProviderClients = async () => { ${scope}.discoveries++; return [{clientKey:'google-web',provider:'google'}]; }; export const acquireProviderCredential = (...args) => ${scope}.acquire(...args);`,
     apiFetch: 'export const apiFetch = () => { throw new Error("Unexpected real transport"); };',
     apiConfig: 'export const API_BASE = ""; export const LEGACY_PUBLIC_API_PREVIEW = false;',
+    authService: `export const providerAccountMethodsRequest = async () => ${scope}.methods;`,
 };
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const server = await createViteTestServer({ root, configFile: `${root}/vite.config.ts`, appType: 'custom', logLevel: 'silent',
@@ -37,7 +38,7 @@ function mount(t) {
     const child={accountId:randomUUID(),userName:'existing-child'};const challenge={state:token(),nonce:token(),expiresInSeconds:300};
     const acquisition=deferred(); let lists=0;
     const auth={isAuthenticated:true,userName:'parent',loading:false,sessionGeneration:1};
-    globalThis[key]={auth,
+    globalThis[key]={auth,discoveries:0,methods:{providerCollectionAllowed:true},
         state(initial){const slot=slots[cursor++]??={value:initial};return [slot.value,next=>{const value=typeof next==='function'?next(slot.value):next;if(!Object.is(value,slot.value)){slot.value=value;dirty=true;}}];},
         ref(initial){return slots[cursor++]??={current:initial};},
         effect(callback,deps){const index=cursor++;const before=slots[index];if(!before||deps.some((v,i)=>!Object.is(v,before.deps[i]))){const slot=slots[index]={deps,cleanup:before?.cleanup};effects.push(()=>{slot.cleanup?.();slot.cleanup=callback();});}},
@@ -74,4 +75,26 @@ test('session renewal cancels the bound withdrawal and reports its uncertain out
     assert.equal(view.acquisition.args[2].aborted,true);assert.deepEqual(view.cancellations,[view.challenge.state]);
     view.acquisition.resolve('late-token');await view.settle();assert.equal(view.proofs.length,0);
     assert.match(view.text(),/session was refreshed.*submitted deletion may still complete/u);
+});
+
+test('direct signed-out parent route discovers no providers and preserves the protected parent surface',async t=>{
+    const view=mount(t);view.auth.isAuthenticated=false;view.auth.userName=null;
+    let policyRequests=0;
+    globalThis[key].api.config=async()=>{policyRequests++;return {enabled:false};};
+    view.render();await view.settle();
+    assert.equal(globalThis[key].discoveries,0);
+    assert.equal(policyRequests,0);
+    assert.equal(view.acquisition.args,undefined);
+    const parent=view.find(node=>node.type==='ParentRegistration');
+    assert.equal(parent.props.authenticated,false);
+    assert.equal(parent.props.requireChildAudience,true);
+    assert.deepEqual(parent.props.clients,[]);
+});
+
+test('a managed child entering parent accounts cannot discover or start parent identity collection',async t=>{
+    const view=mount(t);globalThis[key].methods={providerCollectionAllowed:false};
+    view.render();await view.settle();
+    assert.equal(globalThis[key].discoveries,0);
+    assert.deepEqual(view.find(node=>node.type==='ParentRegistration').props.clients,[]);
+    assert.equal(view.acquisition.args,undefined);
 });

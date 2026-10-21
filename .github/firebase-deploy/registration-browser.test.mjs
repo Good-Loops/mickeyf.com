@@ -6,8 +6,11 @@ import { createViteTestServer } from '../../frontend/ts/testSupport/createViteTe
 
 const { chromium } = createRequire(import.meta.url)('playwright-core');
 const root = fileURLToPath(new URL('../../frontend/', import.meta.url));
-const policy = { enabled: true, mode: 'general-audience', policyVersion: 'synthetic-general',
-    optionalDetails: false, parentRegistrationAvailable: false };
+const policy = { enabled: true, audience: 'children-included', creationEnabled: true, policyVersion: 'synthetic-reviewed',
+    parentRegistrationAvailable: true, countries: [
+        { country: 'US', parentRequiredBelow: 13, adultFrom: 18 },
+        { country: 'BR', parentRequiredBelow: 18, adultFrom: 18 },
+    ] };
 let server, browser, origin;
 before(async () => {
     server = await createViteTestServer({ root, configFile: false,
@@ -19,7 +22,7 @@ before(async () => {
 });
 after(async () => { await browser?.close(); await server?.close(); });
 
-async function fixture(t, signup = async () => ({ error: 'REGISTRATION_REQUIRED' })) {
+async function fixture(t, signup = async () => ({ error: 'REGISTRATION_REQUIRED' }), { eligible = true, config = policy } = {}) {
     const context = await browser.newContext(); t.after(() => context.close());
     const page = await context.newPage(); page.setDefaultTimeout(10_000);
     const calls = [];
@@ -31,9 +34,9 @@ async function fixture(t, signup = async () => ({ error: 'REGISTRATION_REQUIRED'
             const body = request.postDataJSON(); calls.push({ path: url.pathname, body });
             let result = { status: 200, body: {} };
             if (url.pathname === '/auth/providers/config') result.body = { clients: [] };
-            else if (url.pathname === '/auth/registration/config') result.body = policy;
+            else if (url.pathname === '/auth/registration/config') result.body = config;
             else if (url.pathname === '/auth/registration/begin') {
-                assert.deepEqual(body, { policyVersion: policy.policyVersion });
+                assert.deepEqual(body, { country: 'US', ageBand: 'adult', policyVersion: policy.policyVersion });
                 result.body = { authorized: true, expiresInSeconds: 300, scoreVisibility: 'private' };
             }
             else if (url.pathname === '/auth/verify-token' || url.pathname === '/auth/renew') result.body = { loggedIn: false };
@@ -45,7 +48,7 @@ async function fixture(t, signup = async () => ({ error: 'REGISTRATION_REQUIRED'
     });
     // A fresh isolated Vite cache compiles the module graph before DOMContentLoaded.
     await page.goto(`${origin}/signup`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
-    await page.locator('#signup-password').waitFor();
+    if (eligible) await approveAdult(page);
     return { page, calls };
 }
 async function fillSynthetic(page) {
@@ -54,16 +57,45 @@ async function fillSynthetic(page) {
     await page.locator('#signup-password').fill('Synthetic test password 123!');
 }
 
-test('signup opens the ordinary form without a country, Who selector, Cancel or extra entry action', async t => {
-    const { page, calls } = await fixture(t);
+async function approveAdult(page) {
+    await page.locator('#registration-country').selectOption('US');
+    await page.locator('#registration-age').selectOption('adult');
+    await page.getByRole('button', { name: 'Continue', exact: true }).click();
+    await page.locator('#signup-password').waitFor();
+}
+
+test('signup collects country and coarse age before mounting account credentials', async t => {
+    const { page, calls } = await fixture(t, undefined, { eligible: false });
+    await page.locator('#registration-country').waitFor();
+    assert.equal(await page.locator('#signup-username, #signup-email, #signup-password').count(), 0);
+    assert.equal(calls.filter(call => call.path === '/auth/registration/begin').length, 0);
+    await approveAdult(page);
     assert.equal(await page.locator('#signup-username, #signup-email, #signup-password').count(), 3);
-    assert.equal(await page.locator('select').count(), 0);
-    assert.equal(await page.getByRole('button', { name: 'Create account', exact: true }).count(), 0);
-    assert.equal(await page.getByRole('link', { name: 'Cancel', exact: true }).count(), 0);
+    assert.deepEqual(calls.find(call => call.path === '/auth/registration/begin').body,
+        { country: 'US', ageBand: 'adult', policyVersion: policy.policyVersion });
     assert.equal(calls.filter(call => call.path === '/api/users').length, 0);
-    assert.equal(calls.some(call => call.body && ('country' in call.body || 'ageBand' in call.body)), false);
     await page.getByRole('link', { name: 'Log in', exact: true }).click();
     await page.locator('#login-password').waitFor();
+});
+
+for (const country of ['US', 'BR']) test(`${country} parent-required signup collects no child credentials or registration grant`, async t => {
+    const { page, calls } = await fixture(t, undefined, { eligible: false });
+    await page.locator('#registration-country').selectOption(country);
+    await page.locator('#registration-age').selectOption('parent-required');
+    await page.getByRole('button', { name: 'Continue with a parent', exact: true }).click();
+    await page.getByRole('link', { name: 'Continue to parent-led registration', exact: true }).waitFor();
+    assert.equal(await page.locator('#signup-username, #signup-email, #signup-password').count(), 0);
+    assert.equal(calls.filter(call => ['/auth/registration/begin', '/auth/providers/begin', '/api/users'].includes(call.path)).length, 0);
+    assert.equal(await page.evaluate(() => localStorage.length + sessionStorage.length), 0);
+});
+
+test('a general-audience backend cannot authorize the new child-audience credential form', async t => {
+    const { page, calls } = await fixture(t, undefined, { eligible: false, config: {
+        enabled: true, mode: 'general-audience', policyVersion: 'synthetic-old', optionalDetails: false, parentRegistrationAvailable: false,
+    } });
+    await page.getByText('Registration eligibility could not be confirmed. You can keep exploring without an account.', { exact: true }).waitFor();
+    assert.equal(await page.locator('input, select').count(), 0);
+    assert.equal(calls.filter(call => ['/auth/registration/begin', '/auth/providers/begin', '/api/users'].includes(call.path)).length, 0);
 });
 
 test('server registration rejection does not invent authorization, claim success or start login', async t => {

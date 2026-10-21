@@ -14,7 +14,8 @@ import { asyncHandler } from '../middleware/errorHandling';
 
 const secret = 'synthetic-registration-http-session-secret';
 const origin = 'https://mickeyf.com';
-async function fixture(run: (url: string, queries: string[]) => Promise<void>, enabled = true, generalAudience = false) {
+async function fixture(run: (url: string, queries: string[]) => Promise<void>, enabled = true, generalAudience = false,
+    childAudience = false, creationEnabled = true) {
     const queries: string[] = [];
     const database = { async query({ sql }: { sql: string }) { queries.push(sql); return [{ affectedRows: 1 }]; },
         async getConnection() {
@@ -30,14 +31,15 @@ async function fixture(run: (url: string, queries: string[]) => Promise<void>, e
         } } as unknown as Pool;
     const policy = enabled ? loadRegistrationPolicy({ REGISTRATION_ENABLED: 'true', REGISTRATION_POLICY_REVIEWED: 'true',
         REGISTRATION_POLICY_VERSION: 'synthetic', REGISTRATION_COUNTRY_RULES: '{"ZZ":{"parentRequiredBelow":15}}',
+        ...(childAudience ? { REGISTRATION_AUDIENCE: 'children-included' } : {}),
         ...(generalAudience ? { REGISTRATION_GENERAL_AUDIENCE_ENABLED: 'true',
             REGISTRATION_GENERAL_AUDIENCE_POLICY_REVIEWED: 'true',
             REGISTRATION_GENERAL_AUDIENCE_POLICY_VERSION: 'synthetic-general' } : {}) }) : undefined;
-    const registration = createRegistrationAuthorization(database, policy);
+    const registration = createRegistrationAuthorization(database, policy, policy?.audience, creationEnabled);
     const app = express();
     app.use(cookieParser(secret));
     app.use('/auth/registration', createRegistrationRouter(registration,
-        createProviderAuthContextReader({ database, sessionSecret: secret, allowedOrigins: [origin] }), true));
+        createProviderAuthContextReader({ database, sessionSecret: secret, allowedOrigins: [origin] }), true, childAudience && creationEnabled));
     app.post('/api/users', express.json(), asyncHandler(createMainController({ database, sessionSecret: secret,
         isProduction: true, p4VegaScoreSubmissionsEnabled: false, allowedMutationOrigins: [origin], registration })));
     const server = app.listen(0, '127.0.0.1');
@@ -56,6 +58,29 @@ test('HTTP policy is closed by default and cannot touch SQL', async () => fixtur
     assert.deepEqual(await result.json(), { error: 'REGISTRATION_CLOSED' });
     assert.deepEqual(queries, []);
 }, false));
+
+test('strict child contract advertises staged parent availability and rejects credential bodies before validation', async () => fixture(async (url, queries) => {
+    const config = await (await fetch(`${url}/auth/registration/config`)).json() as { audience: string; mode?: string; parentRegistrationAvailable: boolean };
+    assert.equal(config.audience, 'children-included'); assert.equal(config.mode, undefined); assert.equal(config.parentRegistrationAvailable, true);
+    const result = await fetch(`${url}/api/users`, { method: 'POST', headers: { origin, 'content-type': 'application/json' },
+        body: JSON.stringify({ type: 'signup', user_name: 'premature', email: 'invalid', user_password: 'short' }) });
+    assert.equal(result.status, 403); assert.deepEqual(await result.json(), { error: 'REGISTRATION_REQUIRED' });
+    assert.deepEqual(queries, [], 'a missing staged cookie must stop before identifier lookup or password processing');
+}, true, false, true));
+
+test('strict creation-closed config keeps login eligibility and rejects password signup before credential validation', async () => fixture(async (url, queries) => {
+    const config = await (await fetch(`${url}/auth/registration/config`)).json() as Record<string, unknown>;
+    assert.equal(config.enabled, true); assert.equal(config.audience, 'children-included');
+    assert.equal(config.creationEnabled, false); assert.equal(config.parentRegistrationAvailable, false);
+    const authorized = await begin(url, { country: 'ZZ', ageBand: 'adult', policyVersion: 'synthetic' });
+    assert.equal(authorized.status, 200);
+    const cookie = authorized.headers.get('set-cookie')!.split(';')[0];
+    queries.length = 0;
+    const response = await fetch(`${url}/api/users`, { method: 'POST', headers: { origin, cookie, 'content-type': 'application/json' },
+        body: JSON.stringify({ type: 'signup', user_name: 'premature', email: 'invalid', user_password: 'short' }) });
+    assert.equal(response.status, 403); assert.deepEqual(await response.json(), { error: 'REGISTRATION_REQUIRED' });
+    assert.deepEqual(queries, []);
+}, true, false, true, false));
 test('parent-required, unconfigured country and untrusted origin stop before SQL or a signup cookie', async () => fixture(async (url, queries) => {
     for (const [body, requestOrigin, reason] of [
         [{ country: 'ZZ', ageBand: 'parent-required', policyVersion: 'synthetic' }, origin, 'PARENT_REQUIRED'],

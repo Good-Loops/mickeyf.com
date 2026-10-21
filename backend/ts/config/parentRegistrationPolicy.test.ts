@@ -34,3 +34,20 @@ test('enabled parent policy requires a usable HTTPS notice; closed defaults do n
     assert.equal(loadParentRegistrationPolicy({ ...env, PARENT_PRIVACY_NOTICE_URL: 'https://NOTICE.example.test:443/privacy#children' },
         loadRegistrationPolicy(base))?.privacyNoticeUrl, 'https://notice.example.test/privacy#children');
 });
+
+test('child audiences require explicit signed form coverage for every configured parent country', () => {
+    const childEnv = { ...env, REGISTRATION_AUDIENCE: 'children-included',
+        REGISTRATION_COUNTRY_RULES: '{"US":{"parentRequiredBelow":13},"BR":{"parentRequiredBelow":18}}',
+        PARENT_REGISTRATION_COUNTRIES: '["US","BR"]', PARENT_SIGNED_FORM_COUNTRIES: '["BR","US"]',
+        PARENT_SIGNED_FORMS_ENABLED: 'true' };
+    const registration = loadRegistrationPolicy(childEnv)!;
+    const loaded = loadParentRegistrationPolicy(childEnv, registration)!;
+    assert.equal(loaded.audience, 'children-included');
+    assert.deepEqual(loaded.signedFormCountries, ['BR', 'US']);
+    assert.equal(loaded.creationEnabled, false, 'country support never activates creation by itself');
+    for (const changes of [{ PARENT_SIGNED_FORM_COUNTRIES: undefined }, { PARENT_SIGNED_FORM_COUNTRIES: '["US"]' },
+        { PARENT_SIGNED_FORM_COUNTRIES: '["US","US"]' }, { PARENT_SIGNED_FORM_COUNTRIES: '["US","ZZ"]' },
+        { PARENT_SIGNED_FORMS_ENABLED: 'false' }, { PARENT_REGISTRATION_COUNTRIES: '["US"]', PARENT_SIGNED_FORM_COUNTRIES: '["US"]' }]) {
+        assert.throws(() => loadParentRegistrationPolicy({ ...childEnv, ...changes }, registration));
+    }
+});

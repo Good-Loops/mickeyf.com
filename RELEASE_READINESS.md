@@ -1,5 +1,20 @@
 # Release readiness and cumulative security ledger
 
+## Child-audience public-launch hold — 2026-10-20
+
+The owner confirmed that the intended audience includes children under 13 and
+selected completion of parent-led child registration before public launch.
+This supersedes earlier website-first readiness. The current general-signup
+backend is still live; no production flag, database or traffic change has been
+made. The candidate must fail closed against that old registration contract.
+
+Technical implementation, source/schema cutover, signed-consent operations,
+regional age-assurance review and end-to-end acceptance are tracked in
+[child registration readiness](release-prep/2026-10-20/child-registration-readiness.md).
+Guest play remains available. Do not merge into publishing main or submit stores
+until those gates are resolved. Apple English listing text/contact and manual
+release are saved; reviewer credentials remain owner-pending.
+
 ## Current public-release closeout — 2026-10-20
 
 The owner confirms the app now works on their iPhone and wants **the website,

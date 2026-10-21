@@ -4,6 +4,9 @@ export type RegistrationCountry = Readonly<{ country: string; parentRequiredBelo
 export type RegistrationConfig = Readonly<{ enabled: false }> | Readonly<{
     enabled: true; policyVersion: string; countries: readonly RegistrationCountry[]; parentRegistrationAvailable: false;
 }> | Readonly<{
+    enabled: true; audience: 'children-included'; creationEnabled: boolean; policyVersion: string;
+    countries: readonly RegistrationCountry[]; parentRegistrationAvailable: boolean;
+}> | Readonly<{
     enabled: true; mode: 'general-audience'; policyVersion: string; optionalDetails: false; parentRegistrationAvailable: false;
 }>;
 export type RegistrationResult = Readonly<{ authorized: true; expiresInSeconds: number; scoreVisibility: 'private' | 'public' }>
@@ -13,6 +16,10 @@ function record(value: unknown): value is Record<string, unknown> {
     return value !== null && typeof value === 'object' && !Array.isArray(value);
 }
 const keys = (value: Record<string, unknown>, expected: string) => Object.keys(value).sort().join(',') === expected;
+
+export function supportsChildAudience(value: RegistrationConfig | null): value is Extract<RegistrationConfig, { audience: 'children-included' }> {
+    return value?.enabled === true && 'audience' in value && value.audience === 'children-included';
+}
 
 export function readRegistrationConfig(value: unknown): RegistrationConfig | null {
     if (!record(value)) return null;
@@ -24,8 +31,13 @@ export function readRegistrationConfig(value: unknown): RegistrationConfig | nul
         return { enabled: true, mode: 'general-audience', policyVersion: value.policyVersion,
             optionalDetails: false, parentRegistrationAvailable: false };
     }
-    if (!keys(value, 'countries,enabled,parentRegistrationAvailable,policyVersion') || value.enabled !== true
-        || value.parentRegistrationAvailable !== false || typeof value.policyVersion !== 'string'
+    const childAudience = value.audience === 'children-included'
+        && keys(value, 'audience,countries,creationEnabled,enabled,parentRegistrationAvailable,policyVersion')
+        && typeof value.creationEnabled === 'boolean'
+        && typeof value.parentRegistrationAvailable === 'boolean';
+    const legacyStaged = keys(value, 'countries,enabled,parentRegistrationAvailable,policyVersion')
+        && value.parentRegistrationAvailable === false;
+    if ((!childAudience && !legacyStaged) || value.enabled !== true || typeof value.policyVersion !== 'string'
         || !/^[A-Za-z0-9._-]{1,64}$/u.test(value.policyVersion) || !Array.isArray(value.countries)
         || value.countries.length < 1 || value.countries.length > 249) return null;
     const seen = new Set<string>();
@@ -38,19 +50,27 @@ export function readRegistrationConfig(value: unknown): RegistrationConfig | nul
         seen.add(item.country);
         countries.push({ country: item.country, parentRequiredBelow: Number(item.parentRequiredBelow), adultFrom: 18 });
     }
-    return { enabled: true, policyVersion: value.policyVersion, countries, parentRegistrationAvailable: false };
+    return childAudience
+        ? { enabled: true, audience: 'children-included', creationEnabled: value.creationEnabled as boolean, policyVersion: value.policyVersion, countries,
+            parentRegistrationAvailable: value.parentRegistrationAvailable as boolean }
+        : { enabled: true, policyVersion: value.policyVersion, countries, parentRegistrationAvailable: false };
 }
 
 /** No browser storage or credentials; the explicit server policy selects the anonymous grant contract. */
-export function createRegistrationApi(apiBase: string, fetchRequest: typeof fetch = fetch) {
+export function createRegistrationApi(apiBase: string, fetchRequest: typeof fetch = fetch,
+    options: { requireChildAudience?: boolean } = {}) {
     return {
         async config(signal?: AbortSignal): Promise<RegistrationConfig | null> {
             try {
                 const response = await fetchRequest(`${apiBase}/auth/registration/config`, { credentials: 'include', signal });
-                return response.ok ? readRegistrationConfig(await response.json()) : null;
+                const policy = response.ok ? readRegistrationConfig(await response.json()) : null;
+                return options.requireChildAudience && policy?.enabled && !supportsChildAudience(policy) ? null : policy;
             } catch { return null; }
         },
         async begin(input: RegistrationInput): Promise<RegistrationResult> {
+            if (options.requireChildAudience && (!('country' in input) || input.ageBand === 'parent-required')) {
+                return { error: 'REGISTRATION_REQUIRED' };
+            }
             try {
                 const response = await fetchRequest(`${apiBase}/auth/registration/begin`, { method: 'POST', credentials: 'include',
                     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify('country' in input
@@ -60,7 +80,7 @@ export function createRegistrationApi(apiBase: string, fetchRequest: typeof fetc
                 if (!record(result)) return { error: 'UNAVAILABLE' };
                 if (response.status === 200 && keys(result, 'authorized,expiresInSeconds,scoreVisibility') && result.authorized === true
                     && Number.isInteger(result.expiresInSeconds) && Number(result.expiresInSeconds) > 0 && Number(result.expiresInSeconds) <= 300
-                    && (result.scoreVisibility === 'private' || result.scoreVisibility === 'public')) return result as RegistrationResult;
+                    && (result.scoreVisibility === 'private' || !options.requireChildAudience && result.scoreVisibility === 'public')) return result as RegistrationResult;
                 const statuses: Record<string, number> = { REGISTRATION_CLOSED: 503, INVALID_REGISTRATION: 400,
                     PARENT_REQUIRED: 403, INVALID_CONTEXT: 403, REGISTRATION_REQUIRED: 403, RATE_LIMITED: 429, UNAVAILABLE: 503 };
                 if (keys(result, 'error') && typeof result.error === 'string' && Object.prototype.hasOwnProperty.call(statuses, result.error)

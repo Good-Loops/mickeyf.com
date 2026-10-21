@@ -10,6 +10,7 @@ import ProviderSignInControls from '@/components/ProviderSignInControls';
 import PublicAccountPreviewNotice from '@/components/PublicAccountPreviewNotice';
 import { LEGACY_PUBLIC_API_PREVIEW } from '@/config/apiConfig';
 import { usePageLifetime } from '@/hooks/usePageLifetime';
+import RegistrationGate from '@/components/RegistrationGate';
 
 const Login: React.FC = () => {
     const [userName, setUserName] = useState('');
@@ -83,9 +84,10 @@ const Login: React.FC = () => {
                         {loading ? 'Logging in…' : 'Log in'}
                     </button>
                 </form>
-                {!LEGACY_PUBLIC_API_PREVIEW && <ProviderSignInControls action="login" rememberMe={rememberMe} disabled={loading}
+                {!LEGACY_PUBLIC_API_PREVIEW && <RegistrationGate purpose="provider-login">{reset => <ProviderSignInControls action="login" rememberMe={rememberMe} disabled={loading}
+                    onEligibilityRequired={reset}
                     operationLock={operationBusy} onBusyChange={setProviderBusy}
-                    onSuccess={() => { if (pageLifetime.current && !pageLifetime.current.aborted) navigate('/'); }} />}
+                    onSuccess={() => { if (pageLifetime.current && !pageLifetime.current.aborted) navigate('/'); }} />}</RegistrationGate>}
             </div>
         </section>
     );
