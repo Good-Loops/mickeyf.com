@@ -71,7 +71,7 @@ App ID: `4974292717500321843`. [Open the created draft](https://play.google.com/
 
 The verifier receipt records **221 passing tests**, zero failures/skips, and preserved negative drift/readiness tests. Independent review also passed all six targeted new integration/negative cases. Focused privacy rendering/consent tests passed **17/17**, and frontend TypeScript passed. The release-enabled production build passed to an isolated temporary output directory; Vite retained its existing mixed static/dynamic import warnings. Both listing localizations passed field-length checks, and all report-relative links resolved.
 
-Unsigned native screenshot run [39520334734](https://github.com/Good-Loops/mickeyf.com/actions/runs/39520334734) was dispatched at `877b520d45518a6fca953d0ac02a0fe77f5131e2`; result and visual acceptance remain pending. No signed public candidate was uploaded or device-tested in this pass. Current hosted CI applies only to its reported source. Existing Android outputs and previous iPhone/CI observations retain their dates and scopes.
+Unsigned native screenshot run [39520334734](https://github.com/Good-Loops/mickeyf.com/actions/runs/39520334734) was dispatched at `877b520d45518a6fca953d0ac02a0fe77f5131e2`; the first capture failed during simulator boot, and the bounded retry was cancelled after persistent capture stalls. No native screenshots are qualified; see [the iOS technical receipt](ios-technical-prep.md). No signed public candidate was uploaded or device-tested in this pass. Current hosted CI applies only to its reported source. Existing Android outputs and previous iPhone/CI observations retain their dates and scopes.
 
 Safe final local review commands:
 

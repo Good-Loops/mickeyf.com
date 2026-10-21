@@ -79,12 +79,22 @@ let childFormSchemaExtended = false;
 async function enableChildFormSchema() {
     if (childFormSchemaExtended) return;
     await assert.rejects(verifySignedParentFormReadiness(database as unknown as MigrationConnection, true), /schema is missing/u);
-    const sql = readFileSync(path.join(__dirname, '../../migrations/pending/0028_extend_child_signed_parent_forms.sql'), 'utf8');
-    assert.equal(sql.trim().split(';').filter(Boolean).length, 1, 'the pending extension must be one bounded ALTER');
+    const reviewedExtension = `ALTER TABLE parent_signed_forms
+    MODIFY COLUMN user_name VARCHAR(64) NULL,
+    DROP CHECK chk_signed_form_status,
+    ADD CONSTRAINT chk_signed_form_status CHECK (
+        country_code IN ('US','BR') AND public_approved IN (0,1) AND public_withdrawn IN (0,1)
+        AND (public_approved = 0 OR public_policy_digest IS NOT NULL)
+        AND ((status = 'pending' AND reviewed_at IS NULL AND reviewer IS NULL AND form_sha256 IS NULL AND child_uuid IS NULL AND public_approved = 0)
+          OR (status IN ('approved','rejected') AND reviewed_at IS NOT NULL AND reviewer IS NOT NULL AND form_sha256 IS NOT NULL AND child_uuid IS NULL)
+          OR (status = 'used' AND reviewed_at IS NOT NULL AND reviewer IS NOT NULL AND form_sha256 IS NOT NULL AND child_uuid IS NOT NULL))
+    );`;
+    const source = readFileSync(path.join(__dirname, '../../migrations/pending/0028_extend_child_signed_parent_forms.sql'), 'utf8');
+    assert.equal(source.replace(/\r\n/gu, '\n').trim(), reviewedExtension, 'the pending migration must match the exact fixed test statement');
     await admin.query('ALTER TABLE parent_signed_forms MODIFY COLUMN user_name VARCHAR(64) NULL');
     await assert.rejects(verifySignedParentFormReadiness(database as unknown as MigrationConnection, true), /constraint differs/u,
         'nullable credentials alone must not advertise BR signed form capability');
-    await admin.query(sql);
+    await admin.query(reviewedExtension);
     await verifySignedParentFormReadiness(database as unknown as MigrationConnection, true);
     await verifySignedParentFormReadiness(database as unknown as MigrationConnection);
     childFormSchemaExtended = true;

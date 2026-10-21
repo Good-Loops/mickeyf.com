@@ -150,7 +150,7 @@ test('Google preparation keeps a disabled named pill at the final control height
 test('provider SDKs remain unloaded through eligibility and the unresolved session/config barriers', async t => {
     const { page, calls, releaseRenew, releaseConfig } = await fixture(t, 390, { pendingRenew: true, pendingConfig: true });
     const resources = [];
-    page.on('request', request => { if (/accounts.google.com|appleid.cdn-apple.com/.test(request.url())) resources.push(request.url()); });
+    page.on('request', request => { if (['https://accounts.google.com', 'https://appleid.cdn-apple.com'].includes(new URL(request.url()).origin)) resources.push(request.url()); });
     await page.goto(`${origin}/login`);
     await page.locator('#registration-country').waitFor();
     assert.deepEqual(resources, []);
@@ -169,7 +169,7 @@ test('provider SDKs remain unloaded through eligibility and the unresolved sessi
 for (const path of ['/login', '/signup', '/parent-accounts']) test(`${path} makes no provider resource request before eligibility`, async t => {
     const { page, calls } = await fixture(t, 390);
     const resources = [];
-    page.on('request', request => { if (/accounts.google.com|appleid.cdn-apple.com/.test(request.url())) resources.push(request.url()); });
+    page.on('request', request => { if (['https://accounts.google.com', 'https://appleid.cdn-apple.com'].includes(new URL(request.url()).origin)) resources.push(request.url()); });
     await page.goto(`${origin}${path}`);
     await page.waitForLoadState('networkidle');
     assert.deepEqual(resources, []);
