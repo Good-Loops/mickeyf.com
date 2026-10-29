@@ -1,5 +1,11 @@
 # Apple signup 503 investigation
 
+Current checkpoint: the diagnostic backend is deployed and serving 100 percent
+of traffic. Deployed source is `a33c28d9efc35496a05ed73e08ab39387380ecf7`.
+The underlying signup failure still needs one controlled provider test; no
+signup retry was performed during deployment. The Good-Loops account and its
+public scores were preserved. Rollout acceptance is recorded below.
+
 ## Verified scope
 
 The October 29 web signup returned HTTP 503 from `/auth/providers/complete`.
@@ -7,10 +13,11 @@ The serving source is `d0c04cf1052cbc65fccd986e346654218f55e06a`, not the
 unreleased mixed-audience work on the public-release branch. This hotfix branch
 starts at that exact serving source and contains diagnostic changes only.
 
-The existing Good-Loops account and its scores are outside the change. No
+The existing Good-Loops account and its scores are outside the change. During
+the initial diagnosis, no
 production signup retry, private account lookup or mutation, score write, provider
 revocation, SQL/grant change, secret read, deployment or traffic change was
-performed for this investigation.
+performed. The later authorized deployment is recorded below.
 
 Read-only Apple Developer checks matched the configured team, signing key,
 primary app, Services ID, domain and exact return URL. These metadata checks do
@@ -117,3 +124,38 @@ must still pass its own provenance, completed Artifact Analysis and isolated
 runtime checks before any deployment or traffic update. Operational plans and
 receipts are kept privately outside the checkout; they contain no secret
 payloads or private account queries.
+
+## Completed diagnostic rollout
+
+The accepted image build was `ff2bdbde-f651-4b1a-bccf-427b2be09059`, from exact
+source `a33c28d9efc35496a05ed73e08ab39387380ecf7`. Its immutable digest is
+`sha256:4cb006bb8504803fb697d373911ee109b36f1f3dbc058860f3f994686a7cbcd8`.
+Source/provenance checks passed, including independent verification of the
+retained Google builder's classical DSSE signature. Completed Artifact Analysis
+passed the HIGH/CRITICAL gate. The exact production image passed isolated
+Node 26.12.0, OpenSSL, musl, crypto/fetch, dependency-version and diagnostic-marker
+checks; gzip/deflate regression probes each served two successful requests.
+
+The reviewed template change altered only revision, image and two provenance
+labels. Every environment value, secret reference, identity, resource setting,
+probe and volume was preserved. A single etag-conditional template update
+created the zero-traffic candidate at generation 157. Its actual Ready state
+and exact runtime were verified before a separate conditional traffic update.
+
+Revision `mickeyf-org-apple-diag-ff2bdbdef6514b1abccf427b2be09059` now serves
+100 percent without tags at generation 158. Four uncached public GET checks
+returned 200, and matching Cloud Run request traces confirmed that the new
+revision served them. The initial error/5xx log check found no entries.
+The previous serving revision remains Ready and its immutable configuration
+matches the captured rollback baseline. All build triggers are paused again.
+
+The Good-Loops public entries still show p4-Vega position 3 / score 330 and
+Three Bosses position 2 / score 118417 / time 84447 ms / grade B. No account,
+score, SQL schema/grant, policy or signing-secret mutation was performed by the
+operator. The website frontend and store artifacts were not republished.
+
+Private `deployment-result.json` and the separate plan, signature, scan, image,
+traffic and public-check receipts are the operational evidence. A prepared
+rollback plan is time bounded and must be regenerated when needed. This hotfix
+has not been merged into the draft public-release branch; a later release must
+incorporate it before replacing this live image.
