@@ -2,7 +2,7 @@
 # image. Update the tag and digest together during a reviewed runtime upgrade.
 FROM node:26.12.0-alpine@sha256:6f08a523443ddedf52941874c203475b0ad503e859ad70cb26ab8be9a517dbd5 AS node-runtime-base
 
-# Patch Alpine's shared libraries for the reviewed OpenSSL and zlib advisories.
+# Patch Alpine's shared libraries for the reviewed OpenSSL, zlib and musl advisories.
 # The official binary embeds patched OpenSSL 3.5.9. Its Alpine shared libraries
 # are separate components and must also be patched. Discard repository indexes.
 RUN apk update \
@@ -10,9 +10,13 @@ RUN apk update \
         libcrypto3=3.5.9-r0 \
         libssl3=3.5.9-r0 \
         zlib=1.3.2-r1 \
+        musl=1.2.6-r3 \
+        musl-utils=1.2.6-r3 \
     && apk info --exists 'libcrypto3=3.5.9-r0' > /dev/null \
     && apk info --exists 'libssl3=3.5.9-r0' > /dev/null \
     && apk info --exists 'zlib=1.3.2-r1' > /dev/null \
+    && apk info --exists 'musl=1.2.6-r3' > /dev/null \
+    && apk info --exists 'musl-utils=1.2.6-r3' > /dev/null \
     && rm -rf /var/cache/apk/*
 
 FROM node-runtime-base AS npm-base

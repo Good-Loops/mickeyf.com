@@ -86,3 +86,34 @@ Do not merge the public-release branch as a way to deploy this hotfix.
 After rollout, the next failure stage determines the repair. Check whether
 account creation committed before retrying an ambiguous failure. Never merge,
 delete, relink or compensate by revoking an existing identity automatically.
+
+## Authorized build: security prerequisites
+
+The owner authorized building and deploying the diagnostic patch on October 29.
+The first image-only build succeeded, but completed Artifact Analysis blocked
+deployment: body-parser 1.20.6 had a HIGH finding, and musl 1.2.6-r2 had an
+unclassified finding. That image was not deployed; the service remained at
+generation 156 with its original serving revision and traffic.
+
+The hotfix therefore includes the already reviewed npm security entries from
+`1f84329`: body-parser 1.20.9, qs 6.16.1 and ip-address 10.7.4. Express remains
+4.22.2. Alpine musl and musl-utils are pinned to 1.2.6-r3 in the existing shared
+library update stage, and the final-image smoke test verifies those pins.
+See the [body-parser release](https://github.com/expressjs/body-parser/releases/tag/1.20.9)
+and [Alpine vulnerability record](https://security.alpinelinux.org/vuln/CVE-2026-107891).
+
+The new parser regression runs real Express in a bounded, isolated child
+process. It sends a complete compressed JSON frame plus trailing bytes and
+checks that a second request succeeds. An independent negative control with
+the upstream vulnerable 1.20.6 implementation crashed on gzip with an unhandled
+Z_DATA_ERROR; the patched implementation passed. Deflate also passes as a
+compatibility check.
+
+After these prerequisite changes, TypeScript, all 947 backend unit tests,
+production Webpack compilation and `npm audit --omit=dev --audit-level=low`
+passed (zero runtime dependency vulnerabilities). The fixed Alpine stage built
+locally and both exact musl package checks passed. A rebuilt immutable image
+must still pass its own provenance, completed Artifact Analysis and isolated
+runtime checks before any deployment or traffic update. Operational plans and
+receipts are kept privately outside the checkout; they contain no secret
+payloads or private account queries.
