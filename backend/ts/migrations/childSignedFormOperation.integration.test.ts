@@ -11,7 +11,9 @@ import { observeChildSignedFormMetadata, createChildSignedFormSchemaReceipt,
     type ChildSignedFormMetadataSettings } from './childSignedFormMetadata';
 import { CHILD_SIGNED_FORM_SQL_SHA256, childSignedFormFingerprint, planChildSignedFormOperation, applyChildSignedFormOperation,
     verifyChildSignedFormOperation, type ChildReleaseSafety, type ChildSignedFormOperationDependencies } from './childSignedFormOperation';
-import { observeSignedParentFormRetention } from '../accounts/signedParentFormRetention';
+import { observeSignedParentFormRetention, type SignedParentFormRetentionReport } from '../accounts/signedParentFormRetention';
+import { runSignedParentFormRetention } from '../accounts/runSignedParentFormRetention';
+import { createChildSchemaConnection, type childSchemaCommandSettings } from './runChildSignedFormSchema';
 
 const config = loadMigrationConfig();
 let admin: Connection;
@@ -22,6 +24,21 @@ const requestId = randomUUID();
 const retentionChildId = randomUUID();
 const retentionReferences = { approved: randomUUID(), rejected: randomUUID(), expired: randomUUID(), used: randomUUID(), missing: randomUUID() };
 const metadataConnection = (connection: Connection) => connection as unknown as MigrationConnection;
+
+async function runLocalRetentionCommand(references: readonly string[]): Promise<SignedParentFormRetentionReport> {
+    const output: string[] = [];
+    const sourceCommit = 'a'.repeat(40);
+    // Only the target/source binding is synthetic; use the command's actual connector, observer and output boundary.
+    await runSignedParentFormRetention([], {}, {
+        input: (async function* () { yield JSON.stringify({ references }); })(),
+        settings: () => ({ config: { ...config, user: 'root', password: 'migration-test-root-only' }, settings,
+            source: { sourceCommit, sqlSha256: CHILD_SIGNED_FORM_SQL_SHA256 } } as ReturnType<typeof childSchemaCommandSettings>),
+        assertSource: expected => { assert.equal(expected, sourceCommit); },
+        write: value => { output.push(value); },
+    });
+    assert.equal(output.length, 1, 'the command must emit one complete report');
+    return JSON.parse(output[0]) as SignedParentFormRetentionReport;
+}
 
 before(async () => {
     assert.equal(process.env.CHILD_SCHEMA_TEST_ENABLED, '1');
@@ -63,6 +80,21 @@ before(async () => {
 
 after(async () => { if (runtime) await runtime.end(); if (admin) await admin.end(); });
 
+test('bounded CLI connector preserves safe metadata numbers and lossless large integers', async () => {
+    const session = createChildSchemaConnection({ ...config, user: 'root', password: 'migration-test-root-only' });
+    try {
+        const [rows] = await session.connection.query(`SELECT CAST(1 AS UNSIGNED) AS safe,
+            CAST('9007199254740991' AS UNSIGNED) AS maximumSafe,
+            CAST('-9007199254740991' AS SIGNED) AS minimumSafe,
+            CAST('9007199254740993' AS UNSIGNED) AS largeUnsigned,
+            CAST('-9007199254740993' AS SIGNED) AS largeSigned,
+            CAST('18446744073709551615' AS UNSIGNED) AS maximumUnsigned`);
+        assert(Array.isArray(rows));
+        assert.deepEqual({ ...rows[0] }, { safe: 1, maximumSafe: Number.MAX_SAFE_INTEGER, minimumSafe: Number.MIN_SAFE_INTEGER,
+            largeUnsigned: '9007199254740993', largeSigned: '-9007199254740993', maximumUnsigned: '18446744073709551615' });
+    } finally { await session.close(); }
+});
+
 test('actual metadata observer reads only metadata and recognizes exact legacy schema/history/grants', async () => {
     const statements: string[] = [];
     const connection: MigrationConnection = { async query(sql, parameters) {
@@ -92,6 +124,8 @@ test('retention observation works on the exact legacy schema before pending 0028
     const report = await observeSignedParentFormRetention({ connection: metadataConnection(admin), settings,
         source: { sourceCommit: 'a'.repeat(40), sqlSha256: CHILD_SIGNED_FORM_SQL_SHA256 } }, [requestId, missingReference]);
     assert.deepEqual(report.requests.map(request => request.state), ['pending', 'not-found']);
+    const commandReport = await runLocalRetentionCommand([requestId, missingReference]);
+    assert.deepEqual(commandReport.requests, report.requests);
     assert.equal((await observeChildSignedFormMetadata(metadataConnection(admin), settings)).capability, 'legacy-us');
 });
 
@@ -212,6 +246,8 @@ test('real retention observation includes all requested statuses without contact
     assert.equal(states.get(retentionReferences.missing), 'not-found');
     assert.equal(report.requests.length, references.length);
     for (const sql of statements) assert.match(sql, /^(?:SELECT|SHOW)\b/u);
+    const commandReport = await runLocalRetentionCommand(references);
+    assert.deepEqual(commandReport.requests, report.requests, 'the real CLI connector must report every lifecycle state');
     const encoded = JSON.stringify(report);
     for (const privateValue of ['synthetic@example.test', 'SYNTHETIC-OWNER', 'SYNTHETIC RETENTION CHILD', retentionChildId, parentId]) {
         assert.equal(encoded.includes(privateValue), false, 'retention report must not copy identity/contact/evidence data');

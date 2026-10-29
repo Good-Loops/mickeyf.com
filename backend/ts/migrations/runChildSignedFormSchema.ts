@@ -87,7 +87,8 @@ export function createChildSchemaConnection(config: ReturnType<typeof loadMigrat
             deadline = performance.now() + config.operationTimeoutMs;
             raw = await connect({ host: config.host, port: config.port, user: config.user,
                 password: config.password, database: config.database, connectTimeout: Math.min(10_000, config.operationTimeoutMs),
-                multipleStatements: false, supportBigNumbers: true, bigNumberStrings: true });
+                // Strict schema checks need numeric metadata; unsafe BIGINT values must remain exact strings.
+                multipleStatements: false, supportBigNumbers: true, bigNumberStrings: false });
         }
         const remaining = Math.floor(deadline - performance.now());
         if (discarded || remaining <= 0) { discard(); throw new Error(PRIVATE_FAILURE); }
