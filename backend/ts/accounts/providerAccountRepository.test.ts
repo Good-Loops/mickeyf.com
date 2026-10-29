@@ -359,6 +359,36 @@ test('signup uncertain begin/commit, write failures and rollback failure are san
     assert.equal(rollback.events.includes('release'), false);
 });
 
+test('signup diagnostics preserve rollback, uncertain commit and acknowledged-commit distinctions', async () => {
+    const lines: string[] = [];
+    const original = console.warn;
+    console.warn = line => { lines.push(line); };
+    try {
+        const denied = Object.assign(new Error('PRIVATE SQL statement and values'), { code: 'ER_COLUMNACCESS_DENIED_ERROR' });
+        const grant = signupFixture({ fail: 'user', failure: denied });
+        await assert.rejects(createProviderAccount(grant.database, signupIdentity, 'new-player'), ProviderAccountUnavailableError);
+        assert.deepEqual(grant.events, ['connect', 'begin', 'lookup', 'user', 'rollback', 'release']);
+        assert.equal(grant.events.includes('identity'), false);
+        assert(grant.queries.every(query => !/game_personal_bests|game_submission_receipts|UPDATE|DELETE/u.test(query.sql)));
+        for (const fail of ['begin', 'commit', 'release'] as const) {
+            const f = signupFixture({ fail });
+            await assert.rejects(createProviderAccount(f.database, signupIdentity, 'new-player'), ProviderAccountUnavailableError);
+            if (fail !== 'release') assert.deepEqual(f.events.slice(f.events.indexOf(fail) + 1), ['destroy']);
+        }
+        const events = lines.map(line => JSON.parse(line));
+        assert.deepEqual(events.map(event => [event.transactionStep, event.transaction]), [
+            ['user-insert', 'rolled-back'], ['begin', 'begin-unconfirmed'],
+            ['commit', 'commit-unconfirmed'], ['release', 'committed'],
+        ]);
+        assert.equal(events[0].sqlCode, 'ER_COLUMNACCESS_DENIED_ERROR');
+        assert.doesNotMatch(JSON.stringify(lines), /PRIVATE|new-player|Verified@|CaseSensitiveSubject|sensitive/u);
+        console.warn = () => { throw new Error('PRIVATE logger failure'); };
+        const unavailable = signupFixture({ fail: 'user', failure: denied });
+        await assert.rejects(createProviderAccount(unavailable.database, signupIdentity, 'new-player'), ProviderAccountUnavailableError);
+        assert.deepEqual(unavailable.events.slice(-2), ['rollback', 'release']);
+    } finally { console.warn = original; }
+});
+
 test('signup does not report creation until the database acknowledges commit', async () => {
     let acknowledge!: () => void;
     let started!: () => void;

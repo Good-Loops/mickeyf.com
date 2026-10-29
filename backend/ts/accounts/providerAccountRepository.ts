@@ -7,6 +7,7 @@ import { isSessionId, type SessionProof } from '../security/sessionPolicy';
 import { validateLoginRequest } from '../security/userRequestValidation';
 import { assertAccountId } from './deletionJournal';
 import { guardConnectionQueries } from '../db/queryTimeoutConnection';
+import { reportProviderAuthFailure, type ProviderAuthTransactionState, type ProviderAuthTransactionStep } from '../auth/providerAuthDiagnostics';
 
 export type ProviderAccount = Readonly<{ userId: number; userName: string; accountId: string }>;
 export type AccountLinkTarget = Readonly<{ userId: number; accountId: string }>;
@@ -139,24 +140,32 @@ export async function createProviderAccount(
     const name = userName.trim();
     const email = identity.email.trim().toLowerCase();
     const verifiedIdentity = { ...identity };
+    let transactionStep: ProviderAuthTransactionStep = 'connect';
+    let transactionState: ProviderAuthTransactionState = 'not-started';
     try {
         const connection = guardConnectionQueries(await database.getConnection());
         let reusable = true;
         let phase: 'begin' | 'active' | 'commit' = 'begin';
         try {
+            transactionStep = 'begin';
+            transactionState = 'begin-unconfirmed';
             await connection.query({ sql: 'START TRANSACTION', timeout: QUERY_TIMEOUT_MS });
             phase = 'active';
+            transactionState = 'active';
             let result: ProviderAccountCreationResult;
+            transactionStep = 'identity-lookup';
             if (await findProviderAccount(connection, verifiedIdentity)) result = { created: false, reason: 'ALREADY_LINKED' };
             else {
                 let insertingIdentity = false;
                 try {
+                    transactionStep = 'user-insert';
                     const [inserted] = await connection.query<ResultSetHeader>({
                         sql: 'INSERT INTO users (user_name, email, user_password) VALUES (?, ?, NULL)',
                         timeout: QUERY_TIMEOUT_MS,
                     }, [name, email]);
                     if (inserted.affectedRows !== 1 || !Number.isSafeInteger(inserted.insertId)
                         || inserted.insertId <= 0) throw new ProviderAccountUnavailableError();
+                    transactionStep = 'account-read';
                     const [accounts] = await connection.query<RowDataPacket[]>({
                         sql: `SELECT user_id AS userId, user_name AS userName, account_uuid AS accountId
                             FROM users WHERE user_id = ? LIMIT 2`, timeout: QUERY_TIMEOUT_MS,
@@ -166,6 +175,7 @@ export async function createProviderAccount(
                     assertAccountId(accounts[0].accountId);
                     const account = Object.freeze({ userId: inserted.insertId, userName: name, accountId: accounts[0].accountId as string });
                     insertingIdentity = true;
+                    transactionStep = 'identity-insert';
                     const [linked] = await connection.query<ResultSetHeader>({
                         sql: `INSERT INTO account_provider_identities (provider, subject, account_uuid, linked_at)
                             VALUES (?, ?, ?, UTC_TIMESTAMP(6))`, timeout: QUERY_TIMEOUT_MS,
@@ -179,27 +189,37 @@ export async function createProviderAccount(
             }
             // A losing identity insert must roll back its newly inserted user, never leave an orphan.
             if (!result.created) {
-                try { await connection.query({ sql: 'ROLLBACK', timeout: QUERY_TIMEOUT_MS }); }
+                transactionState = 'rollback-unconfirmed';
+                try { await connection.query({ sql: 'ROLLBACK', timeout: QUERY_TIMEOUT_MS }); transactionState = 'rolled-back'; }
                 catch (error) { reusable = false; throw error; }
                 return result;
             }
+            transactionStep = 'credential-write';
             await writeCredential?.(connection, result.account);
             phase = 'commit';
+            transactionStep = 'commit';
+            transactionState = 'commit-unconfirmed';
             await connection.query({ sql: 'COMMIT', timeout: QUERY_TIMEOUT_MS });
+            transactionState = 'committed';
             return result;
         } catch (error) {
             // An uncertain boundary must be discarded without queuing another command.
             if (phase !== 'active') reusable = false;
             else if (reusable) {
-                try { await connection.query({ sql: 'ROLLBACK', timeout: QUERY_TIMEOUT_MS }); }
+                transactionState = 'rollback-unconfirmed';
+                try { await connection.query({ sql: 'ROLLBACK', timeout: QUERY_TIMEOUT_MS }); transactionState = 'rolled-back'; }
                 catch { reusable = false; }
             }
             throw error;
         } finally {
-            if (reusable) connection.release();
+            if (reusable) {
+                if (transactionState === 'committed') transactionStep = 'release';
+                connection.release();
+            }
             else connection.destroy();
         }
-    } catch {
+    } catch (error) {
+        reportProviderAuthFailure('account-transaction', error, { transaction: transactionState, transactionStep });
         // A lost commit response may follow a durable account. Never imply success or retry it as a login.
         throw new ProviderAccountUnavailableError();
     }

@@ -172,6 +172,33 @@ test('only a complete Apple HTTP 400 invalid_grant is classified as a definite i
     }
 });
 
+test('Apple exchange diagnostics distinguish invalid_client without exposing payloads or changing failures', async () => {
+    const lines: string[] = [];
+    const original = console.warn;
+    console.warn = line => { lines.push(line); };
+    try {
+        for (const [status, endpointError, failure] of [
+            [400, 'invalid_client', 'UNAVAILABLE'], [400, 'invalid_grant', 'INVALID_GRANT'],
+            [503, 'invalid_grant', 'UNAVAILABLE'], [400, 'PRIVATE-provider-response', 'UNAVAILABLE'],
+        ] as const) {
+            await assert.rejects(fixture(() => Response.json({ error: endpointError,
+                error_description: 'PRIVATE authorization code, refresh token, email and client secret' }, { status }))
+                .client.exchangeCode(authorizationCode), safeError(failure));
+        }
+        const events = lines.map(line => JSON.parse(line));
+        assert.deepEqual(events.map(event => [event.appleHttp, event.appleError]), [
+            ['400', 'invalid_client'], ['400', 'invalid_grant'], ['5xx', undefined], ['400', undefined],
+        ]);
+        assert(events.every(event => event.stage === 'apple-token-exchange'));
+        for (const value of ['PRIVATE', authorizationCode, refreshToken, identityToken, configuration.privateKey]) {
+            assert(!JSON.stringify(lines).includes(value));
+        }
+        console.warn = () => { throw new Error('PRIVATE logger failure'); };
+        await assert.rejects(fixture(() => Response.json({ error: 'invalid_client' }, { status: 400 }))
+            .client.exchangeCode(authorizationCode), safeError('UNAVAILABLE'));
+    } finally { console.warn = original; }
+});
+
 test('redirects, unknown successful statuses and malformed error bodies never become success', async () => {
     const responses = [
         () => new Response(null, { status: 302, headers: { location: 'https://other.example.test' } }),

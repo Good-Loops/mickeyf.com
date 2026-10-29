@@ -846,6 +846,33 @@ test('Apple exchange and persistence failures stay sanitized and never issue an 
     }
 });
 
+test('Apple signup diagnostics locate pre-creation failures without calling account or score mutations', async () => {
+    const lines: string[] = [];
+    const original = console.warn;
+    console.warn = line => { lines.push(line); };
+    try {
+        for (const [failAt, stage] of [['consume', 'attempt-consume'], ['verify', 'provider-verification'],
+            ['exchange', 'apple-token-exchange'], ['signup', 'account-create']] as const) {
+            const f = await fixture(undefined, true, true);
+            const { input } = await f.appleChallenge('signup');
+            f.controls.failAt = failAt;
+            assert.deepEqual(await f.flow.complete(f.context, input), { ok: false, reason: 'UNAVAILABLE' });
+            assert.equal(JSON.parse(lines.at(-1)!).stage, stage);
+            assert.deepEqual(f.createdAccounts, []);
+            assert.deepEqual(f.linkedTargets, []);
+            assert.deepEqual(f.deletedAccounts, []);
+            assert.deepEqual(f.savedAppleTokens, []);
+        }
+        assert.doesNotMatch(JSON.stringify(lines), /sensitive|opaque-provider-subject|new-player|synthetic-native-authorization-code|correct horse|connection details/u);
+        const f = await fixture(undefined, true, true);
+        const { input } = await f.appleChallenge('signup');
+        f.controls.failAt = 'exchange';
+        console.warn = () => { throw new Error('PRIVATE logger failure'); };
+        assert.deepEqual(await f.flow.complete(f.context, input), { ok: false, reason: 'UNAVAILABLE' });
+        assert.deepEqual(f.createdAccounts, []);
+    } finally { console.warn = original; }
+});
+
 test('Apple signup, link and deletion hand the exchanged token to their atomic repository operation', async () => {
     for (const action of ['signup', 'link', 'delete'] as const) {
         const f = await fixture(action === 'signup' ? undefined : account, true, true);
