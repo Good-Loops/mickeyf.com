@@ -360,6 +360,134 @@ test('cache lifetime respects age, no-store and the one-hour local ceiling', asy
     }
 });
 
+test('Apple no-store keys can verify both tokens in one signup without reusing a stored response', async () => {
+    const { verifier, calls } = fixture({ response: () => jwksResponse(undefined, 'no-store') });
+    const token = signedToken(claims('apple'));
+    assert.equal((await verifier.verify('apple', token, nonce)).verified, true);
+    assert.equal((await verifier.verify('apple', token, nonce, 'apple-exchange')).verified, true);
+    assert.equal(calls.length, 2);
+});
+
+test('no-store fetches fresh keys for different users and never uses stale keys', async () => {
+    let rotated = false;
+    const { verifier, calls } = fixture({ response: () => jwksResponse(
+        [publicJwk(rotated ? rotatedKey.publicKey : firstKey.publicKey)], 'no-store') });
+    assert.equal((await verifier.verify('apple', signedToken(claims('apple')), nonce)).verified, true);
+    rotated = true;
+    const otherUser = signedToken({ ...claims('apple'), sub: 'another-user' }, undefined, rotatedKey.privateKey);
+    assert.equal((await verifier.verify('apple', otherUser, nonce)).verified, true);
+    assert.deepEqual(await verifier.verify('apple', signedToken(claims('apple')), nonce), invalidToken);
+    assert.equal(calls.length, 3);
+});
+
+test('concurrent no-store and no-cache verifications each receive a fresh response', async () => {
+    for (const control of ['no-store', 'no-cache']) {
+        let active = 0;
+        let maximumActive = 0;
+        const { verifier, calls } = fixture({ response: async () => {
+            active += 1;
+            maximumActive = Math.max(maximumActive, active);
+            try {
+                await new Promise(resolve => setTimeout(resolve, 10));
+                return jwksResponse(undefined, control);
+            } finally { active -= 1; }
+        } });
+        const token = signedToken(claims('apple'));
+        for (let round = 0; round < 2; round += 1) {
+            const results = await Promise.all(Array.from({ length: 20 }, () => verifier.verify('apple', token, nonce)));
+            assert.equal(results.every(result => result.verified), true);
+            assert.equal(calls.length, (round + 1) * 20);
+        }
+        assert.ok(maximumActive > 1, 'uncacheable fetches should not serialize');
+        assert.ok(maximumActive <= 8, 'outbound concurrency must remain bounded');
+    }
+});
+
+test('short positive cache lifetimes refresh on expiry rather than waiting for unknown-key cooldown', async () => {
+    for (const [control, age, elapsed] of [['max-age=1', '0', 1000], ['max-age=60', '59', 1000]] as const) {
+        const { verifier, calls, advance } = fixture({ response: () => {
+            const response = jwksResponse(undefined, control);
+            response.headers.set('age', age);
+            return response;
+        } });
+        const token = signedToken(claims('apple'));
+        assert.equal((await verifier.verify('apple', token, nonce)).verified, true);
+        advance(elapsed);
+        assert.equal((await verifier.verify('apple', token, nonce)).verified, true);
+        assert.equal(calls.length, 2);
+    }
+});
+
+test('no-store unknown key floods have a per-provider outbound budget that resets', async () => {
+    const { verifier, calls, advance } = fixture({ response: () => jwksResponse(undefined, 'no-store') });
+    for (let index = 0; index < 60; index += 1) {
+        const token = signedToken(claims('apple'), { alg: 'RS256', kid: `unknown-${index}` });
+        assert.deepEqual(await verifier.verify('apple', token, nonce), invalidToken);
+    }
+    assert.equal(calls.length, 60);
+    assert.deepEqual(await verifier.verify('apple', signedToken(claims('apple')), nonce), unavailable);
+    assert.equal(calls.length, 60);
+    assert.equal((await verifier.verify('google', signedToken(), nonce)).verified, true);
+    assert.equal(calls.length, 61, 'an Apple flood must not exhaust the Google budget');
+    advance(30_000);
+    assert.equal((await verifier.verify('apple', signedToken(claims('apple')), nonce)).verified, true);
+    assert.equal(calls.length, 62);
+});
+
+test('a failed fresh fetch after no-store success retains failure cooldown', async () => {
+    let available = true;
+    const { verifier, calls, advance } = fixture({ response: () => {
+        if (!available) throw new Error('sensitive upstream details');
+        return jwksResponse(undefined, 'no-store');
+    } });
+    const token = signedToken(claims('apple'));
+    assert.equal((await verifier.verify('apple', token, nonce)).verified, true);
+    available = false;
+    assert.deepEqual(await verifier.verify('apple', token, nonce), unavailable);
+    assert.deepEqual(await verifier.verify('apple', token, nonce), unavailable);
+    assert.equal(calls.length, 2);
+    available = true;
+    advance(30_000);
+    assert.equal((await verifier.verify('apple', token, nonce)).verified, true);
+    assert.equal(calls.length, 3);
+});
+
+test('concurrent no-store outcomes preserve the newest started fetch result', async () => {
+    for (const olderSucceeds of [false, true]) {
+        let releaseOlder!: (value: boolean) => void;
+        let releaseNewer!: (value: boolean) => void;
+        const olderGate = new Promise<boolean>(resolve => { releaseOlder = resolve; });
+        const newerGate = new Promise<boolean>(resolve => { releaseNewer = resolve; });
+        let fetchCount = 0;
+        const { verifier, calls } = fixture({ response: async () => {
+            fetchCount += 1;
+            const gate = fetchCount === 2 ? olderGate : fetchCount === 3 ? newerGate : null;
+            if (gate && !(await gate)) throw new Error('upstream failure');
+            return jwksResponse(undefined, 'no-store');
+        } });
+        const token = signedToken(claims('apple'));
+        assert.equal((await verifier.verify('apple', token, nonce)).verified, true);
+        const older = verifier.verify('apple', token, nonce);
+        const newer = verifier.verify('apple', token, nonce);
+        assert.equal(calls.length, 3);
+        if (olderSucceeds) {
+            releaseNewer(false);
+            assert.deepEqual(await newer, unavailable);
+            releaseOlder(true);
+            assert.equal((await older).verified, true);
+            assert.deepEqual(await verifier.verify('apple', token, nonce), unavailable);
+            assert.equal(calls.length, 3, 'older success must not clear a newer failure');
+        } else {
+            releaseOlder(false);
+            assert.deepEqual(await older, unavailable);
+            releaseNewer(true);
+            assert.equal((await newer).verified, true);
+            assert.equal((await verifier.verify('apple', token, nonce)).verified, true);
+            assert.equal(calls.length, 4, 'newer success clears an older failure');
+        }
+    }
+});
+
 test('HTTP errors, redirect responses, oversized or malformed key sets return sanitized failures', async () => {
     const invalidSets: unknown[] = [{}, { keys: [] }, { keys: [publicJwk(), publicJwk()] },
         { keys: Array.from({ length: 17 }, (_, index) => publicJwk(undefined, `key-${index}`)) },

@@ -64,6 +64,8 @@ async function fixture(currentAccount?: ProviderAccount, newActions = false, app
         consumeGate?: Promise<void>;
         verificationGate?: Promise<void>;
         verification?: ProviderTokenVerificationResult;
+        jwksCacheControl?: string;
+        jwksFetches?: number;
         exchangeResponse?: () => ReturnType<AppleTokenClient['exchangeCode']>;
         saveGate?: Promise<void>;
         foundAccount: ProviderAccount | null;
@@ -77,9 +79,12 @@ async function fixture(currentAccount?: ProviderAccount, newActions = false, app
     }
     const actualVerifier = createProviderTokenVerifier({ googleAudience: 'google-audience', appleAudience: 'apple-audience' }, {
         now: () => now * 1000,
-        fetch: async () => new Response(JSON.stringify({ keys: [{
-            ...key.publicKey.export({ format: 'jwk' }), kid: 'test-key', alg: 'RS256', use: 'sig',
-        }] })),
+        fetch: async () => {
+            controls.jwksFetches = (controls.jwksFetches ?? 0) + 1;
+            return new Response(JSON.stringify({ keys: [{
+                ...key.publicKey.export({ format: 'jwk' }), kid: 'test-key', alg: 'RS256', use: 'sig',
+            }] }), { headers: controls.jwksCacheControl ? { 'cache-control': controls.jwksCacheControl } : {} });
+        },
     });
     const verifiedNonces: string[] = [];
     const linkedTargets: unknown[][] = [];
@@ -903,6 +908,21 @@ test('Apple signup diagnostics distinguish exchange response, verification and i
         }
         assert.doesNotMatch(JSON.stringify(lines), /private-different-subject|synthetic|opaque-provider-subject|new-player/u);
     } finally { console.warn = original; }
+});
+
+test('Apple signup with no-store JWKS verifies two signed tokens before creating the separate account', async () => {
+    const f = await fixture(undefined, true, true, 'apple-web');
+    f.controls.jwksCacheControl = 'no-store';
+    const { result, input } = await f.appleChallenge('signup');
+    f.controls.exchangeResponse = async () => ({ idToken: signedToken(result.nonce, 'apple', { iat: now - 9 }),
+        refreshToken: appleRefreshToken });
+    assert.deepEqual(await f.flow.complete(f.context, input), { ok: true, type: 'account-verified', account, ...appleSession });
+    assert.deepEqual(f.events, ['consume', 'committed', 'verify', 'exchange', 'verify', 'signup']);
+    assert.equal(f.controls.jwksFetches, 2);
+    assert.equal(f.createdAccounts.length, 1);
+    assert.equal(f.createdAccounts[0][1], 'new-player');
+    assert.deepEqual(f.linkedTargets, []);
+    assert.deepEqual(f.savedAppleTokens, []);
 });
 
 test('Apple signup, link and deletion hand the exchanged token to their atomic repository operation', async () => {

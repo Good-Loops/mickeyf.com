@@ -12,6 +12,10 @@ const MAX_JWKS_KEYS = 16;
 const MAX_CACHE_AGE_MS = 60 * 60 * 1_000;
 const DEFAULT_CACHE_AGE_MS = 5 * 60 * 1_000;
 const REFRESH_COOLDOWN_MS = 30_000;
+// Bound outbound work per provider even when its response cannot be cached.
+const JWKS_FETCH_WINDOW_MS = 30_000;
+const JWKS_FETCH_WINDOW_LIMIT = 60;
+const JWKS_FETCH_CONCURRENCY_LIMIT = 8;
 const FUTURE_ISSUANCE_TOLERANCE_SECONDS = 30;
 const PROVIDERS = {
     google: {
@@ -59,8 +63,14 @@ type Dependencies = {
 type KeyCache = {
     keys: Map<string, KeyObject>;
     expiresAtMs: number;
-    nextRefreshAtMs: number;
-    pending?: Promise<Map<string, KeyObject>>;
+    nextUnknownRefreshAtMs: number;
+    failureCooldownUntilMs: number;
+    fetchWindowStartedAtMs: number | null;
+    fetchesInWindow: number;
+    nextFetchSequence: number;
+    latestOutcomeSequence: number;
+    uncacheable: boolean;
+    pending: Set<Promise<{ keys: Map<string, KeyObject>; lifetimeMs: number }>>;
 };
 
 export class ProviderKeysUnavailable extends Error {
@@ -199,30 +209,74 @@ export function createProviderKeyResolver(fetcher: typeof globalThis.fetch, now:
     return async (provider: IdentityProvider, keyId: string): Promise<KeyObject | undefined> => {
         let cache = caches.get(provider);
         if (!cache) {
-            cache = { keys: new Map(), expiresAtMs: 0, nextRefreshAtMs: 0 };
+            cache = { keys: new Map(), expiresAtMs: 0, nextUnknownRefreshAtMs: 0, failureCooldownUntilMs: 0,
+                fetchWindowStartedAtMs: null, fetchesInWindow: 0, nextFetchSequence: 0, latestOutcomeSequence: 0,
+                uncacheable: false, pending: new Set() };
             caches.set(provider, cache);
         }
-        const currentTime = now();
-        const cachedKey = cache.keys.get(keyId);
-        if (currentTime < cache.expiresAtMs && cachedKey) return cachedKey;
-        if (cache.pending) return (await cache.pending).get(keyId);
-        // Unknown kids cannot force an unbounded refetch. Rotation can take up to
-        // 30 seconds to become visible; expired keys are never a fallback.
-        if (currentTime < cache.nextRefreshAtMs) {
-            if (currentTime < cache.expiresAtMs) return undefined;
-            throw new ProviderKeysUnavailable();
-        }
-        cache.nextRefreshAtMs = currentTime + REFRESH_COOLDOWN_MS;
-        const currentCache = cache;
-        cache.pending = fetchProviderKeys(PROVIDERS[provider].jwksUrl, fetcher).then(result => {
-            currentCache.keys = result.keys;
-            currentCache.expiresAtMs = now() + result.lifetimeMs;
-            return result.keys;
-        });
-        try {
-            return (await cache.pending).get(keyId);
-        } finally {
-            cache.pending = undefined;
+        const queueDeadline = Date.now() + PROVIDER_JWKS_TIMEOUT_MS;
+        for (;;) {
+            const currentTime = now();
+            const fresh = currentTime < cache.expiresAtMs;
+            const cachedKey = cache.keys.get(keyId);
+            if (fresh && cachedKey) return cachedKey;
+            if (cache.pending.size > 0 && (!cache.uncacheable || cache.pending.size >= JWKS_FETCH_CONCURRENCY_LIMIT)) {
+                // Do not reuse an uncacheable response for another verification.
+                // Bound time spent waiting for a slot as well as the fetch itself.
+                const remaining = queueDeadline - Date.now();
+                if (remaining <= 0) throw new ProviderKeysUnavailable();
+                let timer: ReturnType<typeof setTimeout> | undefined;
+                try {
+                    await Promise.race([Promise.race(cache.pending), new Promise<never>((_resolve, reject) => {
+                        timer = setTimeout(() => reject(new ProviderKeysUnavailable()), remaining);
+                    })]);
+                } finally {
+                    if (timer !== undefined) clearTimeout(timer);
+                }
+                continue;
+            }
+            if (currentTime < cache.failureCooldownUntilMs) throw new ProviderKeysUnavailable();
+            // Refreshing a fresh cache for an unknown kid is throttled, but a
+            // genuinely expired key set must be refreshed as soon as it expires.
+            if (fresh && currentTime < cache.nextUnknownRefreshAtMs) return undefined;
+            if (cache.fetchWindowStartedAtMs === null || currentTime >= cache.fetchWindowStartedAtMs + JWKS_FETCH_WINDOW_MS) {
+                cache.fetchWindowStartedAtMs = currentTime;
+                cache.fetchesInWindow = 0;
+            }
+            if (cache.fetchesInWindow >= JWKS_FETCH_WINDOW_LIMIT) throw new ProviderKeysUnavailable();
+            cache.fetchesInWindow += 1;
+            const sequence = ++cache.nextFetchSequence;
+            cache.nextUnknownRefreshAtMs = currentTime + REFRESH_COOLDOWN_MS;
+            const currentCache = cache;
+            const pending = fetchProviderKeys(PROVIDERS[provider].jwksUrl, fetcher).then(result => {
+                if (sequence >= currentCache.latestOutcomeSequence) {
+                    currentCache.latestOutcomeSequence = sequence;
+                    currentCache.failureCooldownUntilMs = 0;
+                    if (result.lifetimeMs > 0) {
+                        currentCache.uncacheable = false;
+                        currentCache.keys = result.keys;
+                        currentCache.expiresAtMs = now() + result.lifetimeMs;
+                    } else {
+                        // Uncacheable key sets are available only to the initiating verification.
+                        currentCache.uncacheable = true;
+                        currentCache.keys = new Map();
+                        currentCache.expiresAtMs = 0;
+                    }
+                }
+                return result;
+            }).catch(error => {
+                if (sequence >= currentCache.latestOutcomeSequence) {
+                    currentCache.latestOutcomeSequence = sequence;
+                    currentCache.failureCooldownUntilMs = now() + REFRESH_COOLDOWN_MS;
+                }
+                throw error;
+            });
+            cache.pending.add(pending);
+            try {
+                return (await pending).keys.get(keyId);
+            } finally {
+                cache.pending.delete(pending);
+            }
         }
     };
 }

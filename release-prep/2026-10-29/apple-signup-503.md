@@ -195,3 +195,22 @@ Good-Loops public scores remain 330 and 118417 / 84447 ms / rank B. No account
 or score mutation was performed. The change is diagnostic and the signup bug
 is not yet proven fixed. All operational receipts are in the private
 `diagnostic-iteration-2` folder.
+
+## Apple key-cache failure reproduced and repair prepared
+
+A controlled signup on the refined diagnostic revision returned 503 at
+`apple-exchange-verification`, before account creation. The Apple public key
+endpoint observed from this machine returned `Cache-Control: no-store`. A local
+regression reproduced successful first-token verification followed immediately
+by `PROVIDER_UNAVAILABLE`: zero cache lifetime conflicted with the 30-second
+refresh cooldown. Production egress headers were not independently observed, so
+this remains a strongly supported cause rather than a production packet capture.
+
+The fix makes uncacheable results available only to their initiating verification,
+refreshes expired short-lived key sets, preserves failure and unknown-key throttles,
+and bounds per-provider outgoing fetches and concurrency. The 60-fetch-per-30-second
+limit is per verifier instance and may temporarily reject authentication during
+bursts or abuse. No expired key fallback or signature/nonce relaxation is added.
+A synthetic two-token signup with the real verifier reaches one mocked account
+creation; this does not establish successful real Apple signup or rule out a later
+unrelated failure.
