@@ -51,9 +51,13 @@ const expectedAlpineLibraryPatch = [
     '        libcrypto3=3.5.9-r0 \\',
     '        libssl3=3.5.9-r0 \\',
     '        zlib=1.3.2-r1 \\',
+    '        musl=1.2.6-r3 \\',
+    '        musl-utils=1.2.6-r3 \\',
     "    && apk info --exists 'libcrypto3=3.5.9-r0' > /dev/null \\",
     "    && apk info --exists 'libssl3=3.5.9-r0' > /dev/null \\",
     "    && apk info --exists 'zlib=1.3.2-r1' > /dev/null \\",
+    "    && apk info --exists 'musl=1.2.6-r3' > /dev/null \\",
+    "    && apk info --exists 'musl-utils=1.2.6-r3' > /dev/null \\",
     '    && rm -rf /var/cache/apk/*',
 ].join('\n');
 
@@ -91,7 +95,7 @@ test('candidate configuration contains no production rollout capabilities', asyn
     }
 });
 
-test('candidate image patches only the reviewed Alpine OpenSSL and zlib packages', async () => {
+test('candidate image patches only the reviewed Alpine OpenSSL, zlib and musl packages', async () => {
     const dockerfile = await readNormalizedFile(dockerfilePath);
     const patchOccurrences = dockerfile.split(expectedAlpineLibraryPatch).length - 1;
     const patchIndex = dockerfile.indexOf(expectedAlpineLibraryPatch);
