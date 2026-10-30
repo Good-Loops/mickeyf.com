@@ -352,6 +352,10 @@ export function createProviderTokenVerifier(
                 }
                 const keyId = readProviderJwsKeyId(token);
                 if (!keyId) return { verified: false, reason: 'INVALID_PROVIDER_TOKEN' };
+                const initialNowMs = now();
+                if (!Number.isSafeInteger(initialNowMs) || initialNowMs < 1_000) {
+                    return { verified: false, reason: 'INVALID_PROVIDER_TOKEN' };
+                }
                 const key = await resolveKey(provider, keyId);
                 if (!key) return { verified: false, reason: 'INVALID_PROVIDER_TOKEN' };
                 const nowMs = now();

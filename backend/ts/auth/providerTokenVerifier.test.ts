@@ -294,6 +294,18 @@ test('missing provider configuration fails closed and server configuration is ca
     }
 });
 
+test('invalid clocks reject provider tokens before fetching keys', async () => {
+    for (const nowMs of [NaN, Infinity, 0, -1, 1000.5, Number.MAX_SAFE_INTEGER + 1]) {
+        let calls = 0;
+        const verifier = createProviderTokenVerifier({ appleAudience }, {
+            now: () => nowMs,
+            fetch: async () => { calls += 1; return jwksResponse(); },
+        });
+        assert.deepEqual(await verifier.verify('apple', signedToken(claims('apple')), nonce), invalidToken);
+        assert.equal(calls, 0);
+    }
+});
+
 test('concurrent requests share a bounded cache fetch, including independent provider caches', async () => {
     const { verifier, calls } = fixture();
     const results = await Promise.all(Array.from({ length: 20 }, () => verifier.verify('google', signedToken(), nonce)));
