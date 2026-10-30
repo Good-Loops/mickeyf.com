@@ -174,3 +174,24 @@ exchanged-token verification, identity mismatch and a signed token missing a
 nonce using fixed labels only. It preserves strict verification and omits token
 contents, credentials, personal information and provider subjects. This is
 instrumentation, not a confirmed repair.
+
+## Follow-up diagnostic rollout
+
+The refined diagnostic source was committed as `dc9121cf56489d0825e88905686a335c5614d06c`.
+TypeScript and 96 focused authentication tests passed. The full backend suite
+passed 951/951 with one test worker; a previous concurrent run encountered
+subprocess timeouts. Production Webpack compilation passed with two existing
+optional supports-color warnings. The exact image passed isolated runtime and
+compressed-request checks. Artifact Analysis completed with no blocking HIGH
+or CRITICAL findings. Exact source and the classical builder signature were
+verified; no claim is made about verifying the post-quantum signature.
+
+The zero-traffic candidate was checked before a separate promotion. Revision
+`mickeyf-org-apple-diag-e757242892b74eabb36ab654636dd41f` serves 100 percent
+at generation 160. All four public GET traces reached that revision and returned
+200, and initial post-promotion logs showed no 5xx. The former diagnostic
+revision remains the rollback target, and all build triggers are paused.
+Good-Loops public scores remain 330 and 118417 / 84447 ms / rank B. No account
+or score mutation was performed. The change is diagnostic and the signup bug
+is not yet proven fixed. All operational receipts are in the private
+`diagnostic-iteration-2` folder.
