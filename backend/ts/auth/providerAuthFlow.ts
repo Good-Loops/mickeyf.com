@@ -189,13 +189,16 @@ export function createProviderAuthFlow({ attempts, accounts, clients, enabled = 
                     if (selection.client.provider !== 'apple') return undefined;
                     failureStage = 'apple-token-exchange';
                     const tokens = await selection.client.appleTokens!.exchangeCode(input.authorizationCode as string);
+                    failureStage = 'apple-exchange-response';
                     if (!tokens || typeof tokens.refreshToken !== 'string' || tokens.refreshToken.length === 0
                         || tokens.refreshToken.length > 4096 || /[^\x21-\x7e]/u.test(tokens.refreshToken)) {
                         throw new AppleTokenClientError('INVALID_GRANT');
                     }
-                    const exchanged = await selection.client.verifier.verify('apple', tokens.idToken, attempt.nonce);
+                    failureStage = 'apple-exchange-verification';
+                    const exchanged = await selection.client.verifier.verify('apple', tokens.idToken, attempt.nonce, 'apple-exchange');
                     if (!exchanged.verified) throw new AppleTokenClientError(
                         exchanged.reason === 'INVALID_PROVIDER_TOKEN' ? 'INVALID_GRANT' : 'UNAVAILABLE');
+                    failureStage = 'apple-exchange-identity';
                     if (exchanged.identity.provider !== 'apple'
                         || exchanged.identity.subject !== verified.identity.subject) {
                         throw new AppleTokenClientError('INVALID_GRANT');

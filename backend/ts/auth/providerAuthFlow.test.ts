@@ -89,12 +89,12 @@ async function fixture(currentAccount?: ProviderAccount, newActions = false, app
     const exchangedCodes: string[] = [];
     let mostRecentToken: unknown;
     const verifier = {
-        async verify(provider: IdentityProvider, token: unknown, nonce: string) {
+        async verify(provider: IdentityProvider, token: unknown, nonce: string, diagnosticContext?: 'apple-exchange') {
             step('verify');
             mostRecentToken = token;
             verifiedNonces.push(nonce);
             if (controls.verificationGate) await controls.verificationGate;
-            return controls.verification ?? actualVerifier.verify(provider, token, nonce);
+            return controls.verification ?? actualVerifier.verify(provider, token, nonce, diagnosticContext);
         },
     };
     const appleTokens: AppleTokenClient = {
@@ -870,6 +870,38 @@ test('Apple signup diagnostics locate pre-creation failures without calling acco
         console.warn = () => { throw new Error('PRIVATE logger failure'); };
         assert.deepEqual(await f.flow.complete(f.context, input), { ok: false, reason: 'UNAVAILABLE' });
         assert.deepEqual(f.createdAccounts, []);
+    } finally { console.warn = original; }
+});
+
+test('Apple signup diagnostics distinguish exchange response, verification and identity failures safely', async () => {
+    const lines: string[] = [];
+    const original = console.warn;
+    console.warn = line => { lines.push(line); };
+    try {
+        for (const [failure, stage, reason] of [
+            ['response', 'apple-exchange-response', 'INVALID_PROVIDER_TOKEN'],
+            ['verification', 'apple-exchange-verification', 'UNAVAILABLE'],
+            ['identity', 'apple-exchange-identity', 'INVALID_PROVIDER_TOKEN'],
+        ] as const) {
+            const f = await fixture(undefined, true, true);
+            const { result, input } = await f.appleChallenge('signup');
+            f.controls.exchangeResponse = async () => {
+                if (failure === 'verification') f.controls.verification = { verified: false, reason: 'PROVIDER_UNAVAILABLE' };
+                return {
+                    idToken: failure === 'identity' ? signedToken(result.nonce, 'apple', { sub: 'private-different-subject' }) : input.idToken,
+                    refreshToken: failure === 'response' ? '' : appleRefreshToken,
+                };
+            };
+            assert.deepEqual(await f.flow.complete(f.context, input), { ok: false, reason });
+            assert.deepEqual(JSON.parse(lines.at(-1)!), {
+                event: 'provider_auth_failure', severity: 'WARNING', stage, category: 'unclassified',
+            });
+            assert.deepEqual(f.createdAccounts, []);
+            assert.deepEqual(f.savedAppleTokens, []);
+            assert.deepEqual(f.linkedTargets, []);
+            assert.deepEqual(f.deletedAccounts, []);
+        }
+        assert.doesNotMatch(JSON.stringify(lines), /private-different-subject|synthetic|opaque-provider-subject|new-player/u);
     } finally { console.warn = original; }
 });
 

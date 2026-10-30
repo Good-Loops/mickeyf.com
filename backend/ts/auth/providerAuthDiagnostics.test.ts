@@ -44,6 +44,26 @@ test('network codes remain transport failures rather than database failures', ()
     } finally { console.warn = original; }
 });
 
+test('response field diagnostics accept only allowlisted fields at the exchange response stage', () => {
+    const lines: string[] = [];
+    const original = console.warn;
+    console.warn = line => { lines.push(line); };
+    try {
+        reportProviderAuthFailure('apple-exchange-response', undefined, { appleResponseField: 'refresh-token' });
+        reportProviderAuthFailure('apple-token-exchange', undefined, { appleResponseField: 'id-token' });
+        reportProviderAuthFailure('apple-exchange-response', undefined, {
+            appleResponseField: 'PRIVATE-value',
+        } as unknown as Parameters<typeof reportProviderAuthFailure>[2]);
+        assert.deepEqual(lines.map(line => JSON.parse(line)), [
+            { event: 'provider_auth_failure', severity: 'WARNING', stage: 'apple-exchange-response',
+                category: 'unclassified', appleResponseField: 'refresh-token' },
+            { event: 'provider_auth_failure', severity: 'WARNING', stage: 'apple-token-exchange', category: 'unclassified' },
+            { event: 'provider_auth_failure', severity: 'WARNING', stage: 'apple-exchange-response', category: 'unclassified' },
+        ]);
+        assert.doesNotMatch(JSON.stringify(lines), /PRIVATE/u);
+    } finally { console.warn = original; }
+});
+
 test('throwing error inspection or logging never changes the caller outcome', () => {
     const original = console.warn;
     try {

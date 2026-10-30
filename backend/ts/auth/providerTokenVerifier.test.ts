@@ -118,6 +118,27 @@ test('Apple exposes only its signed verified shared or relay email; missing cont
     }
 });
 
+test('exchange nonce absence is reported only after authenticating Apple claims and never changes rejection', async () => {
+    const { verifier } = fixture();
+    const lines: string[] = [];
+    const original = console.warn;
+    console.warn = line => { lines.push(line); };
+    try {
+        const { nonce: _nonce, ...withoutNonce } = claims('apple');
+        const token = signedToken({ ...withoutNonce, email: 'private@example.invalid' });
+        assert.deepEqual(await verifier.verify('apple', token, nonce), invalidToken);
+        assert.deepEqual(await verifier.verify('apple', signedToken(withoutNonce, undefined, rotatedKey.privateKey), nonce, 'apple-exchange'), invalidToken);
+        assert.deepEqual(await verifier.verify('apple', signedToken({ ...claims('apple'), nonce: 'wrong-nonce' }), nonce, 'apple-exchange'), invalidToken);
+        assert.deepEqual(lines, []);
+        assert.deepEqual(await verifier.verify('apple', token, nonce, 'apple-exchange'), invalidToken);
+        assert.deepEqual(lines.map(line => JSON.parse(line)), [{ event: 'provider_auth_failure', severity: 'WARNING',
+            stage: 'apple-exchange-nonce-missing', category: 'unclassified' }]);
+        assert.doesNotMatch(JSON.stringify(lines), /private@example|Opaque|server-issued|eyJ/u);
+        console.warn = () => { throw new Error('PRIVATE logger failure'); };
+        assert.deepEqual(await verifier.verify('apple', token, nonce, 'apple-exchange'), invalidToken);
+    } finally { console.warn = original; }
+});
+
 test('only original Apple ID-token issuance populates the revocation-check time', async () => {
     const { verifier } = fixture();
     const apple = await verifier.verify('apple', signedToken({ ...claims('apple'),

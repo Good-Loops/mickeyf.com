@@ -159,3 +159,18 @@ traffic and public-check receipts are the operational evidence. A prepared
 rollback plan is time bounded and must be regenerated when needed. This hotfix
 has not been merged into the draft public-release branch; a later release must
 incorporate it before replacing this live image.
+
+## Controlled signup result and follow-up diagnostics
+
+On October 29 (local time), a controlled Apple signup returned HTTP 503 on the
+serving diagnostic revision. The sole failure event was `apple-token-exchange`,
+category `unclassified`; request latency was approximately 0.78 seconds. This
+stage occurs before account creation. The log does not establish which token
+response or verification step failed. No automatic retry was performed.
+
+The public Good-Loops entries remained at p4-Vega 330 and Three Bosses 118417,
+84447 ms, rank B. The follow-up diagnostic change distinguishes response field,
+exchanged-token verification, identity mismatch and a signed token missing a
+nonce using fixed labels only. It preserves strict verification and omits token
+contents, credentials, personal information and provider subjects. This is
+instrumentation, not a confirmed repair.

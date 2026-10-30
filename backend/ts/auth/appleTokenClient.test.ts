@@ -235,6 +235,25 @@ test('exchange rejects absent, malformed, oversized or inconsistent token respon
     }
 });
 
+test('malformed successful Apple token responses report a bounded response-shape stage', async () => {
+    const lines: string[] = [];
+    const original = console.warn;
+    console.warn = line => { lines.push(line); };
+    try {
+        for (const [document, field] of [
+            [{ id_token: 'PRIVATE invalid token', refresh_token: refreshToken }, 'id-token'],
+            [{ id_token: identityToken, refresh_token: '' }, 'refresh-token'],
+        ] as const) {
+            const f = fixture(() => Response.json({ ...document, private_data: 'PRIVATE provider payload' }));
+            await assert.rejects(f.client.exchangeCode(authorizationCode), safeError('UNAVAILABLE'));
+            assert.deepEqual(JSON.parse(lines.at(-1)!), { event: 'provider_auth_failure', severity: 'WARNING',
+                stage: 'apple-exchange-response', category: 'unclassified', appleResponseField: field });
+        }
+        assert.equal(lines.length, 2);
+        assert.doesNotMatch(JSON.stringify(lines), /PRIVATE|synthetic/u);
+    } finally { console.warn = original; }
+});
+
 test('the bounded reader rejects excessive and malformed declared lengths before accepting tokens', async () => {
     for (const length of ['65537', '-1', 'Infinity', '1e3', 'private details']) {
         const f = fixture(() => new Response(JSON.stringify({ id_token: identityToken, refresh_token: refreshToken }),

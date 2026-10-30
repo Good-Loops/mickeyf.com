@@ -177,10 +177,20 @@ export function createAppleTokenClient(configuration: AppleTokenClientConfigurat
     return Object.freeze({
         async exchangeCode(authorizationCode: string) {
             const document = await request('exchange', authorizationCode);
-            if (!document || typeof document.id_token !== 'string' || document.id_token.length > ID_TOKEN_MAX_LENGTH
+            if (!document) {
+                reportProviderAuthFailure('apple-exchange-response', undefined, { appleResponseField: 'document' });
+                throw new AppleTokenClientError('UNAVAILABLE');
+            }
+            if (typeof document.id_token !== 'string' || document.id_token.length > ID_TOKEN_MAX_LENGTH
                 || document.id_token !== document.id_token.trim()
-                || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u.test(document.id_token)
-                || !isOpaqueToken(document.refresh_token)) throw new AppleTokenClientError('UNAVAILABLE');
+                || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u.test(document.id_token)) {
+                reportProviderAuthFailure('apple-exchange-response', undefined, { appleResponseField: 'id-token' });
+                throw new AppleTokenClientError('UNAVAILABLE');
+            }
+            if (!isOpaqueToken(document.refresh_token)) {
+                reportProviderAuthFailure('apple-exchange-response', undefined, { appleResponseField: 'refresh-token' });
+                throw new AppleTokenClientError('UNAVAILABLE');
+            }
             // Access tokens and other provider metadata are not part of this client's contract.
             return Object.freeze({ idToken: document.id_token, refreshToken: document.refresh_token });
         },

@@ -2,6 +2,7 @@ const STAGES = [
     'context-read', 'flow-complete', 'registration-check', 'attempt-consume', 'provider-verification', 'apple-token-exchange',
     'account-lookup', 'account-create', 'account-link', 'account-delete', 'credential-save',
     'registration-consume', 'apple-token-store', 'account-transaction', 'session-establish',
+    'apple-exchange-response', 'apple-exchange-verification', 'apple-exchange-identity', 'apple-exchange-nonce-missing',
 ] as const;
 export type ProviderAuthFailureStage = typeof STAGES[number];
 
@@ -17,6 +18,7 @@ const TRANSACTIONS = ['not-started', 'begin-unconfirmed', 'active', 'rollback-un
     'commit-unconfirmed', 'committed'] as const;
 const STEPS = ['connect', 'begin', 'identity-lookup', 'user-insert', 'account-read', 'identity-insert',
     'credential-write', 'commit', 'release'] as const;
+const APPLE_RESPONSE_FIELDS = ['document', 'id-token', 'refresh-token'] as const;
 export type ProviderAuthTransactionState = typeof TRANSACTIONS[number];
 export type ProviderAuthTransactionStep = typeof STEPS[number];
 
@@ -25,6 +27,7 @@ type DiagnosticDetails = Readonly<{
     appleError?: unknown;
     transaction?: ProviderAuthTransactionState;
     transactionStep?: ProviderAuthTransactionStep;
+    appleResponseField?: typeof APPLE_RESPONSE_FIELDS[number];
 }>;
 type DiagnosticEvent = {
     event: 'provider_auth_failure';
@@ -37,6 +40,7 @@ type DiagnosticEvent = {
     appleError?: typeof APPLE_ERRORS[number];
     transaction?: typeof TRANSACTIONS[number];
     transactionStep?: typeof STEPS[number];
+    appleResponseField?: typeof APPLE_RESPONSE_FIELDS[number];
 };
 
 function allowed<T extends string>(values: readonly T[], value: unknown): value is T {
@@ -61,6 +65,9 @@ export function reportProviderAuthFailure(stage: ProviderAuthFailureStage, error
         if (allowed(APPLE_ERRORS, details.appleError)) event.appleError = details.appleError;
         if (allowed(TRANSACTIONS, details.transaction)) event.transaction = details.transaction;
         if (allowed(STEPS, details.transactionStep)) event.transactionStep = details.transactionStep;
+        if (stage === 'apple-exchange-response' && allowed(APPLE_RESPONSE_FIELDS, details.appleResponseField)) {
+            event.appleResponseField = details.appleResponseField;
+        }
         console.warn(JSON.stringify(event));
     } catch { /* Even inspection of an error or the logger itself may fail. */ }
 }

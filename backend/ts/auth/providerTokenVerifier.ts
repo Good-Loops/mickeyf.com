@@ -1,6 +1,7 @@
 import { createPublicKey, KeyObject, timingSafeEqual } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import type { IdentityProvider, VerifiedProviderIdentity } from './providerIdentity';
+import { reportProviderAuthFailure } from './providerAuthDiagnostics';
 
 export const PROVIDER_TOKEN_MAX_LENGTH = 16_384;
 export const PROVIDER_TOKEN_MAX_AGE_SECONDS = 5 * 60;
@@ -46,7 +47,7 @@ export type ProviderTokenVerifier = {
      * required by the native client), not an untransformed secret nonce.
      */
     verify(
-        provider: IdentityProvider, token: unknown, expectedNonce: string
+        provider: IdentityProvider, token: unknown, expectedNonce: string, diagnosticContext?: 'apple-exchange'
     ): Promise<ProviderTokenVerificationResult>;
 };
 
@@ -285,7 +286,7 @@ export function createProviderTokenVerifier(
     const now = dependencies.now ?? Date.now;
     const resolveKey = createProviderKeyResolver(dependencies.fetch ?? globalThis.fetch, now);
     return {
-        async verify(provider, token, expectedNonce) {
+        async verify(provider, token, expectedNonce, diagnosticContext) {
             if (provider !== 'google' && provider !== 'apple') {
                 return { verified: false, reason: 'INVALID_PROVIDER_TOKEN' };
             }
@@ -309,6 +310,11 @@ export function createProviderTokenVerifier(
                     audience, clockTimestamp: nowSeconds, maxAge: PROVIDER_TOKEN_MAX_AGE_SECONDS,
                 });
                 if (!validClaims(claims, provider, audience, authorizedParty, expectedNonce, nowSeconds)) {
+                    // Only report absence after signature, issuer, audience and standard time checks.
+                    if (provider === 'apple' && diagnosticContext === 'apple-exchange'
+                        && isRecord(claims) && !Object.prototype.hasOwnProperty.call(claims, 'nonce')) {
+                        reportProviderAuthFailure('apple-exchange-nonce-missing', undefined);
+                    }
                     return { verified: false, reason: 'INVALID_PROVIDER_TOKEN' };
                 }
                 const email = verifiedProviderEmail(provider, claims);
