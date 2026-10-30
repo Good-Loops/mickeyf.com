@@ -93,7 +93,6 @@ export default function ParentAccounts() {
             await deleteFamilyAccount(approval.grant, ids, expectedAction);
             if (controller.signal.aborted) return;
             pendingState.current = null;
-            setFeedback('Your parent account and the confirmed child accounts have been deleted, including their scores.');
         } catch { if (!controller.signal.aborted) setFeedback('Family deletion could not be confirmed. Recorded requests may still complete. Refresh the list before retrying; a changed family needs a new confirmation.'); }
         finally { if (!controller.signal.aborted) { const state = pendingState.current; pendingState.current = null;
             if (state) void api.cancel(state).catch(() => undefined); operation.current = null; setBusy(false); } }
