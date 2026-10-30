@@ -241,3 +241,18 @@ success; later failures cannot yet be ruled out. Do not deploy the older draft
 public-release branch without incorporating this live fix.
 
 Private operational receipts are in `jwks-fix-rollout-fresh-2026-10-30`.
+
+## Real Apple signup verified
+
+On October 30, the owner completed Apple signup on the repaired live revision
+and reported the new username `GL-Test`. The visible success screen confirmed
+that the account was ready and logged in. The matching completion request was
+HTTP 200 at 2026-10-30T21:54:26Z on the repaired revision, and the queried
+period contained no provider-auth failure events. This verifies this real
+website signup attempt; it does not establish native-app, store-submission, or
+parental-consent acceptance.
+
+A read-only public check afterward confirmed the existing Good-Loops scores
+remain p4-Vega 330 and Three Bosses 118417 / 84447 ms / rank B. No login,
+linking, deletion, or score mutation of Good-Loops was performed by the
+operator. The new test account is left in place.
