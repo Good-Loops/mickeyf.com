@@ -24,6 +24,7 @@ import { createRegistrationAuthorization, type RegistrationAuthorization } from 
 import type { createAppleAndroidHandoffFlow } from '../auth/appleAndroidHandoffFlow';
 import { createAppleAndroidHandoffRouter } from './appleAndroidHandoffRouter';
 import type { ProviderAttemptAction } from '../auth/providerAttemptRepository';
+import { reportProviderAuthFailure, type ProviderAuthFailureStage } from '../auth/providerAuthDiagnostics';
 
 export const PROVIDER_BEGIN_IP_LIMIT = 30;
 export const PROVIDER_COMPLETE_IP_LIMIT = 50;
@@ -78,7 +79,10 @@ function createServices(options: ProviderAuthRouterOptions): ProviderAuthRouterS
                 ? repositories[identity.appleClientId] : undefined
             : options.appleTokenRepository;
         if (!repository) throw new Error('Apple token storage is unavailable.');
-        return async (connection, account) => repository.save(connection, repository.prepare(refreshToken, account.accountId));
+        return async (connection, account) => {
+            try { await repository.save(connection, repository.prepare(refreshToken, account.accountId)); }
+            catch (error) { reportProviderAuthFailure('apple-token-store', error); throw error; }
+        };
     };
     return {
         readContext: createProviderAuthContextReader({ database, sessionSecret, allowedOrigins }),
@@ -94,7 +98,8 @@ function createServices(options: ProviderAuthRouterOptions): ProviderAuthRouterS
                     credentialWriter(token, identity)),
                 create: (identity, userName, token, context) => createProviderAccount(database, identity, userName,
                     async (connection, account) => {
-                        await registration.consume(connection, context, account.accountId);
+                        try { await registration.consume(connection, context, account.accountId); }
+                        catch (error) { reportProviderAuthFailure('registration-consume', error); throw error; }
                         await credentialWriter(token, identity)?.(connection, account);
                     }),
                 ...(options.appleTokenRepository || options.appleTokenRepositories ? {
@@ -269,24 +274,28 @@ export function createProviderAuthRouter(options: ProviderAuthRouterOptions): Ro
                 return fail(res, 'INVALID_REQUEST');
             }
             const { rememberMe = false, ...input } = req.body;
+            let failureStage: ProviderAuthFailureStage = 'context-read';
             try {
                 const context = await services.readContext(req, 'complete');
+                failureStage = 'flow-complete';
                 const result = await services.flow.complete(context, input);
                 if (!result.ok) return fail(res, result.reason);
                 if (result.type === 'signup-required') return res.json({ signupRequired: true,
                     challenge: { state: result.state, nonce: result.nonce, expiresInSeconds: result.expiresInSeconds } });
                 if (result.type === 'linked') return res.json({ success: true, linked: true });
                 if (result.type === 'deleted') {
+                    failureStage = 'account-delete';
                     clearAuthenticationCookies(res, isProduction);
                     if (context?.account) {
                         await attemptAppleAccountRevocation(context.account.accountId, options.appleAccountRevocation);
                     }
                     return res.json({ success: true, deleted: true });
                 }
+                failureStage = 'session-establish';
                 if (!await services.establishSession(database, req, res, result.account, rememberMe === true,
                     sessionSecret, isProduction, result.authenticationMethod, result.appleSessionProof)) return fail(res, 'ACCOUNT_GONE');
                 return res.json({ success: true, user_name: result.account.userName });
-            } catch { return fail(res, 'UNAVAILABLE'); }
+            } catch (error) { reportProviderAuthFailure(failureStage, error); return fail(res, 'UNAVAILABLE'); }
         }));
     return router;
 }

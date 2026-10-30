@@ -10,6 +10,7 @@ import { type ProviderTokenVerifier, PROVIDER_TOKEN_MAX_LENGTH } from './provide
 import { AppleTokenClientError, type AppleTokenClient } from './appleTokenClient';
 import type { AppleSessionProof } from './appleSessionRevocation';
 import { RegistrationRequiredError, type RegistrationAuthorization } from '../accounts/registrationAuthorization';
+import { reportProviderAuthFailure, type ProviderAuthFailureStage } from './providerAuthDiagnostics';
 
 export type ProviderAuthClient = Readonly<{
     provider: IdentityProvider;
@@ -176,12 +177,14 @@ export function createProviderAuthFlow({ attempts, accounts, clients, enabled = 
             const password = selection.action === 'link'
                 ? validateLoginRequest({ user_name: 'link', user_password: input.password }) : null;
             if (password && !password.valid) return { ok: false, reason: 'INVALID_REQUEST' };
+            let failureStage: ProviderAuthFailureStage = 'registration-check';
             try {
                 if (selection.action === 'signup' || registration?.audience === 'children-included') {
                     await authorizeProviderAction(context, selection.action);
                 }
                 // Consumption must commit BEFORE any provider lookup or account work.
                 // Failure/cancellation requires a fresh challenge, never replay of this one.
+                failureStage = 'attempt-consume';
                 const attempt = await attempts.consume(
                     createHash('sha256').update(input.state).digest(), context.bindingHash,
                     selection.clientKey, selection.action);
@@ -189,20 +192,27 @@ export function createProviderAuthFlow({ attempts, accounts, clients, enabled = 
                     || attempt.userId !== (context.account?.userId ?? null)) {
                     return { ok: false, reason: 'INVALID_ATTEMPT' };
                 }
+                failureStage = 'provider-verification';
                 const verified = await selection.client.verifier.verify(selection.client.provider, input.idToken, attempt.nonce);
-                if (!verified.verified) return { ok: false, reason: verified.reason === 'INVALID_PROVIDER_TOKEN'
-                    ? 'INVALID_PROVIDER_TOKEN' : 'UNAVAILABLE' };
+                if (!verified.verified) {
+                    if (verified.reason !== 'INVALID_PROVIDER_TOKEN') reportProviderAuthFailure(failureStage, undefined);
+                    return { ok: false, reason: verified.reason === 'INVALID_PROVIDER_TOKEN' ? 'INVALID_PROVIDER_TOKEN' : 'UNAVAILABLE' };
+                }
                 if (verified.identity.provider !== selection.client.provider) return { ok: false, reason: 'INVALID_PROVIDER_TOKEN' };
                 const exchangeAppleToken = async (): Promise<string | undefined> => {
                     if (selection.client.provider !== 'apple') return undefined;
+                    failureStage = 'apple-token-exchange';
                     const tokens = await selection.client.appleTokens!.exchangeCode(input.authorizationCode as string);
+                    failureStage = 'apple-exchange-response';
                     if (!tokens || typeof tokens.refreshToken !== 'string' || tokens.refreshToken.length === 0
                         || tokens.refreshToken.length > 4096 || /[^\x21-\x7e]/u.test(tokens.refreshToken)) {
                         throw new AppleTokenClientError('INVALID_GRANT');
                     }
-                    const exchanged = await selection.client.verifier.verify('apple', tokens.idToken, attempt.nonce);
+                    failureStage = 'apple-exchange-verification';
+                    const exchanged = await selection.client.verifier.verify('apple', tokens.idToken, attempt.nonce, 'apple-exchange');
                     if (!exchanged.verified) throw new AppleTokenClientError(
                         exchanged.reason === 'INVALID_PROVIDER_TOKEN' ? 'INVALID_GRANT' : 'UNAVAILABLE');
+                    failureStage = 'apple-exchange-identity';
                     if (exchanged.identity.provider !== 'apple'
                         || exchanged.identity.subject !== verified.identity.subject) {
                         throw new AppleTokenClientError('INVALID_GRANT');
@@ -210,15 +220,18 @@ export function createProviderAuthFlow({ attempts, accounts, clients, enabled = 
                     return tokens.refreshToken;
                 };
                 if (selection.action === 'login') {
+                    failureStage = 'account-lookup';
                     const account = await accounts.find(verified.identity);
                     if (account) {
                         const token = await exchangeAppleToken();
+                        failureStage = 'credential-save';
                         if (token !== undefined) await accounts.saveAppleToken!(account, verified.identity, token);
                         return verifiedAccountResult(account, verified.identity);
                     }
                     if (!signupAvailable(selection.clientKey, selection.client)) {
                         return { ok: false, reason: 'NOT_LINKED' };
                     }
+                    failureStage = 'registration-check';
                     await authorizeRegistration(context);
                     if (verified.identity.email === undefined) return { ok: false, reason: 'INVALID_EMAIL' };
                     // This is an explicit server-authorized transition, not reuse of
@@ -239,6 +252,7 @@ export function createProviderAuthFlow({ attempts, accounts, clients, enabled = 
                 if (selection.action === 'signup') {
                     if (verified.identity.email === undefined) return { ok: false, reason: 'INVALID_EMAIL' };
                     const token = await exchangeAppleToken();
+                    failureStage = 'account-create';
                     const result = await accounts.create!(verified.identity, (input.userName as string).trim(), token, context);
                     // Only creation commits this preflight's privacy profile. A collision,
                     // including another tab's successful signup, must use a fresh login;
@@ -249,6 +263,7 @@ export function createProviderAuthFlow({ attempts, accounts, clients, enabled = 
                 if (selection.action === 'delete') {
                     if (!context.account || !context.session) return { ok: false, reason: 'INVALID_CONTEXT' };
                     const token = await exchangeAppleToken();
+                    failureStage = 'account-delete';
                     const result = await accounts.delete!(context.account, verified.identity, context.session,
                         ...(token === undefined ? [] : [token]));
                     return result === 'deleted' ? { ok: true, type: 'deleted' }
@@ -256,6 +271,7 @@ export function createProviderAuthFlow({ attempts, accounts, clients, enabled = 
                 }
                 if (!context.account || !context.session || !password?.valid) return { ok: false, reason: 'INVALID_CONTEXT' };
                 const token = await exchangeAppleToken();
+                failureStage = 'account-link';
                 const result = await accounts.link(context.account, password.input.password, verified.identity, context.session,
                     ...(token === undefined ? [] : [token]));
                 switch (result) {
@@ -265,6 +281,7 @@ export function createProviderAuthFlow({ attempts, accounts, clients, enabled = 
                     case 'not-found': return { ok: false, reason: 'ACCOUNT_GONE' };
                 }
             } catch (error) {
+                reportProviderAuthFailure(failureStage, error);
                 if (error instanceof RegistrationRequiredError) return { ok: false, reason: 'REGISTRATION_REQUIRED' };
                 if (error instanceof AppleTokenClientError && error.code === 'INVALID_GRANT') {
                     return { ok: false, reason: 'INVALID_PROVIDER_TOKEN' };

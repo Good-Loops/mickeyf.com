@@ -200,6 +200,8 @@ test('configuration is bounded and snapshotted; disabled verification performs n
 
 test('an invalid clock never authenticates an event', async () => {
     for (const nowMs of [NaN, Infinity, 0, -1, 1_000.5, Number.MAX_SAFE_INTEGER + 1]) {
-        assert.deepEqual(await fixture({ nowMs }).verifier.verify(signedToken()), invalid);
+        const f = fixture({ nowMs });
+        assert.deepEqual(await f.verifier.verify(signedToken()), invalid);
+        assert.equal(f.calls.length, 0);
     }
 });

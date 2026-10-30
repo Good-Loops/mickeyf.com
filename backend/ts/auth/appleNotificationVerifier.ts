@@ -104,6 +104,10 @@ export function createAppleNotificationVerifier(
             try {
                 const keyId = readProviderJwsKeyId(token);
                 if (!keyId) return { verified: false, reason: 'INVALID_APPLE_NOTIFICATION' };
+                const initialNowMs = now();
+                if (!Number.isSafeInteger(initialNowMs) || initialNowMs < 1_000) {
+                    return { verified: false, reason: 'INVALID_APPLE_NOTIFICATION' };
+                }
                 const key = await resolveKey('apple', keyId);
                 if (!key) return { verified: false, reason: 'INVALID_APPLE_NOTIFICATION' };
                 const nowMs = now();

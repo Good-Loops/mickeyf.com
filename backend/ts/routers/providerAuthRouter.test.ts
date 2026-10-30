@@ -476,6 +476,49 @@ test('unknown provider accounts, failed session commits and removed accounts nev
     });
 });
 
+test('completion diagnostics distinguish context, flow and session failures without replacing cookies', async () => {
+    const lines: string[] = [];
+    const original = console.warn;
+    console.warn = line => { lines.push(line); };
+    try {
+        for (const failure of ['context', 'flow', 'session'] as const) {
+            await withServer(async (base, { state, services }) => {
+                let cookie: string;
+                let stateValue: string;
+                if (failure === 'context') {
+                    cookie = signedCookie(issueSessionToken(account, secret).token);
+                    stateValue = 'a'.repeat(43);
+                    state.contextFailure = true;
+                } else {
+                    const started = await challenge(base);
+                    cookie = started.cookie;
+                    stateValue = started.state;
+                    if (failure === 'flow') services.flow.complete = async () => { throw new Error('PRIVATE flow identity'); };
+                    else state.sessionFailure = true;
+                }
+                const response = await post(base, 'complete', { ...beginInput, state: stateValue, idToken: 'accepted-token' }, { cookie });
+                assert.equal(response.status, 503);
+                assert.deepEqual(await response.json(), { error: 'UNAVAILABLE' });
+                assert.equal(response.headers.get('set-cookie'), null);
+                assert.equal(state.events.some(event => ['signup', 'link', 'delete'].includes(event)), false);
+                assert.equal(JSON.parse(lines.at(-1)!).stage,
+                    failure === 'context' ? 'context-read' : failure === 'flow' ? 'flow-complete' : 'session-establish');
+            });
+        }
+        assert.doesNotMatch(JSON.stringify(lines), /PRIVATE|private|accepted-token|provider-player|11111111|synthetic/u);
+        console.warn = () => { throw new Error('PRIVATE logger failure'); };
+        await withServer(async (base, { state }) => {
+            const started = await challenge(base);
+            state.sessionFailure = true;
+            const response = await post(base, 'complete', { ...beginInput, state: started.state, idToken: 'accepted-token' },
+                { cookie: started.cookie });
+            assert.equal(response.status, 503);
+            assert.deepEqual(await response.json(), { error: 'UNAVAILABLE' });
+            assert.equal(response.headers.get('set-cookie'), null);
+        });
+    } finally { console.warn = original; }
+});
+
 test('full-size ID tokens fit the JSON budget, but token and total body bounds remain enforced', async () => {
     await withServer(async (base, { state }) => {
         const started = await challenge(base);

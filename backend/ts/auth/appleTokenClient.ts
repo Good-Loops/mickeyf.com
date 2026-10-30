@@ -1,6 +1,7 @@
 import { createPrivateKey, type KeyObject } from 'node:crypto';
 import jwt from 'jsonwebtoken';
 import { validAppleRedirectUri } from '../config/appleWebConfig';
+import { reportProviderAuthFailure } from './providerAuthDiagnostics';
 
 export const APPLE_TOKEN_REQUEST_TIMEOUT_MS = 5_000;
 export const APPLE_OPAQUE_TOKEN_MAX_LENGTH = 4_096;
@@ -126,6 +127,8 @@ export function createAppleTokenClient(configuration: AppleTokenClientConfigurat
         if (!isOpaqueToken(token)) throw new AppleTokenClientError('INVALID_REQUEST');
         const controller = new AbortController();
         let timer: ReturnType<typeof setTimeout> | undefined;
+        let appleStatus: number | undefined;
+        let appleError: unknown;
         const deadline = new Promise<never>((_resolve, reject) => {
             timer = setTimeout(() => {
                 reject(new AppleTokenClientError('UNAVAILABLE'));
@@ -145,13 +148,15 @@ export function createAppleTokenClient(configuration: AppleTokenClientConfigurat
                     headers: { accept: 'application/json', 'content-type': 'application/x-www-form-urlencoded' },
                     body: form.toString(),
                 });
+                appleStatus = response.status;
                 const body = await readBoundedBody(response, controller.signal);
                 if (body.trim().length > 0
                     && response.headers.get('content-type')?.split(';')[0].trim().toLowerCase() !== 'application/json') {
                     throw new AppleTokenClientError('UNAVAILABLE');
                 }
-                if (response.status === 400 && readResponseDocument(body).error === 'invalid_grant') {
-                    throw new AppleTokenClientError('INVALID_GRANT');
+                if (response.status === 400) {
+                    appleError = readResponseDocument(body).error;
+                    if (appleError === 'invalid_grant') throw new AppleTokenClientError('INVALID_GRANT');
                 }
                 if (response.status !== 200) throw new AppleTokenClientError('UNAVAILABLE');
                 if (operation === 'revoke' && body.trim().length === 0) return null;
@@ -161,6 +166,7 @@ export function createAppleTokenClient(configuration: AppleTokenClientConfigurat
             })()]);
         } catch (error) {
             controller.abort();
+            if (operation === 'exchange') reportProviderAuthFailure('apple-token-exchange', error, { appleStatus, appleError });
             throw new AppleTokenClientError(error instanceof AppleTokenClientError && error.code === 'INVALID_GRANT'
                 ? 'INVALID_GRANT' : 'UNAVAILABLE');
         } finally {
@@ -171,10 +177,20 @@ export function createAppleTokenClient(configuration: AppleTokenClientConfigurat
     return Object.freeze({
         async exchangeCode(authorizationCode: string) {
             const document = await request('exchange', authorizationCode);
-            if (!document || typeof document.id_token !== 'string' || document.id_token.length > ID_TOKEN_MAX_LENGTH
+            if (!document) {
+                reportProviderAuthFailure('apple-exchange-response', undefined, { appleResponseField: 'document' });
+                throw new AppleTokenClientError('UNAVAILABLE');
+            }
+            if (typeof document.id_token !== 'string' || document.id_token.length > ID_TOKEN_MAX_LENGTH
                 || document.id_token !== document.id_token.trim()
-                || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u.test(document.id_token)
-                || !isOpaqueToken(document.refresh_token)) throw new AppleTokenClientError('UNAVAILABLE');
+                || !/^[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/u.test(document.id_token)) {
+                reportProviderAuthFailure('apple-exchange-response', undefined, { appleResponseField: 'id-token' });
+                throw new AppleTokenClientError('UNAVAILABLE');
+            }
+            if (!isOpaqueToken(document.refresh_token)) {
+                reportProviderAuthFailure('apple-exchange-response', undefined, { appleResponseField: 'refresh-token' });
+                throw new AppleTokenClientError('UNAVAILABLE');
+            }
             // Access tokens and other provider metadata are not part of this client's contract.
             return Object.freeze({ idToken: document.id_token, refreshToken: document.refresh_token });
         },

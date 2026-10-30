@@ -7,12 +7,14 @@ const crypto = require('node:crypto');
 const jwt = require('jsonwebtoken');
 const bcrypt = require('bcryptjs');
 const httpClient = require('undici');
+const { execFileSync } = require('node:child_process');
 
 async function main() {
     assert.equal(process.versions.node, '26.12.0');
     assert.match(process.versions.openssl, /^3\.5\.(?:9|[1-9][0-9]+)$/u);
     assert.equal(process.getuid(), 1000);
     assert.equal(process.env.NODE_ENV, 'production');
+    execFileSync('apk', ['info', '--exists', 'musl=1.2.6-r3', 'musl-utils=1.2.6-r3'], { stdio: 'pipe' });
     assert.equal(require('undici/package.json').version, '7.30.1');
     assert.equal(existsSync('.env'), false);
     for (const entry of ['server', 'apple-token-revocation', 'submission-receipt-cleanup', 'account-deletion-audit']) {
