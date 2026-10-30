@@ -214,3 +214,30 @@ bursts or abuse. No expired key fallback or signature/nonce relaxation is added.
 A synthetic two-token signup with the real verifier reaches one mocked account
 creation; this does not establish successful real Apple signup or rule out a later
 unrelated failure.
+
+## Apple key-cache repair rollout
+
+On October 30, the owner approved deploying the reviewed key-cache fix. A fresh
+image-only build was required because the prior build exceeded the two-hour
+qualification limit. Build `86140067-c7cc-4606-8edb-858075842ef1` resolved exact
+source `02c816dbbb0a4556eac8e981136889be1cc62f5a`; its digest is
+`sha256:2fa6729abb0683c0a66404b10575576664e686adb929d71b459bb3019c31679b`.
+The full backend suite passed 960/960 using one worker; TypeScript, production
+Webpack (two existing optional supports-color warnings), exact-image runtime,
+focused Node 26 tests and compressed-request probes passed. The completed image
+scan had no blocking HIGH or CRITICAL findings. The classical builder signature
+and exact source provenance passed verification; the post-quantum signature was
+not cryptographically verified.
+
+After a reviewed zero-traffic readiness check and separate guarded promotion,
+revision `mickeyf-org-apple-diag-86140067c7cc46068edb858075842ef1` serves
+100 percent at generation 162. Four public GET traces reached it with status 200;
+initial logs showed no 5xx. The previous diagnostic revision remains Ready for
+rollback and build triggers are paused. Good-Loops public scores still match:
+p4-Vega 330; Three Bosses 118417 / 84447 ms / rank B. No account or score
+mutation was performed by the operator. Runtime flags and secret references
+were preserved. A real Apple signup remains necessary to establish end-to-end
+success; later failures cannot yet be ruled out. Do not deploy the older draft
+public-release branch without incorporating this live fix.
+
+Private operational receipts are in `jwks-fix-rollout-fresh-2026-10-30`.
