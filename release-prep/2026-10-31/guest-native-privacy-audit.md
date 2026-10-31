@@ -1,7 +1,8 @@
 # Guest and native privacy audit — 31 October 2026
 
-Read-only source review of release candidate `1b977236` (the later local commits
-add operator documentation and an offline ledger helper, not runtime changes).
+Read-only source review of release candidate `1b977236`. Later local commits
+also change parent registration, score controls and privacy localization; this
+audit does not independently review their complete runtime behavior.
 No live account, child data, production mutation, packet capture, or native
 device test was used. This is not a complete SDK data-safety declaration or a
 finding of compliance. The website currently serving users may be a different
