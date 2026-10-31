@@ -1,20 +1,21 @@
 import os, re, json, zipfile, hashlib, urllib.request, xml.etree.ElementTree as ET
 from pathlib import Path
+from native_notice_paths import dependency_directory, dependency_files
 root=Path(__file__).resolve().parents[2]; cache=Path(os.environ['USERPROFILE'])/'.gradle/caches/modules-2/files-2.1'
 lock=(root/'frontend/android/app/gradle.lockfile').read_text(encoding='utf-8')
 coords=sorted(l.split('=')[0] for l in lock.splitlines() if '=releaseRuntimeClasspath' in l or ('=' in l and 'releaseRuntimeClasspath' in l.split('=',1)[1].split(',')))
 print('coordinates',len(coords))
 entries={}; archives=[]; rows=[]
 for coord in coords:
- group,artifact,version=coord.split(':'); folder=cache/group/artifact/version
- poms=list(folder.rglob('*.pom'))
+ folder=dependency_directory(cache,coord)
+ poms=dependency_files(folder,'.pom')
  if len(poms)!=1: raise ValueError(f'Need exactly one cached POM: {coord}: {poms}')
  tree=ET.parse(poms[0]); ns={'p':'http://maven.apache.org/POM/4.0.0'}
  licenses=[n.text.strip() for n in tree.findall('./p:licenses/p:license/p:name',ns) if n.text]
  if coord=='com.google.guava:listenablefuture:1.0': licenses=['Apache License 2.0 (from guava-parent 26.0-android)']
  if len(licenses)!=1: raise ValueError(f'Unexpected license {coord}: {licenses}')
  rows.append(f'{coord} — {licenses[0]}')
- aars=list(folder.rglob('*.aar'))
+ aars=dependency_files(folder,'.aar')
  if len(aars)>1: raise ValueError(f'Multiple AARs: {coord}')
  if aars:
   with zipfile.ZipFile(aars[0]) as z:

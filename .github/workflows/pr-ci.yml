@@ -55,6 +55,9 @@ jobs:
       - name: Test iOS privacy manifest inspection
         run: python3 scripts/ios-privacy-manifests-test.py
 
+      - name: Test native notice cache path validation
+        run: python3 frontend/scripts/native_notice_paths_test.py
+
       - name: Validate Firebase deploy dependency tree
         run: |
           npm --prefix .github/firebase-deploy ls --omit=dev
