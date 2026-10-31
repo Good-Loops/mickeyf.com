@@ -88,3 +88,21 @@ test('minor provider restriction survives remount and adult reselection without 
     now++; assert.equal(remounted.minorProviderRestricted(), false);
     assert.equal(storage.values.size, 0);
 });
+
+test('a minor provider observation remains restricted if blocked storage later recovers', () => {
+    const stored = store(); let blocked = true;
+    const age = createRegistrationAge({ storage: () => { if (blocked) throw new Error('temporarily blocked'); return stored; },
+        load: async () => null });
+    age.rememberMinorProvider();
+    blocked = false;
+    assert.equal(age.minorProviderRestricted(), true);
+});
+
+test('a parent-required observation remains restricted if blocked storage later recovers', async () => {
+    const stored = store(); let blocked = true;
+    const age = createRegistrationAge({ storage: () => { if (blocked) throw new Error('temporarily blocked'); return stored; },
+        load: async () => null });
+    assert.equal(await age.check('parent-required', 13), 'parent-required');
+    blocked = false;
+    assert.equal(age.parentRequired(), true);
+});

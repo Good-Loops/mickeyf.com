@@ -53,7 +53,8 @@ export function createRegistrationAge({ load = loadAgeSource, storage = () => ty
         } catch { return true; }
     }
     function rememberParent(): void {
-        if (!parentRequired()) restrictedUntil = now() + PARENT_RESTRICTION_MS;
+        const alreadyRestricted = parentRequired();
+        if (!alreadyRestricted || restrictedUntil <= now()) restrictedUntil = now() + PARENT_RESTRICTION_MS;
         try { if (restrictedUntil) storage()?.setItem(parentKey, String(restrictedUntil)); }
         catch { /* Keep the protective in-memory result if storage becomes unavailable. */ }
     }
@@ -71,7 +72,8 @@ export function createRegistrationAge({ load = loadAgeSource, storage = () => ty
         } catch { return true; }
     }
     function rememberMinorProvider(): void {
-        if (!minorProviderRestricted()) minorProviderUntil = now() + PARENT_RESTRICTION_MS;
+        const alreadyRestricted = minorProviderRestricted();
+        if (!alreadyRestricted || minorProviderUntil <= now()) minorProviderUntil = now() + PARENT_RESTRICTION_MS;
         try { if (minorProviderUntil) storage()?.setItem(minorProviderKey, String(minorProviderUntil)); }
         catch { /* Retain the in-memory restriction when storage is unavailable. */ }
     }
@@ -80,9 +82,9 @@ export function createRegistrationAge({ load = loadAgeSource, storage = () => ty
         minorProviderRestricted,
         rememberMinorProvider,
         async check(selected: RegistrationAgeBand, parentRequiredBelow: number): Promise<RegistrationAgeBand | null> {
+            if (selected === 'parent-required') { rememberParent(); return selected; }
             if (parentRequired()) return 'parent-required';
             if (!Number.isInteger(parentRequiredBelow) || parentRequiredBelow < 1 || parentRequiredBelow > 18) return null;
-            if (selected === 'parent-required') { rememberParent(); return selected; }
             try {
                 const source = await load();
                 if (!source) return parentRequired() ? 'parent-required' : selected; // Web retains its neutral age screen.

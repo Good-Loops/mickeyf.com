@@ -142,7 +142,13 @@ export default function RegistrationGate({ children, purpose = 'signup' }: {
                     {country === 'unavailable' && <p role="status">Registration is not available for that country yet. Please do not choose a different country.</p>}
                     {rule && <label className="signup__field" htmlFor="registration-age"><span className="signup__label">Your age range</span>
                         <select id="registration-age" className="signup__input" required disabled={busy} value={ageBand}
-                            onChange={event => setAgeBand(event.target.value as RegistrationAgeBand)}>
+                            onChange={event => {
+                                const selected = event.target.value as RegistrationAgeBand;
+                                if (purpose === 'provider-login' && (selected === 'minor' || selected === 'parent-required')) {
+                                    registrationAge.rememberMinorProvider();
+                                }
+                                setAgeBand(selected);
+                            }}>
                             <option value="">Choose an age range</option>
                             <option value="parent-required">Under {rule.parentRequiredBelow}</option>
                             {rule.parentRequiredBelow < 18 && <option value="minor">{rule.parentRequiredBelow}–17</option>}
@@ -157,6 +163,8 @@ export default function RegistrationGate({ children, purpose = 'signup' }: {
             {purpose === 'signup' && (loading ? retry > 0 : signupPaused || !countryPolicy) && <button type="button" className="signup__submit"
                 aria-disabled={loading} onClick={() => { if (!loading) setRetry(value => value + 1); }}>Check again</button>}
             {feedback && <p role="alert">{feedback}</p>}
+            {feedback && purpose === 'provider-login' && registrationAge.minorProviderRestricted()
+                && <p>If you selected the wrong age range, <Link to="/privacy#privacy-children">contact us for help</Link>.</p>}
             {purpose === 'signup' && <p className="signup__account-link"><Link to="/">Continue as a guest</Link> · <Link to="/login">Log in</Link></p>}
         </div>
     </section>;

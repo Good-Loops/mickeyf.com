@@ -193,6 +193,7 @@ test('minor provider login shows a temporary notice and does not request a grant
     view.render(); await view.settle();
     assert(view.find(node => node.type === 'p' && node.props.role === 'alert'
         && node.props.children.startsWith('Google and Apple sign-in are temporarily unavailable.')));
+    assert(view.find(node => node.props?.to === '/privacy#privacy-children'));
     assert.deepEqual(view.calls, [['config']]);
     assert.equal(view.children.length, 0);
     await view.change('registration-age', 'adult');
@@ -208,3 +209,18 @@ test('disabled policy explains that provider sign-in is unavailable', async t =>
         && node.props.children.startsWith('Google and Apple sign-in are temporarily unavailable.')));
     assert.equal(view.children.length, 0);
 });
+
+for (const firstChoice of ['minor', 'parent-required']) {
+    test(`selecting ${firstChoice} then adult before continuing does not mount provider controls`, async t => {
+        const view = mount(t, creationPaused, 'provider-login'); view.render(); await view.settle();
+        await view.change('registration-country', 'US');
+        await view.change('registration-age', firstChoice);
+        await view.change('registration-age', 'adult');
+        await view.find(node => node.type === 'form').props.onSubmit({ preventDefault() {} });
+        view.render(); await view.settle();
+        assert.deepEqual(view.calls, [['config']]);
+        assert.equal(view.children.length, 0);
+        assert(view.find(node => node.type === 'p' && node.props.role === 'alert'
+            && node.props.children.startsWith('Google and Apple sign-in are temporarily unavailable.')));
+    });
+}

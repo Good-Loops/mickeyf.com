@@ -4,13 +4,16 @@ The child-audience provider login path now rejects an eligibility grant whose
 age band is `minor` before creating a provider challenge, and rechecks it before
 provider completion. Provider session creation rechecks the grant under a SQL
 row lock in the session transaction, after provider verification and before
-session insertion. A cancelled, expired, missing or minor grant cannot issue a
-session. The UI explains that provider sign-in is temporarily
+session insertion. A grant found cancelled, expired, missing or minor during
+that locked recheck cannot issue a session; its expiry may pass after the check
+while the transaction is finishing. The UI explains that provider sign-in is temporarily
 unavailable after a minor result and offers password login or guest play. Adult
 provider login, existing password login, guest play and signup authorization are
 separate paths. This change does not write or alter any account or score.
 The current tab remembers a minor provider restriction for 24 hours across
 component remounts, without storing an exact age, to block adult reselection.
+Selecting a younger band by mistake also temporarily blocks provider sign-in;
+the screen links to support. Signup selections are outside this guard.
 
 This is **not** a durable, cross-tab age restriction. The anonymous eligibility
 grant is bound to an individual signed cookie. A different anonymous binding may
