@@ -48,6 +48,12 @@
 		"chokidar": "^4.0.3",
 		"concurrently": "^10.0.6",
 		"http-server": "^14.1.1",
+		"minimatch": "file:vendor/minimatch-compat/minimatch-11.0.3-typedoc-compat.tgz",
 		"typedoc": "^0.28.20"
+	},
+	"overrides": {
+		"typedoc": {
+			"minimatch": "$minimatch"
+		}
 	}
 }

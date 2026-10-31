@@ -9,6 +9,9 @@ on:
       - 'docs-src/**'
       - 'scripts/clean-docs.mjs'
       - 'scripts/copy-doc-assets.mjs'
+      - 'scripts/typedoc-minimatch-compat.py'
+      - 'scripts/typedoc-minimatch-compat.test.mjs'
+      - 'vendor/minimatch-compat/**'
       - 'typedoc.merge.json'
       - 'package.json'
       - 'package-lock.json'
@@ -21,6 +24,9 @@ on:
       - 'docs-src/**'
       - 'scripts/clean-docs.mjs'
       - 'scripts/copy-doc-assets.mjs'
+      - 'scripts/typedoc-minimatch-compat.py'
+      - 'scripts/typedoc-minimatch-compat.test.mjs'
+      - 'vendor/minimatch-compat/**'
       - 'typedoc.merge.json'
       - 'package.json'
       - 'package-lock.json'
@@ -66,6 +72,9 @@ jobs:
       - name: Use project npm version
         run: npm install --global npm@11.6.2 --no-audit --no-fund
 
+      - name: Verify TypeDoc compatibility package provenance
+        run: python3 scripts/typedoc-minimatch-compat.py
+
       - name: Install root deps
         run: npm ci
 
@@ -76,7 +85,9 @@ jobs:
         run: npm --prefix backend ci
 
       - name: Build docs
-        run: npm run docs
+        run: |
+          node --test scripts/typedoc-minimatch-compat.test.mjs
+          npm run docs
 
       - name: Upload GitHub Pages artifact
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
