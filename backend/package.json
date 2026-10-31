@@ -13,6 +13,7 @@
         "test:child-inactivity:unit": "node --test -r ts-node/register ts/config/childInactivityDeployment.test.ts ts/accounts/childInactivityPolicy.test.ts ts/accounts/childInactivityWorkflow.test.ts ts/accounts/childInactivityParentService.test.ts ts/accounts/childInactivityInAppTarget.test.ts ts/accounts/childInactivityMaintenance.test.ts ts/routers/managedChildActivityRouter.test.ts ts/routers/childInactivityParentRouter.test.ts ts/accounts/runChildInactivityReview.test.ts ts/accounts/gcsRetentionJournal.test.ts ts/accounts/retentionPrimaryHealth.test.ts",
         "test:child-inactivity:sql": "node scripts/run-child-inactivity-sql-rehearsal.mjs",
         "child-inactivity:review": "ts-node ts/accounts/runChildInactivityReview.ts",
+        "child-inactivity:schema": "ts-node ts/migrations/runChildInactivitySchema.ts",
         "test:child-inactivity:review": "node --test -r ts-node/register ts/accounts/runChildInactivityReview.test.ts",
         "test:parent-form-retention:unit": "node --test -r ts-node/register ts/accounts/signedParentFormRetention.test.ts ts/accounts/runSignedParentFormRetention.test.ts",
         "migrations:child-signed-forms:plan": "ts-node ts/migrations/runChildSignedFormSchema.ts plan",

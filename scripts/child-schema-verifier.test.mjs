@@ -155,6 +155,20 @@ test('authenticated metadata reader watches actual monotonic duration and binds 
     assert.notEqual(refreshed.pitr.latestRecoveryTime, proof.pitr.latestRecoveryTime);
 });
 
+test('inactivity schema recheck requires the exact approved target, source and both pinned DDL hashes', async () => {
+    const f = cloudFixture(), safety = await f.reader.read(f.pins);
+    const body = { version: 1, operation: 'create-inactivity-tables', createdAt: new Date(f.clock.now).toISOString(),
+        sourceCommit: safety.sourceCommit, sqlHashes: ['bd927931230a1b677b279612c4e1f9958fa80f8bedac614aa4bf84df0a623eff',
+            '67c60d54a5d435a8e8a4204f164943e17c5f2418d7ebea78c4ce5aad439f1add'],
+        snapshot: { database:'cms', user:'synthetic-admin@%', serverUuid:uuid, serverVersion:'8.0.31', versionComment:'Synthetic', history:'a'.repeat(64) }, safety };
+    const plan = { ...body, sha256: fingerprint(body) };
+    await f.reader.read(f.pins, { approvedPlan: plan, confirmation: plan.sha256 });
+    assert.equal(f.clock.sleeps.length, 6);
+    const changed = structuredClone(body); changed.sqlHashes[0] = 'f'.repeat(64);
+    const bad = { ...changed, sha256: fingerprint(changed) };
+    await assert.rejects(f.reader.read(f.pins, { approvedPlan: bad, confirmation: bad.sha256 }), /approved inactivity/u);
+});
+
 test('reader rejects general/active/old-source pins before any cloud call', async () => {
     for (const phase of ['prepare', 'active']) {
         const f = cloudFixture(), other = fixture(phase);

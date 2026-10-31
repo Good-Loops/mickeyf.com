@@ -32,6 +32,9 @@ import { issueSessionToken } from '../security/sessionPolicy';
 import { verifyChildInactivityWarningReadiness } from './childInactivityRuntime';
 import { verifyParentManagedChildActivityReadiness } from '../migrations/parentManagedChildActivityReadiness';
 import { renderRuntimeGrantStatements } from '../security/runtimeGrantManifest';
+import { applyInactivitySchema, planInactivitySchema, InactivitySchemaError } from '../migrations/childInactivitySchemaOperation';
+import { CHILD_SIGNED_FORM_SQL_SHA256, childSignedFormFingerprint } from '../migrations/childSignedFormOperation';
+import type { ChildSignedFormMetadataSettings } from '../migrations/childSignedFormMetadata';
 
 const config = loadMigrationConfig();
 const rootPassword = 'migration-test-root-only';
@@ -359,4 +362,48 @@ test('composed deployment holds on restore guard and deletes only after an ackno
     assert.equal(deleted.length, 0);
     assert.equal((await journal.readIntentsForChild(childId)).length, 1);
     } finally { await limited.end(); await admin.query("DROP USER 'deployment_test'@'%'"); }
+});
+
+test('schema plan creates only the two reviewed tables and reports partial DDL without retrying', async () => {
+    async function run(partial: boolean) {
+        const db = `inactivity_test_${randomBytes(5).toString('hex')}`;
+        await admin.query(`CREATE DATABASE \`${db}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
+        const connection = await mysql.createConnection({ host: config.host, port: config.port, database: db, user: 'root', password: rootPassword });
+        try {
+            await connection.query(`CREATE TABLE parent_child_consents (child_uuid CHAR(36) CHARACTER SET ascii COLLATE ascii_bin PRIMARY KEY) ENGINE=InnoDB`);
+            await connection.query(`CREATE TABLE schema_migrations LIKE mickeyf_migration_test.schema_migrations`);
+            await connection.query(`INSERT INTO schema_migrations SELECT * FROM mickeyf_migration_test.schema_migrations`);
+            const [[identity]] = await connection.query<RowDataPacket[]>('SELECT CURRENT_USER() AS user,@@GLOBAL.server_uuid AS uuid,@@version AS version,@@version_comment AS comment');
+            const target = { project: 'synthetic', instance: 'synthetic', database: db, serverUuid: identity.uuid as string };
+            const settings = { target, expectedCurrentUser: identity.user, expectedServerVersion: identity.version,
+                expectedVersionComment: identity.comment } as ChildSignedFormMetadataSettings;
+            const source = { sourceCommit: 'a'.repeat(40), sqlSha256: CHILD_SIGNED_FORM_SQL_SHA256 };
+            const at = Date.now(), observedAt = new Date(at).toISOString(), hash = 'b'.repeat(64);
+            const proofBase = { schemaVersion: 1 as const, operation: 'child-schema-prerequisites' as const, sourceCommit: source.sourceCommit,
+                sqlSha256: source.sqlSha256, target, pinsSha256: hash, serviceSha256: hash, candidateSha256: hash,
+                fallbackSha256: hash, readerSince: new Date(at-301_000).toISOString(), readerVerifiedAt: new Date(at-1_000).toISOString(),
+                readerDurationMs: 300_000, automationSha256: hash, backup: { id: '1', endTime: new Date(at-30_000).toISOString(), sha256: hash },
+                cloudSqlSha256: hash };
+            const safety = { ...proofBase, observedAt, pitr: { earliestRecoveryTime: new Date(at-3600_000).toISOString(),
+                latestRecoveryTime: new Date(at-1000).toISOString() }, stableSha256: childSignedFormFingerprint(proofBase) };
+            const wrapped: MigrationConnection = { query: async (sql, values) => {
+                if (partial && /CREATE TABLE parent_child_inactivity_warnings/u.test(sql)) throw new Error('synthetic interrupted DDL');
+                return await connection.query(sql, values as never) as [unknown, unknown];
+            }, destroy() {} };
+            const deps = { connection: wrapped, settings, source, assertSource() {}, observeSafety: async () => safety, now: () => at };
+            const plan = await planInactivitySchema(deps);
+            await assert.rejects(applyInactivitySchema(deps, plan, { allow: true, planSha256: '0'.repeat(64), serverUuid: target.serverUuid }),
+                error => error instanceof InactivitySchemaError && error.state === 'blocked');
+            const approval = { allow: true, planSha256: plan.sha256, serverUuid: target.serverUuid };
+            if (partial) await assert.rejects(applyInactivitySchema(deps, plan, approval), error => error instanceof InactivitySchemaError && error.state === 'indeterminate');
+            else await applyInactivitySchema(deps, plan, approval);
+            const [tables] = await connection.query<RowDataPacket[]>(`SELECT TABLE_NAME AS name FROM information_schema.TABLES
+                WHERE TABLE_SCHEMA=? AND TABLE_NAME LIKE 'parent_%' ORDER BY TABLE_NAME`, [db]);
+            assert.deepEqual(tables.map(row => row.name), partial ? ['parent_child_consents','parent_managed_child_activity']
+                : ['parent_child_consents','parent_child_inactivity_warnings','parent_managed_child_activity']);
+            await assert.rejects(planInactivitySchema(deps), /blocked/u, 'existing or partial tables cannot be silently reused');
+        } finally { await connection.end(); await admin.query(`DROP DATABASE \`${db}\``); }
+    }
+    await run(false);
+    await run(true);
 });

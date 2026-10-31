@@ -52,6 +52,9 @@ export async function verifyChildInactivityWarningReadiness(database: Pick<Pool,
     const [triggers] = await database.query<RowDataPacket[]>(`SELECT TRIGGER_NAME FROM information_schema.TRIGGERS
         WHERE TRIGGER_SCHEMA=DATABASE() AND EVENT_OBJECT_TABLE='parent_child_inactivity_warnings'`);
     if (triggers.length !== 0) throw new Error('Inactivity warning storage has unexpected triggers.');
+    const [checks] = await database.query<RowDataPacket[]>(`SELECT CONSTRAINT_NAME AS name FROM information_schema.TABLE_CONSTRAINTS
+        WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='parent_child_inactivity_warnings' AND CONSTRAINT_TYPE='CHECK'`);
+    if (checks.length !== 1 || checks[0].name !== 'chk_inactivity_warning_receipt') throw new Error('Inactivity warning receipt check differs.');
     // Check the actual write privileges using the same columns as the service, without performing a write.
     await database.query(`EXPLAIN INSERT INTO parent_child_inactivity_warnings
         (child_uuid,parent_uuid,warning_uuid,activity_at,channel,target_digest,notice_digest,prepared_at)

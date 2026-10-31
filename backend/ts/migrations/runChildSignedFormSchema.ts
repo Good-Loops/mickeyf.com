@@ -9,6 +9,7 @@ import type { MigrationConnection } from './leaderboardSchema';
 import { CHILD_SIGNED_FORM_SQL_SHA256, ChildSignedFormOperationError,
     planChildSignedFormOperation, applyChildSignedFormOperation, verifyChildSignedFormOperation,
     type ChildSignedFormOperationDependencies, type ChildSignedFormPlan, type ChildReleaseSafety } from './childSignedFormOperation';
+import type { InactivitySchemaPlan } from './childInactivitySchemaOperation';
 
 const BACKEND = path.resolve(__dirname, '../..');
 const ROOT = path.resolve(BACKEND, '..');
@@ -56,7 +57,7 @@ export function childSchemaPrerequisiteEnvironment(env: Environment): NodeJS.Pro
     return Object.fromEntries(Object.entries(env).filter(([key, value]) => allowed.has(key.toUpperCase()) && typeof value === 'string'));
 }
 
-export function readChildSchemaPrerequisites(pinsPath: string, approvedPlan?: ChildSignedFormPlan,
+export function readChildSchemaPrerequisites(pinsPath: string, approvedPlan?: ChildSignedFormPlan | InactivitySchemaPlan,
     env: Environment = process.env, run = spawnSync): ChildReleaseSafety {
     const pins = path.resolve(pinsPath);
     const file = lstatSync(pins);

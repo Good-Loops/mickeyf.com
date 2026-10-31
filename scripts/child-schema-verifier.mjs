@@ -137,6 +137,21 @@ export function validateChildMigrationPrerequisiteProof(proof, pins, now = Date.
 }
 
 function approvedProof(plan, confirmation, pins, now) {
+    if (plan?.operation === 'create-inactivity-tables') {
+        keys(plan, ['version', 'operation', 'createdAt', 'sourceCommit', 'sqlHashes', 'snapshot', 'safety', 'sha256'], 'Approved inactivity schema plan');
+        keys(plan.snapshot, ['database', 'user', 'serverUuid', 'serverVersion', 'versionComment', 'history'], 'Approved inactivity target');
+        const { sha256, ...body } = plan;
+        requireThat(SHA.test(confirmation) && sha256 === confirmation && fingerprint(body) === confirmation && plan.version === 1
+            && plan.sourceCommit === pins.candidate.deployment.sourceCommit
+            && same(plan.sqlHashes, ['bd927931230a1b677b279612c4e1f9958fa80f8bedac614aa4bf84df0a623eff', '67c60d54a5d435a8e8a4204f164943e17c5f2418d7ebea78c4ce5aad439f1add'])
+            && plan.snapshot.database === TARGET.database && plan.snapshot.serverUuid === TARGET.serverUuid && SHA.test(plan.snapshot.history)
+            && typeof plan.snapshot.user === 'string' && /^[^\s@'`\x00-\x1f\x7f]+@[^\s@'`\x00-\x1f\x7f]+$/u.test(plan.snapshot.user)
+            && plan.snapshot.user !== 'cms_mickeyf@%' && /^8\.0\.31(?:[-.]|$)/u.test(plan.snapshot.serverVersion)
+            && typeof plan.snapshot.versionComment === 'string' && plan.snapshot.versionComment.length > 0 && plan.snapshot.versionComment.length <= 255
+            && Number.isFinite(instant(plan.createdAt)) && now - instant(plan.createdAt) >= 0 && now - instant(plan.createdAt) <= 300_000
+            && instant(plan.createdAt) >= instant(plan.safety?.observedAt), 'Only the exact fresh approved inactivity plan can reuse its observation');
+        return validateChildMigrationPrerequisiteProof(plan.safety, pins, now, false);
+    }
     keys(plan, ['schemaVersion', 'operation', 'createdAt', 'sourceCommit', 'sqlSha256', 'target', 'baseline', 'releaseSafety', 'sha256'], 'Approved child schema plan');
     keys(plan.target, ['project', 'instance', 'database', 'serverUuid'], 'Approved child schema target');
     keys(plan.baseline, ['identity', 'history', 'capability', 'schemaSha256', 'grantsSha256'], 'Approved child schema baseline');
