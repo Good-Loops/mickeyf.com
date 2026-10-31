@@ -53,12 +53,12 @@ test('a pinned administrator can attest original primary absence only under a st
         epoch: '44444444-4444-4444-8444-444444444444', generation: '7', expiresAt: '2026-01-01T00:00:00.000Z' };
     const pins = { database: guard.database, serverUuid: guard.serverUuid, currentUser: 'admin@localhost',
         confirmation: 'ORIGINAL PRIMARY DRAINED AND ACCOUNT ABSENT' };
-    let exists = false; let guardChanged = false; let reads = 0; let recorded: RetentionResolution | undefined;
+    let exists = false; let guardChanged = false; let writerCount = 0; let reads = 0; let recorded: RetentionResolution | undefined;
     const connection = { destroy() {}, async query(query: { sql: string }) {
+        if (query.sql.includes('USER_PRIVILEGES')) return [[{ count: 1 }], []];
+        if (query.sql.includes('PROCESSLIST')) return [[{ count: writerCount }], []];
         if (query.sql.includes('CURRENT_USER')) return [[{ db: pins.database, user: pins.currentUser,
             serverUuid: pins.serverUuid, nowUtc: '2024-01-02T00:00:00.000000Z' }], []];
-        if (query.sql.includes('USER_PRIVILEGES')) return [[{ count: 1 }], []];
-        if (query.sql.includes('PROCESSLIST')) return [[{ count: 0 }], []];
         if (query.sql.includes('SELECT account_uuid')) return [exists ? [{ account_uuid: childId }] : [], []];
         return [[], []];
     } } as unknown as PoolConnection;
@@ -69,7 +69,10 @@ test('a pinned administrator can attest original primary absence only under a st
     exists = true;
     assert.equal(await reconcileDeletedRetentionIntent(connection, journal, intent, pins, key), false);
     assert.equal(recorded, undefined);
-    exists = false; reads = 0; guardChanged = true;
+    exists = false; writerCount = 1;
+    await assert.rejects(reconcileDeletedRetentionIntent(connection, journal, intent, pins, key), /Keep restoration on hold/);
+    assert.equal(recorded, undefined); writerCount = 0;
+    reads = 0; guardChanged = true;
     await assert.rejects(reconcileDeletedRetentionIntent(connection, journal, intent, pins, key), /Keep restoration on hold/);
     assert.equal(recorded, undefined);
     reads = 0; guardChanged = false;

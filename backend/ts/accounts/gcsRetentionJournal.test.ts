@@ -148,6 +148,18 @@ test('restore guard is authenticated, generation-pinned and cannot blindly overw
     await assert.rejects(store.readRestoreGuard(), RetentionJournalUnavailableError);
 });
 
+test('initial guard creation refuses evidence of a previously soft-deleted guard', async () => {
+    let writes = 0;
+    const client: JournalHttpClient = { async request(request) {
+        if (request.method === 'POST') { writes++; throw new Error('unexpected write'); }
+        return { status: 200, data: { kind: 'storage#objects', items: [{ name: 'v1/control/restore-guard.json' }] } };
+    } };
+    const store = journal(client);
+    await assert.rejects(store.writeRestoreGuard({ state: 'hold', database: 'synthetic', serverUuid: intent.parentId,
+        epoch: intent.warningId, expiresAt: '2026-02-01T00:00:00.000Z' }, '0'), RetentionJournalUnavailableError);
+    assert.equal(writes, 0);
+});
+
 test('resolution is append-only, authenticated, and bound to the exact conditional intent', async () => {
     const io = transport(); const store = journal(io.client);
     await store.recordRetentionIntent(intent);

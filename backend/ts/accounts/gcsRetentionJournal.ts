@@ -136,6 +136,16 @@ export function createGcsRetentionJournal(options: Options): RetentionJournal & 
     async function writeRestoreGuard(guard: RestoreGuard, expectedGeneration: string): Promise<string> {
         // A caller must first know the exact current generation, or use zero only for first creation.
         if (!/^(?:0|[1-9][0-9]*)$/u.test(expectedGeneration)) throw new TypeError('Invalid restore guard generation.');
+        if (expectedGeneration === '0') {
+            const value = await request({ method: 'GET', url: base, responseType: 'json',
+                params: { prefix: guardName, softDeleted: true, maxResults: 1, fields: 'kind,nextPageToken,items(name)' } });
+            if (!value || typeof value !== 'object' || Array.isArray(value)) throw new RetentionJournalUnavailableError();
+            const page = value as Record<string, unknown>;
+            if (page.kind !== 'storage#objects' || page.nextPageToken !== undefined
+                || (page.items !== undefined && (!Array.isArray(page.items) || page.items.length !== 0))) {
+                throw new RetentionJournalUnavailableError();
+            }
+        }
         const body = signedGuard(guard);
         const object = info(await request({ method: 'POST', url: `${API}/upload/storage/v1/b/${bucket}/o`,
             params: { uploadType: 'media', name: guardName, ifGenerationMatch: expectedGeneration, fields },

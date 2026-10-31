@@ -17,6 +17,8 @@ import { createChildInactivitySqlStore } from './childInactivitySqlStore';
 import { createInAppInactivityQualityResolver } from './childInactivityInAppTarget';
 import { createPinnedPrimaryHealth } from './retentionPrimaryHealth';
 import { reconcileDeletedRetentionIntent, reconcileKeptRetentionIntent, reconcileRestoredDeletedIntent } from './retentionReconciliation';
+import { executeRetentionReconciliation } from './runRetentionReconciliation';
+import type { createGcsRetentionJournal } from './gcsRetentionJournal';
 import type { RetentionIntent } from './childInactivityWorkflow';
 import type { RetentionResolution } from './gcsRetentionJournal';
 import { createChildInactivityParentService } from './childInactivityParentService';
@@ -180,6 +182,27 @@ test('administrator reconciliation verifies actual primary identity and absence 
     assert.equal(await reconcileDeletedRetentionIntent(admin as unknown as mysql.PoolConnection, journal,
         { ...intent, childId }, pins, Buffer.alloc(32, 8)), false);
     assert.equal(recorded, null);
+});
+
+test('operator command pins a real SQL target before confirming a deleted intent', async () => {
+    const [[identity]] = await admin.query<RowDataPacket[]>('SELECT DATABASE() AS db,CURRENT_USER() AS user,@@GLOBAL.server_uuid AS id');
+    const guard = { state: 'hold' as const, database: identity.db as string, serverUuid: identity.id as string,
+        epoch: randomUUID(), expiresAt: '2099-01-01T00:00:00.000Z', generation: '1' };
+    const intent: RetentionIntent = { parentId: randomUUID(), childId: randomUUID(), warningId: randomUUID(),
+        activityAt: '2020-01-01T00:00:00.000000Z', deliveredAt: '2023-01-01T00:00:00.000000Z', channel: 'in-app',
+        targetDigest: 'a'.repeat(64), noticeDigest: 'b'.repeat(64), receiptDigest: 'c'.repeat(64) };
+    let records = 0;
+    const journal = { async readRestoreGuard() { return guard; }, async verifyRetentionIntent() { return true; },
+        async readResolution() { return null; }, async recordResolution() { records++; } } as unknown as ReturnType<typeof createGcsRetentionJournal>;
+    const pins = { database: guard.database, serverUuid: guard.serverUuid, originalServerUuid: guard.serverUuid, currentUser: identity.user as string };
+    await assert.rejects(executeRetentionReconciliation('confirm-deleted',
+        { confirmation: 'ORIGINAL PRIMARY DRAINED AND ACCOUNT ABSENT', intent }, { ...pins, serverUuid: randomUUID() },
+        journal, database, Buffer.alloc(32, 8)));
+    assert.equal(records, 0);
+    assert.deepEqual(await executeRetentionReconciliation('confirm-deleted',
+        { confirmation: 'ORIGINAL PRIMARY DRAINED AND ACCOUNT ABSENT', intent }, pins, journal, database, Buffer.alloc(32, 8)),
+    { operation: 'confirm-deleted', confirmed: true });
+    assert.equal(records, 1);
 });
 
 test('verified deleted outcome applies only to pinned isolated SQL restore without later activity', async () => {
