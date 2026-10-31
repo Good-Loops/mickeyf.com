@@ -72,6 +72,7 @@ async function fixture(t, width, { pendingBegin = false, pendingApple = false, p
             window.google = { accounts: { id: {
                 initialize(options) { window.__googleLayoutOptions = options; },
                 renderButton(host, options) {
+                    window.__googleLayoutState = options.state;
                     const control = document.createElement('button');
                     control.textContent = 'Google SDK test control';
                     control.dataset.testid = 'synthetic-google-sdk';
@@ -125,6 +126,41 @@ async function approveAdult(page) {
     await page.locator('#registration-age').selectOption('adult');
     await page.getByRole('button', { name: 'Continue', exact: true }).click();
 }
+
+test('Google credentials arriving as the route changes cannot start completion', async t => {
+    const { page, calls } = await fixture(t, 390);
+    await page.goto(`${origin}/login`);
+    await approveAdult(page);
+    await page.getByTestId('synthetic-google-sdk').waitFor();
+    await page.evaluate(() => {
+        const push = history.pushState;
+        history.pushState = function (...args) {
+            const result = push.apply(this, args);
+            if (location.pathname === '/') queueMicrotask(() => {
+                window.__googleLayoutOptions.callback({ state: window.__googleLayoutState, credential: 'synthetic.identity.signature' });
+                window.__googleDeliveredAfterNavigation = true;
+            });
+            return result;
+        };
+    });
+    await page.getByRole('link', { name: 'Home', exact: true }).click();
+    await page.waitForFunction(() => window.__googleDeliveredAfterNavigation === true);
+    await page.waitForLoadState('networkidle');
+    assert.equal(calls.filter(call => call.path === '/auth/providers/complete').length, 0);
+    assert.equal(await page.evaluate(() => localStorage.length + sessionStorage.length), 0);
+});
+
+test('Google remains usable after query and fragment changes on the same page', async t => {
+    const { page, calls } = await fixture(t, 390);
+    await page.goto(`${origin}/login`);
+    await approveAdult(page);
+    await page.getByTestId('synthetic-google-sdk').waitFor();
+    await page.evaluate(() => history.replaceState(history.state, '', '/login?view=test#section'));
+    const response = page.waitForResponse(result => new URL(result.url()).pathname === '/auth/providers/complete');
+    await page.getByTestId('synthetic-google-sdk').click();
+    await response;
+    assert.equal(calls.filter(call => call.path === '/auth/providers/complete').length, 1);
+});
 
 test('Google preparation keeps a disabled named pill at the final control height without visible loading copy', async t => {
     const { page, releaseBegin } = await fixture(t, 390, { pendingBegin: true });

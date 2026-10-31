@@ -112,9 +112,19 @@ for (const mode of ['blocked', 'wrong-state']) test(`browser ${mode} sends no cr
 test('navigating away cancels Apple and ignores delayed SDK success without storing or submitting credentials', async t => {
     const { page, calls } = await fixture(t, 'pending');
     await openApple(page);
+    await page.evaluate(() => {
+        const push = history.pushState;
+        history.pushState = function (...args) {
+            const result = push.apply(this, args);
+            // Resolve as soon as the URL changes, before React can unmount the old page.
+            if (location.pathname === '/') queueMicrotask(() => { window.__finishApple(); window.__appleFinishedAfterNavigation = true; });
+            return result;
+        };
+    });
     await page.getByRole('link', { name: 'Home', exact: true }).click();
     await page.waitForURL(url => url.pathname === '/');
-    await page.evaluate(() => window.__finishApple());
+    await page.waitForFunction(() => window.__appleFinishedAfterNavigation === true);
+    await page.waitForLoadState('networkidle');
     assert.equal(calls.filter(call => call.path.endsWith('/complete')).length, 0);
     assert.equal(await page.evaluate(() => localStorage.length + sessionStorage.length), 0);
 });

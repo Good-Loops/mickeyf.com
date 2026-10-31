@@ -996,6 +996,109 @@ test('an authenticated or uncertain renewal invalidates a queued provider comple
     }
 });
 
+test('a queued Apple or Google completion does not send credentials after its page loses ownership', async () => {
+    for (const clientKey of ['apple-web', 'apple-ios', 'apple-android', 'google-web']) {
+        let releaseRenewal;
+        const renewalResponse = new Promise(resolve => { releaseRenewal = resolve; });
+        const calls = [];
+        let current = true;
+        const api = createAuthApi(apiBase, async url => {
+            calls.push(url);
+            if (url.endsWith('/begin')) return Response.json(providerChallenge);
+            if (url.endsWith('/auth/renew')) { await renewalResponse; return Response.json({ loggedIn: false }); }
+            assert.fail('a departed page must not send a queued credential');
+        });
+        const prepared = await api.prepareProviderLogin(clientKey);
+        const renewal = api.renewRequest();
+        const completion = api.completeProviderLogin(prepared.handle, credentialFor(clientKey), { isCurrent: () => current });
+        await nextTurn();
+        current = false;
+        releaseRenewal();
+        await renewal;
+        assert.deepEqual(await completion, { error: 'CANCELLED' });
+        assert.equal(calls.filter(url => url.endsWith('/complete')).length, 0);
+    }
+});
+
+test('provider link cannot complete when the page departs during a pending SDK response', async () => {
+    let releaseCredential;
+    const credential = new Promise(resolve => { releaseCredential = resolve; });
+    const calls = [];
+    let current = true;
+    const api = createAuthApi(apiBase, async url => {
+        calls.push(url);
+        if (url.endsWith('/begin')) return Response.json(providerChallenge);
+        assert.fail('a departed page cannot complete a provider link');
+    });
+    const operation = api.runProviderAuthentication({ action: 'link', clientKey: 'apple-web', password: 'synthetic' },
+        async () => credential, { isCurrent: () => current });
+    await nextTurn();
+    current = false;
+    releaseCredential(appleCredential);
+    assert.deepEqual(await operation, { error: 'CANCELLED' });
+    assert.equal(calls.filter(url => url.endsWith('/complete')).length, 0);
+});
+
+test('a departed page cannot complete provider linking and ownership errors fail closed', async () => {
+    for (const owner of [() => false, () => { throw new Error('synthetic owner error'); }]) {
+        const calls = [];
+        const api = createAuthApi(apiBase, async url => {
+            calls.push(url);
+            if (url.endsWith('/begin')) return Response.json(providerChallenge);
+            assert.fail('a departed page must not send link credentials');
+        });
+        assert.deepEqual(await api.runProviderAuthentication({ action: 'link', clientKey: 'apple-web', password: 'synthetic' },
+            async () => appleCredential, { isCurrent: owner }), { error: 'CANCELLED' });
+        assert.equal(calls.filter(url => url.endsWith('/complete')).length, 0);
+    }
+});
+
+test('a departed page cannot start a queued provider challenge or open its SDK', async () => {
+    for (const mode of ['prepared', 'link']) {
+        let releaseRenewal;
+        const blocked = new Promise(resolve => { releaseRenewal = resolve; });
+        const calls = [];
+        let current = true;
+        const api = createAuthApi(apiBase, async url => {
+            calls.push(url);
+            if (url.endsWith('/auth/renew')) { await blocked; return Response.json({ loggedIn: false }); }
+            assert.fail('a departed page cannot start a provider challenge');
+        });
+        const renewal = api.renewRequest();
+        const options = { isCurrent: () => current };
+        const operation = mode === 'prepared'
+            ? api.prepareProviderLogin('google-web', options)
+            : api.runProviderAuthentication({ action: 'link', clientKey: 'apple-web', password: 'synthetic' },
+                async () => assert.fail('a departed page cannot open a provider SDK'), options);
+        await nextTurn();
+        current = false;
+        releaseRenewal();
+        await renewal;
+        assert.deepEqual(await operation, { error: 'CANCELLED' });
+        assert.equal(calls.length, 1);
+    }
+});
+
+test('a departed page waits for an already-sent challenge but does not open its provider SDK', async () => {
+    let releaseBegin;
+    const blocked = new Promise(resolve => { releaseBegin = resolve; });
+    const calls = [];
+    let current = true;
+    const api = createAuthApi(apiBase, async url => {
+        calls.push(url);
+        if (url.endsWith('/begin')) { await blocked; return Response.json(providerChallenge); }
+        assert.fail('a departed page cannot complete a provider challenge');
+    });
+    const operation = api.runProviderAuthentication({ action: 'link', clientKey: 'apple-web', password: 'synthetic' },
+        async () => assert.fail('a departed page cannot open a provider SDK'), { isCurrent: () => current });
+    await nextTurn();
+    assert.equal(calls.length, 1);
+    current = false;
+    releaseBegin();
+    assert.deepEqual(await operation, { error: 'CANCELLED' });
+    assert.equal(calls.length, 1);
+});
+
 test('prepared challenge lifetime counts begin response latency and is checked again before queued completion', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
     for (const expireDuringBegin of [true, false]) {
@@ -1074,6 +1177,7 @@ test('cancelling an idle or queued prepared completion ignores late credentials 
 
 test('split completion waits for accepted cookie response and verification despite cancellation before queued logout', async () => {
     const controller = new AbortController();
+    let current = true;
     let releaseComplete;
     let releaseVerification;
     const completed = new Promise(resolve => { releaseComplete = resolve; });
@@ -1091,9 +1195,10 @@ test('split completion waits for accepted cookie response and verification despi
         }
         calls.push('logout'); return Response.json({ loggedOut: true });
     });
-    const prepared = await api.prepareProviderLogin('google-web', { signal: controller.signal });
+    const prepared = await api.prepareProviderLogin('google-web', { signal: controller.signal, isCurrent: () => current });
     const completion = api.completeProviderLogin(prepared.handle, providerToken);
     await nextTurn();
+    current = false;
     controller.abort();
     const logout = api.logoutRequest();
     await nextTurn();

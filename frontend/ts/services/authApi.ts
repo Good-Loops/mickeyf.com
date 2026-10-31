@@ -34,7 +34,7 @@ export type ProviderAuthenticationResult =
 export type AppleProviderCredential = Readonly<{ idToken: string; authorizationCode: string }>;
 export type ProviderCredential = string | AppleProviderCredential;
 export type AcquireProviderCredential = (challenge: ProviderAuthenticationChallenge, signal: AbortSignal) => Promise<ProviderCredential>;
-export type ProviderAuthenticationOptions = Readonly<{ signal?: AbortSignal }>;
+export type ProviderAuthenticationOptions = Readonly<{ signal?: AbortSignal; isCurrent?: () => boolean }>;
 declare const preparedProviderLogin: unique symbol;
 /** Only the auth API instance that prepared this opaque handle can complete it. */
 export type PreparedProviderLogin = Readonly<{ [preparedProviderLogin]: true }>;
@@ -108,17 +108,24 @@ function validProviderUserName(value: unknown): value is string {
 }
 
 function validProviderOptions(options: unknown): options is ProviderAuthenticationOptions {
-    if (!isRecord(options) || Object.keys(options).some(key => key !== 'signal')) return false;
+    if (!isRecord(options) || Object.keys(options).some(key => key !== 'signal' && key !== 'isCurrent')
+        || (options.isCurrent !== undefined && typeof options.isCurrent !== 'function')) return false;
     const signal = options.signal;
     return signal === undefined || (isRecord(signal) && typeof signal.aborted === 'boolean'
         && typeof signal.addEventListener === 'function' && typeof signal.removeEventListener === 'function');
 }
 
 function validCompletionOptions(options: unknown): options is CompleteProviderLoginOptions {
-    return isRecord(options) && Object.keys(options).every(key => key === 'signal' || key === 'rememberMe' || key === 'userName')
+    return isRecord(options) && Object.keys(options).every(key => key === 'signal' || key === 'isCurrent' || key === 'rememberMe' || key === 'userName')
         && (options.rememberMe === undefined || typeof options.rememberMe === 'boolean')
         && (options.userName === undefined || validProviderUserName(options.userName))
-        && validProviderOptions({ signal: options.signal });
+        && validProviderOptions({ signal: options.signal, isCurrent: options.isCurrent });
+}
+
+function providerOperationCancelled(signal?: AbortSignal, isCurrent?: () => boolean): boolean {
+    if (signal?.aborted) return true;
+    try { return isCurrent !== undefined && isCurrent() !== true; }
+    catch { return true; }
 }
 
 function validProviderToken(idToken: unknown): idToken is string {
@@ -149,7 +156,7 @@ function credentialFailure(error: unknown): { error: string } {
 }
 
 async function acquireProviderProof(clientKey: string, challenge: ProviderAuthenticationChallenge, acquireCredential: AcquireProviderCredential,
-    deadline: number, signal?: AbortSignal): Promise<{ idToken: string; authorizationCode?: string } | { error: string }> {
+    deadline: number, signal?: AbortSignal, isCurrent?: () => boolean): Promise<{ idToken: string; authorizationCode?: string } | { error: string }> {
     const controller = new AbortController();
     let cancellation: string | null = null;
     let cancel!: (reason: string) => void;
@@ -167,7 +174,7 @@ async function acquireProviderProof(clientKey: string, challenge: ProviderAuthen
     try {
         if (signal?.aborted) abort();
         const credential = Promise.resolve().then(async () => {
-            if (cancellation !== null) return { error: cancellation };
+            if (cancellation !== null || providerOperationCancelled(signal, isCurrent)) return { error: cancellation ?? 'CANCELLED' };
             try {
                 const proof = readProviderCredential(clientKey, await acquireCredential(challenge, controller.signal));
                 return proof ?? { error: 'INVALID_PROVIDER_TOKEN' };
@@ -190,7 +197,7 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
     type PreparedLogin = {
         clientKey: string; state: string; nonce: string; deadline: number;
         action: 'login' | 'signup';
-        generation: number; signal?: AbortSignal; used: boolean;
+        generation: number; signal?: AbortSignal; isCurrent?: () => boolean; used: boolean;
     };
     const preparedLogins = new WeakMap<PreparedProviderLogin, PreparedLogin>();
 
@@ -198,8 +205,9 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
         providerLoginGeneration++;
     }
 
-    function preparedLoginError(login: PreparedLogin, signal?: AbortSignal): string | null {
-        if (login.signal?.aborted || signal?.aborted || login.generation !== providerLoginGeneration) return 'CANCELLED';
+    function preparedLoginError(login: PreparedLogin, signal?: AbortSignal, isCurrent?: () => boolean): string | null {
+        if (providerOperationCancelled(login.signal, login.isCurrent) || providerOperationCancelled(signal, isCurrent)
+            || login.generation !== providerLoginGeneration) return 'CANCELLED';
         return Date.now() >= login.deadline ? 'INVALID_ATTEMPT' : null;
     }
 
@@ -422,28 +430,32 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
     }
 
     async function runProviderAuthentication(input: ProviderAuthenticationInput, acquireCredential: AcquireProviderCredential,
-        signal?: AbortSignal): Promise<ProviderAuthenticationResult> {
-        if (signal?.aborted) return { error: 'CANCELLED' };
+        signal?: AbortSignal, isCurrent?: () => boolean): Promise<ProviderAuthenticationResult> {
+        if (providerOperationCancelled(signal, isCurrent)) return { error: 'CANCELLED' };
         if (input.action === 'signup' || registrationOptions.requireChildAudience && input.action === 'login') {
             const error = await ensureGeneralRegistration(signal, input.action === 'signup');
             if (error) return { error };
         } else generalRegistrationDeadline = 0;
+        if (providerOperationCancelled(signal, isCurrent)) return { error: 'CANCELLED' };
         const beginning = await postProviderOperation('begin', { action: input.action, clientKey: input.clientKey });
-        if (signal?.aborted) return { error: 'CANCELLED' };
+        if (providerOperationCancelled(signal, isCurrent)) return { error: 'CANCELLED' };
         if (!beginning.ok) return { error: beginning.error };
         const challenge = readProviderChallenge(beginning.body);
         if (!challenge) return { error: 'INVALID_RESPONSE' };
         const deadline = Date.now() + challenge.expiresInSeconds * 1000;
-        const credential = await acquireProviderProof(input.clientKey, challenge, acquireCredential, deadline, signal);
-        if (signal?.aborted) return { error: 'CANCELLED' };
+        const credential = await acquireProviderProof(input.clientKey, challenge, acquireCredential, deadline, signal, isCurrent);
+        if (providerOperationCancelled(signal, isCurrent)) return { error: 'CANCELLED' };
         if ('error' in credential) return credential;
         if (Date.now() >= deadline) return { error: 'INVALID_ATTEMPT' };
-        const result = await completeProviderAuthentication(input, challenge.state, credential);
+        const result = await completeProviderAuthentication(input, challenge.state, credential, isCurrent);
         return 'signupRequired' in result ? { error: 'UNAVAILABLE' } : result;
     }
 
     async function completeProviderAuthentication(input: ProviderAuthenticationInput, state: string,
-        credential: { idToken: string; authorizationCode?: string }): Promise<ProviderCompletionResponse> {
+        credential: { idToken: string; authorizationCode?: string }, isCurrent?: () => boolean): Promise<ProviderCompletionResponse> {
+        // A URL can change before React's unmount effect aborts its pending operation.
+        // Check ownership after the serialized queue clears, immediately before sending credentials.
+        if (providerOperationCancelled(undefined, isCurrent)) return { error: 'CANCELLED' };
         const previousRevocation = appleRevocationPending;
         if (input.action === 'login' || input.action === 'signup') appleRevocationPending = false;
         // Once complete is sent, await its cookie mutation and verification even
@@ -499,20 +511,22 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
             return Promise.resolve({ error: 'INVALID_REQUEST' });
         }
         const signal = options.signal;
-        if (signal?.aborted) return Promise.resolve({ error: 'CANCELLED' });
+        const isCurrent = options.isCurrent;
+        if (providerOperationCancelled(signal, isCurrent)) return Promise.resolve({ error: 'CANCELLED' });
         const generation = ++providerLoginGeneration;
         return enqueueMutation(async () => {
-            if (signal?.aborted || generation !== providerLoginGeneration) return { error: 'CANCELLED' };
+            if (providerOperationCancelled(signal, isCurrent) || generation !== providerLoginGeneration) return { error: 'CANCELLED' };
             if (action === 'signup' || registrationOptions.requireChildAudience && action === 'login') {
                 const error = await ensureGeneralRegistration(signal, action === 'signup');
                 if (error) return { error };
-                if (signal?.aborted || generation !== providerLoginGeneration) return { error: 'CANCELLED' };
+                if (providerOperationCancelled(signal, isCurrent) || generation !== providerLoginGeneration) return { error: 'CANCELLED' };
             } else generalRegistrationDeadline = 0;
+            if (providerOperationCancelled(signal, isCurrent)) return { error: 'CANCELLED' };
             const startedAt = Date.now();
             // Begin changes the cookie too. Even an abandoned render must wait
             // for this response before a password login can use the queue.
             const beginning = await postProviderOperation('begin', { action, clientKey });
-            if (signal?.aborted || generation !== providerLoginGeneration) return { error: 'CANCELLED' };
+            if (providerOperationCancelled(signal, isCurrent) || generation !== providerLoginGeneration) return { error: 'CANCELLED' };
             if (!beginning.ok) return { error: beginning.error };
             const challenge = readProviderChallenge(beginning.body);
             if (!challenge) return { error: 'INVALID_RESPONSE' };
@@ -520,7 +534,7 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
             if (Date.now() >= deadline) return { error: 'INVALID_ATTEMPT' };
             const handle = Object.freeze({}) as PreparedProviderLogin;
             preparedLogins.set(handle, { clientKey, action, state: challenge.state, nonce: challenge.nonce,
-                deadline, generation, signal, used: false });
+                deadline, generation, signal, isCurrent, used: false });
             return { challenge, handle };
         });
     }
@@ -535,22 +549,24 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
         }
         login.used = true;
         const signal = options.signal;
-        const error = preparedLoginError(login, signal);
+        const isCurrent = options.isCurrent;
+        const error = preparedLoginError(login, signal, isCurrent);
         if (error) return Promise.resolve({ error });
         const proof = readProviderCredential(login.clientKey, credential);
         if (!proof) return Promise.resolve({ error: 'INVALID_PROVIDER_TOKEN' });
         const rememberMe = options.rememberMe === true;
         const userName = options.userName?.trim();
         return enqueueMutation(async () => {
-            const queuedError = preparedLoginError(login, signal);
+            const queuedError = preparedLoginError(login, signal, isCurrent);
             if (queuedError) return { error: queuedError };
             const startedAt = Date.now();
             const result = await completeProviderAuthentication({ action: login.action, clientKey: login.clientKey, rememberMe,
                 ...(login.action === 'signup' ? { userName } : {}) },
-                login.state, proof);
+                login.state, proof, () => !providerOperationCancelled(login.signal, login.isCurrent)
+                    && !providerOperationCancelled(signal, isCurrent));
             if (!('signupRequired' in result)) return result;
             if (registrationOptions.requireChildAudience) return { error: 'REGISTRATION_REQUIRED' };
-            const continuationError = preparedLoginError(login, signal);
+            const continuationError = preparedLoginError(login, signal, isCurrent);
             if (continuationError) return { error: continuationError };
             if (result.challenge.nonce !== login.nonce || result.challenge.state === login.state) {
                 return { error: 'INVALID_RESPONSE' };
@@ -672,10 +688,12 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
             }
             const request = { ...input };
             const signal = options.signal;
+            const isCurrent = options.isCurrent;
+            if (providerOperationCancelled(signal, isCurrent)) return Promise.resolve({ error: 'CANCELLED' });
             invalidatePreparedLogins();
             // Keep the provider dialog in the queue too: another auth mutation
             // would replace or clear the cookie binding the pending challenge.
-            return enqueueMutation(() => runProviderAuthentication(request, acquireCredential, signal));
+            return enqueueMutation(() => runProviderAuthentication(request, acquireCredential, signal, isCurrent));
         },
     };
 }

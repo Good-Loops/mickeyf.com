@@ -7,6 +7,8 @@ import Swal from './siteAlert';
 import { requestProviderUsername } from './providerSignupPrompt';
 import { LEGACY_PUBLIC_API_PREVIEW } from '@/config/apiConfig';
 
+const currentPagePath = () => typeof window === 'undefined' ? null : window.location.pathname;
+
 type ProviderAction = 'login' | 'link' | 'signup';
 type ProviderSignInControlsProps = {
     action: ProviderAction;
@@ -137,10 +139,12 @@ export function InlineGoogleSignIn({ client, action = 'login', userName = '', re
         if (LEGACY_PUBLIC_API_PREVIEW || client.issuance === false || disabled || loading || !host.current || latest.current.isAuthenticated) return;
         const element = host.current;
         const controller = new AbortController();
+        const pagePath = currentPagePath();
+        const isCurrent = () => currentPagePath() === pagePath;
         let current = true;
         let ownsOperation = false;
         let claimedLock: ProviderSignInControlsProps['operationLock'];
-        const active = () => current && !controller.signal.aborted;
+        const active = () => current && !controller.signal.aborted && isCurrent();
         const fail = (code: string) => {
             setPhase('retry');
             setNeedsAccount(action === 'login' && ['REGISTRATION_REQUIRED', 'NOT_LINKED'].includes(code));
@@ -157,7 +161,7 @@ export function InlineGoogleSignIn({ client, action = 'login', userName = '', re
                 // Catch immediately so a slow server response never leaves a rejected preload unhandled.
                 const sdkReady = preloadProviderCredential(client, controller.signal).then(() => true, () => false);
                 // Signup preserves the registration preflight cookie; ordinary login retains its existing flow.
-                const prepared = await latest.current.prepareProviderLogin(client.clientKey, { signal: controller.signal }, action);
+                const prepared = await latest.current.prepareProviderLogin(client.clientKey, { signal: controller.signal, isCurrent }, action);
                 if (!active()) return;
                 if ('error' in prepared) { fail(prepared.error); return; }
                 if (!await sdkReady) { if (active()) fail('UNAVAILABLE'); return; }
@@ -178,7 +182,7 @@ export function InlineGoogleSignIn({ client, action = 'login', userName = '', re
                 if (!active()) return;
                 if (signupName === null) { fail('CANCELLED'); controller.abort(); return; }
                 let result = await latest.current.completeProviderLogin(prepared.handle, idToken,
-                    { rememberMe: latest.current.rememberMe, signal: controller.signal,
+                    { rememberMe: latest.current.rememberMe, signal: controller.signal, isCurrent,
                         ...(signupName === undefined ? {} : { userName: signupName }) });
                 if (!active()) return;
                 if ('signupRequired' in result) {
@@ -186,7 +190,7 @@ export function InlineGoogleSignIn({ client, action = 'login', userName = '', re
                     if (!active()) return;
                     if (chosenName === null) { fail('CANCELLED'); controller.abort(); return; }
                     result = await latest.current.completeProviderLogin(result.handle, idToken,
-                        { rememberMe: latest.current.rememberMe, signal: controller.signal, userName: chosenName });
+                        { rememberMe: latest.current.rememberMe, signal: controller.signal, isCurrent, userName: chosenName });
                 }
                 if (!active()) return;
                 if ('error' in result) { fail(result.error); return; }
@@ -330,6 +334,9 @@ export default function ProviderSignInControls({ action, userName = '', remember
         if (client.issuance === false) return;
         if (operationLock) operationLock.current = true;
         const controller = new AbortController();
+        const pagePath = currentPagePath();
+        const isCurrent = () => currentPagePath() === pagePath;
+        const active = () => mounted.current && !controller.signal.aborted && isCurrent();
         operation.current = controller;
         setBusyClient(client.clientKey);
         setFeedback(null);
@@ -358,43 +365,43 @@ export default function ProviderSignInControls({ action, userName = '', remember
                 // fire() resolves before the closing animation finishes; the provider needs a free dialog.
                 await promptClosed;
                 passwordPopup.current = null;
-                if (!decision.isConfirmed || controller.signal.aborted) return;
+                if (!decision.isConfirmed || !active()) return;
                 password = decision.value;
                 if (!password) return;
             }
-            if (controller.signal.aborted) return;
+            if (!active()) return;
             let result;
             if (action === 'link') {
                 const pending = authenticateWithProvider({ action, clientKey: client.clientKey, password },
                     (challenge, signal) => acquireProviderCredential(client, challenge, signal),
-                    { signal: controller.signal });
+                    { signal: controller.signal, isCurrent });
                 password = undefined;
                 result = await pending;
             } else {
                 // Explicit signup keeps its reviewed age/country grant; login remains available without preflight.
-                const prepared = await prepareProviderLogin(client.clientKey, { signal: controller.signal }, action);
-                if (!mounted.current || controller.signal.aborted) return;
+                const prepared = await prepareProviderLogin(client.clientKey, { signal: controller.signal, isCurrent }, action);
+                if (!active()) return;
                 if ('error' in prepared) result = prepared;
                 else {
                     const credential = await acquireProviderCredential(client, prepared.challenge, controller.signal);
-                    if (!mounted.current || controller.signal.aborted) return;
+                    if (!active()) return;
                     const signupName = action === 'signup'
                         ? await requestProviderUsername(userName, controller.signal, client.provider) : undefined;
-                    if (!mounted.current || controller.signal.aborted) return;
+                    if (!active()) return;
                     if (signupName === null) { controller.abort(); return; }
-                    result = await completeProviderLogin(prepared.handle, credential, { rememberMe, signal: controller.signal,
+                    result = await completeProviderLogin(prepared.handle, credential, { rememberMe, signal: controller.signal, isCurrent,
                         ...(signupName === undefined ? {} : { userName: signupName }) });
-                    if (!mounted.current || controller.signal.aborted) return;
+                    if (!active()) return;
                     if ('signupRequired' in result) {
                         const chosenName = await requestProviderUsername(userName, controller.signal, client.provider);
-                        if (!mounted.current || controller.signal.aborted) return;
+                        if (!active()) return;
                         if (chosenName === null) { controller.abort(); return; }
                         result = await completeProviderLogin(result.handle, credential,
-                            { rememberMe, signal: controller.signal, userName: chosenName });
+                            { rememberMe, signal: controller.signal, isCurrent, userName: chosenName });
                     }
                 }
             }
-            if (!mounted.current || controller.signal.aborted) return;
+            if (!active()) return;
             if ('error' in result) {
                 const text = providerSignInErrorMessage(result.error, action, client.provider);
                 if (text) setFeedback({ text, error: true,
@@ -413,7 +420,7 @@ export default function ProviderSignInControls({ action, userName = '', remember
             const code = error && typeof error === 'object' && 'code' in error && error.code === 'CANCELLED'
                 ? 'CANCELLED' : 'UNAVAILABLE';
             const text = providerSignInErrorMessage(code, action, client.provider);
-            if (mounted.current && !controller.signal.aborted && text) setFeedback({ text, error: true });
+            if (active() && text) setFeedback({ text, error: true });
         } finally {
             password = undefined;
             if (operation.current === controller) {
