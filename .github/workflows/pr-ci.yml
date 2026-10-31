@@ -119,9 +119,9 @@ jobs:
           npm --prefix backend test
           npm --prefix backend run test:unit
           npm --prefix backend run test:child-inactivity:unit
-          npm --prefix backend run test:child-inactivity:sql
           npm --prefix backend run test:migrations
           node backend/scripts/run-apple-android-handoff-tests.mjs
+          npm --prefix backend run test:child-inactivity:sql
           node backend/scripts/run-child-schema-tests.mjs
           npm --prefix backend run prod
 

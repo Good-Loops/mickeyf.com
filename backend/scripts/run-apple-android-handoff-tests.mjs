@@ -100,7 +100,9 @@ export async function runHandoffTests({ run = runProcess, environment = process.
         env = Object.fromEntries(Object.entries(env).filter(([key]) => !/^DOCKER_CONTEXT$/iu.test(key)));
         if ((await invoke(docker, [...dockerHost, ...compose, 'ps', '--all', '--quiet'])).trim()) throw new Error('DISPOSABLE_PROJECT_NOT_EMPTY');
         started = true;
+        report('Starting disposable MySQL using the preloaded pinned image.');
         await invoke(docker, [...dockerHost, ...compose, 'up', '--detach', '--wait', '--wait-timeout', '90', '--pull', 'never', 'mysql']);
+        report('Checking disposable MySQL container identity.');
         const id = (await invoke(docker, [...dockerHost, ...compose, 'ps', '--quiet', 'mysql'])).trim();
         if (!/^[a-f0-9]{64}$/u.test(id)) throw new Error('ISOLATED_MYSQL_IDENTITY_REQUIRED');
         port = verifyContainer(JSON.parse(await invoke(docker, [...dockerHost, 'inspect', '--type', 'container', id])), project, id);

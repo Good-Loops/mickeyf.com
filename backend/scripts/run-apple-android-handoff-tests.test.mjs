@@ -12,14 +12,14 @@ function container(project) {
     NetworkSettings: { Ports: { '3306/tcp': [{ HostIp: '127.0.0.1', HostPort: '49152' }] } } };
 }
 
-function fixture({ inspect = value => value, existing = '', testError, cleanupError, endpoint = 'unix:///var/run/docker.sock' } = {}) {
+function fixture({ inspect = value => value, existing = '', upError, testError, cleanupError, endpoint = 'unix:///var/run/docker.sock' } = {}) {
     const calls = [];
     const run = async (executable, args, options) => {
         calls.push({ executable, args, options });
         if (args[0] === 'context') return JSON.stringify(endpoint);
         if (args.includes('down')) { if (cleanupError) throw cleanupError; return ''; }
         if (args.includes('--all')) return existing;
-        if (args.includes('up')) return '';
+        if (args.includes('up')) { if (upError) throw upError; return ''; }
         if (args.includes('inspect')) {
             const compose = calls.find(call => call.args.includes('--project-name'));
             return JSON.stringify([inspect(container(compose.args[compose.args.indexOf('--project-name') + 1]))]);
@@ -134,6 +134,16 @@ test('failed identity never reaches SQL and still cleans only its own started pr
     assert.equal(f.calls.at(-1).args.includes('down'), true);
 });
 
+test('a startup failure reports its phase without exposing captured Docker output and still cleans up', async () => {
+    const failure = Object.assign(new Error('COMMAND_FAILED'), { output: 'private Docker output' });
+    const f = fixture({ upError: failure });
+    const messages = [];
+    await assert.rejects(runHandoffTests({ run: f.run, environment: {}, report: message => messages.push(message) }), /COMMAND_FAILED/u);
+    assert.deepEqual(messages, ['Starting disposable MySQL using the preloaded pinned image.', 'Disposable MySQL cleanup completed.']);
+    assert.equal(f.calls.some(call => call.executable === process.execPath), false);
+    assert.equal(f.calls.at(-1).args.includes('down'), true);
+});
+
 test('test failure still cleans up, and cleanup failure cannot produce a passing run', async () => {
     for (const options of [{ testError: new Error('SQL_FAILED') }, { cleanupError: new Error('cleanup') }]) {
         const f = fixture(options);
@@ -156,5 +166,7 @@ test('actual subprocess capture stops unbounded output and hung children', async
 test('both CI runtime jobs invoke the SQL runner immediately after migration tests', () => {
     const workflow = readFileSync(new URL('../../.github/workflows/pr-ci.yml', import.meta.url), 'utf8');
     assert.equal([...workflow.matchAll(/npm --prefix backend run test:migrations\r?\n\s+node backend\/scripts\/run-apple-android-handoff-tests\.mjs/gu)].length, 2);
+    assert.match(workflow, /npm --prefix backend run test:migrations\r?\n\s+node backend\/scripts\/run-apple-android-handoff-tests\.mjs\r?\n\s+npm --prefix backend run test:child-inactivity:sql/u,
+        'the no-pull inactivity rehearsal requires the preceding migration test to load the pinned MySQL image');
     assert.match(workflow, /node --test[^\r\n]+backend\/scripts\/run-apple-android-handoff-tests\.test\.mjs/u);
 });
