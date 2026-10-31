@@ -34,8 +34,8 @@ export async function prepareChildInactivityDeployment(database: Pool, config: C
         async runMaintenance(): Promise<number> {
             await requireReadyPrimary();
             const result = await runChildInactivityMaintenanceCycle(database, store, journal, { afterChildId: null });
-            // A bounded scan with a remaining cursor needs operator follow-up; do not claim a completed run.
-            return result.nextAfterChildId === null ? 0 : 1;
+            // Held candidates and an unfinished page need follow-up; do not report a clean run.
+            return result.nextAfterChildId === null && result.held === 0 ? 0 : 1;
         },
     });
 }

@@ -5,8 +5,7 @@ import { CHILD_RETENTION_BUCKET, loadChildInactivityDeployment } from './childIn
 const valid = { NODE_ENV: 'production', CHILD_INACTIVITY_ENABLED: 'true', CHILD_ONLINE_ACTIVITY_ENABLED: 'true',
     ACCOUNT_DELETION_ENABLED: 'true', APPLE_MAINTENANCE_HTTP_ENABLED: 'true', CHILD_RETENTION_BUCKET,
     DB_NAME: 'synthetic_db', APPLE_MAINTENANCE_EXPECTED_SERVER_UUID: '11111111-1111-4111-8111-111111111111',
-    CHILD_RETENTION_JOURNAL_KEY: '11'.repeat(32), CHILD_INACTIVITY_TARGET_KEY: '22'.repeat(32),
-    CHILD_INACTIVITY_RECEIPT_KEY: '33'.repeat(32) };
+    CHILD_INACTIVITY_KEYS: `${'11'.repeat(32)}:${'22'.repeat(32)}:${'33'.repeat(32)}` };
 
 test('inactivity deployment is opt-in and requires exact production dependencies', () => {
     assert.equal(loadChildInactivityDeployment({}), undefined);
@@ -21,9 +20,10 @@ test('inactivity deployment is opt-in and requires exact production dependencies
 });
 
 test('independent exact-length secret keys are mandatory', () => {
-    for (const patch of [{ CHILD_RETENTION_JOURNAL_KEY: '' }, { CHILD_INACTIVITY_TARGET_KEY: 'x'.repeat(64) },
-        { CHILD_INACTIVITY_RECEIPT_KEY: 'a'.repeat(62) }, { CHILD_INACTIVITY_RECEIPT_KEY: valid.CHILD_INACTIVITY_TARGET_KEY },
-        { CHILD_RETENTION_JOURNAL_KEY: valid.CHILD_INACTIVITY_RECEIPT_KEY }]) {
+    for (const patch of [{ CHILD_INACTIVITY_KEYS: '' }, { CHILD_INACTIVITY_KEYS: 'x'.repeat(194) },
+        { CHILD_INACTIVITY_KEYS: `${'11'.repeat(32)}:${'22'.repeat(32)}:${'33'.repeat(31)}` },
+        { CHILD_INACTIVITY_KEYS: `${'11'.repeat(32)}:${'22'.repeat(32)}:${'22'.repeat(32)}` },
+        { CHILD_INACTIVITY_KEYS: `${'33'.repeat(32)}:${'22'.repeat(32)}:${'33'.repeat(32)}` }]) {
         assert.throws(() => loadChildInactivityDeployment({ ...valid, ...patch }));
     }
 });
