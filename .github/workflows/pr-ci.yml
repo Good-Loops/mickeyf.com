@@ -52,6 +52,9 @@ jobs:
       - name: Test TypeDoc matcher compatibility and audit visibility
         run: node --test scripts/typedoc-minimatch-compat.test.mjs scripts/typedoc-audit-visibility.test.mjs scripts/child-release-build.test.mjs
 
+      - name: Test iOS privacy manifest inspection
+        run: python3 scripts/ios-privacy-manifests-test.py
+
       - name: Validate Firebase deploy dependency tree
         run: |
           npm --prefix .github/firebase-deploy ls --omit=dev

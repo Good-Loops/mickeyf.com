@@ -52,6 +52,24 @@ cannot be installed on a physical iPhone, and is not a TestFlight build.
 Successful compilation is not proof of working WKWebView authentication,
 microphone/audio permissions, packaged Unity assets, or native gameplay.
 
+### Optional unsigned privacy manifest inventory
+
+On a reviewed branch, dispatch `ios-build.yml` with `compile_only=true` and
+`audit_privacy_manifests=true`. Leave `upload_testflight`,
+`capture_store_screenshots`, and `resolve_native_locks` false. This mode rejects
+conflicting options, uses no signing credentials, and uploads no app artifacts.
+It inspects bundled `PrivacyInfo.xcprivacy` files in the simulator `.app` and
+adds selected declared data categories, purposes, tracking domains, required
+reason APIs, relative paths and hashes to the workflow summary. A missing or
+invalid manifest fails inspection; skipped symlinks require manual investigation.
+
+This inventory is not Apple's Xcode privacy report, a distribution archive, or
+proof of runtime behavior. Apple's documented report is generated from an
+archive in Xcode's Organizer. Independently inspect the final distribution
+archive and validate provider/SDK behavior before completing privacy labels.
+References: [Apple's privacy report instructions](https://developer.apple.com/documentation/bundleresources/describing-data-use-in-privacy-manifests)
+and [privacy manifests](https://developer.apple.com/documentation/bundleresources/privacy-manifest-files).
+
 First cloud compile verified on 2026-09-10:
 [run 34494943864](https://github.com/Good-Loops/mickeyf.com/actions/runs/34494943864),
 development commit `aa83270262ce579826eab79bc85ee55f85139da9`. TypeScript and all

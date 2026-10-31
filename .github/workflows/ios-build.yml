@@ -19,6 +19,11 @@ on:
         type: boolean
         required: false
         default: false
+      audit_privacy_manifests:
+        description: Inspect unsigned simulator manifests; requires compile_only and no signing or screenshots
+        type: boolean
+        required: false
+        default: false
       resolve_native_locks:
         description: Resolve native dependency locks for review before the locked verification run
         type: boolean
@@ -51,6 +56,15 @@ concurrency:
   cancel-in-progress: ${{ !inputs.upload_testflight }}
 
 jobs:
+  invalid-privacy-mode:
+    if: ${{ inputs.audit_privacy_manifests && (!inputs.compile_only || inputs.upload_testflight || inputs.capture_store_screenshots || inputs.resolve_native_locks) }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reject conflicting privacy inspection options
+        run: |
+          echo 'Privacy inspection requires compile_only, no signing, no screenshots, and locked dependencies.' >&2
+          exit 1
+
   simulator:
     if: ${{ !inputs.upload_testflight }}
     name: Compile unsigned iOS simulator app
@@ -92,6 +106,15 @@ jobs:
           test "${{ inputs.compile_only }}" != "true"
           node --test ../scripts/ios-store-screenshots.test.mjs
 
+      - name: Check optional privacy inspection mode
+        if: ${{ inputs.audit_privacy_manifests }}
+        run: |
+          test "${{ inputs.compile_only }}" = "true"
+          test "${{ inputs.upload_testflight }}" != "true"
+          test "${{ inputs.capture_store_screenshots }}" != "true"
+          test "${{ inputs.resolve_native_locks }}" != "true"
+          python3 ../scripts/ios-privacy-manifests-test.py
+
       - name: Install locked frontend dependencies
         run: |
           npm install --global npm@11.6.2 --no-audit --no-fund
@@ -121,6 +144,18 @@ jobs:
         run: |
           node --test ../scripts/ios-age-linkage.test.mjs
           xcrun otool -l "$RUNNER_TEMP/ludolume-derived-data/Build/Products/Release-iphonesimulator/App.app/App" | node ../scripts/ios-age-linkage.mjs
+
+      - name: Inspect bundled privacy manifests
+        if: ${{ inputs.audit_privacy_manifests && inputs.compile_only }}
+        run: |
+          python3 ../scripts/ios-privacy-manifests.py "$RUNNER_TEMP/ludolume-derived-data/Build/Products/Release-iphonesimulator/App.app" > "$RUNNER_TEMP/ludolume-privacy-manifests.json"
+          {
+            echo '### Unsigned simulator privacy manifest inventory'
+            echo 'Declarations only; not an Xcode archive report or runtime proof. Investigate any skipped symlinks.'
+            echo '```json'
+            cat "$RUNNER_TEMP/ludolume-privacy-manifests.json"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Report resolved CocoaPods lock
         if: ${{ always() && inputs.compile_only }}
@@ -187,7 +222,7 @@ jobs:
 
   testflight:
     # Also restrict the protected environment to this exact branch in GitHub.
-    if: ${{ !inputs.compile_only && inputs.upload_testflight && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/auth-family-leaderboards') }}
+    if: ${{ !inputs.compile_only && inputs.upload_testflight && !inputs.audit_privacy_manifests && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/auth-family-leaderboards') }}
     name: Sign and upload (${{ inputs.upload_distribution || 'internal-only' }})
     environment: ios-testflight
     runs-on: macos-26
@@ -252,7 +287,7 @@ jobs:
 
 
   android:
-    if: ${{ inputs.compile_only && !inputs.upload_testflight }}
+    if: ${{ inputs.compile_only && !inputs.upload_testflight && !inputs.audit_privacy_manifests }}
     name: Compile and test Android without distribution
     runs-on: ubuntu-24.04
     timeout-minutes: 25
