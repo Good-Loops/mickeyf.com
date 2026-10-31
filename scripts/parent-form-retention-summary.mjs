@@ -51,7 +51,7 @@ export function summarizeReport(report, now = Date.now()) {
     ...lines,
     '',
     'Check the private register for the actual deletion deadline; this report does not determine it.',
-    'Check mailbox, trash, downloaded files and backups separately. A missing or failed lookup is not proof of deletion.',
+    'Check mailbox, trash, downloaded files, the encrypted archive and backups separately. A missing or failed lookup is not proof of deletion.',
     'This summary neither approves consent nor deletes data.',
   ].join('\n');
 }

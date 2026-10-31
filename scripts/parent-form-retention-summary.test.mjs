@@ -20,6 +20,7 @@ test('all states receive conservative owner guidance without printing private ta
   for (const state of states) assert.match(output, new RegExp(`\\| ${state} \\|`, 'u'));
   assert.match(output, /absence alone does not prove deletion/u);
   assert.match(output, /actual deletion deadline/u);
+  assert.match(output, /downloaded files, the encrypted archive and backups separately/u);
   assert.match(output, /backups separately/u);
   assert.doesNotMatch(output, /DO-NOT-ECHO|a{40}|b{64}/u);
 });

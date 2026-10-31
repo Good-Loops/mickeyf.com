@@ -80,10 +80,28 @@ alone does not satisfy a 14-day deletion promise; qualify the actual removal of
 the specific message and copies. Do not empty unrelated mail or assume Google
 provider recovery copies have been physically erased. See
 [Gmail deletion guidance](https://support.google.com/mail/answer/7401?hl=en).
+In the form mailbox, Gmail's `in:anywhere` search also includes Spam and Trash;
+search using the message's known details and inspect matching messages and any
+replies before acting. It cannot prove the absence of unindexed attachments or
+messages in another account. For each message confirmed due for cleanup, move
+that specific message to Trash, then select it there and choose **Delete forever**.
+Do not select an entire conversation or empty all Trash unless every affected
+message is due. Recheck the specific messages, not just the search results.
+[Gmail search operators](https://support.google.com/mail/answer/7190?hl=en).
 An encrypted container backup is a snapshot: deleting a file from the current
 container does not remove it from older snapshots. No automated backup rotation
 or physical-erasure deadline is established here. Test an all-copy plan before
 making the 14-day notice a public promise.
+
+Before a due cleanup, identify every archive snapshot that could contain the
+form. Remove the due form from the current mounted archive, then make and verify
+a fresh encrypted backup that preserves the forms still needed: dismount the
+archive before copying its container, then verify that the new copy opens and
+contains the remaining forms. Address the
+older affected snapshots within the adopted deadline; a fresh backup does not
+change those files. Do not remove the only recoverable backup of forms that must
+still be kept. This is a proposed manual sequence, not evidence that a backup
+restore, snapshot inventory or deletion has been tested.
 
 ## Prepare a reconciliation list from the private register
 

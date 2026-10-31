@@ -32,8 +32,9 @@ and [ANPD age-assurance portal](https://www.gov.br/anpd/pt-br/assuntos/eca-digit
 ## Notice and process gaps
 
 1. **Logical expiry is not a guaranteed physical deletion deadline.** The
-   signed-form text and public child section in `shared/privacyNotice.json`
-   say that unused requests expire and are removed after 14 days. The database
+   current signed-form text and public child section in `shared/privacyNotice.json`
+   say that unused requests expire after 14 days and expired records are removed
+   during maintenance. They do not promise SQL removal within 14 days. The database
    rejects expired requests immediately, but physical cleanup occurs through
    bounded maintenance (`backend/ts/accounts/signedParentFormReview.ts`) or an
    opportunistic cleanup on a later request
@@ -46,7 +47,11 @@ and [ANPD age-assurance portal](https://www.gov.br/anpd/pt-br/assuntos/eca-digit
    and twice-weekly cleanup; qualification still needs to cover every relevant
    mailbox, trash, local copy, approved-but-unused form, and provider/recovery
    copy. The retention report is a read-only lookup, not an automatic deletion
-   mechanism. Do not interpret failed lookups as successful absence checks.
+   mechanism. The existing register and report require a request reference;
+   messages without a usable reference need a separate private tracking and
+   deadline process, which has not been rehearsed. The candidate also does not
+   describe an approved form whose request expires before an account is created.
+   Do not interpret failed lookups as successful absence checks.
 3. **The retention notice needs actual defined periods.** The candidate mentions
    separate schedules for security records and recovery copies without stating
    them, and does not set an inactivity rule for child data. For covered child
