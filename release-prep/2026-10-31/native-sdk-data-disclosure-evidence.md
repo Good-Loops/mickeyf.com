@@ -38,6 +38,13 @@ or a production backend, and it is not a completed store declaration.
 
 ## SDK and platform evidence
 
+* GitHub Actions [run 41240915795](https://github.com/Good-Loops/mickeyf.com/actions/runs/41240915795)
+  compiled candidate `f119a57c` for the iOS simulator and inventoried nine
+  bundled privacy manifests without skipped symlinks. It confirms that the
+  `GoogleSignIn.framework/GoogleSignIn.bundle/PrivacyInfo.xcprivacy` manifest
+  below is present in that simulator build, including its declared data types
+  and purposes. This is not a signed distribution archive or a runtime capture.
+
 * Google Sign-In is enabled by the checked-in iOS `Info.plist` and the locked
   version is 10.0.0. Its [source privacy manifest](https://github.com/google/GoogleSignIn-iOS/blob/10.0.0/GoogleSignIn/Sources/Resources/PrivacyInfo.xcprivacy)
   declares linked Name, Email Address, Phone Number, Other Data Types, Coarse
