@@ -220,6 +220,7 @@ export default function ParentRegistration({ api, authenticated, accountKey, ses
             : !creationAllowed ? <p>New child accounts are paused. Existing child accounts can still be managed below.</p>
             : grant ? <form onSubmit={create}>
                 <p>{tr("Scores are private. No child email or date of birth is collected. Choose a nickname, not the child's real name.", 'Os resultados são privados. Nenhum e-mail ou data de nascimento da criança é coletado. Escolha um apelido, não o nome real da criança.')}</p>
+                <p>{tr("Keep the child's password safe. This version cannot recover it; deleting and recreating the account also deletes its saved results.", 'Guarde a senha da criança em segurança. Esta versão não permite recuperá-la; excluir e recriar a conta também exclui os resultados salvos.')}</p>
                 <label>{tr("Child's nickname", 'Apelido da criança')}<input required maxLength={64} value={userName} disabled={busy || !!selectedForm && !credentialsAfterApproval} onChange={event => setUserName(event.target.value)} /></label>
                 <label>{tr("Child's password", 'Senha da criança')}<input type="password" autoComplete="new-password" required minLength={8} value={password} disabled={busy} onChange={event => setPassword(event.target.value)} /></label>
                 <button type="submit" disabled={busy}>{tr('Create private child account', 'Criar conta infantil privada')}</button>

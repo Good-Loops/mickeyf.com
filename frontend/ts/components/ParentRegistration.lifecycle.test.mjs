@@ -81,6 +81,7 @@ test('child credential fields stay absent through consent and provider acquisiti
     view.acquisitions[0].resolve('token'); await view.settle(); assert.equal(view.find(node => node.type === 'form'), undefined);
     view.proofs[0].resolve({ grant: random(), purpose: 'create-child', expiresInSeconds: 300 }); await view.settle();
     assert.ok(view.find(node => node.type === 'input' && node.props.type === 'password'));
+    assert.ok(view.text().includes('This version cannot recover it'));
     assert.equal(view.all(node => node.type === 'input' && node.props.type === 'email').length, 0);
 });
 
