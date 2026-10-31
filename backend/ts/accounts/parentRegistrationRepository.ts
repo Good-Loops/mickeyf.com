@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { randomUUID } from 'node:crypto';
-import { SIGNED_FORM_LIFETIME_DAYS, signedFormReferenceDigest, signedFormRequired, SignedParentFormRequiredError, type SignedParentFormRequest } from './signedParentForm';
+import { SIGNED_FORM_LIFETIME_DAYS, signedFormProofNonce, signedFormRequired, SignedParentFormRequiredError, type SignedParentFormRequest } from './signedParentForm';
 import type { ScoreParticipationPolicy } from '../config/scoreParticipationPolicy';
 import { scoreParticipationTarget, scoreProfileDigest, canAuthorizePublication, approveScoreParticipation, readScoreParticipation, removePublicScoreParticipation } from './scoreParticipationRepository';
 import { familySelectionDigest } from './familyDeletionSelection';
@@ -107,7 +107,7 @@ export function createParentRegistrationRepository(database: Database, journal: 
     }
     async function grant(connection: PoolConnection, grantHash: Buffer, context: ProviderAuthContext, digest: Buffer, purpose: string) {
         await currentParent(connection, context, purpose === 'create-child');
-        const found = await rows(connection, `SELECT state_hash, parent_uuid, purpose, country_code, child_uuid, family_digest, profile_digest, consent_version, policy_version, provider, subject
+        const found = await rows(connection, `SELECT state_hash, nonce, parent_uuid, purpose, country_code, child_uuid, family_digest, profile_digest, consent_version, policy_version, provider, subject
             FROM parent_registration_attempts WHERE grant_hash = ? AND binding_hash = ? AND parent_uuid = ?
             AND policy_digest = ? AND purpose = ? AND phase = 'approved' AND expires_at > UTC_TIMESTAMP(6) LIMIT 1 FOR UPDATE`,
         [grantHash, context.bindingHash, context.account!.accountId, digest, purpose]);
@@ -157,7 +157,6 @@ export function createParentRegistrationRepository(database: Database, journal: 
                         AND status='approved' AND expires_at>UTC_TIMESTAMP(6) LIMIT 1 FOR UPDATE`,
                     [attempt.operation.formReference, context.account!.accountId, attempt.operation.country, attempt.policyDigest]);
                     if (form.length !== 1) throw new SignedParentFormRequiredError();
-                    profileDigest = signedFormReferenceDigest(attempt.operation.formReference);
                 }
                 if (attempt.operation.purpose === 'publish-scores') {
                     const target = await scoreParticipationTarget(connection, context, attempt.operation.childAccountId);
@@ -221,8 +220,8 @@ export function createParentRegistrationRepository(database: Database, journal: 
                 let formReference: string | null = null;
                 if (requiresSignedForm(approval.country_code)) {
                     if (!signedFormsEnabled || !credentials.formReference) throw new SignedParentFormRequiredError();
-                    if (credentialsAfterApproval && (!Buffer.isBuffer(approval.profile_digest)
-                        || !approval.profile_digest.equals(signedFormReferenceDigest(credentials.formReference)))) throw new SignedParentFormRequiredError();
+                    if (credentialsAfterApproval && (!Buffer.isBuffer(approval.state_hash)
+                        || approval.nonce !== signedFormProofNonce(approval.state_hash, credentials.formReference))) throw new SignedParentFormRequiredError();
                     const [form] = await rows(connection, `SELECT reference, user_name, provider, subject FROM parent_signed_forms
                         WHERE reference=? AND parent_uuid=? AND country_code=? AND policy_digest=? AND consent_version=? AND policy_version=?
                         AND status='approved' AND expires_at>UTC_TIMESTAMP(6) LIMIT 1 FOR UPDATE`,

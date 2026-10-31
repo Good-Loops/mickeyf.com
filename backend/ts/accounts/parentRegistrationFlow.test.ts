@@ -5,6 +5,7 @@ import type { ProviderAuthContext } from '../auth/providerAuthContext';
 import type { VerifiedProviderIdentity } from '../auth/providerIdentity';
 import { createParentRegistrationFlow, type ParentChallenge, type ParentGrant, type ParentRegistrationPolicy,
     type ParentRegistrationStore } from './parentRegistrationFlow';
+import { signedFormProofNonce } from './signedParentForm';
 
 const policy: ParentRegistrationPolicy = { version: 'synthetic-1', consentVersion: 'consent-1',
     consentText: 'Synthetic test consent only.', privacyNoticeUrl: 'https://notice.example.test/privacy', countries: ['ZZ'] };
@@ -89,6 +90,10 @@ test('strict child flow binds only a valid form reference to a proof challenge',
     const request = { ...beginInput, country: 'US', formReference: reference };
     const challenge = await f.flow.begin(f.context, request); assert.ok('state' in challenge);
     assert.deepEqual(f.attempts.get(hash(challenge.state))?.value.operation, { purpose: 'create-child', country: 'US', formReference: reference });
+    const stateHash = Buffer.from(hash(challenge.state), 'hex');
+    assert.equal(challenge.nonce, signedFormProofNonce(stateHash, reference));
+    assert.notEqual(challenge.nonce, signedFormProofNonce(stateHash, randomUUID()));
+    assert.notEqual(challenge.nonce, signedFormProofNonce(randomBytes(32), reference));
     assert.deepEqual(await f.flow.begin(f.context, { ...request, formReference: 'not-a-reference' }), { error: 'INVALID_REQUEST' });
     const legacy = fixture({ ...policy, countries: ['US'], signedFormsEnabled: true });
     assert.deepEqual(await legacy.flow.begin(legacy.context, request), { error: 'INVALID_REQUEST' });

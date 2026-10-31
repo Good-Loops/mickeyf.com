@@ -11,9 +11,9 @@ export const signedFormNoticeDigest = () => createHash('sha256').update(JSON.str
     notice.version, notice.operatorName, notice.contactEmail, notice.operatorAddress, notice.operatorTelephone,
     notice.signedParentForm,
 ])).digest();
-// Domain-separate this binding from score-profile digests stored in the same column.
-export const signedFormReferenceDigest = (reference: string) =>
-    createHash('sha256').update(`parent-form-proof:${reference}`).digest();
+// Bind the provider nonce to one form without persisting the form reference on an attempt.
+export const signedFormProofNonce = (stateHash: Buffer, reference: string) =>
+    createHash('sha256').update('parent-form-proof:').update(stateHash).update(reference).digest('base64url');
 export type SignedParentFormRequest = Readonly<{
     reference: string; parentAccountId: string; country: string; userName: string | null; verifiedContact: string;
     policyVersion: string; consentVersion: string; status: 'pending' | 'approved' | 'rejected';

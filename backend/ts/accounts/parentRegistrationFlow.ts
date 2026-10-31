@@ -7,7 +7,7 @@ import { isRecord } from '../security/userRequestValidation';
 import type { ScoreParticipationPolicy } from '../config/scoreParticipationPolicy';
 import { familySelectionDigest } from './familyDeletionSelection';
 import { parsePrivacyNoticeUrl } from '../config/privacyNoticeUrl';
-import { SIGNED_FORM_VERSION, signedFormNoticeDigest, signedFormRequired, SignedParentFormRequiredError, type SignedParentFormRequest } from './signedParentForm';
+import { SIGNED_FORM_VERSION, signedFormNoticeDigest, signedFormProofNonce, signedFormRequired, SignedParentFormRequiredError, type SignedParentFormRequest } from './signedParentForm';
 
 const LIFETIME_MS = 5 * 60 * 1000;
 const TOKEN = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/u;
@@ -167,9 +167,11 @@ export function createParentRegistrationFlow({ policy: inputPolicy, publicationP
                 return failure('INVALID_REQUEST');
             }
             const state = randomBytes(32).toString('base64url');
-            const nonce = randomBytes(32).toString('base64url');
+            const stateHash = hash(state);
+            const nonce = operation.purpose === 'create-child' && operation.formReference
+                ? signedFormProofNonce(stateHash, operation.formReference) : randomBytes(32).toString('base64url');
             try {
-                const saved = await store.begin({ stateHash: hash(state), nonce, bindingHash: context.bindingHash,
+                const saved = await store.begin({ stateHash, nonce, bindingHash: context.bindingHash,
                     parentAccountId: context.account!.accountId, parentUserId: context.account!.userId,
                     clientKey: input.clientKey, policyDigest: operationPolicy.digest, expiresAt: now() + LIFETIME_MS, operation }, context);
                 return saved ? { state, nonce, expiresInSeconds: 300 } : failure('UNAVAILABLE');
