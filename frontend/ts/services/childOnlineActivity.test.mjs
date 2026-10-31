@@ -31,3 +31,10 @@ test('offline reports retry only on later input, and stop cancels a queued repor
     f.state.now++; f.events.fire('pointerdown'); await flush(); assert.equal(f.state.calls, 2); f.stop();
     const g = setup(); g.events.fire('pointerdown'); g.stop(); await flush(); assert.equal(g.state.calls, 0);
 });
+
+test('untracked sessions send only one report until the account session changes', async () => {
+    const f = setup(async () => 'not-tracked');
+    f.events.fire('pointerdown'); await flush(); assert.equal(f.state.calls, 1);
+    f.state.now += 5 * 60 * 60_000; f.events.fire('keydown'); await flush(); assert.equal(f.state.calls, 1);
+    f.stop();
+});

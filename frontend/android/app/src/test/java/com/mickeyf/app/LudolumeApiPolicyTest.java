@@ -7,6 +7,16 @@ import okhttp3.HttpUrl;
 import okhttp3.Request;
 
 public class LudolumeApiPolicyTest {
+    @Test public void childActivityAllowsOnlyTwoExactPrivatePostRoutes() {
+        for (String route : new String[] { "interaction", "keep" }) {
+            String url = LudolumeApiPolicy.ORIGIN + "/auth/child-activity/" + route;
+            assertNotNull(LudolumeApiPolicy.request(url, "POST", "{}"));
+            assertNull(LudolumeApiPolicy.request(url, "GET", null));
+            assertNull(LudolumeApiPolicy.request(url + "?extra=1", "POST", "{}"));
+            assertNull(LudolumeApiPolicy.request(url + "/", "POST", "{}"));
+        }
+        assertNull(LudolumeApiPolicy.request(LudolumeApiPolicy.ORIGIN + "/auth/child-activity/delete", "POST", "{}"));
+    }
     @Test public void androidAppleHandoffRedemptionUsesOnlyItsExactPrivatePostRoute() {
         String url = LudolumeApiPolicy.ORIGIN + "/auth/providers/apple-android/credential";
         assertNotNull(LudolumeApiPolicy.request(url, "POST", "{}"));

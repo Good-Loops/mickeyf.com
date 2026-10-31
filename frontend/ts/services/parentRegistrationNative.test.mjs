@@ -15,6 +15,18 @@ const expected = ['GET config', 'POST begin', 'POST complete', 'POST cancel', 'P
 for (const [platform, source] of [
     ['Android', '../../android/app/src/main/java/com/mickeyf/app/LudolumeApiPolicy.java'],
     ['iOS', '../../ios/App/App/LudolumeApiPlugin.swift'],
+]) test(`${platform} permits only the two exact managed-child activity routes`, async () => {
+    const native = await readFile(new URL(source, import.meta.url), 'utf8');
+    const routes = [...native.matchAll(/"((?:GET|POST) \/auth\/child-activity\/[^"\n]+)"/g)].map(match => match[1]);
+    assert.deepEqual(routes.sort(), ['POST /auth/child-activity/interaction', 'POST /auth/child-activity/keep'].sort());
+    const transport = createNativeApiFetch(async () => ({ status: 204, body: '' }));
+    const response = await transport(`${origin}/auth/child-activity/interaction`, { method: 'POST', credentials: 'include', body: '{}' });
+    assert.equal(response.status, 204);
+});
+
+for (const [platform, source] of [
+    ['Android', '../../android/app/src/main/java/com/mickeyf/app/LudolumeApiPolicy.java'],
+    ['iOS', '../../ios/App/App/LudolumeApiPlugin.swift'],
 ]) test(`${platform} parent creation and management requests fit the actual native route contract`, async () => {
     // Uses the real API/transport and each source allowlist; not an OS bridge or live-provider test.
     const native = await readFile(new URL(source, import.meta.url), 'utf8');

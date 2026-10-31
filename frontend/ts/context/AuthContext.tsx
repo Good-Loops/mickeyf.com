@@ -77,7 +77,8 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
             async report() {
                 const init: PageRequestInit = { method: 'POST', credentials: 'include', signal: controller.signal,
                     isCurrent: canReport, headers: { 'Content-Type': 'application/json' }, body: '{}' };
-                return (await apiFetch(`${API_BASE}/auth/child-activity/interaction`, init)).status === 204;
+                const response = await apiFetch(`${API_BASE}/auth/child-activity/interaction`, init);
+                return response.status === 202 ? 'not-tracked' : response.status === 204;
             } });
         return () => { controller.abort(); stop(); };
     }, [isAuthenticated, userName]);

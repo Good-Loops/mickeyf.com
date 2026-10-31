@@ -28,12 +28,12 @@ function current(context: ProviderAuthContext | null) {
 
 /** Track only the signed-in account; no account ID or event details are accepted from the client. */
 export async function recordOnlineInteraction(database: Database, context: ProviderAuthContext | null,
-    activity: ParentManagedChildActivity): Promise<void> {
+    activity: ParentManagedChildActivity): Promise<boolean> {
     const { account, session } = current(context);
-    await withUserSubmissionLock(database, account.userId, lock => transaction(lock, async connection => {
+    return withUserSubmissionLock(database, account.userId, lock => transaction(lock, async connection => {
         if (!await readLiveSession(connection, account.userId, account.accountId, session.sessionId)) throw new Error('Session unavailable.');
         // An absent row is deliberately not backfilled; lifecycle assessment must hold it.
-        await activity.recordInteraction(connection, account.accountId);
+        return activity.recordInteraction(connection, account.accountId);
     }));
 }
 
