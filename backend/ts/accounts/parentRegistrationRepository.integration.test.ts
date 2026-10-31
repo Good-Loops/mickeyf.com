@@ -527,14 +527,18 @@ test('browser creates a chosen nickname, separately publishes and removes scores
     const { createViteTestServer } = await importModule(pathToFileURL(path.resolve('../frontend/ts/testSupport/createViteTestServer.mjs')).href);
     const { createRequire } = await import('node:module');
     const { chromium } = createRequire(path.resolve('../.github/firebase-deploy/registration-browser.test.mjs'))('playwright-core');
+    const notice = require('../../../shared/privacyNotice.json');
+    const brLabels = notice.signedParentForm.ptBR.labels;
     const browserPolicy: ParentRegistrationPolicy = { ...policy, version: 'synthetic-browser-child-parent-v1',
+        consentVersion: notice.consent.parent.version, consentText: notice.consent.parent.text,
         audience: 'children-included', countries: ['BR', 'US'], signedFormsEnabled: true, signedFormCountries: ['BR', 'US'], creationEnabled: true };
     const browserPublicPolicy: ScoreParticipationPolicy = { ...publicPolicy, parentRegistrationVersion: browserPolicy.version,
+        consentVersion: notice.consent.publicScores.version, consentText: notice.consent.publicScores.text,
         countries: { BR: { selfAgeBands: [], parentManaged: true }, US: { selfAgeBands: [], parentManaged: true } }, digest: Buffer.alloc(32, 28) };
     const base = await parent(randomUUID(), browserPublicPolicy);
     const store = createParentRegistrationRepository(database, journal, browserPublicPolicy, true, { countries: ['BR', 'US'], credentialsAfterApproval: true });
     const p = { ...base, store, flow: createParentRegistrationFlow({ store, clients: base.clients, policy: browserPolicy, publicationPolicy: browserPublicPolicy }) };
-    const browserInput = { ...input, country: 'BR', policyVersion: browserPolicy.version };
+    const browserInput = { ...input, country: 'BR', policyVersion: browserPolicy.version, consentVersion: browserPolicy.consentVersion };
     const sessionSecret = 'synthetic-parent-browser-session-secret';
     const token = issueSessionToken({ ...p.account, userName: p.identity.subject }, sessionSecret);
     await createAccountSession(database, p.account, token.sessionId, token.expiresAt, passwordHash);
@@ -569,25 +573,25 @@ test('browser creates a chosen nickname, separately publishes and removes scores
         const page = await context.newPage(); page.setDefaultTimeout(15_000);
         page.on('pageerror', (error: Error) => console.error(error.message));
         await page.goto(`${origin}/__parent-test`);
-        await page.getByLabel("Child's country").selectOption('BR');
-        await page.getByLabel('I am 18 or older.').check(); await page.getByLabel("I am this child's parent or legal guardian and can give this consent.").check();
-        await page.getByLabel('I agree to this child-account consent.').check();
+        await page.getByLabel(/Child's country/).selectOption('BR');
+        await page.getByLabel(brLabels.adult, { exact: true }).check(); await page.getByLabel(brLabels.guardianCheck, { exact: true }).check();
+        await page.getByLabel(brLabels.consentCheck, { exact: true }).check();
         assert.equal(await page.locator('input[type=password]').count(), 0);
-        await page.getByRole('button', { name: 'Confirm with Google', exact: true }).click();
-        await page.getByRole('button', { name: 'Child account request: pending', exact: true }).waitFor();
-        assert.equal(await page.getByLabel("Child's nickname", { exact: true }).count(), 0);
+        await page.getByRole('button', { name: 'Confirmar com Google', exact: true }).click();
+        await page.getByRole('button', { name: 'Solicitação de conta infantil: pendente', exact: true }).waitFor();
+        assert.equal(await page.getByLabel('Apelido da criança', { exact: true }).count(), 0);
         assert.equal(await page.locator('input[type=password]').count(), 0);
         const [pendingForm] = (await admin.query<RowDataPacket[]>('SELECT reference,user_name FROM parent_signed_forms WHERE parent_uuid=? AND status=\'pending\'', [p.account.accountId]))[0];
         assert.equal(pendingForm.user_name, null);
         await ownerReview(await formReview(p, pendingForm.reference, true));
-        await page.getByRole('button', { name: 'Refresh signed form requests', exact: true }).click();
-        await page.getByRole('button', { name: 'Child account request: approved', exact: true }).click();
-        await page.getByLabel('I am 18 or older.').check(); await page.getByLabel("I am this child's parent or legal guardian and can give this consent.").check();
-        await page.getByLabel('I agree to this child-account consent.').check();
-        await page.getByRole('button', { name: 'Confirm with Google', exact: true }).click();
-        const nickname = `browser-${randomUUID()}`; await page.getByLabel("Child's nickname").fill(nickname); await page.getByLabel("Child's password").fill(password);
-        await page.getByRole('button', { name: 'Create private child account', exact: true }).click();
-        await page.getByText(`Created ${nickname} with private scores. You are still signed in to your parent account.`, { exact: true }).waitFor();
+        await page.getByRole('button', { name: 'Atualizar solicitações de formulário assinado', exact: true }).click();
+        await page.getByRole('button', { name: 'Solicitação de conta infantil: aprovado', exact: true }).click();
+        await page.getByLabel(brLabels.adult, { exact: true }).check(); await page.getByLabel(brLabels.guardianCheck, { exact: true }).check();
+        await page.getByLabel(brLabels.consentCheck, { exact: true }).check();
+        await page.getByRole('button', { name: 'Confirmar com Google', exact: true }).click();
+        const nickname = `browser-${randomUUID()}`; await page.getByLabel('Apelido da criança', { exact: true }).fill(nickname); await page.getByLabel('Senha da criança', { exact: true }).fill(password);
+        await page.getByRole('button', { name: 'Criar conta infantil privada', exact: true }).click();
+        await page.getByText(`A conta ${nickname} foi criada com resultados privados. Você continua conectado à conta de responsável.`, { exact: true }).waitFor();
         const [created] = await p.store.listChildren(p.context); assert.equal(created.userName, nickname);
         const beforeDeletion = intents.length;
         // Keep this function self-contained when Playwright serializes it into the browser.
@@ -601,7 +605,7 @@ test('browser creates a chosen nickname, separately publishes and removes scores
         await submitP4VegaScore(database, scoreUser.user_id, 40);
         await page.getByLabel(/^Child account/).selectOption(created.accountId);
         const scoreSection=page.getByRole('region',{name:'Child leaderboard participation'});
-        await scoreSection.getByLabel(publicPolicy.consentText,{exact:true}).check();
+        await scoreSection.getByLabel(browserPublicPolicy.consentText,{exact:true}).check();
         await scoreSection.getByRole('button',{name:'Join leaderboards with Google',exact:true}).click();
         await scoreSection.getByText('Leaderboard participation is enabled.',{exact:true}).waitFor();
         assert.ok((await readP4VegaLeaderboard(database,browserPublicPolicy.digest,true)).some(row=>row.userName===nickname));

@@ -65,6 +65,8 @@ async function fixture(t, country) {
             assert.equal(body.country,country); assert.equal(body.adultAttestation,true);
             assert.equal(body.guardianAttestation,true); assert.equal(body.consent,true);
             assert.equal('userName' in body,false); assert.equal('password' in body,false);
+            if (form?.status === 'approved') assert.equal(body.formReference, reference);
+            else assert.equal(Object.hasOwn(body, 'formReference'), false);
             result = {state,nonce,expiresInSeconds:300};
         } else if (path === '/forms/request') {
             assert.deepEqual(body,{state,idToken:'synthetic.identity.signature'});
@@ -86,28 +88,49 @@ async function fixture(t, country) {
     await page.getByRole('combobox',{name:/Child's country/}).selectOption(country);
     return {page,calls,external,setStatus:status => { form = {...form,status}; }};
 }
-async function confirmParent(page) {
-    await page.getByLabel('I am 18 or older.',{exact:true}).check();
-    await page.getByLabel("I am this child's parent or legal guardian and can give this consent.",{exact:true}).check();
-    await page.getByLabel('I agree to this child-account consent.',{exact:true}).check();
-    await page.getByRole('button',{name:'Confirm with Google',exact:true}).click();
+const labels = country => country === 'BR' ? {
+    adult: notice.signedParentForm.ptBR.labels.adult, guardian: notice.signedParentForm.ptBR.labels.guardianCheck,
+    consent: notice.signedParentForm.ptBR.labels.consentCheck, confirm: 'Confirmar com Google',
+    form: notice.signedParentForm.ptBR.labels.formAria, refresh: 'Atualizar solicitações de formulário assinado',
+    approved: 'Solicitação de conta infantil: aprovado', rejected: 'Solicitação de conta infantil: recusado',
+    nickname: 'Apelido da criança', password: 'Senha da criança', create: 'Criar conta infantil privada',
+    success: 'A conta Synthetic Player foi criada com resultados privados. Você continua conectado à conta de responsável.',
+} : {
+    adult: 'I am 18 or older.', guardian: "I am this child's parent or legal guardian and can give this consent.",
+    consent: 'I agree to this child-account consent.', confirm: 'Confirm with Google',
+    form: 'Signed parent consent form', refresh: 'Refresh signed form requests',
+    approved: 'Child account request: approved', rejected: 'Child account request: rejected',
+    nickname: "Child's nickname", password: "Child's password", create: 'Create private child account',
+    success: 'Created Synthetic Player with private scores. You are still signed in to your parent account.',
+};
+async function confirmParent(page, country) {
+    const text = labels(country);
+    await page.getByLabel(text.adult,{exact:true}).check();
+    await page.getByLabel(text.guardian,{exact:true}).check();
+    await page.getByLabel(text.consent,{exact:true}).check();
+    await page.getByRole('button',{name:text.confirm,exact:true}).click();
 }
 for (const country of ['BR','US']) test(`${country} signed parent flow collects child credentials only after approval`,async t => {
     const {page,calls,external,setStatus} = await fixture(t,country);
+    const text = labels(country);
     assert.equal(await page.locator('input:not([type=checkbox])').count(),0);
-    await confirmParent(page);
-    await page.getByRole('article',{name:'Signed parent consent form'}).waitFor();
+    await confirmParent(page,country);
+    await page.getByRole('article',{name:text.form}).waitFor();
     assert.equal(await page.locator('input:not([type=checkbox])').count(),0);
-    assert.equal(await page.getByRole('button',{name:'Confirm with Google',exact:true}).isDisabled(),true);
+    assert.equal(await page.getByRole('button',{name:text.confirm,exact:true}).isDisabled(),true);
     assert.equal(calls.filter(call => ['/complete','/children'].includes(call.path)).length,0);
     setStatus('approved');
-    await page.getByRole('button',{name:'Refresh signed form requests',exact:true}).click();
-    await page.getByRole('button',{name:'Child account request: approved',exact:true}).waitFor();
-    await page.getByRole('button',{name:'Confirm with Google',exact:true}).click();
-    await page.getByLabel("Child's nickname",{exact:true}).fill('Synthetic Player');
-    await page.getByLabel("Child's password",{exact:true}).fill('Synthetic password 123!');
-    await page.getByRole('button',{name:'Create private child account',exact:true}).click();
-    await page.getByText('Created Synthetic Player with private scores. You are still signed in to your parent account.',{exact:true}).waitFor();
+    await page.getByRole('button',{name:text.refresh,exact:true}).click();
+    await page.getByRole('button',{name:text.approved,exact:true}).waitFor();
+    await page.getByRole('button',{name:text.confirm,exact:true}).click();
+    await page.getByLabel(text.nickname,{exact:true}).fill('Synthetic Player');
+    await page.getByLabel(text.password,{exact:true}).fill('Synthetic password 123!');
+    await page.getByRole('button',{name:text.create,exact:true}).click();
+    await page.getByText(text.success,{exact:true}).waitFor();
+    const begins = calls.filter(call => call.path === '/begin');
+    assert.equal(begins.length,2);
+    assert.equal(Object.hasOwn(begins[0].body,'formReference'),false);
+    assert.equal(begins[1].body.formReference,reference);
     assert.equal(calls.filter(call => call.path === '/children').length,1);
     assert.equal(await page.evaluate(() => localStorage.length+sessionStorage.length),0);
     assert.deepEqual(external,[]);
@@ -115,12 +138,13 @@ for (const country of ['BR','US']) test(`${country} signed parent flow collects 
 
 test('rejected signed consent cannot mount child credentials or reach account creation',async t => {
     const {page,calls,setStatus} = await fixture(t,'BR');
-    await confirmParent(page);
-    await page.getByRole('article',{name:'Signed parent consent form'}).waitFor();
+    const text = labels('BR');
+    await confirmParent(page,'BR');
+    await page.getByRole('article',{name:text.form}).waitFor();
     setStatus('rejected');
-    await page.getByRole('button',{name:'Refresh signed form requests',exact:true}).click();
-    await page.getByRole('button',{name:'Child account request: rejected',exact:true}).waitFor();
-    assert.equal(await page.getByRole('button',{name:'Confirm with Google',exact:true}).isDisabled(),true);
+    await page.getByRole('button',{name:text.refresh,exact:true}).click();
+    await page.getByRole('button',{name:text.rejected,exact:true}).waitFor();
+    assert.equal(await page.getByRole('button',{name:text.confirm,exact:true}).isDisabled(),true);
     assert.equal(await page.locator('input:not([type=checkbox])').count(),0);
     assert.equal(calls.filter(call => ['/complete','/children'].includes(call.path)).length,0);
 });
