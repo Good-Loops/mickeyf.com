@@ -116,10 +116,14 @@ As an alternative, the owner authorized installation of the signed VeraCrypt
 privately by the owner. A synthetic file was written while mounted, the volume
 was dismounted and reopened with the owner's password, and the same synthetic
 content was read and removed. Empty intake/review folders and a header-only
-register were created inside the container; it was then dismounted. A separate
-backup and recovery test remain necessary. Existing EFS files and the prior EFS
-recovery backup were not migrated or removed. Do not receive real forms until
-the complete intake, all-copy deletion and recovery operation is qualified.
+register were created inside the container; it was then dismounted. A snapshot
+of the dismounted container was copied to the owner's selected D: drive, a
+different physical SATA disk, and SHA-256 readback matched the original. This
+does not establish that the disk is removable or offline, and the backup does
+not update automatically. A restore on a separate device remains untested.
+Existing EFS files and the prior EFS recovery backup were not migrated or
+removed. Do not receive real forms until the complete intake, all-copy deletion
+and recovery operation is qualified.
 
 Record the exact tested build and reviewed notice/form/consent versions; qualify
 the parent review and all-copy deletion process with synthetic records; validate
