@@ -1,21 +1,22 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { existsSync, realpathSync } from 'node:fs';
+import { existsSync } from 'node:fs';
 import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { basename, delimiter, dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { test } from 'node:test';
 import { gunzipSync } from 'node:zlib';
 
 function npmCli() {
-    if (process.env.npm_execpath && existsSync(process.env.npm_execpath)) return process.env.npm_execpath;
-    for (const directory of (process.env.PATH ?? '').split(delimiter)) {
-        const path = process.platform === 'win32' ? join(directory, 'node_modules/npm/bin/npm-cli.js') : join(directory, 'npm');
-        if (existsSync(path)) return realpathSync(path);
-    }
-    throw new Error('npm CLI was not found');
+    // Use only the npm installed with the Node executable running this test.
+    // Untrusted PATH/npm_execpath values must not select executable code.
+    const nodeDir = dirname(process.execPath);
+    const path = process.platform === 'win32' ? join(nodeDir, 'node_modules', 'npm', 'bin', 'npm-cli.js')
+        : resolve(nodeDir, '..', 'lib', 'node_modules', 'npm', 'bin', 'npm-cli.js');
+    if (!existsSync(path)) throw new Error('npm CLI was not found in this Node installation');
+    return path;
 }
 
 test('npm audit sends vendored minimatch and TypeDoc versions and reports their advisories', { timeout: 70000 }, async t => {
