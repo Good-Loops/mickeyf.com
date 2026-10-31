@@ -141,7 +141,7 @@ test('workflow keeps the default and protected branch gate for both upload modes
     const workflow = await readFile(new URL('../.github/workflows/ios-build.yml', import.meta.url), 'utf8');
     assert.match(workflow, /upload_testflight:[\s\S]*?type: boolean\s+required: false\s+default: false/);
     assert.match(workflow, /upload_distribution:[\s\S]*?type: choice\s+required: true\s+default: internal-only\s+options:\s+- internal-only\s+- app-store-draft/);
-    assert.match(workflow, /if: \$\{\{ !inputs\.compile_only && inputs\.upload_testflight && \(github\.ref == 'refs\/heads\/main' \|\| github\.ref == 'refs\/heads\/feature\/auth-family-leaderboards'\) \}\}/);
+    assert.match(workflow, /if: \$\{\{ !inputs\.compile_only && inputs\.upload_testflight && !inputs\.audit_privacy_manifests && \(github\.ref == 'refs\/heads\/main' \|\| github\.ref == 'refs\/heads\/feature\/auth-family-leaderboards'\) \}\}/);
     assert.match(workflow, /environment: ios-testflight/);
     assert.match(workflow, /IOS_UPLOAD_DISTRIBUTION: \$\{\{ inputs\.upload_distribution \|\| 'internal-only' \}\}/);
     assert.match(workflow, /node --test \.\.\/scripts\/ios-testflight\.test\.mjs/);
