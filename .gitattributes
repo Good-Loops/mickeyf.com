@@ -19,6 +19,7 @@ Dockerfile text eol=lf
 *.scss text eol=lf
 *.svg text eol=lf
 *.md text eol=lf
+/frontend/public/native-third-party-notices.txt text eol=lf whitespace=-trailing-space
 
 # Content-addressed Unity release bytes must survive checkout unchanged.
 # The stable build manifest remains ordinary normalized JSON outside this tree.
