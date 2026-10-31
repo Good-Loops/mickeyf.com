@@ -29,7 +29,7 @@ const server = await createViteTestServer({ root, configFile: `${root}/vite.conf
     }, load(id) { if (id.startsWith('\0signup-availability:')) return mocks[id.slice('\0signup-availability:'.length)]; } }],
 });
 after(() => server.close());
-const { default: SignUp, SignupCredentials } = await server.ssrLoadModule('/ts/pages/SignUp.tsx');
+const { default: SignUp, SignupCredentials, SIGNUP_CONFIG_TIMEOUT_MS } = await server.ssrLoadModule('/ts/pages/SignUp.tsx');
 const flush = () => new Promise(resolve => setImmediate(resolve));
 const deferred = () => { let resolve, reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { promise, resolve, reject }; };
 
@@ -54,6 +54,7 @@ function fixture(t) {
     const text = () => JSON.stringify(nodes(view).map(node => node.props?.children).flat(Infinity).filter(item => typeof item === 'string'));
     render();
     return { pending, render, unmount, text, hasCredentials: () => nodes(view).some(node => node.type === SignupCredentials),
+        retryButton: () => nodes(view).find(node => node.type === 'button')?.props,
         retry: () => nodes(view).find(node => node.type === 'button')?.props.onClick() };
 }
 
@@ -75,4 +76,19 @@ test('failed or unsupported policy never presents credential controls and can re
 test('a late configuration response cannot update an unmounted page', async t => {
     const f = fixture(t); f.unmount(); f.pending[0].resolve({enabled:true, mode:'general-audience'}); await flush();
     assert.equal(f.pending[0].signal.aborted, true);
+});
+test('a hung configuration check times out, offers a stable keyboard retry, and ignores its late result', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const f = fixture(t);
+    t.mock.timers.tick(SIGNUP_CONFIG_TIMEOUT_MS); f.render();
+    assert.equal(f.pending[0].signal.aborted, true);
+    assert.equal(f.hasCredentials(), false); assert.match(f.text(), /can’t check/);
+    assert.equal(f.retryButton().type, 'button');
+    f.retry(); f.render(); f.render();
+    assert.equal(f.pending.length, 2); assert.equal(f.retryButton()['aria-disabled'], true);
+    f.retry(); f.render(); assert.equal(f.pending.length, 2);
+    f.pending[0].resolve({enabled:true, mode:'general-audience'}); await flush(); f.render();
+    assert.equal(f.hasCredentials(), false);
+    f.pending[1].resolve({enabled:false}); await flush(); f.render();
+    assert.equal(f.hasCredentials(), false); assert.match(f.text(), /temporarily paused/);
 });

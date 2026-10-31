@@ -192,6 +192,7 @@ export const SignupCredentials: React.FC = () => {
 };
 
 type SignupAvailability = 'checking' | 'open' | 'paused' | 'unavailable';
+export const SIGNUP_CONFIG_TIMEOUT_MS = 10_000;
 
 const SignUp: React.FC = () => {
     const [availability, setAvailability] = useState<SignupAvailability>(LEGACY_PUBLIC_API_PREVIEW ? 'open' : 'checking');
@@ -201,14 +202,21 @@ const SignUp: React.FC = () => {
         if (LEGACY_PUBLIC_API_PREVIEW) return;
         const controller = new AbortController();
         setAvailability('checking');
+        const timeout = setTimeout(() => {
+            if (!controller.signal.aborted) {
+                controller.abort();
+                setAvailability('unavailable');
+            }
+        }, SIGNUP_CONFIG_TIMEOUT_MS);
         void registrationConfigRequest(controller.signal).then(config => {
             if (controller.signal.aborted) return;
             // This deployed page only implements the general-audience contract.
             // A different policy must be handled by its matching frontend.
             setAvailability(!config ? 'unavailable' : !config.enabled ? 'paused'
                 : 'mode' in config && config.mode === 'general-audience' ? 'open' : 'unavailable');
-        }).catch(() => { if (!controller.signal.aborted) setAvailability('unavailable'); });
-        return () => controller.abort();
+        }).catch(() => { if (!controller.signal.aborted) setAvailability('unavailable'); })
+            .finally(() => clearTimeout(timeout));
+        return () => { clearTimeout(timeout); controller.abort(); };
     }, [attempt]);
 
     if (availability === 'open') return <SignupCredentials />;
@@ -218,7 +226,10 @@ const SignUp: React.FC = () => {
             {availability === 'checking' ? <p role="status">Checking whether sign-up is available…</p>
                 : availability === 'paused' ? <p role="status">New account creation is temporarily paused. You can still play as a guest or log in to an existing account.</p>
                 : <p role="alert">We can’t check sign-up availability right now. Please try again.</p>}
-            {availability !== 'checking' && <button className="signup__submit" type="button" onClick={() => setAttempt(value => value + 1)}>Check again</button>}
+            {(availability !== 'checking' || attempt > 0) && <button className="signup__submit" type="button"
+                aria-disabled={availability === 'checking'} onClick={() => {
+                    if (availability !== 'checking') setAttempt(value => value + 1);
+                }}>Check again</button>}
             <p className="signup__account-link"><Link to="/">Continue as a guest</Link> · <Link to="/login">Log in</Link></p>
         </div>
     </section>;
