@@ -5,6 +5,15 @@ run-name: Ludolume iOS build
 on:
   workflow_dispatch:
     inputs:
+      child_lifecycle:
+        description: Enable both child activity and warning UI only for a qualified backend
+        type: choice
+        required: false
+        default: follow-repository
+        options:
+          - follow-repository
+          - "on"
+          - "off"
       compile_only:
         description: Validate both native targets without signing, deployment, caches or app artifacts
         type: boolean
@@ -58,6 +67,8 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
       VITE_PROD_API_URL: https://mickeyf-org-j7yuum4tiq-uc.a.run.app
       VITE_ENABLE_THREE_BOSSES_RELEASE: "1"
+      VITE_ENABLE_CHILD_ONLINE_ACTIVITY: ${{ (inputs.child_lifecycle == 'on' || (inputs.child_lifecycle != 'off' && vars.LUDOLUME_CHILD_LIFECYCLE_RELEASE == '1')) && '1' || '0' }}
+      VITE_ENABLE_CHILD_INACTIVITY_WARNING: ${{ (inputs.child_lifecycle == 'on' || (inputs.child_lifecycle != 'off' && vars.LUDOLUME_CHILD_LIFECYCLE_RELEASE == '1')) && '1' || '0' }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -192,6 +203,8 @@ jobs:
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
       VITE_PROD_API_URL: https://mickeyf-org-j7yuum4tiq-uc.a.run.app
       VITE_ENABLE_THREE_BOSSES_RELEASE: "1"
+      VITE_ENABLE_CHILD_ONLINE_ACTIVITY: ${{ (inputs.child_lifecycle == 'on' || (inputs.child_lifecycle != 'off' && vars.LUDOLUME_CHILD_LIFECYCLE_RELEASE == '1')) && '1' || '0' }}
+      VITE_ENABLE_CHILD_INACTIVITY_WARNING: ${{ (inputs.child_lifecycle == 'on' || (inputs.child_lifecycle != 'off' && vars.LUDOLUME_CHILD_LIFECYCLE_RELEASE == '1')) && '1' || '0' }}
       ASC_KEY_ID: ${{ vars.ASC_KEY_ID }}
       ASC_ISSUER_ID: ${{ vars.ASC_ISSUER_ID }}
       ASC_APP_ID: ${{ vars.ASC_APP_ID }}
@@ -252,6 +265,8 @@ jobs:
       NPM_CONFIG_FUND: "false"
       VITE_PROD_API_URL: https://mickeyf-org-j7yuum4tiq-uc.a.run.app
       VITE_ENABLE_THREE_BOSSES_RELEASE: "1"
+      VITE_ENABLE_CHILD_ONLINE_ACTIVITY: ${{ (inputs.child_lifecycle == 'on' || (inputs.child_lifecycle != 'off' && vars.LUDOLUME_CHILD_LIFECYCLE_RELEASE == '1')) && '1' || '0' }}
+      VITE_ENABLE_CHILD_INACTIVITY_WARNING: ${{ (inputs.child_lifecycle == 'on' || (inputs.child_lifecycle != 'off' && vars.LUDOLUME_CHILD_LIFECYCLE_RELEASE == '1')) && '1' || '0' }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

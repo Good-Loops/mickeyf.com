@@ -50,7 +50,7 @@ jobs:
           npm --prefix .github/firebase-deploy ci --ignore-scripts --no-audit --no-fund
 
       - name: Test TypeDoc matcher compatibility and audit visibility
-        run: node --test scripts/typedoc-minimatch-compat.test.mjs scripts/typedoc-audit-visibility.test.mjs
+        run: node --test scripts/typedoc-minimatch-compat.test.mjs scripts/typedoc-audit-visibility.test.mjs scripts/child-release-build.test.mjs
 
       - name: Validate Firebase deploy dependency tree
         run: |

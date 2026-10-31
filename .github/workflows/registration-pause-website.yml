@@ -2,6 +2,16 @@ name: Registration pause website verification
 
 on:
   workflow_dispatch:
+    inputs:
+      child_lifecycle:
+        description: Enable both child activity and warning UI only for a qualified backend
+        type: choice
+        required: false
+        default: follow-repository
+        options:
+          - follow-repository
+          - "on"
+          - "off"
   push:
     branches:
       - fix/public-release-registration-pause
@@ -47,6 +57,8 @@ jobs:
       - name: Test and build website
         env:
           VITE_ENABLE_THREE_BOSSES_RELEASE: "1"
+          VITE_ENABLE_CHILD_ONLINE_ACTIVITY: ${{ (inputs.child_lifecycle == 'on' || (inputs.child_lifecycle != 'off' && vars.LUDOLUME_CHILD_LIFECYCLE_RELEASE == '1')) && '1' || '0' }}
+          VITE_ENABLE_CHILD_INACTIVITY_WARNING: ${{ (inputs.child_lifecycle == 'on' || (inputs.child_lifecycle != 'off' && vars.LUDOLUME_CHILD_LIFECYCLE_RELEASE == '1')) && '1' || '0' }}
           VITE_PROD_API_URL: https://mickeyf-org-j7yuum4tiq-uc.a.run.app
         run: |
           npm run three-bosses:webgl:release:validate

@@ -8,12 +8,14 @@ import { createParentRegistrationApi, type ParentConfig } from '@/services/paren
 import { acquireProviderCredential, getAvailableProviderClients, type PublicProviderClient } from '@/services/providerClient';
 import { apiFetch } from '@/services/apiFetch';
 import { API_BASE, LEGACY_PUBLIC_API_PREVIEW } from '@/config/apiConfig';
+import { isChildLifecycleEnabled } from '@/config/childLifecycleGate';
 import { providerAccountMethodsRequest } from '@/services/authService';
 import { capturePageOwnership, sameAccountIds } from '@/services/pageOwnership';
 import type { PageRequestInit } from '@/services/pageOwnership';
 
 const api = createParentRegistrationApi(API_BASE, apiFetch, { requireChildAudience: true });
 export default function ParentAccounts() {
+    const childLifecycleEnabled = isChildLifecycleEnabled(import.meta.env.VITE_ENABLE_CHILD_ONLINE_ACTIVITY, import.meta.env.VITE_ENABLE_CHILD_INACTIVITY_WARNING);
     const { isAuthenticated, userName, loading, sessionGeneration, deleteFamily: deleteFamilyAccount, captureAccountAction, captureSessionGeneration } = useAuth();
     const [clients, setClients] = useState<PublicProviderClient[]>([]);
     const [config, setConfig] = useState<ParentConfig | null>(null);
@@ -163,10 +165,10 @@ export default function ParentAccounts() {
                 </select></label>
                 {selected && <ScoreParticipation childAccountId={selected} authenticated={isAuthenticated} accountKey={userName ?? ''} sessionGeneration={sessionGeneration}
                     selectionIsCurrent={() => selectedNow.current === selected} captureAccountAction={captureAccountAction} captureSessionGeneration={captureSessionGeneration} />}
-                {selected && import.meta.env.VITE_ENABLE_CHILD_INACTIVITY_WARNING === '1' && <ParentInactivityWarning
+                {selected && childLifecycleEnabled && <ParentInactivityWarning
                     key={`${sessionGeneration}:${selected}`} childAccountId={selected} sessionGeneration={sessionGeneration} refreshKey={warningRevision}
                     selectionIsCurrent={() => selectedNow.current === selected} captureAccountAction={captureAccountAction} captureSessionGeneration={captureSessionGeneration} />}
-                {selected && import.meta.env.VITE_ENABLE_CHILD_ONLINE_ACTIVITY === '1' && <p><button type="button" disabled={busy} onClick={() => void keepChild()}>Keep this child account active</button></p>}
+                {selected && childLifecycleEnabled && <p><button type="button" disabled={busy} onClick={() => void keepChild()}>Keep this child account active</button></p>}
                 <p>Withdrawing consent permanently deletes this child's account and scores and signs out its devices. It cannot be undone.</p>
                 <label>Type WITHDRAW AND DELETE<input disabled={busy} value={confirmation} onChange={event => setConfirmation(event.target.value)} /></label>
                 <div className="manage-account__actions">

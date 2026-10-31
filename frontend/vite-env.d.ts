@@ -8,6 +8,8 @@ interface ImportMetaEnv {
   readonly VITE_PUBLIC_AUTH_PROTOCOL?: string;
   readonly VITE_ENABLE_THREE_BOSSES_LOCAL?: string;
   readonly VITE_ENABLE_THREE_BOSSES_RELEASE?: string;
+  readonly VITE_ENABLE_CHILD_ONLINE_ACTIVITY?: string;
+  readonly VITE_ENABLE_CHILD_INACTIVITY_WARNING?: string;
 }
 
 interface ImportMeta {

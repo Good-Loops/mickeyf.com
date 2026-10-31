@@ -21,6 +21,7 @@ import { watchSessionRenewalActivity } from '@/services/sessionRenewalActivity';
 import { watchChildOnlineActivity } from '@/services/childOnlineActivity';
 import { apiFetch } from '@/services/apiFetch';
 import { API_BASE } from '@/config/apiConfig';
+import { isChildLifecycleEnabled } from '@/config/childLifecycleGate';
 import type { PageRequestInit } from '@/services/pageOwnership';
 import Swal from '@/components/siteAlert';
 import { showScopedAlert } from '@/components/scopedAlert';
@@ -69,7 +70,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const renewalActivity = useRef<ReturnType<typeof watchSessionRenewalActivity> | null>(null);
 
     useEffect(() => {
-        if (import.meta.env.VITE_ENABLE_CHILD_ONLINE_ACTIVITY !== '1' || !isAuthenticated || !userName) return;
+        if (!isChildLifecycleEnabled(import.meta.env.VITE_ENABLE_CHILD_ONLINE_ACTIVITY, import.meta.env.VITE_ENABLE_CHILD_INACTIVITY_WARNING) || !isAuthenticated || !userName) return;
         const controller = new AbortController();
         const action = authActionVersion.current;
         const canReport = () => !controller.signal.aborted && authActionVersion.current === action;

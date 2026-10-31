@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import { API_BASE } from '@/config/apiConfig';
+import { isChildLifecycleEnabled } from '@/config/childLifecycleGate';
 import { apiFetch } from '@/services/apiFetch';
 import type { PageRequestInit } from '@/services/pageOwnership';
 
@@ -14,7 +15,7 @@ export default function ParentInactivityBanner() {
     current.current = { captureAccountAction, captureSessionGeneration };
     useEffect(() => {
         setPending(false);
-        if (import.meta.env.VITE_ENABLE_CHILD_INACTIVITY_WARNING !== '1' || !isAuthenticated || !userName || onParentPage) return;
+        if (!isChildLifecycleEnabled(import.meta.env.VITE_ENABLE_CHILD_ONLINE_ACTIVITY, import.meta.env.VITE_ENABLE_CHILD_INACTIVITY_WARNING) || !isAuthenticated || !userName || onParentPage) return;
         const controller = new AbortController();
         const action = current.current.captureAccountAction();
         const isCurrent = () => !controller.signal.aborted && current.current.captureAccountAction() === action

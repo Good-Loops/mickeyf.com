@@ -14,7 +14,7 @@ const mocks = {
 };
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const server = await createViteTestServer({ root, configFile:`${root}/vite.config.ts`, appType:'custom', logLevel:'silent',
-    define: { 'import.meta.env.VITE_ENABLE_CHILD_INACTIVITY_WARNING': '"1"' }, server:{middlewareMode:true}, ssr:{noExternal:[/^react$/, /^react-router-dom$/]},
+    define: { 'import.meta.env.VITE_ENABLE_CHILD_INACTIVITY_WARNING': '"1"', 'import.meta.env.VITE_ENABLE_CHILD_ONLINE_ACTIVITY': '"1"' }, server:{middlewareMode:true}, ssr:{noExternal:[/^react$/, /^react-router-dom$/]},
     plugins:[{name:'inactivity-banner-test',enforce:'pre', resolveId(source) { const name=source.replaceAll('\\','/').split('/').at(-1).replace(/\.tsx?$/,'');
         if(Object.hasOwn(mocks,name)) return `\0banner:${name}`; }, load(id) { if(id.startsWith('\0banner:')) return mocks[id.slice(8)]; } }],
 });
