@@ -48,7 +48,7 @@ function mount(t, policy, purpose = 'signup') {
                 effects.push(() => { slot.cleanup?.(); slot.cleanup = callback(); });
             }
         },
-        async config() { calls.push(['config']); return policy ?? { enabled: true, audience: 'children-included', creationEnabled: true,
+        async config(signal) { calls.push(['config']); return typeof policy === 'function' ? policy(signal) : policy ?? { enabled: true, audience: 'children-included', creationEnabled: true,
             policyVersion: 'synthetic-reviewed', parentRegistrationAvailable: true,
             countries: [{ country: 'US', parentRequiredBelow: 13, adultFrom: 18 }, { country: 'BR', parentRequiredBelow: 18, adultFrom: 18 }] }; },
         async begin(input) { calls.push(['begin', input]); return { authorized: true, expiresInSeconds: 300, scoreVisibility: 'private' }; },
@@ -120,7 +120,53 @@ test('paused creation never mounts signup credentials, providers or an eligibili
     assert.equal(view.children.length, 0);
     assert.equal(view.find(node => node.type === 'form' || node.type === 'input' || node.type === 'select'), undefined);
     assert(view.find(node => node.type === 'p' && node.props.role === 'status'
-        && node.props.children.startsWith('New registrations are currently paused.')));
+        && node.props.children.startsWith('New account creation is temporarily paused.')));
+    assert(view.find(node => node.props?.to === '/'));
+    assert(view.find(node => node.props?.to === '/login'));
+    assert.deepEqual(view.calls, [['config']]);
+});
+
+test('disabled registration shows the same pause notice and does not request a grant', async t => {
+    const view = mount(t, { enabled: false }); view.render(); await view.settle();
+    assert(view.find(node => node.type === 'p' && node.props.role === 'status'
+        && node.props.children.startsWith('New account creation is temporarily paused.')));
+    assert.equal(view.find(node => node.type === 'form' || node.type === 'input' || node.type === 'select'), undefined);
+    assert(view.find(node => node.props?.to === '/'));
+    assert(view.find(node => node.props?.to === '/login'));
+    assert.deepEqual(view.calls, [['config']]);
+});
+
+test('an unavailable config can be retried without displaying credentials', async t => {
+    let policy = null;
+    const view = mount(t, () => policy); view.render(); await view.settle();
+    assert(view.find(node => node.type === 'p' && node.props.children === 'We can’t check sign-up availability right now. Please try again.'));
+    assert.equal(view.children.length, 0);
+    policy = { enabled: false };
+    view.find(node => node.type === 'button' && node.props.children === 'Check again').props.onClick();
+    view.render(); await view.settle();
+    assert(view.find(node => node.type === 'p' && node.props.children?.startsWith?.('New account creation is temporarily paused.')));
+    assert.deepEqual(view.calls, [['config'], ['config']]);
+});
+
+test('a failed config request shows the retry message without mounting credentials', async t => {
+    const view = mount(t, () => Promise.reject(new Error('offline'))); view.render(); await view.settle();
+    assert(view.find(node => node.type === 'p' && node.props.children === 'We can’t check sign-up availability right now. Please try again.'));
+    assert(view.find(node => node.type === 'button' && node.props.children === 'Check again'));
+    assert.equal(view.children.length, 0);
+    assert.deepEqual(view.calls, [['config']]);
+});
+
+test('a timed-out config fails closed and ignores a late response', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    let resolveConfig, signal;
+    const view = mount(t, inputSignal => { signal = inputSignal; return new Promise(resolve => { resolveConfig = resolve; }); });
+    view.render();
+    t.mock.timers.tick(10_000); view.render(); await view.settle();
+    assert.equal(signal.aborted, true);
+    assert(view.find(node => node.type === 'p' && node.props.children === 'We can’t check sign-up availability right now. Please try again.'));
+    resolveConfig(creationPaused); await view.settle();
+    assert(view.find(node => node.type === 'p' && node.props.children === 'We can’t check sign-up availability right now. Please try again.'));
+    assert.equal(view.children.length, 0);
     assert.deepEqual(view.calls, [['config']]);
 });
 

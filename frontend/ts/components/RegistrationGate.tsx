@@ -4,6 +4,8 @@ import { registrationConfigRequest, beginRegistration, cancelRegistration } from
 import { supportsChildAudience, type RegistrationAgeBand, type RegistrationConfig } from '@/services/registrationApi';
 import { registrationAge } from '@/services/registrationAge';
 
+export const REGISTRATION_CONFIG_TIMEOUT_MS = 10_000;
+
 export function ParentRegistrationUnavailable() {
     return <div role="status">
         <h2>A parent or guardian needs to lead this step</h2>
@@ -32,15 +34,25 @@ export default function RegistrationGate({ children, purpose = 'signup' }: {
     const generation = useRef(0);
     const countryPolicy = supportsChildAudience(config) ? config : null;
     const creationPaused = purpose === 'signup' && countryPolicy?.creationEnabled === false;
+    const signupPaused = purpose === 'signup' && (config?.enabled === false || creationPaused);
 
     useEffect(() => {
         let active = true;
         const controller = new AbortController();
         setLoading(true);
+        const timeout = setTimeout(() => {
+            if (active) {
+                controller.abort();
+                setConfig(null);
+                setLoading(false);
+            }
+        }, REGISTRATION_CONFIG_TIMEOUT_MS);
         void registrationConfigRequest(controller.signal).then(value => {
-            if (active) { setConfig(value); setLoading(false); }
-        });
-        return () => { active = false; controller.abort(); };
+            if (active && !controller.signal.aborted) { setConfig(value); setLoading(false); }
+        }).catch(() => {
+            if (active && !controller.signal.aborted) { setConfig(null); setLoading(false); }
+        }).finally(() => clearTimeout(timeout));
+        return () => { active = false; clearTimeout(timeout); controller.abort(); };
     }, [retry]);
 
     useEffect(() => () => {
@@ -101,13 +113,14 @@ export default function RegistrationGate({ children, purpose = 'signup' }: {
     const titleId = purpose === 'signup' ? 'registration-title' : 'provider-eligibility-title';
     return <section className={purpose === 'signup' ? 'signup' : 'provider-eligibility'} aria-labelledby={titleId}>
         <div className="signup__form-wrapper">
-            {purpose === 'signup' ? <h1 id={titleId}>Check eligibility</h1> : <h2 id={titleId}>Use Google or Apple</h2>}
+            {purpose === 'signup' ? <h1 id={titleId}>{signupPaused ? 'Sign up' : 'Check eligibility'}</h1> : <h2 id={titleId}>Use Google or Apple</h2>}
             {purpose === 'provider-login' && <p>First choose your country and age range. Children with a parent-managed account can use their nickname and password above.</p>}
             {loading ? <p role="status">Checking registration availability…</p>
-                : creationPaused ? <p role="status">New registrations are currently paused. You can keep exploring without an account, or log in to an existing account.</p>
-                : !countryPolicy ? <div role="status">
-                    <p>{config?.enabled === false ? 'New registrations are currently paused.' : 'Registration eligibility could not be confirmed. You can keep exploring without an account.'}</p>
-                    <button type="button" onClick={() => setRetry(value => value + 1)}>Check again</button>
+                : signupPaused ? <p role="status">New account creation is temporarily paused. You can still play as a guest or log in to an existing account.</p>
+                : !countryPolicy ? <div role={purpose === 'signup' ? 'alert' : 'status'}>
+                    <p>{purpose === 'signup' ? 'We can’t check sign-up availability right now. Please try again.'
+                        : config?.enabled === false ? 'New registrations are currently paused.' : 'Registration eligibility could not be confirmed. You can keep exploring without an account.'}</p>
+                    {purpose === 'provider-login' && <button type="button" onClick={() => setRetry(value => value + 1)}>Check again</button>}
                 </div>
                 : parentStep || registrationAge.parentRequired() ? <ParentRegistrationUnavailable />
                 : <form className="signup__form" onSubmit={submit} aria-busy={busy}>
@@ -134,8 +147,10 @@ export default function RegistrationGate({ children, purpose = 'signup' }: {
                         {busy ? 'Checking…' : ageBand === 'parent-required' ? 'Continue with a parent' : 'Continue'}
                     </button>
                 </form>}
+            {purpose === 'signup' && (loading ? retry > 0 : signupPaused || !countryPolicy) && <button type="button" className="signup__submit"
+                aria-disabled={loading} onClick={() => { if (!loading) setRetry(value => value + 1); }}>Check again</button>}
             {feedback && <p role="alert">{feedback}</p>}
-            {purpose === 'signup' && <p className="signup__account-link">Already have an account? <Link to="/login">Log in</Link></p>}
+            {purpose === 'signup' && <p className="signup__account-link"><Link to="/">Continue as a guest</Link> · <Link to="/login">Log in</Link></p>}
         </div>
     </section>;
 }
