@@ -12,6 +12,7 @@ import { withUserSubmissionLock, type UserSubmissionLockContext } from '../leade
 import { AccountDeletionPendingError, deleteOwnedAccountRows } from './accountDeletionRepository';
 import type { AccountDeletionJournal } from './deletionJournal';
 import type { ParentChallenge, ParentChild, ParentRegistrationStore } from './parentRegistrationFlow';
+import type { ParentManagedChildActivity } from './parentManagedChildActivity';
 
 const timeout = 10_000;
 type Database = Pick<Pool, 'query' | 'getConnection'>;
@@ -54,8 +55,8 @@ async function transaction<T>(lock: UserSubmissionLockContext, operation: (conne
 
 /** Only short-lived proof metadata and the minimal current consent relationship are persisted. */
 export function createParentRegistrationRepository(database: Database, journal: AccountDeletionJournal, publicationPolicy?: ScoreParticipationPolicy,
-    signedFormsEnabled = false, { countries = ['US'], credentialsAfterApproval = false }: {
-        countries?: readonly string[]; credentialsAfterApproval?: boolean;
+    signedFormsEnabled = false, { countries = ['US'], credentialsAfterApproval = false, childActivity }: {
+        countries?: readonly string[]; credentialsAfterApproval?: boolean; childActivity?: ParentManagedChildActivity;
     } = {}): ParentRegistrationStore {
     if (!journal || typeof journal.recordAccountDeletion !== 'function') throw new TypeError('Parent registration requires deletion journaling.');
     const requiresSignedForm = (country: string) => signedFormRequired(country, countries);
@@ -241,6 +242,7 @@ export function createParentRegistrationRepository(database: Database, journal: 
                 await command(connection, `INSERT INTO parent_child_consents (child_uuid, parent_uuid, country_code, policy_digest, consent_version, consented_at)
                     VALUES (?, ?, ?, ?, ?, UTC_TIMESTAMP(6))`,
                 [child.account_uuid, context.account!.accountId, approval.country_code, policyDigest, approval.consent_version]);
+                if (childActivity) await childActivity.initialize(connection, child.account_uuid);
                 await consume(connection, approval.state_hash, context);
                 if (formReference) await command(connection, "UPDATE parent_signed_forms SET status='used', child_uuid=? WHERE reference=? AND status='approved'", [child.account_uuid, formReference]);
                 return { accountId: child.account_uuid, userName: credentials.userName, scoreVisibility: 'private' as const };

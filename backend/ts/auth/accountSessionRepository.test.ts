@@ -3,6 +3,7 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import test from 'node:test';
 import type { Pool, PoolConnection, QueryOptions } from 'mysql2/promise';
 import { AccountSessionUnavailableError, createAccountSession, readLiveSession, renewAccountSession, revokeAccountSession } from './accountSessionRepository';
+import { parentManagedChildActivity } from '../accounts/parentManagedChildActivity';
 
 const target = { userId: 7, accountId: randomUUID() };
 const sessionId = randomBytes(32).toString('base64url');
@@ -61,6 +62,28 @@ test('deleted/replaced accounts or changed password proof cannot create or evict
         assert.equal(await createAccountSession(f.database, target, sessionId, expiresAt(), 'expected-hash'), false);
         assert.equal(f.calls.some(call => /INSERT|DELETE/u.test(call.sql)), false);
     }
+});
+
+test('opt-in child activity follows successful password session insertion and rolls back if tracking fails', async () => {
+    const f = fixture();
+    assert.equal(await createAccountSession(f.database, target, sessionId, expiresAt(), 'expected-hash', false, undefined, parentManagedChildActivity), true);
+    const insert = f.calls.findIndex(call => call.sql.startsWith('INSERT INTO account_sessions'));
+    const activity = f.calls.findIndex(call => call.sql.includes('UPDATE parent_managed_child_activity'));
+    assert.ok(activity > insert); assert.ok(activity < f.calls.findIndex(call => call.sql === 'COMMIT'));
+    assert.deepEqual(f.calls[activity].values, [target.accountId]);
+    const wrong = fixture({ user: { accountId: target.accountId, passwordHash: 'changed' } });
+    assert.equal(await createAccountSession(wrong.database, target, sessionId, expiresAt(), 'expected-hash', false, undefined, parentManagedChildActivity), false);
+    assert.equal(wrong.calls.some(call => call.sql.includes('parent_managed_child_activity')), false);
+    const fail = fixture({ fail: 'UPDATE parent_managed_child_activity' });
+    await assert.rejects(createAccountSession(fail.database, target, sessionId, expiresAt(), 'expected-hash', false, undefined, parentManagedChildActivity), AccountSessionUnavailableError);
+    assert.ok(fail.calls.some(call => call.sql === 'ROLLBACK'));
+    assert.equal(fail.calls.some(call => call.sql === 'COMMIT'), false);
+    const disabled = fixture();
+    await createAccountSession(disabled.database, target, sessionId, expiresAt(), 'expected-hash');
+    assert.equal(disabled.calls.some(call => call.sql.includes('parent_managed_child_activity')), false);
+    const provider = fixture();
+    await createAccountSession(provider.database, target, sessionId, expiresAt(), undefined, false, undefined, parentManagedChildActivity);
+    assert.equal(provider.calls.some(call => call.sql.includes('parent_managed_child_activity')), false);
 });
 
 test('only a full account evicts its oldest remaining device after bounded expiry cleanup', async () => {

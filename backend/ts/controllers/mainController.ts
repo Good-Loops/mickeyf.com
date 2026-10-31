@@ -21,6 +21,7 @@ import { authorizeScoreSubmission } from '../security/scoreSubmissionAuthorizati
 import { clearAuthenticationCookies, NATIVE_SESSION_COOKIE, WEB_SESSION_COOKIE, sessionCookieOptions } from '../security/sessionCookie';
 import { issueSessionToken } from '../security/sessionPolicy';
 import { createAccountSession, revokeAccountSession } from '../auth/accountSessionRepository';
+import type { ParentManagedChildActivity } from '../accounts/parentManagedChildActivity';
 import { authenticateRequest } from '../security/requestAuthentication';
 import { hasAllowedMutationOrigin, isJsonMutationRequest } from '../security/mutationRequest';
 import {
@@ -38,6 +39,7 @@ type ControllerDependencies = {
     p4VegaScoreSubmissionsEnabled: boolean;
     allowedMutationOrigins: readonly string[];
     registration?: RegistrationAuthorization;
+    childActivity?: ParentManagedChildActivity;
 };
 
 // A fixed, valid bcrypt hash keeps nonexistent-account checks on the same
@@ -52,6 +54,7 @@ export function createMainController({
     p4VegaScoreSubmissionsEnabled,
     allowedMutationOrigins,
     registration = createRegistrationAuthorization(database),
+    childActivity,
 }: ControllerDependencies) {
     const readRegistrationContext = createProviderAuthContextReader({ database, sessionSecret, allowedOrigins: allowedMutationOrigins });
     async function addUser(req: Request, res: Response) {
@@ -127,7 +130,7 @@ export function createMainController({
         const session = issueSessionToken({ userId: user.userId, userName: user.userName,
             accountId: user.accountId }, sessionSecret, rememberMe);
         if (!await createAccountSession(database, { userId: user.userId, accountId: user.accountId },
-            session.sessionId, session.expiresAt, user.passwordHash, rememberMe)) {
+            session.sessionId, session.expiresAt, user.passwordHash, rememberMe, undefined, childActivity)) {
             return res.json({ error: 'AUTH_FAILED' });
         }
         const cookieName = req.headers.origin === 'capacitor://localhost' ? NATIVE_SESSION_COOKIE : WEB_SESSION_COOKIE;

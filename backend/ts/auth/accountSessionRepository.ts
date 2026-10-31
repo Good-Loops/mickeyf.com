@@ -4,6 +4,7 @@ import { isAccountId } from '../accounts/deletionJournal';
 import { appleSubjectHash, assertFreshAppleSession, APPLE_SESSION_PROOF_MAX_AGE_SECONDS,
     APPLE_SESSION_PROOF_FUTURE_TOLERANCE_SECONDS, type AppleSessionProof } from './appleSessionRevocation';
 import { withUserSubmissionLock, type UserSubmissionLockContext } from '../leaderboards/userSubmissionLock';
+import type { ParentManagedChildActivity } from '../accounts/parentManagedChildActivity';
 import { isSessionId, PERSISTENT_SESSION_SECONDS,
     SESSION_RENEWAL_GRACE_SECONDS, SESSION_RENEWAL_INTERVAL_SECONDS } from '../security/sessionPolicy';
 
@@ -62,6 +63,7 @@ export async function createAccountSession(
     expectedPasswordHash?: string,
     rememberMe = false,
     appleProof?: AppleSessionProof,
+    childActivity?: ParentManagedChildActivity,
 ): Promise<boolean> {
     const hash = sessionHash(target, sessionId);
     const appleHash = appleProof === undefined ? undefined : appleSubjectHash(appleProof);
@@ -122,6 +124,7 @@ export async function createAccountSession(
                 ...(proof ? [proof.issuedAt, proof.issuedAt] : [])]);
             if (proof && inserted.affectedRows === 0) throw new AppleSessionProofRejected();
             if (inserted.affectedRows !== 1) throw new AccountSessionUnavailableError();
+            if (childActivity && expectedPasswordHash !== undefined) await childActivity.recordInteractiveSignIn(connection, account.accountId);
             return true;
         }, 'READ COMMITTED'));
     } catch (error) {
