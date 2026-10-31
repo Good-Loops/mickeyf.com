@@ -366,9 +366,10 @@ for (const width of [1280, 390]) {
         assert.equal(await page.getByRole('link', { name: 'Cancel', exact: true }).count(), 0);
         const loginLink = page.getByRole('link', { name: 'Log in', exact: true });
         assert.equal(await loginLink.evaluate(link => getComputedStyle(link).color), 'rgba(234, 234, 251, 0.9)');
-        const privacy = page.locator('.footer a');
+        const privacy = page.locator('.footer a[href="/privacy"]');
         assert.equal(await privacy.textContent(), 'Privacy notice');
         assert.equal(await privacy.evaluate(link => getComputedStyle(link).color), 'rgb(234, 234, 251)');
+        assert.equal(await page.locator('.footer a[href="/licenses"]').count(), 1);
         assert.equal(calls.filter(call => call.path === '/api/users').length, 0);
         assert.equal(calls.filter(call => call.path === '/auth/registration/begin').length, 1);
         assert.ok(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth));
