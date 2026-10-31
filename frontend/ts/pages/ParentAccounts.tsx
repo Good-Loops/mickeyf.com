@@ -8,10 +8,11 @@ import { acquireProviderCredential, getAvailableProviderClients, type PublicProv
 import { apiFetch } from '@/services/apiFetch';
 import { API_BASE, LEGACY_PUBLIC_API_PREVIEW } from '@/config/apiConfig';
 import { providerAccountMethodsRequest } from '@/services/authService';
+import { capturePageOwnership, sameAccountIds } from '@/services/pageOwnership';
 
 const api = createParentRegistrationApi(API_BASE, apiFetch, { requireChildAudience: true });
 export default function ParentAccounts() {
-    const { isAuthenticated, userName, loading, sessionGeneration, deleteFamily: deleteFamilyAccount, captureAccountAction } = useAuth();
+    const { isAuthenticated, userName, loading, sessionGeneration, deleteFamily: deleteFamilyAccount, captureAccountAction, captureSessionGeneration } = useAuth();
     const [clients, setClients] = useState<PublicProviderClient[]>([]);
     const [config, setConfig] = useState<ParentConfig | null>(null);
     const [children, setChildren] = useState<{ accountId: string; userName: string }[]>([]);
@@ -26,6 +27,10 @@ export default function ParentAccounts() {
     const operation = useRef<AbortController | null>(null);
     const pendingState = useRef<string | null>(null);
     const previousSession = useRef(sessionGeneration);
+    const selectedNow = useRef(selected);
+    selectedNow.current = selected;
+    const latest = useRef({ isAuthenticated, userName, loading, sessionGeneration, children, childrenLoaded, selected, confirmation, familyAcknowledged, familyConfirmation });
+    latest.current = { isAuthenticated, userName, loading, sessionGeneration, children, childrenLoaded, selected, confirmation, familyAcknowledged, familyConfirmation };
     useEffect(() => { setFeedback(''); }, [isAuthenticated, userName]);
     useEffect(() => {
         setChildren([]); setChildrenLoaded(false); setFamilyConfirmation(''); setFamilyAcknowledged(false); setConfig(null); setSelected(''); setConfirmation(''); setBusy(false);
@@ -57,61 +62,85 @@ export default function ParentAccounts() {
     async function withdraw(client: PublicProviderClient) {
         if (operation.current || !isAuthenticated || !config?.enabled || confirmation !== 'WITHDRAW AND DELETE'
             || !children.some(child => child.accountId === selected)) return;
-        const controller = new AbortController(); operation.current = controller; setBusy(true); setFeedback('');
+        const controller = new AbortController(); const ownsPage = capturePageOwnership();
+        const target = selected, account = userName, generation = sessionGeneration, expectedAction = captureAccountAction();
+        const isOwner = () => ownsPage() && latest.current.isAuthenticated && !latest.current.loading
+            && latest.current.userName === account && latest.current.sessionGeneration === generation && captureSessionGeneration() === generation
+            && captureAccountAction() === expectedAction;
+        const isCurrent = () => isOwner()
+            && latest.current.selected === target && latest.current.confirmation === 'WITHDRAW AND DELETE'
+            && latest.current.children.some(child => child.accountId === target);
+        const active = () => !controller.signal.aborted && isCurrent();
+        operation.current = controller; setBusy(true); setFeedback('');
         try {
-            const challenge = await api.beginWithdrawal(config, client.clientKey, selected, controller.signal);
-            if (controller.signal.aborted) { void api.cancel(challenge.state).catch(() => undefined); return; }
+            const challenge = await api.beginWithdrawal(config, client.clientKey, selected, controller.signal, isCurrent);
+            if (!active()) { void api.cancel(challenge.state).catch(() => undefined); return; }
             pendingState.current = challenge.state;
             const credential = await acquireProviderCredential(client, challenge, controller.signal);
-            if (controller.signal.aborted) return;
-            const approved = await api.complete(challenge.state, typeof credential === 'string' ? credential : credential.idToken, controller.signal);
-            if (controller.signal.aborted) return;
+            if (!active()) return;
+            const approved = await api.complete(challenge.state, typeof credential === 'string' ? credential : credential.idToken, controller.signal, isCurrent);
+            if (!active()) return;
             if (approved.purpose !== 'withdraw-child') throw new Error('Invalid purpose.');
-            await api.withdraw(approved.grant, controller.signal);
-            if (controller.signal.aborted) return;
+            await api.withdraw(approved.grant, controller.signal, isCurrent);
+            if (!active()) return;
             pendingState.current = null; setFeedback('Consent withdrawn and child account deleted. Your parent account is unchanged.');
             setRetry(value => value + 1);
-        } catch { if (!controller.signal.aborted) setFeedback('Deletion could not be confirmed. A recorded request may still complete. Refresh the child list before retrying.'); }
-        finally { if (!controller.signal.aborted) { const state = pendingState.current; pendingState.current = null;
-            if (state) void api.cancel(state).catch(() => undefined); operation.current = null; setBusy(false); } }
+        } catch { if (active()) setFeedback('Deletion could not be confirmed. A recorded request may still complete. Refresh the child list before retrying.'); }
+        finally { if (operation.current === controller) { const state = pendingState.current; pendingState.current = null;
+            if (state) void api.cancel(state).catch(() => undefined); operation.current = null; if (!controller.signal.aborted) setBusy(false); } }
     }
     async function deleteFamily(client: PublicProviderClient) {
         if (operation.current || !isAuthenticated || !config?.enabled || !childrenLoaded
             || !familyAcknowledged || familyConfirmation !== 'DELETE MY FAMILY') return;
-        const controller = new AbortController(); operation.current = controller; setBusy(true); setFeedback('');
         const ids = children.map(child => child.accountId);
-        const expectedAction = captureAccountAction();
+        const controller = new AbortController(); const ownsPage = capturePageOwnership();
+        const account = userName, generation = sessionGeneration, expectedAction = captureAccountAction();
+        const isOwner = () => ownsPage() && latest.current.isAuthenticated && !latest.current.loading
+            && latest.current.userName === account && latest.current.sessionGeneration === generation && captureSessionGeneration() === generation;
+        const isPageCurrent = () => isOwner()
+            && latest.current.childrenLoaded && latest.current.familyAcknowledged && latest.current.familyConfirmation === 'DELETE MY FAMILY'
+            && sameAccountIds(ids, latest.current.children.map(child => child.accountId));
+        const isCurrent = () => isPageCurrent() && captureAccountAction() === expectedAction;
+        const active = () => !controller.signal.aborted && isCurrent();
+        let deletionAction: number | null = null;
+        const canUpdate = () => !controller.signal.aborted && isOwner()
+            && captureAccountAction() === (deletionAction ?? expectedAction);
+        operation.current = controller; setBusy(true); setFeedback('');
         try {
-            const challenge = await api.beginFamilyDeletion(config, client.clientKey, ids, controller.signal);
-            if (controller.signal.aborted) { void api.cancel(challenge.state).catch(() => undefined); return; }
+            const challenge = await api.beginFamilyDeletion(config, client.clientKey, ids, controller.signal, isCurrent);
+            if (!active()) { void api.cancel(challenge.state).catch(() => undefined); return; }
             pendingState.current = challenge.state;
             const credential = await acquireProviderCredential(client, challenge, controller.signal);
-            if (controller.signal.aborted) return;
-            const approval = await api.complete(challenge.state, typeof credential === 'string' ? credential : credential.idToken, controller.signal);
-            if (controller.signal.aborted) return;
+            if (!active()) return;
+            const approval = await api.complete(challenge.state, typeof credential === 'string' ? credential : credential.idToken, controller.signal, isCurrent);
+            if (!active()) return;
             if (approval.purpose !== 'delete-family') throw new Error('Invalid purpose.');
-            await deleteFamilyAccount(approval.grant, ids, expectedAction);
-            if (controller.signal.aborted) return;
+            const request = deleteFamilyAccount(approval.grant, ids, expectedAction, { signal: controller.signal, isCurrent: isPageCurrent });
+            deletionAction = captureAccountAction();
+            await request;
+            if (!canUpdate()) return;
             pendingState.current = null;
-        } catch { if (!controller.signal.aborted) setFeedback('Family deletion could not be confirmed. Recorded requests may still complete. Refresh the list before retrying; a changed family needs a new confirmation.'); }
-        finally { if (!controller.signal.aborted) { const state = pendingState.current; pendingState.current = null;
-            if (state) void api.cancel(state).catch(() => undefined); operation.current = null; setBusy(false); } }
+        } catch { if (canUpdate()) setFeedback('Family deletion could not be confirmed. Recorded requests may still complete. Refresh the list before retrying; a changed family needs a new confirmation.'); }
+        finally { if (operation.current === controller) { const state = pendingState.current; pendingState.current = null;
+            if (state) void api.cancel(state).catch(() => undefined); operation.current = null; if (!controller.signal.aborted) setBusy(false); } }
     }
     if (LEGACY_PUBLIC_API_PREVIEW) return <p>Parent accounts are unavailable in this preview.</p>;
     return <section className="manage-account parent-accounts"><div className="manage-account__form-wrapper">
         <h1 className="manage-account__title">Parent and child accounts</h1>
         {loading ? <p>Checking your session.</p> : <ParentRegistration api={api} authenticated={isAuthenticated}
             requireChildAudience
-            accountKey={userName ?? ''} sessionGeneration={sessionGeneration} clients={clients} acquire={acquireProviderCredential} onCreated={() => setRetry(value => value + 1)} />}
+            accountKey={userName ?? ''} sessionGeneration={sessionGeneration} captureAccountAction={captureAccountAction} captureSessionGeneration={captureSessionGeneration}
+            clients={clients} acquire={acquireProviderCredential} onCreated={() => setRetry(value => value + 1)} />}
         {isAuthenticated && config?.enabled && <section aria-label="Manage child accounts">
             <h2>Your child accounts</h2>
             <p>Choose leaderboard participation separately for each child. Keep the child's password safe. This release has no email recovery for children; you can withdraw consent and delete their account here.</p>
             <button type="button" disabled={busy} onClick={() => setRetry(value => value + 1)}>Refresh child accounts</button>
             {children.length === 0 ? <p>No child accounts are listed.</p> : <>
-                <label>Child account<select disabled={busy} value={selected} onChange={event => { setSelected(event.target.value); setConfirmation(''); }}>
+                <label>Child account<select disabled={busy} value={selected} onChange={event => { selectedNow.current = event.target.value; setSelected(event.target.value); setConfirmation(''); }}>
                     <option value="">Choose the child account</option>{children.map(child => <option key={child.accountId} value={child.accountId}>{child.userName}</option>)}
                 </select></label>
-                {selected && <ScoreParticipation childAccountId={selected} authenticated={isAuthenticated} accountKey={userName ?? ''} sessionGeneration={sessionGeneration} />}
+                {selected && <ScoreParticipation childAccountId={selected} authenticated={isAuthenticated} accountKey={userName ?? ''} sessionGeneration={sessionGeneration}
+                    selectionIsCurrent={() => selectedNow.current === selected} captureAccountAction={captureAccountAction} captureSessionGeneration={captureSessionGeneration} />}
                 <p>Withdrawing consent permanently deletes this child's account and scores and signs out its devices. It cannot be undone.</p>
                 <label>Type WITHDRAW AND DELETE<input disabled={busy} value={confirmation} onChange={event => setConfirmation(event.target.value)} /></label>
                 <div className="manage-account__actions">

@@ -33,7 +33,8 @@ type AuthContextType = {
     login: (user: string, pass: string, options?: LoginOptions) => Promise<boolean>;
     logout: () => Promise<void>;
     captureAccountAction: () => number;
-    deleteFamily: (grant: string, childAccountIds: readonly string[], expectedAction: number) => Promise<void>;
+    captureSessionGeneration: () => number;
+    deleteFamily: (grant: string, childAccountIds: readonly string[], expectedAction: number, options?: ProviderAuthenticationOptions) => Promise<void>;
     deleteAccount: (password: string) => Promise<DeleteAccountResponse>;
     authenticateWithProvider: (input: ProviderAuthenticationInput, acquireCredential: AcquireProviderCredential,
         options?: ProviderAuthenticationOptions) => Promise<ProviderAuthenticationResult>;
@@ -57,6 +58,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const [isAuthenticated, setIsAuthenticated] = useState(false);
     const [loading, setLoading] = useState(true);
     const [sessionGeneration, setSessionGeneration] = useState(0);
+    const sessionGenerationRef = useRef(0);
     const authActionVersion = useRef(0);
     const preparedLoginVersions = useRef(new WeakMap<PreparedProviderLogin, number>());
     const sessionMayExist = useRef(true);
@@ -85,7 +87,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
                 return !canApply();
             } finally {
                 // An HttpOnly cookie may rotate even if the response cannot be confirmed.
-                if (active) setSessionGeneration(value => value + 1);
+                if (active) { sessionGenerationRef.current++; setSessionGeneration(sessionGenerationRef.current); }
                 if (canApply()) setLoading(false);
             }
         };
@@ -275,10 +277,12 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     };
 
     const captureAccountAction = () => authActionVersion.current;
-    const deleteFamily = async (grant: string, childAccountIds: readonly string[], expectedAction: number): Promise<void> => {
+    const captureSessionGeneration = () => sessionGenerationRef.current;
+    const deleteFamily = async (grant: string, childAccountIds: readonly string[], expectedAction: number, options?: ProviderAuthenticationOptions): Promise<void> => {
         if (expectedAction !== authActionVersion.current) throw new Error('Family approval belongs to an earlier authentication action.');
         const actionVersion = ++authActionVersion.current;
-        await deleteFamilyRequest(grant, childAccountIds);
+        await deleteFamilyRequest(grant, childAccountIds, { ...options,
+            isCurrent: () => actionVersion === authActionVersion.current && (!options?.isCurrent || options.isCurrent()) });
         if (actionVersion === authActionVersion.current) {
             // Show confirmation before the signed-out UI replaces the account page.
             // Do not await dismissal: the server has already invalidated the session.
@@ -308,7 +312,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     return (
         <AuthContext.Provider
-            value={{ userName, isAuthenticated, loading, sessionGeneration, login, logout, deleteAccount, deleteFamily, captureAccountAction, authenticateWithProvider,
+            value={{ userName, isAuthenticated, loading, sessionGeneration, login, logout, deleteAccount, deleteFamily, captureAccountAction, captureSessionGeneration, authenticateWithProvider,
                 prepareProviderLogin, completeProviderLogin }}
         >
             {children}

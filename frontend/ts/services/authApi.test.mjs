@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { createAuthApi } from './authApi.ts';
+import { createNativeApiFetch } from './nativeApiFetch.ts';
 
 const apiBase = 'https://api.example.test';
 const credentials = { user_name: ' Player ', user_password: ' pass phrase ' };
@@ -1326,4 +1327,59 @@ test('family cookie mutation settles in the auth queue before a newer login and 
     assert.deepEqual(JSON.parse(seen[0].init.body),{grant:'synthetic-grant',childAccountIds:['123e4567-e89b-42d3-a456-426614174000'],confirmation:'DELETE MY FAMILY'});
     finish(Response.json({deleted:true}));await deletion;await login;
     assert.equal(seen[1].url,apiBase+'/api/users');
+});
+
+test('queued family deletion is cancelled before send, but a sent deletion still resolves', async () => {
+    for (const phase of ['queued', 'sent']) {
+        let release, current = true;
+        const waiting = new Promise(resolve => { release = resolve; });
+        const calls = [], controller = new AbortController();
+        const api = createAuthApi(apiBase, async url => {
+            if (url.endsWith('/auth/renew')) { calls.push('renew'); await waiting; return Response.json({loggedIn:false}); }
+            if (url.endsWith('/family/delete')) { calls.push('delete'); if (phase === 'sent') await waiting; return Response.json({deleted:true}); }
+            assert.fail('unexpected synthetic transport');
+        });
+        const preceding = phase === 'queued' ? api.renewRequest() : null;
+        const deletion = api.deleteFamilyRequest('synthetic-grant', [], { signal:controller.signal, isCurrent:() => current });
+        await new Promise(resolve => setImmediate(resolve));
+        assert.deepEqual(calls, phase === 'queued' ? ['renew'] : ['delete']);
+        current = false; controller.abort(); release();
+        if (preceding) await preceding;
+        if (phase === 'queued') await assert.rejects(deletion, /no longer current/u);
+        else await assert.doesNotReject(deletion);
+        assert.deepEqual(calls, phase === 'queued' ? ['renew'] : ['delete']);
+    }
+});
+
+test('family deletion rechecks cancellation at the deferred native send boundary', async () => {
+    for (const cause of ['navigation', 'same-path abort']) {
+        let current = true, nativeCalls = 0;
+        const controller = new AbortController();
+        const native = createNativeApiFetch(async () => { nativeCalls++; return { status:200, body:'{"deleted":true}' }; });
+        const api = createAuthApi(apiBase, (url, init) => {
+            const result = native(url, init);
+            if (cause === 'navigation') current = false;
+            else controller.abort();
+            return result;
+        });
+        await assert.rejects(api.deleteFamilyRequest('synthetic-grant', [],
+            { signal:controller.signal, isCurrent:() => current }), { name:'AbortError' });
+        assert.equal(nativeCalls, 0, cause);
+    }
+});
+
+test('a family deletion already sent to native transport settles after departure without retrying', async () => {
+    let current = true, release, nativeCalls = 0;
+    const controller = new AbortController();
+    const native = createNativeApiFetch(async () => {
+        nativeCalls++;
+        return new Promise(resolve => { release = () => resolve({status:200,body:'{"deleted":true}'}); });
+    });
+    const api = createAuthApi(apiBase, native);
+    const deletion = api.deleteFamilyRequest('synthetic-grant', [], {signal:controller.signal,isCurrent:() => current});
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(nativeCalls, 1);
+    current = false; controller.abort(); release();
+    await assert.doesNotReject(deletion);
+    assert.equal(nativeCalls, 1);
 });

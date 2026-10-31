@@ -12,7 +12,7 @@ import ScoreParticipation from '@/components/ScoreParticipation';
 import PublicAccountPreviewNotice from '@/components/PublicAccountPreviewNotice';
 
 export default function ManageAccount() {
-    const { userName, isAuthenticated, loading, sessionGeneration, deleteAccount, authenticateWithProvider } = useAuth();
+    const { userName, isAuthenticated, loading, sessionGeneration, deleteAccount, authenticateWithProvider, captureAccountAction, captureSessionGeneration } = useAuth();
     const [methods, setMethods] = useState<ProviderAccountMethods | null>(null);
     const [deletionClient, setDeletionClient] = useState<PublicProviderClient | undefined>();
     const [methodsLoading, setMethodsLoading] = useState(true);
@@ -155,7 +155,8 @@ export default function ManageAccount() {
                         {methods?.hasPassword && methods.providerCollectionAllowed === true && <ProviderSignInControls action="link" disabled={busy}
                             operationLock={submitting} onBusyChange={setProviderBusy}
                             onSuccess={() => setMethodsRetry(value => value + 1)} />}
-                        <ScoreParticipation authenticated={isAuthenticated} accountKey={userName ?? ''} sessionGeneration={sessionGeneration} />
+                        <ScoreParticipation authenticated={isAuthenticated} accountKey={userName ?? ''} sessionGeneration={sessionGeneration}
+                            captureAccountAction={captureAccountAction} captureSessionGeneration={captureSessionGeneration} />
                         <h2 className="manage-account__subtitle">Delete account</h2>
                         <p id="deletion-consequences">
                             Permanently remove your username, account details, personal bests,

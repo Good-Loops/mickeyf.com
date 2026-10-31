@@ -37,7 +37,8 @@ function mount(t) {
     const slots=[],effects=[],cancellations=[],withdrawals=[],proofs=[];let cursor=0,dirty=false,tree;
     const child={accountId:randomUUID(),userName:'existing-child'};const challenge={state:token(),nonce:token(),expiresInSeconds:300};
     const acquisition=deferred(); let lists=0;
-    const auth={isAuthenticated:true,userName:'parent',loading:false,sessionGeneration:1};
+    const auth={isAuthenticated:true,userName:'parent',loading:false,sessionGeneration:1,
+        captureAccountAction:()=>0,captureSessionGeneration:()=>auth.sessionGeneration};
     globalThis[key]={auth,discoveries:0,methods:{providerCollectionAllowed:true},
         state(initial){const slot=slots[cursor++]??={value:initial};return [slot.value,next=>{const value=typeof next==='function'?next(slot.value):next;if(!Object.is(value,slot.value)){slot.value=value;dirty=true;}}];},
         ref(initial){return slots[cursor++]??={current:initial};},

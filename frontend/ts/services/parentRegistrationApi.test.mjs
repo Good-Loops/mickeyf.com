@@ -3,11 +3,43 @@ import notice from '../../../shared/privacyNotice.json' with { type: 'json' };
 import { randomBytes, randomUUID } from 'node:crypto';
 import test from 'node:test';
 import { createParentRegistrationApi } from './parentRegistrationApi.ts';
+import { createNativeApiFetch } from './nativeApiFetch.ts';
 const response = (value, status = 200) => new Response(JSON.stringify(value), { status });
 const config = { enabled: true, creationEnabled: true, policyVersion: 'test-policy', consentVersion: 'test-consent', consentText: 'Synthetic consent.', privacyNoticeUrl: 'https://notice.example.test/privacy', countries: ['ZZ'] };
 const random = () => randomBytes(32).toString('base64url');
 const challenge = { state: random(), nonce: random(), expiresInSeconds: 300 };
 const consent = { country: 'ZZ', adultAttestation: true, guardianAttestation: true, consent: true };
+
+test('parent approval checks ownership before transport and again at native dispatch', async () => {
+    let current = false, nativeCalls = 0;
+    const native = createNativeApiFetch(async () => { nativeCalls++; return {status:200,body:'{}'}; });
+    const api = createParentRegistrationApi('https://api.example.test', (url, init) => {
+        const result = native(url, init);
+        current = false;
+        return result;
+    });
+    await assert.rejects(api.complete(challenge.state, 'synthetic-proof', undefined, () => current), {code:'CANCELLED'});
+    current = true;
+    await assert.rejects(api.complete(challenge.state, 'synthetic-proof', undefined, () => current), {code:'CANCELLED'});
+    assert.equal(nativeCalls, 0);
+});
+
+test('an already-sent child withdrawal is never retried when its response becomes uncertain', async () => {
+    let current = true, nativeCalls = 0, release;
+    const controller = new AbortController();
+    const native = createNativeApiFetch(async () => {
+        nativeCalls++;
+        return new Promise(resolve => { release = () => resolve({status:200,body:'{"deleted":true}'}); });
+    });
+    const api = createParentRegistrationApi('https://api.example.test', native);
+    const withdrawal = api.withdraw('synthetic-grant', controller.signal, () => current);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(nativeCalls, 1);
+    current = false; controller.abort(); release();
+    await assert.rejects(withdrawal, {code:'CANCELLED'});
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(nativeCalls, 1, 'an uncertain destructive request must not be retried');
+});
 
 test('parent consent request contains only reviewed coarse fields, never child credentials or claimed parent identity', async () => {
     const api = createParentRegistrationApi('https://api.example.test', async (url, options) => {

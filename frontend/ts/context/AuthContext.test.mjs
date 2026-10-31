@@ -72,9 +72,11 @@ test('successful and uncertain same-account renewals advance the parent-operatio
         assert.equal(operation, 'renewRequest');
         return new Promise((resolve, reject) => renewals.push({ resolve, reject }));
     }, options => activity = { renewNow: options.renew, stop() {} });
-    assert.equal(f.render().sessionGeneration, 0); f.startEffects();
+    const firstRender = f.render();
+    assert.equal(firstRender.sessionGeneration, 0); f.startEffects();
     renewals[0].resolve({ loggedIn: true, user_name: 'Same parent' });
     await new Promise(resolve => setImmediate(resolve));
+    assert.equal(firstRender.captureSessionGeneration(), 1, 'in-flight approvals must see a renewal before React re-renders');
     assert.equal(f.render().sessionGeneration, 1); assert.equal(f.render().userName, 'Same parent');
     const uncertain = activity.renewNow(); renewals[1].reject(new Error('response lost after cookie rotation')); await uncertain;
     assert.equal(f.render().sessionGeneration, 2); assert.equal(f.render().userName, 'Same parent');
@@ -212,6 +214,32 @@ test('confirmed family deletion opens success before clearing authentication wit
     assert.equal(f.feedback.length,1);assert.equal(f.feedback[0].title,'Account deleted');
     assert.equal(f.feedback[0].icon,'success');assert.equal(f.feedback[0].confirmButtonText,'Continue');
     dismiss({isConfirmed:true});
+});
+
+test('a family deletion already sent before departure still clears the confirmed session', async t => {
+    let release, current = true;
+    const waiting = new Promise(resolve => { release = resolve; });
+    const controller = new AbortController(), calls = [];
+    const api = createAuthApi('https://api.example.test', async url => {
+        calls.push(url);
+        if (url.endsWith('/family/delete')) { await waiting; return Response.json({deleted:true}); }
+        assert.fail('unexpected synthetic network call');
+    });
+    const f = fixture(t, (operation, args) => {
+        if (operation === 'loginRequest') return Promise.resolve({user_name:'Parent'});
+        if (operation === 'deleteFamilyRequest') return api.deleteFamilyRequest(...args);
+        assert.fail('unexpected authentication operation');
+    });
+    await f.render().login('Parent', 'synthetic', {showFeedback:false});
+    const auth = f.render();
+    const deletion = auth.deleteFamily('synthetic-grant', [], auth.captureAccountAction(),
+        {signal:controller.signal,isCurrent:() => current});
+    await new Promise(resolve => setImmediate(resolve));
+    assert.equal(calls.length, 1, 'the synthetic request must be sent before departure');
+    current = false; controller.abort(); release();
+    await deletion;
+    assert.equal(f.render().isAuthenticated, false);
+    assert.equal(f.render().userName, null);
 });
 
 test('sign-out starting during family approval owns authentication and prevents a late family request', async t => {

@@ -47,6 +47,17 @@ test('pre-aborted calls do not reach native code', async () => {
     await assert.rejects(fetchApi(base, { ...credentials, signal: { aborted: true } }), { name: 'AbortError' });
 });
 
+test('page ownership is checked again before the deferred native dispatch', async () => {
+    let current = true, sent = 0;
+    const fetchApi = createNativeApiFetch(async () => { sent++; return { status: 200, body: '{}' }; });
+    const result = fetchApi(base, { ...credentials, isCurrent: () => current });
+    current = false;
+    await assert.rejects(result, { name: 'AbortError' });
+    assert.equal(sent, 0);
+    await assert.rejects(fetchApi(base, { ...credentials, isCurrent: () => { throw new Error('stale'); } }), { name: 'AbortError' });
+    assert.equal(sent, 0);
+});
+
 test('an abort discards a late native response without an unhandled rejection', async () => {
     let finish;
     const controller = new AbortController();

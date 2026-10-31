@@ -83,6 +83,27 @@ test('child credential fields stay absent through consent and provider acquisiti
     assert.equal(view.all(node => node.type === 'input' && node.props.type === 'email').length, 0);
 });
 
+test('navigation or synchronous session change cancels parent proof before sending', async t => {
+    for (const cause of ['navigation', 'session']) {
+        const previous = Object.getOwnPropertyDescriptor(globalThis, 'window');
+        const window = {location:{pathname:'/parent-accounts'}};
+        Object.defineProperty(globalThis, 'window', {configurable:true,value:window});
+        let session = 0;
+        const view = mount(t, {sessionGeneration:0, captureSessionGeneration:() => session});
+        await view.prepare();
+        const state = random(); view.begins[0].resolve({state,nonce:random(),expiresInSeconds:300});
+        await view.settle();
+        if (cause === 'navigation') window.location.pathname = '/'; else session++;
+        view.acquisitions[0].resolve('synthetic-proof'); await view.settle();
+        assert.equal(view.proofs.length, 0, cause);
+        assert.deepEqual(view.cancellations, [state], cause);
+        window.location.pathname = '/parent-accounts';
+        assert.equal(view.button('Confirm with Google').props.disabled, false, 'a still-mounted page can retry');
+        view.unmount();
+        if (previous) Object.defineProperty(globalThis, 'window', previous); else delete globalThis.window;
+    }
+});
+
 test('strict parent flow requests a signed form without a nickname and collects credentials only after reviewed approval', async t => {
     const policy = { ...config, audience: 'children-included', credentialsAfterApproval: true,
         countries: ['US'], signedFormCountries: ['US'] };

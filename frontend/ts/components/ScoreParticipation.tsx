@@ -4,10 +4,12 @@ import { acquireProviderCredential, getAvailableProviderClients, type PublicProv
 import { apiFetch } from '@/services/apiFetch';
 import { API_BASE } from '@/config/apiConfig';
 import PrivacyNoticeLink from './PrivacyNoticeLink';
+import { capturePageOwnership, requestIsCurrent } from '@/services/pageOwnership';
 
 const api = createParentRegistrationApi(API_BASE, apiFetch);
-export default function ScoreParticipation({ childAccountId = null, authenticated, accountKey, sessionGeneration }: {
-    childAccountId?: string | null; authenticated: boolean; accountKey: string; sessionGeneration: number;
+export default function ScoreParticipation({ childAccountId = null, authenticated, accountKey, sessionGeneration, selectionIsCurrent, captureAccountAction, captureSessionGeneration }: {
+    childAccountId?: string | null; authenticated: boolean; accountKey: string; sessionGeneration: number; selectionIsCurrent?: () => boolean;
+    captureAccountAction?: () => number; captureSessionGeneration?: () => number;
 }) {
     const [policy, setPolicy] = useState<ScoreParticipationConfig | null>(null);
     const [status, setStatus] = useState<{ visibility: 'public' | 'private'; canPublish: boolean } | null>(null);
@@ -18,6 +20,8 @@ export default function ScoreParticipation({ childAccountId = null, authenticate
     const [retry, setRetry] = useState(0);
     const operation = useRef<AbortController | null>(null);
     const pending = useRef<string | null>(null);
+    const latest = useRef({ childAccountId, authenticated, accountKey, sessionGeneration, policy, status, consent });
+    latest.current = { childAccountId, authenticated, accountKey, sessionGeneration, policy, status, consent };
     function cancel() {
         operation.current?.abort(); operation.current = null;
         const state = pending.current; pending.current = null;
@@ -36,24 +40,32 @@ export default function ScoreParticipation({ childAccountId = null, authenticate
     }, [childAccountId, authenticated, accountKey, sessionGeneration, retry]);
     async function change(client?: PublicProviderClient) {
         if (operation.current || !authenticated || !status || client && (!consent || !policy?.enabled || !status.canPublish)) return;
-        const controller = new AbortController(); operation.current = controller; setBusy(true); setFeedback('');
+        const controller = new AbortController(); const ownsPage = capturePageOwnership();
+        const expectedAction = captureAccountAction?.();
+        const isOwner = () => ownsPage() && requestIsCurrent(selectionIsCurrent) && latest.current.authenticated && latest.current.accountKey === accountKey
+            && latest.current.sessionGeneration === sessionGeneration && latest.current.childAccountId === childAccountId
+            && (!captureAccountAction || captureAccountAction() === expectedAction)
+            && (!captureSessionGeneration || captureSessionGeneration() === sessionGeneration);
+        const isCurrent = () => isOwner() && latest.current.policy === policy && latest.current.status === status && (!client || latest.current.consent);
+        const active = () => !controller.signal.aborted && isCurrent();
+        operation.current = controller; setBusy(true); setFeedback('');
         try {
             if (client && policy?.enabled) {
-                const challenge = await api.beginScorePublication(policy, client.clientKey, childAccountId, controller.signal);
-                if (controller.signal.aborted) { void api.cancel(challenge.state).catch(() => undefined); return; }
+                const challenge = await api.beginScorePublication(policy, client.clientKey, childAccountId, controller.signal, isCurrent);
+                if (!active()) { void api.cancel(challenge.state).catch(() => undefined); return; }
                 pending.current = challenge.state;
                 const credential = await acquireProviderCredential(client, challenge, controller.signal);
-                if (controller.signal.aborted) return;
-                const approval = await api.complete(challenge.state, typeof credential === 'string' ? credential : credential.idToken, controller.signal);
-                if (controller.signal.aborted) return;
+                if (!active()) return;
+                const approval = await api.complete(challenge.state, typeof credential === 'string' ? credential : credential.idToken, controller.signal, isCurrent);
+                if (!active()) return;
                 if (approval.purpose !== 'publish-scores') throw new Error('Wrong approval purpose.');
-                await api.publishScores(approval.grant, controller.signal);
-            } else await api.withdrawScores(childAccountId, controller.signal);
-            if (controller.signal.aborted) return;
+                await api.publishScores(approval.grant, controller.signal, isCurrent);
+            } else await api.withdrawScores(childAccountId, controller.signal, isCurrent);
+            if (!active()) return;
             pending.current = null; setConsent(false); setRetry(value => value + 1);
             setFeedback(client ? 'Leaderboard participation is enabled.' : 'Public entries have been removed. Your account and private scores are kept.');
-        } catch { if (!controller.signal.aborted) setFeedback('The change could not be confirmed. Refresh before retrying. A recorded removal request may still complete.'); }
-        finally { if (!controller.signal.aborted) { cancel(); setBusy(false); } }
+        } catch { if (active()) setFeedback('The change could not be confirmed. Refresh before retrying. A recorded removal request may still complete.'); }
+        finally { if (operation.current === controller) { const canUpdate = !controller.signal.aborted; cancel(); if (canUpdate) setBusy(false); } }
     }
     if (!authenticated) return null;
     return <section aria-label={childAccountId ? 'Child leaderboard participation' : 'Your leaderboard participation'}>

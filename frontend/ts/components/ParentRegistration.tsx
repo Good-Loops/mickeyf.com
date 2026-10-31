@@ -6,6 +6,7 @@ import { ParentRegistrationError, type ParentRegistrationApi, type ParentConfig,
 import PrivacyNoticeLink from '@/components/PrivacyNoticeLink';
 import SignedParentForm from './SignedParentForm';
 import notice from '../../../shared/privacyNotice.json' with { type: 'json' };
+import { capturePageOwnership } from '@/services/pageOwnership';
 
 type Props = {
     api: ParentRegistrationApi;
@@ -13,6 +14,8 @@ type Props = {
     /** Changes whenever the current account changes; never inferred from provider email. */
     accountKey: string;
     sessionGeneration?: number;
+    captureAccountAction?(): number;
+    captureSessionGeneration?(): number;
     clients: readonly PublicProviderClient[];
     acquire(client: PublicProviderClient, challenge: ProviderAuthenticationChallenge, signal: AbortSignal): Promise<ProviderCredential>;
     onCreated?(): void;
@@ -20,7 +23,7 @@ type Props = {
 };
 
 /** Child credentials are collected only after a fresh, consent-bound parent approval. */
-export default function ParentRegistration({ api, authenticated, accountKey, sessionGeneration = 0, clients, acquire, onCreated,
+export default function ParentRegistration({ api, authenticated, accountKey, sessionGeneration = 0, captureAccountAction, captureSessionGeneration, clients, acquire, onCreated,
     requireChildAudience = false }: Props) {
     const [config, setConfig] = useState<ParentConfig | null>(null);
     const [retry, setRetry] = useState(0);
@@ -40,6 +43,8 @@ export default function ParentRegistration({ api, authenticated, accountKey, ses
     const challengeState = useRef<string | null>(null);
     const generation = useRef(0);
     const previousSession = useRef(sessionGeneration);
+    const latest = useRef({ authenticated, accountKey, sessionGeneration, config, country, selectedForm });
+    latest.current = { authenticated, accountKey, sessionGeneration, config, country, selectedForm };
     const credentialsAfterApproval = config?.enabled === true && config.audience === 'children-included'
         && config.credentialsAfterApproval === true;
     const creationAllowed = config?.enabled === true && config.creationEnabled
@@ -106,48 +111,68 @@ export default function ParentRegistration({ api, authenticated, accountKey, ses
             : !credentialsAfterApproval && !userName.trim())) return;
         const controller = new AbortController(); operation.current = controller;
         const current = ++generation.current;
-        const active = () => current === generation.current && !controller.signal.aborted;
+        const expectedAction = captureAccountAction?.();
+        const ownsPage = capturePageOwnership();
+        const isOwner = () => ownsPage() && latest.current.authenticated && latest.current.accountKey === accountKey
+            && latest.current.sessionGeneration === sessionGeneration
+            && (!captureAccountAction || captureAccountAction() === expectedAction)
+            && (!captureSessionGeneration || captureSessionGeneration() === sessionGeneration);
+        const isCurrent = () => isOwner() && latest.current.config === config
+            && latest.current.country === country && latest.current.selectedForm === selectedForm;
+        const active = () => current === generation.current && !controller.signal.aborted && isCurrent();
         setBusy(true); setFeedback('');
         try {
             const challenge = await api.begin(config, client.clientKey,
-                { country, adultAttestation: true, guardianAttestation: true, consent: true }, controller.signal);
+                { country, adultAttestation: true, guardianAttestation: true, consent: true }, controller.signal, isCurrent);
             if (!active()) { void api.cancel(challenge.state).catch(() => undefined); return; }
             challengeState.current = challenge.state;
             const credential = await acquire(client, challenge, controller.signal);
             if (!active()) return;
             if (needsForm && !selectedForm) {
                 const form = await api.requestSignedForm(challenge.state, typeof credential === 'string' ? credential : credential.idToken,
-                    credentialsAfterApproval ? undefined : userName, controller.signal);
+                    credentialsAfterApproval ? undefined : userName, controller.signal, isCurrent);
                 if (!active()) return;
                 challengeState.current = null; setSelectedForm(form); setForms(current => [form, ...current]);
                 setFeedback('Print and sign the form, then email the scan from the verified parent address shown. The child account is waiting for review and has not been created.');
                 return;
             }
-            const proof = await api.complete(challenge.state, typeof credential === 'string' ? credential : credential.idToken, controller.signal);
+            const proof = await api.complete(challenge.state, typeof credential === 'string' ? credential : credential.idToken, controller.signal, isCurrent);
             if (!active()) return;
             if (proof.purpose !== 'create-child') throw new ParentRegistrationError('UNAVAILABLE');
             setGrant({ token: proof.grant, expiresAt: Date.now() + proof.expiresInSeconds * 1000 });
         } catch (error) {
             if (active()) { const state = challengeState.current; challengeState.current = null;
                 if (state) void api.cancel(state).catch(() => undefined); setFeedback(errorText(error)); }
-        } finally { if (active()) { operation.current = null; setBusy(false); } }
+        } finally { if (current === generation.current && operation.current === controller) {
+            if (!active()) { const state = challengeState.current; challengeState.current = null;
+                if (state) void api.cancel(state).catch(() => undefined); }
+            operation.current = null; if (!controller.signal.aborted) setBusy(false);
+        } }
     };
     const create = async (event: FormEvent) => {
         event.preventDefault();
         if (operation.current || !authenticated || !grant || grant.expiresAt <= Date.now()) return;
         const controller = new AbortController(); operation.current = controller;
         const current = ++generation.current;
+        const expectedAction = captureAccountAction?.();
+        const ownsPage = capturePageOwnership();
+        const isCurrent = () => ownsPage() && latest.current.authenticated && latest.current.accountKey === accountKey
+            && latest.current.sessionGeneration === sessionGeneration && latest.current.config === config
+            && (!captureAccountAction || captureAccountAction() === expectedAction)
+            && (!captureSessionGeneration || captureSessionGeneration() === sessionGeneration)
+            && latest.current.selectedForm === selectedForm;
+        const active = () => current === generation.current && !controller.signal.aborted && isCurrent();
         setBusy(true); setFeedback('');
         try {
-            const child = await api.createChild(grant.token, userName, password, controller.signal, selectedForm?.reference);
-            if (current !== generation.current || controller.signal.aborted) return;
+            const child = await api.createChild(grant.token, userName, password, controller.signal, selectedForm?.reference, isCurrent);
+            if (!active()) return;
             challengeState.current = null; setGrant(null); setUserName(''); setPassword('');
             setFeedback(`Created ${child.userName} with private scores. You are still signed in to your parent account.`);
             setSelectedForm(null); setFormRefresh(value => value + 1);
             onCreated?.();
-        } catch (error) { if (current === generation.current && !controller.signal.aborted) {
+        } catch (error) { if (active()) {
             discard(); setGrant(null); setPassword(''); setBusy(false); setFeedback(errorText(error));
-        } } finally { if (current === generation.current && !controller.signal.aborted) { operation.current = null; setBusy(false); } }
+        } } finally { if (current === generation.current && operation.current === controller) { operation.current = null; if (!controller.signal.aborted) setBusy(false); } }
     };
     const selectForm = (form: SignedParentFormRequest) => {
         discard(); setGrant(null); setPassword(''); setBusy(false); setSelectedForm(form); setCountry(form.country);

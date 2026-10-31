@@ -659,15 +659,21 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
             generalRegistrationDeadline = 0;
             return enqueueMutation(logoutRequest);
         },
-        deleteFamilyRequest: (grant: string, childAccountIds: readonly string[]) => {
+        deleteFamilyRequest: (grant: string, childAccountIds: readonly string[], options: ProviderAuthenticationOptions = {}) => {
+            if (!validProviderOptions(options) || providerOperationCancelled(options.signal, options.isCurrent)) {
+                return Promise.reject(new Error('Family approval is no longer current.'));
+            }
             invalidatePreparedLogins();
             const ids = [...childAccountIds];
             // A cookie mutation must settle before another login/renewal, even after UI cancellation.
             return enqueueMutation(async (): Promise<void> => {
-                const response = await fetchRequest(`${apiBase}/auth/parent-registration/family/delete`, {
+                if (providerOperationCancelled(options.signal, options.isCurrent)) throw new Error('Family approval is no longer current.');
+                const init: RequestInit & { isCurrent?: () => boolean } = {
                     method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+                    ...(options.signal || options.isCurrent ? { isCurrent: () => !providerOperationCancelled(options.signal, options.isCurrent) } : {}),
                     body: JSON.stringify({ grant, childAccountIds: ids, confirmation: 'DELETE MY FAMILY' }),
-                });
+                };
+                const response = await fetchRequest(`${apiBase}/auth/parent-registration/family/delete`, init);
                 const value: unknown = await response.json();
                 if (response.status !== 200 || !isRecord(value) || !hasKeys(value, 'deleted') || value.deleted !== true) {
                     throw new Error('Family deletion could not be confirmed.');

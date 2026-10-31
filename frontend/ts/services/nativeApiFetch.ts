@@ -1,3 +1,5 @@
+import { requestIsCurrent, type PageRequestInit } from './pageOwnership.ts';
+
 /** Adapts our small JSON API to the iOS cookie-owning native transport. */
 export type NativeApiRequest = (options: {
     url: string;
@@ -21,7 +23,9 @@ export function createNativeApiFetch(request: NativeApiRequest): typeof fetch {
             throw new TypeError('The native API requires cookie credentials and a JSON string body.');
         }
         const signal = init.signal;
+        const isCurrent = (init as PageRequestInit).isCurrent;
         throwIfAborted(signal);
+        if (!requestIsCurrent(isCurrent)) throw new DOMException('Aborted', 'AbortError');
 
         return new Promise<Response>((resolve, reject) => {
             const abort = () => reject(signal?.reason ?? new DOMException('Aborted', 'AbortError'));
@@ -31,6 +35,7 @@ export function createNativeApiFetch(request: NativeApiRequest): typeof fetch {
             // to undo a mutation the server has already received.
             Promise.resolve().then(() => {
                 throwIfAborted(signal);
+                if (!requestIsCurrent(isCurrent)) throw new DOMException('Aborted', 'AbortError');
                 return request({
                     url: input.toString(),
                     method: init.method ?? 'GET',
