@@ -20,6 +20,7 @@ export default function ScoreParticipation({ childAccountId = null, authenticate
     const [retry, setRetry] = useState(0);
     const operation = useRef<AbortController | null>(null);
     const pending = useRef<string | null>(null);
+    const loadGeneration = useRef(0);
     const latest = useRef({ childAccountId, authenticated, accountKey, sessionGeneration, policy, status, consent });
     latest.current = { childAccountId, authenticated, accountKey, sessionGeneration, policy, status, consent };
     function cancel() {
@@ -33,13 +34,16 @@ export default function ScoreParticipation({ childAccountId = null, authenticate
     }, [childAccountId, authenticated, accountKey, sessionGeneration]);
     useEffect(() => {
         const controller = new AbortController();
+        const generation = ++loadGeneration.current;
         if (authenticated) void Promise.all([api.scoreConfig(controller.signal), api.scoreStatus(childAccountId, controller.signal), getAvailableProviderClients()])
-            .then(([next, current, available]) => { if (!controller.signal.aborted) { setPolicy(next); setStatus(current); setClients(available); } })
-            .catch(() => { if (!controller.signal.aborted) setFeedback('Leaderboard choices could not be loaded. Please retry.'); });
+            .then(([next, current, available]) => { if (!controller.signal.aborted && generation === loadGeneration.current) { setPolicy(next); setStatus(current); setClients(available); } })
+            .catch(() => { if (!controller.signal.aborted && generation === loadGeneration.current) setFeedback('Leaderboard choices could not be loaded. Please retry.'); });
         return () => controller.abort();
     }, [childAccountId, authenticated, accountKey, sessionGeneration, retry]);
     async function change(client?: PublicProviderClient) {
         if (operation.current || !authenticated || !status || client && (!consent || !policy?.enabled || !status.canPublish)) return;
+        // A refresh from a preceding action must not replace the state this action owns.
+        loadGeneration.current++;
         const controller = new AbortController(); const ownsPage = capturePageOwnership();
         const expectedAction = captureAccountAction?.();
         const isOwner = () => ownsPage() && requestIsCurrent(selectionIsCurrent) && latest.current.authenticated && latest.current.accountKey === accountKey

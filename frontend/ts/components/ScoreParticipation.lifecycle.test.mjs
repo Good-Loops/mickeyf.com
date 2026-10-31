@@ -49,3 +49,26 @@ test('child selection or synchronous session change cancels pending score approv
         slots.forEach(slot=>slot.cleanup?.());delete globalThis[key];
     }
 });
+
+test('a pending refresh cannot invalidate an in-flight removal or hide its result',async()=>{
+    const slots=[],effects=[],refresh=deferred(),removal=deferred();let cursor=0,dirty=false,tree,loads=0;
+    const props={childAccountId:'synthetic-child',authenticated:true,accountKey:'parent',sessionGeneration:4};
+    globalThis[key]={state(initial){const slot=slots[cursor++]??={value:initial};return [slot.value,next=>{
+        const value=typeof next==='function'?next(slot.value):next;if(!Object.is(value,slot.value)){slot.value=value;dirty=true;}}];},
+        ref(initial){return slots[cursor++]??={current:initial};},effect(fn,deps){const index=cursor++,before=slots[index];
+            if(!before||deps.some((value,i)=>!Object.is(value,before.deps[i]))){const slot=slots[index]={deps,cleanup:before?.cleanup};effects.push(()=>{slot.cleanup?.();slot.cleanup=fn();});}},
+        api:{scoreConfig:async()=>({enabled:true,policyVersion:'v1',consentVersion:'v1',consentText:'Synthetic',privacyNoticeUrl:'https://mickeyf.com/privacy'}),
+            scoreStatus:()=>++loads===2?refresh.promise:Promise.resolve({visibility:'public',canPublish:true}),
+            withdrawScores:()=>removal.promise,cancel:async()=>{}}};
+    const render=()=>{cursor=0;dirty=false;tree=Component(props);effects.splice(0).forEach(run=>run());};
+    const settle=async()=>{for(let n=0;n<10;n++){await new Promise(resolve=>setImmediate(resolve));if(!dirty)return;render();}assert.fail('hooks did not settle');};
+    const button=label=>nodes(tree).find(node=>node.type==='button'&&text(node).includes(label));
+    try {
+        render();await settle();
+        button('Refresh leaderboard choice').props.onClick();render();await settle();
+        button('Remove public entries').props.onClick();await settle();
+        refresh.resolve({visibility:'public',canPublish:true});await settle();
+        removal.resolve({});await settle();
+        assert.ok(nodes(tree).some(node=>text(node).includes('Public entries have been removed. Your account and private scores are kept.')));
+    } finally { slots.forEach(slot=>slot.cleanup?.());delete globalThis[key]; }
+});
