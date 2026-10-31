@@ -27,6 +27,8 @@ export type LockedInactivityTarget = Readonly<{
     databaseTimestamp(): Promise<string>;
     /** Recheck deadlines against the locked datastore clock before journaling. */
     assertDeletionStillDue(): Promise<void>;
+    /** Administrative restore operations may pin the isolated target inside this transaction. */
+    matchesSqlIdentity?(database: string, serverUuid: string, currentUser: string): Promise<boolean>;
     deleteChild(childId: string): Promise<void>;
 }>;
 export type InactivityStore = Readonly<{

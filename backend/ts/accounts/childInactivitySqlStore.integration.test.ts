@@ -16,7 +16,7 @@ import { applyMigrations } from '../migrations/migrationRunner';
 import { createChildInactivitySqlStore } from './childInactivitySqlStore';
 import { createInAppInactivityQualityResolver } from './childInactivityInAppTarget';
 import { createPinnedPrimaryHealth } from './retentionPrimaryHealth';
-import { reconcileKeptRetentionIntent } from './retentionReconciliation';
+import { reconcileDeletedRetentionIntent, reconcileKeptRetentionIntent, reconcileRestoredDeletedIntent } from './retentionReconciliation';
 import type { RetentionIntent } from './childInactivityWorkflow';
 import type { RetentionResolution } from './gcsRetentionJournal';
 import { createChildInactivityParentService } from './childInactivityParentService';
@@ -107,6 +107,7 @@ test('only a live parent can reconcile a conditional intent after later real SQL
         noticeDigest: 'b'.repeat(64), receiptDigest: 'c'.repeat(64) };
     let resolution: RetentionResolution | null = null;
     const journal = { async verifyRetentionIntent(value: RetentionIntent) { return value.warningId === intent.warningId; },
+        async readResolution() { return resolution; },
         async recordResolution(_intent: RetentionIntent, value: RetentionResolution) { resolution = value; } };
     const proof = { accountId: parentId, sessionId };
     assert.equal(await reconcileKeptRetentionIntent(store, journal, intent, proof, Buffer.alloc(32, 8)), false);
@@ -116,6 +117,55 @@ test('only a live parent can reconcile a conditional intent after later real SQL
     assert.equal((resolution as RetentionResolution | null)?.outcome, 'kept');
     await revokeAccountSession(database, account.userId, parentId, sessionId);
     assert.equal(await reconcileKeptRetentionIntent(store, journal, intent, proof, Buffer.alloc(32, 8)), false);
+});
+
+test('administrator reconciliation verifies actual primary identity and absence under a hold', async () => {
+    const [[identity]] = await admin.query<RowDataPacket[]>('SELECT DATABASE() AS db, CURRENT_USER() AS user, @@GLOBAL.server_uuid AS id');
+    const guard = { state: 'hold' as const, database: identity.db as string, serverUuid: identity.id as string,
+        epoch: randomUUID(), expiresAt: '2099-01-01T00:00:00.000Z', generation: '1' };
+    const intent: RetentionIntent = { parentId: randomUUID(), childId: randomUUID(), warningId: randomUUID(),
+        activityAt: '2020-01-01T00:00:00.000000Z', deliveredAt: '2023-01-01T00:00:00.000000Z', channel: 'in-app',
+        targetDigest: 'a'.repeat(64), noticeDigest: 'b'.repeat(64), receiptDigest: 'c'.repeat(64) };
+    let recorded: RetentionResolution | null = null;
+    const journal = { async readRestoreGuard() { return guard; }, async verifyRetentionIntent() { return true; },
+        async readResolution() { return recorded; },
+        async recordResolution(_intent: RetentionIntent, value: RetentionResolution) { recorded = value; } };
+    const pins = { database: guard.database, serverUuid: guard.serverUuid, currentUser: identity.user as string,
+        confirmation: 'ORIGINAL PRIMARY DRAINED AND ACCOUNT ABSENT' };
+    await assert.rejects(reconcileDeletedRetentionIntent(admin as unknown as mysql.PoolConnection, journal, intent,
+        { ...pins, currentUser: 'not-the-pinned-admin@localhost' }, Buffer.alloc(32, 8)), /Keep restoration on hold/);
+    assert.equal(recorded, null);
+    assert.equal(await reconcileDeletedRetentionIntent(admin as unknown as mysql.PoolConnection, journal, intent, pins, Buffer.alloc(32, 8)), true);
+    assert.equal((recorded as RetentionResolution | null)?.outcome, 'deleted');
+    const { childId } = await managedFixture();
+    recorded = null;
+    assert.equal(await reconcileDeletedRetentionIntent(admin as unknown as mysql.PoolConnection, journal,
+        { ...intent, childId }, pins, Buffer.alloc(32, 8)), false);
+    assert.equal(recorded, null);
+});
+
+test('verified deleted outcome applies only to pinned isolated SQL restore without later activity', async () => {
+    const { parentId, childId, unrelatedId } = await managedFixture();
+    const [[identity]] = await admin.query<RowDataPacket[]>('SELECT DATABASE() AS db, CURRENT_USER() AS user, @@GLOBAL.server_uuid AS id');
+    const originalServerUuid = randomUUID();
+    const guard = { state: 'hold' as const, database: 'original', serverUuid: originalServerUuid,
+        epoch: randomUUID(), expiresAt: '2099-01-01T00:00:00.000Z', generation: '1' };
+    const intent: RetentionIntent = { parentId, childId, warningId: randomUUID(),
+        activityAt: '2020-01-01T00:00:00.000000Z', deliveredAt: '2023-01-01T00:00:00.000000Z', channel: 'in-app',
+        targetDigest: 'a'.repeat(64), noticeDigest: 'b'.repeat(64), receiptDigest: 'c'.repeat(64) };
+    const journal = { async readRestoreGuard() { return guard; }, async verifyRetentionIntent() { return true; },
+        async recordResolution() {}, async readResolution() { return { outcome: 'deleted' as const,
+            confirmedAt: '2024-01-01T00:00:00.000000Z', observedActivityAt: null, proofDigest: 'd'.repeat(64) }; } };
+    const store = createChildInactivitySqlStore(database, createInAppInactivityQualityResolver(Buffer.alloc(32, 3), async () => false));
+    const pins = { database: identity.db as string, serverUuid: identity.id as string, originalServerUuid,
+        currentUser: identity.user as string, confirmation: 'ISOLATED RESTORE FENCED AND DELETION VERIFIED' };
+    assert.equal(await reconcileRestoredDeletedIntent(store, journal, intent, { ...pins, serverUuid: originalServerUuid }), false);
+    await admin.query("UPDATE parent_managed_child_activity SET retention_activity_at='2021-01-01 00:00:00.000000' WHERE child_uuid=?", [childId]);
+    assert.equal(await reconcileRestoredDeletedIntent(store, journal, intent, pins), false);
+    await admin.query("UPDATE parent_managed_child_activity SET retention_activity_at='2020-01-01 00:00:00.000000' WHERE child_uuid=?", [childId]);
+    assert.equal(await reconcileRestoredDeletedIntent(store, journal, intent, pins), true);
+    const [users] = await admin.query<RowDataPacket[]>('SELECT account_uuid FROM users WHERE account_uuid IN (?,?,?)', [parentId, childId, unrelatedId]);
+    assert.deepEqual(users.map(row => row.account_uuid).sort(), [parentId, unrelatedId].sort());
 });
 
 test('read-only operator report scans real SQL and withholds recent activity without disclosing contact', async () => {

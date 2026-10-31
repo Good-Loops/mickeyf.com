@@ -122,6 +122,12 @@ export function createChildInactivitySqlStore(database: Queryable, resolveQualit
                                     LIMIT 1 FOR UPDATE`, [childId, parentId, INACTIVITY_NOTICE_DIGEST]);
                                 if (due.length !== 1) throw new Error('SQL deadline changed.');
                             },
+                            async matchesSqlIdentity(database, serverUuid, currentUser) {
+                                const identity = await rows(connection, `SELECT DATABASE() AS db,
+                                    @@GLOBAL.server_uuid AS serverUuid,CURRENT_USER() AS currentUser`, []);
+                                return identity.length === 1 && identity[0].db === database
+                                    && identity[0].serverUuid === serverUuid && identity[0].currentUser === currentUser;
+                            },
                             async deleteChild(id) {
                                 if (id !== childId) throw new Error('Child mismatch.');
                                 await deleteOwnedAccountRows(connection, childUserId, childId);
