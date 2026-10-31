@@ -96,7 +96,11 @@ for (const scenario of scenarios) {
                 const module = await server.ssrLoadModule(`/ts/pages/${page}.tsx`);
                 if (page === 'SignUp') {
                     const entry = render(module.default);
-                    assert.match(entry, /type="password"|signup-email/);
+                    if (scenario.legacy) assert.match(entry, /type="password"|signup-email/);
+                    else {
+                        assert.match(entry, /Checking whether sign-up is available/);
+                        assert.doesNotMatch(entry, /type="password"|signup-email|Continue with Apple|Continue with Google/);
+                    }
                     assert.doesNotMatch(entry, /registration-country|registration-for|>Cancel<|>Create account<\/button>/);
                 }
                 const markup = render(page === 'SignUp' ? module.SignupCredentials : module.default,
