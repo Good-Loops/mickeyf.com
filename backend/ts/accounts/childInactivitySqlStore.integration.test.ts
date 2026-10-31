@@ -164,3 +164,31 @@ test('real SQL accepts only the live parent session for exact-warning acknowledg
     assert.equal(await acknowledgeInactivityWarning(store, parentId, childId, warningId,
         'ACKNOWLEDGE WARNING', proof, key), false, 'revoked parent session cannot acknowledge');
 });
+
+
+test('channel replacement holds current warnings and replaces stale warnings under SQL locks', async () => {
+    const { parentId, childId } = await managedFixture();
+    const emailStore = createChildInactivitySqlStore(database, async () => ({ activityComplete: true, targetVerified: true,
+        channel: 'email', currentTargetDigest: targetDigest }));
+    const appStore = createChildInactivitySqlStore(database, createInAppInactivityQualityResolver(Buffer.alloc(32, 3), async () => true));
+    const [[parent]] = await admin.query<RowDataPacket[]>('SELECT user_id FROM users WHERE account_uuid=?', [parentId]);
+    const sessionId = randomBytes(32).toString('base64url');
+    const account = { accountId: parentId, userId: parent.user_id as number }, proof = { accountId: parentId, sessionId };
+    assert.equal(await createAccountSession(database, account, sessionId, Math.floor(Date.now() / 1000) + 1800), true);
+    const service = createChildInactivityParentService(appStore, Buffer.alloc(32, 8));
+    const context = { account, session: proof } as unknown as ProviderAuthContext;
+    const original = await prepareInactivityWarning(emailStore, parentId, childId); assert.ok(original);
+    const [[clock]] = await admin.query<RowDataPacket[]>("SELECT DATE_FORMAT(UTC_TIMESTAMP(6),'%Y-%m-%dT%H:%i:%s.%fZ') AS nowValue");
+    assert.equal(await confirmInactivityWarning(emailStore, parentId, childId, {}, async () => ({ warningId: original.warningId,
+        parentId, childId, targetDigest, deliveredAt: clock.nowValue as string, receiptDigest: 'b'.repeat(64) }), Date.now() + 1000), true);
+    assert.deepEqual(await service.read(context, { childAccountId: childId }), { warning: null }, 'current confirmed email is preserved');
+    await admin.query("UPDATE parent_managed_child_activity SET retention_activity_at='2021-01-01 00:00:00.000000' WHERE child_uuid=?", [childId]);
+    const appResult = await service.read(context, { childAccountId: childId }); assert.ok('warning' in appResult && appResult.warning);
+    assert.notEqual(appResult.warning.warningId, original.warningId);
+    assert.equal(await prepareInactivityWarning(emailStore, parentId, childId), null, 'current in-app warning is preserved');
+    await admin.query("UPDATE parent_managed_child_activity SET retention_activity_at='2022-01-01 00:00:00.000000' WHERE child_uuid=?", [childId]);
+    const replacement = await prepareInactivityWarning(emailStore, parentId, childId); assert.ok(replacement);
+    assert.notEqual(replacement.warningId, appResult.warning.warningId); assert.equal(replacement.channel, 'email');
+    assert.deepEqual(await service.acknowledge(context, { childAccountId: childId, warningId: appResult.warning.warningId, acknowledge: true }),
+        { error: 'UNAVAILABLE' }, 'the superseded warning cannot be acknowledged');
+});

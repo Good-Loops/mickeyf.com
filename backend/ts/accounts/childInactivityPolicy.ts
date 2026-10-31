@@ -13,7 +13,7 @@ const digest = /^[a-f0-9]{64}$/u;
 const timestamp = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/u;
 
 /** Exact UTC microsecond strings are compared before millisecond date arithmetic. */
-function instant(value: unknown): number | null {
+export function parseInactivityInstant(value: unknown): number | null {
     if (typeof value !== 'string' || !timestamp.test(value)) return null;
     const milliseconds = Date.parse(value);
     if (!Number.isSafeInteger(milliseconds) || milliseconds < 0) return null;
@@ -55,13 +55,13 @@ export function assessChildInactivity(snapshot: InactivitySnapshot, nowMs: numbe
         || !['in-app', 'email'].includes(snapshot.channel)
         || snapshot.targetVerified !== true || typeof snapshot.currentTargetDigest !== 'string'
         || !digest.test(snapshot.currentTargetDigest) || !Number.isSafeInteger(nowMs) || nowMs < 0) return 'hold';
-    const activity = instant(snapshot.activityAt);
+    const activity = parseInactivityInstant(snapshot.activityAt);
     if (activity === null || activity > nowMs) return 'hold';
     const anniversary = thirdAnniversary(activity);
     if (!Number.isSafeInteger(anniversary) || nowMs < anniversary - INACTIVITY_WARNING_DAYS * DAY) return 'hold';
     if (!snapshot.warning) return 'warning-due';
     const warning = snapshot.warning;
-    const delivered = instant(warning.deliveredAt);
+    const delivered = parseInactivityInstant(warning.deliveredAt);
     if (warning.parentId !== snapshot.parentId || warning.childId !== snapshot.childId
         || warning.activityAt !== snapshot.activityAt || warning.channel !== snapshot.channel || warning.targetDigest !== snapshot.currentTargetDigest
         || !isAccountId(warning.warningId) || warning.noticeDigest !== INACTIVITY_NOTICE_DIGEST

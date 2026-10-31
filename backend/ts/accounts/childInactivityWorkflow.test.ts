@@ -144,3 +144,16 @@ test('replay holds when independent activity history is incomplete even if resto
     assert.equal(await replayRetentionIntent(f.store, incompleteJournal, f.intent, deletionTime + 500 * 86400_000), 'held');
     assert.equal(f.deleted, false);
 });
+
+
+test('email preparation replaces an old in-app warning but preserves current or uncertain evidence', async () => {
+    const base: PendingInactivityWarning = { parentId, childId, warningId: '33333333-3333-4333-8333-333333333333',
+        activityAt, targetDigest, channel: 'in-app', noticeDigest: INACTIVITY_NOTICE_DIGEST };
+    for (const old of [base, { ...base, activityAt: '2028-01-02T00:00:00.000000Z' }, { ...base, noticeDigest: 'bad' }]) {
+        const f = fixture(); f.setPending(old);
+        assert.equal(await prepareInactivityWarning(f.store, parentId, childId, warningTime), null);
+    }
+    const f = fixture(); f.setPending({ ...base, activityAt: '2027-12-31T00:00:00.000000Z' });
+    const replacement = await prepareInactivityWarning(f.store, parentId, childId, warningTime);
+    assert.ok(replacement); assert.equal(replacement.channel, 'email'); assert.notEqual(replacement.warningId, base.warningId);
+});

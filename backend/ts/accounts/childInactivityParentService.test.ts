@@ -76,3 +76,23 @@ test('anonymous, altered or wrong-child requests never disclose or acknowledge a
     f.setSnapshot(null);
     assert.deepEqual(await f.service.read(f.context, { childAccountId: childId }), { warning: null });
 });
+
+
+test('an in-app warning replaces only a demonstrably stale email warning', async () => {
+    const base: PendingInactivityWarning = { parentId, childId, warningId, activityAt: '2020-01-01T00:00:00.000000Z',
+        targetDigest, channel: 'email', noticeDigest: INACTIVITY_NOTICE_DIGEST };
+    for (const old of [base, { ...base, activityAt: '2021-01-01T00:00:00.000000Z' },
+        { ...base, activityAt: 'broken' }, { ...base, targetDigest: 'broken' }]) {
+        const f = fixture(); f.setPending(old);
+        assert.deepEqual(await f.service.read(f.context, { childAccountId: childId }), { warning: null });
+    }
+    for (const old of [{ ...base, activityAt: '2019-01-01T00:00:00.000000Z' },
+        { ...base, noticeDigest: 'b'.repeat(64) }, { ...base, parentId: '44444444-4444-4444-8444-444444444444' }]) {
+        const f = fixture(); f.setPending(old);
+        const result = await f.service.read(f.context, { childAccountId: childId });
+        assert.ok('warning' in result && result.warning);
+        assert.notEqual(result.warning.warningId, warningId);
+        assert.equal(await f.service.acknowledge(f.context, { childAccountId: childId, warningId, acknowledge: true }).then(x => 'error' in x), true);
+        assert.deepEqual(await f.service.acknowledge(f.context, { childAccountId: childId, warningId: result.warning.warningId, acknowledge: true }), { acknowledged: true });
+    }
+});

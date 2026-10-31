@@ -2,7 +2,7 @@ import type { ProviderAuthContext } from '../auth/providerAuthContext';
 import { randomUUID } from 'node:crypto';
 import { isAccountId } from './deletionJournal';
 import { assessChildInactivity, INACTIVITY_NOTICE, INACTIVITY_NOTICE_DIGEST } from './childInactivityPolicy';
-import { acknowledgeInactivityWarning, type InactivityStore } from './childInactivityWorkflow';
+import { acknowledgeInactivityWarning, canReplaceStaleWarning, type InactivityStore } from './childInactivityWorkflow';
 
 const childInput = (input: unknown): input is { childAccountId: string } => !!input && typeof input === 'object'
     && !Array.isArray(input) && Object.keys(input).join(',') === 'childAccountId'
@@ -23,10 +23,10 @@ export function createChildInactivityParentService(store: InactivityStore, recei
                     const timestamp = await target.databaseTimestamp(); const now = Date.parse(timestamp) + 1;
                     if (!snapshot || snapshot.channel !== 'in-app' || snapshot.parentId !== context.account!.accountId || snapshot.childId !== input.childAccountId
                         || assessChildInactivity({ ...snapshot, warning: null }, now) !== 'warning-due') return { warning: null };
-                    if (pending && pending.channel !== 'in-app') return { warning: null };
                     if (!pending || pending.parentId !== snapshot.parentId || pending.childId !== snapshot.childId
                         || pending.activityAt !== snapshot.activityAt || pending.targetDigest !== snapshot.currentTargetDigest
-                        || pending.noticeDigest !== INACTIVITY_NOTICE_DIGEST) {
+                        || pending.channel !== snapshot.channel || pending.noticeDigest !== INACTIVITY_NOTICE_DIGEST) {
+                        if (pending && !canReplaceStaleWarning(pending, snapshot)) return { warning: null };
                         if (!snapshot.activityAt || !snapshot.currentTargetDigest || !await target.parentSessionValid(context.session!)) return { error: 'INVALID_CONTEXT' as const };
                         pending = { parentId: snapshot.parentId, childId: snapshot.childId, activityAt: snapshot.activityAt,
                             targetDigest: snapshot.currentTargetDigest, channel: 'in-app', noticeDigest: INACTIVITY_NOTICE_DIGEST,

@@ -1,6 +1,6 @@
 import { createHmac, randomUUID } from 'node:crypto';
 import { isAccountId } from './deletionJournal';
-import { assessChildInactivity, INACTIVITY_NOTICE_DIGEST, type InactivityChannel, type InactivitySnapshot, type InactivityWarning } from './childInactivityPolicy';
+import { assessChildInactivity, INACTIVITY_NOTICE_DIGEST, parseInactivityInstant, type InactivityChannel, type InactivitySnapshot, type InactivityWarning } from './childInactivityPolicy';
 import { isSessionId, type SessionProof } from '../security/sessionPolicy';
 
 export type PendingInactivityWarning = Readonly<{
@@ -75,6 +75,19 @@ function validIds(parentId: string, childId: string): void {
     if (!isAccountId(parentId) || !isAccountId(childId) || parentId === childId) throw new TypeError('Invalid parent or child account.');
 }
 
+/** Replace only evidence that is demonstrably stale; incomparable or corrupt rows hold. */
+export function canReplaceStaleWarning(pending: PendingInactivityWarning, snapshot: InactivitySnapshot): boolean {
+    const hex = /^[a-f0-9]{64}$/u;
+    if (!isAccountId(pending.warningId) || !isAccountId(pending.parentId) || !isAccountId(pending.childId)
+        || pending.childId !== snapshot.childId || !['in-app', 'email'].includes(pending.channel)
+        || !hex.test(pending.targetDigest) || !hex.test(pending.noticeDigest)
+        || parseInactivityInstant(pending.activityAt) === null || parseInactivityInstant(snapshot.activityAt) === null
+        || !snapshot.activityAt || pending.activityAt > snapshot.activityAt) return false;
+    return pending.parentId !== snapshot.parentId || pending.activityAt < snapshot.activityAt
+        || pending.noticeDigest !== INACTIVITY_NOTICE_DIGEST
+        || (pending.channel === snapshot.channel && pending.targetDigest !== snapshot.currentTargetDigest);
+}
+
 /** Email-only operator preparation; in-app preparation requires a live parent session. */
 export async function prepareInactivityWarning(store: InactivityStore, parentId: string, childId: string,
     now = Date.now()): Promise<PendingInactivityWarning | null> {
@@ -85,10 +98,10 @@ export async function prepareInactivityWarning(store: InactivityStore, parentId:
             || !['warning-due', 'await-confirmed-warning'].includes(assessChildInactivity(snapshot, now))
             || !snapshot.activityAt || !snapshot.currentTargetDigest) return null;
         const existing = await target.pending();
-        if (existing && existing.channel !== snapshot.channel) return null;
         if (existing && existing.parentId === parentId && existing.childId === childId
             && existing.activityAt === snapshot.activityAt && existing.channel === snapshot.channel && existing.targetDigest === snapshot.currentTargetDigest
             && existing.noticeDigest === INACTIVITY_NOTICE_DIGEST) return existing;
+        if (existing && !canReplaceStaleWarning(existing, snapshot)) return null;
         const pending = Object.freeze({ warningId: randomUUID(), parentId, childId, activityAt: snapshot.activityAt,
             targetDigest: snapshot.currentTargetDigest, channel: snapshot.channel, noticeDigest: INACTIVITY_NOTICE_DIGEST });
         await target.savePending(pending);
