@@ -1,9 +1,11 @@
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { existsSync, realpathSync } from 'node:fs';
+import { mkdtemp, realpath, rm } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { delimiter, join } from 'node:path';
+import { basename, delimiter, dirname, join, resolve } from 'node:path';
+import { tmpdir } from 'node:os';
 import { test } from 'node:test';
 import { gunzipSync } from 'node:zlib';
 
@@ -17,7 +19,11 @@ function npmCli() {
 }
 
 test('npm audit sends vendored minimatch and TypeDoc versions and reports their advisories', { timeout: 70000 }, async t => {
-    let body, mockError;
+    const cacheBase = await realpath(tmpdir());
+    const cache = await mkdtemp(join(cacheBase, 'ludolume-audit-mock-'));
+    assert.equal(await realpath(cache), cache);
+    assert.equal(dirname(cache), cacheBase);
+    let body, mockError, child, timeout;
     const server = createServer((request, response) => {
         response.setHeader('connection', 'close');
         if (request.method !== 'POST' || request.url !== '/-/npm/v1/security/advisories/bulk') {
@@ -44,17 +50,29 @@ test('npm audit sends vendored minimatch and TypeDoc versions and reports their 
             }
         });
     });
+    t.after(async () => {
+        clearTimeout(timeout);
+        if (child && child.exitCode === null && child.signalCode === null) {
+            const closed = once(child, 'close');
+            child.kill();
+            await closed;
+        }
+        if (server.listening) await new Promise(done => { server.closeAllConnections(); server.close(done); });
+        // Only delete the unique cache directory created by this test.
+        assert.equal(dirname(resolve(cache)), cacheBase);
+        assert.ok(basename(cache).startsWith('ludolume-audit-mock-'));
+        await rm(cache, { recursive: true, force: true });
+    });
     server.listen(0, '127.0.0.1');
     await once(server, 'listening');
-    t.after(() => new Promise(resolve => { server.closeAllConnections(); server.close(resolve); }));
     const url = `http://127.0.0.1:${server.address().port}/`;
-    const child = spawn(process.execPath, [npmCli(), 'audit', '--json', `--registry=${url}`,
+    child = spawn(process.execPath, [npmCli(), 'audit', '--json', `--registry=${url}`,
         '--fetch-retries=0', '--fetch-timeout=15000'], {
-        env: { ...process.env, NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost' },
+        env: { ...process.env, npm_config_cache: cache, NPM_CONFIG_CACHE: cache,
+            NO_PROXY: '127.0.0.1,localhost', no_proxy: '127.0.0.1,localhost' },
         stdio: ['ignore', 'pipe', 'pipe'],
     });
-    const timeout = setTimeout(() => child.kill(), 60000);
-    t.after(() => { clearTimeout(timeout); if (child.exitCode === null) child.kill(); });
+    timeout = setTimeout(() => child.kill(), 60000);
     let stdout = '', stderr = '';
     child.stdout.on('data', value => { stdout += value; });
     child.stderr.on('data', value => { stderr += value; });
