@@ -3,6 +3,9 @@ import plistlib
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
+import contextlib
+import io
 import sys
 
 sys.dont_write_bytecode = True
@@ -12,6 +15,40 @@ spec.loader.exec_module(privacy)
 
 
 class PrivacyManifestsTest(unittest.TestCase):
+    def test_cli_only_scans_fixed_runner_bundle_and_rejects_path_arguments(self):
+        with tempfile.TemporaryDirectory() as temp:
+            app = Path(temp) / 'ludolume-derived-data/Build/Products/Release-iphonesimulator/App.app'
+            app.mkdir(parents=True)
+            (app / 'PrivacyInfo.xcprivacy').write_bytes(plistlib.dumps({}))
+            with mock.patch.dict('os.environ', {'RUNNER_TEMP': temp}), mock.patch.object(sys, 'argv', ['inventory']):
+                with contextlib.redirect_stdout(io.StringIO()) as output:
+                    privacy.main()
+                self.assertIn('PrivacyInfo.xcprivacy', output.getvalue())
+                with mock.patch.object(sys, 'argv', ['inventory', str(app)]):
+                    with self.assertRaisesRegex(ValueError, 'no path arguments'):
+                        privacy.main()
+
+    def test_cli_rejects_bundle_redirected_outside_runner(self):
+        with tempfile.TemporaryDirectory() as temp, tempfile.TemporaryDirectory() as outside:
+            link = Path(temp) / 'ludolume-derived-data'
+            try:
+                link.symlink_to(outside, target_is_directory=True)
+            except (OSError, NotImplementedError):
+                self.skipTest('Symlink creation unavailable on this system')
+            with mock.patch.dict('os.environ', {'RUNNER_TEMP': temp}), mock.patch.object(sys, 'argv', ['inventory']):
+                with self.assertRaisesRegex(ValueError, 'inside the runner'):
+                    privacy.main()
+
+    def test_cli_rejects_resolved_escape_even_without_symlink_permissions(self):
+        with tempfile.TemporaryDirectory() as temp, tempfile.TemporaryDirectory() as outside:
+            realpath = privacy.os.path.realpath
+            def redirect_app(path):
+                return str(Path(outside) / 'App.app') if str(path).endswith('App.app') else realpath(path)
+            with mock.patch.dict('os.environ', {'RUNNER_TEMP': temp}), mock.patch.object(sys, 'argv', ['inventory']):
+                with mock.patch.object(privacy.os.path, 'realpath', side_effect=redirect_app):
+                    with self.assertRaisesRegex(ValueError, 'inside the runner'):
+                        privacy.main()
+
     def test_discovers_xml_and_binary_manifests_and_summarizes_known_fields(self):
         with tempfile.TemporaryDirectory() as temp:
             app = Path(temp) / 'App.app'
