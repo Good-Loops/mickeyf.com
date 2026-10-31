@@ -1,8 +1,21 @@
+import { loadScoreParticipationPolicy, type ScoreParticipationPolicy } from './scoreParticipationPolicy';
+import { loadRegistrationPolicy, type RegistrationPolicy } from './registrationPolicy';
+import { loadParentRegistrationPolicy } from './parentRegistrationPolicy';
+import type { ParentRegistrationPolicy } from '../accounts/parentRegistrationFlow';
+import { DELETION_JOURNAL_BUCKET } from '../accounts/gcsDeletionJournal';
+import { loadProviderAuthConfig, type ProviderAuthConfig } from './providerAuthConfig';
+import { loadAppleMaintenanceConfig, type AppleMaintenanceConfig } from './appleMaintenanceConfig';
+import { loadLocalProviderRuntime, type LocalProviderRuntime } from './localProviderRuntime';
+
 export type RuntimeEnvironment = 'development' | 'test' | 'production';
 
 type Environment = Readonly<Record<string, string | undefined>>;
 
 export type RuntimeConfig = {
+    registrationPolicy: RegistrationPolicy | undefined;
+    registrationAudience?: 'children-included';
+    scoreParticipationPolicy: ScoreParticipationPolicy | undefined;
+    parentRegistrationPolicy: ParentRegistrationPolicy | undefined;
     nodeEnv: RuntimeEnvironment;
     isProduction: boolean;
     port: number;
@@ -10,6 +23,12 @@ export type RuntimeConfig = {
     corsOrigins: readonly string[];
     p4VegaScoreSubmissionsEnabled: boolean;
     threeBossesRunSubmissionsEnabled: boolean;
+    accountDeletionEnabled: boolean;
+    accountIdentityEpoch: string | undefined;
+    journalBucket: string | undefined;
+    providerAuth: ProviderAuthConfig;
+    appleMaintenance: AppleMaintenanceConfig | undefined;
+    localProviderRuntime: LocalProviderRuntime | undefined;
 };
 
 export type DatabaseConfig = {
@@ -28,6 +47,8 @@ const PRODUCTION_ORIGINS = Object.freeze([
     'https://www.mickeyf.com',
     // Packaged iOS WebView origin, not an HTTP development server or app attestation.
     'capacitor://localhost',
+    // Explicit local frontend access to real accounts/scores; never a wildcard or LAN origin.
+    'http://localhost:5173',
 ]);
 
 const DEVELOPMENT_ORIGINS = Object.freeze([
@@ -69,14 +90,53 @@ export function parseRuntimeEnvironment(env: Environment): RuntimeEnvironment {
 
 export function loadRuntimeConfig(env: Environment = process.env): RuntimeConfig {
     const nodeEnv = parseRuntimeEnvironment(env);
+    const localProviderRuntime = loadLocalProviderRuntime(env);
     const sessionSecret = requiredValue(env, 'SESSION_SECRET');
-    const minimumSecretLength = nodeEnv === 'production' ? 32 : 16;
+    const minimumSecretLength = nodeEnv === 'production' || localProviderRuntime ? 32 : 16;
 
     if (sessionSecret.length < minimumSecretLength) {
         throw new Error(`SESSION_SECRET must contain at least ${minimumSecretLength} characters`);
     }
+    const accountDeletionEnabled = isExplicitlyEnabled(env.ACCOUNT_DELETION_ENABLED);
+    if (accountDeletionEnabled && nodeEnv !== 'production' && !localProviderRuntime) {
+        throw new Error('ACCOUNT_DELETION_ENABLED requires production; local tests must inject a fake journal');
+    }
+    const journalBucket = accountDeletionEnabled
+        ? requiredValue(env, 'ACCOUNT_DELETION_JOURNAL_BUCKET') : undefined;
+    if (accountDeletionEnabled && env.ACCOUNT_DELETION_JOURNAL_BUCKET !== DELETION_JOURNAL_BUCKET) {
+        throw new Error('ACCOUNT_DELETION_JOURNAL_BUCKET must explicitly name the approved production bucket');
+    }
+    const accountIdentityEpoch = accountDeletionEnabled
+        ? requiredValue(env, 'ACCOUNT_IDENTITY_EPOCH') : undefined;
+    if (accountIdentityEpoch !== undefined
+        && !/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\.\d{6}$/.test(accountIdentityEpoch)) {
+        throw new Error('ACCOUNT_IDENTITY_EPOCH must be the original identity migration UTC timestamp');
+    }
 
+    const appleMaintenance = loadAppleMaintenanceConfig(env);
+    if (appleMaintenance && (env.APPLE_TOKEN_RUNTIME_SECRETS_ENABLED !== 'true'
+        || env.APPLE_SIGN_IN_PRIVATE_KEY !== undefined || env.APPLE_TOKEN_ENCRYPTION_KEYS !== undefined)) {
+        throw new Error('Apple HTTP maintenance requires runtime secret access without injected Apple keys.');
+    }
+    const providerAuth = loadProviderAuthConfig(env);
+    if ((nodeEnv === 'production' || localProviderRuntime) && providerAuth.signupEnabled && !accountDeletionEnabled) {
+        throw new Error('Google signup requires account deletion to be enabled in production');
+    }
+
+    const registrationPolicy = loadRegistrationPolicy(env);
+    const parentRegistrationPolicy = loadParentRegistrationPolicy(env, registrationPolicy);
+    const registrationAudience = env.REGISTRATION_AUDIENCE === 'children-included' ? 'children-included' as const : undefined;
+    if (registrationAudience && (registrationPolicy && env.REGISTRATION_CREATION_ENABLED !== 'false'
+        || env.PROVIDER_GOOGLE_SIGNUP_ENABLED === 'true' || env.PROVIDER_APPLE_SIGNUP_ENABLED === 'true'
+        || env.PARENT_REGISTRATION_CREATION_ENABLED === 'true')
+        && (!parentRegistrationPolicy?.creationEnabled || !parentRegistrationPolicy.signedFormsEnabled)) {
+        throw new Error('Child-audience account creation requires the enabled reviewed signed-parent policy.');
+    }
     return Object.freeze({
+        registrationPolicy,
+        registrationAudience,
+        scoreParticipationPolicy: loadScoreParticipationPolicy(env, registrationPolicy),
+        parentRegistrationPolicy,
         nodeEnv,
         isProduction: nodeEnv === 'production',
         port: parsePort(env.BACKEND_PORT, 'BACKEND_PORT', 8080),
@@ -92,6 +152,12 @@ export function loadRuntimeConfig(env: Environment = process.env): RuntimeConfig
         threeBossesRunSubmissionsEnabled: isExplicitlyEnabled(
             env.THREE_BOSSES_RUN_SUBMISSIONS_ENABLED
         ),
+        accountDeletionEnabled,
+        accountIdentityEpoch,
+        journalBucket,
+        providerAuth,
+        appleMaintenance,
+        localProviderRuntime,
     });
 }
 

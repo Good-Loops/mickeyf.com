@@ -1,0 +1,148 @@
+@use '../abstracts' as *;
+
+.swal2-container.site-alert-container {
+    --swal2-backdrop: #{rgba($space-background, .58)};
+
+    padding: max(1.6rem, env(safe-area-inset-top))
+        max(1.6rem, env(safe-area-inset-right))
+        max(1.6rem, env(safe-area-inset-bottom))
+        max(1.6rem, env(safe-area-inset-left));
+}
+
+.swal2-popup.site-alert {
+    width: 44rem;
+    max-width: 100%;
+    max-height: calc(100vh - 3.2rem);
+    max-height: calc(100dvh - 3.2rem - env(safe-area-inset-top) - env(safe-area-inset-bottom));
+    grid-auto-rows: max-content;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    padding: 2.6rem;
+
+    border: .1rem solid rgba($primary-light, .25);
+    border-radius: 1.4rem;
+    color: $white;
+    // The tinted surface remains readable when backdrop filtering is unavailable.
+    background:
+        radial-gradient(ellipse at 0 0, rgba($primary, .12), transparent 58%),
+        radial-gradient(ellipse at 100% 100%, rgba($tertiary, .08), transparent 58%),
+        linear-gradient(145deg, rgba($space-background-soft, .96), rgba($space-background-green, .93));
+    box-shadow:
+        0 2rem 6rem rgba(black, .42),
+        0 .1rem 0 rgba($white, .13) inset,
+        0 0 3.2rem rgba($primary, .055);
+    backdrop-filter: blur(1.2rem) saturate(120%);
+    -webkit-backdrop-filter: blur(1.2rem) saturate(120%);
+    font-family: inherit;
+    font-size: 1.4rem;
+
+    .site-alert__title {
+        padding: .8rem 0 0;
+        color: $white;
+        font-size: clamp(2rem, 5vw, 2.4rem);
+        font-weight: 600;
+        line-height: 1.25;
+        letter-spacing: -.015em;
+    }
+
+    .site-alert__text {
+        margin: 0;
+        padding: 1.2rem 0 0;
+        color: rgba($white, .83);
+        font-size: 1.5rem;
+        line-height: 1.55;
+        overflow-wrap: anywhere;
+        user-select: text;
+    }
+
+    .site-alert__actions {
+        gap: .9rem;
+        margin: 2.2rem auto 0;
+        padding: 0;
+    }
+
+    .site-alert__button {
+        min-width: 10rem;
+        min-height: 4.4rem;
+        margin: 0;
+        padding: 1rem 1.7rem;
+        border: .1rem solid rgba($primary-light, .34);
+        border-radius: .8rem;
+        background: linear-gradient(145deg, rgba($primary, .2), rgba($primary, .1));
+        box-shadow: 0 .1rem 0 rgba($white, .08) inset;
+        color: $white;
+        font-family: $button-font;
+        font-size: 1.4rem;
+        font-weight: 600;
+        line-height: 1.35;
+        letter-spacing: .025em;
+        transition: border-color .2s ease, background-color .2s ease, box-shadow .2s ease;
+
+        &--secondary {
+            border-color: rgba($white, .19);
+            background: rgba($white, .055);
+        }
+
+        &:hover:not(:disabled) {
+            border-color: rgba($primary-light, .65);
+            background-color: rgba($primary, .12);
+            box-shadow: 0 0 1.6rem rgba($primary, .12);
+        }
+
+        &:disabled {
+            opacity: .55;
+            cursor: $cursor-notallowed;
+        }
+    }
+
+    .site-alert__close {
+        width: 4.4rem;
+        height: 4.4rem;
+        margin: -1.4rem -1.4rem -3rem 0;
+        border-radius: .7rem;
+        color: rgba($white, .8);
+        font-size: 3rem;
+    }
+
+    .site-alert__button:focus-visible,
+    .site-alert__close:focus-visible {
+        outline: .2rem solid $primary-light;
+        outline-offset: .3rem;
+    }
+
+    .swal2-icon {
+        margin: 0 auto 1rem;
+        font-size: 1.2rem;
+    }
+
+    // SweetAlert paints these animation masks inline; solid masks break glass backgrounds.
+    [class^='swal2-success-circular-line'],
+    .swal2-success-fix {
+        background-color: transparent !important;
+    }
+}
+
+@media (max-width: 480px), (max-height: 480px) {
+    .swal2-popup.site-alert {
+        padding: 2rem;
+
+        .swal2-icon {
+            font-size: 1rem;
+            margin-bottom: .6rem;
+        }
+
+        .site-alert__actions {
+            margin-top: 1.6rem;
+        }
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .site-alert-container,
+    .site-alert-container *,
+    .site-alert-container *::before,
+    .site-alert-container *::after {
+        animation: none !important;
+        transition: none !important;
+    }
+}

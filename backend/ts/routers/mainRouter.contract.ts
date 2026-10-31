@@ -57,6 +57,9 @@ export type PostUsersRequest =
 
                     /** Required; at most 72 UTF-8 bytes to match bcrypt's effective input boundary. */
           user_password: string;
+
+                    /** Optional; true selects the server's persistent-session lifetime. */
+          remember_me?: boolean;
       }
     | {
                     /** Operation: submit a p4-Vega score. */

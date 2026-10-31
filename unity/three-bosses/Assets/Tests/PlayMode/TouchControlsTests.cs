@@ -25,6 +25,7 @@ namespace ThreeBosses.Tests
         };
 
         [UnityTest]
+        [Category("ScreenUI")]
         public IEnumerator BattleScenesPreserveKeyboardBindingsAndShareTouchControls()
         {
             foreach (string sceneName in BattleScenes)
@@ -89,20 +90,21 @@ namespace ThreeBosses.Tests
                     Has.Length.EqualTo(1),
                     $"{sceneName} must contain exactly one gameplay pause controller.");
 
-                FieldInfo pauseMenuField = pauseControllerType.GetField(
-                    "pauseMenu",
+                FieldInfo documentField = pauseControllerType.GetField(
+                    "document",
                     BindingFlags.Instance | BindingFlags.NonPublic);
                 FieldInfo playerInputField = pauseControllerType.GetField(
                     "playerInput",
                     BindingFlags.Instance | BindingFlags.NonPublic);
-                Assert.That(pauseMenuField, Is.Not.Null);
+                Assert.That(documentField, Is.Not.Null);
                 Assert.That(playerInputField, Is.Not.Null);
 
-                CanvasGroup pauseMenu = pauseMenuField.GetValue(pauseControllers[0]) as CanvasGroup;
+                var document = documentField.GetValue(pauseControllers[0]) as UnityEngine.UIElements.UIDocument;
+                Assert.That(document, Is.Not.Null);
+                var pauseMenu = UnityEngine.UIElements.UQueryExtensions.Q(
+                    document.rootVisualElement, "pause-overlay");
                 Assert.That(pauseMenu, Is.Not.Null);
-                Assert.That(pauseMenu.alpha, Is.EqualTo(0f));
-                Assert.That(pauseMenu.interactable, Is.False);
-                Assert.That(pauseMenu.blocksRaycasts, Is.False);
+                Assert.That(pauseMenu.resolvedStyle.display, Is.EqualTo(UnityEngine.UIElements.DisplayStyle.None));
                 Assert.That(playerInputField.GetValue(pauseControllers[0]), Is.SameAs(playerInput));
             }
         }
@@ -319,56 +321,6 @@ namespace ThreeBosses.Tests
         }
 
         [Test]
-        public void PauseButtonTracksTheSafeAreaTopRightCorner()
-        {
-            Type pauseControllerType = Type.GetType("GameplayPauseController, Assembly-CSharp");
-            Assert.That(pauseControllerType, Is.Not.Null);
-            MethodInfo applySafeArea = pauseControllerType.GetMethod(
-                "ApplyTopRightSafeArea",
-                BindingFlags.Static | BindingFlags.NonPublic);
-            Assert.That(applySafeArea, Is.Not.Null);
-
-            var button = new GameObject("Pause Button", typeof(RectTransform));
-            try
-            {
-                RectTransform rect = button.GetComponent<RectTransform>();
-                rect.pivot = Vector2.one;
-                rect.sizeDelta = new Vector2(48f, 40f);
-                rect.anchoredPosition = new Vector2(-24f, -54f);
-                var safeArea = new Rect(0f, 0f, 1200f, 680f);
-                var screenSize = new Vector2(1280f, 720f);
-                applySafeArea.Invoke(
-                    null,
-                    new object[]
-                    {
-                        rect,
-                        safeArea,
-                        screenSize
-                    });
-
-                var expected = new Vector2(0.9375f, 0.9444444f);
-                Assert.That(rect.anchorMin.x, Is.EqualTo(expected.x).Within(0.0001f));
-                Assert.That(rect.anchorMin.y, Is.EqualTo(expected.y).Within(0.0001f));
-                Assert.That(rect.anchorMax.x, Is.EqualTo(expected.x).Within(0.0001f));
-                Assert.That(rect.anchorMax.y, Is.EqualTo(expected.y).Within(0.0001f));
-                Assert.That(rect.anchoredPosition, Is.EqualTo(new Vector2(-24f, -54f)));
-
-                Vector2 anchorPoint = Vector2.Scale(rect.anchorMin, screenSize);
-                Vector2 elementMinimum = anchorPoint + rect.anchoredPosition -
-                    Vector2.Scale(rect.pivot, rect.sizeDelta);
-                Vector2 elementMaximum = elementMinimum + rect.sizeDelta;
-                Assert.That(elementMinimum.x, Is.GreaterThanOrEqualTo(safeArea.xMin));
-                Assert.That(elementMinimum.y, Is.GreaterThanOrEqualTo(safeArea.yMin));
-                Assert.That(elementMaximum.x, Is.LessThanOrEqualTo(safeArea.xMax));
-                Assert.That(elementMaximum.y, Is.LessThanOrEqualTo(safeArea.yMax));
-            }
-            finally
-            {
-                UnityEngine.Object.DestroyImmediate(button);
-            }
-        }
-
-        [Test]
         public void AimResolutionKeepsDesktopPriorityAndLastDirection()
         {
             Type weaponType = Type.GetType("PlayerWeaponController, Assembly-CSharp");
@@ -560,7 +512,7 @@ namespace ThreeBosses.Tests
             Vector4 buttonHitPadding = new(-20f, -20f, -20f, -20f);
             AssertGlassControl(
                 jump,
-                new Vector2(64f, 64f),
+                new Vector2(128f, 128f),
                 "Jump",
                 jump.GetComponent<OnScreenButton>(),
                 true,
@@ -568,7 +520,7 @@ namespace ThreeBosses.Tests
                 sceneName);
             AssertGlassControl(
                 dash,
-                new Vector2(64f, 64f),
+                new Vector2(128f, 128f),
                 "Dash",
                 dash.GetComponent<OnScreenButton>(),
                 true,
@@ -576,12 +528,14 @@ namespace ThreeBosses.Tests
                 sceneName);
             AssertGlassControl(
                 fire,
-                new Vector2(72f, 72f),
+                new Vector2(144f, 144f),
                 "Fire",
                 fire.GetComponent<OnScreenButton>(),
                 true,
                 buttonHitPadding,
                 sceneName);
+
+            AssertSeparateActionHitTargets(new[] { jump, dash, fire }, sceneName);
 
             Type textType = Type.GetType("TMPro.TMP_Text, Unity.TextMeshPro");
             Assert.That(textType, Is.Not.Null);
@@ -646,6 +600,38 @@ namespace ThreeBosses.Tests
             Assert.That(style.GetValue(graphic).ToString(), Is.EqualTo(expectedStyle), sceneName);
             Assert.That(inputSource.GetValue(graphic), Is.SameAs(expectedInputSource), sceneName);
             Assert.That(isPressed.GetValue(graphic), Is.False, sceneName);
+        }
+
+        private static void AssertSeparateActionHitTargets(Transform[] buttons, string sceneName)
+        {
+            Rect[] hitTargets = buttons.Select(button =>
+            {
+                var rect = (RectTransform)button;
+                Vector4 padding = button.GetComponent<Image>().raycastPadding;
+                Vector2 center = rect.anchoredPosition;
+                Vector2 halfSize = rect.sizeDelta * 0.5f;
+                Assert.That(rect.anchorMin, Is.EqualTo(new Vector2(1f, 0f)), sceneName);
+                Assert.That(rect.anchorMax, Is.EqualTo(rect.anchorMin), sceneName);
+                return Rect.MinMaxRect(
+                    center.x - halfSize.x + padding.x,
+                    center.y - halfSize.y + padding.y,
+                    center.x + halfSize.x - padding.z,
+                    center.y + halfSize.y - padding.w);
+            }).ToArray();
+
+            for (int index = 0; index < hitTargets.Length; index++)
+            {
+                Assert.That(hitTargets[index].xMax, Is.LessThanOrEqualTo(0f),
+                    $"{sceneName}: {buttons[index].name} must stay inside the safe right edge.");
+                Assert.That(hitTargets[index].yMin, Is.GreaterThanOrEqualTo(0f),
+                    $"{sceneName}: {buttons[index].name} must stay inside the safe bottom edge.");
+                // The browser owns the fullscreen toggle in this corner of the embedded canvas.
+                Assert.That(hitTargets[index].Overlaps(Rect.MinMaxRect(-160f, 0f, 0f, 160f)), Is.False,
+                    $"{sceneName}: {buttons[index].name} must leave the fullscreen corner available.");
+                for (int other = index + 1; other < hitTargets.Length; other++)
+                    Assert.That(hitTargets[index].Overlaps(hitTargets[other]), Is.False,
+                        $"{sceneName}: {buttons[index].name} and {buttons[other].name} must not share a touch target.");
+            }
         }
 
         private static void AssertAnchors(

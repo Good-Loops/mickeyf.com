@@ -171,6 +171,33 @@ test('uses the standard Fullscreen API without applying the fallback', async () 
     assert.equal(exitCalls, 1);
 });
 
+test('installed iOS uses reversible in-app fullscreen even when WebKit exposes native fullscreen', async () => {
+    const target = createElement();
+    const sibling = createElement();
+    target.parentElement = { children: [target, sibling] };
+    const fullscreenDocument = createDocument([target]);
+    fullscreenDocument.documentElement.setAttribute('data-native-app', 'ios');
+    target.requestFullscreen = target.webkitRequestFullscreen = () => assert.fail('must not invoke WebKit presenter');
+
+    for (let cycle = 0; cycle < 3; cycle += 1) {
+        assert.equal(await toggleCanvasFullscreen(target, fullscreenDocument), true);
+        assert.equal(target.getAttribute(CANVAS_FULLSCREEN_FALLBACK_ATTRIBUTE), CANVAS_FULLSCREEN_FALLBACK_VALUE);
+        assert.equal(sibling.hasAttribute('inert'), true);
+        assert.equal(await toggleCanvasFullscreen(target, fullscreenDocument), false);
+        assert.equal(sibling.hasAttribute('inert'), false);
+        assert.equal(fullscreenDocument.documentElement.classList.contains(CANVAS_FULLSCREEN_ROOT_CLASS), false);
+    }
+});
+
+test('Android app keeps the browser native fullscreen path', async () => {
+    const target = createElement();
+    const fullscreenDocument = createDocument([target]);
+    fullscreenDocument.documentElement.setAttribute('data-native-app', 'android');
+    target.requestFullscreen = () => { fullscreenDocument.fullscreenElement = target; };
+    assert.equal(await toggleCanvasFullscreen(target, fullscreenDocument), true);
+    assert.equal(target.getAttribute(CANVAS_FULLSCREEN_FALLBACK_ATTRIBUTE), null);
+});
+
 test('supports prefixed WebKit fullscreen used by older iPads', async () => {
     const target = createElement();
     const fullscreenDocument = createDocument([target]);
@@ -339,6 +366,26 @@ test('fallback isolates background controls and restores their prior inert state
 
     clearCanvasFullscreenFallback(target, fullscreenDocument);
     assert.equal(sibling.hasAttribute('inert'), false);
+});
+
+test('overlapping fallback entries do not leave navigation inert after exit', async () => {
+    const target = createElement();
+    const header = createElement();
+    const alreadyInert = createElement();
+    alreadyInert.setAttribute('inert', '');
+    target.parentElement = { children: [target, header, alreadyInert] };
+    target.webkitRequestFullscreen = () => {};
+    const fullscreenDocument = createDocument([target]);
+
+    await Promise.all([
+        toggleCanvasFullscreen(target, fullscreenDocument, 0),
+        toggleCanvasFullscreen(target, fullscreenDocument, 0),
+    ]);
+    assert.equal(header.hasAttribute('inert'), true);
+    assert.equal(await toggleCanvasFullscreen(target, fullscreenDocument), false);
+    assert.equal(header.hasAttribute('inert'), false);
+    assert.equal(alreadyInert.hasAttribute('inert'), true);
+    assert.equal(fullscreenDocument.listenerCount('webkitfullscreenchange'), 0);
 });
 
 test('stale cleanup cannot remove the root lock from a replacement fallback', async () => {

@@ -18,6 +18,7 @@ import {
     configureThreeBossesSubmission,
     type ThreeBossesRunTicketIssuer,
     type ThreeBossesRunSubmitter,
+    type ThreeBossesSubmissionObserver,
 } from '@/games/three-bosses/unitySubmissionBridge';
 
 type UnityWebGlInstance = UnityVisibilityBridgeInstance & Readonly<{
@@ -71,6 +72,7 @@ type StartUnityWebGlOptions = Readonly<{
     onCanvasOwned?: () => void;
     issueRunTicket: ThreeBossesRunTicketIssuer;
     submitRun: ThreeBossesRunSubmitter;
+    onSubmissionAccepted?: ThreeBossesSubmissionObserver;
 }>;
 
 const manifestUrl = `${THREE_BOSSES_BUILD_BASE_PATH}build-manifest.json`;
@@ -213,6 +215,7 @@ const startNewHandle = async ({
     onCanvasOwned,
     issueRunTicket,
     submitRun,
+    onSubmissionAccepted,
 }: StartUnityWebGlOptions): Promise<UnityWebGlHandle> => {
     const manifest = await readManifest(signal);
     const loaderUrl = resolveAssetUrl(manifest.loaderUrl);
@@ -245,6 +248,24 @@ const startNewHandle = async ({
         let releasePageScroll: (() => void) | null = null;
         let browserBindingsReleased = false;
 
+        const releaseUnityBridges = () => {
+            try {
+                releaseSubmissionBridge?.();
+            } catch {
+                // Quit remains authoritative if a browser-global cleanup fails.
+            }
+            try {
+                releasePortraitLayout?.();
+            } catch {
+                // Quit remains authoritative if responsive-layout cleanup fails.
+            }
+            try {
+                releaseVisibility?.();
+            } catch {
+                // Quit must still be attempted if visibility cleanup fails.
+            }
+        };
+
         try {
             // Yield the canvas before the Unity splash, but keep bindings
             // behind the later main-menu readiness signal.
@@ -256,26 +277,15 @@ const startNewHandle = async ({
             releaseSubmissionBridge = bindThreeBossesSubmissionBridge(
                 instance,
                 issueRunTicket,
-                submitRun
+                submitRun,
+                undefined,
+                undefined,
+                onSubmissionAccepted,
             );
             configureThreeBossesSubmission(instance, false);
         } catch (error) {
             releasePageScroll?.();
-            try {
-                releaseSubmissionBridge?.();
-            } catch {
-                // Continue tearing down the partially initialized player.
-            }
-            try {
-                releasePortraitLayout?.();
-            } catch {
-                // Quit remains authoritative if responsive-layout cleanup fails.
-            }
-            try {
-                releaseVisibility?.();
-            } catch {
-                // Quit remains authoritative for partial initialization.
-            }
+            releaseUnityBridges();
             await instance.Quit();
             throw error;
         }
@@ -290,21 +300,7 @@ const startNewHandle = async ({
             } catch {
                 // The player may already be shutting down.
             }
-            try {
-                releaseSubmissionBridge?.();
-            } catch {
-                // Quit remains authoritative if a browser-global cleanup fails.
-            }
-            try {
-                releasePortraitLayout?.();
-            } catch {
-                // Quit remains authoritative if responsive-layout cleanup fails.
-            }
-            try {
-                releaseVisibility?.();
-            } catch {
-                // A hidden player is resumed again by the shutdown path below.
-            }
+            releaseUnityBridges();
         };
 
         const quit = async () => {

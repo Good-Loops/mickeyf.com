@@ -1,0 +1,156 @@
+import { useEffect, useRef, useState, type ReactNode } from 'react';
+import { Link } from 'react-router-dom';
+import { registrationConfigRequest, beginRegistration, cancelRegistration } from '@/services/authService';
+import { supportsChildAudience, type RegistrationAgeBand, type RegistrationConfig } from '@/services/registrationApi';
+import { registrationAge } from '@/services/registrationAge';
+
+export const REGISTRATION_CONFIG_TIMEOUT_MS = 10_000;
+
+export function ParentRegistrationUnavailable() {
+    return <div role="status">
+        <h2>A parent or guardian needs to lead this step</h2>
+        <p><Link to="/parent-accounts">Continue to parent-led registration</Link> to check availability and sign in to your own parent account.</p>
+        <p>No child name, email, password or identity document is needed here. Please do not enter an adult age range for a child.</p>
+        <p>A parent can use their own device and account for registration. For an incorrect age result, <Link to="/privacy#privacy-children">contact us for help</Link>. You can keep exploring without an account.</p>
+    </div>;
+}
+
+/** Credentials mount only after the server approves this browser's short-lived preflight. */
+export default function RegistrationGate({ children, purpose = 'signup' }: {
+    children: (reset: () => void, scoreVisibility: 'private' | 'public') => ReactNode;
+    purpose?: 'signup' | 'provider-login';
+}) {
+    const [config, setConfig] = useState<RegistrationConfig | null>(null);
+    const [loading, setLoading] = useState(true);
+    const [retry, setRetry] = useState(0);
+    const [country, setCountry] = useState('');
+    const [ageBand, setAgeBand] = useState<RegistrationAgeBand | ''>('');
+    const [parentStep, setParentStep] = useState(false);
+    const [busy, setBusy] = useState(false);
+    const [feedback, setFeedback] = useState<string | null>(null);
+    const [grant, setGrant] = useState<{ expiresAt: number; visibility: 'private' | 'public' } | null>(null);
+    const operation = useRef(false);
+    const began = useRef(false);
+    const generation = useRef(0);
+    const countryPolicy = supportsChildAudience(config) ? config : null;
+    const creationPaused = purpose === 'signup' && countryPolicy?.creationEnabled === false;
+    const signupPaused = purpose === 'signup' && (config?.enabled === false || creationPaused);
+
+    useEffect(() => {
+        let active = true;
+        const controller = new AbortController();
+        setLoading(true);
+        const timeout = setTimeout(() => {
+            if (active) {
+                controller.abort();
+                setConfig(null);
+                setLoading(false);
+            }
+        }, REGISTRATION_CONFIG_TIMEOUT_MS);
+        void registrationConfigRequest(controller.signal).then(value => {
+            if (active && !controller.signal.aborted) { setConfig(value); setLoading(false); }
+        }).catch(() => {
+            if (active && !controller.signal.aborted) { setConfig(null); setLoading(false); }
+        }).finally(() => clearTimeout(timeout));
+        return () => { active = false; clearTimeout(timeout); controller.abort(); };
+    }, [retry]);
+
+    useEffect(() => () => {
+        generation.current++;
+        if (began.current) void cancelRegistration();
+    }, []);
+
+    const reset = () => {
+        generation.current++;
+        setGrant(null); setAgeBand(''); setCountry(''); setParentStep(registrationAge.parentRequired());
+        if (began.current) {
+            began.current = false;
+            // Wait for any in-flight begin before revoking its grant; neither request is abandoned.
+            void cancelRegistration();
+        }
+    };
+    useEffect(() => {
+        if (!grant) return;
+        const timer = setTimeout(() => {
+            reset(); setFeedback('This registration step expired. Please choose your country and age range again.');
+        }, Math.max(0, grant.expiresAt - Date.now()));
+        return () => clearTimeout(timer);
+    }, [grant]);
+
+    async function submit(event: React.FormEvent) {
+        event.preventDefault();
+        if (operation.current || creationPaused || !countryPolicy || !ageBand || !countryPolicy.countries.some(item => item.country === country)) return;
+        operation.current = true; setBusy(true); setFeedback(null); began.current = true;
+        const current = ++generation.current;
+        const started = Date.now();
+        try {
+            const rule = countryPolicy.countries.find(item => item.country === country)!;
+            const effectiveAge = await registrationAge.check(ageBand, rule.parentRequiredBelow);
+            if (current !== generation.current) return;
+            if (!effectiveAge) {
+                setFeedback('Your device could not confirm an age range. You can keep exploring without an account. A parent can use their own device for parent-led registration, or contact us through the privacy page for help.');
+                return;
+            }
+            if (effectiveAge === 'parent-required') setParentStep(true);
+            const result = await beginRegistration({ country, ageBand: effectiveAge, policyVersion: countryPolicy.policyVersion });
+            if (current !== generation.current) return;
+            if (effectiveAge === 'parent-required') return;
+            if ('authorized' in result) {
+                const expiresAt = started + result.expiresInSeconds * 1000;
+                if (expiresAt > Date.now()) { setGrant({ expiresAt, visibility: result.scoreVisibility }); return; }
+            } else if (result.error === 'PARENT_REQUIRED') { setParentStep(true); return; }
+            setFeedback('We could not confirm this registration step. Retry, or log in if you already have an account.');
+        } finally {
+            operation.current = false;
+            if (current === generation.current) setBusy(false);
+        }
+    }
+
+    if (grant) return children(reset, grant.visibility);
+    const rule = countryPolicy?.countries.find(item => item.country === country);
+    const countries = countryPolicy?.countries ?? [];
+    const names = new Intl.DisplayNames(['en'], { type: 'region' });
+    const titleId = purpose === 'signup' ? 'registration-title' : 'provider-eligibility-title';
+    return <section className={purpose === 'signup' ? 'signup' : 'provider-eligibility'} aria-labelledby={titleId}>
+        <div className="signup__form-wrapper">
+            {purpose === 'signup' ? <h1 id={titleId}>{signupPaused ? 'Sign up' : 'Check eligibility'}</h1> : <h2 id={titleId}>Use Google or Apple</h2>}
+            {purpose === 'provider-login' && <p>First choose your country and age range. Children with a parent-managed account can use their nickname and password above.</p>}
+            {loading ? <p role="status">Checking registration availability…</p>
+                : signupPaused ? <p role="status">New account creation is temporarily paused. You can still play as a guest or log in to an existing account.</p>
+                : !countryPolicy ? <div role={purpose === 'signup' ? 'alert' : 'status'}>
+                    <p>{purpose === 'signup' ? 'We can’t check sign-up availability right now. Please try again.'
+                        : config?.enabled === false ? 'New registrations are currently paused.' : 'Registration eligibility could not be confirmed. You can keep exploring without an account.'}</p>
+                    {purpose === 'provider-login' && <button type="button" onClick={() => setRetry(value => value + 1)}>Check again</button>}
+                </div>
+                : parentStep || registrationAge.parentRequired() ? <ParentRegistrationUnavailable />
+                : <form className="signup__form" onSubmit={submit} aria-busy={busy}>
+                    <label className="signup__field" htmlFor="registration-country"><span className="signup__label">Country where you live</span>
+                        <select id="registration-country" className="signup__input" required disabled={busy} value={country}
+                            onChange={event => { setCountry(event.target.value); setAgeBand(''); setFeedback(null); }}>
+                            <option value="">Choose a country</option>
+                            {countries.map(item => <option key={item.country} value={item.country}>{names.of(item.country) ?? item.country}</option>)}
+                            <option value="unavailable">My country is not listed</option>
+                        </select>
+                    </label>
+                    {country === 'unavailable' && <p role="status">Registration is not available for that country yet. Please do not choose a different country.</p>}
+                    {rule && <label className="signup__field" htmlFor="registration-age"><span className="signup__label">Your age range</span>
+                        <select id="registration-age" className="signup__input" required disabled={busy} value={ageBand}
+                            onChange={event => setAgeBand(event.target.value as RegistrationAgeBand)}>
+                            <option value="">Choose an age range</option>
+                            <option value="parent-required">Under {rule.parentRequiredBelow}</option>
+                            {rule.parentRequiredBelow < 18 && <option value="minor">{rule.parentRequiredBelow}–17</option>}
+                            <option value="adult">18 or older</option>
+                        </select>
+                    </label>}
+                    {ageBand === 'minor' && <p>Your account’s scores will be private and will not appear on public leaderboards.</p>}
+                    <button className="signup__submit" type="submit" disabled={busy || !rule || !ageBand}>
+                        {busy ? 'Checking…' : ageBand === 'parent-required' ? 'Continue with a parent' : 'Continue'}
+                    </button>
+                </form>}
+            {purpose === 'signup' && (loading ? retry > 0 : signupPaused || !countryPolicy) && <button type="button" className="signup__submit"
+                aria-disabled={loading} onClick={() => { if (!loading) setRetry(value => value + 1); }}>Check again</button>}
+            {feedback && <p role="alert">{feedback}</p>}
+            {purpose === 'signup' && <p className="signup__account-link"><Link to="/">Continue as a guest</Link> · <Link to="/login">Log in</Link></p>}
+        </div>
+    </section>;
+}

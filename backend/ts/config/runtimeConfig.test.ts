@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { loadDatabaseConfig, loadRuntimeConfig } from './runtimeConfig';
+import { DELETION_JOURNAL_BUCKET } from '../accounts/gcsDeletionJournal';
+import { LOCAL_PROVIDER_SERVER_UUID } from './localProviderRuntime';
 
 const productionEnvironment = {
     NODE_ENV: 'production',
@@ -12,22 +14,40 @@ const productionEnvironment = {
     CLOUD_SQL_CONNECTION_NAME: 'test-project:test-region:test-instance',
 };
 
-test('production runtime configuration allows only the website and packaged iOS origins', () => {
+test('child-audience runtime retains its contract while creation is closed and refuses opening without signed-parent support', () => {
+    const childEnvironment = { ...productionEnvironment, REGISTRATION_AUDIENCE: 'children-included',
+        REGISTRATION_ENABLED: 'true', REGISTRATION_POLICY_REVIEWED: 'true', REGISTRATION_POLICY_VERSION: 'synthetic-child-v1',
+        REGISTRATION_COUNTRY_RULES: '{"US":{"parentRequiredBelow":13},"BR":{"parentRequiredBelow":18}}' };
+    assert.throws(() => loadRuntimeConfig(childEnvironment), /enabled reviewed signed-parent policy/u);
+    const closed = loadRuntimeConfig({ ...childEnvironment, REGISTRATION_CREATION_ENABLED: 'false' });
+    assert.equal(closed.registrationAudience, 'children-included');
+    assert.equal(closed.parentRegistrationPolicy, undefined);
+    assert.equal(loadRuntimeConfig({ ...productionEnvironment, REGISTRATION_AUDIENCE: 'children-included' }).registrationAudience,
+        'children-included', 'closed policy must still gate provider collection for known managed children');
+});
+
+test('production runtime configuration allows only the website, packaged iOS and exact local preview origins', () => {
     const config = loadRuntimeConfig(productionEnvironment);
 
     assert.equal(config.isProduction, true);
     assert.equal(config.port, 8080);
     assert.equal(config.p4VegaScoreSubmissionsEnabled, false);
     assert.equal(config.threeBossesRunSubmissionsEnabled, false);
+    assert.equal(config.accountDeletionEnabled, false);
+    assert.deepEqual(config.providerAuth, { enabled: false, signupEnabled: false, clients: {}, publicClients: [] });
     assert.deepEqual(config.corsOrigins, [
         'https://mickeyf.com',
         'https://www.mickeyf.com',
         'capacitor://localhost',
+        'http://localhost:5173',
     ]);
     for (const origin of [
         'null',
         'http://localhost',
-        'http://localhost:5173',
+        'http://localhost:5174',
+        'http://127.0.0.1:5173',
+        'http://192.168.0.106:5173',
+        'http://localhost:5173.evil.example',
         'https://localhost',
         'capacitor://localhost:5173',
         'capacitor://localhost.evil.example',
@@ -35,6 +55,88 @@ test('production runtime configuration allows only the website and packaged iOS 
     ]) {
         assert.equal(config.corsOrigins.includes(origin), false, origin);
     }
+});
+
+test('provider runtime configuration stays disabled without exact opt-in in every environment', () => {
+    for (const nodeEnv of ['development', 'test', 'production']) {
+        for (const enabled of [undefined, '', 'false', 'TRUE', '1', ' true ']) {
+            const config = loadRuntimeConfig({ ...productionEnvironment, NODE_ENV: nodeEnv,
+                PROVIDER_AUTH_ENABLED: enabled, GOOGLE_WEB_CLIENT_ID: 'ignored-while-disabled' });
+            assert.equal(config.providerAuth.enabled, false);
+            assert.deepEqual(config.providerAuth.publicClients, []);
+        }
+    }
+});
+
+test('enabled provider runtime configuration requires exact server-owned client IDs', () => {
+    assert.throws(() => loadRuntimeConfig({ ...productionEnvironment, PROVIDER_AUTH_ENABLED: 'true' }),
+        /GOOGLE_WEB_CLIENT_ID or APPLE_IOS_BUNDLE_ID/);
+    const clientId = '1234567890-synthetic.apps.googleusercontent.com';
+    const config = loadRuntimeConfig({ ...productionEnvironment, PROVIDER_AUTH_ENABLED: 'true', GOOGLE_WEB_CLIENT_ID: clientId });
+    assert.equal(config.providerAuth.enabled, true);
+    assert.deepEqual(Object.keys(config.providerAuth.clients), ['google-web']);
+    assert.deepEqual(config.providerAuth.publicClients, [
+        { clientKey: 'google-web', provider: 'google', platform: 'web', clientId },
+    ]);
+    assert.throws(() => loadRuntimeConfig({ ...productionEnvironment, PROVIDER_AUTH_ENABLED: 'true',
+        GOOGLE_WEB_CLIENT_ID: ` ${clientId}` }), /GOOGLE_WEB_CLIENT_ID/);
+});
+
+test('account deletion defaults off in every environment and requires exact opt-in', () => {
+    for (const nodeEnv of ['development', 'test', 'production']) {
+        for (const value of [undefined, '', 'false', 'TRUE', '1', ' true ', 'yes']) {
+            const config = loadRuntimeConfig({
+                ...productionEnvironment,
+                NODE_ENV: nodeEnv,
+                ACCOUNT_DELETION_ENABLED: value,
+            });
+            assert.equal(config.accountDeletionEnabled, false, `${nodeEnv}: ${value}`);
+        }
+    }
+    const enabled = loadRuntimeConfig({
+        ...productionEnvironment,
+        ACCOUNT_DELETION_ENABLED: 'true',
+        ACCOUNT_DELETION_JOURNAL_BUCKET: DELETION_JOURNAL_BUCKET,
+        ACCOUNT_IDENTITY_EPOCH: '2026-09-11 23:00:00.123456',
+    });
+    assert.equal(enabled.accountDeletionEnabled, true);
+    assert.equal(enabled.journalBucket, DELETION_JOURNAL_BUCKET);
+});
+
+test('production Google signup cannot create passwordless users without available deletion', () => {
+    const env = { ...productionEnvironment, PROVIDER_AUTH_ENABLED: 'true',
+        PROVIDER_GOOGLE_SIGNUP_ENABLED: 'true', GOOGLE_WEB_CLIENT_ID: 'synthetic.apps.googleusercontent.com' };
+    assert.throws(() => loadRuntimeConfig(env), /Google signup requires account deletion/);
+    assert.equal(loadRuntimeConfig({ ...env, NODE_ENV: 'development' }).providerAuth.signupEnabled, true);
+    assert.equal(loadRuntimeConfig({ ...env, ACCOUNT_DELETION_ENABLED: 'true',
+        ACCOUNT_DELETION_JOURNAL_BUCKET: DELETION_JOURNAL_BUCKET,
+        ACCOUNT_IDENTITY_EPOCH: '2026-09-11 23:00:00.123456' }).providerAuth.signupEnabled, true);
+});
+
+test('enabled deletion requires an independently captured identity epoch', () => {
+    for (const epoch of [undefined, '', 'now', '2026-09-11 23:00:00']) {
+        assert.throws(() => loadRuntimeConfig({ ...productionEnvironment,
+            ACCOUNT_DELETION_JOURNAL_BUCKET: DELETION_JOURNAL_BUCKET,
+            ACCOUNT_DELETION_ENABLED: 'true', ACCOUNT_IDENTITY_EPOCH: epoch }), /ACCOUNT_IDENTITY_EPOCH/);
+    }
+    assert.equal(loadRuntimeConfig(productionEnvironment).accountIdentityEpoch, undefined);
+});
+
+test('enabled deletion refuses development or implicit production-journal access', () => {
+    const enabledEnvironment = {
+        ...productionEnvironment,
+        ACCOUNT_DELETION_ENABLED: 'true',
+        ACCOUNT_IDENTITY_EPOCH: '2026-09-11 23:00:00.123456',
+        ACCOUNT_DELETION_JOURNAL_BUCKET: DELETION_JOURNAL_BUCKET,
+    };
+    for (const nodeEnv of ['development', 'test']) {
+        assert.throws(() => loadRuntimeConfig({ ...enabledEnvironment, NODE_ENV: nodeEnv }), /requires production/);
+    }
+    for (const bucket of [undefined, '', 'other-bucket', ` ${DELETION_JOURNAL_BUCKET}`]) {
+        assert.throws(() => loadRuntimeConfig({ ...enabledEnvironment, ACCOUNT_DELETION_JOURNAL_BUCKET: bucket }),
+            /ACCOUNT_DELETION_JOURNAL_BUCKET/);
+    }
+    assert.equal(loadRuntimeConfig(productionEnvironment).journalBucket, undefined);
 });
 
 test('Three Bosses run submissions require the exact positive runtime opt-in', () => {
@@ -102,4 +204,44 @@ test('database configuration fails closed and uses bounded local connection inpu
     });
     assert.equal(developmentDatabase.host, 'localhost');
     assert.equal(developmentDatabase.port, 3306);
+});
+
+test('HTTP Apple maintenance requires deferred secrets, not container-injected Apple keys', () => {
+    const env = { ...productionEnvironment, APPLE_MAINTENANCE_HTTP_ENABLED: 'true',
+        APPLE_MAINTENANCE_CALLER_SUBJECT: '123456789012345678901',
+        APPLE_MAINTENANCE_EXPECTED_SERVER_UUID: '12345678-1234-1234-1234-123456789abc' };
+    assert.throws(() => loadRuntimeConfig(env), /runtime secret access/);
+    const runtimeEnv = { ...env, APPLE_TOKEN_RUNTIME_SECRETS_ENABLED: 'true' };
+    assert.ok(loadRuntimeConfig(runtimeEnv).appleMaintenance);
+    // Missing key references are handled after DB cleanup, not as a startup requirement.
+    assert.equal(loadRuntimeConfig(runtimeEnv).providerAuth.enabled, false);
+    for (const name of ['APPLE_SIGN_IN_PRIVATE_KEY', 'APPLE_TOKEN_ENCRYPTION_KEYS']) {
+        assert.throws(() => loadRuntimeConfig({ ...runtimeEnv, [name]: 'synthetic' }), /without injected Apple keys/);
+    }
+    assert.equal(loadRuntimeConfig(productionEnvironment).appleMaintenance, undefined);
+});
+
+const localEnvironment = { ...productionEnvironment, NODE_ENV: 'development',
+    DB_HOST: '127.0.0.1', DB_PORT: '3306', DB_USER: 'cms_mickeyf', DB_NAME: 'cms',
+    LUDOLUME_LOCAL_PROVIDER_RUNTIME: 'true', LUDOLUME_LOCAL_PROVIDER_EXPECTED_SERVER_UUID: LOCAL_PROVIDER_SERVER_UUID };
+
+test('explicit local profile retains development transport and journaled deletion without pretending to be production', () => {
+    const config = loadRuntimeConfig({ ...localEnvironment, ACCOUNT_DELETION_ENABLED: 'true',
+        ACCOUNT_DELETION_JOURNAL_BUCKET: DELETION_JOURNAL_BUCKET, ACCOUNT_IDENTITY_EPOCH: '2026-09-12 00:15:39.954172' });
+    assert.equal(config.isProduction, false);
+    assert.equal(config.nodeEnv, 'development');
+    assert.equal(config.accountDeletionEnabled, true);
+    assert.equal(config.localProviderRuntime?.expectedServerUuid, LOCAL_PROVIDER_SERVER_UUID);
+    assert.deepEqual(config.corsOrigins, ['http://localhost:5173']);
+    const database = loadDatabaseConfig(localEnvironment);
+    assert.equal(database.isProduction, false);
+    assert.equal(database.host, '127.0.0.1');
+    assert.equal(database.cloudSqlConnectionName, undefined);
+});
+
+test('real-account local provider profile requires production-strength session signing and available deletion', () => {
+    assert.throws(() => loadRuntimeConfig({ ...localEnvironment, SESSION_SECRET: 'synthetic-16-character-key' }), /32 characters/);
+    assert.throws(() => loadRuntimeConfig({ ...localEnvironment, PROVIDER_AUTH_ENABLED: 'true',
+        GOOGLE_WEB_CLIENT_ID: 'synthetic.apps.googleusercontent.com', PROVIDER_GOOGLE_SIGNUP_ENABLED: 'true' }),
+    /Google signup requires account deletion/);
 });

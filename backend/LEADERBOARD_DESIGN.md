@@ -591,15 +591,14 @@ were retired after migration `0003`. The aggregate reconciliation logic remains
 only as a pre-DDL safety check when planning or replaying the drop against the
 fresh pre-drop backup.
 
-Retention check (2026-09-07): the live Cloud SQL backup inventory still includes
-successful on-demand pre-drop backup `1787787054951` (2026-08-26), plus the
-pre-backfill/additive snapshots. Newer automated backups and seven-day PITR do
-not by themselves retire that documented historical restore path. The current
-drop-plan/apply workflow still depends on reconciliation; it is not application
-runtime code. Retiring it requires retiring or replacing the whole supported
-legacy replay workflow, not deleting its safety check alone. No backup or
-migration tooling was deleted in this inspection. Keep immutable migrations and
-checksums even when that operational workflow is eventually retired.
+The 2026-09-07 retention check found the manual pre-drop backup
+`1787787054951` and pre-backfill/additive snapshots still available, so their
+guarded legacy replay path remained necessary then. On 2026-09-12 the owner
+approved their permanent retirement after verifying a current-schema replacement
+restore. Those named historical restore paths are now retired; see the
+[completed retirement set](#backup-retirement-approval-set--2026-09-12-utc).
+Keep immutable migrations and checksums. Any removal of obsolete operational
+commands belongs in the focused code-cleanup review, not this backup operation.
 
 ## Completed live metadata preflight
 
@@ -643,23 +642,30 @@ Credential changes and privilege revocation require
 their own reviewed approval. The preflight made no database, configuration, or
 repository change and returned the local proxy to its original stopped state.
 
-The exact generic-only column-level runtime manifest now lives in
-`ts/security/runtimeGrantManifest.ts`. It grants `users` only the auth columns
-required for `SELECT` and signup `INSERT`, with no `p4_score` access and no
-`UPDATE` privilege. `game_runs` and `game_personal_bests` retain only their
-required narrow `SELECT`, `INSERT`, and personal-best `UPDATE` columns. It
-grants no access to `schema_migrations`, no `DELETE`, DDL, role, administrative
-privilege, or grant option. A redundant `game_runs SELECT ... FOR UPDATE` was
-removed because the shared application lock already serializes every
-submission for that user; the immutable ledger therefore needs only `SELECT`
-and `INSERT`.
+The exact generic-only runtime manifest now lives in
+`ts/security/runtimeGrantManifest.ts`. It grants `users` the auth columns
+required for `SELECT` and signup `INSERT`, plus read-only `account_uuid`, with
+no `p4_score` access and no `UPDATE` privilege. `game_submission_receipts` and
+`game_personal_bests` retain their required narrow `SELECT`, `INSERT`, and
+personal-best `UPDATE` columns.
+The existing-account deletion implementation additionally requires
+non-grantable table `DELETE` on exactly those three tables; MySQL has no
+column-level `DELETE`. Ownership checks and the transaction constrain deletion
+to the authenticated account, with receipts and bests removed before the user.
+Identity-epoch verification also needs `SELECT(version, applied_at)` on
+`schema_migrations`, not checksum access or migration writes. There is still no
+DDL, role, administrative, grant-option, or schema/global DML access. **These
+additional deletion grants are local preparation, not an applied production change.** A separately
+approved grant plan/apply/verify is required before deploying self-deletion.
 
 The pinned MySQL 8.0.31 integration suite installs the manifest on a separate
 disposable runtime identity and a physical `users` table without `p4_score`. It
-exercises every current auth and leaderboard SQL path, compares the exact column
-inventory, and proves that user-row `FOR UPDATE`, migration history, ledger
-mutation, destructive DML, DDL, account creation, and grant operations are
-denied. This test evidence did not itself change live grants; the earlier
+exercises auth, leaderboard and transactional account-deletion SQL paths and
+compares both exact column and table inventories. User-row `FOR UPDATE` is now
+permitted by `SELECT` plus `DELETE`; user-column updates, receipt updates,
+migration checksum access/deletion, DDL, account creation and grant operations
+remain denied. The deletion assertions must pass in the disposable suite before
+the new grant deployment; local tests do not themselves change live grants. The earlier
 approved production reduction used the previous transitional manifest.
 Do not improvise replacement grants. After maintenance,
 drop and verify removal of an ephemeral account; if the account is deliberately
@@ -1016,6 +1022,631 @@ only serialization mechanism.
 - If data recovery is required, restore the recorded backup or point-in-time
   state into a separate recovery instance first; do not overwrite production
   as the initial response.
+
+### Deleted-account recovery
+
+**2026-09-14 UTC status: identity migrations 0006–0008 and the reviewed runtime
+grants are applied. The independent journal identities are verified and the
+read-only deletion audit is provisioned. Existing account/score rows are
+unchanged. The website deletion/replay release remains disabled: older
+automatic backups/PITR still predate the original identity epoch. See the
+dated rollout evidence below; do not repeat the completed restore exercise.**
+`ACCOUNT_DELETION_ENABLED` defaults to false in every environment; only the
+exact value `true`, production mode, explicit approved journal bucket, and an
+independently captured original identity epoch permit runtime activation.
+Startup verifies the schema and epoch before listening. Missing router or
+journal wiring also fails closed. Valid requests reaching the disabled handler return
+`503 ACCOUNT_DELETION_UNAVAILABLE` without database access or cookie changes.
+Parsing and rate-limit middleware can still reject requests earlier. Session
+verification and logout remain available. This switch prevents accidental
+activation on ordinary deployment;
+it does not establish recovery safety. Do not enable live self-deletion until
+the operational work below and separately approved release/grants are complete.
+Local tests inject a fake journal and disposable SQL data; they do not point a
+developer's ADC credentials at the production journal.
+
+The current deletion transaction safely removes an account and its scores from
+the active database, but restoring an earlier backup would undo that deletion.
+A tombstone or outbox in that same database would be rolled back too. In
+addition, `users.user_id` is an auto-increment number, not an account-incarnation
+identity: a restored allocation state can allow an ID to be reused. Therefore
+an ID-only deletion list is insufficient, even if stored outside MySQL.
+
+Recovery design and remaining operational requirements:
+
+1. Use one private Cloud Storage journal independent of SQL backups. Restrict
+   runtime access to creating new records, with separate recovery-reader and
+   authorized retention-management permissions. Do not make it public, grant
+   runtime overwrite/delete access, or introduce a scheduler merely to store
+   these records. Record only a schema version, stable opaque account identity,
+   deletion action and timestamp; exclude usernames, email, passwords, scores
+   and raw request bodies. The adapter writes create-only objects to the approved
+   destination using ADC, without an extra service-account key.
+   Further permission changes and eventual expiry rules need scoped review.
+2. Establish immutable account-incarnation identities before allowing deletion.
+   New accounts need distinct identities even when numeric IDs repeat. Preserve
+   identity through recovery. For pre-identity snapshots, either verify a minimal
+   protected mapping or explicitly retire the affected recovery copies under
+   approval; rerunning a random UUID backfill cannot recover original identities.
+   Until one of those paths is verified, recovery from such copies stays blocked.
+3. After password reauthentication under the shared per-user lock, durably record
+   the deletion intent **before** SQL deletion. Wrong passwords and missing
+   accounts must never create an intent. Success requires both durable intent
+   and confirmed SQL commit. Storage or commit timeouts have uncertain outcomes:
+   settle them idempotently, never claim success early or promise cancellation,
+   and never discard a durable intent just because SQL rolled back. A confirmed
+   intent followed by SQL failure returns `ACCOUNT_DELETION_PENDING`; an uncertain
+   upload never permits SQL deletion. The UI also explains that an unconfirmed
+   request may already be recorded and retrying does not cancel it. Active-mode
+   replay can finish pending intents; it is not scheduled or automatic. Assign
+   an operator response procedure before activation so pending requests are not
+   left until a future restore.
+4. Restore to a separately identified, non-public recovery instance and migrate
+   it through the supported schema path. Loopback is not proof of isolation:
+   the production Cloud SQL proxy also listens on loopback. Validate the exact
+   recovery target and journal lineage/completeness before replay. Reject
+   unavailable, malformed, incomplete or unverified stale journal snapshots;
+   an empty list is not proof that no deletions occurred.
+5. Drain source mutations and establish a final current journal checkpoint before
+   cutover. Reapply all applicable intents to the restored accounts and owned
+   scores/receipts, verify none remain and preserve unrelated accounts. A replay
+   taken while new deletion requests continue is not a final recovery check.
+   Rotate `SESSION_SECRET` at cutover to revoke pre-restore sessions and Three
+   Bosses run tickets; current tokens rely on numeric IDs. UUID-safe replay alone
+   does not revoke them. Keep public access off if any prerequisite fails.
+6. Expire records only when an actual recovery-copy inventory proves no supported
+   backup, manual export, retained version or lawful hold can resurrect the data.
+   Do not implement a blind 30-day journal lifecycle while older manual backups
+   remain. This is a minimal anti-resurrection record, not permanent user history.
+   Future consent withdrawals/child profiles need their own modeled actions;
+   this account-only design does not implement those features.
+
+Focused local acceptance covers storage failures and uncertain
+acknowledgements, SQL rollback/commit uncertainty after recorded intent,
+repeated replay, numeric-ID reuse, pre-identity backup rejection, unavailable or
+partial journals, and an isolated restore that removes only marked accounts.
+The identity schema, isolated backup/SQL replay exercise, runtime-grant rollout
+and journal identity permissions are verified. Actual writer-upload acceptance,
+the old-backup transition and the eventual website rollout remain outstanding.
+Keep the release switch off. Manual
+operations and older binaries can bypass an HTTP switch; the recovery runbook and deployment
+review remain necessary.
+
+#### Activation access review — 2026-09-14 UTC
+
+Read-only cloud checks found the verified manual backup `1789172213271` and
+eight successful automatic backups: two after the original identity epoch and
+six before it. The earliest PITR point was `2026-09-06T20:25:36.943Z`, still
+before the independently pinned epoch `2026-09-12 00:15:39.954172` UTC.
+Eight-backup retention, seven-day transaction logs, deletion protection and
+connector enforcement remain unchanged. No additional backup was deleted.
+
+The runtime remains `mickeyf-runtime` on the same generation-142 backend
+revision with 100% traffic. Journal bucket IAM remains create-only for that
+identity and read-only for `ludolume-deletion-recovery`, with seven-day soft
+delete. Two bounded access checks identified the outstanding execution paths:
+
+- The existing `runtime-grants:plan` failed closed with `SELECT` denied on
+  `mysql.user` for `michel_operator`. No complete plan or approved digest was
+  produced. Planning can run online, but needs an explicitly authorized
+  maintenance identity with privilege/role metadata visibility and effective
+  `PROCESS`; do not broaden the ordinary TablePlus account implicitly.
+- An all-version journal listing through the recovery service identity was
+  denied at impersonation (`iam.serviceAccounts.getAccessToken`), before
+  storage access. This is not evidence that the bucket's reader grant is wrong.
+  No impersonation permission, key, job or journal object was created.
+
+The required deletion-related privileges are three table `DELETE` grants plus read-only
+`users.account_uuid` and `schema_migrations(version, applied_at)`; only a fresh
+live plan can establish which are missing. Obtain scoped approval for the
+maintenance and service-identity execution paths before proceeding. Any live
+writer probe also needs an approved valid synthetic intent and retention
+disposition; an arbitrary test object or immediate soft deletion would make
+the strict replay reader reject the journal. Grant apply remains a separate,
+plan-bound operation with drained runtime sessions; its planner rejects a
+locked runtime account, so the identity-migration locking procedure cannot be
+copied unchanged. No runtime grant, deployment or activation occurred.
+
+#### Approved access and audit rollout — 2026-09-14 UTC
+
+The owner approved the maintenance execution paths and completing the backend
+preparation. This supersedes the access failures above without broadening the
+ordinary TablePlus operator. Temporary SQL maintenance accounts and temporary,
+service-account-scoped impersonation bindings were removed after use.
+
+- Actual writer credentials passed `buckets.testIamPermissions` for create only;
+  recovery-reader credentials passed get/list only. The strict reader verified
+  an empty journal across live/versioned/soft-deleted views. No journal object
+  was written; permission checks are not an upload acceptance test.
+- The existing grant planner produced reviewed digest
+  `e161a22a9ebd4e6d8f6de2adb6e1d259092ed0e9b4b6e8a6c5f7cbfe099cd579`, with
+  no blockers, role changes or unrelated privileges. During apply, the local
+  backend and receipt Scheduler were paused, the untagged Cloud Run service
+  was scaled to zero, and zero runtime/cleanup SQL sessions were verified.
+  The runtime account stayed unlocked, as required by the planner.
+- Applied only DELETE on `users`, `game_personal_bests` and
+  `game_submission_receipts`, SELECT on `users.account_uuid`, and SELECT on
+  `schema_migrations(version, applied_at)`. Fresh connections passed permitted
+  zero-row probes and rejected UUID updates, migration deletion and checksum
+  reads. Verification digest
+  `ecfddd0ec1670919b026cb1d0b1f99b552b0ea39388620183730150e3968ede5`
+  confirmed the reduced compliant grant set. No application rows changed.
+- Restored automatic service scaling, the same 100% serving revision
+  `mickeyf-org-ios-origin-a1f3ea43-0910`, the receipt schedule and local backend.
+  Service generation advanced from 142 to 144 solely for scaling; the CLI made
+  automatic/default service scaling explicit while preserving the revision's
+  ten-instance cap. Anonymous leaderboard HTTP readback returned 200.
+  Frontend and WebGL development servers were not stopped.
+- Created `deletion_audit@cloudsqlproxy~%` directly with no administrator role:
+  only UUID and migration-epoch column reads. Fresh probes rejected email,
+  score and DELETE access. Its version-pinned Secret Manager password is
+  accessible to the recovery reader; that identity also received Cloud SQL
+  Client for the job socket. It retains read-only bucket access. No key file
+  or secret value was stored in Git, logs or the evidence reports.
+- Built reviewed source `64e274e1c72855df0c6c770921d6e680e13f7073` in approved
+  image-only build `0c99adb9-028c-461e-bb0a-798618788e7b`. Image digest
+  `sha256:23d5cd840582c53bad36855e2e37e92ffd203d20821334480a51d36e4d8779c1`
+  passed completed image analysis with no vulnerability occurrences. The
+  separate read-only Job uses that digest, not the website's default command.
+  Its configuration, schedule and operational outcome are maintained in
+  [DELETION_AUDIT.md](DELETION_AUDIT.md).
+
+Non-secret, restricted local evidence is retained under
+`%LOCALAPPDATA%\Ludolume\Recovery\identity-20260911`: the September 14
+`journal-access`, `runtime-grants`, `grant-drain-before` and `deletion-audit-*`
+reports. Keep this recovery evidence; it is not disposable preview output.
+The six older automatic backups and pre-epoch PITR range found earlier today
+remain a genuine activation gate. Retention, backup protection and existing
+deployment-trigger states were not relaxed to bypass it.
+
+#### Deployment contract (prepared; website rollout not performed)
+
+The canonical deployment and frozen renderer now carry an exact deletion
+environment contract rather than dropping these settings through `--set-env-vars`.
+Omitting deletion pins remains default-off. Enabling requires the literal
+approved bucket, original epoch and an enable approval bound to the verified
+source commit, source build and image digest. An intentional disable/rollback
+requires an equally explicit decision if any current template, serving revision
+or tagged revision has deletion enabled; a routine default-off deployment must
+not silently disable it. Canonical substitutions are `_ACCOUNT_DELETION_ENABLED`,
+`_ACCOUNT_DELETION_JOURNAL_BUCKET`, `_ACCOUNT_IDENTITY_EPOCH` and
+`_ACCOUNT_DELETION_APPROVAL`.
+
+Frozen deployment/traffic pins use optional `accountDeletion`: omit for the
+safe default, `{ "enabled": false }` for reviewed disabling, or
+`{ "enabled": true, "journalBucket": "ludolume-deletion-journal-1012884798546",
+"identityEpoch": "2026-09-12 00:15:39.954172" }` for reviewed enabling. The
+renderer binds the enable/disable approval to the existing source/image pins;
+the environment and step digests are checked again before traffic changes.
+Arbitrary extra variables, wrong pins and missing/duplicate settings are rejected.
+These checks do not inspect backup age or replace the final operational gate.
+No trigger was enabled and no website candidate was deployed for this change.
+The service UID/generation is rechecked before deployment, but this is not an
+atomic lock against an unrelated console deployment: retain the existing
+single-writer release discipline. Old eight-variable frozen candidates no
+longer satisfy the exact nine-/eleven-variable contract; use a fresh reviewed
+immutable revision, including for an intentional disable. The renderer/traffic
+suites passed all 64 tests, including Bash/Python syntax and argument-size checks.
+
+#### Pending or unconfirmed deletion response
+
+The owner, Michel, investigates the read-only audit's notifications through the
+approved `mickeyf.plays@gmail.com` channel; job/schedule/policy evidence and pause
+instructions are in [DELETION_AUDIT.md](DELETION_AUDIT.md). This is detection, not
+an automatic reconciler or permission to skip a fresh reviewed replay plan.
+Existing controller logs are `Account deletion pending reconciliation`
+and `Account deletion unavailable`. Both need attention: an unavailable upload
+may already have persisted. A process crash can precede either message, so
+error-only alerts cannot guarantee eventual completion. The independent audit
+also compares durable intents with remaining accounts to detect that case.
+
+For a reported or discovered unresolved request:
+
+1. Do not promise completion or cancellation, remove an intent, log account
+   payloads, or request the user's password. A retry does not cancel a durable
+   deletion request. Investigate sanitized logs and the protected journal.
+2. Arrange an approved maintenance window and freeze/drain actual writers using
+   the existing procedure. Merely turning the HTTP deletion switch off does not
+   stop in-flight work, signup, score writers or the receipt-cleanup job.
+3. With dedicated credentials and independently checked target/epoch pins, run
+   `deletion-replay:plan` in **active** mode against the current database. Review
+   the complete plan; run `deletion-replay:apply` only with its approved digest.
+   Do not declare a recovery source UUID in active mode or use a stale export.
+4. Require confirmed reconciliation and an unchanged fresh journal digest before
+   restoring the previous access state. On failure, investigate and review a new
+   plan; never improvise account deletion by numeric ID. Report only aggregate
+   outcomes. Session-secret rotation is required for a restore cutover, not this
+   active-database reconciliation.
+
+#### Identity and replay operations (identity applied; replay not activated)
+
+The three checksummed migrations are deliberately separate: `0006` adds a
+nullable unique `account_uuid`, `0007` fills only missing IDs, and `0008` enforces
+NOT NULL with a database `UUID()` default. This avoids MySQL's rejection of
+adding a nondeterministic default to a populated table with binary logging.
+ROW or MIXED logging is required; logging is never disabled. Existing signup SQL
+remains unchanged, and the runtime cannot insert or update UUIDs. Generic
+`migrations:apply` does not opt into these identity effects.
+
+From `backend`, use `npm run migrations:identity:plan`, then separately approved
+`migrations:identity:apply`, then `migrations:identity:verify`. These use dedicated
+`MIGRATION_DB_*` credentials and the existing exact database/account/target
+confirmations. Apply additionally requires `MIGRATION_ALLOW_APPLY=1`,
+`MIGRATION_ALLOW_ACCOUNT_IDENTITY=1`, `MIGRATION_CONFIRM_WRITERS_DRAINED=1`,
+`MIGRATION_CONFIRM_SERVER_UUID`, and the reviewed
+`MIGRATION_CONFIRM_ACCOUNT_IDENTITY_PLAN_SHA256`. The writer-drain flag is an
+operator attestation: the command cannot prove that all clients are stopped.
+
+For an approved live identity migration, take the pre-change backup before
+creating temporary maintenance users. Pause the local backend and receipt
+Scheduler, restrict public ingress, then temporarily lock the existing customer
+database accounts and drain their sessions. Record and restore each account's
+original lock state; never modify Cloud SQL's internal system accounts. Ingress
+and a request timeout alone do not prevent a running handler from reconnecting.
+Distinguish customer `root@%` from Google's managed loopback `root` sessions;
+verify the internal accounts and session source, and do not terminate them.
+Compare all existing account, score and receipt fields before/after the change,
+excluding only the newly added UUID. After schema verification, restore access
+and remove temporary users before taking the post-change backup, so neither
+named snapshot contains the temporary accounts or maintenance lock state.
+PITR points inside the maintenance interval may still contain that temporary
+state; inspect and reconcile database accounts before reopening any such restore.
+Google documents that a [Cloud Run request timeout](https://docs.cloud.google.com/run/docs/configuring/request-timeout)
+does not terminate the handler, and [Cloud SQL restore](https://docs.cloud.google.com/sql/docs/mysql/backup-recovery/restore)
+also restores database users. These are separate from application-level checks.
+
+Capture the original `0008_finalize_account_identity` `applied_at` once as UTC
+`YYYY-MM-DD HH:mm:ss.ffffff`, in protected configuration outside SQL. Runtime
+uses `ACCOUNT_IDENTITY_EPOCH`; replay uses `DELETION_REPLAY_IDENTITY_EPOCH`.
+Never obtain the expected value from the restored target. A pre-identity restore
+is rejected even if someone reruns the UUID migrations, because the original
+epoch differs. It needs approved backup retirement or a separately verified
+identity mapping; this tool does not invent that mapping. Preserve original
+UUIDs and migration history in supported backups.
+
+Generate a **new** runtime-grant plan after migration. It includes SELECT on
+`users.account_uuid` and only `schema_migrations.version, applied_at`, not schema
+history writes or DDL. Changed SQL/privileges change the approval hash, so an
+older grant approval is not reusable. Activation also requires
+`ACCOUNT_DELETION_JOURNAL_BUCKET=ludolume-deletion-journal-1012884798546` and the
+production runtime identity's already-approved create-only access.
+
+`npm run deletion-replay:plan` is read-only; `npm run deletion-replay:apply`
+requires its exact `DELETION_REPLAY_APPROVED_PLAN_SHA256`. Both require dedicated
+`DELETION_REPLAY_DB_HOST=127.0.0.1`, explicit `DB_PORT`, `DB_NAME`, `DB_USER`,
+`DB_PASSWORD`, `DB_CURRENT_USER` and `DB_SERVER_UUID` under the same
+`DELETION_REPLAY_` prefix. They never fall back to application DB credentials.
+The loopback connection must use an authenticated Cloud SQL proxy/tunnel to the
+reviewed target. Google ADC must independently have the authorized recovery
+reader's permissions; the CLI creates no keys or impersonation grants.
+
+Set `DELETION_REPLAY_MODE=active` for pending requests against the frozen active
+database, or `recovery` for an isolated restore. Both require
+`DELETION_REPLAY_FREEZE_ACK=public-traffic-and-account-writes-stopped` after
+actually stopping and draining writers. Recovery additionally requires the
+independently recorded `DELETION_REPLAY_SOURCE_SERVER_UUID` (different from the
+target) and `DELETION_REPLAY_RECOVERY_ACK=isolated-restore-and-session-rotation-required`.
+These attestations do not technically enforce isolation or rotate credentials.
+
+The reader checks all pages and generations, rejects deleted/unexpected objects,
+pins downloads to generations and verifies content checksums. Replay validates
+every intent before mutation, compares exact target/epoch pins, rechecks each
+UUID under the shared submission lock, and commits scoped account deletions.
+Missing UUIDs are repeatable no-ops. A fresh journal digest must match afterward;
+failure never authorizes cutover even if some valid deletions already committed.
+Drained writers and protected journal retention are essential: pagination and
+digest comparisons alone are not an atomic snapshot or proof of absent history.
+
+Default limits are 1,000 intents and a 60-second work budget; explicit
+`DELETION_REPLAY_MAX_INTENTS` and `DELETION_REPLAY_MAX_DURATION_MS` are capped at
+10,000 and 300,000 respectively. Queries are bounded to ten seconds. The work
+budget stops new work; finishing or rolling back an in-flight transaction can
+extend it. Exceeding a limit fails closed, never silently truncates the journal.
+Review/retry with the documented bounded settings rather than bypassing checks.
+No live-object expiry is enabled until the recovery-copy inventory justifies it.
+
+Local validation for this checkpoint: backend `npm test` (TypeScript),
+`npm run test:unit` (275 passed), and `npm run test:migrations` (58 passed across
+the disposable MySQL suites, including simulated restoration/replay). Frontend
+`node --experimental-strip-types --test ts/services/authApi.test.mjs` (16 passed)
+and `npx tsc -p tsconfig.json --noEmit` passed. Backend
+`npm audit --omit=dev --audit-level=moderate` reported zero vulnerabilities after
+using Node's system CA option; TLS verification was not disabled. Temporary
+MySQL containers/networks were removed. No cloud journal object was created.
+
+Primary technical references checked 2026-09-11:
+[Cloud Storage consistency](https://docs.cloud.google.com/storage/docs/consistency)
+documents consistent object writes/reads/listing, not an atomic multi-page
+recovery snapshot; the final freeze/checkpoint is our design requirement.
+[Cloud Storage IAM roles](https://docs.cloud.google.com/storage/docs/access-control/iam-roles)
+documents the create-only role without read, overwrite or delete access; retry
+and recovery-reader behavior must respect that separation.
+[MySQL auto-increment handling](https://dev.mysql.com/doc/refman/8.0/en/innodb-auto-increment-handling.html)
+describes allocation state stored with the database. The reuse risk across an
+older restore is inferred from that behavior and our numeric-ID-only identity.
+
+#### Pre-identity backup inventory — 2026-09-11, approximately 23:43 UTC
+
+This was a read-only metadata review, not a restore or deletion. At that time the
+identity migrations were local-only, so treat every recovery point below as
+pre-identity and unsupported by UUID replay. Backup contents were not restored
+or opened, and no production SQL migration/history query was performed here.
+
+Cloud SQL `cms-mickeyf` in `noted-reef-387021` is RUNNABLE, MySQL 8.0.31, with
+Standard backups enabled. Retention is **eight automated backups by count**,
+not a guaranteed eight-calendar-day expiry. Binary logging and seven-day
+transaction-log retention are enabled; instance deletion protection is on.
+The inventory returned twelve successful backups:
+
+| Kind | Snapshot dates (UTC) | Count | Disposition before deletion activation |
+| --- | --- | ---: | --- |
+| Automated | September 4–11, 2026 | 8 | Preserve now; let successful post-identity backups replace them and recheck the actual list. |
+| On-demand | August 26 and September 8, 2026 | 4 | Preserve until replacement recovery is verified, then obtain exact-target retirement approval. |
+
+The four on-demand retirement candidates are:
+
+| Backup ID | Started (UTC) | Recorded purpose |
+| --- | --- | --- |
+| `1787754667930` | 2026-08-26 14:31:07 | Before additive leaderboard migration |
+| `1787755849821` | 2026-08-26 14:50:49 | Before p4-Vega backfill |
+| `1787787054951` | 2026-08-26 23:30:54 | Before legacy p4_score removal |
+| `1788894880118` | 2026-09-08 19:14:40 | Before receipt migration 0004–0005 |
+
+These IDs document candidates, not authorization or a deletion script. Recheck
+their metadata and replacement recovery evidence before any later removal.
+Standard on-demand backups do not age out automatically; this differs from the
+automated backup count. See Google's
+[backup-retention documentation](https://docs.cloud.google.com/sql/docs/mysql/backup-recovery/backups#backup-retention).
+
+The reported point-in-time recovery window was
+`2026-09-04T21:24:45.390Z` through `2026-09-11T23:43:24.597639300Z`.
+After migration, a successful new backup alone does not retire earlier PITR
+targets. Before activation, query the window again and confirm its earliest
+recoverable time no longer precedes the original identity checkpoint. Do not
+disable/reduce PITR merely to shorten this transition.
+
+Project-wide backup listing (`--instance=-`) returned the same twelve records,
+with no additional final/deleted-instance backups. Instance listing returned
+only `cms-mickeyf`, without replicas. The available operations history returned
+no EXPORT/IMPORT/CLONE/RESTORE matches and no unfinished SQL operation. This is
+not proof that a client never made a manual dump. Project bucket listing returned
+only the approved deletion journal; no separate export bucket was discovered.
+The live backend still routes 100% to `mickeyf-org-ios-origin-a1f3ea43-0910`,
+without the new deletion activation settings; this review did not deploy code.
+
+Local filename/metadata checks found no database dump in the repository,
+documented Mickeyf operator directory, or nine documented `mickeyf-*` temporary
+evidence directories. The repository's eight SQL files are migrations. A small
+`preservation-snapshot.json` is documented operational evidence, not a database
+backup. No payloads, credentials, personal folders or unrelated archives were
+opened. The owner confirmed no database exports/backups saved elsewhere on
+2026-09-11. Other devices, Downloads, external drives and other cloud accounts
+were not independently scanned; that portion relies on the owner's confirmation.
+Provider-internal recovery copies are outside this customer-visible inventory.
+
+Recommended order: keep deletion disabled; obtain approval for the identity
+migration and replacement backup; verify isolated recovery and preserve the
+original epoch externally; retire the specifically approved manual copies;
+allow automated backups/PITR to roll beyond the checkpoint; refresh the inventory
+if any additional copies are made; then separately approve live activation. No legacy identity-mapping
+subsystem, new scheduler or new alert system is proposed. Other development can
+continue while the old recovery window rolls forward.
+
+Read-only evidence commands used `gcloud sql instances describe/list`,
+`gcloud sql backups list` for the instance and project wildcard,
+`gcloud sql instances get-latest-recovery-time`, filtered
+`gcloud sql operations list`, `gcloud storage buckets list`, and
+`gcloud run services describe` with output limited to relevant metadata. This
+documentation-only checkpoint did not rerun application tests or change cloud
+configuration, accounts, scores, grants or backups.
+
+#### Production identity checkpoint — 2026-09-12 UTC
+
+Under the owner's approved maintenance window (September 11 local time),
+`0006_add_account_identity`, `0007_backfill_account_identity` and
+`0008_finalize_account_identity` were applied to `cms-mickeyf`, database `cms`,
+on pinned server UUID `d1e6865c-ecad-11ee-a6b0-42010a400002`. The final reviewed
+plan SHA-256 was `95530d311f8f18155042965e2224bb51ddd5b0047719c3f658e3a5d8c6bb0ba1`.
+All eight migration versions/checksums verified afterward; none were pending
+or recoverable. The final UUID column/default/unique index verified, covering
+all **12 accounts**. Full before/after fingerprints of the existing account
+columns, **nine personal bests** and **zero receipts** matched exactly.
+
+Original identity epoch: **`2026-09-12 00:15:39.954172` UTC**. A copy is retained
+outside SQL in the owner-restricted Windows directory
+`%LOCALAPPDATA%\Ludolume\Recovery\identity-20260911`, alongside non-secret
+operation evidence and recovery notes. Use the independently recorded epoch,
+not a value obtained from a restored target.
+
+| Snapshot | Backup ID | Completed (UTC) | Recovery significance |
+| --- | --- | --- | --- |
+| Before identity migration | `1789171137743` | 2026-09-12 00:00:29 | Permanently retired under exact-target approval on September 12; see completed retirement set below. |
+| After identity migration and access cleanup | `1789172213271` | 2026-09-12 00:17:44 | Successful post-identity backup; isolated restoration and synthetic SQL replay verified below. |
+
+Both backups were successful. At that migration checkpoint all twelve previously
+inventoried backups remained, for fourteen total; backup/PITR retention was not
+shortened. The new pre-identity
+snapshot raises the on-demand pre-identity retirement candidates from four to
+five. Existing automated/PITR recovery points still need to roll past the
+identity checkpoint before deletion activation.
+
+The initial maintenance attempt was aborted before DDL when an unclassified
+session was found. Read-only diagnosis identified Google's internal loopback
+`root` sessions; they were neither locked nor terminated. A JSON object-key
+ordering mismatch in the temporary helper's configuration comparison was also
+corrected before production pause. The successful attempt verified locked
+customer accounts, no customer sessions or open transactions, no metadata-lock
+waiters, and completed cleanup executions before the final plan/apply.
+
+Customer lock states, existing grant fingerprints, receipt Scheduler and public
+ingress were restored. Final Cloud Run generation **142** still serves exactly
+100% of `mickeyf-org-ios-origin-a1f3ea43-0910`, with no template, image or traffic
+change. The four original SQL users remain; every temporary maintenance user
+was removed before the final backup. The local backend was restarted with
+`npm run backend:dev:local`; frontend/WebGL/proxy processes were preserved.
+Public session, catalog, p4-Vega and Three Bosses read endpoints returned HTTP
+200 with JSON and `no-store`. No authenticated login/submission retest, account
+deletion, journal write, replay, runtime-grant rollout or application deployment
+was performed. The existing deletion activation settings remain absent.
+
+The operation used a temporary interactive Node helper calling the repository's
+guarded `planAccountIdentityMigration`, `applyAccountIdentityMigration` and
+`verifyAccountIdentitySchema` functions, with exact plan/server confirmation.
+Google Cloud API backup/ingress/Scheduler operations and read-only `gcloud`
+inventory checks supplied the infrastructure evidence. This operations-only
+checkpoint did not rerun the already-passing application test suites.
+
+#### Isolated recovery exercise — 2026-09-12 UTC
+
+The owner approved restoring backup `1789172213271` into temporary instance
+`ludolume-restore-check-20260912`, never over `cms-mickeyf`. Creation operation
+`01ef3cec-150c-49a1-8138-767400000032` and restore operation
+`8e1f705c-72d4-49d0-85c7-f39a00000032` completed successfully. The restored
+MySQL version was `8.0.31-google`; target server UUID
+`37431f47-ae41-11f1-a32f-42010a40001c` differed from the pinned production UUID.
+
+Connector enforcement and encrypted connections were required, with no public
+network allowlist. The temporary proxy listened only on `127.0.0.1:3307`, not
+production's port 3306. No application, cleanup job or public route was pointed
+at the restored instance. Its four inherited customer SQL accounts were locked
+before replay; Google's internal system users were left untouched. This was
+isolation from application traffic, not from privileged project administrators.
+
+Verified against the independent checkpoint: **12 accounts, nine personal bests,
+zero receipts**, all eight migration checksums, UUID/default/index integrity,
+and the original epoch `2026-09-12 00:15:39.954172`. Existing-column fingerprints
+matched the pre/post-migration evidence. Administrator metadata inspection found
+exactly the four expected InnoDB tables and no schema triggers or events.
+
+The helper called the existing `planDeletionReplay`/`applyDeletionReplay`
+functions with a target-only SQL account: SELECT/DELETE on the three account
+tables and SELECT on migration history, without INSERT, UPDATE, DDL or grant
+authority. Separate setup credentials created the dummy data.
+
+- The real GCS reader checked the live journal using existing operator
+  credentials and a GET-only transport. Zero intents were present; the reviewed
+  empty plan reconciled without deletions. No production marker was written.
+- A separate, frozen **in-memory** intent targeted one new dummy account in the
+  restored copy, with two game bests and one receipt. Replay removed that account
+  and its related rows. Repeating the same plan returned zero deletions and one
+  absent account. A replacement with the same numeric ID but a new UUID survived
+  another replay. Its fixture was then removed; all original copied rows,
+  including account UUIDs, matched their pre-exercise fingerprints exactly.
+
+This verifies actual backup restoration and SQL replay on the restored schema.
+It does **not** prove a production marker's persistence, runtime-writer or recovery-
+service-account authentication, replay of a fixture present in the original
+backup, or session invalidation at cutover. The instance never became live, so
+production writers were not paused and production session secrets were not
+rotated. Existing local servers remained running. Production instance settings,
+the source backup and Cloud Run generation 142/100% revision routing remained
+unchanged; deletion activation settings were still absent.
+
+The one-time helper was syntax-checked with `node --check` and executed using
+`node --use-system-ca`; this was an operational check of existing implementation,
+not a new application-code change or a rerun of the broad test suites. Non-secret
+results are retained as `restore-exercise-20260912.json` beside the independently
+saved epoch in the owner-restricted recovery directory. No row exports, dummy
+passwords or cloud access tokens are retained.
+
+Cleanup: the temporary SQL credentials and proxy container were removed.
+Instance deletion `6cd482d2-f4e6-4615-9853-db6800000032` completed at
+`2026-09-12T00:36:37.483Z`. Project-wide read-back showed only `cms-mickeyf`, all
+14 original successful backups and no backup belonging to the temporary
+instance; port 3307 was closed. No final/retained backup was requested for the
+disposable copy. The filesystem tool refused removal of the external temporary
+helper folder. Its credential-free helper and duplicate aggregate result remain
+outside the repository; the exact path and matching evidence hash are recorded
+in the protected recovery notes. This local cleanup item is not complete.
+
+#### Backup retirement approval set — 2026-09-12 UTC
+
+Pre-deletion project-wide metadata showed 14 successful backups for `cms-mickeyf`
+and no backup for the removed test instance. The owner explicitly approved
+permanent removal of these five **manual pre-identity** snapshots:
+
+| Backup ID | Started (UTC) | Purpose |
+| --- | --- | --- |
+| `1787754667930` | 2026-08-26 14:31:07 | Before additive leaderboard migration |
+| `1787755849821` | 2026-08-26 14:50:49 | Before p4-Vega backfill |
+| `1787787054951` | 2026-08-26 23:30:54 | Before legacy score-column removal |
+| `1788894880118` | 2026-09-08 19:14:40 | Before receipt migration |
+| `1789171137743` | 2026-09-11 23:58:57 | Before account identity migration |
+
+**Completed 2026-09-12 at 01:01:35.536 UTC.** All five exact deletions completed
+successfully, in sequence. Fresh project-wide read-back matched exactly the nine
+protected backups: verified replacement `1789172213271` and all eight automated
+backups, each still successful. The database remained RUNNABLE; automated backup,
+binary logging, eight-backup COUNT retention and seven-day transaction-log
+settings were preserved. These old named snapshot restore points are permanently
+removed; no live SQL account or score data was changed. Standard manual
+backups remain until explicitly deleted; do not manually remove automated
+backups to accelerate the transition ([Google backup retention](https://docs.cloud.google.com/sql/docs/mysql/backup-recovery/backups#backup-retention)).
+
+The post-deletion recovery window still began at `2026-09-04T21:24:45.390Z`, before the
+original identity epoch; its reported latest point was
+`2026-09-12T01:01:54.602501768Z`. Retirement of the five manual snapshots alone
+therefore does not permit activation. Allow automatic history to roll forward
+and verify the actual inventory/window once it is eligible; do not rerun the
+completed restore test or shorten recovery retention. No new monitor, scheduler,
+IAM grant, probe object or deployment was created. Deletion remains disabled.
+
+Operations used guarded `gcloud sql backups delete <approved ID>` calls and
+confirmed each returned operation completed without error. The final backup
+inventory, instance settings and recovery window were read back. Non-secret
+operation IDs/timestamps and the protected backup list are recorded in
+`backup-retirement-20260912-0101.json` beside the original epoch in the restricted
+recovery directory. Repository changes were documentation-only and passed `git diff --check`;
+no application test suite or restore exercise was rerun.
+
+#### Journal storage and IAM checkpoint — 2026-09-11
+
+User-approved provisioning created
+`gs://ludolume-deletion-journal-1012884798546` in project `noted-reef-387021`,
+using Standard storage in `us-central1` alongside the existing backend region.
+Public-access prevention is **enforced** and uniform bucket-level access is on.
+Seven-day soft delete is explicit (`604800` seconds); object versioning, lifecycle
+expiry and a bucket retention policy are absent. No irreversible Bucket Lock,
+scheduler, recovery job, key file or secret was created.
+
+Bucket-scoped access:
+
+- Existing backend identity
+  `mickeyf-runtime@noted-reef-387021.iam.gserviceaccount.com` has
+  `roles/storage.objectCreator`: new objects, not object read/list/update/delete
+  or overwrite. Its only direct project role remains `roles/cloudsql.client`,
+  which has no storage permissions.
+- New identity
+  `ludolume-deletion-recovery@noted-reef-387021.iam.gserviceaccount.com` has
+  `roles/storage.objectViewer`: object read/list, not create/change/delete.
+  It has no direct project-role grants, user-managed keys or service-account-
+  level impersonation bindings and is not attached to a job or service.
+  Recovery execution remains separate.
+- Preserved the project's owner convenience bindings for bucket/object
+  administration. Removed only this newly created bucket's automatic
+  Editor/Viewer convenience grants. Project IAM was not changed. Other
+  inherited privileged project roles still apply; this is not isolation from
+  project administrators or destruction of the entire project.
+
+Read-back verified the project number, region, private-access settings, soft
+delete duration, absence of lifecycle/versioning/retention policy, exact bucket
+bindings, identity/project roles and live role definitions. Both all-version and
+soft-deleted object listings were empty. No probe object or deletion marker was
+written. IAM was verified from policy/role reads, not impersonated data-plane
+requests; no Token Creator grant was added merely to run a test. The bucket IAM
+update used the observed etag to avoid overwriting concurrent policy changes.
+
+The live backend revision/100% traffic target remained
+`mickeyf-org-ios-origin-a1f3ea43-0910`; no deployment, database grant, account or
+score operation occurred. The deletion release switch was not enabled.
+
+Recovery implementation must account for
+[soft-deleted records](https://docs.cloud.google.com/storage/docs/soft-delete),
+which ordinary listing does not return and which cannot be read until restored.
+An empty ordinary listing must never be accepted as evidence of a complete
+journal. Before eventual marker expiry, include the soft-delete recovery window
+in the retention accounting. The empty bucket is infrastructure readiness, not
+proof that account deletion now survives a database restore.
 
 ## Deferred decisions
 

@@ -71,7 +71,8 @@ export class P4 extends Entity<AnimatedSprite> {
      * - Combines keyboard and proportional joystick movement without normalizing diagonals.
      * - Clamps the sprite on-screen, including fractional movement near an edge.
      */
-    update(p4Anim: AnimatedSprite) {
+    update(): void {
+        const { p4Anim } = this;
         const x = getP4MovementAxis(this.isMovingRight, this.isMovingLeft, this.joystickX);
         const y = getP4MovementAxis(this.isMovingDown, this.isMovingUp, this.joystickY);
         p4Anim.x = Math.max(0, Math.min(Math.max(0, CANVAS_WIDTH - p4Anim.width), p4Anim.x + x * this.speed));

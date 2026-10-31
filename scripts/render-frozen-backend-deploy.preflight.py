@@ -5,6 +5,7 @@ The Artifact Registry response is read through authenticated Google APIs. Envelo
 metadata is checked here; this is not an independent cryptographic key verifier.
 """
 import base64
+import hashlib
 import json
 import os
 import re
@@ -22,11 +23,66 @@ REPOSITORY = "https://github.com/Good-Loops/mickeyf.com.git"
 IMAGE = f"us-central1-docker.pkg.dev/{PROJECT}/cloud-run-source-deploy/cloud-run-source-deploy"
 BUILDER = "gcr.io/cloud-builders/docker:latest@sha256:661e95acd923514f71f47ce7b390e06a8d31b15febecf772e506babf62960528"
 STAGE_A = "ef5a2981-95be-4f4d-af91-f997fde73356"
+SESSION_CUTOVER = False  # Set only by the offline session renderer, not a CLI flag.
+PROVIDER_RELEASE = False  # Set only by the offline provider renderer.
 UUID = r"[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}"
 
 
 def reject(message):
-    raise SystemExit(f"Frozen candidate preflight rejected: {message}")
+    scope = "Session" if SESSION_CUTOVER else "Frozen"
+    raise SystemExit(f"{scope} candidate preflight rejected: {message}")
+
+
+def validate_session_secret_version(pins):
+    version = pins.get("sessionSecretVersion") if isinstance(pins, dict) else None
+    if not isinstance(version, str) or re.fullmatch(r"[1-9][0-9]*", version) is None:
+        reject("sessionSecretVersion must be an explicit positive decimal string without aliases or whitespace")
+    return version
+
+
+def validate_previous_session_version(pins):
+    previous = pins.get("previousSessionSecretVersion")
+    if (not isinstance(previous, str) or re.fullmatch(r"[1-9][0-9]*", previous) is None
+            or int(validate_session_secret_version(pins)) <= int(previous)):
+        reject("session cutover requires a newer version than the explicit serving signing-secret pin")
+    return previous
+
+
+def verify_session_cutover(service, pins, phase):
+    """The enabled-score candidate may only replace the reviewed legacy state."""
+    traffic = service.get("spec", {}).get("traffic", [])
+    serving = [item for item in traffic if item.get("percent", 0) > 0]
+    if (len(serving) != 1 or serving[0].get("percent") != 100
+            or serving[0].get("latestRevision") is True or serving[0].get("tag")
+            or (phase != "after-deploy" and len(traffic) != 1)):
+        reject("session cutover requires one explicit serving revision and no previous tags")
+    revision = serving[0].get("revisionName")
+    if not isinstance(revision, str) or re.fullmatch(r"mickeyf-org-[a-z0-9-]+", revision) is None:
+        reject("session cutover serving revision is malformed")
+    previous = validate_previous_session_version(pins)
+
+    def verify_environment(spec, version):
+        containers = spec.get("containers") or []
+        if len(containers) != 1:
+            reject("session cutover expects one runtime container")
+        entries = containers[0].get("env") or []
+        values = {item.get("name"): item for item in entries}
+        if len(values) != len(entries):
+            reject("session cutover environment contains duplicate names")
+        secret = values.get("SESSION_SECRET", {})
+        if (set(secret) != {"name", "valueFrom"}
+                or secret["valueFrom"] != {"secretKeyRef": {"name": "SESSION_SECRET", "key": version}}
+                or any(values.get(flag, {}).get("value") != "true" for flag in
+                       ("P4_VEGA_SCORE_SUBMISSIONS_ENABLED", "THREE_BOSSES_RUN_SUBMISSIONS_ENABLED"))):
+            reject("serving session-secret pin or enabled-score baseline differs")
+
+    verify_environment(service.get("spec", {}).get("template", {}).get("spec", {}),
+                       pins["sessionSecretVersion"] if phase == "after-deploy" else previous)
+    record = command(["run", "revisions", "describe", revision, f"--project={PROJECT}",
+                      "--region=us-central1", "--format=json"])
+    if record.get("metadata", {}).get("name") != revision:
+        reject("session cutover serving revision identity differs")
+    verify_environment(record.get("spec", {}), previous)
 
 
 def command(arguments):
@@ -59,14 +115,24 @@ def approved(build):
             and approval.get("result", {}).get("decision") == "APPROVED")
 
 
-def safe_options(options, require_provenance=False):
+def safe_options(options, require_provenance=False, allow_completed_source_defaults=False,
+                 allow_observed_deployment_defaults=False):
     allowed = {"logging", "substitutionOption", "dynamicSubstitutions", "pool"}
     if require_provenance:
         allowed.add("requestedVerifyOption")
+    # Google adds its documented current worker default to API build responses.
+    # Input configurations remain strict. Observed defaults are accepted only
+    # after the caller checks the exact approved source/deployment identity.
+    # https://docs.cloud.google.com/build/docs/release-channels (2026-10-17):
+    # legacy remains the default until 2027-03-28; it selects the host VM only.
+    if (require_provenance and allow_completed_source_defaults
+            or not require_provenance and allow_observed_deployment_defaults):
+        allowed.add("workerRelease")
     if (not isinstance(options, dict) or set(options) - allowed
             or options.get("logging") != "CLOUD_LOGGING_ONLY"
             or options.get("requestedVerifyOption") not in (None, "VERIFIED")
             or (require_provenance and options.get("requestedVerifyOption") != "VERIFIED")
+            or ("workerRelease" in options and options["workerRelease"] != "legacy")
             or options.get("substitutionOption") not in (None, "ALLOW_LOOSE")
             or ("dynamicSubstitutions" in options and options["dynamicSubstitutions"] is not True)
             or ("pool" in options and options["pool"] != {})):
@@ -100,7 +166,6 @@ def verify_source(build, trigger, pins, now):
             or build.get("sourceProvenance", {}).get("resolvedGitSource") != source
             or build.get("substitutions") != substitutions(pins)):
         reject("requested/resolved source or substitutions do not match the exact commit")
-    safe_options(build.get("options"), require_provenance=True)
     if any(build.get(key) for key in ("availableSecrets", "secrets", "dependencies")):
         reject("image-only build acquired secrets or additional dependencies")
     tag = f"{IMAGE}:{commit}"
@@ -135,6 +200,37 @@ def verify_source(build, trigger, pins, now):
         reject("manual source trigger identity or image-only source configuration differs")
     if set(trigger) & {"build", "filename", "github", "pubsubConfig", "webhookConfig", "repositoryEventConfig", "developerConnectEventConfig"}:
         reject("manual source trigger gained an alternate execution source")
+    safe_options(build.get("options"), require_provenance=True, allow_completed_source_defaults=True)
+
+
+def verify_provenance_envelope(envelope, statement):
+    required = "projects/verified-builder/locations/global/keyRings/attestor/cryptoKeys/google-hosted-worker/cryptoKeyVersions/1"
+    additional = "projects/verified-builder/locations/global/keyRings/attestor/cryptoKeys/pqcProvenanceSigner/cryptoKeyVersions/1"
+    if (not isinstance(envelope, dict) or set(envelope) != {"payloadType", "payload", "signatures"}
+            or envelope.get("payloadType") != "application/vnd.in-toto+json"
+            or not isinstance(envelope.get("payload"), str) or not envelope["payload"]
+            or not isinstance(envelope.get("signatures"), list) or not 1 <= len(envelope["signatures"]) <= 2):
+        reject("SLSA v1 signature envelope metadata differs")
+    seen = set()
+    try:
+        if json.loads(base64.b64decode(envelope["payload"], validate=True)) != statement:
+            reject("SLSA envelope payload and displayed statement disagree")
+        for signature in envelope["signatures"]:
+            if (not isinstance(signature, dict) or set(signature) != {"keyid", "sig"}
+                    or not isinstance(signature.get("keyid"), str) or signature["keyid"] not in {required, additional}
+                    or signature["keyid"] in seen or not isinstance(signature.get("sig"), str)
+                    or not signature["sig"] or len(signature["sig"]) > 8192):
+                reject("SLSA v1 signature envelope metadata differs")
+            seen.add(signature["keyid"])
+            # URL-safe bytes are emitted by Container Analysis. An added PQ
+            # co-signature never substitutes for the original required signer.
+            decoded = base64.b64decode(signature["sig"], altchars=b"-_", validate=True)
+            if not decoded or signature["sig"] not in (base64.b64encode(decoded).decode(), base64.urlsafe_b64encode(decoded).decode()):
+                reject("SLSA signature is malformed")
+    except (ValueError, UnicodeError):
+        reject("SLSA envelope is malformed")
+    if required not in seen:
+        reject("SLSA original hosted-worker signer is missing")
 
 
 def verify_provenance(provenance, pins):
@@ -157,21 +253,7 @@ def verify_provenance(provenance, pins):
             or occurrence.get("noteName") != f"projects/verified-builder/notes/intoto_slsa_v1_{build_id}"):
         reject("SLSA v1 occurrence identity differs")
     statement = occurrence["build"]["inTotoSlsaProvenanceV1"]
-    envelope = occurrence.get("envelope") or {}
-    signatures = envelope.get("signatures") or []
-    if (envelope.get("payloadType") != "application/vnd.in-toto+json" or len(signatures) != 1
-            or signatures[0].get("keyid") != "projects/verified-builder/locations/global/keyRings/attestor/cryptoKeys/google-hosted-worker/cryptoKeyVersions/1"
-            or not isinstance(signatures[0].get("sig"), str) or not signatures[0]["sig"]):
-        reject("SLSA v1 signature envelope metadata differs")
-    try:
-        if json.loads(base64.b64decode(envelope["payload"], validate=True)) != statement:
-            reject("SLSA envelope payload and displayed statement disagree")
-        # Container Analysis serializes this bytes field with URL-safe base64.
-        # Keep strict alphabet validation; do not silently discard invalid bytes.
-        if not base64.b64decode(signatures[0]["sig"], altchars=b"-_", validate=True):
-            reject("SLSA signature is empty")
-    except (KeyError, ValueError, UnicodeError):
-        reject("SLSA envelope is malformed")
+    verify_provenance_envelope(occurrence.get("envelope"), statement)
     if (statement.get("_type") != "https://in-toto.io/Statement/v1"
             or statement.get("predicateType") != "https://slsa.dev/provenance/v1"
             or statement.get("subject") != [{"digest": {"sha256": digest.removeprefix("sha256:")}, "name": f"https://{IMAGE}:{commit}"}]):
@@ -235,6 +317,17 @@ def stable_service(service):
             "latestReadyRevisionName": status.get("latestReadyRevisionName")}
 
 
+def verify_deployed_service(snapshot, before, revision, tag):
+    expected_traffic = sorted(before["traffic"] + [[revision, 0, tag]])
+    pointer = snapshot["latestReadyRevisionName"]
+    # Dormant revisions may retire while the service still points to its prior serving revision.
+    if (snapshot["traffic"] != expected_traffic or int(snapshot["generation"]) != int(before["generation"]) + 1
+            or snapshot["latestCreatedRevisionName"] != revision
+            or not isinstance(pointer, str) or re.fullmatch(r"mickeyf-org-[a-z0-9-]+", pointer) is None
+            or pointer not in (before["latestReadyRevisionName"], revision)):
+        reject("post-deploy state changed anything beyond the exact new candidate tag/revision")
+
+
 def verify_exclusion(stage_a, stage_b, active_builds, deploy_build, deploy_trigger, triggers, pins, build_id, trigger_id):
     for record, expected_id, expected_name in ((stage_a, STAGE_A, "main-push-mickeyf-com"),
             (stage_b, pins["canonicalDeployTriggerId"], pins["canonicalDeployTriggerName"])):
@@ -264,9 +357,12 @@ def verify_exclusion(stage_a, stage_b, active_builds, deploy_build, deploy_trigg
         reject("temporary deployment trigger is not the reviewed source-less approval-required trigger")
     if set(deploy_trigger) & {"filename", "gitFileSource", "sourceToBuild", "github", "pubsubConfig", "webhookConfig", "repositoryEventConfig", "developerConnectEventConfig"}:
         reject("temporary deploy trigger gained a source or event binding")
-    safe_options(deploy_build.get("options"))
     inline = deploy_trigger["build"]
     safe_options(inline.get("options"))
+    # The exact approved WORKING source-less build is already bound above.
+    # Its trigger's requested options remain strict; only the API response may
+    # materialize Google's current legacy host default (observed 2026-10-17).
+    safe_options(deploy_build.get("options"), allow_observed_deployment_defaults=True)
     if deploy_build.get("timeout") != "2400s" or inline.get("timeout") != "2400s":
         reject("deployment deadline differs from the reviewed package")
     if any(inline.get(key) for key in ("source", "images", "artifacts", "availableSecrets", "secrets", "dependencies")):
@@ -275,11 +371,30 @@ def verify_exclusion(stage_a, stage_b, active_builds, deploy_build, deploy_trigg
 
 def main():
     pins_path, build_id, trigger_id, approval, phase = sys.argv[1:]
-    with open(pins_path, encoding="utf-8") as handle:
-        pins = json.load(handle)
+    if SESSION_CUTOVER:
+        if pins_path != "/workspace/session-pins.json":
+            reject("pins must use the materialized session deployment path")
+        with open("/workspace/session-pins.json", encoding="utf-8") as handle:
+            pins = json.load(handle)
+    else:
+        if pins_path != "/workspace/frozen-pins.json":
+            reject("pins must use the materialized frozen deployment path")
+        with open("/workspace/frozen-pins.json", encoding="utf-8") as handle:
+            pins = json.load(handle)
+    session_secret_version = validate_session_secret_version(pins)
+    expected_approval = f"freeze-zero-traffic:{pins['sourceCommit']}:{pins['sourceBuildId']}:{pins['imageDigest']}:session-secret:{session_secret_version}"
+    if SESSION_CUTOVER:
+        previous = validate_previous_session_version(pins)
+        expected_approval = f"session-zero-traffic:{pins['sourceCommit']}:{pins['sourceBuildId']}:{pins['imageDigest']}:previous-session-secret:{previous}:session-secret:{session_secret_version}"
+    if PROVIDER_RELEASE:
+        configuration = pins.get("providerRelease")
+        if not isinstance(configuration, dict) or set(configuration) != {"phase", "environment"}:
+            reject("missing exact provider configuration")
+        digest = hashlib.sha256(json.dumps({"current": configuration, "previous": pins.get("previousProviderRelease")}, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode()).hexdigest()
+        expected_approval = expected_approval.replace("session-zero-traffic:", "provider-zero-traffic:", 1) + f":configuration:{digest}"
     if (re.fullmatch(UUID, build_id) is None or re.fullmatch(UUID, trigger_id) is None
             or trigger_id in (STAGE_A, pins["canonicalDeployTriggerId"], pins["sourceTriggerId"])
-            or approval != f"freeze-zero-traffic:{pins['sourceCommit']}:{pins['sourceBuildId']}:{pins['imageDigest']}"
+            or approval != expected_approval
             or phase not in ("initial", "before-deploy", "after-deploy")):
         reject("explicit one-shot approval or current deployment identity is invalid")
     def build(identifier):
@@ -311,14 +426,19 @@ def main():
                      build(build_id), trigger(trigger_id), triggers, pins, build_id, trigger_id)
     service = command(["run", "services", "describe", SERVICE, f"--project={PROJECT}", "--region=us-central1", "--format=json"])
     snapshot = stable_service(service)
-    baseline = "/workspace/frozen-before.json"
+    if SESSION_CUTOVER:
+        verify_session_cutover(service, pins, phase)
+    baseline = "/workspace/session-before.json" if SESSION_CUTOVER else "/workspace/frozen-before.json"
+    compact = pins["sourceBuildId"].replace("-", "")
+    tag = f"s-{compact}" if SESSION_CUTOVER else f"f-{compact}"
+    suffix = f"session-{compact}" if SESSION_CUTOVER else f"freeze-{compact}"
+    revision = f"mickeyf-org-{suffix}"
     if phase == "initial":
         with open(baseline, "x", encoding="utf-8") as handle:
             json.dump(snapshot, handle, sort_keys=True)
-        compact = pins["sourceBuildId"].replace("-", "")
-        state = {"build_id": pins["sourceBuildId"], "candidate_tag": f"f-{compact}", "commit": pins["sourceCommit"],
-                 "digest": pins["imageDigest"], "revision_name": f"mickeyf-org-freeze-{compact}",
-                 "revision_suffix": f"freeze-{compact}", "target_image": f"{IMAGE}@{pins['imageDigest']}"}
+        state = {"build_id": pins["sourceBuildId"], "candidate_tag": tag, "commit": pins["sourceCommit"],
+                 "digest": pins["imageDigest"], "revision_name": revision,
+                 "revision_suffix": suffix, "target_image": f"{IMAGE}@{pins['imageDigest']}"}
         with open("/workspace/verified-stage-a.json", "x", encoding="utf-8") as handle:
             json.dump(state, handle, sort_keys=True)
     else:
@@ -328,13 +448,8 @@ def main():
             if snapshot != before:
                 reject("service changed during scan/preflight; regenerate/review the one-shot deployment")
         else:
-            compact = pins["sourceBuildId"].replace("-", "")
-            revision = f"mickeyf-org-freeze-{compact}"
-            expected_traffic = sorted(before["traffic"] + [[revision, 0, f"f-{compact}"]])
-            if (snapshot["traffic"] != expected_traffic or int(snapshot["generation"]) != int(before["generation"]) + 1
-                    or snapshot["latestCreatedRevisionName"] != revision or snapshot["latestReadyRevisionName"] != revision):
-                reject("post-deploy state changed anything beyond the exact new frozen tag/revision")
-    print(f"Frozen candidate trust/exclusion preflight passed ({phase}); no production mutation performed by preflight.")
+            verify_deployed_service(snapshot, before, revision, tag)
+    print(f"Candidate trust/exclusion preflight passed ({phase}); no production mutation performed by preflight.")
 
 
 if __name__ == "__main__":

@@ -1,0 +1,8 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <bool name="ludolume_google_sign_in_enabled">false</bool>
+    <string name="google_server_client_id" translatable="false"></string>
+    <bool name="ludolume_apple_sign_in_enabled">false</bool>
+    <string name="apple_android_services_id" translatable="false"></string>
+    <string name="apple_android_redirect_uri" translatable="false"></string>
+</resources>

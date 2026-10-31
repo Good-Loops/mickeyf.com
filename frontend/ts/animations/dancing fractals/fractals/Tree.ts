@@ -46,7 +46,7 @@ const DEPTH_HUE_STEP_DEG = 26;
  *
  * Invariants:
  * - When initialized, `depthGraphics.length === config.maxDepth + 1`.
- * - `baseConfig` captures the post-construction baseline used for music-driven motion targets.
+ * - `baseConfig` tracks user settings used as the baseline for music-driven motion targets.
  *
  * @category Fractals — Core
  */
@@ -421,13 +421,14 @@ export class Tree implements FractalAnimation<TreeConfig> {
 	 *
 	 * Merge semantics: `this.config` is replaced via `{ ...this.config, ...patch }`.
 	 *
-	 * Note: `baseConfig` is not modified by patches; it remains the baseline for music-driven motion targets.
+	 * Explicit patches also update `baseConfig`, preserving untouched baseline values independently of beat boosts.
 	 *
 	 * If `maxDepth` changes while initialized, depth graphics and the palette tween are rebuilt.
 	 */
 	updateConfig = (patch: Partial<TreeConfig>): void => {
 		const oldMaxDepth = this.config.maxDepth;
 		this.config = { ...this.config, ...patch };
+		Object.assign(this.baseConfig, patch);
 
 		// If maxDepth changed, rebuild depth graphics & color interpolator
 		if (patch.maxDepth !== undefined && this.app && this.config.maxDepth !== oldMaxDepth) {
@@ -458,6 +459,13 @@ export class Tree implements FractalAnimation<TreeConfig> {
 		this.disposalTimer = 0;
 		this.autoDispose = true;
 		this.isDisposing = false;
+	};
+
+	/** Cancels the countdown without changing an active shrinking animation. */
+	cancelScheduledDisposal = (): void => {
+		this.autoDispose = false;
+		this.disposalDelay = 0;
+		this.disposalTimer = 0;
 	};
 
 	/** Begins the disposal process immediately (tree shrinks until invisible, then disposes). */

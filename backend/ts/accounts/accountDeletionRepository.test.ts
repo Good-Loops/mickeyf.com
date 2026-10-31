@@ -1,0 +1,421 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import bcrypt from 'bcryptjs';
+import { createHash } from 'node:crypto';
+import { Pool, PoolConnection } from 'mysql2/promise';
+import { AccountDeletionPendingError, AccountDeletionRollbackError, deleteAccount, deleteProviderAccount } from './accountDeletionRepository';
+import type { AccountDeletionJournal } from './deletionJournal';
+import type { VerifiedProviderIdentity } from '../auth/providerIdentity';
+
+const PASSWORD = 'correct-test-password';
+const PASSWORD_HASH = bcrypt.hashSync(PASSWORD, 4);
+const ACCOUNT_ID = '123e4567-e89b-42d3-a456-426614174000';
+const SESSION_ID = Buffer.alloc(32, 1).toString('base64url');
+const SESSION_HASH = createHash('sha256').update(SESSION_ID, 'ascii').digest();
+const SESSION = { accountId: ACCOUNT_ID, sessionId: SESSION_ID };
+const PROVIDER_IDENTITY = { provider: 'google', subject: 'ExactGoogleSubject' } as VerifiedProviderIdentity;
+
+type FakeOptions = {
+    userExists?: boolean;
+    deletedAccounts?: number;
+    failAt?: string;
+    failureCode?: string;
+    rollbackFails?: boolean;
+    acquire?: () => Promise<void>;
+    commit?: () => Promise<void>;
+    journal?: () => Promise<void>;
+    accountId?: string;
+    sessionExists?: boolean;
+    passwordHash?: string | null;
+    providerSubject?: Buffer | null;
+    sessionExpiresAfterProviderCheck?: boolean;
+};
+
+function fakeDatabase(options: FakeOptions = {}) {
+    const events: string[] = [];
+    const queries: Array<{ sql: string; values?: unknown[]; timeout?: number }> = [];
+    const transactions: Array<{ sql: string; timeout?: number }> = [];
+    const failure = Object.assign(new Error('database operation failed'), { code: options.failureCode });
+    const rollbackFailure = new Error('rollback failed');
+    function record(event: string) {
+        events.push(event);
+        if (options.failAt === event) throw failure;
+    }
+    const connection = {
+        async beginTransaction() { transactions.push({ sql: 'START TRANSACTION' }); record('begin'); },
+        async query(query: { sql: string; timeout?: number }, values?: unknown[]) {
+            const sql = query.sql.replace(/\s+/g, ' ').trim();
+            if (['START TRANSACTION', 'COMMIT', 'ROLLBACK'].includes(sql)) {
+                transactions.push({ sql, timeout: query.timeout });
+                record(sql === 'START TRANSACTION' ? 'begin' : sql === 'COMMIT' ? 'commit' : 'rollback');
+                if (sql === 'COMMIT') await options.commit?.();
+                if (sql === 'ROLLBACK' && options.rollbackFails) throw rollbackFailure;
+                return [[], []];
+            }
+            queries.push({ ...query, sql, values });
+            if (sql.includes('GET_LOCK')) {
+                record('acquire');
+                await options.acquire?.();
+                return [[{ lockResult: 1 }], []];
+            }
+            if (sql.includes('RELEASE_LOCK')) {
+                record('unlock');
+                return [[{ lockResult: 1 }], []];
+            }
+            if (sql.includes('FROM account_sessions AS s')) {
+                record('read-session');
+                const matches = options.sessionExists !== false
+                    && !(options.sessionExpiresAfterProviderCheck && events.includes('read-provider')) && values?.[0] === 42
+                    && values?.[1] === ACCOUNT_ID && Buffer.isBuffer(values?.[2])
+                    && values[2].equals(SESSION_HASH);
+                return [matches ? [{ userName: 'player' }] : [], []];
+            }
+            if (sql.startsWith('SELECT user_password')) {
+                record('read-password');
+                const accountId = options.accountId ?? ACCOUNT_ID;
+                return [options.userExists === false
+                    ? [] : [{ passwordHash: options.passwordHash === undefined ? PASSWORD_HASH : options.passwordHash, accountId }], []];
+            }
+            if (sql.includes('FROM account_provider_identities')) {
+                record('read-provider');
+                return [options.providerSubject === null ? []
+                    : [{ subject: options.providerSubject ?? Buffer.from(PROVIDER_IDENTITY.subject) }], []];
+            }
+            if (sql.startsWith('UPDATE apple_provider_tokens')) { record('mark-apple-tokens'); return [{ affectedRows: 1 }, []]; }
+            if (sql.startsWith('DELETE FROM apple_provider_tokens')) { record('purge-expired-apple-tokens'); return [{ affectedRows: 0 }, []]; }
+            record(sql);
+            return [{ affectedRows: sql === 'DELETE FROM users WHERE user_id = ?'
+                ? options.deletedAccounts ?? 1 : 2 }, []];
+        },
+        async commit() {
+            transactions.push({ sql: 'COMMIT' });
+            record('commit');
+            await options.commit?.();
+        },
+        async rollback() {
+            transactions.push({ sql: 'ROLLBACK' });
+            record('rollback');
+            if (options.rollbackFails) throw rollbackFailure;
+        },
+        release() { record('release'); },
+        destroy() { record('destroy'); },
+    } as unknown as PoolConnection;
+    const database = {
+        async getConnection() {
+            record('connect');
+            return connection;
+        },
+    } as Pick<Pool, 'getConnection'>;
+    const journal: AccountDeletionJournal = {
+        async recordAccountDeletion(accountId) {
+            assert.equal(accountId, ACCOUNT_ID);
+            record('journal');
+            await options.journal?.();
+        },
+    };
+    return { database, events, queries, transactions, failure, rollbackFailure, journal };
+}
+
+test('deletion transaction controls are bounded on success, rejection and rollback', async () => {
+    for (const options of [{}, { sessionExists: false }, { failAt: 'journal' }]) {
+        const fake = fakeDatabase(options);
+        const deletion = deleteAccount(fake.database, 42, PASSWORD, fake.journal, SESSION);
+        if (options.failAt) await assert.rejects(deletion);
+        else assert.equal(await deletion, options.sessionExists === false ? 'not-found' : 'deleted');
+        assert.deepEqual(fake.transactions, [
+            { sql: 'START TRANSACTION', timeout: 10_000 },
+            { sql: options.failAt ? 'ROLLBACK' : 'COMMIT', timeout: 10_000 },
+        ]);
+    }
+});
+
+test('sanitized session and Apple-storage timeouts discard before cleanup and preserve deletion-pending status', async () => {
+    for (const failAt of ['read-session', 'mark-apple-tokens']) {
+        const fake = fakeDatabase({ failAt, failureCode: 'PROTOCOL_SEQUENCE_TIMEOUT' });
+        await assert.rejects(deleteAccount(fake.database, 42, PASSWORD, fake.journal, SESSION), error => {
+            assert.equal(error instanceof AccountDeletionPendingError, failAt === 'mark-apple-tokens');
+            return true;
+        });
+        assert.deepEqual(fake.events.slice(fake.events.indexOf(failAt) + 1), ['destroy']);
+        assert.equal(fake.events.includes('journal'), failAt === 'mark-apple-tokens');
+        assert.equal(fake.events.includes('DELETE FROM users WHERE user_id = ?'), false);
+    }
+});
+
+test('reauthenticates and deletes only this user and all their scores/receipts under the shared lock', async () => {
+    const fake = fakeDatabase();
+    assert.equal(await deleteAccount(fake.database, 42, PASSWORD, fake.journal), 'deleted');
+    assert.deepEqual(fake.events, [
+        'connect', 'acquire', 'begin', 'read-password', 'journal',
+        'mark-apple-tokens', 'purge-expired-apple-tokens',
+        'DELETE FROM game_personal_bests WHERE user_id = ?',
+        'DELETE FROM game_submission_receipts WHERE user_id = ?',
+        'DELETE FROM users WHERE user_id = ?',
+        'commit', 'unlock', 'release',
+    ]);
+    assert.deepEqual(fake.queries.filter(({ sql }) => !sql.includes('apple_provider_tokens')).map(({ values }) => values),
+        [[42, 5], [42], [42], [42], [42], [42]]);
+    assert.ok(fake.queries.every(({ timeout }) => timeout === 10_000));
+    assert.match(fake.queries[0].sql, /mickeyf:leaderboard-user:/);
+    assert.match(fake.queries[1].sql, /WHERE user_id = \? LIMIT 1 FOR UPDATE$/);
+    assert.ok(fake.queries.every(({ values }) => !values?.includes(PASSWORD)));
+});
+
+test('missing users and incorrect passwords never issue a deletion', async () => {
+    for (const [userExists, password, expected] of [
+        [false, PASSWORD, 'not-found'],
+        [true, 'wrong-password', 'invalid-password'],
+    ] as const) {
+        const fake = fakeDatabase({ userExists });
+        assert.equal(await deleteAccount(fake.database, 42, password, fake.journal), expected);
+        assert.deepEqual(fake.events, ['connect', 'acquire', 'begin', 'read-password', 'commit', 'unlock', 'release']);
+    }
+});
+
+test('fresh provider credentials persist only after proof and before the journal, and all deletions queue Apple tokens', async () => {
+    const fake = fakeDatabase({ passwordHash: null });
+    await deleteProviderAccount(fake.database, 42, PROVIDER_IDENTITY, fake.journal, SESSION, async (_connection, accountId) => {
+        assert.equal(accountId, ACCOUNT_ID);
+        assert.equal(fake.events.at(-1), 'read-session');
+        assert.equal(fake.events.includes('journal'), false);
+        fake.events.push('save-fresh-token');
+    });
+    assert(fake.events.indexOf('save-fresh-token') < fake.events.indexOf('journal'));
+    assert(fake.events.indexOf('journal') < fake.events.indexOf('mark-apple-tokens'));
+    assert(fake.events.indexOf('mark-apple-tokens') < fake.events.indexOf('DELETE FROM users WHERE user_id = ?'));
+    const mark = fake.queries.find(({ sql }) => sql.startsWith('UPDATE apple_provider_tokens'))!;
+    assert.equal(mark.values?.at(-1), ACCOUNT_ID);
+    for (const options of [{ sessionExists: false }, { providerSubject: null }]) {
+        const rejected = fakeDatabase(options);
+        await deleteProviderAccount(rejected.database, 42, PROVIDER_IDENTITY, rejected.journal, SESSION,
+            async () => assert.fail('Rejected proof must not retain credentials'));
+        assert.equal(rejected.events.includes('mark-apple-tokens'), false);
+    }
+    const failed = fakeDatabase();
+    await assert.rejects(deleteProviderAccount(failed.database, 42, PROVIDER_IDENTITY, failed.journal, SESSION,
+        async () => { throw new Error('synthetic storage failure'); }));
+    assert.equal(failed.events.includes('journal'), false);
+    assert.equal(failed.events.includes('rollback'), true);
+});
+
+test('NULL-password accounts reject password reauthentication without invoking the deletion journal', async () => {
+    const fake = fakeDatabase({ passwordHash: null });
+    assert.equal(await deleteAccount(fake.database, 42, PASSWORD, fake.journal, SESSION), 'invalid-password');
+    assert.equal(fake.events.includes('journal'), false);
+    assert.equal(fake.queries.some(({ sql }) => sql.startsWith('DELETE')), false);
+});
+
+test('a stale UUID or session rejects before password checking, journaling or deletion', async () => {
+    for (const expectedSession of [SESSION,
+        { ...SESSION, accountId: '123e4567-e89b-42d3-a456-426614174001' },
+        { ...SESSION, sessionId: Buffer.alloc(32, 2).toString('base64url') }]) {
+        const fake = fakeDatabase();
+        const matches = expectedSession === SESSION;
+        // A wrong password would return invalid-password if the stale proof reached reauthentication.
+        const result = await deleteAccount(fake.database, 42,
+            matches ? PASSWORD : 'wrong-password', fake.journal, expectedSession);
+        assert.equal(result, matches ? 'deleted' : 'not-found');
+        assert.match(fake.queries[1].sql, /FROM account_sessions AS s/);
+        assert.deepEqual(fake.queries[1].values, [42, expectedSession.accountId,
+            createHash('sha256').update(expectedSession.sessionId, 'ascii').digest(),
+            createHash('sha256').update(expectedSession.sessionId, 'ascii').digest()]);
+        assert.equal(fake.events.includes('read-password'), matches);
+        assert.equal(fake.events.includes('journal'), matches);
+        assert.equal(fake.queries.some(({ sql }) => sql.startsWith('DELETE')), matches);
+        assert.deepEqual(fake.events.slice(0, 4), ['connect', 'acquire', 'begin', 'read-session']);
+    }
+});
+
+test('a revoked or expired session cannot delete, and malformed proofs fail closed', async () => {
+    const missing = fakeDatabase({ sessionExists: false });
+    assert.equal(await deleteAccount(missing.database, 42, PASSWORD, missing.journal, SESSION), 'not-found');
+    assert.equal(missing.events.includes('read-password'), false);
+    assert.equal(missing.events.includes('journal'), false);
+    const invalid = fakeDatabase();
+    await assert.rejects(deleteAccount(invalid.database, 42, PASSWORD, invalid.journal,
+        { ...SESSION, sessionId: 'invalid' }), TypeError);
+    assert.equal(invalid.events.includes('read-password'), false);
+    assert.equal(invalid.events.includes('journal'), false);
+});
+
+test('does not start until it owns the user lock or resolve before commit completes', async () => {
+    let acquire!: () => void;
+    let commit!: () => void;
+    let beginCommit!: () => void;
+    const lockReady = new Promise<void>((resolve) => { acquire = resolve; });
+    const commitReady = new Promise<void>((resolve) => { commit = resolve; });
+    const commitStarted = new Promise<void>((resolve) => { beginCommit = resolve; });
+    const fake = fakeDatabase({
+        acquire: () => lockReady,
+        async commit() {
+            beginCommit();
+            await commitReady;
+        },
+    });
+    let resolved = false;
+    const deletion = deleteAccount(fake.database, 42, PASSWORD, fake.journal).then((result) => {
+        resolved = true;
+        return result;
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+    assert.deepEqual(fake.events, ['connect', 'acquire']);
+    acquire();
+    await commitStarted;
+    assert.equal(resolved, false);
+    assert.equal(fake.events.includes('unlock'), false);
+    commit();
+    assert.equal(await deletion, 'deleted');
+});
+
+test('rolls back a partial deletion before releasing the user lock', async () => {
+    const fake = fakeDatabase({ failAt: 'DELETE FROM game_submission_receipts WHERE user_id = ?' });
+    await assert.rejects(deleteAccount(fake.database, 42, PASSWORD, fake.journal), (error: unknown) => {
+        assert.ok(error instanceof AccountDeletionPendingError);
+        assert.equal(error.cause, fake.failure);
+        return true;
+    });
+    assert.deepEqual(fake.events.slice(-3), ['rollback', 'unlock', 'release']);
+    assert.equal(fake.events.includes('commit'), false);
+    assert.equal(fake.events.includes('DELETE FROM users WHERE user_id = ?'), false);
+});
+
+test('does not commit if the parent deletion count is unexpected', async () => {
+    const fake = fakeDatabase({ deletedAccounts: 0 });
+    await assert.rejects(deleteAccount(fake.database, 42, PASSWORD, fake.journal), (error: unknown) => {
+        assert.ok(error instanceof AccountDeletionPendingError);
+        assert.match(String(error.cause), /exactly one account/);
+        return true;
+    });
+    assert.deepEqual(fake.events.slice(-3), ['rollback', 'unlock', 'release']);
+    assert.equal(fake.events.includes('commit'), false);
+});
+
+test('destroys uncertain deletion begin and commit without queuing rollback', async () => {
+    for (const failAt of ['begin', 'commit']) {
+        const fake = fakeDatabase({ failAt });
+        await assert.rejects(deleteAccount(fake.database, 42, PASSWORD, fake.journal), (error: unknown) => {
+            assert.equal(error instanceof AccountDeletionPendingError ? error.cause : error, fake.failure);
+            assert.equal(error instanceof AccountDeletionPendingError, failAt === 'commit');
+            return true;
+        });
+        assert.deepEqual(fake.events.slice(fake.events.indexOf(failAt) + 1), ['destroy']);
+        assert.equal(fake.events.includes('release'), false);
+    }
+});
+
+test('preserves both errors and destroys the connection if rollback fails', async () => {
+    const fake = fakeDatabase({ failAt: 'DELETE FROM users WHERE user_id = ?', rollbackFails: true });
+    await assert.rejects(deleteAccount(fake.database, 42, PASSWORD, fake.journal), (error: unknown) => {
+        assert.ok(error instanceof AccountDeletionPendingError);
+        assert.ok(error.cause instanceof AccountDeletionRollbackError);
+        assert.equal(error.cause.transactionError, fake.failure);
+        assert.equal(error.cause.rollbackError, fake.rollbackFailure);
+        return true;
+    });
+    assert.deepEqual(fake.events.slice(-2), ['rollback', 'destroy']);
+});
+
+test('rejects invalid user IDs and non-string passwords without acquiring a connection', async () => {
+    const fake = fakeDatabase();
+    await assert.rejects(deleteAccount(fake.database, 0, PASSWORD, fake.journal), TypeError);
+    await assert.rejects(deleteAccount(fake.database, 42, null as unknown as string, fake.journal), TypeError);
+    await assert.rejects(deleteAccount(fake.database, 42, PASSWORD, undefined as unknown as AccountDeletionJournal), TypeError);
+    assert.deepEqual(fake.events, []);
+});
+
+test('journal failure or an invalid identity cannot reach a SQL deletion', async () => {
+    for (const options of [{ failAt: 'journal' }, { accountId: '42' }]) {
+        const fake = fakeDatabase(options);
+        await assert.rejects(deleteAccount(fake.database, 42, PASSWORD, fake.journal));
+        assert.equal(fake.queries.some(({ sql }) => sql.startsWith('DELETE')), false);
+        assert.equal(fake.events.includes('commit'), false);
+        assert.ok(fake.events.includes('rollback'));
+    }
+});
+
+test('SQL deletion waits for durable journal acknowledgement', async () => {
+    let acknowledge!: () => void;
+    let recording!: () => void;
+    const started = new Promise<void>(resolve => { recording = resolve; });
+    const durable = new Promise<void>(resolve => { acknowledge = resolve; });
+    const fake = fakeDatabase({ journal: async () => { recording(); await durable; } });
+    const deletion = deleteAccount(fake.database, 42, PASSWORD, fake.journal);
+    await started;
+    assert.equal(fake.queries.some(({ sql }) => sql.startsWith('DELETE')), false);
+    acknowledge();
+    assert.equal(await deletion, 'deleted');
+});
+
+for (const provider of ['google', 'apple'] as const) {
+test(`fresh ${provider} proof authenticates deletion of its exact linked subject under the shared account lock`, async () => {
+    const fake = fakeDatabase({ passwordHash: null });
+    assert.equal(await deleteProviderAccount(fake.database, 42, { ...PROVIDER_IDENTITY, provider }, fake.journal, SESSION), 'deleted');
+    assert.deepEqual(fake.events, [
+        'connect', 'acquire', 'begin', 'read-session', 'read-password', 'read-provider', 'read-session', 'journal',
+        'mark-apple-tokens', 'purge-expired-apple-tokens',
+        'DELETE FROM game_personal_bests WHERE user_id = ?',
+        'DELETE FROM game_submission_receipts WHERE user_id = ?', 'DELETE FROM users WHERE user_id = ?',
+        'commit', 'unlock', 'release',
+    ]);
+    const providerQuery = fake.queries.find(({ sql }) => sql.includes('FROM account_provider_identities'))!;
+    assert.deepEqual(providerQuery.values, [ACCOUNT_ID, provider]);
+    assert.match(providerQuery.sql, /WHERE account_uuid = \? AND provider = \? LIMIT 2 FOR SHARE/);
+    assert.ok(fake.queries.every(({ values }) => !values?.includes(PROVIDER_IDENTITY.subject)
+        && !values?.includes(PASSWORD) && !values?.includes(SESSION_ID)));
+});
+}
+
+test('provider deletion rejects wrong account, subject case, missing link, revoked session and expiry before journal', async () => {
+    for (const [options, expected] of [
+        [{ accountId: '123e4567-e89b-42d3-a456-426614174001' }, 'not-found'],
+        [{ providerSubject: Buffer.from('exactgooglesubject') }, 'invalid-password'],
+        [{ providerSubject: null }, 'invalid-password'],
+        [{ sessionExists: false }, 'not-found'],
+        [{ sessionExpiresAfterProviderCheck: true }, 'not-found'],
+    ] as const) {
+        const fake = fakeDatabase(options);
+        assert.equal(await deleteProviderAccount(fake.database, 42, PROVIDER_IDENTITY, fake.journal, SESSION), expected);
+        assert.equal(fake.events.includes('journal'), false);
+        assert.equal(fake.queries.some(({ sql }) => sql.startsWith('DELETE')), false);
+    }
+    for (const identity of [{ ...PROVIDER_IDENTITY, provider: 'other' }, { ...PROVIDER_IDENTITY, subject: '' }]) {
+        const fake = fakeDatabase();
+        assert.equal(await deleteProviderAccount(fake.database, 42, identity as VerifiedProviderIdentity, fake.journal, SESSION), 'invalid-password');
+        assert.deepEqual(fake.events, []);
+    }
+});
+
+test('provider deletion requires a well-formed proof and does not journal after verification or journal failure', async () => {
+    for (const expectedSession of [undefined, { ...SESSION, sessionId: 'invalid' }, { ...SESSION, accountId: 'invalid' }]) {
+        const fake = fakeDatabase();
+        await assert.rejects(deleteProviderAccount(fake.database, 42, PROVIDER_IDENTITY, fake.journal, expectedSession as typeof SESSION));
+        assert.deepEqual(fake.events, []);
+    }
+    for (const failAt of ['read-provider', 'journal']) {
+        const fake = fakeDatabase({ failAt });
+        await assert.rejects(deleteProviderAccount(fake.database, 42, PROVIDER_IDENTITY, fake.journal, SESSION));
+        assert.equal(fake.queries.some(({ sql }) => sql.startsWith('DELETE')), false);
+        assert.equal(fake.events.includes('commit'), false);
+    }
+});
+
+test('provider deletion uses the same durable-intent and uncertain-commit guarantees as password deletion', async () => {
+    const fake = fakeDatabase({ failAt: 'commit' });
+    await assert.rejects(deleteProviderAccount(fake.database, 42, PROVIDER_IDENTITY, fake.journal, SESSION), error => {
+        assert.ok(error instanceof AccountDeletionPendingError);
+        return true;
+    });
+    assert.equal(fake.events.includes('journal'), true);
+    assert.equal(fake.events.includes('destroy'), true);
+    assert.equal(fake.events.includes('release'), false);
+    let acknowledge!: () => void;
+    let recording!: () => void;
+    const started = new Promise<void>(resolve => { recording = resolve; });
+    const durable = new Promise<void>(resolve => { acknowledge = resolve; });
+    const delayed = fakeDatabase({ journal: async () => { recording(); await durable; } });
+    const deletion = deleteProviderAccount(delayed.database, 42, PROVIDER_IDENTITY, delayed.journal, SESSION);
+    await started;
+    assert.equal(delayed.queries.some(({ sql }) => sql.startsWith('DELETE')), false);
+    acknowledge();
+    assert.equal(await deletion, 'deleted');
+});

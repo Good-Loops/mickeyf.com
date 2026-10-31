@@ -81,6 +81,9 @@ const P4Vega: React.FC = () => {
                     onResultChange: (value) => {
                         if (!abortController.signal.aborted) setResult(value);
                     },
+                    onLoadError: () => {
+                        if (!abortController.signal.aborted) setGameError(true);
+                    },
                 });
                 if (abortController.signal.aborted) controller.dispose();
                 else controllerRef.current = controller;
@@ -191,6 +194,8 @@ const P4Vega: React.FC = () => {
                         onRestart={() => { void controllerRef.current?.restart(); }}
                         onRetrySubmission={() => { void controllerRef.current?.retrySubmission(); }}
                         onHelp={openHelp}
+                        fullscreenTargetRef={canvasWrapperRef}
+                        helpDialogRef={helpDialogRef}
                     />
                 )}
                 {gameError && <p className="p4-vega__load-error" role="alert">The game could not load. Please refresh to try again.</p>}

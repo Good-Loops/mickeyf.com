@@ -1,17 +1,22 @@
-# Registry-verified multi-platform digest for the supported Node 22 LTS Alpine
+# Registry-verified multi-platform digest for the supported Node 26 Current Alpine
 # image. Update the tag and digest together during a reviewed runtime upgrade.
-FROM node:22-alpine@sha256:c610fcdfb1d5b4740dd70c284ed3cb16bb857e0f7166196e36a5501df7a3aa32 AS node-runtime-base
+FROM node:26.12.0-alpine@sha256:6f08a523443ddedf52941874c203475b0ad503e859ad70cb26ab8be9a517dbd5 AS node-runtime-base
 
-# Artifact Registry identifies Alpine's OpenSSL 3.5.7-r0 package record as
-# affected. This patches Alpine's shared libraries; Node's separately embedded
-# OpenSSL remains part of each reviewed Node runtime upgrade. Upgrade only the
-# installed libraries, verify the result, and discard the repository indexes.
+# Patch Alpine's shared libraries for the reviewed OpenSSL, zlib and musl advisories.
+# The official binary embeds patched OpenSSL 3.5.9. Its Alpine shared libraries
+# are separate components and must also be patched. Discard repository indexes.
 RUN apk update \
     && apk add --no-cache --upgrade \
-        libcrypto3=3.5.8-r0 \
-        libssl3=3.5.8-r0 \
-    && apk info --exists 'libcrypto3=3.5.8-r0' > /dev/null \
-    && apk info --exists 'libssl3=3.5.8-r0' > /dev/null \
+        libcrypto3=3.5.9-r0 \
+        libssl3=3.5.9-r0 \
+        zlib=1.3.2-r1 \
+        musl=1.2.6-r3 \
+        musl-utils=1.2.6-r3 \
+    && apk info --exists 'libcrypto3=3.5.9-r0' > /dev/null \
+    && apk info --exists 'libssl3=3.5.9-r0' > /dev/null \
+    && apk info --exists 'zlib=1.3.2-r1' > /dev/null \
+    && apk info --exists 'musl=1.2.6-r3' > /dev/null \
+    && apk info --exists 'musl-utils=1.2.6-r3' > /dev/null \
     && rm -rf /var/cache/apk/*
 
 FROM node-runtime-base AS npm-base
@@ -33,6 +38,7 @@ RUN npm ci
 # The allowlisted Docker context excludes local configuration and generated
 # output, so only reviewed backend sources enter this stage.
 COPY backend/ ./
+COPY shared/privacyNotice.json /usr/src/app/shared/privacyNotice.json
 RUN npm run prod
 
 
@@ -48,6 +54,9 @@ RUN npm ci --omit=dev
 
 
 FROM node-runtime-base AS runtime
+
+# The old embedded-OpenSSL exception is no longer permitted in a new image.
+RUN node -e 'const version = process.versions.openssl; const match = /^3[.]5[.]([0-9]+)$/.exec(version); if (!match || Number(match[1]) < 9) { console.error("Production image blocked: unpatched or unreviewed embedded OpenSSL " + version); process.exit(1); }'
 
 ENV NODE_ENV=production
 WORKDIR /usr/src/app/backend

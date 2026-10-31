@@ -177,3 +177,26 @@
         }
     }
 }
+
+@media (orientation: landscape) and (max-height: $bp-compact-height) {
+    .connect {
+        grid-template-columns: minmax(0, .9fr) minmax(0, 1.1fr);
+        align-items: center;
+        gap: 1.6rem;
+        width: min(94vw, 90rem);
+        padding-block: .5rem;
+
+        &__grid { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; }
+        &__link { grid-template-rows: minmax(4.8rem, 1fr) auto; min-height: 8.2rem; animation: none; }
+        &__visual { width: 4.5rem; }
+        &__visual svg { width: 3.6rem; height: 3.6rem; }
+        &__label { padding: .65rem .8rem; font-size: 1.2rem; }
+        &__link::after { right: .7rem; bottom: .7rem; width: 1.6rem; }
+
+        &__feedback { gap: .8rem; padding: 1.1rem; }
+        &__feedback-heading h2 { font-size: 1.5rem; }
+        &__feedback-heading p { font-size: 1.05rem; }
+        &__feedback-message { min-height: 6.4rem; height: 6.4rem; max-height: 10rem; padding: .7rem .9rem; font-size: 1.6rem; }
+        &__feedback-submit { min-height: 4.4rem; padding: .6rem 1rem; }
+    }
+}

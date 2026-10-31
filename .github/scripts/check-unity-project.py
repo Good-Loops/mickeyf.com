@@ -76,13 +76,21 @@ def tracked_files() -> list[PurePosixPath]:
     return [PurePosixPath(item) for item in output.decode().split("\0") if item]
 
 
+def is_ignored_dot_asset(path: Path) -> bool:
+    parts = path.relative_to(ASSETS).parts
+    # Unity imports dot-prefixed names only under the root StreamingAssets folder.
+    return parts[0] != "StreamingAssets" and any(part.startswith(".") for part in parts)
+
+
 def check_meta_files(errors: list[str]) -> tuple[int, int]:
     entries = [path for path in ASSETS.rglob("*") if not path.name.endswith(".meta")]
-    metas = list(ASSETS.rglob("*.meta"))
+    metas = [path for path in ASSETS.rglob("*.meta") if not is_ignored_dot_asset(path)]
 
     for entry in entries:
         if entry.is_symlink():
             errors.append(f"Unity asset path is a symbolic link: {entry.relative_to(REPOSITORY)}")
+        if is_ignored_dot_asset(entry):
+            continue
         if not Path(f"{entry}.meta").is_file():
             errors.append(f"Missing meta file: {entry.relative_to(REPOSITORY)}.meta")
 

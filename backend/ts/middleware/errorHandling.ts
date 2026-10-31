@@ -12,11 +12,29 @@ type RequestError = Error & {
     type?: string;
 };
 
+// One backend process owns one HTTP application. Track handler work rather than
+// sockets: a disconnected client does not cancel an in-flight database operation.
+const pendingHandlers = new Set<Promise<unknown>>();
+
+export async function waitForPendingHandlers(): Promise<void> {
+    while (pendingHandlers.size > 0) {
+        await Promise.allSettled([...pendingHandlers]);
+    }
+}
+
 export function asyncHandler(handler: AsyncRequestHandler): RequestHandler {
     return (req, res, next) => {
-        void Promise.resolve()
+        const work = Promise.resolve()
             .then(() => handler(req, res, next))
-            .catch(next);
+            .catch((error: unknown) => {
+                // Express treats falsy values and 'route'/'router' as routing commands,
+                // not failures. Keep error objects (including parser metadata) intact.
+                next(typeof error === 'object' && error !== null
+                    ? error
+                    : new Error('Asynchronous request failed'));
+            });
+        pendingHandlers.add(work);
+        void work.finally(() => { pendingHandlers.delete(work); });
     };
 }
 

@@ -73,6 +73,12 @@ async function createSchema(): Promise<void> {
     try {
         await administrator.query(`
             DROP TABLE IF EXISTS
+                account_registration_profiles, registration_authorizations,
+                apple_auth_revocations,
+                apple_provider_tokens,
+                account_sessions,
+                provider_auth_attempts,
+                account_provider_identities,
                 game_personal_bests,
                 game_runs,
                 game_submission_receipts,
@@ -100,6 +106,16 @@ async function createSchema(): Promise<void> {
     });
     await applyMigrations(asMigrationConnection(administrator), migrations, config, {
         allowedEffectKinds: ['detach-best-source', 'retain-receipts'],
+    });
+    await applyMigrations(asMigrationConnection(administrator), migrations, config, {
+        allowedEffectKinds: ['add-account-identity'],
+    });
+    await applyMigrations(asMigrationConnection(administrator), migrations, config, {
+        allowedEffectKinds: ['add-provider-identities', 'add-provider-attempts', 'add-account-sessions', 'add-session-renewal'],
+    });
+    await applyMigrations(asMigrationConnection(administrator), migrations, config, {
+        allowedEffectKinds: ['add-unique-user-names', 'allow-passwordless-accounts', 'extend-provider-attempt-actions', 'add-apple-tokens',
+            'add-apple-revocations', 'add-apple-session-provenance', 'add-registration-authorization', 'add-registration-profile'],
     });
 }
 
@@ -243,7 +259,10 @@ after(async () => {
         await dropFixtureAccounts();
         await root.end();
     }
-    if (administrator) await administrator.end();
+    if (administrator) {
+        try { await administrator.query('DROP TABLE IF EXISTS account_registration_profiles, registration_authorizations'); }
+        finally { await administrator.end(); }
+    }
 });
 
 test('active runtime sessions block role removal, then a drained rerun converges', async () => {
@@ -264,7 +283,7 @@ test('active runtime sessions block role removal, then a drained rerun converges
         );
         assert.equal(initialPlan.state, 'broad');
         assert.deepEqual(initialPlan.blockers, []);
-        assert.equal(initialPlan.operations.ensureRequiredPrivileges.length, 3);
+        assert.equal(initialPlan.operations.ensureRequiredPrivileges.length, 11);
         assert.equal(
             initialPlan.operations.removeApprovedRole?.approvedRole,
             'mock_cloudsqlsuperuser@%'
@@ -290,7 +309,7 @@ test('active runtime sessions block role removal, then a drained rerun converges
             RUNTIME_ACCOUNT
         );
         assert.equal(preparedPlan.state, 'broad');
-        assert.equal(preparedPlan.operations.ensureRequiredPrivileges.length, 3);
+        assert.equal(preparedPlan.operations.ensureRequiredPrivileges.length, 11);
     } finally {
         await openRuntimeConnection.end();
         await waitForFixtureSessionToClose(openRuntimeConnection.threadId);
@@ -329,8 +348,9 @@ test('active runtime sessions block role removal, then a drained rerun converges
         >>('SELECT CURRENT_ROLE() AS currentRole');
         assert.equal(freshRoleRows[0].currentRole, 'NONE');
         await freshRuntimeConnection.query('SELECT user_id FROM users LIMIT 1');
+        await freshRuntimeConnection.query('DELETE FROM users WHERE 1 = 0');
         await assert.rejects(
-            () => freshRuntimeConnection.query('DELETE FROM users WHERE 1 = 0'),
+            () => freshRuntimeConnection.query('DELETE FROM schema_migrations WHERE 1 = 0'),
             (error: unknown) => (error as { code?: string }).code === 'ER_TABLEACCESS_DENIED_ERROR'
         );
         const reducedWhileActive = await planRuntimeGrants(
@@ -523,7 +543,7 @@ test('stale plans and unsupported privilege state refuse before mutation', async
     );
     assert.equal(cleanPlan.compliant, true);
     await root.query(
-        'GRANT DELETE ON `mickeyf_migration_test`.`users` TO ' + RUNTIME_PRINCIPAL
+        'GRANT ALTER ON `mickeyf_migration_test`.`users` TO ' + RUNTIME_PRINCIPAL
     );
     try {
         await assert.rejects(
@@ -560,7 +580,7 @@ test('stale plans and unsupported privilege state refuse before mutation', async
         );
     } finally {
         await root.query(
-            'REVOKE DELETE ON `mickeyf_migration_test`.`users` FROM '
+            'REVOKE ALTER ON `mickeyf_migration_test`.`users` FROM '
             + RUNTIME_PRINCIPAL
         );
     }
@@ -581,5 +601,41 @@ test('stale plans and unsupported privilege state refuse before mutation', async
     } finally {
         await root.query('SET GLOBAL mandatory_roles = ?', ['']);
         await root.query("DROP ROLE IF EXISTS 'mandatory_runtime_test'@'%'");
+    }
+});
+
+test('parent runtime grants inspect and verify score participation columns', async () => {
+    await installBroadFixture();
+    const parentSettings: RuntimeGrantSettings = { ...settings, profile: 'google-apple-parent' };
+    try {
+        await applyMigrations(asMigrationConnection(administrator), migrations, config, {
+            allowedEffectKinds: ['allow-parent-managed-contact', 'add-parent-attempts',
+                'add-parent-consents', 'extend-parent-family', 'add-score-participation'],
+        });
+        const connection = asRuntimeGrantConnection(root);
+        const plan = await planRuntimeGrants(connection, parentSettings, RUNTIME_ACCOUNT);
+        assert.deepEqual(plan.blockers, []);
+        assert.deepEqual(plan.observed.availableColumns
+            .filter(({ tableName }) => tableName === 'account_score_permissions')
+            .map(({ columnName }) => columnName).sort(), [
+            'account_uuid', 'age_band', 'authorizer_uuid', 'confirmed_at', 'country_code',
+            'policy_digest', 'registration_policy_version', 'visibility',
+        ]);
+        const applied = await applyRuntimeGrants(connection, parentSettings, RUNTIME_ACCOUNT,
+            plan.sha256, plan.server.uuid, createSqlRoleRemover());
+        assert.equal(applied.compliant, true);
+        const verified = await verifyRuntimeGrants(connection, parentSettings, RUNTIME_ACCOUNT);
+        assert.equal(verified.compliant, true);
+        const runtime = await createRuntimeConnection();
+        try {
+            await runtime.query('SELECT account_uuid, visibility FROM account_score_permissions LIMIT 1');
+            await assert.rejects(() => runtime.query('DELETE FROM account_score_permissions WHERE 1 = 0'),
+                (error: unknown) => (error as { code?: string }).code === 'ER_TABLEACCESS_DENIED_ERROR');
+        } finally {
+            await runtime.end();
+            await waitForFixtureSessionToClose(runtime.threadId);
+        }
+    } finally {
+        await administrator.query('DROP TABLE IF EXISTS account_score_permissions, parent_child_consents, parent_registration_attempts');
     }
 });

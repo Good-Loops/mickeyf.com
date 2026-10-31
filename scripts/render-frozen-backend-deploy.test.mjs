@@ -6,6 +6,9 @@ import { deploymentStepsFingerprint } from './frozen-backend-traffic.mjs';
 import {
     CANONICAL_SHA256, frozenDeploymentStepsSha256, renderFrozenBackendDeployConfig,
     resolveFrozenDeploymentSteps, validateFrozenPins,
+    accountDeletionEnvironment, ACCOUNT_DELETION_JOURNAL_BUCKET, ORIGINAL_ACCOUNT_IDENTITY_EPOCH,
+    googleSignInEnvironment, APPROVED_GOOGLE_WEB_CLIENT_ID,
+    frozenDeploymentApproval, validateSessionSecretVersion,
 } from './render-frozen-backend-deploy.mjs';
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8');
@@ -14,13 +17,13 @@ const pins = {
     sourceBuildId: '123e4567-e89b-42d3-a456-426614174000', sourceCommit: 'a'.repeat(40),
     imageDigest: `sha256:${'b'.repeat(64)}`, sourceTriggerId: '648fadca-3cd1-4b57-9d35-0f62a1468443',
     sourceTriggerName: 'feature-new-leaderboard-candidate', sourceRef: 'refs/heads/feature/three-bosses-polish',
-    deploymentTriggerName: 'frozen-backend-receipts',
+    deploymentTriggerName: 'frozen-backend-receipts', sessionSecretVersion: '2',
 };
 const input = { canonical: read('../cloudbuild.deploy.yaml'), candidate: read('../cloudbuild.candidate.yaml'), preflight, pins };
 const config = renderFrozenBackendDeployConfig(input);
 const buildId = '223e4567-e89b-42d3-a456-426614174000';
 const deploymentTriggerId = '323e4567-e89b-42d3-a456-426614174000';
-const approval = `freeze-zero-traffic:${pins.sourceCommit}:${pins.sourceBuildId}:${pins.imageDigest}`;
+const approval = frozenDeploymentApproval(pins);
 const resolved = resolveFrozenDeploymentSteps(config.steps, { buildId, deploymentTriggerId, approval });
 
 function python(code, payload) {
@@ -40,17 +43,114 @@ test('renderer preserves main-only canonical policy and rejects any unreviewed i
     assert.deepEqual(renderFrozenBackendDeployConfig({ ...input, canonical: input.canonical.replace(/\r?\n/gu, '\r\n') }), config);
 });
 
-test('only exact reviewed feature pins render; main triggers and shell injection are rejected', () => {
+test('only exact reviewed work-branch pins render; main triggers and shell injection are rejected', () => {
+    for (const prefix of ['feature', 'improvement', 'fix']) {
+        const sourceRef = `refs/heads/${prefix}/reviewed-backend-change`;
+        assert.equal(validateFrozenPins({ ...pins, sourceRef }).sourceRef, sourceRef);
+    }
     for (const change of [
         { sourceCommit: 'main' }, { imageDigest: 'latest' }, { sourceBuildId: 'INVALID' },
         { sourceTriggerName: "x'; echo y" }, { sourceRef: 'refs/heads/main' }, { sourceRef: 'refs/heads/feature/../main' },
+        { sourceRef: 'refs/heads/improvement/../main' }, { sourceRef: 'refs/heads/fix/' },
+        { sourceRef: 'refs/heads/unknown/change' }, { sourceRef: 'refs/heads/fix/change;echo' },
         { sourceTriggerId: 'ef5a2981-95be-4f4d-af91-f997fde73356' }, { sourceTriggerId: 'd71109da-8350-4f2f-a3be-2053bb6ccd45' },
         { deploymentTriggerName: 'main-push-mickeyf-com' }, { unexpected: 'value' },
     ]) assert.throws(() => validateFrozenPins({ ...pins, ...change }));
 });
 
+const invalidSessionVersions = [undefined, null, 2, true, '', '0', '02', '-1', '1.5',
+    'latest', 'current', ' 2', '2 ', '2\n', '2\r\n', '2\u00a0', '2;echo unsafe'];
+
+test('session-secret version must be supplied as an exact positive decimal string', () => {
+    for (const version of ['1', '2', '17']) {
+        assert.equal(validateSessionSecretVersion(version), version);
+        assert.equal(validateFrozenPins({ ...pins, sessionSecretVersion: version }).sessionSecretVersion, version);
+    }
+    for (const sessionSecretVersion of invalidSessionVersions) {
+        assert.throws(() => validateSessionSecretVersion(sessionSecretVersion));
+        assert.throws(() => renderFrozenBackendDeployConfig({ ...input, pins: { ...pins, sessionSecretVersion } }));
+    }
+    const { sessionSecretVersion, ...missingVersion } = pins;
+    assert.throws(() => validateFrozenPins(missingVersion));
+});
+
+test('one reviewed version pins deployment, runtime verification, approval and resolved steps digest', () => {
+    const alternatePins = { ...pins, sessionSecretVersion: '17' };
+    const alternateConfig = renderFrozenBackendDeployConfig({ ...input, pins: alternatePins });
+    const alternateApproval = frozenDeploymentApproval(alternatePins);
+    assert.equal(alternateApproval, `freeze-zero-traffic:${pins.sourceCommit}:${pins.sourceBuildId}:${pins.imageDigest}:session-secret:17`);
+    assert.match(alternateConfig.steps[5].args[1], /DB_PASS=DB_PASS:1,SESSION_SECRET=SESSION_SECRET:17/u);
+    assert.match(alternateConfig.steps[6].args[1], /"DB_PASS": "1",\s+"SESSION_SECRET": "17"/u);
+    assert.doesNotMatch(alternateConfig.steps[5].args[1], /SESSION_SECRET=SESSION_SECRET:2/u);
+    assert.doesNotMatch(alternateConfig.steps[6].args[1], /"SESSION_SECRET": "2"/u);
+    const alternateSteps = resolveFrozenDeploymentSteps(alternateConfig.steps, {
+        buildId, deploymentTriggerId, approval: alternateApproval,
+    });
+    assert.notEqual(frozenDeploymentStepsSha256(alternateSteps), frozenDeploymentStepsSha256(resolved));
+    for (const invalidApproval of [approval.replace(':session-secret:2', ''), ...invalidSessionVersions.map(
+        version => approval.replace(':session-secret:2', `:session-secret:${version}`),
+    ).filter(value => value !== approval)]) {
+        assert.throws(() => resolveFrozenDeploymentSteps(config.steps, { buildId, deploymentTriggerId, approval: invalidApproval }));
+    }
+});
+
+test('Python preflight rejects alternate pins paths before file or cloud access', () => {
+    const result = python(`
+from unittest.mock import patch
+def unexpected(*args, **kwargs):
+    raise AssertionError("untrusted path reached file or cloud access")
+for path in ["/etc/passwd", "/workspace/../etc/passwd", "frozen-pins.json", ""]:
+    with patch.dict(namespace, {"open": unexpected, "command": unexpected}), \\
+            patch.object(sys, "argv", ["preflight", path, payload["buildId"], payload["triggerId"], payload["approval"], "initial"]):
+        try:
+            namespace["main"]()
+        except SystemExit as error:
+            assert "materialized frozen deployment path" in str(error)
+        else:
+            raise AssertionError("alternate pins path accepted")
+`, { approval, buildId, triggerId: deploymentTriggerId });
+    assert.equal(result.status, 0, result.stderr);
+});
+
+test('Python preflight rejects missing, malformed or differently approved versions before cloud access', () => {
+    const result = python(`
+from io import StringIO
+from unittest.mock import patch
+class CloudReached(Exception): pass
+calls = []
+def cloud_command(args):
+    calls.append(args)
+    raise CloudReached()
+def run(candidate, approval):
+    calls.clear()
+    with patch.dict(namespace, {"open": lambda *args, **kwargs: StringIO(json.dumps(candidate)), "command": cloud_command}), \\
+            patch.object(sys, "argv", ["preflight", "/workspace/frozen-pins.json", payload["buildId"], payload["triggerId"], approval, "initial"]):
+        try:
+            namespace["main"]()
+        except SystemExit:
+            assert not calls, "invalid version/approval reached cloud access"
+            return False
+        except CloudReached:
+            assert len(calls) == 1
+            return True
+    raise AssertionError("preflight unexpectedly finished")
+base = payload["pins"]
+for value in payload["invalidVersions"]:
+    assert not run(dict(base, sessionSecretVersion=value), payload["approval"])
+missing = {key: value for key, value in base.items() if key != "sessionSecretVersion"}
+assert not run(missing, payload["approval"])
+assert not run(base, payload["approval"].replace(":session-secret:2", ""))
+alternate = dict(base, sessionSecretVersion="17")
+assert not run(alternate, payload["approval"])
+assert run(base, payload["approval"])
+assert run(alternate, payload["approval"].replace(":session-secret:2", ":session-secret:17"))
+`, { pins: validateFrozenPins(pins), approval, buildId, triggerId: deploymentTriggerId,
+        invalidVersions: invalidSessionVersions });
+    assert.equal(result.status, 0, result.stderr);
+});
+
 test('source-less generated package requires approval and contains no traffic promotion, expiry, notification or secrets payload', () => {
-    assert.equal(config.steps.length, 7);
+    assert.equal(config.steps.length, 8);
     assert.equal(config.serviceAccount, 'projects/noted-reef-387021/serviceAccounts/mickeyf-backend-deploy@noted-reef-387021.iam.gserviceaccount.com');
     assert.deepEqual(config.substitutions, { _DEPLOY_TRIGGER_ID: 'INVALID', _APPROVAL: 'INVALID' });
     assert.equal(config.source, undefined);
@@ -76,8 +176,8 @@ test('scan policy remains strict and anonymous HTTP requires both frozen gates',
     assert.match(discovery, /FINISHED_SUCCESS/u);
     assert.match(discovery, /\{"OS", "NPM", "SECRET"\}/u);
     assert.match(severity, /if counts\["HIGH"\] or counts\["CRITICAL"\]:/u);
-    assert.match(config.steps[4].args[1], /blocking_count != 0/u);
-    const smoke = config.steps[6].args.slice(3).join('');
+    assert.match(config.steps[5].args[1], /blocking_count != 0/u);
+    const smoke = config.steps[7].args.slice(3).join('');
     assert.match(smoke, /"\/api\/leaderboards\/three-bosses\/run-tickets", 403/u);
     assert.match(smoke, /"\/api\/leaderboards\/three-bosses\/runs", 403/u);
     assert.match(smoke, /"\/api\/users", 503, \{"type": "submit_score"/u);
@@ -93,7 +193,7 @@ test('resolved deployment digest binds the reviewed steps plus exact dispatch wi
     assert.notEqual(frozenDeploymentStepsSha256(resolved), frozenDeploymentStepsSha256(resolveFrozenDeploymentSteps(config.steps, {
         buildId: '423e4567-e89b-42d3-a456-426614174000', deploymentTriggerId, approval,
     })));
-    const source = resolved[4].args[1];
+    const source = resolved[5].args[1];
     assert.match(source, /\$\(python3/u);
     assert.doesNotMatch(source, /\$\$|\$\{BUILD_ID\}|\$\{_APPROVAL\}/u);
     assert.ok(source.includes(approval));
@@ -115,13 +215,195 @@ test('all resolved Bash programs pass syntax checking without execution', () => 
 });
 
 test('all embedded Python programs compile after Cloud Build interpolation', () => {
-    const programs = [resolved[0].args[1], resolved[6].args.slice(3).join('')];
-    for (const step of resolved.slice(2, 6)) {
+    const programs = [resolved[0].args[1], resolved[4].args[1], resolved[7].args.slice(3).join('')];
+    for (const step of resolved.slice(2, 7)) {
         for (const match of step.args.join('\n').matchAll(/<<'PY'\n([\s\S]*?)\nPY/gu)) programs.push(match[1]);
     }
     const result = python('for source in payload["programs"]: compile(source,"generated.py","exec")\nprint(len(payload["programs"]))', { programs });
     assert.equal(result.status, 0, result.stderr);
     assert.ok(Number(result.stdout.trim()) >= 8);
+});
+
+const enabledDeletion = {
+    enabled: true, journalBucket: ACCOUNT_DELETION_JOURNAL_BUCKET, identityEpoch: ORIGINAL_ACCOUNT_IDENTITY_EPOCH,
+};
+
+test('deletion defaults off; enabling and intentional disabling are explicit source/image-bound configurations', () => {
+    assert.deepEqual(accountDeletionEnvironment(), { ACCOUNT_DELETION_ENABLED: 'false' });
+    assert.deepEqual(config.steps[4].env.filter(item => item.startsWith('ACCOUNT_')), [
+        'ACCOUNT_DELETION_ENABLED=false', 'ACCOUNT_DELETION_JOURNAL_BUCKET=', 'ACCOUNT_IDENTITY_EPOCH=',
+        'ACCOUNT_DELETION_APPROVAL=DISABLED',
+    ]);
+    assert.match(input.canonical, /_ACCOUNT_DELETION_ENABLED: 'false'/u);
+    for (const settings of [null, {}, { enabled: 'true' }, { enabled: true },
+        { ...enabledDeletion, journalBucket: 'other' }, { ...enabledDeletion, identityEpoch: '2026-09-13 00:15:39.954172' },
+        { ...enabledDeletion, arbitrary: 'unsafe' }, { enabled: false, journalBucket: ACCOUNT_DELETION_JOURNAL_BUCKET }]) {
+        assert.throws(() => renderFrozenBackendDeployConfig({ ...input, pins: { ...pins, accountDeletion: settings } }));
+    }
+    for (const settings of [enabledDeletion, { enabled: false }]) {
+        const explicit = renderFrozenBackendDeployConfig({ ...input, pins: { ...pins, accountDeletion: settings } });
+        assert.ok(explicit.steps[4].env.includes(`ACCOUNT_DELETION_APPROVAL=${settings.enabled ? 'enable' : 'disable'}-account-deletion:${pins.sourceCommit}:${pins.sourceBuildId}:${pins.imageDigest}`));
+        assert.notEqual(frozenDeploymentStepsSha256(explicit.steps), frozenDeploymentStepsSha256(config.steps));
+        assert.doesNotMatch(JSON.stringify(explicit), /\$\{_ACCOUNT_/u);
+    }
+});
+
+test('Google defaults off; full signup/login requires exact client, deletion and source-bound explicit approval', () => {
+    const disabled = { PROVIDER_AUTH_ENABLED: 'false', PROVIDER_GOOGLE_SIGNUP_ENABLED: 'false' };
+    const enabled = { enabled: true, clientId: APPROVED_GOOGLE_WEB_CLIENT_ID };
+    assert.deepEqual(googleSignInEnvironment(), disabled);
+    assert.deepEqual(googleSignInEnvironment({ enabled: false }), disabled);
+    assert.deepEqual(googleSignInEnvironment(enabled, enabledDeletion), {
+        PROVIDER_AUTH_ENABLED: 'true', PROVIDER_GOOGLE_SIGNUP_ENABLED: 'true', GOOGLE_WEB_CLIENT_ID: APPROVED_GOOGLE_WEB_CLIENT_ID,
+    });
+    assert.deepEqual(config.steps[4].env.filter(item => !item.startsWith('ACCOUNT_')), [
+        'PROVIDER_AUTH_ENABLED=false', 'PROVIDER_GOOGLE_SIGNUP_ENABLED=false', 'GOOGLE_WEB_CLIENT_ID=', 'GOOGLE_SIGN_IN_APPROVAL=DISABLED',
+    ]);
+    for (const settings of [null, {}, [], { enabled: 'true' }, { enabled: true },
+        { enabled: true, clientId: `${APPROVED_GOOGLE_WEB_CLIENT_ID} ` }, { enabled: true, clientId: 'other.apps.googleusercontent.com' },
+        { ...enabled, signup: false }, { ...enabled, appleClientId: 'com.mickeyf.app' }, { enabled: false, clientId: APPROVED_GOOGLE_WEB_CLIENT_ID }]) {
+        assert.throws(() => renderFrozenBackendDeployConfig({ ...input, pins: { ...pins, googleSignIn: settings, accountDeletion: enabledDeletion } }));
+    }
+    for (const accountDeletion of [undefined, { enabled: false }, { ...enabledDeletion, journalBucket: 'other' }]) {
+        assert.throws(() => renderFrozenBackendDeployConfig({ ...input, pins: { ...pins, googleSignIn: enabled, accountDeletion } }));
+    }
+    for (const settings of [enabled, { enabled: false }]) {
+        const rendered = renderFrozenBackendDeployConfig({ ...input, pins: { ...pins, accountDeletion: enabledDeletion, googleSignIn: settings } });
+        assert.ok(rendered.steps[4].env.includes(`GOOGLE_SIGN_IN_APPROVAL=${settings.enabled ? 'enable' : 'disable'}-google-sign-in:${pins.sourceCommit}:${pins.sourceBuildId}:${pins.imageDigest}`));
+        assert.notEqual(frozenDeploymentStepsSha256(rendered.steps), frozenDeploymentStepsSha256(config.steps));
+        assert.doesNotMatch(JSON.stringify(rendered), /\$\{_(PROVIDER|GOOGLE)/u);
+    }
+    // The validated artifact feeds both deployment and exact revision verification.
+    assert.match(config.steps[5].args[1], /--set-env-vars=.*\$\$DELETION_ENV/u);
+    assert.match(config.steps[6].args[1], /plain\.update\(json\.load\(handle\)\["environment"\]\)/u);
+    for (const declaration of ["_PROVIDER_AUTH_ENABLED: 'false'", "_PROVIDER_GOOGLE_SIGNUP_ENABLED: 'false'",
+        "_GOOGLE_WEB_CLIENT_ID: ''", "_GOOGLE_SIGN_IN_APPROVAL: 'DISABLED'"]) assert.ok(input.canonical.includes(declaration));
+});
+
+test('canonical Google policy rejects partial activation, client drift and approval/deletion mismatches', () => {
+    const code = String.raw`
+policy = {"__name__": "reviewed_google_contract"}
+exec(compile(payload["policy"], "google-contract.py", "exec"), policy)
+environment = policy["google_environment"]
+state = {"commit":payload["pins"]["sourceCommit"], "build_id":payload["pins"]["sourceBuildId"], "digest":payload["pins"]["imageDigest"]}
+suffix = f"{state['commit']}:{state['build_id']}:{state['digest']}"
+off = {"PROVIDER_AUTH_ENABLED":"false", "PROVIDER_GOOGLE_SIGNUP_ENABLED":"false", "GOOGLE_WEB_CLIENT_ID":"", "GOOGLE_SIGN_IN_APPROVAL":"DISABLED"}
+on = {"PROVIDER_AUTH_ENABLED":"true", "PROVIDER_GOOGLE_SIGNUP_ENABLED":"true", "GOOGLE_WEB_CLIENT_ID":policy["GOOGLE_CLIENT"], "GOOGLE_SIGN_IN_APPROVAL":"enable-google-sign-in:"+suffix}
+deletion = {"ACCOUNT_DELETION_ENABLED":"true"}
+assert environment(off,state,{}) == ({"PROVIDER_AUTH_ENABLED":"false", "PROVIDER_GOOGLE_SIGNUP_ENABLED":"false"},False)
+assert environment(on,state,deletion) == ({key:on[key] for key in policy["GOOGLE_KEYS"]},False)
+assert environment({**off,"GOOGLE_SIGN_IN_APPROVAL":"disable-google-sign-in:"+suffix},state,{})[1]
+def fails(call):
+    try: call()
+    except SystemExit: return
+    raise AssertionError("unsafe Google deployment configuration accepted")
+for key,value in [("PROVIDER_AUTH_ENABLED","TRUE"),("PROVIDER_GOOGLE_SIGNUP_ENABLED","false"),
+                  ("GOOGLE_WEB_CLIENT_ID","other.apps.googleusercontent.com"),("GOOGLE_WEB_CLIENT_ID",policy["GOOGLE_CLIENT"]+" "),
+                  ("GOOGLE_SIGN_IN_APPROVAL","DISABLED"),("GOOGLE_SIGN_IN_APPROVAL","enable-google-sign-in:other")]:
+    fails(lambda:environment({**on,key:value},state,deletion))
+for key in state: fails(lambda:environment(on,{**state,key:"different"},deletion))
+for wrong in [{},{"ACCOUNT_DELETION_ENABLED":"false"}]: fails(lambda:environment(on,state,wrong))
+for changed in [{**off,"GOOGLE_WEB_CLIENT_ID":policy["GOOGLE_CLIENT"]},{**off,"PROVIDER_GOOGLE_SIGNUP_ENABLED":"true"}]:
+    fails(lambda:environment(changed,state,deletion))
+print("Google deployment configuration fixtures passed")
+`;
+    const result = python(code, { policy: resolved[4].args[1], pins });
+    assert.equal(result.status, 0, result.stderr);
+});
+
+test('canonical Google policy protects template, serving and tagged revisions from implicit disable and unknown provider states', () => {
+    const code = String.raw`
+from copy import deepcopy
+policy = {"__name__": "reviewed_google_contract"}
+exec(compile(payload["policy"], "google-contract.py", "exec"), policy)
+previous = policy["check_previous_state"]
+off = {"ACCOUNT_DELETION_ENABLED":"true","ACCOUNT_DELETION_JOURNAL_BUCKET":policy["BUCKET"],"ACCOUNT_IDENTITY_EPOCH":policy["EPOCH"],
+       "PROVIDER_AUTH_ENABLED":"false","PROVIDER_GOOGLE_SIGNUP_ENABLED":"false"}
+on = {**off,"PROVIDER_AUTH_ENABLED":"true","PROVIDER_GOOGLE_SIGNUP_ENABLED":"true","GOOGLE_WEB_CLIENT_ID":policy["GOOGLE_CLIENT"]}
+def spec(values): return {"containers":[{"env":[{"name":key,"value":value} for key,value in values.items()]}]}
+traffic = [{"revisionName":"current","percent":100},{"revisionName":"tagged","tag":"old","percent":0}]
+service = {"metadata":{"uid":"service-uid","generation":2},"spec":{"template":{"spec":spec(off)},"traffic":deepcopy(traffic)},
+           "status":{"observedGeneration":2,"conditions":[{"type":"Ready","status":"True"}],"traffic":deepcopy(traffic)}}
+revisions = [{"metadata":{"name":name},"spec":spec(off)} for name in ["current","tagged"]]
+def fails(call):
+    try: call()
+    except SystemExit: return
+    raise AssertionError("unsafe active Google state accepted")
+for where in ["template","current","tagged"]:
+    current=deepcopy(service); inventory=deepcopy(revisions)
+    if where=="template": current["spec"]["template"]["spec"]=spec(on)
+    else: inventory[0 if where=="current" else 1]["spec"]=spec(on)
+    fails(lambda:previous(current,inventory,off,False))
+    previous(current,inventory,on,False)
+    previous(current,inventory,off,False,True)
+for change in [{"PROVIDER_AUTH_ENABLED":"TRUE"},{"PROVIDER_GOOGLE_SIGNUP_ENABLED":"false"},
+               {"GOOGLE_WEB_CLIENT_ID":"other.apps.googleusercontent.com"},{"GOOGLE_IOS_CLIENT_ID":"ios"},
+               {"APPLE_IOS_BUNDLE_ID":"com.mickeyf.app"},{"APPLE_WEB_SERVICES_ID":"apple"},
+               {"APPLE_CLIENT_ID":"other"},{"GOOGLE_FUTURE_SETTING":"unreviewed"},
+               {"PROVIDER_UNKNOWN_ENABLED":"true"},{"ACCOUNT_DELETION_ENABLED":"false"}]:
+    changed=deepcopy(service); changed["spec"]["template"]["spec"]=spec({**on,**change})
+    fails(lambda:previous(changed,revisions,off,True,True))
+for bad_env in [spec(on)["containers"][0]["env"]+[{"name":"GOOGLE_WEB_CLIENT_ID","value":policy["GOOGLE_CLIENT"]}],
+                spec(off)["containers"][0]["env"]+[{"name":"GOOGLE_WEB_CLIENT_ID","value":policy["GOOGLE_CLIENT"]}],
+                [{"name":"PROVIDER_AUTH_ENABLED","valueFrom":{"secretKeyRef":{"name":"other","key":"1"}}}]]:
+    changed=deepcopy(service); changed["spec"]["template"]["spec"]={"containers":[{"env":bad_env}]}
+    fails(lambda:previous(changed,revisions,off,True,True))
+print("Google active-state fixtures passed")
+`;
+    const result = python(code, { policy: resolved[4].args[1] });
+    assert.equal(result.status, 0, result.stderr);
+});
+
+test('canonical deletion policy rejects unapproved pins and silent live/tagged downgrades but permits approved rollback', () => {
+    const code = String.raw`
+from copy import deepcopy
+policy = {"__name__": "reviewed_deletion_contract"}
+exec(compile(payload["policy"], "deletion-contract.py", "exec"), policy)
+environment = policy["deployment_environment"]
+previous = policy["check_previous_state"]
+state = {"commit":payload["pins"]["sourceCommit"], "build_id":payload["pins"]["sourceBuildId"], "digest":payload["pins"]["imageDigest"]}
+base = {"ACCOUNT_DELETION_ENABLED":"false", "ACCOUNT_DELETION_JOURNAL_BUCKET":"", "ACCOUNT_IDENTITY_EPOCH":"", "ACCOUNT_DELETION_APPROVAL":"DISABLED"}
+suffix = f"{state['commit']}:{state['build_id']}:{state['digest']}"
+enabled = {"ACCOUNT_DELETION_ENABLED":"true", "ACCOUNT_DELETION_JOURNAL_BUCKET":policy["BUCKET"],
+           "ACCOUNT_IDENTITY_EPOCH":policy["EPOCH"], "ACCOUNT_DELETION_APPROVAL":"enable-account-deletion:"+suffix}
+off, explicit = environment(base, state)
+assert off == {"ACCOUNT_DELETION_ENABLED":"false"} and not explicit
+on, _ = environment(enabled, state)
+assert len(on) == 3
+def fails(call):
+    try: call()
+    except SystemExit: return
+    raise AssertionError("unsafe deletion configuration accepted")
+for key, value in [("ACCOUNT_DELETION_ENABLED","TRUE"), ("ACCOUNT_DELETION_JOURNAL_BUCKET","other"),
+                   ("ACCOUNT_IDENTITY_EPOCH","2026-09-13 00:15:39.954172"), ("ACCOUNT_IDENTITY_EPOCH","'; echo injected"),
+                   ("ACCOUNT_DELETION_APPROVAL","DISABLED"), ("ACCOUNT_DELETION_APPROVAL","enable-account-deletion:other")]:
+    fails(lambda: environment({**enabled, key:value}, state))
+fails(lambda: environment({**base,"ACCOUNT_IDENTITY_EPOCH":policy["EPOCH"]}, state))
+for key in state:
+    fails(lambda: environment(enabled, {**state,key:"different"}))
+def spec(values): return {"containers":[{"env":[{"name":key,"value":value} for key,value in values.items()]}]}
+traffic = [{"revisionName":"current","percent":100}, {"revisionName":"older-enabled","tag":"old","percent":0}]
+service = {"metadata":{"uid":"service-uid","generation":2}, "spec":{"template":{"spec":spec(off)},"traffic":deepcopy(traffic)},
+           "status":{"observedGeneration":2,"conditions":[{"type":"Ready","status":"True"}],"traffic":deepcopy(traffic)}}
+revisions = [{"metadata":{"name":"current"},"spec":spec(off)}, {"metadata":{"name":"older-enabled"},"spec":spec(on)}]
+fails(lambda: previous(service,revisions,off,False))
+assert previous(service,revisions,on,False) == {"uid":"service-uid","generation":"2"}
+rollback, explicit = environment({**base,"ACCOUNT_DELETION_APPROVAL":"disable-account-deletion:"+suffix},state)
+assert explicit
+previous(service,revisions,rollback,explicit)
+fails(lambda: previous(service,revisions[:1],rollback,explicit))
+changed=deepcopy(service); changed["status"]["observedGeneration"]=1
+fails(lambda: previous(changed,revisions,rollback,explicit))
+changed=deepcopy(service); changed["spec"]["template"]["spec"]=spec(on)
+fails(lambda: previous(changed,[{**r,"spec":spec(off)} for r in revisions],off,False))
+changed=deepcopy(service); changed["spec"]["traffic"][0]={"latestRevision":True,"percent":100}
+fails(lambda: previous(changed,revisions,rollback,explicit))
+changed["status"]["latestReadyRevisionName"]="current"
+previous(changed,revisions,rollback,explicit)
+print("deletion policy fixtures passed")
+`;
+    const result = python(code, { policy: resolved[4].args[1], pins });
+    assert.equal(result.status, 0, result.stderr);
 });
 
 const fixtureCode = String.raw`
@@ -177,6 +459,27 @@ print("source fixtures passed")
     assert.equal(result.status, 0, result.stderr);
 });
 
+test('only completed exact source builds accept the documented legacy worker default', () => {
+    const result = python(fixtureCode + String.raw`
+completed=deepcopy(build); completed["options"]["workerRelease"]="legacy"
+verify_source(completed,trigger,pins,now)
+fails(lambda: safe_options(completed["options"],require_provenance=True))
+fails(lambda: safe_options(completed["options"],allow_completed_source_defaults=True))
+for status in ["PENDING","QUEUED","WORKING"]:
+    changed=deepcopy(completed); changed["status"]=status
+    fails(lambda: verify_source(changed,trigger,pins,now))
+for value in [None,"regular","rapid","stable","2026.09","LEGACY","legacy ",True,{},[]]:
+    changed=deepcopy(completed); changed["options"]["workerRelease"]=value
+    fails(lambda: verify_source(changed,trigger,pins,now))
+for key,value in [("requestedVerifyOption","NOT_VERIFIED"),("logging","LEGACY"),
+        ("env",["UNREVIEWED=1"]),("secretEnv",["UNREVIEWED"]),("volumes",[]),
+        ("pool",{"name":"untrusted"}),("automapSubstitutions",True),("dynamicSubstitutions",False)]:
+    changed=deepcopy(completed); changed["options"][key]=value
+    fails(lambda: verify_source(changed,trigger,pins,now))
+`, { pins: validateFrozenPins(pins) });
+    assert.equal(result.status, 0, result.stderr);
+});
+
 test('stable explicit traffic rejects latest, unresolved state, duplicate tags and incomplete allocations', () => {
     const code = String.raw`
 from copy import deepcopy
@@ -197,6 +500,32 @@ for changed in cases:
 print("traffic fixtures passed")
 `;
     const result = python(code, {});
+    assert.equal(result.status, 0, result.stderr);
+});
+
+test('post-deploy preflight permits only the captured or new serving pointer with the exact candidate addition', () => {
+    const result = python(String.raw`
+from copy import deepcopy
+before={"generation":10,"traffic":[["mickeyf-org-serving",100,""]],
+    "latestReadyRevisionName":"mickeyf-org-serving","latestCreatedRevisionName":"mickeyf-org-serving"}
+revision="mickeyf-org-session-candidate"; tag="s-candidate"
+snapshot={"generation":11,"traffic":sorted(before["traffic"]+[[revision,0,tag]]),
+    "latestReadyRevisionName":revision,"latestCreatedRevisionName":revision}
+verify_deployed_service(snapshot,before,revision,tag)
+snapshot["latestReadyRevisionName"]=before["latestReadyRevisionName"]
+verify_deployed_service(snapshot,before,revision,tag)
+cases=[]
+for key,value in [("latestReadyRevisionName","mickeyf-org-foreign"),("latestReadyRevisionName",None),
+        ("latestCreatedRevisionName","mickeyf-org-foreign"),("generation",10),("generation",12)]:
+    changed=deepcopy(snapshot); changed[key]=value; cases.append(changed)
+for traffic in [before["traffic"],[["mickeyf-org-serving",99,""],[revision,1,tag]],
+        before["traffic"]+[[revision,0,"foreign-tag"]],before["traffic"]+[[revision,0,tag],[revision,0,"extra"]]]:
+    changed=deepcopy(snapshot); changed["traffic"]=sorted(traffic); cases.append(changed)
+for changed in cases:
+    try: verify_deployed_service(changed,before,revision,tag)
+    except SystemExit: continue
+    raise AssertionError("post-deploy drift accepted")
+`, {});
     assert.equal(result.status, 0, result.stderr);
 });
 
@@ -229,6 +558,42 @@ print("exclusion fixtures passed")
     assert.equal(result.status, 0, result.stderr);
 });
 
+test('deployment exclusion accepts only the observed legacy worker default and keeps trigger input strict', () => {
+    const result = python(fixtureCode + String.raw`
+bid=payload["buildId"]; tid=payload["deploymentTriggerId"]
+stage_a={"id":STAGE_A,"name":"main-push-mickeyf-com","resourceName":f"projects/{PROJECT}/locations/global/triggers/{STAGE_A}","disabled":True}
+stage_b={"id":pins["canonicalDeployTriggerId"],"name":pins["canonicalDeployTriggerName"],"resourceName":f"projects/{PROJECT}/locations/global/triggers/{pins['canonicalDeployTriggerId']}","disabled":True}
+deploy={"id":bid,"name":f"projects/{NUMBER}/locations/global/builds/{bid}","projectId":PROJECT,"buildTriggerId":tid,
+ "status":"WORKING","serviceAccount":DEPLOY_SA,"approval":build["approval"],
+ "options":{"logging":"CLOUD_LOGGING_ONLY","workerRelease":"legacy"},"timeout":"2400s"}
+dt={"id":tid,"name":pins["deploymentTriggerName"],"resourceName":f"projects/{PROJECT}/locations/global/triggers/{tid}",
+ "approvalConfig":{"approvalRequired":True},"serviceAccount":DEPLOY_SA,
+ "build":{"steps":[],"options":{"logging":"CLOUD_LOGGING_ONLY"},"timeout":"2400s"}}
+def check(d=deploy,t=dt):
+    verify_exclusion(stage_a,stage_b,[{"id":bid}],d,t,[stage_a,stage_b,trigger,t],pins,bid,tid)
+check()
+fails(lambda:safe_options(deploy["options"]))
+fails(lambda:safe_options(deploy["options"],allow_completed_source_defaults=True))
+for value in [None,"regular","rapid","stable","2026.10","LEGACY","legacy ",True,{},[]]:
+    changed=deepcopy(deploy); changed["options"]["workerRelease"]=value
+    fails(lambda:check(d=changed))
+for key,value in [("requestedVerifyOption","VERIFIED"),("env",["UNREVIEWED=1"]),
+        ("secretEnv",["UNREVIEWED"]),("volumes",[]),("pool",{"name":"foreign"}),
+        ("automapSubstitutions",True),("dynamicSubstitutions",False)]:
+    changed=deepcopy(deploy); changed["options"][key]=value
+    fails(lambda:check(d=changed))
+changed=deepcopy(dt); changed["build"]["options"]["workerRelease"]="legacy"
+fails(lambda:check(t=changed))
+for key,value in [("status","PENDING"),("status","SUCCESS"),("serviceAccount",BUILD_SA),
+        ("buildTriggerId",pins["sourceTriggerId"]),("source",{"gitSource":source})]:
+    changed=deepcopy(deploy); changed[key]=value
+    fails(lambda:check(d=changed))
+changed=deepcopy(deploy); changed["approval"]["state"]="PENDING"
+fails(lambda:check(d=changed))
+`, { pins: validateFrozenPins(pins), buildId, deploymentTriggerId });
+    assert.equal(result.status, 0, result.stderr);
+});
+
 test('provenance binds the authenticated registry envelope to exact image/build/source/trigger', () => {
     const code = fixtureCode + String.raw`
 bid=pins["sourceBuildId"]; digest=pins["imageDigest"]; target=f"{IMAGE}@{digest}"
@@ -247,6 +612,13 @@ occurrence={"kind":"BUILD","resourceUri":f"https://{target}","noteName":f"projec
 provenance={"image_summary":{"digest":digest,"fully_qualified_digest":target,"registry":"us-central1-docker.pkg.dev","repository":"cloud-run-source-deploy","slsa_build_level":3},
  "provenance_summary":{"provenance":[occurrence]}}
 verify_provenance(provenance,pins)
+co_signed=deepcopy(provenance)
+co_signed["provenance_summary"]["provenance"][0]["envelope"]["signatures"].append({
+ "keyid":"projects/verified-builder/locations/global/keyRings/attestor/cryptoKeys/pqcProvenanceSigner/cryptoKeyVersions/1",
+ "sig":base64.b64encode(bytes([42])*3309).decode()})
+verify_provenance(co_signed,pins)
+co_signed["provenance_summary"]["provenance"][0]["envelope"]["signatures"].reverse()
+verify_provenance(co_signed,pins)
 for path,value in [(("image_summary","digest"),"sha256:"+"d"*64),
  (("provenance_summary","provenance",0,"envelope","payload"),base64.b64encode(b"{}").decode()),
  (("provenance_summary","provenance",0,"envelope","signatures",0,"keyid"),"wrong"),
@@ -270,5 +642,52 @@ for dependencies in [
 print("provenance fixtures passed")
 `;
     const result = python(code, { pins: validateFrozenPins(pins) });
+    assert.equal(result.status, 0, result.stderr);
+});
+
+const envelopeFixture = String.raw`
+from copy import deepcopy
+statement={"synthetic":"bound payload"}
+original={"keyid":"projects/verified-builder/locations/global/keyRings/attestor/cryptoKeys/google-hosted-worker/cryptoKeyVersions/1",
+ "sig":base64.urlsafe_b64encode(bytes([251,255])*36).decode()}
+pqc={"keyid":"projects/verified-builder/locations/global/keyRings/attestor/cryptoKeys/pqcProvenanceSigner/cryptoKeyVersions/1",
+ "sig":base64.b64encode(bytes([42])*3309).decode()}
+envelope={"payloadType":"application/vnd.in-toto+json","payload":base64.b64encode(json.dumps(statement).encode()).decode(),
+ "signatures":[original,pqc]}
+def fails(value):
+    try: verify_provenance_envelope(value,statement)
+    except SystemExit: return
+    raise AssertionError("unsafe signature envelope accepted")
+`;
+
+test('provenance requires the original signer once and permits only its exact optional PQ co-signer', () => {
+    const result = python(envelopeFixture + String.raw`
+for signatures in [[original],[original,pqc],[pqc,original]]:
+    verify_provenance_envelope({**envelope,"signatures":signatures},statement)
+for signatures in [[],[pqc],[original,original],[pqc,pqc],[original,pqc,pqc],
+        [original,{**pqc,"keyid":"unknown"}],[original,{**pqc,"keyid":original["keyid"]}],
+        [{**original,"keyid":original["keyid"]+"-spoof"},pqc],
+        [original,{**pqc,"extra":"unreviewed"}], [None], [original,None]]:
+    fails({**envelope,"signatures":signatures})
+for signatures in [None,{},True,"not a list"]:
+    fails({**envelope,"signatures":signatures})
+fails({**envelope,"extra":"unreviewed"})
+fails({key:value for key,value in envelope.items() if key!="payloadType"})
+`, {});
+    assert.equal(result.status, 0, result.stderr);
+});
+
+test('every provenance signature and its exact payload must be well formed even when the original signer remains', () => {
+    const result = python(envelopeFixture + String.raw`
+for value in [None,"","bad!signature","AA===","Zg===",True,{},[],"A"*8193]:
+    for index in [0,1]:
+        changed=deepcopy(envelope); changed["signatures"][index]["sig"]=value
+        fails(changed)
+for payload in [None,"","bad!payload",base64.b64encode(b"{}").decode(),
+        base64.b64encode(b"malformed json").decode(),True,{},[]]:
+    fails({**envelope,"payload":payload})
+fails({**envelope,"payloadType":"application/json"})
+fails(None); fails([])
+`, {});
     assert.equal(result.status, 0, result.stderr);
 });
