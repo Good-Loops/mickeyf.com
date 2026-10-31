@@ -2,6 +2,7 @@ import { createHmac, randomUUID } from 'node:crypto';
 import { isAccountId } from './deletionJournal';
 import { assessChildInactivity, INACTIVITY_NOTICE_DIGEST, parseInactivityInstant, type InactivityChannel, type InactivitySnapshot, type InactivityWarning } from './childInactivityPolicy';
 import { isSessionId, type SessionProof } from '../security/sessionPolicy';
+import type { PoolConnection } from 'mysql2/promise';
 
 export type PendingInactivityWarning = Readonly<{
     warningId: string; parentId: string; childId: string; activityAt: string; targetDigest: string; channel: InactivityChannel; noticeDigest: string;
@@ -27,6 +28,8 @@ export type LockedInactivityTarget = Readonly<{
     databaseTimestamp(): Promise<string>;
     /** Recheck deadlines against the locked datastore clock before journaling. */
     assertDeletionStillDue(): Promise<void>;
+    /** Run continuity verification on the same locked connection when available. */
+    verifyContinuity?(intent: RetentionIntent, journal: RetentionJournal): Promise<boolean>;
     /** Administrative restore operations may pin the isolated target inside this transaction. */
     matchesSqlIdentity?(database: string, serverUuid: string, currentUser: string): Promise<boolean>;
     deleteChild(childId: string): Promise<void>;
@@ -148,7 +151,7 @@ export interface RetentionJournal {
     /** Verify this exact intent exists in the authenticated independent journal. */
     verifyRetentionIntent(intent: RetentionIntent): Promise<boolean>;
     /** Prove independent activity/keep history is complete across any restore. Unknown means false. */
-    verifyActivityContinuity(intent: RetentionIntent): Promise<boolean>;
+    verifyActivityContinuity(intent: RetentionIntent, connection?: Pick<PoolConnection, 'query'>): Promise<boolean>;
 }
 
 function matchesIntent(snapshot: InactivitySnapshot, intent: RetentionIntent): boolean {
@@ -167,7 +170,8 @@ export async function replayRetentionIntent(store: InactivityStore, journal: Ret
     return store.withLockedChild(intent.parentId, intent.childId, async target => {
         const snapshot = await target.snapshot();
         if (!snapshot || !matchesIntent(snapshot, intent) || assessChildInactivity(snapshot, now) !== 'eligible'
-            || !await journal.verifyRetentionIntent(intent) || !await journal.verifyActivityContinuity(intent)) return 'held';
+            || !await journal.verifyRetentionIntent(intent)
+            || !await (target.verifyContinuity ? target.verifyContinuity(intent, journal) : journal.verifyActivityContinuity(intent))) return 'held';
         await target.assertDeletionStillDue();
         await target.deleteChild(intent.childId);
         return 'deleted';
@@ -191,7 +195,7 @@ export async function deleteInactiveChild(store: InactivityStore, journal: Reten
             const intent: RetentionIntent = { parentId, childId, activityAt: snapshot.activityAt, warningId: warning.warningId,
                 targetDigest: snapshot.currentTargetDigest, channel: snapshot.channel, noticeDigest: warning.noticeDigest,
                 deliveredAt: warning.deliveredAt, receiptDigest: warning.receiptDigest };
-            if (!await journal.verifyActivityContinuity(intent)) return 'held';
+            if (!await (target.verifyContinuity ? target.verifyContinuity(intent, journal) : journal.verifyActivityContinuity(intent))) return 'held';
             await target.assertDeletionStillDue();
             journalAttempted = true;
             await journal.recordRetentionIntent(intent);

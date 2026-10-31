@@ -15,10 +15,8 @@ export async function prepareChildInactivityDeployment(database: Pool, config: C
     options: Readonly<{ client?: JournalHttpClient }> = {}) {
     let health: ReturnType<typeof createPinnedPrimaryHealth>;
     const journal = createGcsRetentionJournal({ bucket: config.bucket, expectedBucket: config.bucket, key: config.journalKey, client: options.client,
-        async verifyActivityContinuity(intent) {
-            const connection = await database.getConnection();
-            try { return await health(connection, intent.parentId, intent.childId); }
-            finally { connection.release(); }
+        async verifyActivityContinuity(intent, connection) {
+            return !!connection && await health(connection, intent.parentId, intent.childId);
         } });
     health = createPinnedPrimaryHealth({ database: config.database, serverUuid: config.serverUuid, journal });
     async function requireReadyPrimary(): Promise<void> {
@@ -28,7 +26,6 @@ export async function prepareChildInactivityDeployment(database: Pool, config: C
             if (!await health(probe, randomUUID(), randomUUID())) throw new Error('Inactivity primary or retention guard is unavailable.');
         } finally { probe.release(); }
     }
-    await requireReadyPrimary();
     const service = await prepareChildInactivityRuntime(database, config.targetKey, config.receiptKey, health);
     const store = createChildInactivitySqlStore(database, createInAppInactivityQualityResolver(config.targetKey, health));
     return Object.freeze({ service, reconcileChildKeep: createRetentionKeepReconciler(store, journal, config.receiptKey),

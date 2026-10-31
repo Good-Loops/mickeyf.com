@@ -19,7 +19,6 @@ import { createPinnedPrimaryHealth } from './retentionPrimaryHealth';
 import { reconcileDeletedRetentionIntent, reconcileKeptRetentionIntent, reconcileRestoredDeletedIntent } from './retentionReconciliation';
 import { executeRetentionReconciliation } from './runRetentionReconciliation';
 import { activateRetentionGuard } from './retentionGuardActivation';
-import type { createGcsRetentionJournal } from './gcsRetentionJournal';
 import type { RetentionIntent } from './childInactivityWorkflow';
 import type { RetentionResolution } from './gcsRetentionJournal';
 import { createChildInactivityParentService } from './childInactivityParentService';
@@ -472,7 +471,7 @@ test('composed deployment holds on restore guard and deletes only after an ackno
     for (const sql of renderRuntimeGrantStatements('mickeyf_migration_test', { user: 'deployment_test', host: '%' },
         'google-apple-parent-signed-inactivity')) await admin.query(sql);
     const limited = mysql.createPool({ host: config.host, port: config.port, database: config.database, user: 'deployment_test',
-        password: 'synthetic-deployment-test-only', connectionLimit: 5, dateStrings: true, timezone: 'Z' });
+        password: 'synthetic-deployment-test-only', connectionLimit: 1, dateStrings: true, timezone: 'Z' });
     try {
     const bucket = 'synthetic-retention-test', journalKey = Buffer.alloc(32, 7);
     const objects = new Map<string, string>(), generations = new Map<string, number>();
@@ -496,6 +495,13 @@ test('composed deployment holds on restore guard and deletes only after an ackno
         verifyActivityContinuity: async () => false });
     const guard = { state: 'active' as const, database: identity.db as string, serverUuid: identity.serverUuid as string,
         epoch: randomUUID(), expiresAt: new Date(Date.now() + 30 * 86400_000).toISOString() };
+    let unavailableRequests = 0;
+    const unavailable = await prepareChildInactivityDeployment(limited, { bucket, database: guard.database, serverUuid: guard.serverUuid,
+        journalKey, targetKey: Buffer.alloc(32, 8), receiptKey: Buffer.alloc(32, 9) },
+    { client: { async request() { unavailableRequests++; throw new Error('synthetic storage outage'); } } });
+    assert.equal(unavailableRequests, 0, 'a storage outage must not prevent the backend starting');
+    await assert.rejects(unavailable.runMaintenance(), /guard is unavailable/);
+    assert.ok(unavailableRequests > 0, 'maintenance still checks the guard and fails closed');
     assert.equal(await journal.writeRestoreGuard(guard, '0'), '1');
     const deployment = await prepareChildInactivityDeployment(limited, { bucket, database: guard.database, serverUuid: guard.serverUuid,
         journalKey, targetKey: Buffer.alloc(32, 8), receiptKey: Buffer.alloc(32, 9) }, { client });

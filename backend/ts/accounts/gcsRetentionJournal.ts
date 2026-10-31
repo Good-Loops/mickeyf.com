@@ -4,6 +4,7 @@ import { isAccountId } from './deletionJournal';
 import { DELETION_JOURNAL_BUCKET, type JournalHttpClient, type JournalHttpRequest } from './gcsDeletionJournal';
 import { parseInactivityInstant } from './childInactivityPolicy';
 import type { RetentionIntent, RetentionJournal } from './childInactivityWorkflow';
+import type { PoolConnection } from 'mysql2/promise';
 
 const API = 'https://storage.googleapis.com';
 const LIMIT = 10_000;
@@ -23,7 +24,7 @@ type Options = Readonly<{
     expectedBucket: string;
     key: Buffer;
     /** Must establish live-primary health independently. Restores and uncertainty return false. */
-    verifyActivityContinuity: (intent: RetentionIntent) => Promise<boolean>;
+    verifyActivityContinuity: (intent: RetentionIntent, connection?: Pick<PoolConnection, 'query'>) => Promise<boolean>;
     client?: JournalHttpClient;
     timeoutMs?: number;
 }>;
@@ -262,9 +263,9 @@ export function createGcsRetentionJournal(options: Options): RetentionJournal & 
         readIntents: () => readInventory('v1/conditional/'),
         readIntentsForChild: async childId => readInventory(childPrefix(childId)),
         readRestoreGuard, writeRestoreGuard,
-        async verifyActivityContinuity(intent) {
+        async verifyActivityContinuity(intent, connection) {
             validateIntent(intent);
-            try { return await verifyActivityContinuity(intent) === true; } catch { return false; }
+            try { return await verifyActivityContinuity(intent, connection) === true; } catch { return false; }
         } };
 }
 
