@@ -97,7 +97,8 @@ async function fixture(t, width, { pendingBegin = false, pendingApple = false, p
                 { clientKey: 'apple-web', provider: 'apple', platform: 'web', clientId: 'com.example.synthetic', redirectUri: 'https://example.test/return', ...(closedSignup ? {} : { signup: true }) },
                 ] };
             }
-            else if (url.pathname === '/auth/registration/config') result = closedSignup ? { ...policy, creationEnabled: false } : policy;
+            else if (url.pathname === '/auth/registration/config') result = closedSignup === 'disabled'
+                ? { enabled: false } : closedSignup ? { ...policy, creationEnabled: false } : policy;
             else if (url.pathname === '/auth/registration/begin') {
                 assert.deepEqual(route.request().postDataJSON(), { country: 'US', ageBand: 'adult', policyVersion: policy.policyVersion });
                 result = { authorized: true, expiresInSeconds: 300, scoreVisibility: 'private' };
@@ -196,14 +197,18 @@ test('Google SDK loads alongside its challenge and becomes usable before the ind
         .find(button => button.textContent === 'Continue with Apple')?.disabled);
 });
 
-test('paused registration exposes no signup credentials or providers and keeps login reachable', async t => {
-    const { page, calls } = await fixture(t, 390, { closedSignup: true });
+for (const width of [390, 1280]) for (const closedSignup of [true, 'disabled'])
+test(`paused registration at ${width}px (${closedSignup}) shows navigation without signup controls`, async t => {
+    const { page, calls } = await fixture(t, width, { closedSignup });
     await page.goto(`${origin}/signup`);
-    await page.getByText('New registrations are currently paused. You can keep exploring without an account, or log in to an existing account.', { exact: true }).waitFor();
+    await page.getByRole('status').filter({ hasText: 'New account creation is temporarily paused.' }).waitFor();
+    assert.equal(await page.getByRole('link', { name: 'Continue as a guest' }).getAttribute('href'), '/');
+    assert.equal(await page.getByRole('link', { name: 'Log in', exact: true }).getAttribute('href'), '/login');
     assert.equal(await page.locator('input, select, .provider-sign-in').count(), 0);
     assert.equal(calls.filter(call => ['/auth/registration/begin', '/auth/providers/begin', '/auth/providers/complete', '/api/users'].includes(call.path)).length, 0);
     await page.getByRole('link', { name: 'Log in', exact: true }).click();
     await page.locator('#login-password').waitFor();
+    if (closedSignup === 'disabled') return;
     await approveAdult(page);
     await page.getByTestId('synthetic-google-sdk').waitFor();
     assert.equal(calls.filter(call => call.path === '/api/users').length, 0);

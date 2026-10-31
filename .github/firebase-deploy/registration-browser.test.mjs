@@ -115,7 +115,7 @@ test('a general-audience backend cannot authorize the new child-audience credent
     const { page, calls } = await fixture(t, undefined, { eligible: false, config: {
         enabled: true, mode: 'general-audience', policyVersion: 'synthetic-old', optionalDetails: false, parentRegistrationAvailable: false,
     } });
-    await page.getByText('Registration eligibility could not be confirmed. You can keep exploring without an account.', { exact: true }).waitFor();
+    await page.getByRole('alert').filter({ hasText: 'We can’t check sign-up availability right now. Please try again.' }).waitFor();
     assert.equal(await page.locator('input, select').count(), 0);
     assert.equal(calls.filter(call => ['/auth/registration/begin', '/auth/providers/begin', '/api/users'].includes(call.path)).length, 0);
 });
