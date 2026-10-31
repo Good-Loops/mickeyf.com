@@ -73,7 +73,20 @@ public class LudolumeApiPlugin: CAPPlugin, CAPBridgedPlugin {
 }
 
 private enum LudolumeApiPolicy {
+    #if LUDOLUME_STAGING && !DEBUG
+    #error("Staging API configuration is only allowed in a debug build")
+    #endif
+    #if LUDOLUME_STAGING
+    static let host: String = {
+        guard Bundle.main.bundleIdentifier == "com.mickeyf.app.staging",
+              let host = Bundle.main.object(forInfoDictionaryKey: "LudolumeStagingAPIHost") as? String,
+              host != "mickeyf-org-j7yuum4tiq-uc.a.run.app",
+              host.range(of: #"^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*\.(?:a\.run\.app|trycloudflare\.com)$"#, options: .regularExpression) != nil else { return "" }
+        return host
+    }()
+    #else
     static let host = "mickeyf-org-j7yuum4tiq-uc.a.run.app"
+    #endif
     static let origin = "https://\(host)"
     static let maximumRequestBytes = 32 * 1024
     static let maximumResponseBytes = 1024 * 1024
@@ -106,7 +119,7 @@ private enum LudolumeApiPolicy {
     ]
 
     static func request(from call: CAPPluginCall) -> URLRequest? {
-        guard let address = call.getString("url"), address.utf8.count <= 512,
+        guard !host.isEmpty, let address = call.getString("url"), address.utf8.count <= 512,
               let method = call.getString("method"),
               let components = URLComponents(string: address),
               components.scheme == "https", components.host == host,

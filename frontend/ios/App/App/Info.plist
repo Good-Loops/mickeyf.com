@@ -39,6 +39,8 @@
 	</array>
 	<key>LudolumeAppleSignInEnabled</key>
 	<true/>
+	<key>LudolumeStagingAPIHost</key>
+	<string>$(LUDOLUME_STAGING_API_HOST)</string>
 	<key>UIApplicationSceneManifest</key>
 	<dict>
 		<key>UIApplicationSupportsMultipleScenes</key>

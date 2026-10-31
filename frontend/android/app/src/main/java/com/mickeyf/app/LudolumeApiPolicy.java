@@ -10,7 +10,7 @@ import okhttp3.Request;
 import okhttp3.RequestBody;
 
 final class LudolumeApiPolicy {
-    static final String HOST = "mickeyf-org-j7yuum4tiq-uc.a.run.app";
+    static final String HOST = BuildConfig.LUDOLUME_STAGING ? BuildConfig.LUDOLUME_STAGING_HOST : "mickeyf-org-j7yuum4tiq-uc.a.run.app";
     static final String ORIGIN = "https://" + HOST;
     static final int MAX_REQUEST = 32 * 1024;
     static final int MAX_RESPONSE = 1024 * 1024;
@@ -33,7 +33,7 @@ final class LudolumeApiPolicy {
         "POST /api/leaderboards/three-bosses/run-tickets", "POST /api/leaderboards/three-bosses/runs"));
 
     static Request request(String address, String method, String body) {
-        if (address == null || address.length() > 512 || method == null) return null;
+        if (HOST.isEmpty() || address == null || address.length() > 512 || method == null) return null;
         HttpUrl url = HttpUrl.parse(address);
         if (url == null || !url.isHttps() || !HOST.equals(url.host()) || url.port() != 443
             || !url.username().isEmpty() || !url.password().isEmpty() || url.query() != null || url.fragment() != null

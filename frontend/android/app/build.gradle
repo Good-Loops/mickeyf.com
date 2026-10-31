@@ -5,6 +5,7 @@ dependencyLocking { lockAllConfigurations() }
 android {
     namespace = "com.mickeyf.app"
     compileSdk = rootProject.ext.compileSdkVersion
+    buildFeatures { buildConfig = true }
     defaultConfig {
         applicationId "com.mickeyf.app"
         minSdkVersion rootProject.ext.minSdkVersion
@@ -12,6 +13,8 @@ android {
         versionCode 1
         versionName "1.0"
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
+        buildConfigField "String", "LUDOLUME_STAGING_HOST", '""'
+        buildConfigField "boolean", "LUDOLUME_STAGING", "false"
         aaptOptions {
              // Files and dirs to omit from the packaged assets dir, modified to accommodate modern web apps.
              // Default: https://android.googlesource.com/platform/frameworks/base/+/282e181b58cf72b6ca770dc7ca5f91f135444502/tools/aapt/AaptAssets.cpp#61
@@ -19,6 +22,18 @@ android {
         }
     }
     buildTypes {
+        if (providers.gradleProperty("ludolumeStagingHost").isPresent()) staging {
+            initWith debug
+            matchingFallbacks = ['debug']
+            applicationIdSuffix ".staging"
+            versionNameSuffix "-staging"
+            def host = providers.gradleProperty("ludolumeStagingHost").orElse("").get()
+            if (!(host ==~ /[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*\.(?:a\.run\.app|trycloudflare\.com)/) || host == "mickeyf-org-j7yuum4tiq-uc.a.run.app") {
+                throw new GradleException("Staging requires a non-production Cloud Run or Quick Tunnel hostname")
+            }
+            buildConfigField "String", "LUDOLUME_STAGING_HOST", '"' + host + '"'
+            buildConfigField "boolean", "LUDOLUME_STAGING", "true"
+        }
         release {
             minifyEnabled false
             proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
