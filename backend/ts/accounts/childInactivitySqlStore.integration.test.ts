@@ -6,11 +6,14 @@ import { after, before, test } from 'node:test';
 import mysql, { type Connection, type Pool, type ResultSetHeader, type RowDataPacket } from 'mysql2/promise';
 import { loadMigrationConfig } from '../config/migrationConfig';
 import type { MigrationConnection } from '../migrations/leaderboardSchema';
+import type { childSchemaCommandSettings } from '../migrations/runChildSignedFormSchema';
 import { loadMigrationManifest } from '../migrations/migrationManifest';
 import { applyMigrations } from '../migrations/migrationRunner';
 import { createChildInactivitySqlStore } from './childInactivitySqlStore';
 import { acknowledgeInactivityWarning, confirmInactivityWarning, deleteInactiveChild, prepareInactivityWarning } from './childInactivityWorkflow';
 import { createAccountSession, revokeAccountSession } from '../auth/accountSessionRepository';
+import { runChildInactivityReview } from './runChildInactivityReview';
+import { Readable } from 'node:stream';
 
 const config = loadMigrationConfig();
 const rootPassword = 'migration-test-root-only';
@@ -53,6 +56,27 @@ before(async () => {
         password: rootPassword, connectionLimit: 5, multipleStatements: false, dateStrings: true, timezone: 'Z' });
 });
 after(async () => { if (database) await database.end(); if (admin) await admin.end(); });
+
+test('read-only operator report scans real SQL and withholds recent activity without disclosing contact', async () => {
+    const due = await managedFixture(), recent = await managedFixture(), missing = await managedFixture();
+    await admin.query('UPDATE parent_managed_child_activity SET retention_activity_at=UTC_TIMESTAMP(6) WHERE child_uuid=?', [recent.childId]);
+    await admin.query('DELETE FROM parent_managed_child_activity WHERE child_uuid=?', [missing.childId]);
+    const [[identity]] = await admin.query<RowDataPacket[]>('SELECT DATABASE() AS db, CURRENT_USER() AS user, @@GLOBAL.server_uuid AS id, @@version AS version, @@version_comment AS vendor');
+    let output = '';
+    const settings = { config, source: { sourceCommit: 'a'.repeat(40), sqlSha256: 'b'.repeat(64) },
+        settings: { target: { project: 'synthetic', instance: 'synthetic', database: identity.db, serverUuid: identity.id },
+            expectedCurrentUser: identity.user, expectedServerVersion: identity.version, expectedVersionComment: identity.vendor } } as unknown as ReturnType<typeof childSchemaCommandSettings>;
+    await runChildInactivityReview([], {}, {
+        settings: () => settings, assertSource() {}, input: Readable.from(['{"afterChildId":null}']), write(value) { output = value; },
+        connect() { return { connection: admin as unknown as MigrationConnection, async close() {} }; },
+    });
+    const report = JSON.parse(output);
+    assert.equal(report.draftOnly, true);
+    assert.equal(report.candidates.find((item: { childId: string }) => item.childId === due.childId)?.review, 'potentially-approaching-warning');
+    assert.equal(report.candidates.find((item: { childId: string }) => item.childId === missing.childId)?.review, 'missing-activity');
+    assert.equal(report.candidates.some((item: { childId: string }) => item.childId === recent.childId), false);
+    assert.doesNotMatch(output, /@example\.test|verified_contact|user_name|user_password/u);
+});
 
 async function managedFixture() {
     const parentId = randomUUID(), childId = randomUUID(), unrelatedId = randomUUID();
