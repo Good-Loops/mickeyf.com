@@ -503,68 +503,12 @@ test('mounted warning route checks origin and parent session and acknowledges th
     } finally { server.close(); await once(server, 'close'); }
 });
 
-test('composed deployment holds on restore guard and deletes only after an acknowledged warning', async () => {
-    await admin.query('DELETE FROM parent_child_inactivity_warnings');
-    const { parentId, childId } = await managedFixture();
+test('production inactivity composition is disabled without independent activity continuity', async () => {
     const [[identity]] = await admin.query<RowDataPacket[]>('SELECT DATABASE() AS db, @@GLOBAL.server_uuid AS serverUuid');
-    await admin.query("CREATE USER 'deployment_test'@'%' IDENTIFIED BY 'synthetic-deployment-test-only'");
-    for (const sql of renderRuntimeGrantStatements('mickeyf_migration_test', { user: 'deployment_test', host: '%' },
-        'google-apple-parent-signed-inactivity')) await admin.query(sql);
-    const limited = mysql.createPool({ host: config.host, port: config.port, database: config.database, user: 'deployment_test',
-        password: 'synthetic-deployment-test-only', connectionLimit: 1, dateStrings: true, timezone: 'Z' });
-    try {
-    const bucket = 'synthetic-retention-test', journalKey = Buffer.alloc(32, 7);
-    const objects = new Map<string, string>(), generations = new Map<string, number>();
-    const meta = (name: string, body: string) => ({ bucket, name, generation: String(generations.get(name)),
-        size: String(Buffer.byteLength(body)), md5Hash: createHash('md5').update(body).digest('base64') });
-    const client: JournalHttpClient = { async request(request) {
-        if (request.method === 'POST') {
-            const name = String(request.params.name);
-            if (String(request.params.ifGenerationMatch) !== String(generations.get(name) ?? 0)) return { status: 412, data: {} };
-            objects.set(name, request.data!); generations.set(name, (generations.get(name) ?? 0) + 1);
-            return { status: 200, data: meta(name, request.data!) };
-        }
-        if (request.url.endsWith('/o')) return { status: 200, data: { kind: 'storage#objects',
-            items: request.params.softDeleted === true ? [] : [...objects].filter(([name]) => name.startsWith(String(request.params.prefix)))
-                .map(([name, body]) => meta(name, body)) } };
-        const name = decodeURIComponent(request.url.split('/').at(-1)!); const body = objects.get(name);
-        if (!body) return { status: 404, data: {} };
-        return { status: 200, data: request.params.alt === 'media' ? body : meta(name, body) };
-    } };
-    const journal = createGcsRetentionJournal({ bucket, expectedBucket: bucket, key: journalKey, client,
-        verifyActivityContinuity: async () => false });
-    const guard = { state: 'active' as const, database: identity.db as string, serverUuid: identity.serverUuid as string,
-        epoch: randomUUID(), expiresAt: new Date(Date.now() + 30 * 86400_000).toISOString() };
-    let unavailableRequests = 0;
-    const unavailable = await prepareChildInactivityDeployment(limited, { bucket, database: guard.database, serverUuid: guard.serverUuid,
-        journalKey, targetKey: Buffer.alloc(32, 8), receiptKey: Buffer.alloc(32, 9) },
-    { client: { async request() { unavailableRequests++; throw new Error('synthetic storage outage'); } } });
-    assert.equal(unavailableRequests, 0, 'a storage outage must not prevent the backend starting');
-    await assert.rejects(unavailable.runMaintenance(), /guard is unavailable/);
-    assert.ok(unavailableRequests > 0, 'maintenance still checks the guard and fails closed');
-    assert.equal(await journal.writeRestoreGuard(guard, '0'), '1');
-    const deployment = await prepareChildInactivityDeployment(limited, { bucket, database: guard.database, serverUuid: guard.serverUuid,
-        journalKey, targetKey: Buffer.alloc(32, 8), receiptKey: Buffer.alloc(32, 9) }, { client });
-    const [[parent]] = await admin.query<RowDataPacket[]>('SELECT user_id FROM users WHERE account_uuid=?', [parentId]);
-    const sessionId = randomBytes(32).toString('base64url');
-    const account = { accountId: parentId, userId: parent.user_id as number };
-    assert.equal(await createAccountSession(database, account, sessionId, Math.floor(Date.now() / 1000) + 1800), true);
-    const context = { account, session: { accountId: parentId, sessionId } } as unknown as ProviderAuthContext;
-    const result = await deployment.service.read(context, { childAccountId: childId });
-    assert.ok('warning' in result && result.warning);
-    assert.deepEqual(await deployment.service.acknowledge(context, { childAccountId: childId,
-        warningId: result.warning.warningId, acknowledge: true }), { acknowledged: true });
-    await admin.query('UPDATE parent_child_inactivity_warnings SET prepared_at=UTC_TIMESTAMP(6)-INTERVAL 32 DAY, delivered_at=UTC_TIMESTAMP(6)-INTERVAL 31 DAY WHERE child_uuid=?', [childId]);
-    assert.equal(await journal.writeRestoreGuard({ ...guard, state: 'hold' }, '1'), '2');
-    await assert.rejects(deployment.runMaintenance(), /guard is unavailable/);
-    const [held] = await admin.query<RowDataPacket[]>('SELECT account_uuid FROM users WHERE account_uuid=?', [childId]);
-    assert.equal(held.length, 1);
-    assert.equal(await journal.writeRestoreGuard(guard, '2'), '3');
-    assert.equal(await deployment.runMaintenance(), 0);
-    const [deleted] = await admin.query<RowDataPacket[]>('SELECT account_uuid FROM users WHERE account_uuid=?', [childId]);
-    assert.equal(deleted.length, 0);
-    assert.equal((await journal.readIntentsForChild(childId)).length, 1);
-    } finally { await limited.end(); await admin.query("DROP USER 'deployment_test'@'%'"); }
+    await assert.rejects(prepareChildInactivityDeployment(database, {
+        bucket: 'synthetic-retention-journal', database: identity.db as string, serverUuid: identity.serverUuid as string,
+        journalKey: Buffer.alloc(32, 7), targetKey: Buffer.alloc(32, 8), receiptKey: Buffer.alloc(32, 9),
+    }), /independent activity continuity/u);
 });
 
 test('schema plan creates only the two reviewed tables and reports partial DDL without retrying', async () => {
