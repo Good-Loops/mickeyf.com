@@ -5,12 +5,12 @@ export type RuntimeDatabaseAccount = Readonly<{
 
 export type RuntimeDmlPrivilege = 'SELECT' | 'INSERT' | 'UPDATE';
 
-export type RuntimeGrantProfile = 'google' | 'google-apple' | 'google-apple-parent' | 'google-apple-parent-signed';
+export type RuntimeGrantProfile = 'google' | 'google-apple' | 'google-apple-parent' | 'google-apple-parent-signed' | 'google-apple-parent-signed-inactivity';
 
 export function parseRuntimeGrantProfile(value: string | undefined): RuntimeGrantProfile {
     if (value === undefined) return 'google-apple';
-    if (value === 'google' || value === 'google-apple' || value === 'google-apple-parent' || value === 'google-apple-parent-signed') return value;
-    throw new Error('Runtime grant profile must be google, google-apple, google-apple-parent or google-apple-parent-signed');
+    if (value === 'google' || value === 'google-apple' || value === 'google-apple-parent' || value === 'google-apple-parent-signed' || value === 'google-apple-parent-signed-inactivity') return value;
+    throw new Error('Runtime grant profile is not recognized');
 }
 
 export type RuntimeColumnGrant = Readonly<{
@@ -21,14 +21,15 @@ export type RuntimeColumnGrant = Readonly<{
 export type RuntimeTableGrant = Readonly<{
     table: 'users' | 'game_submission_receipts' | 'game_personal_bests' | 'schema_migrations' | 'account_sessions'
         | 'account_provider_identities' | 'provider_auth_attempts' | 'apple_provider_tokens' | 'apple_auth_revocations'
-        | 'registration_authorizations' | 'account_registration_profiles' | 'parent_registration_attempts' | 'parent_child_consents' | 'account_score_permissions' | 'parent_signed_forms';
+        | 'registration_authorizations' | 'account_registration_profiles' | 'parent_registration_attempts' | 'parent_child_consents' | 'account_score_permissions' | 'parent_signed_forms'
+        | 'parent_managed_child_activity' | 'parent_child_inactivity_warnings';
     grants: readonly RuntimeColumnGrant[];
-    tablePrivileges: readonly 'DELETE'[];
+    tablePrivileges: readonly ('DELETE' | 'SELECT')[];
 }>;
 
 export type RuntimeTablePrivilege = Readonly<{
     tableName: RuntimeTableGrant['table'];
-    privilegeType: 'DELETE';
+    privilegeType: 'DELETE' | 'SELECT';
 }>;
 
 export type RuntimeColumnPrivilege = Readonly<{
@@ -299,7 +300,21 @@ export const SIGNED_PARENT_RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] 
     ]) }),
 ]);
 
+/** Explicit opt-in profile: table SELECT exposes all columns to strict schema checks. */
+export const INACTIVITY_RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freeze([
+    ...SIGNED_PARENT_RUNTIME_GRANT_MANIFEST,
+    Object.freeze({ table: 'parent_managed_child_activity' as const, tablePrivileges: Object.freeze(['SELECT' as const]), grants: Object.freeze([
+        Object.freeze({ privilege: 'INSERT' as const, columns: Object.freeze(['child_uuid', 'retention_activity_at']) }),
+        Object.freeze({ privilege: 'UPDATE' as const, columns: Object.freeze(['retention_activity_at']) }),
+    ]) }),
+    Object.freeze({ table: 'parent_child_inactivity_warnings' as const, tablePrivileges: Object.freeze(['SELECT' as const]), grants: Object.freeze([
+        Object.freeze({ privilege: 'INSERT' as const, columns: Object.freeze(['child_uuid', 'parent_uuid', 'warning_uuid', 'activity_at', 'channel', 'target_digest', 'notice_digest', 'prepared_at']) }),
+        Object.freeze({ privilege: 'UPDATE' as const, columns: Object.freeze(['parent_uuid', 'warning_uuid', 'activity_at', 'channel', 'target_digest', 'notice_digest', 'prepared_at', 'delivered_at', 'receipt_digest']) }),
+    ]) }),
+]);
+
 function manifestForProfile(profile: RuntimeGrantProfile | undefined): readonly RuntimeTableGrant[] {
+    if (profile === 'google-apple-parent-signed-inactivity') return INACTIVITY_RUNTIME_GRANT_MANIFEST;
     if (profile === 'google-apple-parent-signed') return SIGNED_PARENT_RUNTIME_GRANT_MANIFEST;
     if (profile === 'google-apple-parent') return PARENT_RUNTIME_GRANT_MANIFEST;
     return parseRuntimeGrantProfile(profile) === 'google'

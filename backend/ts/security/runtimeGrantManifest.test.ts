@@ -90,6 +90,23 @@ test('signed-form runtime can consume and withdraw proofs but cannot create revi
     }
 });
 
+test('inactivity profile adds only scoped writes and table-level reads to the two new tables', () => {
+    const profile = 'google-apple-parent-signed-inactivity';
+    assert.equal(parseRuntimeGrantProfile(profile), profile);
+    const prior = 'google-apple-parent-signed';
+    const columns = runtimeColumnPrivilegeInventory(profile);
+    const added = columns.filter(row => row.tableName === 'parent_managed_child_activity' || row.tableName === 'parent_child_inactivity_warnings');
+    assert.deepEqual(columns.filter(row => !added.includes(row)), runtimeColumnPrivilegeInventory(prior));
+    assert.equal(added.some(row => row.privilegeType === 'SELECT'), false);
+    assert.deepEqual(added.filter(row => row.tableName === 'parent_managed_child_activity' && row.privilegeType === 'UPDATE').map(row => row.columnName), ['retention_activity_at']);
+    assert.deepEqual(runtimeTablePrivilegeInventory(profile).slice(-2), [
+        { tableName: 'parent_managed_child_activity', privilegeType: 'SELECT' },
+        { tableName: 'parent_child_inactivity_warnings', privilegeType: 'SELECT' },
+    ]);
+    assert.ok(renderRuntimeGrantStatements('cms', PRODUCTION_RUNTIME_DATABASE_ACCOUNT, profile).slice(-2)
+        .every(statement => !/\bDELETE\b/u.test(statement) && /, SELECT ON/u.test(statement)));
+});
+
 test('defines only runtime DML and read-only identity-epoch metadata', () => {
     assert.deepEqual(PRODUCTION_RUNTIME_DATABASE_ROLE, {
         user: 'cloudsqlsuperuser',

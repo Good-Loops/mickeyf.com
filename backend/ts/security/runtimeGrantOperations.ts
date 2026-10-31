@@ -465,7 +465,8 @@ export async function inspectRuntimeGrantState(
            AND TABLE_NAME IN (
                'account_sessions', 'account_provider_identities', 'provider_auth_attempts', 'apple_provider_tokens', 'apple_auth_revocations',
                'schema_migrations', 'users', 'game_runs', 'game_submission_receipts', 'game_personal_bests',
-               'registration_authorizations', 'account_registration_profiles', 'parent_registration_attempts', 'parent_child_consents', 'account_score_permissions', 'parent_signed_forms'
+               'registration_authorizations', 'account_registration_profiles', 'parent_registration_attempts', 'parent_child_consents', 'account_score_permissions', 'parent_signed_forms',
+               'parent_managed_child_activity', 'parent_child_inactivity_warnings'
            )
          /* runtime-grants:columns */`,
         [database],

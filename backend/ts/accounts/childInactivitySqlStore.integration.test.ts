@@ -27,6 +27,8 @@ import { createAuthRouter } from '../routers/authRouter';
 import { parentManagedChildActivity } from './parentManagedChildActivity';
 import { issueSessionToken } from '../security/sessionPolicy';
 import { verifyChildInactivityWarningReadiness } from './childInactivityRuntime';
+import { verifyParentManagedChildActivityReadiness } from '../migrations/parentManagedChildActivityReadiness';
+import { renderRuntimeGrantStatements } from '../security/runtimeGrantManifest';
 
 const config = loadMigrationConfig();
 const rootPassword = 'migration-test-root-only';
@@ -57,11 +59,7 @@ before(async () => {
         [...new Set(migrations.filter(migration => migration.version > '0003').map(migration => migration.effect))]]) {
         await applyMigrations(admin as unknown as MigrationConnection, migrations, config, { allowedEffectKinds });
     }
-    await admin.query(`CREATE TABLE parent_managed_child_activity (
-        child_uuid CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL PRIMARY KEY,
-        retention_activity_at DATETIME(6) NOT NULL,
-        FOREIGN KEY (child_uuid) REFERENCES parent_child_consents(child_uuid) ON DELETE CASCADE ON UPDATE RESTRICT
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci`);
+    await admin.query(readFileSync(path.resolve(__dirname, '../../migrations/pending/draft_create_parent_managed_child_activity.sql'), 'utf8'));
     const sql = readFileSync(path.resolve(__dirname, '../../migrations/pending/draft_parent_child_inactivity_warnings.sql'), 'utf8');
     assert.match(sql, /CREATE TABLE parent_child_inactivity_warnings/u);
     await admin.query(sql);
@@ -251,12 +249,17 @@ test('channel replacement holds current warnings and replaces stale warnings und
 
 test('warning readiness requires the exact table and actual restricted write grants', async () => {
     await admin.query("CREATE USER 'warning_test'@'%' IDENTIFIED BY 'synthetic-warning-test-only'");
-    await admin.query('GRANT SELECT, INSERT, UPDATE ON mickeyf_migration_test.parent_child_inactivity_warnings TO \'warning_test\'@\'%\'');
+    for (const sql of renderRuntimeGrantStatements('mickeyf_migration_test', { user: 'warning_test', host: '%' },
+        'google-apple-parent-signed-inactivity').slice(-2)) await admin.query(sql);
+    await admin.query('GRANT SELECT (child_uuid) ON mickeyf_migration_test.parent_child_consents TO \'warning_test\'@\'%\'');
     const limited = mysql.createPool({ host: config.host, port: config.port, database: config.database, user: 'warning_test',
         password: 'synthetic-warning-test-only', connectionLimit: 1 });
     try {
         await verifyChildInactivityWarningReadiness(limited);
-        await admin.query('REVOKE UPDATE ON mickeyf_migration_test.parent_child_inactivity_warnings FROM \'warning_test\'@\'%\'');
+        await verifyParentManagedChildActivityReadiness(limited);
+        await assert.rejects(limited.query('EXPLAIN DELETE FROM parent_child_inactivity_warnings WHERE child_uuid=?', ['not-an-id']));
+        await assert.rejects(limited.query('EXPLAIN DELETE FROM parent_managed_child_activity WHERE child_uuid=?', ['not-an-id']));
+        await admin.query('REVOKE UPDATE (receipt_digest) ON mickeyf_migration_test.parent_child_inactivity_warnings FROM \'warning_test\'@\'%\'');
         await assert.rejects(verifyChildInactivityWarningReadiness(limited));
     } finally { await limited.end(); await admin.query("DROP USER 'warning_test'@'%'"); }
 });
