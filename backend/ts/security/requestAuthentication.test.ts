@@ -11,6 +11,15 @@ import {
 const secret = 'unit-test-secret-that-is-not-a-runtime-credential';
 const account = { userId: 42, userName: 'verified-user', accountId: '11111111-2222-4333-8444-555555555555' };
 
+test('initial remembered sessions reserve clock-skew margin within the 30-day maximum', () => {
+    const issuedAtMs = 1_800_000_000_000;
+    const issued = issueSessionToken(account, secret, true, issuedAtMs);
+    const claims = jwt.decode(issued.token) as jwt.JwtPayload;
+    assert.equal(claims.exp! - claims.iat!, PERSISTENT_SESSION_SECONDS - 3);
+    assert.equal(issued.expiresAt, claims.exp);
+    assert.equal(issued.maxAge, (PERSISTENT_SESSION_SECONDS - 3) * 1000);
+});
+
 function authRequest(
     signedCookieToken?: unknown,
     authorization?: string

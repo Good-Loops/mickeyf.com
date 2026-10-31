@@ -253,6 +253,19 @@ test('cancelled and expired form requests cannot be approved; bounded cleanup re
     assert.deepEqual(await p.flow.listSignedForms(p.context, {}), { forms: [] });
 });
 
+test('remembered session creation tolerates a two-second application clock lead without exceeding the database limit', async () => {
+    const p = await parent();
+    const realNow = Date.now;
+    Date.now = () => realNow() + 2_000;
+    try {
+        const issued = issueSessionToken({ ...p.account, userName: p.identity.subject }, 'synthetic-skew-secret', true);
+        assert.equal(await createAccountSession(database, p.account, issued.sessionId, issued.expiresAt, passwordHash, true), true);
+        const [[row]] = await admin.query<RowDataPacket[]>(`SELECT TIMESTAMPDIFF(MICROSECOND, UTC_TIMESTAMP(6), expires_at) AS remaining
+            FROM account_sessions WHERE account_uuid=? AND remembered=1`, [p.account.accountId]);
+        assert.ok(Number(row.remaining) <= 30 * 86400 * 1_000_000);
+    } finally { Date.now = realNow; }
+});
+
 test('rotating a remembered session rejects old proof/grants and fresh parent approval recovers', async () => {
     for (const phase of ['provider-proof', 'child-credentials']) {
         const p = await parent(); const secret = 'synthetic-renewal-parent-test'; const origin = 'https://parent.example.test';

@@ -6,6 +6,9 @@ export const SESSION_PURPOSE = 'ludolume-session';
 export const SESSION_VERSION = 2;
 export const STANDARD_SESSION_SECONDS = 4 * 60 * 60;
 export const PERSISTENT_SESSION_SECONDS = 30 * 24 * 60 * 60;
+// Initial tokens use the application clock; the database independently enforces
+// the 30-day maximum. Allow a small clock lead without extending that maximum.
+const PERSISTENT_SESSION_INITIAL_CLOCK_MARGIN_SECONDS = 3;
 export const SESSION_RENEWAL_INTERVAL_SECONDS = 15 * 60;
 export const SESSION_RENEWAL_GRACE_SECONDS = 2 * 60;
 
@@ -50,7 +53,7 @@ export function issueRenewedSessionToken(account: SessionAccount, secret: string
 
 /** Durations are selected on the server, never accepted as arbitrary client input. */
 export function sessionLifetimeSeconds(staySignedIn: boolean): number {
-    return staySignedIn ? PERSISTENT_SESSION_SECONDS : STANDARD_SESSION_SECONDS;
+    return staySignedIn ? PERSISTENT_SESSION_SECONDS - PERSISTENT_SESSION_INITIAL_CLOCK_MARGIN_SECONDS : STANDARD_SESSION_SECONDS;
 }
 
 export function issueSessionToken(account: SessionAccount, secret: string, staySignedIn = false, nowMs = Date.now(),
