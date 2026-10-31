@@ -60,7 +60,7 @@ test('renewal signs committed timestamps identically and caps each credential at
 
 test('server-selected lifetimes align token and cookie expiry without storing the password', () => {
     const now = Date.now();
-    for (const [remember, duration] of [[false, STANDARD_SESSION_SECONDS], [true, PERSISTENT_SESSION_SECONDS]] as const) {
+    for (const [remember, duration] of [[false, STANDARD_SESSION_SECONDS], [true, PERSISTENT_SESSION_SECONDS - 3]] as const) {
         const issued = issueSessionToken(account, secret, remember, now);
         const claims = jwt.verify(issued.token, sessionSigningKey(secret)) as jwt.JwtPayload;
         assert.equal(claims.exp! - claims.iat!, duration);

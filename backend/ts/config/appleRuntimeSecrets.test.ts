@@ -191,10 +191,19 @@ test('the overall deadline includes a stalled response stream and never returns 
     assert.equal(f.calls[0].options?.signal?.aborted, true);
 });
 
-test('a late secret response cannot escape the overall timeout', async () => {
+test('a late secret response cannot escape the overall timeout', async context => {
+    context.mock.timers.enable({ apis: ['setTimeout'] });
     const pending = deferred<Response>();
-    const f = fixture(url => url.includes('apple-signing') ? pending.promise : undefined);
-    await assert.rejects(loadAppleRuntimeLifecycle(environment, { ...f, timeoutMs: 15 }), failure);
+    const started = deferred<void>();
+    const f = fixture(url => {
+        if (!url.includes('apple-signing')) return undefined;
+        started.resolve();
+        return pending.promise;
+    });
+    const rejected = assert.rejects(loadAppleRuntimeLifecycle(environment, { ...f, timeoutMs: 10_000 }), failure);
+    await started.promise;
+    context.mock.timers.tick(10_000);
+    await rejected;
     pending.resolve(json(secretDocument(environment.APPLE_SIGN_IN_PRIVATE_KEY_SECRET_VERSION, privateKey)));
     await new Promise(resolve => setImmediate(resolve));
     assert.equal(f.calls.length, 3);

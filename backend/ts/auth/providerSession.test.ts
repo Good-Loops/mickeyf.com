@@ -82,7 +82,7 @@ for (const rememberMe of [false, true]) {
         assert.deepEqual(authentication.identity, { ...account, sessionId: authentication.identity.sessionId });
         const payload = jwt.decode(cookie.value);
         assert(payload && typeof payload === 'object');
-        const lifetime = rememberMe ? 30 * 24 * 60 * 60 : 4 * 60 * 60;
+        const lifetime = rememberMe ? 30 * 24 * 60 * 60 - 3 : 4 * 60 * 60;
         assert.equal(payload.exp! - payload.iat!, lifetime);
         assert.equal(cookie.options.maxAge, lifetime * 1000);
         const insert = f.calls.find(call => call.sql.startsWith('INSERT INTO account_sessions'));

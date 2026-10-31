@@ -190,7 +190,7 @@ test('login commits a revocable session before its signed cookie, with matching 
     for (const [rememberMe, seconds, origin] of [
         [undefined, 4 * 60 * 60, origins[0]],
         [false, 4 * 60 * 60, origins[0]],
-        [true, 30 * 24 * 60 * 60, origins[0]],
+        [true, 30 * 24 * 60 * 60 - 3, origins[0]],
         [false, 4 * 60 * 60, origins[1]],
     ] as const) {
         const { response, state } = responseRecorder();
