@@ -153,3 +153,20 @@ A 30-day warning period is a proposal, not an owner decision. The process must
 stop for missing activity/contact or unconfirmed delivery, and must use a tested
 child-only deletion and recovery path. The existing withdrawal flow requires
 fresh parent proof and is not itself an automated inactivity-deletion job.
+
+## Follow-up implementation decision
+
+The owner confirmed that a parent-managed child account stays pending when the
+parent does not respond to the warning. A sent message or lack of a bounce is
+not confirmation. The candidate measures authenticated online activity and
+discloses that offline play may not update the timer; it must hold when the
+reliability of activity tracking is unknown. A warning is considered no sooner
+than 30 days before the third calendar anniversary, and deletion is considered
+no sooner than both that anniversary and 30 days after the parent's confirmed
+receipt. Later activity or a keep action invalidates the warning.
+
+The code and isolated tests prepared after the initial review are disabled and
+do not by themselves complete the process. Current-contact verification,
+reliable tracking health across outages and restores, independently durable
+retention history, operator notification, and an end-to-end privacy and device
+review remain necessary. See `backend/docs/child-inactivity-candidate.md`.
