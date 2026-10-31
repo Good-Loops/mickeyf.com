@@ -55,8 +55,14 @@ function mount(t) {
     const begin=async()=>{render();await settle();find(node=>node.type==='select').props.onChange({target:{value:child.accountId}});render();
         find(node=>node.type==='input').props.onChange({target:{value:'WITHDRAW AND DELETE'}});render();button('Confirm deletion').props.onClick();await settle();};
     t.after(()=>{slots.forEach(slot=>slot.cleanup?.());delete globalThis[key];});
-    return {auth,render,settle,find,button,begin,challenge,acquisition,proofs,withdrawals,cancellations,text:()=>text(tree),lists:()=>lists};
+    return {auth,render,settle,find,button,begin,child,challenge,acquisition,proofs,withdrawals,cancellations,text:()=>text(tree),lists:()=>lists};
 }
+
+test('inactivity warning is absent by default even after selecting a child',async t=>{
+    const view=mount(t);view.render();await view.settle();
+    view.find(node=>node.type==='select').props.onChange({target:{value:view.child.accountId}});view.render();await view.settle();
+    assert.equal(view.find(node=>typeof node.type==='function'&&node.type.name==='ParentInactivityWarning'),undefined);
+});
 
 for(const stage of ['provider proof','submitted deletion'])test(`late creation completion refreshes the list without cancelling ${stage}`,async t=>{
     const view=mount(t);await view.begin();

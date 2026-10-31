@@ -17,6 +17,17 @@ public class LudolumeApiPolicyTest {
         }
         assertNull(LudolumeApiPolicy.request(LudolumeApiPolicy.ORIGIN + "/auth/child-activity/delete", "POST", "{}"));
     }
+    @Test public void parentInactivityAllowsOnlyExactWarningAndAcknowledgmentPosts() {
+        String base = LudolumeApiPolicy.ORIGIN + "/auth/child-inactivity/";
+        for (String route : new String[] { "warning", "acknowledge" }) {
+            assertNotNull(LudolumeApiPolicy.request(base + route, "POST", "{}"));
+            assertNull(LudolumeApiPolicy.request(base + route, "GET", null));
+            assertNull(LudolumeApiPolicy.request(base + route + "?extra=1", "POST", "{}"));
+            assertNull(LudolumeApiPolicy.request(base + route + "/", "POST", "{}"));
+        }
+        assertNull(LudolumeApiPolicy.request(base + "delete", "POST", "{}"));
+        assertNull(LudolumeApiPolicy.request("https://attacker.test/auth/child-inactivity/warning", "POST", "{}"));
+    }
     @Test public void androidAppleHandoffRedemptionUsesOnlyItsExactPrivatePostRoute() {
         String url = LudolumeApiPolicy.ORIGIN + "/auth/providers/apple-android/credential";
         assertNotNull(LudolumeApiPolicy.request(url, "POST", "{}"));

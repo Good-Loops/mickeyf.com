@@ -3,6 +3,7 @@ import { Link } from 'react-router-dom';
 import { useAuth } from '@/context/AuthContext';
 import ScoreParticipation from '@/components/ScoreParticipation';
 import ParentRegistration from '@/components/ParentRegistration';
+import ParentInactivityWarning from '@/components/ParentInactivityWarning';
 import { createParentRegistrationApi, type ParentConfig } from '@/services/parentRegistrationApi';
 import { acquireProviderCredential, getAvailableProviderClients, type PublicProviderClient } from '@/services/providerClient';
 import { apiFetch } from '@/services/apiFetch';
@@ -25,6 +26,7 @@ export default function ParentAccounts() {
     const [selected, setSelected] = useState('');
     const [feedback, setFeedback] = useState('');
     const [busy, setBusy] = useState(false);
+    const [warningRevision, setWarningRevision] = useState(0);
     const operation = useRef<AbortController | null>(null);
     const pendingState = useRef<string | null>(null);
     const previousSession = useRef(sessionGeneration);
@@ -75,7 +77,7 @@ export default function ParentAccounts() {
             if (!isCurrent()) return;
             const response = await apiFetch(`${API_BASE}/auth/child-activity/keep`, init);
             if (!response.ok) throw new Error('Request unavailable.');
-            if (!controller.signal.aborted && isCurrent()) setFeedback('This child account has been kept active.');
+            if (!controller.signal.aborted && isCurrent()) { setFeedback('This child account has been kept active.'); setWarningRevision(value => value + 1); }
         } catch { if (!controller.signal.aborted && isCurrent()) setFeedback('We could not confirm that this child account was kept active. Please try again.'); }
         finally { if (operation.current === controller) { operation.current = null; if (!controller.signal.aborted) setBusy(false); } }
     }
@@ -160,6 +162,9 @@ export default function ParentAccounts() {
                     <option value="">Choose the child account</option>{children.map(child => <option key={child.accountId} value={child.accountId}>{child.userName}</option>)}
                 </select></label>
                 {selected && <ScoreParticipation childAccountId={selected} authenticated={isAuthenticated} accountKey={userName ?? ''} sessionGeneration={sessionGeneration}
+                    selectionIsCurrent={() => selectedNow.current === selected} captureAccountAction={captureAccountAction} captureSessionGeneration={captureSessionGeneration} />}
+                {selected && import.meta.env.VITE_ENABLE_CHILD_INACTIVITY_WARNING === '1' && <ParentInactivityWarning
+                    key={`${sessionGeneration}:${selected}`} childAccountId={selected} sessionGeneration={sessionGeneration} refreshKey={warningRevision}
                     selectionIsCurrent={() => selectedNow.current === selected} captureAccountAction={captureAccountAction} captureSessionGeneration={captureSessionGeneration} />}
                 {selected && import.meta.env.VITE_ENABLE_CHILD_ONLINE_ACTIVITY === '1' && <p><button type="button" disabled={busy} onClick={() => void keepChild()}>Keep this child account active</button></p>}
                 <p>Withdrawing consent permanently deletes this child's account and scores and signs out its devices. It cannot be undone.</p>
