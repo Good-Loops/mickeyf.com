@@ -49,8 +49,12 @@ import { verifySignedParentFormReadiness } from './migrations/signedParentFormSc
 import { cleanupSignedParentForms } from './accounts/signedParentFormReview';
 import { parentManagedChildActivity } from './accounts/parentManagedChildActivity';
 import { verifyParentManagedChildActivityReadiness } from './migrations/parentManagedChildActivityReadiness';
+import { loadChildInactivityDeployment } from './config/childInactivityDeployment';
+import { prepareChildInactivityDeployment } from './accounts/childInactivityDeployment';
 
 const runtimeConfig = loadRuntimeConfig();
+const childInactivityConfig = loadChildInactivityDeployment(process.env);
+let childInactivityDeployment: Awaited<ReturnType<typeof prepareChildInactivityDeployment>> | undefined;
 const childActivity = runtimeConfig.childOnlineActivityEnabled ? parentManagedChildActivity : undefined;
 const creationPolicy = registrationPolicyForCreation(runtimeConfig.registrationPolicy);
 const registration = createRegistrationAuthorization(pool,
@@ -88,17 +92,19 @@ app.use(helmet({
 // Mount before CORS/preflight and body parsers so they cannot bypass its checks.
 async function runConfiguredMaintenance(): Promise<number> {
     // Independent cleanup must still run if Apple's provider request fails.
-    const [apple, registrationCleanup, parentCleanup, formCleanup] = await Promise.allSettled([
+    const [apple, registrationCleanup, parentCleanup, formCleanup, inactivity] = await Promise.allSettled([
         runAppleMaintenance({ database: pool, expectedServerUuid: runtimeConfig.appleMaintenance!.expectedServerUuid,
             loadLifecycle: loadRuntimeAppleLifecycle, appleAndroidEnabled: runtimeConfig.providerAuth.appleAndroidEnabled === true }),
         cleanupRegistrationAuthorizations(pool),
         cleanupParentRegistrationAttempts(pool),
         runtimeConfig.parentRegistrationPolicy?.signedFormsEnabled ? cleanupSignedParentForms(pool) : Promise.resolve({ backlog: false }),
+        childInactivityDeployment ? childInactivityDeployment.runMaintenance() : Promise.resolve(0),
     ]);
     return apple.status === 'fulfilled' && apple.value === 0
         && registrationCleanup.status === 'fulfilled' && !registrationCleanup.value.backlog
         && parentCleanup.status === 'fulfilled' && !parentCleanup.value.backlog
-        && formCleanup.status === 'fulfilled' && !formCleanup.value.backlog ? 0 : 1;
+        && formCleanup.status === 'fulfilled' && !formCleanup.value.backlog
+        && inactivity.status === 'fulfilled' && inactivity.value === 0 ? 0 : 1;
 }
 app.use(APPLE_MAINTENANCE_PATH, createAppleMaintenanceRouter(runtimeConfig.appleMaintenance, runConfiguredMaintenance));
 const localMaintenance = runtimeConfig.localProviderRuntime?.maintenanceEnabled
@@ -172,6 +178,7 @@ async function startServer(): Promise<void> {
             if (runtimeConfig.accountDeletionEnabled) {
                 await verifyAccountDeletionReadiness(pool, runtimeConfig.accountIdentityEpoch!);
             }
+            if (childInactivityConfig) childInactivityDeployment = await prepareChildInactivityDeployment(pool, childInactivityConfig);
             // Explicit local maintenance performs real queue cleanup only after all startup schema/identity gates pass.
             await localMaintenance?.start();
             const googleWeb = providerAuth.publicClients.find(client => client.clientKey === 'google-web');
@@ -183,7 +190,7 @@ async function startServer(): Promise<void> {
             app.use('/auth', createAuthRouter(
                 pool, runtimeConfig.sessionSecret, runtimeConfig.isProduction, runtimeConfig.corsOrigins,
                 { accountDeletionEnabled: runtimeConfig.accountDeletionEnabled, deletionJournal, providerAuth, registration,
-                    childActivity,
+                    childActivity, childInactivity: childInactivityDeployment?.service,
                     parentRegistrationStorageReady: true, parentRegistrationPolicy: runtimeConfig.parentRegistrationPolicy,
                     scoreParticipationPolicy: runtimeConfig.scoreParticipationPolicy,
                     ...(localMaintenance ? { appleIssuanceAvailable: () => localMaintenance.isHealthy() } : {}) }
