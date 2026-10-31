@@ -1,6 +1,7 @@
 param(
     [Parameter(Mandatory = $true)]
-    [string] $LedgerPath
+    [string] $LedgerPath,
+    [switch] $DeadlineReport
 )
 
 $ErrorActionPreference = 'Stop'
@@ -15,6 +16,8 @@ try {
         'last_successful_reconciliation_at', 'purge_due_at', 'deleted_at')
     $seen = [System.Collections.Generic.HashSet[string]]::new([System.StringComparer]::Ordinal)
     $outstanding = [System.Collections.Generic.List[string]]::new()
+    $deadlines = [System.Collections.Generic.List[object]]::new()
+    $now = [DateTimeOffset]::UtcNow
     Add-Type -AssemblyName Microsoft.VisualBasic
     $parser = [Microsoft.VisualBasic.FileIO.TextFieldParser]::new($file.FullName, [Text.Encoding]::UTF8, $true)
     try {
@@ -34,6 +37,21 @@ try {
             $deleted = $fields[10]
             if ([string]::IsNullOrWhiteSpace($deleted)) {
                 $outstanding.Add($reference)
+                if ($DeadlineReport) {
+                    $due = $fields[9]
+                    if ([string]::IsNullOrWhiteSpace($due)) {
+                        $deadlines.Add([pscustomobject]@{ Reference = $reference; Due = $null; Label = 'NO DEADLINE ENTERED - check request status' })
+                    } else {
+                        $parsedDue = [DateTimeOffset]::MinValue
+                        if ($due -cnotmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,7})?Z$' -or
+                            -not [DateTimeOffset]::TryParse($due, [Globalization.CultureInfo]::InvariantCulture,
+                                [Globalization.DateTimeStyles]::None, [ref] $parsedDue)) { throw 'invalid' }
+                        $label = if ($parsedDue -le $now) { 'DUE OR OVERDUE' }
+                            elseif ($parsedDue -le $now.AddDays(4)) { 'DUE WITHIN 4 DAYS' }
+                            else { 'LATER' }
+                        $deadlines.Add([pscustomobject]@{ Reference = $reference; Due = $parsedDue; Label = $label })
+                    }
+                }
             } else {
                 $parsed = [DateTimeOffset]::MinValue
                 if ($deleted -cnotmatch '^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,7})?Z$' -or
@@ -44,7 +62,21 @@ try {
     } finally {
         $parser.Dispose()
     }
-    if ($outstanding.Count -lt 1 -or $outstanding.Count -gt 100) { throw 'invalid' }
+    if ($outstanding.Count -gt 100 -or (-not $DeadlineReport -and $outstanding.Count -lt 1)) { throw 'invalid' }
+    if ($DeadlineReport) {
+        # Buffer all output until the entire file has been checked. The private
+        # register remains authoritative; this only reports entered deadlines.
+        $lines = [System.Collections.Generic.List[string]]::new()
+        $lines.Add(('PRIVATE FORM DEADLINES - checked {0}' -f $now.ToString('yyyy-MM-ddTHH:mm:ssZ')))
+        foreach ($entry in @($deadlines | Sort-Object @{ Expression = { if ($null -eq $_.Due) { [DateTimeOffset]::MaxValue } else { $_.Due } } }, Reference)) {
+            $date = if ($null -eq $entry.Due) { 'not entered' } else { $entry.Due.ToString('yyyy-MM-ddTHH:mm:ss.fffffffZ') }
+            $lines.Add(('{0} | {1} | {2}' -f $entry.Reference, $date, $entry.Label))
+        }
+        if ($outstanding.Count -eq 0) { $lines.Add('No outstanding rows in this register.') }
+        $lines.Add('Verify each deadline against the request and all copies. This report does not prove deletion or send reminders.')
+        [Console]::Out.WriteLine(($lines -join [Environment]::NewLine))
+        exit 0
+    }
     $payload = @{ references = @($outstanding.ToArray()) }
     ConvertTo-Json -InputObject $payload -Compress -Depth 3
 } catch {

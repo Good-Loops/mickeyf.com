@@ -11,7 +11,7 @@ const script = path.join(root, 'scripts/parent-form-ledger-input.ps1');
 const source = path.join(root, 'release-prep/2026-10-21/parent-form-retention-register.example.csv');
 const first = '00000000-0000-4000-8000-000000000001';
 const second = '00000000-0000-4000-8000-000000000002';
-const run = ledger => spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-File', script, '-LedgerPath', ledger],
+const run = (ledger, ...options) => spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-File', script, '-LedgerPath', ledger, ...options],
     { encoding: 'utf8', timeout: 15_000 });
 
 test('private ledger conversion emits only unique outstanding references and fails closed',
@@ -60,6 +60,56 @@ test('private ledger conversion emits only unique outstanding references and fai
             result = run(ledger);
             assert.notEqual(result.status, 0, 'more than 100 active rows must not produce a truncated list');
             assert.equal(result.stdout.trim(), '');
+        } finally {
+            await rm(temp, { recursive: true, force: true });
+        }
+    });
+
+test('deadline report sorts entered deadlines, flags missing dates, and emits nothing for invalid input',
+    { skip: process.platform !== 'win32' }, async () => {
+        const temp = await mkdtemp(path.join(os.tmpdir(), 'synthetic-parent-deadlines-'));
+        try {
+            const ledger = path.join(temp, 'register.csv');
+            const fixture = await readFile(source, 'utf8');
+            const [header, sample] = fixture.trimEnd().split(/\r?\n/u);
+            const now = Date.now();
+            const at = days => new Date(now + days * 86_400_000).toISOString();
+            const row = (id, due, deleted = '') => {
+                const fields = sample.split(',');
+                fields[0] = `00000000-0000-4000-8000-${String(id).padStart(12, '0')}`;
+                fields[6] = 'PRIVATE-MESSAGE-SENTINEL';
+                fields[9] = due;
+                fields[10] = deleted;
+                return fields.join(',');
+            };
+            await writeFile(ledger, `${header}\n${row(1, at(-1))}\n${row(2, at(2))}\n${row(3, at(10))}\n${row(4, '')}\n${row(5, at(-1), at(-2))}\n`);
+            let result = run(ledger, '-DeadlineReport');
+            assert.equal(result.status, 0, result.stderr);
+            assert.match(result.stdout, /000000000001.*DUE OR OVERDUE/u);
+            assert.match(result.stdout, /000000000002.*DUE WITHIN 4 DAYS/u);
+            assert.match(result.stdout, /000000000003.*LATER/u);
+            assert.match(result.stdout, /000000000004.*NO DEADLINE ENTERED/u);
+            assert.doesNotMatch(result.stdout, /000000000005|PRIVATE-MESSAGE-SENTINEL/u);
+            assert.ok(result.stdout.indexOf('000000000001') < result.stdout.indexOf('000000000002'));
+            assert.ok(result.stdout.indexOf('000000000003') < result.stdout.indexOf('000000000004'));
+
+            for (const invalid of [
+                `${header}\n${row(1, at(-1))}\n${row(2, '2026-02-31T00:00:00Z')}\n`,
+                `${header}\n${row(1, at(-1))}\n${row(1, at(1))}\n`,
+                `${header}\n${row(1, at(-1))}\n${row(2, '', at(2))}\n`,
+                `${header}\n${row(1, at(-1))}\n${row(2, 'PRIVATE-SENTINEL')}\n`,
+            ]) {
+                await writeFile(ledger, invalid);
+                result = run(ledger, '-DeadlineReport');
+                assert.notEqual(result.status, 0);
+                assert.equal(result.stdout.trim(), '', 'invalid later rows must not print a partial report');
+                assert.doesNotMatch(result.stderr, /PRIVATE-SENTINEL|PRIVATE-MESSAGE-SENTINEL/u);
+            }
+            await writeFile(ledger, `${header}\n`);
+            result = run(ledger, '-DeadlineReport');
+            assert.equal(result.status, 0, result.stderr);
+            assert.match(result.stdout, /No outstanding rows in this register/u);
+            assert.match(result.stdout, /does not prove deletion/u);
         } finally {
             await rm(temp, { recursive: true, force: true });
         }

@@ -112,6 +112,24 @@ attachments, or validate that a human review was completed. It does not simplify
 or bypass the target, schema, source, account and proxy checks in the report.
 Both register and report contain sensitive metadata; keep them private.
 
+To see the deadlines already entered in the register, run this local-only view
+in the same private window:
+
+```powershell
+& ./scripts/parent-form-ledger-input.ps1 -LedgerPath 'P:\Records\retention-register.csv' -DeadlineReport
+```
+
+It lists outstanding references ordered by entered deadline, flags dates due
+now or within four days, and flags blank deadlines for a status check. Four
+days covers the longer gap in a typical twice-weekly routine; it is a reminder
+threshold, not a deletion deadline or automatic reminder. An active account
+may have no deletion deadline yet. The view does not calculate the correct
+deadline from the request's status or verify that an entered date is correct.
+Check the guarded report and current facts before acting. A header-only register
+means only that this register contains no rows; it does not prove that the
+mailbox, unreferenced messages, downloads or backups have no copies. The view
+does not delete anything or inspect those copies.
+
 The optional summary displays only request references, their observed states and
 short actions; it omits database target details. It rejects invalid, duplicate,
 future or older-than-one-hour reports without printing a partial list. The report
