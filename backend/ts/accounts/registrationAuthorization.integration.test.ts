@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { after, before, test } from 'node:test';
 import bcrypt from 'bcryptjs';
-import mysql, { type Connection, type Pool, type RowDataPacket } from 'mysql2/promise';
+import mysql, { type Connection, type Pool, type PoolConnection, type RowDataPacket } from 'mysql2/promise';
 import { loadMigrationConfig } from '../config/migrationConfig';
 import { loadRegistrationPolicy } from '../config/registrationPolicy';
 import { loadMigrationManifest } from '../migrations/migrationManifest';
@@ -12,6 +12,11 @@ import type { MigrationConnection } from '../migrations/leaderboardSchema';
 import type { ProviderAuthContext } from '../auth/providerAuthContext';
 import type { VerifiedProviderIdentity } from '../auth/providerIdentity';
 import { createAccountSession, SessionEligibilityRejected } from '../auth/accountSessionRepository';
+import { AccountSessionUnavailableError } from '../auth/accountSessionRepository';
+import { establishProviderSession } from '../auth/providerSession';
+import { stageAppleCredential } from '../auth/stagedAppleCredential';
+import { createAppleTokenRepository, type StoredAppleToken } from './appleTokenRepository';
+import type { Response } from 'express';
 import { readP4VegaLeaderboard, submitP4VegaScore } from '../leaderboards/p4VegaScoreRepository';
 import { readThreeBossesLeaderboard, submitThreeBossesRun } from '../leaderboards/threeBossesRunRepository';
 import { createRegisteredPasswordAccount } from './registeredPasswordAccount';
@@ -119,6 +124,161 @@ async function assertGeneralPrivate(name: string) {
         'SELECT account_uuid FROM account_registration_profiles WHERE account_uuid=?', [user.accountId]))[0].length, 0);
     return user;
 }
+
+/** Every account, credential, provider identity and age grant below is synthetic. */
+async function stagedAppleFixture() {
+    const childPolicy = loadRegistrationPolicy({ REGISTRATION_ENABLED: 'true', REGISTRATION_POLICY_REVIEWED: 'true',
+        REGISTRATION_AUDIENCE: 'children-included', REGISTRATION_POLICY_VERSION: 'synthetic-stage-v1',
+        REGISTRATION_COUNTRY_RULES: '{"ZZ":{"parentRequiredBelow":15}}' })!;
+    const registration = createRegistrationAuthorization(generalDatabase, childPolicy, childPolicy.audience, false);
+    const binding = context();
+    assert.equal((await registration.begin(binding, { country: 'ZZ', ageBand: 'adult', policyVersion: childPolicy.version })).allowed, true);
+    const userName = `stage-${randomUUID()}`;
+    await administrator.query('INSERT INTO users (user_name,email,user_password) VALUES (?,?,?)',
+        [userName, `${userName}@example.test`, passwordHash]);
+    const user = { ...await account(userName), userName };
+    const subject = `synthetic-${randomUUID()}`;
+    const clientId = 'com.example.synthetic.apple';
+    const issuedAt = Math.floor(Date.now() / 1000) - 2;
+    const identity = { provider: 'apple', subject, appleClientId: clientId, appleIssuedAt: issuedAt } as VerifiedProviderIdentity;
+    const proof = { subject, clientId, issuedAt };
+    await administrator.query(`INSERT INTO account_provider_identities (account_uuid,provider,subject,linked_at)
+        VALUES (?,'apple',?,UTC_TIMESTAMP(6))`, [user.accountId, Buffer.from(subject)]);
+    const vault = createAppleTokenRepository({ clientId, activeKeyId: 'synthetic', encryptionKeys: { synthetic: randomBytes(32) } });
+    await vault.save(administrator as unknown as PoolConnection, vault.prepare('synthetic-old-refresh', user.accountId));
+    const tokenRows = async () => (await administrator.query<(RowDataPacket & StoredAppleToken)[]>(
+        'SELECT token_id, account_uuid, client_id, encrypted_token FROM apple_provider_tokens WHERE account_uuid=? ORDER BY token_id',
+        [user.accountId]))[0];
+    const sessionRows = async () => (await administrator.query<RowDataPacket[]>(
+        'SELECT session_hash FROM account_sessions WHERE account_uuid=?', [user.accountId]))[0];
+    const eligibility = async (connection: PoolConnection) => {
+        try { await registration.assertLoginAvailableOnConnection(connection, binding); return true; }
+        catch (error) { if (error instanceof RegistrationRequiredError) return false; throw error; }
+    };
+    return { user, identity, proof, vault, registration, binding, tokenRows, sessionRows, eligibility };
+}
+
+test('staged Apple credential and provider session commit together for an eligible account', async () => {
+    const f = await stagedAppleFixture(); const before = await f.tokenRows();
+    const stage = stageAppleCredential(f.vault, f.user, f.identity, 'synthetic-new-refresh');
+    try {
+        assert.equal(await createAccountSession(generalDatabase, f.user, randomBytes(32).toString('base64url'),
+            Math.floor(Date.now() / 1000) + 3600, undefined, false, f.proof, undefined, f.eligibility, stage.write), true);
+    } finally { stage.dispose(); }
+    const after = await f.tokenRows();
+    assert.equal(after.length, 2); assert.deepEqual(after.find(row => row.token_id === before[0].token_id), before[0]);
+    assert.deepEqual(after.map(row => f.vault.decrypt(row)).sort(), ['synthetic-new-refresh', 'synthetic-old-refresh']);
+    assert.equal((await f.sessionRows()).length, 1);
+});
+
+test('a cancelled eligibility grant leaves the existing Apple credential and sessions unchanged', async () => {
+    const f = await stagedAppleFixture(); const before = await f.tokenRows();
+    const stage = stageAppleCredential(f.vault, f.user, f.identity, 'synthetic-new-refresh');
+    await f.registration.cancel(f.binding);
+    let writes = 0;
+    try {
+        await assert.rejects(createAccountSession(generalDatabase, f.user, randomBytes(32).toString('base64url'),
+            Math.floor(Date.now() / 1000) + 3600, undefined, false, f.proof, undefined, f.eligibility,
+            async (...args) => { writes++; await stage.write(...args); }), SessionEligibilityRejected);
+    } finally { stage.dispose(); }
+    assert.equal(writes, 0); assert.deepEqual(await f.tokenRows(), before); assert.deepEqual(await f.sessionRows(), []);
+});
+
+test('an Apple credential write failure rolls back its SQL insert and leaves the old token intact', async () => {
+    const f = await stagedAppleFixture(); const before = await f.tokenRows();
+    const failingVault = { ...f.vault, async save(connection: Pick<PoolConnection, 'query'>, token: ReturnType<typeof f.vault.prepare>) {
+        await f.vault.save(connection, token); throw new Error('synthetic-failure-after-insert');
+    } };
+    const stage = stageAppleCredential(failingVault, f.user, f.identity, 'synthetic-new-refresh');
+    try {
+        await assert.rejects(createAccountSession(generalDatabase, f.user, randomBytes(32).toString('base64url'),
+            Math.floor(Date.now() / 1000) + 3600, undefined, false, f.proof, undefined, f.eligibility, stage.write), AccountSessionUnavailableError);
+    } finally { stage.dispose(); }
+    assert.deepEqual(await f.tokenRows(), before); assert.deepEqual(await f.sessionRows(), []);
+});
+
+test('a session insert collision rolls back the staged token and preserves the other account session', async () => {
+    const f = await stagedAppleFixture(); const other = await stagedAppleFixture(); const before = await f.tokenRows();
+    const sharedSession = randomBytes(32).toString('base64url');
+    assert.equal(await createAccountSession(generalDatabase, other.user, sharedSession, Math.floor(Date.now() / 1000) + 3600), true);
+    const stage = stageAppleCredential(f.vault, f.user, f.identity, 'synthetic-new-refresh');
+    try {
+        await assert.rejects(createAccountSession(generalDatabase, f.user, sharedSession,
+            Math.floor(Date.now() / 1000) + 3600, undefined, false, f.proof, undefined, f.eligibility, stage.write), AccountSessionUnavailableError);
+    } finally { stage.dispose(); }
+    assert.deepEqual(await f.tokenRows(), before); assert.deepEqual(await f.sessionRows(), []);
+    assert.equal((await other.sessionRows()).length, 1);
+});
+
+test('an Apple subject mismatch fails before staged token persistence', async () => {
+    const f = await stagedAppleFixture(); const before = await f.tokenRows();
+    const stage = stageAppleCredential(f.vault, f.user, f.identity, 'synthetic-new-refresh');
+    let writes = 0;
+    try {
+        assert.equal(await createAccountSession(generalDatabase, f.user, randomBytes(32).toString('base64url'),
+            Math.floor(Date.now() / 1000) + 3600, undefined, false, { ...f.proof, subject: 'synthetic-wrong-subject' },
+            undefined, f.eligibility, async (...args) => { writes++; await stage.write(...args); }), false);
+    } finally { stage.dispose(); }
+    assert.equal(writes, 0); assert.deepEqual(await f.tokenRows(), before); assert.deepEqual(await f.sessionRows(), []);
+});
+
+test('eligibility that expires after token insertion rolls the token and session back', async () => {
+    const f = await stagedAppleFixture(); const before = await f.tokenRows();
+    const stage = stageAppleCredential(f.vault, f.user, f.identity, 'synthetic-new-refresh');
+    let stagedWrites = 0, eligibilityReads = 0;
+    const checkWithExpiry = async (connection: PoolConnection) => {
+        eligibilityReads++;
+        if (eligibilityReads !== 2) return f.eligibility(connection);
+        await connection.query('SET timestamp = UNIX_TIMESTAMP() + 3600');
+        try { return await f.eligibility(connection); }
+        finally { await connection.query('SET timestamp = 0'); }
+    };
+    try {
+        await assert.rejects(createAccountSession(generalDatabase, f.user, randomBytes(32).toString('base64url'),
+            Math.floor(Date.now() / 1000) + 3600, undefined, false, f.proof, undefined, checkWithExpiry,
+            async (connection, user, proof) => {
+                await stage.write(connection, user, proof);
+                stagedWrites++;
+            }), SessionEligibilityRejected);
+    } finally { stage.dispose(); }
+    assert.equal(stagedWrites, 1, 'the first eligibility check must have allowed the staged write');
+    assert.equal(eligibilityReads, 2, 'the staged write must be followed by a second eligibility check');
+    assert.deepEqual(await f.tokenRows(), before); assert.deepEqual(await f.sessionRows(), []);
+});
+
+test('an unknown commit result sends no cookie and does not claim token or session rollback', async () => {
+    const f = await stagedAppleFixture(); const before = await f.tokenRows();
+    const stage = stageAppleCredential(f.vault, f.user, f.identity, 'synthetic-new-refresh');
+    let simulatedLostResponse = false;
+    const uncertainDatabase = { async getConnection() {
+        const connection = await generalDatabase.getConnection();
+        return new Proxy(connection, { get(target, property) {
+            if (property === 'query') return async (...args: unknown[]) => {
+                const result = await Reflect.apply(target.query, target, args);
+                const statement = typeof args[0] === 'string' ? args[0]
+                    : (args[0] as { sql?: string } | undefined)?.sql;
+                if (statement === 'COMMIT') { simulatedLostResponse = true; throw new Error('synthetic-lost-commit-response'); }
+                return result;
+            };
+            const value = Reflect.get(target, property, target);
+            return typeof value === 'function' ? value.bind(target) : value;
+        } });
+    } };
+    const cookieOperations: string[] = [];
+    const response = { clearCookie() { cookieOperations.push('clear'); return this; },
+        cookie() { cookieOperations.push('set'); return this; } } as unknown as Response;
+    try {
+        await assert.rejects(establishProviderSession(uncertainDatabase, { headers: { origin: 'https://synthetic.example.test' } },
+            response, f.user, false, randomBytes(32).toString('base64url'), true, 'apple', f.proof, f.eligibility, stage.write),
+        AccountSessionUnavailableError);
+    } finally { stage.dispose(); }
+    assert.equal(simulatedLostResponse, true);
+    assert.deepEqual(cookieOperations, []);
+    const after = await f.tokenRows();
+    assert.equal(after.length, 2, 'the synthetic COMMIT reached MySQL despite the lost response');
+    assert.deepEqual(after.find(row => row.token_id === before[0].token_id), before[0]);
+    assert.equal((await f.sessionRows()).length, 1, 'the result must be treated as unknown rather than rolled back');
+});
 
 test('provider session checks a current adult grant under a transaction lock', async () => {
     const childPolicy = loadRegistrationPolicy({ REGISTRATION_ENABLED: 'true', REGISTRATION_POLICY_REVIEWED: 'true',
