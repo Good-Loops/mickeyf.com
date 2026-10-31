@@ -183,3 +183,14 @@ test('child-audience provider login denies minor grants without changing signup 
     await assert.rejects(createRegistrationAuthorization(missing.database, childPolicy, childPolicy.audience, true)
         .assertLoginAvailable(context()), RegistrationRequiredError);
 });
+
+test('transactional provider eligibility locks and rechecks the adult grant', async () => {
+    const childPolicy = { ...policy, audience: 'children-included' as const };
+    const adult = fixture('adult');
+    const service = createRegistrationAuthorization(adult.database, childPolicy, childPolicy.audience, false);
+    await service.assertLoginAvailableOnConnection(adult.connection, context());
+    assert.match(adult.calls[0].sql, /FOR UPDATE$/u);
+    const missing = fixture('adult', false, true);
+    await assert.rejects(createRegistrationAuthorization(missing.database, childPolicy, childPolicy.audience, false)
+        .assertLoginAvailableOnConnection(missing.connection, context()), RegistrationRequiredError);
+});

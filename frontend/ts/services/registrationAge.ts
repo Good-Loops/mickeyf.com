@@ -8,6 +8,7 @@ export type NativeAgeRange = Readonly<{
 type AgeSource = { request: () => Promise<unknown> } | null;
 const unavailable: NativeAgeRange = { status: 'unavailable', minimumAge: null, maximumAge: null };
 const parentKey = 'ludolume.parent-registration-until';
+const minorProviderKey = 'ludolume.minor-provider-until';
 export const PARENT_RESTRICTION_MS = 24 * 60 * 60 * 1000;
 
 /** Both native bridges normalize their upper bound to an inclusive age. */
@@ -37,6 +38,7 @@ async function loadAgeSource(): Promise<AgeSource> {
 export function createRegistrationAge({ load = loadAgeSource, storage = () => typeof window === 'undefined' ? null : window.sessionStorage,
     now = Date.now }: { load?: () => Promise<AgeSource>; storage?: () => Storage | null; now?: () => number } = {}) {
     let restrictedUntil = 0;
+    let minorProviderUntil = 0;
     function parentRequired(): boolean {
         if (restrictedUntil > now()) return true;
         try {
@@ -55,8 +57,28 @@ export function createRegistrationAge({ load = loadAgeSource, storage = () => ty
         try { if (restrictedUntil) storage()?.setItem(parentKey, String(restrictedUntil)); }
         catch { /* Keep the protective in-memory result if storage becomes unavailable. */ }
     }
+    function minorProviderRestricted(): boolean {
+        if (minorProviderUntil > now()) return true;
+        try {
+            const value = storage()?.getItem(minorProviderKey);
+            if (!value) return false;
+            if (!/^[0-9]{13}$/u.test(value)) return true;
+            const expiry = Number(value);
+            if (expiry > now() + PARENT_RESTRICTION_MS) return true;
+            if (expiry > now()) { minorProviderUntil = expiry; return true; }
+            storage()?.removeItem(minorProviderKey);
+            return false;
+        } catch { return true; }
+    }
+    function rememberMinorProvider(): void {
+        if (!minorProviderRestricted()) minorProviderUntil = now() + PARENT_RESTRICTION_MS;
+        try { if (minorProviderUntil) storage()?.setItem(minorProviderKey, String(minorProviderUntil)); }
+        catch { /* Retain the in-memory restriction when storage is unavailable. */ }
+    }
     return {
         parentRequired,
+        minorProviderRestricted,
+        rememberMinorProvider,
         async check(selected: RegistrationAgeBand, parentRequiredBelow: number): Promise<RegistrationAgeBand | null> {
             if (parentRequired()) return 'parent-required';
             if (!Number.isInteger(parentRequiredBelow) || parentRequiredBelow < 1 || parentRequiredBelow > 18) return null;

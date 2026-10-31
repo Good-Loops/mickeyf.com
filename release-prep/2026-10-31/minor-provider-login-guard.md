@@ -2,15 +2,22 @@
 
 The child-audience provider login path now rejects an eligibility grant whose
 age band is `minor` before creating a provider challenge, and rechecks it before
-provider completion. The UI explains that provider sign-in is temporarily
+provider completion. Provider session creation rechecks the grant under a SQL
+row lock in the session transaction, after provider verification and before
+session insertion. A cancelled, expired, missing or minor grant cannot issue a
+session. The UI explains that provider sign-in is temporarily
 unavailable after a minor result and offers password login or guest play. Adult
 provider login, existing password login, guest play and signup authorization are
 separate paths. This change does not write or alter any account or score.
+The current tab remembers a minor provider restriction for 24 hours across
+component remounts, without storing an exact age, to block adult reselection.
 
 This is **not** a durable, cross-tab age restriction. The anonymous eligibility
 grant is bound to an individual signed cookie. A different anonymous binding may
-still assert an adult band; a request that already passed its grant check may
-continue if the grant is revoked while provider verification is in flight.
+still assert an adult band. The tab-local restriction is not synchronized across
+tabs or devices. A cancellation that loses the race for the grant-row lock waits
+for the session transaction to commit and cannot retroactively revoke that
+session, even if it arrived before the commit completed.
 The server does not independently attest the age signal from the native client.
 Do not claim this guard proves that all minors or all concurrent sessions have
 been identified. Account creation remains paused; release requires separately

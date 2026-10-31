@@ -6,7 +6,7 @@ import jwt from 'jsonwebtoken';
 import type { Pool, PoolConnection, QueryOptions } from 'mysql2/promise';
 import type { ProviderAccount } from '../accounts/providerAccountRepository';
 import { verifyRequestToken } from '../security/requestAuthentication';
-import { AccountSessionUnavailableError, readLiveSession } from './accountSessionRepository';
+import { AccountSessionUnavailableError, readLiveSession, SessionEligibilityRejected } from './accountSessionRepository';
 import { establishProviderSession } from './providerSession';
 
 const account: ProviderAccount = { userId: 7, userName: 'provider-player', accountId: randomUUID() };
@@ -113,6 +113,26 @@ test('production provider sessions use signed HttpOnly web or native cookies and
         assert.deepEqual(f.cookies[0].options, { httpOnly: true, secure: true, sameSite,
             signed: true, priority: 'high', path: '/', maxAge: 4 * 60 * 60 * 1000 });
         assert.deepEqual(f.cleared, ['__session', 'session']);
+    }
+});
+
+test('provider eligibility is rechecked under transaction before session insertion and rejects revoked grants', async () => {
+    for (const accepted of [true, false]) {
+        const f = fixture();
+        const outcome = establishProviderSession(f.database, { headers: {} }, f.response, account, false, sessionSecret, true,
+            undefined, undefined, async connection => {
+                await connection.query({ sql: 'SELECT synthetic_eligibility FOR UPDATE', timeout: 10_000 });
+                return accepted;
+            });
+        if (accepted) assert.equal(await outcome, true);
+        else await assert.rejects(outcome, SessionEligibilityRejected);
+        const sql = f.calls.map(call => call.sql);
+        const guard = sql.indexOf('SELECT synthetic_eligibility FOR UPDATE');
+        assert(guard > sql.indexOf('START TRANSACTION'));
+        const next = accepted ? sql.findIndex(value => value.startsWith('INSERT INTO account_sessions')) : sql.indexOf('ROLLBACK');
+        assert(guard < next);
+        assert.equal(f.cookies.length, accepted ? 1 : 0);
+        assert.equal(sql.some(value => value.startsWith('INSERT INTO account_sessions')), accepted);
     }
 });
 

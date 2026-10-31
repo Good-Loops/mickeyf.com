@@ -15,6 +15,7 @@ const QUERY_TIMEOUT_MS = 10_000;
 const SESSION_LIMIT = 10;
 const EXPIRY_SQL = "TIMESTAMPADD(SECOND, ?, '1970-01-01 00:00:00')";
 class AppleSessionProofRejected extends Error {}
+export class SessionEligibilityRejected extends Error {}
 
 export class AccountSessionUnavailableError extends Error {
     constructor() {
@@ -64,6 +65,7 @@ export async function createAccountSession(
     rememberMe = false,
     appleProof?: AppleSessionProof,
     childActivity?: ParentManagedChildActivity,
+    eligibilityCheck?: (connection: PoolConnection) => Promise<boolean>,
 ): Promise<boolean> {
     const hash = sessionHash(target, sessionId);
     const appleHash = appleProof === undefined ? undefined : appleSubjectHash(appleProof);
@@ -109,6 +111,7 @@ export async function createAccountSession(
             // Recheck after every lock/cap wait and roll back eviction on rejection.
             // Initial provider verification cannot rule out revocation during sign-in.
             if (proof && !await assertFreshAppleSession(connection, account.accountId, proof)) throw new AppleSessionProofRejected();
+            if (eligibilityCheck && !await eligibilityCheck(connection)) throw new SessionEligibilityRejected();
             // UTC arithmetic avoids depending on a pooled connection's session time zone.
             const [inserted] = await connection.query<ResultSetHeader>({
                 sql: `INSERT INTO account_sessions (session_hash, account_uuid, created_at, expires_at,
@@ -129,6 +132,7 @@ export async function createAccountSession(
         }, 'READ COMMITTED'));
     } catch (error) {
         if (error instanceof AppleSessionProofRejected) return false;
+        if (error instanceof SessionEligibilityRejected) throw error;
         // Never retain raw driver parameters, credentials, or an uncertain commit as a successful login.
         throw new AccountSessionUnavailableError();
     }

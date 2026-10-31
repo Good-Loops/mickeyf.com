@@ -85,13 +85,15 @@ export default function RegistrationGate({ children, purpose = 'signup' }: {
         const started = Date.now();
         try {
             const rule = countryPolicy.countries.find(item => item.country === country)!;
+            if (purpose === 'provider-login' && ageBand === 'minor') registrationAge.rememberMinorProvider();
             const effectiveAge = await registrationAge.check(ageBand, rule.parentRequiredBelow);
             if (current !== generation.current) return;
             if (!effectiveAge) {
                 setFeedback('Your device could not confirm an age range. You can keep exploring without an account. A parent can use their own device for parent-led registration, or contact us through the privacy page for help.');
                 return;
             }
-            if (purpose === 'provider-login' && effectiveAge === 'minor') {
+            if (purpose === 'provider-login' && effectiveAge === 'minor') registrationAge.rememberMinorProvider();
+            if (purpose === 'provider-login' && effectiveAge !== 'parent-required' && registrationAge.minorProviderRestricted()) {
                 setFeedback('Google and Apple sign-in are temporarily unavailable. You can use your existing username and password, or continue as a guest.');
                 return;
             }

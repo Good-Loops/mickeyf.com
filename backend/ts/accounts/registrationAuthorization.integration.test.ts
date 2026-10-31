@@ -11,12 +11,12 @@ import { verifyRegistrationReadiness } from '../migrations/registrationSchema';
 import type { MigrationConnection } from '../migrations/leaderboardSchema';
 import type { ProviderAuthContext } from '../auth/providerAuthContext';
 import type { VerifiedProviderIdentity } from '../auth/providerIdentity';
-import { createAccountSession } from '../auth/accountSessionRepository';
+import { createAccountSession, SessionEligibilityRejected } from '../auth/accountSessionRepository';
 import { readP4VegaLeaderboard, submitP4VegaScore } from '../leaderboards/p4VegaScoreRepository';
 import { readThreeBossesLeaderboard, submitThreeBossesRun } from '../leaderboards/threeBossesRunRepository';
 import { createRegisteredPasswordAccount } from './registeredPasswordAccount';
 import { createProviderAccount } from './providerAccountRepository';
-import { createRegistrationAuthorization } from './registrationAuthorization';
+import { createRegistrationAuthorization, RegistrationRequiredError } from './registrationAuthorization';
 import { deleteAccount } from './accountDeletionRepository';
 import { renderRuntimeGrantStatements } from '../security/runtimeGrantManifest';
 
@@ -119,6 +119,55 @@ async function assertGeneralPrivate(name: string) {
         'SELECT account_uuid FROM account_registration_profiles WHERE account_uuid=?', [user.accountId]))[0].length, 0);
     return user;
 }
+
+test('provider session checks a current adult grant under a transaction lock', async () => {
+    const childPolicy = loadRegistrationPolicy({ REGISTRATION_ENABLED: 'true', REGISTRATION_POLICY_REVIEWED: 'true',
+        REGISTRATION_AUDIENCE: 'children-included', REGISTRATION_POLICY_VERSION: 'synthetic-lock-v1',
+        REGISTRATION_COUNTRY_RULES: '{"ZZ":{"parentRequiredBelow":15}}' })!;
+    const registration = createRegistrationAuthorization(generalDatabase, childPolicy, childPolicy.audience, false);
+    const makeGrant = async () => {
+        const binding = context();
+        assert.equal((await registration.begin(binding, { country: 'ZZ', ageBand: 'adult', policyVersion: childPolicy.version })).allowed, true);
+        return binding;
+    };
+    const name = `lock-${randomUUID()}`;
+    await administrator.query('INSERT INTO users (user_name,email,user_password) VALUES (?,?,?)',
+        [name, `${name}@example.test`, passwordHash]);
+    const user = await account(name);
+    const sessionId = () => randomBytes(32).toString('base64url');
+    const expiresAt = () => Math.floor(Date.now() / 1000) + 3600;
+    const revoked = await makeGrant();
+    await registration.cancel(revoked);
+    await assert.rejects(createAccountSession(generalDatabase, user, sessionId(), expiresAt(), undefined, false, undefined, undefined,
+        async connection => {
+            try { await registration.assertLoginAvailableOnConnection(connection, revoked); return true; }
+            catch (error) { if (error instanceof RegistrationRequiredError) return false; throw error; }
+        }), SessionEligibilityRejected);
+    assert.equal((await administrator.query<RowDataPacket[]>(
+        'SELECT session_hash FROM account_sessions WHERE account_uuid=?', [user.accountId]))[0].length, 0);
+
+    const binding = await makeGrant();
+    let locked!: () => void; let release!: () => void;
+    const lockedSignal = new Promise<void>(resolve => { locked = resolve; });
+    const releaseSignal = new Promise<void>(resolve => { release = resolve; });
+    const pending = createAccountSession(generalDatabase, user, sessionId(), expiresAt(), undefined, false, undefined, undefined,
+        async connection => {
+            await registration.assertLoginAvailableOnConnection(connection, binding);
+            locked(); await releaseSignal; return true;
+        });
+    const other = await generalDatabase.getConnection();
+    try {
+        await lockedSignal;
+        await other.query('SET SESSION innodb_lock_wait_timeout = 1');
+        await assert.rejects(other.query({ sql: 'DELETE FROM registration_authorizations WHERE binding_hash = ?', timeout: 10_000 },
+            [binding.bindingHash]), (error: unknown) => !!error && typeof error === 'object'
+                && 'code' in error && error.code === 'ER_LOCK_WAIT_TIMEOUT');
+    } finally { other.destroy(); release(); }
+    assert.equal(await pending, true);
+    await registration.cancel(binding);
+    assert.equal((await administrator.query<RowDataPacket[]>(
+        'SELECT session_hash FROM account_sessions WHERE account_uuid=?', [user.accountId]))[0].length, 1);
+});
 
 test('fresh schema records all migrations and enforces the private-minor database constraint', async () => {
     const plan = await planMigrations(administrator as unknown as MigrationConnection, loadMigrationManifest(), config);

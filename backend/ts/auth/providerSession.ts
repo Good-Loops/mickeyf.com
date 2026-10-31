@@ -1,5 +1,5 @@
 import type { Request, Response } from 'express';
-import type { Pool } from 'mysql2/promise';
+import type { Pool, PoolConnection } from 'mysql2/promise';
 import type { ProviderAccount } from '../accounts/providerAccountRepository';
 import { clearAuthenticationCookies, NATIVE_SESSION_COOKIE, sessionCookieOptions, WEB_SESSION_COOKIE } from '../security/sessionCookie';
 import { issueSessionToken, type SessionAuthenticationMethod } from '../security/sessionPolicy';
@@ -14,13 +14,14 @@ export async function establishProviderSession(
     account: ProviderAccount, rememberMe: boolean, sessionSecret: string, isProduction: boolean,
     authenticationMethod?: SessionAuthenticationMethod,
     appleProof?: AppleSessionProof,
+    eligibilityCheck?: (connection: PoolConnection) => Promise<boolean>,
 ): Promise<boolean> {
     if ((authenticationMethod === 'apple') !== (appleProof !== undefined)) {
         throw new TypeError('Apple sessions require verified original authentication proof.');
     }
     const issued = issueSessionToken(account, sessionSecret, rememberMe, Date.now(), authenticationMethod);
     const created = await createAccountSession(database, account, issued.sessionId,
-        issued.expiresAt, undefined, rememberMe, appleProof);
+        issued.expiresAt, undefined, rememberMe, appleProof, undefined, eligibilityCheck);
     if (!created) return false;
     // A failed or uncertain commit must never send a usable authentication cookie.
     const name = req.headers.origin === 'capacitor://localhost' ? NATIVE_SESSION_COOKIE : WEB_SESSION_COOKIE;

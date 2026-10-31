@@ -74,6 +74,13 @@ export function createRegistrationAuthorization(database: Pick<Pool, 'query'> & 
         if (!decision.allowed) throw new RegistrationRequiredError();
         return { binding, decision };
     }
+    async function assertAdultLogin(connection: Pick<PoolConnection, 'query'>, context: ProviderAuthContext | null, lock: boolean) {
+        if (audience !== 'children-included') throw new RegistrationRequiredError();
+        const { decision } = await read(connection, context, lock);
+        // Login does not yet bind a minor's privacy decision to an existing account.
+        // Refuse this path until public-score privacy can be enforced durably.
+        if (decision.ageBand !== 'adult') throw new RegistrationRequiredError();
+    }
     return {
         policy,
         audience,
@@ -133,11 +140,13 @@ export function createRegistrationAuthorization(database: Pick<Pool, 'query'> & 
             else await read(database, context, false);
         },
         async assertLoginAvailable(context: ProviderAuthContext | null): Promise<void> {
-            if (audience !== 'children-included') throw new RegistrationRequiredError();
-            const { decision } = await read(database, context, false);
-            // Login does not yet bind a minor's privacy decision to an existing account.
-            // Refuse this path until public-score privacy can be enforced durably.
-            if (decision.ageBand !== 'adult') throw new RegistrationRequiredError();
+            await assertAdultLogin(database, context, false);
+        },
+        async assertLoginAvailableOnConnection(connection: Pick<PoolConnection, 'query'>,
+            context: ProviderAuthContext | null): Promise<void> {
+            // The session transaction holds this row lock until commit, so a
+            // concurrent cancellation cannot invalidate the grant before issuance.
+            await assertAdultLogin(connection, context, true);
         },
         /** Called inside the NEW account transaction; failures roll back user, identity, privacy and consumption together. */
         async consume(connection: PoolConnection, context: ProviderAuthContext | null, accountId: string): Promise<void> {

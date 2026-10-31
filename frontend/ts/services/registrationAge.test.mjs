@@ -74,3 +74,17 @@ test('blocked storage fails protectively; an in-flight adult response cannot era
     finish(shared(18, null));
     assert.equal(await earlier, 'parent-required');
 });
+
+test('minor provider restriction survives remount and adult reselection without extending its expiry', () => {
+    const storage = store(); let now = 1_790_000_000_000;
+    const make = () => createRegistrationAge({ storage: () => storage, now: () => now, load: async () => null });
+    const first = make(); first.rememberMinorProvider();
+    assert.equal(first.minorProviderRestricted(), true);
+    const expiry = [...storage.values.values()][0];
+    assert.match(expiry, /^[0-9]{13}$/u);
+    now += PARENT_RESTRICTION_MS - 1;
+    const remounted = make(); assert.equal(remounted.minorProviderRestricted(), true);
+    remounted.rememberMinorProvider(); assert.equal([...storage.values.values()][0], expiry);
+    now++; assert.equal(remounted.minorProviderRestricted(), false);
+    assert.equal(storage.values.size, 0);
+});

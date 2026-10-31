@@ -5,13 +5,14 @@ import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import cookieParser from 'cookie-parser';
 import express from 'express';
-import type { Pool } from 'mysql2/promise';
+import type { Pool, PoolConnection } from 'mysql2/promise';
 import { AccountDeletionPendingError } from '../accounts/accountDeletionRepository';
 import { createAppleTokenRepository } from '../accounts/appleTokenRepository';
 import { createRegistrationAuthorization } from '../accounts/registrationAuthorization';
 import { loadRegistrationPolicy } from '../config/registrationPolicy';
 import { readProviderAccountMethods, type ProviderAccountCreationResult } from '../accounts/providerAccountRepository';
 import { createProviderAuthContextReader } from '../auth/providerAuthContext';
+import { SessionEligibilityRejected } from '../auth/accountSessionRepository';
 import { createProviderAuthFlow, type ProviderAuthClient, type ProviderChallengeResult, type ProviderCompletionResult } from '../auth/providerAuthFlow';
 import type { ProviderAttempt } from '../auth/providerAttemptRepository';
 import type { VerifiedProviderIdentity } from '../auth/providerIdentity';
@@ -39,14 +40,14 @@ function signedCookie(value: string, name = '__session') {
 
 type Features = { signupEnabled?: boolean; accountDeletionEnabled?: boolean; withJournal?: boolean; missingProviderTable?: boolean;
     appleDeletionEnabled?: boolean; appleTokens?: boolean; appleStorage?: boolean; immediateRevocation?: boolean;
-    appleIssuanceAvailable?: () => boolean; childAudience?: boolean };
+    appleIssuanceAvailable?: () => boolean; childAudience?: boolean; revokeOnVerify?: boolean };
 
 function fixture(features: Features = {}) {
     const state = {
         events: [] as string[], contextReads: 0, databaseReads: 0, verifiedNonces: [] as string[],
         rememberMe: [] as boolean[], proofs: [] as SessionProof[], linked: true, accountExists: true,
         sessionExists: true, sessionFailure: false, contextFailure: false,
-        eligibilityAgeBand: 'adult' as 'adult' | 'minor',
+        eligibilityAgeBand: 'adult' as 'adult' | 'minor' | 'missing',
         beginFailure: null as FailureReason | null, completionFailure: null as FailureReason | null,
         creation: { created: true, account } as ProviderAccountCreationResult,
         deletion: 'deleted' as 'deleted' | 'invalid-password' | 'not-found' | 'pending' | 'unavailable',
@@ -62,7 +63,7 @@ function fixture(features: Features = {}) {
         state.databaseReads++;
         if (state.contextFailure) throw new Error('private database details');
         if (features.childAudience && query.sql.startsWith('SELECT country_code AS country')) {
-            return [[{ country: 'US', ageBand: state.eligibilityAgeBand }], []];
+            return [state.eligibilityAgeBand === 'missing' ? [] : [{ country: 'US', ageBand: state.eligibilityAgeBand }], []];
         }
         if (features.missingProviderTable && query.sql.includes('user_password IS NOT NULL')) {
             return [[{ hasPassword: state.methods?.hasPassword ? 1 : 0 }], []];
@@ -79,6 +80,7 @@ function fixture(features: Features = {}) {
     const clients: Record<string, ProviderAuthClient> = { 'google-test': {
         provider: 'google', verifier: { async verify(_provider, token, nonce) {
             state.events.push('verify');
+            if (features.revokeOnVerify) state.eligibilityAgeBand = 'missing';
             state.verifiedNonces.push(nonce);
             return token === 'accepted-token' || token === 'x'.repeat(PROVIDER_TOKEN_MAX_LENGTH)
                 ? { verified: true, identity } : { verified: false, reason: 'INVALID_PROVIDER_TOKEN' };
@@ -149,7 +151,9 @@ function fixture(features: Features = {}) {
                 return state.completionFailure ? { ok: false, reason: state.completionFailure } : flow.complete(context, input);
             },
         },
-        async establishSession(_database, _req, res, verifiedAccount, rememberMe, sessionSecret, isProduction) {
+        async establishSession(_database, _req, res, verifiedAccount, rememberMe, sessionSecret, isProduction,
+            _method, _proof, eligibilityCheck) {
+            if (eligibilityCheck && !await eligibilityCheck(database as unknown as PoolConnection)) throw new SessionEligibilityRejected();
             state.events.push('session');
             assert.deepEqual(verifiedAccount, account);
             state.rememberMe.push(rememberMe);
@@ -270,6 +274,21 @@ test('minor provider eligibility never issues an HTTP session, including a chang
         assert.equal(accepted.status, 200);
         assert.equal(state.events.filter(event => event === 'session').length, 1);
     }, true, { childAudience: true });
+});
+
+test('a grant revoked while provider verification runs cannot produce a session cookie', async () => {
+    await withServer(async (base, { state }) => {
+        const cookie = signedCookie(['provider', 'v1', Date.now(), Buffer.alloc(32, 9).toString('base64url')].join(':'));
+        const started = await post(base, 'begin', beginInput, { cookie });
+        assert.equal(started.status, 200);
+        const { state: challengeState } = await started.json() as { state: string };
+        const response = await post(base, 'complete', { ...beginInput, state: challengeState, idToken: 'accepted-token' }, { cookie });
+        assert.equal(response.status, 403);
+        assert.deepEqual(await response.json(), { error: 'REGISTRATION_REQUIRED' });
+        assert.equal(response.headers.getSetCookie().length, 0);
+        assert.equal(state.events.includes('verify'), true);
+        assert.equal(state.events.includes('session'), false);
+    }, true, { childAudience: true, revokeOnVerify: true });
 });
 
 test('native Apple credential discovery exposes only the current Apple session subject without cookies or mutations', async () => {

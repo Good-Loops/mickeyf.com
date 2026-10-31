@@ -9,7 +9,7 @@ import type { VerifiedProviderIdentity } from '../auth/providerIdentity';
 import { deleteProviderAccount, type BeforeAccountDeletion } from '../accounts/accountDeletionRepository';
 import { attemptAppleAccountRevocation, type AppleAccountRevocation } from '../accounts/attemptAppleAccountRevocation';
 import type { AccountDeletionJournal } from '../accounts/deletionJournal';
-import { readLiveSession } from '../auth/accountSessionRepository';
+import { readLiveSession, SessionEligibilityRejected } from '../auth/accountSessionRepository';
 import { createProviderAuthContextReader } from '../auth/providerAuthContext';
 import { createProviderAuthFlow, type ProviderAuthClient, type ProviderCompletionResult,
     type ProviderAuthFlowDependencies } from '../auth/providerAuthFlow';
@@ -20,7 +20,7 @@ import { authenticateRequest } from '../security/requestAuthentication';
 import { clearAuthenticationCookies, NATIVE_SESSION_COOKIE, WEB_SESSION_COOKIE, SESSION_COOKIE_NAMES,
     sessionCookieOptions } from '../security/sessionCookie';
 import { isRecord } from '../security/userRequestValidation';
-import { createRegistrationAuthorization, type RegistrationAuthorization } from '../accounts/registrationAuthorization';
+import { createRegistrationAuthorization, RegistrationRequiredError, type RegistrationAuthorization } from '../accounts/registrationAuthorization';
 import type { createAppleAndroidHandoffFlow } from '../auth/appleAndroidHandoffFlow';
 import { createAppleAndroidHandoffRouter } from './appleAndroidHandoffRouter';
 import type { ProviderAttemptAction } from '../auth/providerAttemptRepository';
@@ -292,10 +292,19 @@ export function createProviderAuthRouter(options: ProviderAuthRouterOptions): Ro
                     return res.json({ success: true, deleted: true });
                 }
                 failureStage = 'session-establish';
+                const registration = options.registration;
+                const eligibilityCheck = req.body.action === 'login' && registration?.audience === 'children-included'
+                    ? async (connection: Parameters<typeof registration.assertLoginAvailableOnConnection>[0]) => {
+                        try { await registration.assertLoginAvailableOnConnection(connection, context); return true; }
+                        catch (error) { if (error instanceof RegistrationRequiredError) return false; throw error; }
+                    } : undefined;
                 if (!await services.establishSession(database, req, res, result.account, rememberMe === true,
-                    sessionSecret, isProduction, result.authenticationMethod, result.appleSessionProof)) return fail(res, 'ACCOUNT_GONE');
+                    sessionSecret, isProduction, result.authenticationMethod, result.appleSessionProof, eligibilityCheck)) return fail(res, 'ACCOUNT_GONE');
                 return res.json({ success: true, user_name: result.account.userName });
-            } catch (error) { reportProviderAuthFailure(failureStage, error); return fail(res, 'UNAVAILABLE'); }
+            } catch (error) {
+                if (error instanceof SessionEligibilityRejected) return fail(res, 'REGISTRATION_REQUIRED');
+                reportProviderAuthFailure(failureStage, error); return fail(res, 'UNAVAILABLE');
+            }
         }));
     return router;
 }

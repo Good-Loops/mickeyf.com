@@ -15,6 +15,8 @@ const mocks = {
         export const beginRegistration = (...args) => ${scope}.begin(...args);
         export const cancelRegistration = (...args) => ${scope}.cancel(...args);`,
     registrationAge: `export const registrationAge = { parentRequired: () => ${scope}.parentRequired,
+        minorProviderRestricted: () => ${scope}.minorRestricted,
+        rememberMinorProvider: () => { ${scope}.minorRestricted = true; },
         check: async selected => { if (selected === 'parent-required') ${scope}.parentRequired = true; return selected; } };`,
 };
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -34,7 +36,7 @@ function mount(t, policy, purpose = 'signup') {
     let cursor = 0, dirty = false, tree;
     const previous = Object.getOwnPropertyDescriptor(globalThis, key);
     const hooks = {
-        parentRequired: false,
+        parentRequired: false, minorRestricted: false,
         state(initial) {
             const slot = slots[cursor++] ??= { value: initial };
             return [slot.value, value => { slot.value = typeof value === 'function' ? value(slot.value) : value; dirty = true; }];
@@ -192,6 +194,11 @@ test('minor provider login shows a temporary notice and does not request a grant
     assert(view.find(node => node.type === 'p' && node.props.role === 'alert'
         && node.props.children.startsWith('Google and Apple sign-in are temporarily unavailable.')));
     assert.deepEqual(view.calls, [['config']]);
+    assert.equal(view.children.length, 0);
+    await view.change('registration-age', 'adult');
+    await view.find(node => node.type === 'form').props.onSubmit({ preventDefault() {} });
+    view.render(); await view.settle();
+    assert.deepEqual(view.calls, [['config']], 'adult reselection must not bypass a known minor result');
     assert.equal(view.children.length, 0);
 });
 
