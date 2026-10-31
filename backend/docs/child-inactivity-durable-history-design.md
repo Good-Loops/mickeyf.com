@@ -32,6 +32,10 @@ reconciliation: the exact authenticated parent can record an append-only kept
 resolution only after later activity is visible on the locked SQL relationship.
 The verifier clears that intent only while SQL still confirms that activity.
 A deleted resolution never clears a restored live account automatically.
+For a normal successful inactivity deletion, the service records a signed
+deleted outcome only after the SQL transaction confirms commit. If that
+outcome write is unconfirmed, the conditional intent remains for manual
+reconciliation; it is never blindly retried.
 `reconcileDeletedRetentionIntent` can record a deleted outcome only after an
 administrator's exact SQL user/database/server pins and the held restore guard
 are checked against an absent account on the drained original primary. It uses

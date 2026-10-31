@@ -3,6 +3,8 @@ import { createHash } from 'node:crypto';
 import test from 'node:test';
 import { createGcsRetentionJournal, RetentionJournalUnavailableError } from './gcsRetentionJournal';
 import type { RetentionIntent } from './childInactivityWorkflow';
+import { deleteInactiveChild, InactivityDeletionUncertainError, type InactivityStore, type LockedInactivityTarget } from './childInactivityWorkflow';
+import { INACTIVITY_NOTICE_DIGEST, type InactivitySnapshot } from './childInactivityPolicy';
 import type { JournalHttpClient, JournalHttpRequest } from './gcsDeletionJournal';
 
 const bucket = 'ludolume-test-conditional-intents';
@@ -174,4 +176,47 @@ test('resolution is append-only, authenticated, and bound to the exact condition
     const name = [...io.objects.keys()].find(value => value.startsWith('v1/resolutions/'))!;
     io.objects.set(name, io.objects.get(name)!.replace('"kept"', '"deleted"'));
     assert.equal(await store.readResolution(intent), null);
+});
+
+test('confirmed SQL deletion produces a separately signed append-only deleted outcome', async () => {
+    const io = transport(); const store = journal(io.client);
+    await store.recordRetentionIntent(intent);
+    await assert.rejects(store.recordCommittedDeletion(intent, '2020-01-01T00:00:00.000000Z'), /timestamp/);
+    await store.recordCommittedDeletion(intent, '2026-02-01T00:00:00.000000Z');
+    const outcome = await store.readResolution(intent);
+    assert.equal(outcome?.outcome, 'deleted'); assert.equal(outcome?.observedActivityAt, null);
+    assert.match(outcome?.proofDigest ?? '', /^[a-f0-9]{64}$/);
+    await assert.rejects(store.recordCommittedDeletion(intent, '2026-02-01T00:00:00.000000Z'),
+        RetentionJournalUnavailableError, 'uncertain writes are never retried blindly');
+});
+
+test('committed SQL deletion writes its outcome after commit; uncertain commit writes no outcome', async () => {
+    for (const commitFails of [false, true]) {
+        const io = transport(); let committed = false; let resolutionBeforeCommit = false;
+        const guardedClient: JournalHttpClient = { async request(request) {
+            if (request.method === 'POST' && String(request.params.name).startsWith('v1/resolutions/') && !committed) resolutionBeforeCommit = true;
+            return io.client.request(request);
+        } };
+        const storeJournal = journal(guardedClient);
+        const warning = { ...intent, noticeDigest: INACTIVITY_NOTICE_DIGEST };
+        const snapshot: InactivitySnapshot = { parentId: intent.parentId, childId: intent.childId, activityAt: intent.activityAt,
+            activityComplete: true, currentTargetDigest: intent.targetDigest, targetVerified: true, channel: intent.channel, warning };
+        const target = { async snapshot() { return snapshot; }, async assertDeletionStillDue() {},
+            async databaseTimestamp() { return '2026-02-01T00:00:00.000000Z'; }, async deleteChild() {} } as unknown as LockedInactivityTarget;
+        const store: InactivityStore = { async withLockedChild(_parent, _child, operation) {
+            const result = await operation(target);
+            if (commitFails) throw new Error('synthetic uncertain commit');
+            committed = true; return result;
+        } };
+        if (commitFails) {
+            await assert.rejects(deleteInactiveChild(store, storeJournal, intent.parentId, intent.childId,
+                Date.parse('2026-02-01T00:00:00.000Z')), InactivityDeletionUncertainError);
+            assert.equal([...io.objects.keys()].some(name => name.startsWith('v1/resolutions/')), false);
+        } else {
+            assert.equal(await deleteInactiveChild(store, storeJournal, intent.parentId, intent.childId,
+                Date.parse('2026-02-01T00:00:00.000Z')), 'deleted');
+            assert.equal((await storeJournal.readResolution(warning))?.outcome, 'deleted');
+        }
+        assert.equal(resolutionBeforeCommit, false);
+    }
 });

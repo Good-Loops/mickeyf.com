@@ -152,6 +152,8 @@ export interface RetentionJournal {
     verifyRetentionIntent(intent: RetentionIntent): Promise<boolean>;
     /** Prove independent activity/keep history is complete across any restore. Unknown means false. */
     verifyActivityContinuity(intent: RetentionIntent, connection?: Pick<PoolConnection, 'query'>): Promise<boolean>;
+    /** Only after SQL commit, write a separately durable deleted outcome. */
+    recordCommittedDeletion(intent: RetentionIntent, confirmedAt: string): Promise<void>;
 }
 
 function matchesIntent(snapshot: InactivitySnapshot, intent: RetentionIntent): boolean {
@@ -182,11 +184,14 @@ export async function replayRetentionIntent(store: InactivityStore, journal: Ret
 export async function deleteInactiveChild(store: InactivityStore, journal: RetentionJournal,
     parentId: string, childId: string, now = Date.now()): Promise<'held' | 'deleted'> {
     validIds(parentId, childId);
-    if (!journal || typeof journal.recordRetentionIntent !== 'function' || typeof journal.verifyRetentionIntent !== 'function' || typeof journal.verifyActivityContinuity !== 'function')
+    if (!journal || typeof journal.recordRetentionIntent !== 'function' || typeof journal.verifyRetentionIntent !== 'function'
+        || typeof journal.verifyActivityContinuity !== 'function' || typeof journal.recordCommittedDeletion !== 'function')
         throw new TypeError('An independent retention journal and continuity verifier are required.');
     let journalAttempted = false;
+    let committedIntent: RetentionIntent | undefined;
+    let confirmedAt: string | undefined;
     try {
-        return await store.withLockedChild(parentId, childId, async target => {
+        const result = await store.withLockedChild(parentId, childId, async target => {
             const snapshot = await target.snapshot();
             if (!snapshot || snapshot.parentId !== parentId || snapshot.childId !== childId
                 || assessChildInactivity(snapshot, now) !== 'eligible' || !snapshot.warning || !snapshot.activityAt
@@ -197,11 +202,24 @@ export async function deleteInactiveChild(store: InactivityStore, journal: Reten
                 deliveredAt: warning.deliveredAt, receiptDigest: warning.receiptDigest };
             if (!await (target.verifyContinuity ? target.verifyContinuity(intent, journal) : journal.verifyActivityContinuity(intent))) return 'held';
             await target.assertDeletionStillDue();
+            const databaseTime = await target.databaseTimestamp();
+            if (parseInactivityInstant(databaseTime) === null || databaseTime < intent.deliveredAt) {
+                throw new Error('Database clock is unavailable.');
+            }
             journalAttempted = true;
             await journal.recordRetentionIntent(intent);
             await target.deleteChild(childId);
+            committedIntent = intent;
+            confirmedAt = databaseTime;
             return 'deleted';
         });
+        // The result above is returned only after the SQL adapter confirms COMMIT.
+        // A lost journal acknowledgement leaves an explicit intent requiring review.
+        if (result === 'deleted') {
+            if (!committedIntent || !confirmedAt) throw new Error('Committed deletion evidence is unavailable.');
+            await journal.recordCommittedDeletion(committedIntent, confirmedAt);
+        }
+        return result;
     } catch (error) {
         if (journalAttempted) throw new InactivityDeletionUncertainError(error);
         throw error;

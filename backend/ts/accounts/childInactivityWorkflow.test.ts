@@ -38,7 +38,9 @@ function fixture() {
         },
     };
     let intent: RetentionIntent | undefined;
-    const journal = { async recordRetentionIntent(value: RetentionIntent) { assert.equal(value.childId, childId); intent = value; events.push('journal'); }, async verifyRetentionIntent() { return true; }, async verifyActivityContinuity() { return true; } };
+    const journal = { async recordRetentionIntent(value: RetentionIntent) { assert.equal(value.childId, childId); intent = value; events.push('journal'); },
+        async recordCommittedDeletion() { assert.equal(deleted, true, 'resolution follows confirmed SQL commit'); events.push('resolved'); },
+        async verifyRetentionIntent() { return true; }, async verifyActivityContinuity() { return true; } };
     return { store, journal, events, get snapshot() { return current; }, get deleted() { return deleted; }, get intent() { return intent; },
         setSnapshot(next: InactivitySnapshot | null) { current = next; }, setPending(value: PendingInactivityWarning | null) { pending = value; },
         setCommitFailure(value = true) { failCommit = value; } };
@@ -60,7 +62,7 @@ test('warning is prepared once, confirmed with evidence, and deletion follows th
     assert.equal(await deleteInactiveChild(f.store, f.journal, parentId, childId, deletionTime - 1), 'held');
     assert.deepEqual(f.events, []);
     assert.equal(await deleteInactiveChild(f.store, f.journal, parentId, childId, deletionTime), 'deleted');
-    assert.deepEqual(f.events, ['journal', 'delete']); assert.equal(f.deleted, true);
+    assert.deepEqual(f.events, ['journal', 'delete', 'resolved']); assert.equal(f.deleted, true);
 });
 
 test('a warning cannot follow a changed activity, identity, address, or unverified receipt', async () => {
@@ -89,10 +91,21 @@ test('journal failure or uncertain commit never reports deletion as safely faile
         const f = fixture(); const pending = await prepareInactivityWarning(f.store, parentId, childId, warningTime); assert.ok(pending);
         await confirmInactivityWarning(f.store, parentId, childId, {}, async () => receipt(pending), warningTime);
         if (cause === 'commit') f.setCommitFailure();
-        const journal = cause === 'journal' ? { async recordRetentionIntent() { throw new Error('ack lost'); }, async verifyRetentionIntent() { return true; }, async verifyActivityContinuity() { return true; } } : f.journal;
+        const journal = cause === 'journal' ? { async recordRetentionIntent() { throw new Error('ack lost'); },
+            async recordCommittedDeletion() { assert.fail('Cannot resolve an unconfirmed intent'); }, async verifyRetentionIntent() { return true; }, async verifyActivityContinuity() { return true; } } : f.journal;
         await assert.rejects(deleteInactiveChild(f.store, journal, parentId, childId, deletionTime), InactivityDeletionUncertainError);
         assert.equal(f.deleted, false);
     }
+});
+
+test('lost post-commit resolution acknowledgment reports uncertainty while preserving the durable intent', async () => {
+    const f = fixture(); const pending = await prepareInactivityWarning(f.store, parentId, childId, warningTime); assert.ok(pending);
+    await confirmInactivityWarning(f.store, parentId, childId, {}, async () => receipt(pending), warningTime);
+    const journal = { ...f.journal, async recordCommittedDeletion() { throw new Error('synthetic lost acknowledgment'); } };
+    await assert.rejects(deleteInactiveChild(f.store, journal, parentId, childId, deletionTime), InactivityDeletionUncertainError);
+    assert.equal(f.deleted, true, 'SQL commit happened even though resolution is unconfirmed');
+    assert.ok(f.intent, 'the earlier conditional intent remains available for reconciliation');
+    assert.deepEqual(f.events, ['journal', 'delete']);
 });
 
 test('unknown relationship or unhealthy tracking never reaches the journal', async () => {

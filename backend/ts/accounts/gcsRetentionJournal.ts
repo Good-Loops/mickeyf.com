@@ -216,6 +216,14 @@ export function createGcsRetentionJournal(options: Options): RetentionJournal & 
             throw new RetentionJournalUnavailableError();
         }
     }
+    async function recordCommittedDeletion(intent: RetentionIntent, confirmedAt: string): Promise<void> {
+        if (parseInactivityInstant(confirmedAt) === null || confirmedAt < intent.deliveredAt) {
+            throw new TypeError('Invalid committed deletion timestamp.');
+        }
+        const proofDigest = createHmac('sha256', key).update('ludolume-retention-committed-sql-v1\0')
+            .update(signed(intent).name).update('\0').update(confirmedAt).digest('hex');
+        await recordResolution(intent, { outcome: 'deleted', confirmedAt, observedActivityAt: null, proofDigest });
+    }
     async function listObjects(prefix: string, softDeleted: boolean, deadline: number): Promise<ObjectInfo[]> {
         const objects: ObjectInfo[] = []; const names = new Set<string>(); const tokens = new Set<string>();
         let pageToken: string | undefined;
@@ -259,7 +267,7 @@ export function createGcsRetentionJournal(options: Options): RetentionJournal & 
         // writers and repeat reconciliation before cutover; this is not replay authority.
         return Object.freeze(results);
     }
-    return { recordRetentionIntent, verifyRetentionIntent, readResolution, recordResolution,
+    return { recordRetentionIntent, verifyRetentionIntent, recordCommittedDeletion, readResolution, recordResolution,
         readIntents: () => readInventory('v1/conditional/'),
         readIntentsForChild: async childId => readInventory(childPrefix(childId)),
         readRestoreGuard, writeRestoreGuard,

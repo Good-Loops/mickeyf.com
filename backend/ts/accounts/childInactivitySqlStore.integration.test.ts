@@ -333,7 +333,10 @@ test('maintenance scans confirmed due accounts and applies the locked deletion c
     await admin.query('UPDATE parent_managed_child_activity SET retention_activity_at=UTC_TIMESTAMP(6) WHERE child_uuid=?', [recent.childId]);
     const intents: string[] = [];
     const journal = { async recordRetentionIntent(intent: { childId: string }) { intents.push(intent.childId); },
-        async verifyRetentionIntent() { return true; }, async verifyActivityContinuity() { return true; } };
+        async recordCommittedDeletion(intent: { childId: string }) {
+            const [committed] = await admin.query<RowDataPacket[]>('SELECT account_uuid FROM users WHERE account_uuid=?', [intent.childId]);
+            assert.equal(committed.length, 0, 'the SQL deletion must commit before recording the outcome');
+        }, async verifyRetentionIntent() { return true; }, async verifyActivityContinuity() { return true; } };
     assert.deepEqual(await runChildInactivityMaintenance(database, store, journal, { afterChildId: null }),
         { examined: 1, held: 0, deleted: 1, nextAfterChildId: null });
     assert.deepEqual(intents, [due.childId]);
@@ -346,7 +349,11 @@ test('real SQL requires a confirmed warning, rechecks the SQL clock before journ
     const { parentId, childId, unrelatedId } = await managedFixture();
     const store = createChildInactivitySqlStore(database, async () => ({ activityComplete: true, targetVerified: true, channel: 'email', currentTargetDigest: targetDigest }));
     const intents: string[] = [];
-    const journal = { async recordRetentionIntent(intent: { childId: string }) { intents.push(intent.childId); }, async verifyRetentionIntent() { return true; }, async verifyActivityContinuity() { return true; } };
+    const journal = { async recordRetentionIntent(intent: { childId: string }) { intents.push(intent.childId); },
+        async recordCommittedDeletion(intent: { childId: string }) {
+            const [committed] = await admin.query<RowDataPacket[]>('SELECT account_uuid FROM users WHERE account_uuid=?', [intent.childId]);
+            assert.equal(committed.length, 0, 'the SQL deletion must be committed before the resolution');
+        }, async verifyRetentionIntent() { return true; }, async verifyActivityContinuity() { return true; } };
     const warning = await prepareInactivityWarning(store, parentId, childId); assert.ok(warning);
     assert.equal(await deleteInactiveChild(store, journal, parentId, childId, Date.now() + 31 * 86400_000), 'held');
     assert.deepEqual(intents, []);
