@@ -43,6 +43,7 @@ import { createManagedChildActivityRouter } from './managedChildActivityRouter';
 import type { ParentManagedChildActivity } from '../accounts/parentManagedChildActivity';
 import { createChildInactivityParentRouter } from './childInactivityParentRouter';
 import type { ChildInactivityParentService } from '../accounts/childInactivityParentService';
+import type { RetentionKeepReconciler } from '../accounts/retentionKeepReconciler';
 
 export { authRoutesContract } from './authRouter.contract';
 
@@ -52,7 +53,7 @@ export function createAuthRouter(
     isProduction: boolean,
     allowedMutationOrigins: readonly string[],
     { accountDeletionEnabled = false, deletionJournal, providerAuth, registration = createRegistrationAuthorization(database),
-        parentRegistrationStorageReady = false, parentRegistrationPolicy, scoreParticipationPolicy, appleIssuanceAvailable, childActivity, childInactivity }: {
+        parentRegistrationStorageReady = false, parentRegistrationPolicy, scoreParticipationPolicy, appleIssuanceAvailable, childActivity, childInactivity, reconcileChildKeep }: {
         scoreParticipationPolicy?: ScoreParticipationPolicy;
         parentRegistrationStorageReady?: boolean;
         parentRegistrationPolicy?: ParentRegistrationPolicy;
@@ -62,6 +63,7 @@ export function createAuthRouter(
         appleIssuanceAvailable?: () => boolean;
         childActivity?: ParentManagedChildActivity;
         childInactivity?: ChildInactivityParentService;
+        reconcileChildKeep?: RetentionKeepReconciler;
         providerAuth?: {
             enabled: boolean;
             signupEnabled?: boolean;
@@ -91,8 +93,8 @@ export function createAuthRouter(
     const beforeAccountDeletion = parentRegistrationStorageReady ? assertNoManagedChildren : undefined;
     if (childActivity && !parentRegistrationStorageReady) throw new Error('Child activity storage is not ready.');
     if (childActivity) router.use('/child-activity', createManagedChildActivityRouter(database,
-        createProviderAuthContextReader({ database, sessionSecret, allowedOrigins: allowedMutationOrigins }), childActivity));
-    if (childInactivity && (!parentRegistrationStorageReady || !childActivity)) {
+        createProviderAuthContextReader({ database, sessionSecret, allowedOrigins: allowedMutationOrigins }), childActivity, reconcileChildKeep));
+    if (childInactivity && (!parentRegistrationStorageReady || !childActivity || !reconcileChildKeep)) {
         throw new Error('Inactivity warnings require ready parent and activity storage.');
     }
     if (childInactivity) router.use('/child-inactivity', createChildInactivityParentRouter(childInactivity,

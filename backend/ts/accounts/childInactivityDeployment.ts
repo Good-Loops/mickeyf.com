@@ -8,6 +8,7 @@ import { prepareChildInactivityRuntime } from './childInactivityRuntime';
 import { createGcsRetentionJournal } from './gcsRetentionJournal';
 import type { JournalHttpClient } from './gcsDeletionJournal';
 import { createPinnedPrimaryHealth } from './retentionPrimaryHealth';
+import { createRetentionKeepReconciler } from './retentionKeepReconciler';
 
 /** Compose real storage and primary verification before exposing either operation. */
 export async function prepareChildInactivityDeployment(database: Pool, config: ChildInactivityDeployment,
@@ -30,7 +31,7 @@ export async function prepareChildInactivityDeployment(database: Pool, config: C
     await requireReadyPrimary();
     const service = await prepareChildInactivityRuntime(database, config.targetKey, config.receiptKey, health);
     const store = createChildInactivitySqlStore(database, createInAppInactivityQualityResolver(config.targetKey, health));
-    return Object.freeze({ service,
+    return Object.freeze({ service, reconcileChildKeep: createRetentionKeepReconciler(store, journal, config.receiptKey),
         async runMaintenance(): Promise<number> {
             await requireReadyPrimary();
             const result = await runChildInactivityMaintenanceCycle(database, store, journal, { afterChildId: null });

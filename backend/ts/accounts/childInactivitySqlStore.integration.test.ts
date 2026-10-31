@@ -38,12 +38,48 @@ import { renderRuntimeGrantStatements } from '../security/runtimeGrantManifest';
 import { applyInactivitySchema, planInactivitySchema, InactivitySchemaError } from '../migrations/childInactivitySchemaOperation';
 import { CHILD_SIGNED_FORM_SQL_SHA256, childSignedFormFingerprint } from '../migrations/childSignedFormOperation';
 import type { ChildSignedFormMetadataSettings } from '../migrations/childSignedFormMetadata';
+import { createRetentionKeepReconciler } from './retentionKeepReconciler';
 
 const config = loadMigrationConfig();
 const rootPassword = 'migration-test-root-only';
 const targetDigest = 'a'.repeat(64);
 let admin: Connection;
 let database: Pool;
+
+test('parent keep over HTTP reconciles a prior conditional intent or reports uncertainty', async () => {
+    const { parentId, childId } = await managedFixture();
+    const [[parent]] = await admin.query<RowDataPacket[]>('SELECT user_id, user_name FROM users WHERE account_uuid=?', [parentId]);
+    const account = { accountId: parentId, userId: parent.user_id as number, userName: parent.user_name as string };
+    const secret = 'synthetic-parent-keep-http-secret', issued = issueSessionToken(account, secret);
+    assert.equal(await createAccountSession(database, account, issued.sessionId, issued.expiresAt), true);
+    const intent: RetentionIntent = { parentId, childId, warningId: randomUUID(), activityAt:'2020-01-01T00:00:00.000000Z',
+        deliveredAt:'2023-01-01T00:00:00.000000Z', channel:'in-app', targetDigest:'a'.repeat(64),
+        noticeDigest:'b'.repeat(64), receiptDigest:'c'.repeat(64) };
+    let resolution: RetentionResolution | null = null, unavailable = false;
+    const journal = { async readIntentsForChild(id: string) { assert.equal(id, childId); if (unavailable) throw new Error('offline'); return [intent]; },
+        async verifyRetentionIntent() { return true; }, async readResolution() { return resolution; },
+        async recordResolution(_intent: RetentionIntent, value: RetentionResolution) { resolution = value; } };
+    const store = createChildInactivitySqlStore(database, createInAppInactivityQualityResolver(Buffer.alloc(32, 3), async () => false));
+    const reconcileChildKeep = createRetentionKeepReconciler(store, journal, Buffer.alloc(32, 8));
+    const app = express(); app.use(cookieParser(secret)); app.use(express.json());
+    app.use('/auth', createAuthRouter(database, secret, false, ['https://parent.example.test'],
+        { parentRegistrationStorageReady:true, childActivity:parentManagedChildActivity, reconcileChildKeep }));
+    const server = app.listen(0, '127.0.0.1'); await once(server, 'listening');
+    const signature = createHmac('sha256', secret).update(issued.token).digest('base64').replace(/=+$/, '');
+    const cookie = `__session=${encodeURIComponent(`s:${issued.token}.${signature}`)}`;
+    const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/auth/child-activity/keep`;
+    const send = () => fetch(url, { method:'POST', headers:{ 'Content-Type':'application/json', Origin:'https://parent.example.test', Cookie:cookie },
+        body:JSON.stringify({ childAccountId:childId }) });
+    try {
+        assert.equal((await send()).status, 204);
+        assert.equal((resolution as RetentionResolution | null)?.outcome, 'kept');
+        assert.equal((await send()).status, 204, 'confirmed keep reconciliation is idempotent');
+        unavailable = true;
+        assert.equal((await send()).status, 503, 'an unavailable journal must not report fully confirmed keep');
+        await revokeAccountSession(database, account.userId, parentId, issued.sessionId);
+        assert.equal((await send()).status, 403);
+    } finally { server.close(); await once(server, 'close'); }
+});
 
 before(async () => {
     assert.equal(process.env.SYNTHETIC_PARENT_CONSENT_REHEARSAL, '1');
@@ -357,7 +393,8 @@ test('mounted warning route checks origin and parent session and acknowledges th
     const service = createChildInactivityParentService(store, Buffer.alloc(32, 8), async id => id === parentId ? [childId] : []);
     const app = express(); app.use(cookieParser(secret)); app.use(express.json());
     app.use('/auth', createAuthRouter(database, secret, false, ['https://parent.example.test'],
-        { parentRegistrationStorageReady: true, childActivity: parentManagedChildActivity, childInactivity: service }));
+        { parentRegistrationStorageReady: true, childActivity: parentManagedChildActivity, childInactivity: service,
+            reconcileChildKeep: async () => {} }));
     const server = app.listen(0, '127.0.0.1'); await once(server, 'listening');
     const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/auth/child-inactivity`;
     const signature = createHmac('sha256', secret).update(issued.token).digest('base64').replace(/=+$/, '');

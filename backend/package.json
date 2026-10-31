@@ -10,7 +10,7 @@
         "test": "tsc -p tsconfig.json --noEmit",
         "parent-form:review": "ts-node ts/accounts/runSignedParentFormReview.ts",
         "parent-form:retention": "ts-node ts/accounts/runSignedParentFormRetention.ts",
-        "test:child-inactivity:unit": "node --test -r ts-node/register ts/config/childInactivityDeployment.test.ts ts/accounts/childInactivityPolicy.test.ts ts/accounts/childInactivityWorkflow.test.ts ts/accounts/childInactivityParentService.test.ts ts/accounts/childInactivityInAppTarget.test.ts ts/accounts/childInactivityMaintenance.test.ts ts/routers/managedChildActivityRouter.test.ts ts/routers/childInactivityParentRouter.test.ts ts/accounts/runChildInactivityReview.test.ts ts/accounts/gcsRetentionJournal.test.ts ts/accounts/retentionPrimaryHealth.test.ts ts/accounts/retentionReconciliation.test.ts",
+        "test:child-inactivity:unit": "node --test -r ts-node/register ts/config/childInactivityDeployment.test.ts ts/accounts/childInactivityPolicy.test.ts ts/accounts/childInactivityWorkflow.test.ts ts/accounts/childInactivityParentService.test.ts ts/accounts/childInactivityInAppTarget.test.ts ts/accounts/childInactivityMaintenance.test.ts ts/routers/managedChildActivityRouter.test.ts ts/routers/childInactivityParentRouter.test.ts ts/accounts/runChildInactivityReview.test.ts ts/accounts/gcsRetentionJournal.test.ts ts/accounts/retentionPrimaryHealth.test.ts ts/accounts/retentionReconciliation.test.ts ts/accounts/retentionKeepReconciler.test.ts",
         "test:child-inactivity:sql": "node scripts/run-child-inactivity-sql-rehearsal.mjs",
         "child-inactivity:review": "ts-node ts/accounts/runChildInactivityReview.ts",
         "child-inactivity:schema": "ts-node ts/migrations/runChildInactivitySchema.ts",

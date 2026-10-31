@@ -191,6 +191,7 @@ async function startServer(): Promise<void> {
                 pool, runtimeConfig.sessionSecret, runtimeConfig.isProduction, runtimeConfig.corsOrigins,
                 { accountDeletionEnabled: runtimeConfig.accountDeletionEnabled, deletionJournal, providerAuth, registration,
                     childActivity, childInactivity: childInactivityDeployment?.service,
+                    reconcileChildKeep: childInactivityDeployment?.reconcileChildKeep,
                     parentRegistrationStorageReady: true, parentRegistrationPolicy: runtimeConfig.parentRegistrationPolicy,
                     scoreParticipationPolicy: runtimeConfig.scoreParticipationPolicy,
                     ...(localMaintenance ? { appleIssuanceAvailable: () => localMaintenance.isHealthy() } : {}) }
