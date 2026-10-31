@@ -55,6 +55,19 @@ signed outcome, and refuses newer restored activity. Neither command proves
 that Cloud Run or another external writer has been fenced; the operator must
 keep all old writers stopped and restored traffic isolated throughout.
 
-This command deliberately has no guard activation, automatic replay, traffic
-cutover, or cloud-resource creation operation. After all records are reconciled,
-an independently reviewed activation/cutover procedure is still required.
+After every intent has a verified outcome and that outcome matches the
+isolated target, an administrator can use `activate` with
+`{"confirmation":"ALL WRITERS FENCED AND INTENTS RECONCILED"}`. It checks the
+held guard, SQL identity, privileges, runtime sessions, every signed intent and
+outcome, and target account state under a short global SQL read lock, then
+updates the guard using its exact generation. It refuses unresolved or changed
+inventory. It cannot itself prove Cloud Run or other external writers are
+stopped; keep them fenced through traffic cutover. If activation is
+unconfirmed, inspect the guard and keep traffic stopped rather than retrying
+blindly.
+
+The command does not create a bucket, grant permissions, apply database
+migrations or switch traffic. An active guard lasts 364 days at most. Review it
+with the annual privacy/security review; after expiry, deletion holds until the
+reviewed procedure is repeated. Automatic renewal is intentionally absent: it
+could not detect an undeclared restore.

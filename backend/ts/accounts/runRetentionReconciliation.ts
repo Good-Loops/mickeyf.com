@@ -6,6 +6,7 @@ import { isAccountId } from './deletionJournal';
 import { createChildInactivitySqlStore } from './childInactivitySqlStore';
 import { createGcsRetentionJournal } from './gcsRetentionJournal';
 import { reconcileDeletedRetentionIntent, reconcileRestoredDeletedIntent } from './retentionReconciliation';
+import { activateRetentionGuard } from './retentionGuardActivation';
 import type { RetentionIntent } from './childInactivityWorkflow';
 
 const FAILURE = 'Retention reconciliation unavailable or unconfirmed. Keep restoration on hold.';
@@ -50,7 +51,7 @@ export async function executeRetentionReconciliation(command: string, input: Rec
         const now = typeof rows[0].nowUtc === 'string' ? Date.parse(rows[0].nowUtc) : NaN;
         if (pins.serverUuid !== pins.originalServerUuid || !Number.isFinite(now) || (await journal.readIntents()).length !== 0) throw new Error(FAILURE);
         const guard = { state: 'hold' as const, database: pins.database, serverUuid: pins.serverUuid,
-            epoch: randomUUID(), expiresAt: new Date(now + 89 * 24 * 60 * 60_000).toISOString() };
+            epoch: randomUUID(), expiresAt: new Date(now + 364 * 24 * 60 * 60_000).toISOString() };
         const generation = await journal.writeRestoreGuard(guard, '0');
         return { state: 'hold', generation };
     }
@@ -62,6 +63,14 @@ export async function executeRetentionReconciliation(command: string, input: Rec
         const generation = await journal.writeRestoreGuard({ state: 'hold', database: current.database,
             serverUuid: current.serverUuid, epoch: current.epoch, expiresAt: current.expiresAt }, current.generation);
         return { state: 'hold', generation };
+    }
+    if (command === 'activate' && Object.keys(input).join(',') === 'confirmation'
+        && input.confirmation === 'ALL WRITERS FENCED AND INTENTS RECONCILED') {
+        const connection = await database.getConnection();
+        try {
+            const generation = await activateRetentionGuard(connection, journal, { ...pins, confirmation: input.confirmation });
+            return { state: 'active', generation };
+        } finally { connection.release(); }
     }
     if ((command !== 'confirm-deleted' && command !== 'apply-restored')
         || Object.keys(input).sort().join(',') !== 'confirmation,intent' || !input.intent
@@ -89,7 +98,7 @@ export async function executeRetentionReconciliation(command: string, input: Rec
 
 export async function runRetentionReconciliation(args = process.argv.slice(2), env: Environment = process.env,
     input: AsyncIterable<string | Uint8Array> = process.stdin): Promise<void> {
-    if (args.length !== 1 || !['inventory', 'initialize-hold', 'hold', 'confirm-deleted', 'apply-restored'].includes(args[0])) throw new Error(FAILURE);
+    if (args.length !== 1 || !['inventory', 'initialize-hold', 'hold', 'activate', 'confirm-deleted', 'apply-restored'].includes(args[0])) throw new Error(FAILURE);
     const body = await readInput(input);
     const config = loadMigrationConfig(env); assertMutationAuthorized(config, env);
     const currentUser = loadMigrationAccountConfirmation(env);

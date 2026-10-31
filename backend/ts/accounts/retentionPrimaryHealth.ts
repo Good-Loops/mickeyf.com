@@ -11,7 +11,7 @@ type Journal = Readonly<{
 }>;
 type Connection = Pick<PoolConnection, 'query'>;
 const timeout = 10_000;
-const MAX_ATTESTATION_MS = 90 * 24 * 60 * 60 * 1000;
+const MAX_ATTESTATION_MS = 365 * 24 * 60 * 60 * 1000;
 
 /**
  * The GCS guard is an authenticated administrative control, not a detector of

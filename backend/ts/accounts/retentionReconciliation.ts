@@ -47,6 +47,21 @@ type RestoreJournal = AdminJournal & Readonly<{ readResolution(intent: Retention
 type AdminConnection = Pick<PoolConnection, 'query' | 'destroy'>;
 type AdminPins = Readonly<{ database: string; serverUuid: string; currentUser: string; confirmation: string }>;
 
+/** Requires direct PROCESS privilege so a restricted account cannot hide writer sessions. */
+export async function assertNoRetentionRuntimeWriters(connection: AdminConnection): Promise<void> {
+    const [privileges] = await connection.query<RowDataPacket[]>({ sql: `SELECT COUNT(*) AS count
+        FROM information_schema.USER_PRIVILEGES WHERE PRIVILEGE_TYPE='PROCESS'
+        AND GRANTEE=CONCAT("'",SUBSTRING_INDEX(CURRENT_USER(),'@',1),"'@'",SUBSTRING_INDEX(CURRENT_USER(),'@',-1),"'")`, timeout: 10_000 });
+    if (!Array.isArray(privileges) || privileges.length !== 1 || ![1, '1'].includes(privileges[0].count)) {
+        throw new Error('The administrator cannot verify writer sessions.');
+    }
+    const [writers] = await connection.query<RowDataPacket[]>({ sql: `SELECT COUNT(*) AS count
+        FROM information_schema.PROCESSLIST WHERE USER='cms_mickeyf' AND ID<>CONNECTION_ID()`, timeout: 10_000 });
+    if (!Array.isArray(writers) || writers.length !== 1 || ![0, '0'].includes(writers[0].count)) {
+        throw new Error('Runtime writers are not drained.');
+    }
+}
+
 /**
  * Administrative use only, after stopping and draining all original writers.
  * A short global MySQL read lock fences database writes while the pinned
@@ -75,17 +90,7 @@ export async function reconcileDeletedRetentionIntent(connection: AdminConnectio
         await identity(); // Never acquire the global lock on an unverified target.
         await connection.query({ sql: 'FLUSH TABLES WITH READ LOCK', timeout: 10_000 });
         const current = await identity();
-        const [privileges] = await connection.query<RowDataPacket[]>({ sql: `SELECT COUNT(*) AS count
-            FROM information_schema.USER_PRIVILEGES WHERE PRIVILEGE_TYPE='PROCESS'
-            AND GRANTEE=CONCAT("'",SUBSTRING_INDEX(CURRENT_USER(),'@',1),"'@'",SUBSTRING_INDEX(CURRENT_USER(),'@',-1),"'")`, timeout: 10_000 });
-        if (!Array.isArray(privileges) || privileges.length !== 1 || ![1, '1'].includes(privileges[0].count)) {
-            throw new Error('The administrator cannot verify writer sessions.');
-        }
-        const [writers] = await connection.query<RowDataPacket[]>({ sql: `SELECT COUNT(*) AS count
-            FROM information_schema.PROCESSLIST WHERE USER='cms_mickeyf' AND ID<>CONNECTION_ID()`, timeout: 10_000 });
-        if (!Array.isArray(writers) || writers.length !== 1 || ![0, '0'].includes(writers[0].count)) {
-            throw new Error('Runtime writers are not drained.');
-        }
+        await assertNoRetentionRuntimeWriters(connection);
         const [rows] = await connection.query<RowDataPacket[]>({ sql: `SELECT account_uuid FROM users
             WHERE account_uuid=? LIMIT 2`, timeout: 10_000 }, [intent.childId]);
         if (!Array.isArray(rows) || rows.length !== 0 || !await journal.verifyRetentionIntent(intent)) {

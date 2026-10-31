@@ -37,7 +37,7 @@ test('allows a pinned writable primary only with a stable current active guard a
 test('holds on a restore hold, stale or changed guard, wrong primary or unresolved child intent', async () => {
     for (const options of [
         { guard: { ...base, state: 'hold' as const } }, { guard: { ...base, expiresAt: '2025-12-31T00:00:00.000Z' } },
-        { guard: { ...base, expiresAt: '2027-01-01T00:00:00.000Z' } }, { guard: { ...base, generation: '0' } },
+        { guard: { ...base, expiresAt: '2027-01-02T00:00:00.000Z' } }, { guard: { ...base, generation: '0' } },
         { secondGuard: { ...base, generation: '13' } }, { server: child }, { name: 'other' }, { readOnly: 1 },
         { readOnly: null as unknown as number }, { intentChild: child }, { throwGuard: true }, { sqlNow: 'bad' },
     ]) {

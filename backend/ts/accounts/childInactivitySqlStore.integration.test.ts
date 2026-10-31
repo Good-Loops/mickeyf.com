@@ -18,6 +18,7 @@ import { createInAppInactivityQualityResolver } from './childInactivityInAppTarg
 import { createPinnedPrimaryHealth } from './retentionPrimaryHealth';
 import { reconcileDeletedRetentionIntent, reconcileKeptRetentionIntent, reconcileRestoredDeletedIntent } from './retentionReconciliation';
 import { executeRetentionReconciliation } from './runRetentionReconciliation';
+import { activateRetentionGuard } from './retentionGuardActivation';
 import type { createGcsRetentionJournal } from './gcsRetentionJournal';
 import type { RetentionIntent } from './childInactivityWorkflow';
 import type { RetentionResolution } from './gcsRetentionJournal';
@@ -203,6 +204,24 @@ test('operator command pins a real SQL target before confirming a deleted intent
         { confirmation: 'ORIGINAL PRIMARY DRAINED AND ACCOUNT ABSENT', intent }, pins, journal, database, Buffer.alloc(32, 8)),
     { operation: 'confirm-deleted', confirmed: true });
     assert.equal(records, 1);
+});
+
+test('guard activation audits an isolated SQL target while runtime writers are drained', async () => {
+    const [[identity]] = await admin.query<RowDataPacket[]>('SELECT DATABASE() AS db,CURRENT_USER() AS user,@@GLOBAL.server_uuid AS id');
+    const original = randomUUID();
+    const guard = { state: 'hold' as const, database: identity.db as string, serverUuid: original,
+        epoch: randomUUID(), expiresAt: '2099-01-01T00:00:00.000Z', generation: '1' };
+    let writes = 0;
+    const journal = { async readRestoreGuard() { return guard; }, async readIntents() { return []; },
+        async readResolution() { return null; }, async writeRestoreGuard(value: { state: string; serverUuid: string }, generation: string) {
+            assert.equal(value.state, 'active'); assert.equal(value.serverUuid, identity.id); assert.equal(generation, '1'); writes++; return '2';
+        } };
+    const pins = { database: identity.db as string, serverUuid: identity.id as string, originalServerUuid: original,
+        currentUser: identity.user as string, confirmation: 'ALL WRITERS FENCED AND INTENTS RECONCILED' };
+    const connection = await database.getConnection();
+    try { assert.equal(await activateRetentionGuard(connection, journal, pins), '2'); }
+    finally { connection.release(); }
+    assert.equal(writes, 1);
 });
 
 test('verified deleted outcome applies only to pinned isolated SQL restore without later activity', async () => {

@@ -132,8 +132,10 @@ and [request preconditions](https://docs.cloud.google.com/storage/docs/request-p
 
 ## Current unresolved work
 
-No independent per-activity history, writer fence, administrative
-command-line wiring, automated restore integration, or provisioned GCS journal exists. The new
+No independent per-activity history, provider-level writer fence, automated
+restore integration, or provisioned GCS journal exists. The prepared pinned
+administrative command is described in `retention-reconciliation-command.md`
+and requires a reviewed cutover and drained writers. The new
 primary verifier depends on the administrative restore protocol above; it does
 not prove that offline or failed client activity was seen. The activity writer
 presently updates SQL only. Runtime composition, warning notification,
