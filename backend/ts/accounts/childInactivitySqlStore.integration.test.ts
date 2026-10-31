@@ -168,7 +168,9 @@ test('administrator reconciliation verifies actual primary identity and absence 
         async recordResolution(_intent: RetentionIntent, value: RetentionResolution) { recorded = value; } };
     const pins = { database: guard.database, serverUuid: guard.serverUuid, currentUser: identity.user as string,
         confirmation: 'ORIGINAL PRIMARY DRAINED AND ACCOUNT ABSENT' };
-    await assert.rejects(reconcileDeletedRetentionIntent(admin as unknown as mysql.PoolConnection, journal, intent,
+    const wrongAdmin = await mysql.createConnection({ host: config.host, port: config.port, database: config.database,
+        user: 'root', password: rootPassword, multipleStatements: false, dateStrings: true, timezone: 'Z' });
+    await assert.rejects(reconcileDeletedRetentionIntent(wrongAdmin as unknown as mysql.PoolConnection, journal, intent,
         { ...pins, currentUser: 'not-the-pinned-admin@localhost' }, Buffer.alloc(32, 8)), /Keep restoration on hold/);
     assert.equal(recorded, null);
     assert.equal(await reconcileDeletedRetentionIntent(admin as unknown as mysql.PoolConnection, journal, intent, pins, Buffer.alloc(32, 8)), true);

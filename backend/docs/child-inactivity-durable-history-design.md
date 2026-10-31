@@ -34,7 +34,12 @@ The verifier clears that intent only while SQL still confirms that activity.
 A deleted resolution never clears a restored live account automatically.
 `reconcileDeletedRetentionIntent` can record a deleted outcome only after an
 administrator's exact SQL user/database/server pins and the held restore guard
-are checked against an absent account on the drained original primary.
+are checked against an absent account on the drained original primary. It uses
+a short global MySQL read lock while recording the outcome; this blocks writes
+to all databases on that server and needs the administrative `RELOAD`
+privilege. The target is checked before acquiring the lock, and an uncertain
+lock/transport state discards the SQL connection. This lock is a short additional
+fence, not a replacement for stopping writers before and after the operation.
 `reconcileRestoredDeletedIntent` applies that signed outcome only to a separately
 pinned, isolated restore, under parent/child locks, when restored activity is no
 newer than the intent. Both operations need a qualified administrative caller;

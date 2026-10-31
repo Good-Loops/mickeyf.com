@@ -54,9 +54,11 @@ test('a pinned administrator can attest original primary absence only under a st
     const pins = { database: guard.database, serverUuid: guard.serverUuid, currentUser: 'admin@localhost',
         confirmation: 'ORIGINAL PRIMARY DRAINED AND ACCOUNT ABSENT' };
     let exists = false; let guardChanged = false; let reads = 0; let recorded: RetentionResolution | undefined;
-    const connection = { async query(query: { sql: string }) {
+    const connection = { destroy() {}, async query(query: { sql: string }) {
         if (query.sql.includes('CURRENT_USER')) return [[{ db: pins.database, user: pins.currentUser,
             serverUuid: pins.serverUuid, nowUtc: '2024-01-02T00:00:00.000000Z' }], []];
+        if (query.sql.includes('USER_PRIVILEGES')) return [[{ count: 1 }], []];
+        if (query.sql.includes('PROCESSLIST')) return [[{ count: 0 }], []];
         if (query.sql.includes('SELECT account_uuid')) return [exists ? [{ account_uuid: childId }] : [], []];
         return [[], []];
     } } as unknown as PoolConnection;
