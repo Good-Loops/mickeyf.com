@@ -3,6 +3,7 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import test, { after } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { createViteTestServer } from '../testSupport/createViteTestServer.mjs';
+import notice from '../../../shared/privacyNotice.json' with { type: 'json' };
 
 const fixtureKey = '__parentRegistrationLifecycle';
 const scope = `globalThis.${fixtureKey}`;
@@ -81,6 +82,37 @@ test('child credential fields stay absent through consent and provider acquisiti
     view.proofs[0].resolve({ grant: random(), purpose: 'create-child', expiresInSeconds: 300 }); await view.settle();
     assert.ok(view.find(node => node.type === 'input' && node.props.type === 'password'));
     assert.equal(view.all(node => node.type === 'input' && node.props.type === 'email').length, 0);
+});
+
+test('Brazilian consent is translated only for exact bound policy and mismatch blocks continuation', async t => {
+    for (const matches of [true, false]) {
+        const policy = { ...config, audience: 'children-included', credentialsAfterApproval: true,
+            countries: ['BR'], signedFormCountries: ['BR'], consentVersion: notice.consent.parent.version,
+            consentText: matches ? notice.consent.parent.text : 'Different terms' };
+        const view = mount(t, { api: { config: async () => policy, listSignedForms: async () => [] } });
+        view.render(); await view.settle();
+        view.find(node => node.type === 'select').props.onChange({ target: { value: 'BR' } });
+        view.render();
+        view.all(node => node.type === 'input' && node.props.type === 'checkbox').forEach(node => node.props.onChange({ target: { checked: true } }));
+        view.render();
+        assert.equal(view.button('Confirm with Google').props.disabled, !matches);
+        assert.ok(view.text().includes(matches ? notice.signedParentForm.ptBR.parentConsent : notice.signedParentForm.ptBR.labels.unavailable));
+        view.unmount();
+    }
+});
+
+test('changing country clears the previous adult, guardian and consent choices', async t => {
+    const policy = { ...config, countries: ['US', 'BR'], consentVersion: notice.consent.parent.version, consentText: notice.consent.parent.text };
+    const view = mount(t, { api: { config: async () => policy } });
+    view.render(); await view.settle();
+    view.find(node => node.type === 'select').props.onChange({ target: { value: 'US' } });
+    view.render();
+    view.all(node => node.type === 'input' && node.props.type === 'checkbox').forEach(node => node.props.onChange({ target: { checked: true } }));
+    view.render(); assert.equal(view.button('Confirm with Google').props.disabled, false);
+    view.find(node => node.type === 'select').props.onChange({ target: { value: 'BR' } });
+    view.render();
+    assert.equal(view.button('Confirm with Google').props.disabled, true);
+    assert.ok(view.all(node => node.type === 'input' && node.props.type === 'checkbox').every(node => node.props.checked === false));
 });
 
 test('navigation or synchronous session change cancels parent proof before sending', async t => {

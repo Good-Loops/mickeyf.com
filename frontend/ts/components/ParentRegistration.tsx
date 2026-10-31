@@ -4,7 +4,7 @@ import type { ProviderCredential, ProviderAuthenticationChallenge } from '@/serv
 import type { PublicProviderClient } from '@/services/providerClient';
 import { ParentRegistrationError, type ParentRegistrationApi, type ParentConfig, type SignedParentFormRequest } from '@/services/parentRegistrationApi';
 import PrivacyNoticeLink from '@/components/PrivacyNoticeLink';
-import SignedParentForm from './SignedParentForm';
+import SignedParentForm, { portugueseFormAvailable, portugueseParentConsentAvailable } from './SignedParentForm';
 import notice from '../../../shared/privacyNotice.json' with { type: 'json' };
 import { capturePageOwnership } from '@/services/pageOwnership';
 
@@ -49,6 +49,10 @@ export default function ParentRegistration({ api, authenticated, accountKey, ses
         && config.credentialsAfterApproval === true;
     const creationAllowed = config?.enabled === true && config.creationEnabled
         && (!requireChildAudience || credentialsAfterApproval);
+    const portuguese = country === 'BR';
+    const portugueseConsentUnavailable = portuguese && config?.enabled === true
+        && (!portugueseParentConsentAvailable(config) || !!selectedForm && !portugueseFormAvailable(selectedForm, config));
+    const pt = notice.signedParentForm.ptBR;
 
     const discard = () => {
         generation.current++;
@@ -217,20 +221,23 @@ export default function ParentRegistration({ api, authenticated, accountKey, ses
                 <label>Child's password<input type="password" autoComplete="new-password" required minLength={8} value={password} disabled={busy} onChange={event => setPassword(event.target.value)} /></label>
                 <button type="submit" disabled={busy}>Create private child account</button>
             </form> : <div>
-                <label>Child's country<select value={country} disabled={busy || !!selectedForm} onChange={event => setCountry(event.target.value)}>
+                <label>Child's country<select value={country} disabled={busy || !!selectedForm} onChange={event => {
+                    setCountry(event.target.value); setAdult(false); setGuardian(false); setConsent(false);
+                }}>
                     <option value="">Choose a country</option>{config.countries.map(value => <option key={value} value={value}>{value}</option>)}
                 </select></label>
                 {config.signedFormCountries?.includes(country) && <>
-                    <p>{notice.signedParentForm.notice}</p>
+                    <p lang={portuguese ? 'pt-BR' : undefined}>{portuguese ? pt.notice : notice.signedParentForm.notice}</p>
                     {!selectedForm && !credentialsAfterApproval && <label>Child's chosen nickname<input maxLength={64} value={userName} disabled={busy} onChange={event => setUserName(event.target.value)} /></label>}
-                    {credentialsAfterApproval && <p>The child's nickname and password are chosen only after the signed parent form is approved.</p>}
-                    {selectedForm && selectedForm.status !== 'approved' && <p>Awaiting signed form review. The child account is not active.</p>}
+                    {credentialsAfterApproval && <p>{portuguese ? pt.labels.credentialsAfterApproval : "The child's nickname and password are chosen only after the signed parent form is approved."}</p>}
+                    {selectedForm && selectedForm.status !== 'approved' && <p>{portuguese ? pt.labels.awaiting : 'Awaiting signed form review. The child account is not active.'}</p>}
                 </>}
-                <label><input type="checkbox" checked={adult} disabled={busy} onChange={event => setAdult(event.target.checked)} />I am 18 or older.</label>
-                <label><input type="checkbox" checked={guardian} disabled={busy} onChange={event => setGuardian(event.target.checked)} />I am this child's parent or legal guardian and can give this consent.</label>
-                <p>{config.consentText}</p>
-                <label><input type="checkbox" checked={consent} disabled={busy} onChange={event => setConsent(event.target.checked)} />I agree to this child-account consent.</label>
-                {clients.map(client => <button type="button" key={client.clientKey} disabled={busy || !country || !adult || !guardian || !consent
+                <label><input type="checkbox" checked={adult} disabled={busy} onChange={event => setAdult(event.target.checked)} />{portuguese ? pt.labels.adult : 'I am 18 or older.'}</label>
+                <label><input type="checkbox" checked={guardian} disabled={busy} onChange={event => setGuardian(event.target.checked)} />{portuguese ? pt.labels.guardianCheck : "I am this child's parent or legal guardian and can give this consent."}</label>
+                {portugueseConsentUnavailable ? <p lang="pt-BR" role="alert">{pt.labels.unavailable}</p>
+                    : <p lang={portuguese ? 'pt-BR' : undefined}>{portuguese ? pt.parentConsent : config.consentText}</p>}
+                <label><input type="checkbox" checked={consent} disabled={busy || portugueseConsentUnavailable} onChange={event => setConsent(event.target.checked)} />{portuguese ? pt.labels.consentCheck : 'I agree to this child-account consent.'}</label>
+                {clients.map(client => <button type="button" key={client.clientKey} disabled={busy || portugueseConsentUnavailable || !country || !adult || !guardian || !consent
                     || !!config.signedFormCountries?.includes(country) && (selectedForm ? selectedForm.status !== 'approved' : !credentialsAfterApproval && !userName.trim())}
                     onClick={() => void approve(client)}>Confirm with {client.provider === 'google' ? 'Google' : 'Apple'}</button>)}
                 {clients.length === 0 && <p>No supported provider is available here. No child details are needed.</p>}
