@@ -90,11 +90,12 @@ making the 14-day notice a public promise.
 The private register can supply the request references for the existing guarded
 read-only report, so the owner need not type each reference into a separate JSON
 file. After completing the separately reviewed target/proxy setup, from a clean
-checkout run the following in a private PowerShell 7 (`pwsh`) window. Replace the
-example path with the actual protected register location:
+checkout run the following in a private PowerShell 7 (`pwsh`) window. This path
+is for the newly created VeraCrypt archive when mounted as `P:`; use the actual
+protected register location if it is mounted under another letter:
 
 ```powershell
-& ./scripts/parent-form-ledger-input.ps1 -LedgerPath 'C:\Private\parent-form-register.csv' |
+& ./scripts/parent-form-ledger-input.ps1 -LedgerPath 'P:\Records\retention-register.csv' |
     npm --prefix backend run --silent parent-form:retention |
     node ./scripts/parent-form-retention-summary.mjs
 ```
