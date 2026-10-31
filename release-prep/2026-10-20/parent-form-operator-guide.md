@@ -7,7 +7,29 @@ This guide does not activate registration, approve a real request, send email, c
 The 21 October [decision package](../2026-10-21/br-us-policy-decision-package.md)
 proposes the all-status retention reconciliation procedure, approved-unused attachment
 case, consumer-mail terms and Apple relay qualification. Its private register and
-security program are drafts; no mailbox/storage control is presumed completed.
+security program are drafts. The mailbox's two-step verification and a separate
+VeraCrypt container were verified on 31 October; see the later
+[privacy review](../2026-10-31/child-privacy-review.md) for their limits.
+
+## Twice-weekly routine at a glance
+
+1. Open the encrypted archive using the desktop shortcut and check the form
+   mailbox, including Spam. Review each returned form against its exact pending
+   request. Keep incomplete or mismatched forms unapproved; the checks below
+   explain what must match.
+2. Record each returned form with a valid request reference in the private
+   register. Use the read-only report and summary below to check each one.
+   Track an incomplete message without a usable reference separately in the
+   private archive, including its receive date and cleanup deadline; never
+   invent a reference for it. Check all deadlines on each pass.
+3. Complete due cleanup across all relevant copies, including Gmail Trash,
+   downloads, the archive and any backups. Record completion only after the
+   copies have actually been addressed. An error or missing report is not proof
+   of deletion. Close the mounted archive in VeraCrypt when finished.
+
+This is a guide to the manual process, not evidence that the process is already
+qualified or permission to delete any particular message or file. Keep new child
+registration closed until the operating procedure and deadlines are verified.
 
 ## What the reviewer checks
 
@@ -47,11 +69,21 @@ Before enabling the service, establish restricted mailbox access and private att
 
 The current candidate notice promises:
 
-- unused requests expire after 14 days and are removed;
+- unused requests expire after 14 days; expired database rows are removed during maintenance;
 - incomplete or rejected form messages are deleted within 14 days;
 - approved forms remain private while the managed child account is active, then are deleted within 14 days of account-consent withdrawal or child-account deletion.
 
 Database cleanup removes expired unused request rows; it **does not delete Gmail messages or downloaded attachments**. The owner must track the separate mailbox/file deadlines, including trash and other retained copies, and ensure that actual storage and recovery handling match the published notice. A parent may withdraw public display alone while keeping the private account, or withdraw account permission/delete the child. Verify the requester using the established account controls or approved support process; never ask them to email passwords or sign-in codes.
+
+Gmail normally keeps messages in Trash for 30 days. Moving a message to Trash
+alone does not satisfy a 14-day deletion promise; qualify the actual removal of
+the specific message and copies. Do not empty unrelated mail or assume Google
+provider recovery copies have been physically erased. See
+[Gmail deletion guidance](https://support.google.com/mail/answer/7401?hl=en).
+An encrypted container backup is a snapshot: deleting a file from the current
+container does not remove it from older snapshots. No automated backup rotation
+or physical-erasure deadline is established here. Test an all-copy plan before
+making the 14-day notice a public promise.
 
 ## Prepare a reconciliation list from the private register
 
@@ -63,7 +95,8 @@ example path with the actual protected register location:
 
 ```powershell
 & ./scripts/parent-form-ledger-input.ps1 -LedgerPath 'C:\Private\parent-form-register.csv' |
-    npm --prefix backend run --silent parent-form:retention
+    npm --prefix backend run --silent parent-form:retention |
+    node ./scripts/parent-form-retention-summary.mjs
 ```
 
 The helper reads the existing register format and sends **only** references from
@@ -77,5 +110,13 @@ This helper does not connect to any database, approve or delete anything, inspec
 attachments, or validate that a human review was completed. It does not simplify
 or bypass the target, schema, source, account and proxy checks in the report.
 Both register and report contain sensitive metadata; keep them private.
+
+The optional summary displays only request references, their observed states and
+short actions; it omits database target details. It rejects invalid, duplicate,
+future or older-than-one-hour reports without printing a partial list. The report
+does not include review dates or determine deletion deadlines: consult the
+private register. A `not-found` result needs investigation and does not prove
+that copies or backup contents were deleted. The summary makes no database or
+file changes and does not replace the full guarded target/source checks.
 
 The owner accepting the reviewer role resolves staffing. It does not automatically approve these storage/retention arrangements, the BR/US age-assurance design or production activation. No paid review service, response-time guarantee or new external account has been introduced.

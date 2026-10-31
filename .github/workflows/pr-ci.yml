@@ -104,7 +104,9 @@ jobs:
           npm run test:receipt-cleanup
 
       - name: Test backend development and migration launchers
-        run: node --test backend/scripts/dev-isolated.test.cjs backend/scripts/run-migration-tests.test.mjs backend/scripts/run-apple-android-handoff-tests.test.mjs backend/scripts/run-child-schema-tests.test.mjs scripts/start-local-provider-backend.test.mjs
+        run: |
+          node --test backend/scripts/dev-isolated.test.cjs backend/scripts/run-migration-tests.test.mjs backend/scripts/run-apple-android-handoff-tests.test.mjs backend/scripts/run-child-schema-tests.test.mjs scripts/start-local-provider-backend.test.mjs
+          npm run test:parent-form-retention-summary
 
       - name: Test and build backend
         run: |
