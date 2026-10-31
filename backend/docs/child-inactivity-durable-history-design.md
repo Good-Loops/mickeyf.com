@@ -28,10 +28,14 @@ administrative recovery.
 an authenticated active restore guard with a bounded expiry and unchanged object
 generation, and the absence of an earlier conditional intent for that child.
 It fails closed on provider or database errors. A matching old intent requires
-manual reconciliation; this implementation does not yet provide an intent
-resolution command. This includes the same intent during attempted replay:
-the normal live-primary verifier holds it, so replay is not automatic. GCS and SQL tests use a synthetic transport and disposable
-database, respectively; no GCS bucket or guard has been created.
+reconciliation: the exact authenticated parent can record an append-only kept
+resolution only after later activity is visible on the locked SQL relationship.
+The verifier clears that intent only while SQL still confirms that activity.
+A deleted resolution never clears a restored live account; reconciliation of a
+confirmed deletion still requires an audited administrator workflow. No
+unresolved intent is automatic replay authority. GCS and SQL tests use a
+synthetic transport and disposable database, respectively; no GCS bucket or
+guard has been created.
 
 **Administrative restoration is a critical assumption.** Before any restore,
 an authorized operator must change the signed guard to `hold` using its current
@@ -116,8 +120,8 @@ and [request preconditions](https://docs.cloud.google.com/storage/docs/request-p
 
 ## Current unresolved work
 
-No independent per-activity history, writer fence, intent-resolution operation,
-automated restore integration, or provisioned GCS journal exists. The new
+No independent per-activity history, writer fence, administrative
+deleted-intent resolution, automated restore integration, or provisioned GCS journal exists. The new
 primary verifier depends on the administrative restore protocol above; it does
 not prove that offline or failed client activity was seen. The activity writer
 presently updates SQL only. Runtime composition, warning notification,

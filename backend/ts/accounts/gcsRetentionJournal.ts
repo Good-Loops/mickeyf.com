@@ -31,6 +31,8 @@ type ObjectInfo = Readonly<{ name: string; generation: string; size: number; md5
 export type RestoreGuard = Readonly<{ state: 'active' | 'hold'; database: string; serverUuid: string;
     epoch: string; expiresAt: string }>;
 export type ObservedRestoreGuard = RestoreGuard & Readonly<{ generation: string }>;
+export type RetentionResolution = Readonly<{ outcome: 'kept' | 'deleted'; confirmedAt: string;
+    observedActivityAt: string | null; proofDigest: string }>;
 
 /**
  * Conditional intents have a separate bucket and HMAC key from the unconditional
@@ -41,6 +43,8 @@ export function createGcsRetentionJournal(options: Options): RetentionJournal & 
     readIntentsForChild(childId: string): Promise<readonly RetentionIntent[]>;
     readRestoreGuard(): Promise<ObservedRestoreGuard>;
     writeRestoreGuard(guard: RestoreGuard, expectedGeneration: string): Promise<string>;
+    readResolution(intent: RetentionIntent): Promise<RetentionResolution | null>;
+    recordResolution(intent: RetentionIntent, resolution: RetentionResolution): Promise<void>;
 } {
     const { bucket, expectedBucket, verifyActivityContinuity } = options;
     if (typeof bucket !== 'string' || bucket !== expectedBucket || bucket === DELETION_JOURNAL_BUCKET
@@ -82,6 +86,18 @@ export function createGcsRetentionJournal(options: Options): RetentionJournal & 
         const payload = JSON.stringify(normalized);
         const mac = createHmac('sha256', key).update('ludolume-conditional-retention-v1\0').update(payload).digest('hex');
         return { name: `${childPrefix(normalized.childId)}${mac}.json`, body: JSON.stringify({ version: 1, intent: normalized, mac }) };
+    }
+    function signedResolution(intent: RetentionIntent, resolution: RetentionResolution): { name: string; body: string } {
+        const original = signed(intent);
+        const normalized = validateResolution(resolution);
+        if (normalized.confirmedAt < intent.deliveredAt || (normalized.outcome === 'kept'
+            && (!normalized.observedActivityAt || normalized.observedActivityAt <= intent.activityAt
+                || normalized.observedActivityAt > normalized.confirmedAt))) throw new TypeError('Invalid retention resolution chronology.');
+        const originalId = original.name.slice(original.name.lastIndexOf('/') + 1, -'.json'.length);
+        const payload = JSON.stringify({ intentId: originalId, resolution: normalized });
+        const mac = createHmac('sha256', key).update('ludolume-retention-resolution-v1\0').update(payload).digest('hex');
+        return { name: original.name.replace('v1/conditional/', 'v1/resolutions/'),
+            body: JSON.stringify({ version: 1, intentId: originalId, resolution: normalized, mac }) };
     }
     function info(input: unknown, expectedName?: string): ObjectInfo {
         if (!input || typeof input !== 'object' || Array.isArray(input)) throw new RetentionJournalUnavailableError();
@@ -161,6 +177,34 @@ export function createGcsRetentionJournal(options: Options): RetentionJournal & 
         if (object.name !== entry.name) throw new RetentionJournalUnavailableError();
         return signed(await read(object)).body === entry.body;
     }
+    async function readResolution(intent: RetentionIntent): Promise<RetentionResolution | null> {
+        const name = signedResolution(intent, { outcome: 'deleted', confirmedAt: intent.deliveredAt,
+            observedActivityAt: null, proofDigest: intent.receiptDigest }).name;
+        try {
+            const object = info(await request({ method: 'GET', url: `${base}/${encodeURIComponent(name)}`,
+                params: { fields }, responseType: 'json' }), name);
+            const body = await request({ method: 'GET', url: `${base}/${encodeURIComponent(name)}`,
+                params: { alt: 'media', generation: object.generation, ifGenerationMatch: object.generation }, responseType: 'text' });
+            if (typeof body !== 'string' || Buffer.byteLength(body) !== object.size
+                || createHash('md5').update(body).digest('base64') !== object.md5) return null;
+            const decoded = JSON.parse(body) as Record<string, unknown>;
+            if (!decoded || Object.keys(decoded).sort().join(',') !== 'intentId,mac,resolution,version'
+                || decoded.version !== 1) return null;
+            const resolution = validateResolution(decoded.resolution);
+            return signedResolution(intent, resolution).body === body ? resolution : null;
+        } catch { return null; }
+    }
+    /** Only a verified parent/administrator workflow may call this; records are append-only. */
+    async function recordResolution(intent: RetentionIntent, resolution: RetentionResolution): Promise<void> {
+        if (!await verifyRetentionIntent(intent)) throw new RetentionJournalUnavailableError();
+        const entry = signedResolution(intent, resolution);
+        const object = info(await request({ method: 'POST', url: `${API}/upload/storage/v1/b/${bucket}/o`,
+            params: { uploadType: 'media', name: entry.name, ifGenerationMatch: 0, fields },
+            headers: { 'Content-Type': 'application/json; charset=utf-8' }, data: entry.body, responseType: 'json' }), entry.name);
+        if (object.size !== Buffer.byteLength(entry.body) || object.md5 !== createHash('md5').update(entry.body).digest('base64')) {
+            throw new RetentionJournalUnavailableError();
+        }
+    }
     async function listObjects(prefix: string, softDeleted: boolean, deadline: number): Promise<ObjectInfo[]> {
         const objects: ObjectInfo[] = []; const names = new Set<string>(); const tokens = new Set<string>();
         let pageToken: string | undefined;
@@ -204,7 +248,7 @@ export function createGcsRetentionJournal(options: Options): RetentionJournal & 
         // writers and repeat reconciliation before cutover; this is not replay authority.
         return Object.freeze(results);
     }
-    return { recordRetentionIntent, verifyRetentionIntent,
+    return { recordRetentionIntent, verifyRetentionIntent, readResolution, recordResolution,
         readIntents: () => readInventory('v1/conditional/'),
         readIntentsForChild: async childId => readInventory(childPrefix(childId)),
         readRestoreGuard, writeRestoreGuard,
@@ -212,6 +256,17 @@ export function createGcsRetentionJournal(options: Options): RetentionJournal & 
             validateIntent(intent);
             try { return await verifyActivityContinuity(intent) === true; } catch { return false; }
         } };
+}
+
+function validateResolution(input: unknown): RetentionResolution {
+    if (!input || typeof input !== 'object' || Array.isArray(input)) throw new TypeError('Invalid retention resolution.');
+    const v = input as Record<string, unknown>;
+    if (Object.keys(v).sort().join(',') !== 'confirmedAt,observedActivityAt,outcome,proofDigest'
+        || (v.outcome !== 'kept' && v.outcome !== 'deleted') || parseInactivityInstant(v.confirmedAt) === null
+        || (v.outcome === 'kept' ? parseInactivityInstant(v.observedActivityAt) === null : v.observedActivityAt !== null)
+        || typeof v.proofDigest !== 'string' || !HEX.test(v.proofDigest)) throw new TypeError('Invalid retention resolution.');
+    return { outcome: v.outcome, confirmedAt: v.confirmedAt as string,
+        observedActivityAt: v.observedActivityAt as string | null, proofDigest: v.proofDigest };
 }
 
 function validateGuard(input: unknown): RestoreGuard {

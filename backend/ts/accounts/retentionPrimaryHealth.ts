@@ -1,11 +1,13 @@
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { isAccountId } from './deletionJournal';
 import type { RetentionIntent } from './childInactivityWorkflow';
-import type { ObservedRestoreGuard } from './gcsRetentionJournal';
+import type { ObservedRestoreGuard, RetentionResolution } from './gcsRetentionJournal';
+import { parseInactivityInstant } from './childInactivityPolicy';
 
 type Journal = Readonly<{
     readRestoreGuard(): Promise<ObservedRestoreGuard>;
     readIntentsForChild(childId: string): Promise<readonly RetentionIntent[]>;
+    readResolution(intent: RetentionIntent): Promise<RetentionResolution | null>;
 }>;
 type Connection = Pick<PoolConnection, 'query'>;
 const timeout = 10_000;
@@ -18,7 +20,8 @@ const MAX_ATTESTATION_MS = 90 * 24 * 60 * 60 * 1000;
  */
 export function createPinnedPrimaryHealth(options: Readonly<{ database: string; serverUuid: string; journal: Journal }>) {
     if (!/^[A-Za-z0-9_]{1,64}$/u.test(options.database) || !isAccountId(options.serverUuid)
-        || typeof options.journal?.readRestoreGuard !== 'function' || typeof options.journal?.readIntentsForChild !== 'function') {
+        || typeof options.journal?.readRestoreGuard !== 'function' || typeof options.journal?.readIntentsForChild !== 'function'
+        || typeof options.journal?.readResolution !== 'function') {
         throw new TypeError('Invalid retention primary pin.');
     }
     async function identity(connection: Connection): Promise<number | null> {
@@ -45,9 +48,23 @@ export function createPinnedPrimaryHealth(options: Readonly<{ database: string; 
                 || !isAccountId(before.epoch) || !/^[1-9][0-9]*$/u.test(before.generation)
                 || !Number.isFinite(expiry) || expiry <= now || expiry - now > MAX_ATTESTATION_MS) return false;
             const intents = await options.journal.readIntentsForChild(childId);
-            // Earlier attempts for this child need individual manual reconciliation;
-            // they must never become automatic replay authority.
-            if (!Array.isArray(intents) || intents.length !== 0) return false;
+            if (!Array.isArray(intents)) return false;
+            if (intents.length) {
+                const [rows] = await connection.query<RowDataPacket[]>({ sql: `SELECT DATE_FORMAT(a.retention_activity_at,
+                    '%Y-%m-%dT%H:%i:%s.%fZ') AS activityAt FROM parent_managed_child_activity a
+                    INNER JOIN parent_child_consents c ON c.child_uuid=a.child_uuid
+                    WHERE c.parent_uuid=? AND c.child_uuid=? LIMIT 1`, timeout }, [parentId, childId]);
+                if (!Array.isArray(rows) || rows.length !== 1 || parseInactivityInstant(rows[0].activityAt) === null) return false;
+                const current = rows[0].activityAt as string;
+                for (const intent of intents) {
+                    const resolution = await options.journal.readResolution(intent);
+                    // Deleted outcomes still hold if the account is present. Kept outcomes
+                    // only clear a previous attempt when durable SQL shows later use.
+                    if (intent.parentId !== parentId || intent.childId !== childId || !resolution || resolution.outcome !== 'kept'
+                        || !resolution.observedActivityAt || parseInactivityInstant(resolution.observedActivityAt) === null
+                        || resolution.observedActivityAt <= intent.activityAt || current < resolution.observedActivityAt) return false;
+                }
+            }
             const after = await options.journal.readRestoreGuard();
             const nowAfter = await identity(connection);
             return nowAfter !== null && nowAfter >= now && nowAfter < expiry && JSON.stringify(before) === JSON.stringify(after);

@@ -147,3 +147,19 @@ test('restore guard is authenticated, generation-pinned and cannot blindly overw
     io.objects.set(name, body.replace('"hold"', '"active"'));
     await assert.rejects(store.readRestoreGuard(), RetentionJournalUnavailableError);
 });
+
+test('resolution is append-only, authenticated, and bound to the exact conditional intent', async () => {
+    const io = transport(); const store = journal(io.client);
+    await store.recordRetentionIntent(intent);
+    assert.equal(await store.readResolution(intent), null);
+    const resolution = { outcome: 'kept' as const, confirmedAt: '2026-01-03T00:00:00.000000Z',
+        observedActivityAt: '2026-01-02T00:00:00.000000Z', proofDigest: 'e'.repeat(64) };
+    await store.recordResolution(intent, resolution);
+    assert.deepEqual(await store.readResolution(intent), resolution);
+    await assert.rejects(store.recordResolution(intent, { ...resolution, outcome: 'deleted', observedActivityAt: null }),
+        RetentionJournalUnavailableError);
+    assert.equal(await store.readResolution({ ...intent, receiptDigest: 'd'.repeat(64) }), null);
+    const name = [...io.objects.keys()].find(value => value.startsWith('v1/resolutions/'))!;
+    io.objects.set(name, io.objects.get(name)!.replace('"kept"', '"deleted"'));
+    assert.equal(await store.readResolution(intent), null);
+});

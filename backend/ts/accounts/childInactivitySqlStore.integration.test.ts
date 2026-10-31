@@ -16,6 +16,9 @@ import { applyMigrations } from '../migrations/migrationRunner';
 import { createChildInactivitySqlStore } from './childInactivitySqlStore';
 import { createInAppInactivityQualityResolver } from './childInactivityInAppTarget';
 import { createPinnedPrimaryHealth } from './retentionPrimaryHealth';
+import { reconcileKeptRetentionIntent } from './retentionReconciliation';
+import type { RetentionIntent } from './childInactivityWorkflow';
+import type { RetentionResolution } from './gcsRetentionJournal';
 import { createChildInactivityParentService } from './childInactivityParentService';
 import type { ProviderAuthContext } from '../auth/providerAuthContext';
 import { acknowledgeInactivityWarning, confirmInactivityWarning, deleteInactiveChild, prepareInactivityWarning } from './childInactivityWorkflow';
@@ -82,7 +85,7 @@ test('primary identity verifier checks a real isolated SQL server and respects a
         epoch: randomUUID(), expiresAt: new Date(Date.parse(identity.nowUtc) + 24 * 60 * 60_000).toISOString(), generation: '1' };
     let held = false;
     const journal = { async readRestoreGuard() { return held ? { ...guard, state: 'hold' as const } : guard; },
-        async readIntentsForChild() { return []; } };
+        async readIntentsForChild() { return []; }, async readResolution() { return null; } };
     const check = createPinnedPrimaryHealth({ database: identity.name, serverUuid: identity.id, journal });
     const connection = await database.getConnection();
     try {
@@ -90,6 +93,29 @@ test('primary identity verifier checks a real isolated SQL server and respects a
         held = true;
         assert.equal(await check(connection, accounts.parentId, accounts.childId), false);
     } finally { connection.release(); }
+});
+
+test('only a live parent can reconcile a conditional intent after later real SQL activity', async () => {
+    const { parentId, childId } = await managedFixture();
+    const store = createChildInactivitySqlStore(database, createInAppInactivityQualityResolver(Buffer.alloc(32, 3), async () => false));
+    const [[parent]] = await admin.query<RowDataPacket[]>('SELECT user_id FROM users WHERE account_uuid=?', [parentId]);
+    const sessionId = randomBytes(32).toString('base64url');
+    const account = { accountId: parentId, userId: parent.user_id as number };
+    assert.equal(await createAccountSession(database, account, sessionId, Math.floor(Date.now() / 1000) + 1800), true);
+    const intent: RetentionIntent = { parentId, childId, warningId: randomUUID(), activityAt: '2020-01-01T00:00:00.000000Z',
+        deliveredAt: '2023-01-01T00:00:00.000000Z', channel: 'in-app', targetDigest: 'a'.repeat(64),
+        noticeDigest: 'b'.repeat(64), receiptDigest: 'c'.repeat(64) };
+    let resolution: RetentionResolution | null = null;
+    const journal = { async verifyRetentionIntent(value: RetentionIntent) { return value.warningId === intent.warningId; },
+        async recordResolution(_intent: RetentionIntent, value: RetentionResolution) { resolution = value; } };
+    const proof = { accountId: parentId, sessionId };
+    assert.equal(await reconcileKeptRetentionIntent(store, journal, intent, proof, Buffer.alloc(32, 8)), false);
+    await admin.query('UPDATE parent_managed_child_activity SET retention_activity_at=UTC_TIMESTAMP(6)-INTERVAL 1 SECOND WHERE child_uuid=?', [childId]);
+    assert.equal(await reconcileKeptRetentionIntent(store, journal, intent, { ...proof, sessionId: randomBytes(32).toString('base64url') }, Buffer.alloc(32, 8)), false);
+    assert.equal(await reconcileKeptRetentionIntent(store, journal, intent, proof, Buffer.alloc(32, 8)), true);
+    assert.equal((resolution as RetentionResolution | null)?.outcome, 'kept');
+    await revokeAccountSession(database, account.userId, parentId, sessionId);
+    assert.equal(await reconcileKeptRetentionIntent(store, journal, intent, proof, Buffer.alloc(32, 8)), false);
 });
 
 test('read-only operator report scans real SQL and withholds recent activity without disclosing contact', async () => {
