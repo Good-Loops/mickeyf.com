@@ -5,6 +5,13 @@ that a jurisdiction's requirements have been met, an authorization to publish
 the candidate notice, or a change to production. Review the deployed build,
 configuration, and owner-operated process again before release.
 
+Later work on 31 October prepared Portuguese translations for all notice
+sections and the Brazilian form and country-selected registration controls;
+bound both language versions to the form policy digest; and corrected the
+expired-request wording. Some account-management screens remain English. These
+source changes do not resolve the operational and regional qualification gaps
+below and are not a published notice.
+
 ## Newly published Brazilian guidance
 
 On 28 October, Brazil's ANPD published the final general guide to the scope and
