@@ -1,12 +1,12 @@
 {
-  "version": "privacy-2026-10-31.1",
+  "version": "privacy-2026-10-31.2",
   "noticeUrl": "https://mickeyf.com/privacy",
   "operatorName": "Michel Silveira Dias Fingergut",
   "contactEmail": "mickeyf.plays@gmail.com",
   "operatorAddress": "Avenida Santa Luzia, 379, Horto Florestal, Salvador, Bahia, CEP 40295-050, Brazil",
   "operatorTelephone": "+55 71 99910 2221",
   "signedParentForm": {
-    "version": "signed-parent-form-2026-10-31.1",
+    "version": "signed-parent-form-2026-10-31.2",
     "requestLifetimeDays": 14,
     "notice": "Your permission is required before the child account is created. Before approval, we ask you, the parent, for your own verified account contact information and the child's country, and assign a form request reference. Do not include the child's name, nickname, email, birth date, identity document or password in the form or message. After the signed permission has been reviewed and approved, you choose the child's nickname and password. The child account then stores the nickname, password hash, account identifier and private game results. Connection and session information protects sign-ins and prevents abuse. Google Cloud and Firebase process hosting and account/result data; Google or Apple establishes control of your linked parent account; Gmail processes the signed form you return. These service providers support the account and verification process. We do not sell personal information or use it for targeted advertising. Public disclosure of the nickname and qualifying results is optional and requires the separate signed choice below; declining it does not prevent a private account. Print this form, sign it by hand, and return a scan or photograph from the verified parent email shown on the form to mickeyf.plays@gmail.com. Do not include passwords or identity documents. We review the signature, parent declaration, sender and exact request before approving it. No child account is created if approval is missing. Unused requests expire after 14 days; expired request records are removed during maintenance. Incomplete or rejected form messages are deleted within 14 days. Approved signed forms are retained privately while the managed child account remains active, then deleted within 14 days after account-consent withdrawal or child-account deletion. Parents can review the child's information, withdraw public display alone, or withdraw account permission and delete the child through parent account controls or by contacting us. See the linked privacy notice for account and service information. Where native age-range sharing is available, Apple or Google Play may provide a coarse range for the person using that device; this does not establish guardianship or replace your separate signed permission. A parent-required result is retained as a temporary registration restriction for up to 24 hours; parents can use their own device/account or contact us about an incorrect result.",
     "ptBR": {
@@ -16,7 +16,7 @@
       "labels": {
         "formAria": "Formulário assinado de autorização do responsável",
         "title": "Formulário de autorização do responsável — Ludolume",
-        "privacy": "Aviso de privacidade (abre em outra aba; atualmente em inglês)",
+        "privacy": "Aviso de privacidade em português (abre em outra aba)",
         "reference": "Código de referência da solicitação",
         "parentAccount": "Conta do responsável",
         "email": "E-mail verificado do responsável",
@@ -46,6 +46,86 @@
     }
   },
   "availabilityText": "Feature availability can vary by platform and account. If an account or privacy control described below is unavailable, contact us for help. Separate permission is required before optional public leaderboard participation.",
+  "ptBR": {
+    "title": "Aviso de privacidade do Ludolume",
+    "englishLink": "Read this notice in English",
+    "availabilityText": "A disponibilidade dos recursos pode variar conforme a plataforma e a conta. Se um controle de conta ou de privacidade descrito abaixo estiver indisponível, entre em contato para obter ajuda. A participação opcional em rankings públicos exige autorização separada.",
+    "deletion": {
+      "beforeAccount": "No navegador, abra",
+      "accountLink": "Conta",
+      "betweenLinks": "ou, quando disponível,",
+      "parentLink": "Contas de responsáveis",
+      "afterLinks": "para usar os controles de exclusão.",
+      "beforeEmail": "Para solicitar a exclusão da sua conta Ludolume e dos dados associados descritos acima, sem reinstalar o aplicativo,",
+      "emailLink": "envie uma solicitação de exclusão para",
+      "afterEmail": "A titularidade da conta precisa ser verificada antes de uma solicitação por e-mail ser concluída. Não envie senhas ou códigos de acesso.",
+      "emailSubject": "Solicitação de exclusão de conta Ludolume"
+    },
+    "permissions": {
+      "title": "Autorizações separadas",
+      "explanation": "Onde esses recursos estiverem disponíveis, os controles da conta solicitam as seguintes autorizações separadamente. Ler este aviso não concede nenhuma delas.",
+      "parentTitle": "Autorização do responsável para uma conta infantil",
+      "publicTitle": "Autorização opcional para rankings públicos",
+      "versionLabel": "Versão do aviso"
+    },
+    "sections": [
+      {
+        "id": "operator",
+        "title": "Quem opera o Ludolume",
+        "text": "O Ludolume é operado por Michel Silveira Dias Fingergut. Para dúvidas ou solicitações sobre privacidade, entre em contato pelo e-mail mickeyf.plays@gmail.com, pelo telefone +55 71 99910 2221 ou no endereço Avenida Santa Luzia, 379, Horto Florestal, Salvador, Bahia, CEP 40295-050, Brasil. Você pode explorar jogos e animações sem ter uma conta. Este aviso explica o tratamento de informações de conta, jogos e suporte; aceitá-lo não autoriza automaticamente usos opcionais."
+      },
+      {
+        "id": "accounts",
+        "title": "Informações da conta",
+        "text": "Uma conta permite salvar resultados de jogos elegíveis. Tratamos o apelido escolhido, um identificador interno da conta e as credenciais necessárias para o método de acesso selecionado. Contas com senha armazenam um hash da senha. O acesso com Google ou Apple fornece um identificador do provedor e um e-mail verificado, que pode ser um endereço do Retransmissor Privado da Apple; não recebemos sua senha do Google ou da Apple. A coincidência de endereços de e-mail, por si só, não une contas."
+      },
+      {
+        "id": "children",
+        "title": "País, idade e contas criadas por responsáveis",
+        "text": "Antes de um novo cadastro, perguntamos o país e uma faixa etária aproximada para determinar o caminho de conta disponível. Nessa tela, não solicitamos data de nascimento nem documento de identidade. Quando uma conta exige a participação de um responsável, ele usa a própria conta e conclui o processo de autorização aplicável. No Brasil e nos Estados Unidos, o cadastro por responsável exige um formulário assinado, enviado como digitalização ou fotografia a partir do e-mail verificado do responsável e analisado antes que as credenciais da criança sejam solicitadas ou que a conta infantil seja criada. Antes da aprovação, o formulário identifica a conta do responsável, o país e o código da solicitação; não coleta o apelido nem a senha da criança. A divulgação opcional em rankings públicos exige uma escolha assinada separada. Depois da aprovação, o responsável escolhe o apelido e a senha da criança; esse fluxo não solicita um e-mail da criança. O acesso pelo provedor confirma o controle da conta, não a idade nem a responsabilidade legal. A criação de contas continua indisponível onde o processo necessário não estiver habilitado. Solicitações de formulário não utilizadas vencem após 14 dias; os registros vencidos são removidos durante a manutenção. Mensagens com formulários incompletos ou recusados são excluídas em até 14 dias; formulários aprovados são mantidos em privado enquanto a conta infantil estiver ativa e excluídos em até 14 dias após a retirada da autorização ou a exclusão da conta."
+      },
+      {
+        "id": "age-assurance",
+        "title": "Faixas etárias do dispositivo e restrições de cadastro",
+        "text": "Ao prosseguir pela verificação de elegibilidade de conta no aplicativo nativo, o aplicativo pode solicitar uma faixa etária à Apple ou ao Google Play. A plataforma pode perguntar a você ou a um responsável se deseja compartilhá-la. Usamos apenas a faixa para escolher um caminho de conta protetivo; ela não comprova identidade, responsabilidade legal ou consentimento. Os limites de idade recebidos, identificadores de instalação da loja e documentos de verificação de idade não são enviados ao nosso servidor nem retidos por esse recurso. Se o compartilhamento for recusado, se for necessária verificação ou se o dispositivo não puder fornecer uma faixa, o cadastro e o acesso por provedor no aplicativo nativo continuam indisponíveis; o conteúdo para visitantes e o acesso com apelido e senha continuam disponíveis. Um responsável pode usar seu próprio dispositivo e sua própria conta. Quando há indicação de que é necessário um responsável, esta aba do navegador mantém apenas um marcador temporário de expiração, e o servidor pode manter uma restrição anônima e assinada de cadastro em seu cookie funcional de sessão, cada um por até 24 horas. Eles não contêm data de nascimento, faixa etária, e-mail ou identificador de conta. Recarregar ou tentar novamente com uma idade maior não remove essa restrição. Para perguntar sobre um resultado incorreto, entre em contato com mickeyf.plays@gmail.com; não envie documentos de identidade ou senhas."
+      },
+      {
+        "id": "leaderboards",
+        "title": "Resultados privados e rankings públicos",
+        "text": "Novas contas salvam resultados como privados por padrão. Quando disponível e permitida, a participação em rankings públicos é uma escolha opcional separada. Ela exibe o apelido e o resultado elegível do jogo, inclusive o tempo de conclusão ou a colocação pertinentes. Outras pessoas podem visualizar ou copiar informações públicas. Escolha um apelido que não revele nome real ou informações de contato. A autorização pública pode ser retirada sem excluir os resultados privados. A participação gerenciada por responsável exige autorização separada do responsável, quando aplicável. Contas existentes criadas antes desses controles de cadastro mantêm a visibilidade que se aplicava a elas anteriormente."
+      },
+      {
+        "id": "sessions",
+        "title": "Sessões e armazenamento no dispositivo",
+        "text": "Usamos registros de conta e de sessão para autenticar solicitações, associar resultados e prevenir abusos. Sessões normais duram quatro horas; uma sessão opcional mantida conectada pode ser renovada por até trinta dias de cada vez. Sair da conta invalida a sessão. Limpar dados locais ou desinstalar o aplicativo não exclui a conta no servidor. Preferências funcionais e arquivos de jogos em cache podem permanecer no dispositivo até serem apagados."
+      },
+      {
+        "id": "deletion",
+        "title": "Exclusão de conta e de família",
+        "text": "Você pode solicitar a exclusão permanente da conta pelos controles da conta. Excluir a conta de um responsável exige confirmar as contas infantis dependentes listadas e também exclui essas contas e seus resultados. Responsáveis podem retirar separadamente a autorização e excluir uma conta infantil gerenciada. A exclusão invalida acessos antigos. Retirar apenas a autorização pública preserva os resultados privados; a exclusão da conta os remove."
+      },
+      {
+        "id": "apple",
+        "title": "Autorização Apple e alterações de conta",
+        "text": "As credenciais de autorização da Apple são criptografadas para que o serviço possa revogar a autorização do aplicativo quando uma conta for excluída. Se a revogação falhar, ela pode ser tentada novamente após a exclusão dentro de um prazo de autorização de sete dias. Notificações assinadas da Apple sobre alterações de conta ajudam a invalidar acessos afetados. Registros mínimos de segurança e registros independentes de exclusão ajudam a impedir que novas tentativas ou backups restaurados reativem acessos revogados ou contas excluídas."
+      },
+      {
+        "id": "operations",
+        "title": "Comprovantes de jogo, hospedagem e suporte",
+        "text": "Tratamos comprovantes temporários de envio de jogos para reconhecer novas tentativas e evitar envios duplicados ou abusivos. Os serviços de hospedagem também tratam informações de conexão, incluindo endereços IP e informações das solicitações, para fornecer e proteger o serviço. Se você nos enviar um e-mail, receberemos sua mensagem e os anexos que escolher enviar. Não envie senhas ou códigos de acesso."
+      },
+      {
+        "id": "services",
+        "title": "Música e prestadores de serviços",
+        "text": "A música selecionada é reproduzida e analisada no seu dispositivo; esse recurso não envia o arquivo de música, seu nome ou os resultados da análise ao nosso servidor e não solicita acesso ao microfone. Google Cloud e Firebase hospedam o serviço e o armazenamento de contas e resultados; o servidor e o banco de dados ficam nos Estados Unidos, enquanto a entrega e o processamento do suporte podem ocorrer em outros locais. As fontes do aplicativo são incluídas e fornecidas com o aplicativo; carregá-las não acessa o Google Fonts. O acesso com Google ou Apple, o Gmail e, para testadores beta, o Apple TestFlight têm suas respectivas funções de serviço e privacidade. Não vendemos informações pessoais nem as usamos para publicidade direcionada."
+      },
+      {
+        "id": "retention",
+        "title": "Retenção, escolhas e solicitações de privacidade",
+        "text": "Mantemos os dados da conta para as finalidades aqui descritas enquanto a conta estiver ativa, sujeitos à exclusão e às obrigações aplicáveis. Cópias de recuperação e registros de segurança têm finalidades limitadas e prazos de retenção separados. Entre em contato para solicitar acesso, correção, exclusão ou outros direitos de privacidade aplicáveis, incluindo a retirada do consentimento quando o tratamento se basear nele. Usamos verificação proporcional para proteger contra falsificação de identidade. Você também pode apresentar uma reclamação à autoridade de proteção de dados competente. Alterações em coleta opcional ou divulgação pública exigem a nova autorização aplicável; elas não são autorizadas apenas pela atualização deste aviso."
+      }
+    ]
+  },
   "sections": [
     {
       "id": "operator",

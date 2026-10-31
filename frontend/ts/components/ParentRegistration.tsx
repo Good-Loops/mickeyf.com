@@ -50,6 +50,7 @@ export default function ParentRegistration({ api, authenticated, accountKey, ses
     const creationAllowed = config?.enabled === true && config.creationEnabled
         && (!requireChildAudience || credentialsAfterApproval);
     const portuguese = country === 'BR';
+    const tr = (en: string, pt: string) => portuguese ? pt : en;
     const portugueseConsentUnavailable = portuguese && config?.enabled === true
         && (!portugueseParentConsentAvailable(config) || !!selectedForm && !portugueseFormAvailable(selectedForm, config));
     const pt = notice.signedParentForm.ptBR;
@@ -89,24 +90,24 @@ export default function ParentRegistration({ api, authenticated, accountKey, ses
         if (previousSession.current === sessionGeneration) return;
         previousSession.current = sessionGeneration;
         discard(); setGrant(null); setPassword(''); setUserName(''); setSelectedForm(null); setBusy(false);
-        setFeedback('Your session was refreshed. Restart parent approval. If you submitted child details, refresh the child list first: account creation may still complete.');
+            setFeedback(tr('Your session was refreshed. Restart parent approval. If you submitted child details, refresh the child list first: account creation may still complete.', 'Sua sessão foi atualizada. Reinicie a aprovação do responsável. Se você enviou dados da criança, atualize primeiro a lista: a criação da conta ainda pode ser concluída.'));
     }, [sessionGeneration]);
     useEffect(() => {
         if (!grant) return;
         const timer = setTimeout(() => { discard(); setGrant(null); setPassword(''); setBusy(false);
-            setFeedback('The approval window ended. If you submitted child details, check whether the account was created before trying again.'); }, Math.max(0, grant.expiresAt - Date.now()));
+            setFeedback(tr('The approval window ended. If you submitted child details, check whether the account was created before trying again.', 'O prazo da aprovação terminou. Se você enviou dados da criança, verifique se a conta foi criada antes de tentar novamente.')); }, Math.max(0, grant.expiresAt - Date.now()));
         return () => clearTimeout(timer);
     }, [grant]);
 
     const reset = () => { discard(); setGrant(null); setUserName(''); setPassword(''); setSelectedForm(null); setBusy(false);
-        setFeedback('Cancelled. Any unconfirmed account creation must be checked before trying again.'); };
+        setFeedback(tr('Cancelled. Any unconfirmed account creation must be checked before trying again.', 'Cancelado. Verifique qualquer criação de conta não confirmada antes de tentar novamente.')); };
     const errorText = (error: unknown) => error instanceof ParentRegistrationError && error.code === 'VERIFIED_CONTACT_REQUIRED'
-        ? 'The provider did not supply a verified email. No child account was created. Try a linked provider that can confirm your email.'
+        ? tr('The provider did not supply a verified email. No child account was created. Try a linked provider that can confirm your email.', 'O provedor não forneceu um e-mail verificado. Nenhuma conta infantil foi criada. Tente um provedor vinculado que confirme seu e-mail.')
         : error instanceof ParentRegistrationError && error.code === 'SIGNED_FORM_REQUIRED'
-        ? 'An approved signed parent form for this exact child, country and notice is required. No child account was created.'
+        ? tr('An approved signed parent form for this exact child, country and notice is required. No child account was created.', 'É necessário um formulário assinado e aprovado para esta solicitação, país e aviso. Nenhuma conta infantil foi criada.')
         : error instanceof ParentRegistrationError && error.code === 'PROVIDER_NOT_LINKED'
-        ? 'Use the Google or Apple account already linked to your own Ludolume account.'
-        : 'This request could not be confirmed. If you submitted child account details, check the account before trying again.';
+        ? tr('Use the Google or Apple account already linked to your own Ludolume account.', 'Use a conta Google ou Apple já vinculada à sua própria conta Ludolume.')
+        : tr('This request could not be confirmed. If you submitted child account details, check the account before trying again.', 'Não foi possível confirmar esta solicitação. Se você enviou dados da conta infantil, verifique a conta antes de tentar novamente.');
 
     const approve = async (client: PublicProviderClient) => {
         if (operation.current || !authenticated || !config?.enabled || !creationAllowed || !config.countries.includes(country) || !adult || !guardian || !consent) return;
@@ -138,7 +139,7 @@ export default function ParentRegistration({ api, authenticated, accountKey, ses
                     credentialsAfterApproval ? undefined : userName, controller.signal, isCurrent);
                 if (!active()) return;
                 challengeState.current = null; setSelectedForm(form); setForms(current => [form, ...current]);
-                setFeedback('Print and sign the form, then email the scan from the verified parent address shown. The child account is waiting for review and has not been created.');
+                setFeedback(tr('Print and sign the form, then email the scan from the verified parent address shown. The child account is waiting for review and has not been created.', 'Imprima e assine o formulário; depois, envie a digitalização ou fotografia pelo e-mail verificado do responsável indicado. A solicitação aguarda análise e a conta infantil ainda não foi criada.'));
                 return;
             }
             const proof = await api.complete(challenge.state, typeof credential === 'string' ? credential : credential.idToken, controller.signal, isCurrent);
@@ -172,7 +173,7 @@ export default function ParentRegistration({ api, authenticated, accountKey, ses
             const child = await api.createChild(grant.token, userName, password, controller.signal, selectedForm?.reference, isCurrent);
             if (!active()) return;
             challengeState.current = null; setGrant(null); setUserName(''); setPassword('');
-            setFeedback(`Created ${child.userName} with private scores. You are still signed in to your parent account.`);
+            setFeedback(tr(`Created ${child.userName} with private scores. You are still signed in to your parent account.`, `A conta ${child.userName} foi criada com resultados privados. Você continua conectado à conta de responsável.`));
             setSelectedForm(null); setFormRefresh(value => value + 1);
             onCreated?.();
         } catch (error) { if (active()) {
@@ -183,7 +184,9 @@ export default function ParentRegistration({ api, authenticated, accountKey, ses
         discard(); setGrant(null); setPassword(''); setBusy(false); setSelectedForm(form); setCountry(form.country);
         setUserName(credentialsAfterApproval ? '' : form.userName ?? '');
         setAdult(false); setGuardian(false); setConsent(false);
-        setFeedback(form.status === 'approved' ? 'Signed form approved. Confirm again with the same linked provider, then choose the child password.' : 'This child account has not been created. Return the signed form and wait for review.');
+        setFeedback(form.country === 'BR'
+            ? form.status === 'approved' ? 'Formulário assinado aprovado. Confirme novamente com o mesmo provedor vinculado e depois escolha a senha da criança.' : 'Esta conta infantil ainda não foi criada. Devolva o formulário assinado e aguarde a análise.'
+            : form.status === 'approved' ? 'Signed form approved. Confirm again with the same linked provider, then choose the child password.' : 'This child account has not been created. Return the signed form and wait for review.');
     };
     const cancelForm = async () => {
         if (!selectedForm || operation.current) return;
@@ -194,21 +197,21 @@ export default function ParentRegistration({ api, authenticated, accountKey, ses
             await api.cancelSignedForm(selectedForm.reference, controller.signal);
             if (current !== generation.current || controller.signal.aborted) return;
             setSelectedForm(null); setCountry(''); setUserName(''); setFormRefresh(value => value + 1);
-            setFeedback('Signed form request cancelled. If you sent a form by email, contact us to request removal of the copy.');
-        } catch { if (current === generation.current && !controller.signal.aborted) setFeedback('Cancellation could not be confirmed. Refresh the requests before trying again.'); }
+            setFeedback(tr('Signed form request cancelled. If you sent a form by email, contact us to request removal of the copy.', 'Solicitação do formulário cancelada. Se você enviou um formulário por e-mail, entre em contato para solicitar a remoção da cópia.'));
+        } catch { if (current === generation.current && !controller.signal.aborted) setFeedback(tr('Cancellation could not be confirmed. Refresh the requests before trying again.', 'Não foi possível confirmar o cancelamento. Atualize as solicitações antes de tentar novamente.')); }
         finally { if (current === generation.current && !controller.signal.aborted) { operation.current = null; setBusy(false); } }
     };
 
-    return <section aria-label="Parent-led registration">
-        <h2>Create a private child account</h2>
-        <p>Google or Apple confirms your provider account and may confirm your email. Your adult and guardian declarations are separate; provider sign-in does not verify guardianship.</p>
-        {config?.enabled && <p><PrivacyNoticeLink url={config.privacyNoticeUrl} /></p>}
+    return <section aria-label={tr('Parent-led registration', 'Cadastro por responsável')}>
+        <h2>{tr('Create a private child account', 'Criar uma conta infantil privada')}</h2>
+        <p>{tr('Google or Apple confirms your provider account and may confirm your email. Your adult and guardian declarations are separate; provider sign-in does not verify guardianship.', 'Google ou Apple confirma sua conta no provedor e pode confirmar seu e-mail. Suas declarações de maioridade e responsabilidade legal são separadas; o acesso pelo provedor não comprova responsabilidade legal.')}</p>
+        {config?.enabled && <p><PrivacyNoticeLink url={config.privacyNoticeUrl} portuguese={portuguese} /></p>}
         {authenticated && config?.enabled && config.signedFormCountries && <div>
-            <button type="button" disabled={busy} onClick={() => setFormRefresh(value => value + 1)}>Refresh signed form requests</button>
-            {forms.map(form => <button type="button" key={form.reference} disabled={busy} onClick={() => selectForm(form)}>{form.userName ?? 'Child account request'}: {form.status}</button>)}
+            <button type="button" disabled={busy} onClick={() => setFormRefresh(value => value + 1)}>{tr('Refresh signed form requests', 'Atualizar solicitações de formulário assinado')}</button>
+            {forms.map(form => <button type="button" key={form.reference} disabled={busy} onClick={() => selectForm(form)}>{form.userName ?? (form.country === 'BR' ? 'Solicitação de conta infantil' : 'Child account request')}: {form.country === 'BR' ? ({ pending: 'pendente', approved: 'aprovado', rejected: 'recusado' } as const)[form.status] : form.status}</button>)}
             {selectedForm && <>
                 <SignedParentForm request={selectedForm} policy={config} />
-                <button type="button" disabled={busy} onClick={() => void cancelForm()}>Cancel this signed form request</button>
+                <button type="button" disabled={busy} onClick={() => void cancelForm()}>{tr('Cancel this signed form request', 'Cancelar esta solicitação de formulário assinado')}</button>
             </>}
         </div>}
         {!authenticated ? <p><Link to="/login">Log in to your own Ludolume account with Google or Apple</Link>, then return here.</p>
@@ -216,19 +219,19 @@ export default function ParentRegistration({ api, authenticated, accountKey, ses
             : !config.enabled ? <p>Parent registration is not available on this server.</p>
             : !creationAllowed ? <p>New child accounts are paused. Existing child accounts can still be managed below.</p>
             : grant ? <form onSubmit={create}>
-                <p>Scores are private. No child email or date of birth is collected. Choose a nickname, not the child's real name.</p>
-                <label>Child's nickname<input required maxLength={64} value={userName} disabled={busy || !!selectedForm && !credentialsAfterApproval} onChange={event => setUserName(event.target.value)} /></label>
-                <label>Child's password<input type="password" autoComplete="new-password" required minLength={8} value={password} disabled={busy} onChange={event => setPassword(event.target.value)} /></label>
-                <button type="submit" disabled={busy}>Create private child account</button>
+                <p>{tr("Scores are private. No child email or date of birth is collected. Choose a nickname, not the child's real name.", 'Os resultados são privados. Nenhum e-mail ou data de nascimento da criança é coletado. Escolha um apelido, não o nome real da criança.')}</p>
+                <label>{tr("Child's nickname", 'Apelido da criança')}<input required maxLength={64} value={userName} disabled={busy || !!selectedForm && !credentialsAfterApproval} onChange={event => setUserName(event.target.value)} /></label>
+                <label>{tr("Child's password", 'Senha da criança')}<input type="password" autoComplete="new-password" required minLength={8} value={password} disabled={busy} onChange={event => setPassword(event.target.value)} /></label>
+                <button type="submit" disabled={busy}>{tr('Create private child account', 'Criar conta infantil privada')}</button>
             </form> : <div>
-                <label>Child's country<select value={country} disabled={busy || !!selectedForm} onChange={event => {
+                <label>{portuguese ? 'País da criança' : "Child's country / País da criança"}<select value={country} disabled={busy || !!selectedForm} onChange={event => {
                     setCountry(event.target.value); setAdult(false); setGuardian(false); setConsent(false);
                 }}>
-                    <option value="">Choose a country</option>{config.countries.map(value => <option key={value} value={value}>{value}</option>)}
+                    <option value="">{tr('Choose a country / Escolha um país', 'Escolha um país')}</option>{config.countries.map(value => <option key={value} value={value}>{value}</option>)}
                 </select></label>
                 {config.signedFormCountries?.includes(country) && <>
                     <p lang={portuguese ? 'pt-BR' : undefined}>{portuguese ? pt.notice : notice.signedParentForm.notice}</p>
-                    {!selectedForm && !credentialsAfterApproval && <label>Child's chosen nickname<input maxLength={64} value={userName} disabled={busy} onChange={event => setUserName(event.target.value)} /></label>}
+                    {!selectedForm && !credentialsAfterApproval && <label>{tr("Child's chosen nickname", 'Apelido escolhido para a criança')}<input maxLength={64} value={userName} disabled={busy} onChange={event => setUserName(event.target.value)} /></label>}
                     {credentialsAfterApproval && <p>{portuguese ? pt.labels.credentialsAfterApproval : "The child's nickname and password are chosen only after the signed parent form is approved."}</p>}
                     {selectedForm && selectedForm.status !== 'approved' && <p>{portuguese ? pt.labels.awaiting : 'Awaiting signed form review. The child account is not active.'}</p>}
                 </>}
@@ -239,10 +242,10 @@ export default function ParentRegistration({ api, authenticated, accountKey, ses
                 <label><input type="checkbox" checked={consent} disabled={busy || portugueseConsentUnavailable} onChange={event => setConsent(event.target.checked)} />{portuguese ? pt.labels.consentCheck : 'I agree to this child-account consent.'}</label>
                 {clients.map(client => <button type="button" key={client.clientKey} disabled={busy || portugueseConsentUnavailable || !country || !adult || !guardian || !consent
                     || !!config.signedFormCountries?.includes(country) && (selectedForm ? selectedForm.status !== 'approved' : !credentialsAfterApproval && !userName.trim())}
-                    onClick={() => void approve(client)}>Confirm with {client.provider === 'google' ? 'Google' : 'Apple'}</button>)}
-                {clients.length === 0 && <p>No supported provider is available here. No child details are needed.</p>}
+                    onClick={() => void approve(client)}>{tr('Confirm with', 'Confirmar com')} {client.provider === 'google' ? 'Google' : 'Apple'}</button>)}
+                {clients.length === 0 && <p>{tr('No supported provider is available here. No child details are needed.', 'Nenhum provedor compatível está disponível aqui. Não são necessários dados da criança.')}</p>}
             </div>}
-        <button type="button" onClick={reset}>Cancel parent registration</button>
-        {feedback && <p role="status">{feedback}</p>}
+        <button type="button" onClick={reset}>{tr('Cancel parent registration', 'Cancelar cadastro por responsável')}</button>
+        {feedback && <p lang={portuguese ? 'pt-BR' : undefined} role="status">{feedback}</p>}
     </section>;
 }

@@ -31,11 +31,27 @@ test('public contact contains the owner-approved operator details without local 
     assert.equal(notice.operatorName, 'Michel Silveira Dias Fingergut');
     assert.equal(notice.contactEmail, 'mickeyf.plays@gmail.com');
     assert.match(markup, /href="mailto:mickeyf\.plays@gmail\.com"/u);
-    assert.deepEqual(Object.keys(notice).sort(), ['availabilityText', 'consent', 'contactEmail', 'noticeUrl', 'operatorAddress', 'operatorName', 'operatorTelephone', 'sections', 'signedParentForm', 'version']);
+    assert.deepEqual(Object.keys(notice).sort(), ['availabilityText', 'consent', 'contactEmail', 'noticeUrl', 'operatorAddress', 'operatorName', 'operatorTelephone', 'ptBR', 'sections', 'signedParentForm', 'version']);
     assert.equal(notice.operatorTelephone, '+55 71 99910 2221');
     assert.ok(markup.includes(notice.operatorTelephone));
     assert.ok(markup.includes(notice.operatorAddress));
     assert.doesNotMatch(markup, /tel:|C:\\Users\\|privateDraft|postalAddress|phoneNumber/u);
+});
+
+test('Portuguese notice includes every English section and both separate permissions', () => {
+    assert.deepEqual(notice.ptBR.sections.map(section => section.id), notice.sections.map(section => section.id));
+    assert.match(markup, /href="#portugues" lang="pt-BR"/u);
+    assert.match(markup, /<section lang="pt-BR" aria-labelledby="portugues">/u);
+    const translated = markup.slice(markup.indexOf('<section lang="pt-BR"'));
+    for (const { id, title, text } of notice.ptBR.sections) {
+        assert.ok(translated.includes(`id="privacidade-${id}"`));
+        assert.ok(translated.includes(title));
+        assert.ok(translated.includes(escaped(text)));
+    }
+    assert.ok(translated.includes(escaped(notice.signedParentForm.ptBR.parentConsent)));
+    assert.ok(translated.includes(escaped(notice.signedParentForm.ptBR.publicConsent)));
+    assert.match(translated, /Ler este aviso não concede nenhuma delas/u);
+    assert.match(translated, /Não envie senhas ou códigos de acesso/u);
 });
 
 test('public deletion section offers browser controls and a scoped email request without an authenticated session', () => {

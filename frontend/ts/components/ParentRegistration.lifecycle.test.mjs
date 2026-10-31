@@ -97,7 +97,8 @@ test('Brazilian consent requires exact bound policy and form version before cont
         view.render();
         view.all(node => node.type === 'input' && node.props.type === 'checkbox').forEach(node => node.props.onChange({ target: { checked: true } }));
         view.render();
-        assert.equal(view.button('Confirm with Google').props.disabled, !matches);
+        assert.equal(view.button('Confirmar com Google').props.disabled, !matches);
+        assert.ok(view.text().includes('Criar uma conta infantil privada'));
         assert.ok(view.text().includes(matches ? notice.signedParentForm.ptBR.parentConsent : notice.signedParentForm.ptBR.labels.unavailable));
         view.unmount();
     }
@@ -113,7 +114,7 @@ test('changing country clears the previous adult, guardian and consent choices',
     view.render(); assert.equal(view.button('Confirm with Google').props.disabled, false);
     view.find(node => node.type === 'select').props.onChange({ target: { value: 'BR' } });
     view.render();
-    assert.equal(view.button('Confirm with Google').props.disabled, true);
+    assert.equal(view.button('Confirmar com Google').props.disabled, true);
     assert.ok(view.all(node => node.type === 'input' && node.props.type === 'checkbox').every(node => node.props.checked === false));
 });
 

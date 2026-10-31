@@ -22,3 +22,10 @@ test('notice is a native accessible link with an announced new tab, opener isola
 test('an unset or invalid notice is omitted, never replaced by a guessed route or executable link', () => {
     for (const value of [undefined, '', 'javascript:alert(1)', '/privacy', 'https://u:p@notice.example.test']) assert.equal(render(value), '');
 });
+test('Portuguese links use the notice language anchor and retain link protections', () => {
+    const html = renderToStaticMarkup(React.createElement(PrivacyNoticeLink, { url: 'https://notice.example.test/privacy#old', portuguese: true }));
+    assert.match(html, /href="https:\/\/notice.example.test\/privacy#portugues"/u);
+    assert.match(html, /lang="pt-BR"/u);
+    assert.match(html, /Aviso de privacidade/iu);
+    assert.match(html, /rel="noopener noreferrer"/u);
+});

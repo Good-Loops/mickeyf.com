@@ -42,6 +42,7 @@ test('Brazil form shows the bound Portuguese notice, choices, references and no 
         notice.signedParentForm.ptBR.publicConsent, notice.signedParentForm.ptBR.labels.signature,
         request.reference, request.parentAccountId, request.verifiedContact, notice.signedParentForm.version]) assert.ok(value.includes(text));
     assert.match(value, /lang="pt-BR"/u);
+    assert.match(value, /href="https:\/\/mickeyf\.com\/privacy#portugues"/u);
     assert.doesNotMatch(value, /<input|childPassword|idToken|grant=/u);
 });
 test('Brazil form refuses unknown parent or public consent wording rather than translating a different policy', () => {

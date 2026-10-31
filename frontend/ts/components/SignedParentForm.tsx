@@ -27,7 +27,7 @@ function PortugueseSignedParentForm({ request, policy }: { request: SignedParent
         <h3>{label.title}</h3>
         <p>{notice.operatorName}<br />{notice.operatorAddress}<br />{notice.operatorTelephone}<br />{notice.contactEmail}</p>
         <p>{pt.notice}</p>
-        <p><a href={privacyUrl} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">{label.privacy}</a></p>
+        <p><a href={`${privacyUrl.split('#')[0]}#portugues`} target="_blank" rel="noopener noreferrer" referrerPolicy="no-referrer">{label.privacy}</a></p>
         <dl>
             <dt>{label.reference}</dt><dd>{request.reference}</dd>
             <dt>{label.parentAccount}</dt><dd>{request.parentAccountId}</dd>
