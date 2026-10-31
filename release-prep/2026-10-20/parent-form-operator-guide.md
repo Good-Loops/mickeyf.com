@@ -17,11 +17,10 @@ VeraCrypt container were verified on 31 October; see the later
    mailbox, including Spam. Review each returned form against its exact pending
    request. Keep incomplete or mismatched forms unapproved; the checks below
    explain what must match.
-2. Record each returned form with a valid request reference in the private
-   register. Use the read-only report and summary below to check each one.
-   Track an incomplete message without a usable reference separately in the
-   private archive, including its receive date and cleanup deadline; never
-   invent a reference for it. Check all deadlines on each pass.
+2. Record each returned form in the private register. Use its actual request
+   reference when available; for an unmatched message, use the separate local
+   case ID described below, never an invented request reference. Use the
+   read-only report and deadline view to check the cases on each pass.
 3. Complete due cleanup across all relevant copies, including Gmail Trash,
    downloads, the archive and any backups. Record completion only after the
    copies have actually been addressed. An error or missing report is not proof
@@ -113,7 +112,7 @@ is for the newly created VeraCrypt archive when mounted as `P:`; use the actual
 protected register location if it is mounted under another letter:
 
 ```powershell
-& ./scripts/parent-form-ledger-input.ps1 -LedgerPath 'P:\Records\retention-register.csv' |
+pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ./scripts/parent-form-ledger-input.ps1 -LedgerPath 'P:\Records\retention-register.csv' |
     npm --prefix backend run --silent parent-form:retention |
     node ./scripts/parent-form-retention-summary.mjs
 ```
@@ -134,7 +133,7 @@ To see the deadlines already entered in the register, run this local-only view
 in the same private window:
 
 ```powershell
-& ./scripts/parent-form-ledger-input.ps1 -LedgerPath 'P:\Records\retention-register.csv' -DeadlineReport
+pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ./scripts/parent-form-ledger-input.ps1 -LedgerPath 'P:\Records\retention-register.csv' -DeadlineReport
 ```
 
 It lists outstanding references ordered by entered deadline, flags dates due
@@ -155,5 +154,31 @@ does not include review dates or determine deletion deadlines: consult the
 private register. A `not-found` result needs investigation and does not prove
 that copies or backup contents were deleted. The summary makes no database or
 file changes and does not replace the full guarded target/source checks.
+
+For a message with no usable request reference, create a local case ID with:
+
+```powershell
+pwsh -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ./scripts/parent-form-ledger-input.ps1 -NewUnmatchedReference
+```
+
+Put the resulting `unmatched:...` ID in the register's `request_reference`
+column, the actual receipt time in `received_at` as UTC (for example,
+`2026-10-30T14:30:00Z`), and enough private information in `message_locator`
+to locate the specific email. Choose a conservative earlier receipt time if
+the exact time cannot be established; do not treat the time the record is made
+as the receipt time. Keep locators inside the encrypted register. Leave
+`deleted_at` blank until all copies have actually been addressed. The process-only
+execution-policy option above does not change the Windows policy for other
+sessions; use the reviewed script from this checkout.
+
+The deadline view labels this as an unmatched message and calculates a
+conservative 14-day deadline from receipt. An earlier entered `purge_due_at`
+is accepted; a later one is rejected. These local IDs never go to the database
+report and never establish that a request or consent exists. If only unmatched
+messages are outstanding, use the deadline view; the database-report pipeline
+will return an error because there are no actual references to reconcile. If a
+valid matching request is later verified, follow the regular review process and
+update the register without leaving duplicate active entries. This is a tracking
+aid: it does not search Gmail or prove that all messages and copies are recorded.
 
 The owner accepting the reviewer role resolves staffing. It does not automatically approve these storage/retention arrangements, the BR/US age-assurance design or production activation. No paid review service, response-time guarantee or new external account has been introduced.

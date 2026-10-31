@@ -11,7 +11,7 @@ const script = path.join(root, 'scripts/parent-form-ledger-input.ps1');
 const source = path.join(root, 'release-prep/2026-10-21/parent-form-retention-register.example.csv');
 const first = '00000000-0000-4000-8000-000000000001';
 const second = '00000000-0000-4000-8000-000000000002';
-const run = (ledger, ...options) => spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-File', script, '-LedgerPath', ledger, ...options],
+const run = (ledger, ...options) => spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, '-LedgerPath', ledger, ...options],
     { encoding: 'utf8', timeout: 15_000 });
 
 test('private ledger conversion emits only unique outstanding references and fails closed',
@@ -113,4 +113,56 @@ test('deadline report sorts entered deadlines, flags missing dates, and emits no
         } finally {
             await rm(temp, { recursive: true, force: true });
         }
+    });
+
+test('unmatched messages stay local and are due within 14 days of receipt',
+    { skip: process.platform !== 'win32' }, async () => {
+        const temp = await mkdtemp(path.join(os.tmpdir(), 'synthetic-unmatched-parent-'));
+        try {
+            const generated = spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, '-NewUnmatchedReference'],
+                { encoding: 'utf8', timeout: 15_000 });
+            assert.equal(generated.status, 0, generated.stderr);
+            const localId = generated.stdout.trim();
+            assert.match(localId, /^unmatched:[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u);
+            const fixture = await readFile(source, 'utf8');
+            const [header, sample] = fixture.trimEnd().split(/\r?\n/u);
+            const fields = sample.split(',');
+            const received = Date.now() - 12 * 86_400_000;
+            fields[0] = localId;
+            fields[1] = new Date(received).toISOString();
+            fields[6] = 'PRIVATE-UNMATCHED-LOCATOR';
+            fields[9] = '';
+            fields[10] = '';
+            const ledger = path.join(temp, 'register.csv');
+            await writeFile(ledger, `${header}\n${sample}\n${fields.join(',')}\n`);
+            let result = run(ledger, '-DeadlineReport');
+            assert.equal(result.status, 0, result.stderr);
+            assert.match(result.stdout, /unmatched:.*UNMATCHED MESSAGE - DUE WITHIN 4 DAYS/u);
+            assert.doesNotMatch(result.stdout, /PRIVATE-UNMATCHED-LOCATOR/u);
+            result = run(ledger);
+            assert.equal(result.status, 0, result.stderr);
+            assert.deepEqual(JSON.parse(result.stdout), { references: [first] }, 'local case IDs must never reach the database report');
+            await writeFile(ledger, `${header}\n${fields.join(',')}\n`);
+            result = run(ledger);
+            assert.notEqual(result.status, 0, 'an unmatched-only register is not a successful database lookup');
+            assert.equal(result.stdout.trim(), '');
+            result = run(ledger, '-DeadlineReport');
+            assert.equal(result.status, 0, result.stderr);
+            assert.doesNotMatch(result.stdout, /No outstanding rows/u);
+
+            for (const change of [
+                row => { row[1] = 'not-a-date'; },
+                row => { row[1] = new Date(Date.now() + 86_400_000).toISOString(); },
+                row => { row[6] = ''; },
+                row => { row[9] = new Date(received + 15 * 86_400_000).toISOString(); },
+                row => { row[10] = new Date(received - 86_400_000).toISOString(); },
+            ]) {
+                const bad = [...fields]; change(bad);
+                await writeFile(ledger, `${header}\n${sample}\n${bad.join(',')}\n`);
+                result = run(ledger, '-DeadlineReport');
+                assert.notEqual(result.status, 0);
+                assert.equal(result.stdout.trim(), '', 'invalid unmatched row must suppress the entire report');
+                assert.doesNotMatch(result.stderr, /PRIVATE-UNMATCHED-LOCATOR/u);
+            }
+        } finally { await rm(temp, { recursive: true, force: true }); }
     });
