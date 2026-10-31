@@ -78,6 +78,14 @@ and [312.10](https://www.ecfr.gov/current/title-16/chapter-I/subchapter-C/part-3
 
 ## Completion evidence still needed
 
+Read-only cloud configuration observed 31 October: the `cms-mickeyf` Cloud SQL
+instance has automated backups enabled, retains eight automated backups by count,
+and has seven-day point-in-time recovery. The `_Default` and `_Required` logging
+buckets have configured retention of 30 and 400 days, respectively. These are
+configuration facts, not proof that a particular category of child information
+is logged, proof of its actual lifetime in every copy, or a universal erasure
+deadline. Determine actual data and restore behavior before publishing schedules.
+
 Record the exact tested build and reviewed notice/form/consent versions; qualify
 the parent review and all-copy deletion process with synthetic records; validate
 the restore and deletion-replay procedures and real device age-signal behavior;

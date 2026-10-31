@@ -53,4 +53,29 @@ The current candidate notice promises:
 
 Database cleanup removes expired unused request rows; it **does not delete Gmail messages or downloaded attachments**. The owner must track the separate mailbox/file deadlines, including trash and other retained copies, and ensure that actual storage and recovery handling match the published notice. A parent may withdraw public display alone while keeping the private account, or withdraw account permission/delete the child. Verify the requester using the established account controls or approved support process; never ask them to email passwords or sign-in codes.
 
+## Prepare a reconciliation list from the private register
+
+The private register can supply the request references for the existing guarded
+read-only report, so the owner need not type each reference into a separate JSON
+file. After completing the separately reviewed target/proxy setup, from a clean
+checkout run the following in a private PowerShell 7 (`pwsh`) window. Replace the
+example path with the actual protected register location:
+
+```powershell
+& ./scripts/parent-form-ledger-input.ps1 -LedgerPath 'C:\Private\parent-form-register.csv' |
+    npm --prefix backend run --silent parent-form:retention
+```
+
+The helper reads the existing register format and sends **only** references from
+rows whose `deleted_at` is empty to the report. Set `deleted_at` only after all
+applicable copies have actually been deleted. Invalid CSV, duplicate references,
+invalid or future deletion dates, an empty set or more than 100 outstanding rows
+produce an error rather than a partial list. Split larger registers into deliberate,
+independently checked batches. A successful zero-row lookup, a failed lookup, and
+no outstanding rows are different outcomes; no report is evidence of deletion.
+This helper does not connect to any database, approve or delete anything, inspect
+attachments, or validate that a human review was completed. It does not simplify
+or bypass the target, schema, source, account and proxy checks in the report.
+Both register and report contain sensitive metadata; keep them private.
+
 The owner accepting the reviewer role resolves staffing. It does not automatically approve these storage/retention arrangements, the BR/US age-assurance design or production activation. No paid review service, response-time guarantee or new external account has been introduced.
