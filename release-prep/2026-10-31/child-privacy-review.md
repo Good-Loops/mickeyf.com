@@ -111,6 +111,16 @@ a synthetic file created in `Incoming` was not encrypted; both were removed.
 The source of the discrepancy is unknown. The owner previously deferred a
 restore test on another Windows device.
 
+As an alternative, the owner authorized installation of the signed VeraCrypt
+1.26.29 package. A new 1 GiB file container was created with a password entered
+privately by the owner. A synthetic file was written while mounted, the volume
+was dismounted and reopened with the owner's password, and the same synthetic
+content was read and removed. Empty intake/review folders and a header-only
+register were created inside the container; it was then dismounted. A separate
+backup and recovery test remain necessary. Existing EFS files and the prior EFS
+recovery backup were not migrated or removed. Do not receive real forms until
+the complete intake, all-copy deletion and recovery operation is qualified.
+
 Record the exact tested build and reviewed notice/form/consent versions; qualify
 the parent review and all-copy deletion process with synthetic records; validate
 the restore and deletion-replay procedures and real device age-signal behavior;
