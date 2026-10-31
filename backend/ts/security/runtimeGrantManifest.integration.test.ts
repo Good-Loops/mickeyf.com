@@ -20,7 +20,7 @@ import { findProviderAccount, linkProviderAccount, readProviderAccountMethods } 
 import { createAccountSession, readLiveSession, renewAccountSession, revokeAccountSession } from '../auth/accountSessionRepository';
 import { consumeProviderAttempt, createProviderAttempt, type ProviderAttempt } from '../auth/providerAttemptRepository';
 import type { VerifiedProviderIdentity } from '../auth/providerIdentity';
-import { deriveRenewedSessionId } from './sessionPolicy';
+import { deriveRenewedSessionId, sessionLifetimeSeconds } from './sessionPolicy';
 import { verifyAccountSessionReadiness, verifyProviderAuthReadiness } from '../accounts/accountDeletionReadiness';
 import {
     readP4VegaLeaderboard,
@@ -350,7 +350,7 @@ test('limited runtime session grants support rotation without rewriting immutabl
     const accountId = accounts[0].accountId as string;
     const sessionId = Buffer.alloc(32, 3).toString('base64url');
     assert.equal(await createAccountSession(runtimePool, { userId: 1, accountId }, sessionId,
-        Math.floor(Date.now() / 1000) + 30 * 24 * 60 * 60, undefined, true), true);
+        Math.floor(Date.now() / 1000) + sessionLifetimeSeconds(true), undefined, true), true);
     assert.deepEqual(await readLiveSession(runtimePool, 1, accountId, sessionId), { userName: 'player-1' });
     for (const column of ['account_uuid', 'created_at', 'remembered']) {
         await assertPrivilegeDenied(() => runtimePool.query(`UPDATE account_sessions SET ${column} = ${column} WHERE 1 = 0`));
