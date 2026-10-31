@@ -97,9 +97,12 @@ success. The known contents were setup materials and synthetic data. Keep real
 forms out until directory inheritance, existing copies and a separately tested
 recovery backup are verified. After the owner reported applying encryption,
 readback still showed the directory unencrypted, and a newly created synthetic
-file did not inherit encryption; the synthetic file was removed. A separate
-empty synthetic directory could not be encrypted by this process and was also
-removed. The owner previously deferred a restore test on another Windows device.
+file did not inherit encryption; the synthetic file was removed. Explorer
+continued to show the encryption checkbox selected, according to the owner. A
+separate empty synthetic directory could not be encrypted by this process, and
+a synthetic file created in `Incoming` was not encrypted; both were removed.
+The source of the discrepancy is unknown. The owner previously deferred a
+restore test on another Windows device.
 
 Record the exact tested build and reviewed notice/form/consent versions; qualify
 the parent review and all-copy deletion process with synthetic records; validate
