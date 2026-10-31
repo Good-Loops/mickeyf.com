@@ -1,5 +1,9 @@
 import assert from 'node:assert/strict';
-import { randomBytes, randomUUID } from 'node:crypto';
+import { createHmac, randomBytes, randomUUID } from 'node:crypto';
+import { once } from 'node:events';
+import type { AddressInfo } from 'node:net';
+import express from 'express';
+import cookieParser from 'cookie-parser';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
@@ -19,6 +23,10 @@ import { createAccountSession, revokeAccountSession } from '../auth/accountSessi
 import { runChildInactivityReview } from './runChildInactivityReview';
 import { runChildInactivityMaintenance } from './childInactivityMaintenance';
 import { Readable } from 'node:stream';
+import { createAuthRouter } from '../routers/authRouter';
+import { parentManagedChildActivity } from './parentManagedChildActivity';
+import { issueSessionToken } from '../security/sessionPolicy';
+import { verifyChildInactivityWarningReadiness } from './childInactivityRuntime';
 
 const config = loadMigrationConfig();
 const rootPassword = 'migration-test-root-only';
@@ -239,4 +247,53 @@ test('channel replacement holds current warnings and replaces stale warnings und
     assert.notEqual(replacement.warningId, appResult.warning.warningId); assert.equal(replacement.channel, 'email');
     assert.deepEqual(await service.acknowledge(context, { childAccountId: childId, warningId: appResult.warning.warningId, acknowledge: true }),
         { error: 'UNAVAILABLE' }, 'the superseded warning cannot be acknowledged');
+});
+
+test('warning readiness requires the exact table and actual restricted write grants', async () => {
+    await admin.query("CREATE USER 'warning_test'@'%' IDENTIFIED BY 'synthetic-warning-test-only'");
+    await admin.query('GRANT SELECT, INSERT, UPDATE ON mickeyf_migration_test.parent_child_inactivity_warnings TO \'warning_test\'@\'%\'');
+    const limited = mysql.createPool({ host: config.host, port: config.port, database: config.database, user: 'warning_test',
+        password: 'synthetic-warning-test-only', connectionLimit: 1 });
+    try {
+        await verifyChildInactivityWarningReadiness(limited);
+        await admin.query('REVOKE UPDATE ON mickeyf_migration_test.parent_child_inactivity_warnings FROM \'warning_test\'@\'%\'');
+        await assert.rejects(verifyChildInactivityWarningReadiness(limited));
+    } finally { await limited.end(); await admin.query("DROP USER 'warning_test'@'%'"); }
+});
+
+test('mounted warning route checks origin and parent session and acknowledges the exact child over HTTP', async () => {
+    const { parentId, childId } = await managedFixture();
+    const [[parent]] = await admin.query<RowDataPacket[]>('SELECT user_id, user_name FROM users WHERE account_uuid=?', [parentId]);
+    const account = { accountId: parentId, userId: parent.user_id as number, userName: parent.user_name as string };
+    const secret = 'synthetic-parent-warning-http-secret';
+    const issued = issueSessionToken(account, secret);
+    assert.equal(await createAccountSession(database, account, issued.sessionId, issued.expiresAt), true);
+    const store = createChildInactivitySqlStore(database, createInAppInactivityQualityResolver(Buffer.alloc(32, 3), async () => true));
+    const service = createChildInactivityParentService(store, Buffer.alloc(32, 8), async id => id === parentId ? [childId] : []);
+    const app = express(); app.use(cookieParser(secret)); app.use(express.json());
+    app.use('/auth', createAuthRouter(database, secret, false, ['https://parent.example.test'],
+        { parentRegistrationStorageReady: true, childActivity: parentManagedChildActivity, childInactivity: service }));
+    const server = app.listen(0, '127.0.0.1'); await once(server, 'listening');
+    const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}/auth/child-inactivity`;
+    const signature = createHmac('sha256', secret).update(issued.token).digest('base64').replace(/=+$/, '');
+    const cookie = `__session=${encodeURIComponent(`s:${issued.token}.${signature}`)}`;
+    const send = (route: string, body: unknown, origin = 'https://parent.example.test', session = cookie) => fetch(`${base}/${route}`,
+        { method: 'POST', headers: { 'Content-Type': 'application/json', Origin: origin, Cookie: session }, body: JSON.stringify(body) });
+    try {
+        assert.equal((await send('warning', { childAccountId: childId }, 'https://attacker.example.test')).status, 403);
+        assert.equal((await send('warning', { childAccountId: childId }, undefined, '')).status, 403);
+        const pending = await send('pending', {});
+        assert.equal(pending.status, 200); assert.deepEqual(await pending.json(), { pending: true });
+        const response = await send('warning', { childAccountId: childId });
+        assert.equal(response.status, 200); const body = await response.json() as { warning: { warningId: string; acknowledged: boolean } };
+        assert.equal(body.warning.acknowledged, false);
+        const acknowledgment = await send('acknowledge', { childAccountId: childId, warningId: body.warning.warningId, acknowledge: true });
+        assert.equal(acknowledgment.status, 200); assert.deepEqual(await acknowledgment.json(), { acknowledged: true });
+        const cleared = await send('pending', {});
+        assert.equal(cleared.status, 200); assert.deepEqual(await cleared.json(), { pending: false });
+        const again = await send('warning', { childAccountId: childId });
+        assert.equal(((await again.json()) as { warning: { acknowledged: boolean } }).warning.acknowledged, true);
+        await revokeAccountSession(database, account.userId, parentId, issued.sessionId);
+        assert.equal((await send('acknowledge', { childAccountId: childId, warningId: body.warning.warningId, acknowledge: true })).status, 403);
+    } finally { server.close(); await once(server, 'close'); }
 });

@@ -19,7 +19,7 @@ public class LudolumeApiPolicyTest {
     }
     @Test public void parentInactivityAllowsOnlyExactWarningAndAcknowledgmentPosts() {
         String base = LudolumeApiPolicy.ORIGIN + "/auth/child-inactivity/";
-        for (String route : new String[] { "warning", "acknowledge" }) {
+        for (String route : new String[] { "warning", "acknowledge", "pending" }) {
             assertNotNull(LudolumeApiPolicy.request(base + route, "POST", "{}"));
             assertNull(LudolumeApiPolicy.request(base + route, "GET", null));
             assertNull(LudolumeApiPolicy.request(base + route + "?extra=1", "POST", "{}"));

@@ -27,6 +27,27 @@
 
 html.canvas-fullscreen-fallback-active .app-shell > .main { overflow: visible; }
 
+.app-shell:has(> .parent-inactivity-banner) {
+    grid-template-rows: auto auto minmax(0, 1fr) auto;
+}
+
+.parent-inactivity-banner {
+    position: relative;
+    z-index: 2;
+    justify-self: center;
+    max-width: min(48rem, 100%);
+    margin: .4rem 1rem 0;
+    padding: .55rem .8rem;
+    border: 1px solid rgba(185, 216, 239, .45);
+    border-radius: .5rem;
+    background: #10283a;
+    color: #fff;
+    text-align: center;
+    font-size: .875rem;
+    line-height: 1.4;
+    a { color: #bfe5ff; text-decoration: underline; }
+}
+
 @include compact-viewport {
     // Mobile browser chrome can change the large viewport while the visible
     // viewport stays smaller. Intrinsic outer rows keep short pages in-frame.

@@ -12,7 +12,7 @@ export function createChildInactivityParentRouter(service: ChildInactivityParent
     router.use(rateLimit({ windowMs: 15 * 60 * 1000, limit: 30, standardHeaders: 'draft-8',
         legacyHeaders: false, passOnStoreError: false, message: { error: 'RATE_LIMITED' } }));
     router.use(json({ limit: '4kb', strict: true }));
-    for (const [path, operation] of [['/warning', service.read], ['/acknowledge', service.acknowledge]] as const) {
+    for (const [path, operation] of [['/warning', service.read], ['/acknowledge', service.acknowledge], ['/pending', service.pending]] as const) {
         router.post(path, asyncHandler(async (req, res) => {
             try {
                 const result = await operation(await readContext(req, 'complete'), req.body);

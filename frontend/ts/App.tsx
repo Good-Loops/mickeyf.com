@@ -11,6 +11,7 @@ import RouteContentBoundary from '@/components/RouteContentBoundary';
 import PrivacyNoticeLink from '@/components/PrivacyNoticeLink';
 import { parsePrivacyNoticeUrl } from '@/config/privacyNoticeUrl';
 import Header from "@/Header";
+import ParentInactivityBanner from '@/components/ParentInactivityBanner';
 import Home from "@/pages/Home";
 
 import { isThreeBossesAvailableInCurrentBrowser } from '@/games/three-bosses/unityVisibility';
@@ -65,6 +66,7 @@ const App: React.FC = () => {
 			<div className="space-background__celestial space-background__celestial--quasar-lensed" />
 		</div>
 		<Header />
+		<ParentInactivityBanner />
 		<main className="main">
 			<RouteContentBoundary key={pathname}>
 				<Routes>

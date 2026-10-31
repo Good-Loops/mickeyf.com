@@ -9,10 +9,11 @@ const childInput = (input: unknown): input is { childAccountId: string } => !!in
     && isAccountId((input as { childAccountId?: unknown }).childAccountId);
 
 /** Parent-only surface. The caller must use the cookie/origin-protected context reader. */
-export function createChildInactivityParentService(store: InactivityStore, receiptKey: Buffer) {
+export function createChildInactivityParentService(store: InactivityStore, receiptKey: Buffer,
+    findChildren?: (parentId: string) => Promise<readonly string[]>) {
     if (!Buffer.isBuffer(receiptKey) || receiptKey.length < 32) throw new TypeError('A separate receipt HMAC key is required.');
     const key = Buffer.from(receiptKey);
-    return {
+    const service = {
         async read(context: ProviderAuthContext | null, input: unknown) {
             if (!context?.account || !context.session || context.account.accountId !== context.session.accountId) return { error: 'INVALID_CONTEXT' as const };
             if (!childInput(input)) return { error: 'INVALID_REQUEST' as const };
@@ -21,7 +22,8 @@ export function createChildInactivityParentService(store: InactivityStore, recei
                     if (!await target.parentSessionValid(context.session!)) return { error: 'INVALID_CONTEXT' as const };
                     const snapshot = await target.snapshot(); let pending = await target.pending();
                     const timestamp = await target.databaseTimestamp(); const now = Date.parse(timestamp) + 1;
-                    if (!snapshot || snapshot.channel !== 'in-app' || snapshot.parentId !== context.account!.accountId || snapshot.childId !== input.childAccountId
+                    if (!snapshot || !snapshot.activityComplete || !snapshot.targetVerified) return { error: 'UNAVAILABLE' as const };
+                    if (snapshot.channel !== 'in-app' || snapshot.parentId !== context.account!.accountId || snapshot.childId !== input.childAccountId
                         || assessChildInactivity({ ...snapshot, warning: null }, now) !== 'warning-due') return { warning: null };
                     if (!pending || pending.parentId !== snapshot.parentId || pending.childId !== snapshot.childId
                         || pending.activityAt !== snapshot.activityAt || pending.targetDigest !== snapshot.currentTargetDigest
@@ -52,6 +54,25 @@ export function createChildInactivityParentService(store: InactivityStore, recei
                 return accepted ? { acknowledged: true as const } : { error: 'UNAVAILABLE' as const };
             } catch { return { error: 'UNAVAILABLE' as const }; }
         },
+        /** Generic in-app reminder; no child identities or contact details are exposed. */
+        async pending(context: ProviderAuthContext | null, input: unknown) {
+            if (!context?.account || !context.session || context.account.accountId !== context.session.accountId) return { error: 'INVALID_CONTEXT' as const };
+            if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).length !== 0) return { error: 'INVALID_REQUEST' as const };
+            if (!findChildren) return { error: 'UNAVAILABLE' as const };
+            try {
+                const children = await findChildren(context.account.accountId);
+                if (!Array.isArray(children) || children.length > 50 || new Set(children).size !== children.length
+                    || children.some(id => !isAccountId(id) || id === context.account!.accountId)) return { error: 'UNAVAILABLE' as const };
+                for (const childAccountId of children) {
+                    // Each read rechecks the exact parent session and ownership while holding the relationship locks.
+                    const result = await service.read(context, { childAccountId });
+                    if ('error' in result) return { error: result.error };
+                    if (result.warning && !result.warning.acknowledged) return { pending: true as const };
+                }
+                return { pending: false as const };
+            } catch { return { error: 'UNAVAILABLE' as const }; }
+        },
     };
+    return service;
 }
 export type ChildInactivityParentService = ReturnType<typeof createChildInactivityParentService>;

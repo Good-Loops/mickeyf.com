@@ -22,6 +22,7 @@ final class LudolumeApiPolicy {
         "POST /auth/parent-registration/family/delete",
         "POST /auth/child-activity/interaction", "POST /auth/child-activity/keep",
         "POST /auth/child-inactivity/warning", "POST /auth/child-inactivity/acknowledge",
+        "POST /auth/child-inactivity/pending",
         "GET /auth/parent-registration/scores/config",
         "POST /auth/parent-registration/scores/status",
         "POST /auth/parent-registration/scores/publish",

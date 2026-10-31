@@ -2,6 +2,15 @@
 
 This code is a local candidate, not an enabled feature or a deployable release. No warning is sent and no account is deleted by importing it. The parent router is not mounted; the schema is a pending draft and is not in the migration manifest. Do not enable or apply it as-is.
 
+The warning service can now be explicitly injected into the auth router after
+`prepareChildInactivityRuntime` verifies its table and restricted grants. Its
+authenticated `/pending` route reports only whether a parent has an unacknowledged
+warning; the default-off web/native banner links to the parent account page.
+The runtime requires separate target and receipt keys and an independently
+supplied activity-health verifier. No startup wiring provides these dependencies
+yet. This in-app reminder reaches only parents who sign in; it is not email or
+proof of delivery to an absent parent, whose account remains pending.
+
 The policy measures authenticated online activity. It prepares a bilingual warning no sooner than 30 days before the third calendar anniversary; it allows a candidate deletion no sooner than the third anniversary and 30 full days after parent confirmation. Missing or uncertain activity, target identity, relationship, warning, acknowledgment, or timing holds the process. Later activity or a parent keep action invalidates the old warning. Offline play may not update the timer and is disclosed in the warning.
 
 The candidate supports a locked parent acknowledgment API and a separate retention journal interface, with no production wiring. The in-app target is a domain-separated HMAC of the exact parent/child relationship, not a verified email, and the parent must have a live session to see and explicitly acknowledge the warning. Email and in-app confirmations have separate channel types and cannot substitute for each other. Gmail Sent, lack of a bounce, and accepted delivery are not proof the parent received a warning; no-response is held. A parent who never signs in receives no proactive warning and their account remains pending.

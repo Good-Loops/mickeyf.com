@@ -41,6 +41,8 @@ import { createAppleAndroidHandoffRepository } from '../auth/appleAndroidHandoff
 import { createAppleAndroidHandoffFlow } from '../auth/appleAndroidHandoffFlow';
 import { createManagedChildActivityRouter } from './managedChildActivityRouter';
 import type { ParentManagedChildActivity } from '../accounts/parentManagedChildActivity';
+import { createChildInactivityParentRouter } from './childInactivityParentRouter';
+import type { ChildInactivityParentService } from '../accounts/childInactivityParentService';
 
 export { authRoutesContract } from './authRouter.contract';
 
@@ -50,7 +52,7 @@ export function createAuthRouter(
     isProduction: boolean,
     allowedMutationOrigins: readonly string[],
     { accountDeletionEnabled = false, deletionJournal, providerAuth, registration = createRegistrationAuthorization(database),
-        parentRegistrationStorageReady = false, parentRegistrationPolicy, scoreParticipationPolicy, appleIssuanceAvailable, childActivity }: {
+        parentRegistrationStorageReady = false, parentRegistrationPolicy, scoreParticipationPolicy, appleIssuanceAvailable, childActivity, childInactivity }: {
         scoreParticipationPolicy?: ScoreParticipationPolicy;
         parentRegistrationStorageReady?: boolean;
         parentRegistrationPolicy?: ParentRegistrationPolicy;
@@ -59,6 +61,7 @@ export function createAuthRouter(
         deletionJournal?: AccountDeletionJournal;
         appleIssuanceAvailable?: () => boolean;
         childActivity?: ParentManagedChildActivity;
+        childInactivity?: ChildInactivityParentService;
         providerAuth?: {
             enabled: boolean;
             signupEnabled?: boolean;
@@ -89,6 +92,11 @@ export function createAuthRouter(
     if (childActivity && !parentRegistrationStorageReady) throw new Error('Child activity storage is not ready.');
     if (childActivity) router.use('/child-activity', createManagedChildActivityRouter(database,
         createProviderAuthContextReader({ database, sessionSecret, allowedOrigins: allowedMutationOrigins }), childActivity));
+    if (childInactivity && (!parentRegistrationStorageReady || !childActivity)) {
+        throw new Error('Inactivity warnings require ready parent and activity storage.');
+    }
+    if (childInactivity) router.use('/child-inactivity', createChildInactivityParentRouter(childInactivity,
+        createProviderAuthContextReader({ database, sessionSecret, allowedOrigins: allowedMutationOrigins })));
     if ((parentRegistrationPolicy || scoreParticipationPolicy) && (!parentRegistrationStorageReady || !deletionJournal || !providerAuth?.enabled)) {
         throw new Error('Parent registration dependencies are not ready.');
     }

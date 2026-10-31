@@ -11,7 +11,7 @@ const warningId = '33333333-3333-4333-8333-333333333333';
 const targetDigest = 'a'.repeat(64);
 const sessionId = 'A'.repeat(43);
 
-function fixture() {
+function fixture(findChildren?: (id: string) => Promise<readonly string[]>) {
     let snapshot: InactivitySnapshot | null = { parentId, childId, activityAt: '2020-01-01T00:00:00.000000Z', activityComplete: true,
         currentTargetDigest: targetDigest, targetVerified: true, channel: 'in-app', warning: null };
     let pending: PendingInactivityWarning | null = { parentId, childId, warningId, activityAt: snapshot.activityAt!, targetDigest, channel: 'in-app',
@@ -28,10 +28,21 @@ function fixture() {
             async deleteChild() { assert.fail('parent service cannot delete'); } });
     } };
     const context = { account: { accountId: parentId, userId: 1 }, session: { accountId: parentId, sessionId } } as unknown as ProviderAuthContext;
-    return { service: createChildInactivityParentService(store, Buffer.alloc(32, 7)), context,
+    return { service: createChildInactivityParentService(store, Buffer.alloc(32, 7), findChildren), context,
         stopSession() { sessionLive = false; }, setSnapshot(next: InactivitySnapshot | null) { snapshot = next; },
         setPending(next: PendingInactivityWarning | null) { pending = next; } };
 }
+
+test('parent-wide discovery exposes only a boolean and treats unknown health or ownership as unavailable', async () => {
+    const f = fixture(async id => { assert.equal(id, parentId); return [childId]; });
+    assert.deepEqual(await f.service.pending(f.context, {}), { pending: true });
+    assert.deepEqual(await f.service.pending(null, {}), { error: 'INVALID_CONTEXT' });
+    assert.deepEqual(await f.service.pending(f.context, { childAccountId: childId }), { error: 'INVALID_REQUEST' });
+    f.setSnapshot(null);
+    assert.deepEqual(await f.service.pending(f.context, {}), { error: 'UNAVAILABLE' });
+    const invalid = fixture(async () => [childId, childId]);
+    assert.deepEqual(await invalid.service.pending(invalid.context, {}), { error: 'UNAVAILABLE' });
+});
 
 test('a current parent can read and explicitly acknowledge the exact rendered warning', async () => {
     const f = fixture();
@@ -56,7 +67,7 @@ test('a live parent session prepares its own in-app warning but missing health e
     f.setSnapshot({ parentId, childId, activityAt: '2020-01-01T00:00:00.000000Z', activityComplete: false,
         currentTargetDigest: targetDigest, targetVerified: true, channel: 'in-app', warning: null });
     f.setPending(null);
-    assert.deepEqual(await f.service.read(f.context, { childAccountId: childId }), { warning: null });
+    assert.deepEqual(await f.service.read(f.context, { childAccountId: childId }), { error: 'UNAVAILABLE' });
 });
 
 test('in-app and email warnings cannot substitute for one another', async () => {
@@ -74,7 +85,7 @@ test('anonymous, altered or wrong-child requests never disclose or acknowledge a
     assert.deepEqual(await f.service.acknowledge(f.context, { childAccountId: childId, warningId, acknowledge: false }), { error: 'INVALID_REQUEST' });
     assert.deepEqual(await f.service.acknowledge(f.context, { childAccountId: parentId, warningId, acknowledge: true }), { error: 'UNAVAILABLE' });
     f.setSnapshot(null);
-    assert.deepEqual(await f.service.read(f.context, { childAccountId: childId }), { warning: null });
+    assert.deepEqual(await f.service.read(f.context, { childAccountId: childId }), { error: 'UNAVAILABLE' });
 });
 
 

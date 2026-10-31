@@ -8,5 +8,5 @@ for (const [platform, file] of [
 ]) test(`${platform} bridge permits only the exact child warning routes`, async () => {
     const native = await readFile(new URL(file, import.meta.url), 'utf8');
     const routes = [...native.matchAll(/"((?:GET|POST) \/auth\/child-inactivity\/[^"\n]+)"/g)].map(match => match[1]);
-    assert.deepEqual(routes.sort(), ['POST /auth/child-inactivity/acknowledge', 'POST /auth/child-inactivity/warning']);
+    assert.deepEqual(routes.sort(), ['POST /auth/child-inactivity/acknowledge', 'POST /auth/child-inactivity/pending', 'POST /auth/child-inactivity/warning']);
 });
