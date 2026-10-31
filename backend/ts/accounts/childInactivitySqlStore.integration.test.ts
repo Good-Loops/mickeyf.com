@@ -16,6 +16,7 @@ import type { ProviderAuthContext } from '../auth/providerAuthContext';
 import { acknowledgeInactivityWarning, confirmInactivityWarning, deleteInactiveChild, prepareInactivityWarning } from './childInactivityWorkflow';
 import { createAccountSession, revokeAccountSession } from '../auth/accountSessionRepository';
 import { runChildInactivityReview } from './runChildInactivityReview';
+import { runChildInactivityMaintenance } from './childInactivityMaintenance';
 import { Readable } from 'node:stream';
 
 const config = loadMigrationConfig();
@@ -93,6 +94,34 @@ async function managedFixture() {
     await admin.query("INSERT INTO parent_managed_child_activity (child_uuid,retention_activity_at) VALUES (?,'2020-01-01 00:00:00.000000')", [childId]);
     return { parentId, childId, unrelatedId };
 }
+
+test('maintenance scans confirmed due accounts and applies the locked deletion checks', async () => {
+    await admin.query('DELETE FROM parent_child_inactivity_warnings');
+    const due = await managedFixture(), unconfirmed = await managedFixture(), recent = await managedFixture();
+    const store = createChildInactivitySqlStore(database, async () => ({ activityComplete: true, targetVerified: true,
+        channel: 'email', currentTargetDigest: targetDigest }));
+    for (const item of [due, unconfirmed, recent]) {
+        const warning = await prepareInactivityWarning(store, item.parentId, item.childId);
+        assert.ok(warning);
+        if (item === unconfirmed) continue;
+        const [[clock]] = await admin.query<RowDataPacket[]>("SELECT DATE_FORMAT(UTC_TIMESTAMP(6),'%Y-%m-%dT%H:%i:%s.%fZ') AS nowValue");
+        assert.equal(await confirmInactivityWarning(store, item.parentId, item.childId, {}, async () => ({
+            warningId: warning.warningId, parentId: item.parentId, childId: item.childId, targetDigest,
+            deliveredAt: clock.nowValue as string, receiptDigest: 'b'.repeat(64),
+        }), Date.now() + 1000), true);
+        await admin.query('UPDATE parent_child_inactivity_warnings SET prepared_at=UTC_TIMESTAMP(6)-INTERVAL 32 DAY, delivered_at=UTC_TIMESTAMP(6)-INTERVAL 31 DAY WHERE child_uuid=?', [item.childId]);
+    }
+    await admin.query('UPDATE parent_managed_child_activity SET retention_activity_at=UTC_TIMESTAMP(6) WHERE child_uuid=?', [recent.childId]);
+    const intents: string[] = [];
+    const journal = { async recordRetentionIntent(intent: { childId: string }) { intents.push(intent.childId); },
+        async verifyRetentionIntent() { return true; }, async verifyActivityContinuity() { return true; } };
+    assert.deepEqual(await runChildInactivityMaintenance(database, store, journal, { afterChildId: null }),
+        { examined: 1, held: 0, deleted: 1, nextAfterChildId: null });
+    assert.deepEqual(intents, [due.childId]);
+    const [remaining] = await admin.query<RowDataPacket[]>('SELECT account_uuid FROM users WHERE account_uuid IN (?,?,?)',
+        [due.childId, unconfirmed.childId, recent.childId]);
+    assert.deepEqual(remaining.map(row => row.account_uuid).sort(), [unconfirmed.childId, recent.childId].sort());
+});
 
 test('real SQL requires a confirmed warning, rechecks the SQL clock before journaling, and deletes only the exact child', async () => {
     const { parentId, childId, unrelatedId } = await managedFixture();
