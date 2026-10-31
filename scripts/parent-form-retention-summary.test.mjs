@@ -5,6 +5,7 @@ import test from 'node:test';
 import { summarizeReport } from './parent-form-retention-summary.mjs';
 
 const script = fileURLToPath(new URL('./parent-form-retention-summary.mjs', import.meta.url));
+const backend = fileURLToPath(new URL('../backend/', import.meta.url));
 const now = Date.parse('2026-10-31T12:00:00.000Z');
 const ref = number => `00000000-0000-4000-8000-${String(number).padStart(12, '0')}`;
 const item = (number, state) => ({ reference: ref(number), state,
@@ -56,4 +57,29 @@ test('CLI reads a complete fresh report and prints only the private action summa
   assert.equal(result.status, 0, result.stderr);
   assert.match(result.stdout, /not-found.*absence alone does not prove deletion/u);
   assert.doesNotMatch(result.stdout, /DO-NOT-ECHO/u);
+});
+
+test('the guarded report output is accepted by the summary CLI', () => {
+  const producer = `
+    const { fixture, settings } = require('./ts/migrations/childSignedFormMetadata.testFixture');
+    const { CHILD_SIGNED_FORM_SQL_SHA256 } = require('./ts/migrations/childSignedFormOperation');
+    const { observeSignedParentFormRetention } = require('./ts/accounts/signedParentFormRetention');
+    const f = fixture(true);
+    const connection = { async query(sql, values) {
+      if (sql.includes('FROM parent_signed_forms WHERE reference IN')) return [[{
+        reference: '00000000-0000-4000-8000-000000000001', status: 'approved',
+        expiresAt: '2030-01-01T00:00:00.000001Z', expired: 0
+      }], []];
+      return f.connection.query(sql, values);
+    } };
+    observeSignedParentFormRetention({ connection, settings, source: { sourceCommit: 'a'.repeat(40),
+      sqlSha256: CHILD_SIGNED_FORM_SQL_SHA256 } }, ['00000000-0000-4000-8000-000000000001'])
+      .then(value => process.stdout.write(JSON.stringify(value)))
+      .catch(() => { process.exitCode = 1; });`;
+  const generated = spawnSync(process.execPath, ['-r', 'ts-node/register', '-e', producer],
+    { cwd: backend, encoding: 'utf8', timeout: 30000 });
+  assert.equal(generated.status, 0, generated.stderr);
+  const result = spawnSync(process.execPath, [script], { input: generated.stdout, encoding: 'utf8', timeout: 10000 });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.stdout, /00000000-0000-4000-8000-000000000001 \| approved \|/u);
 });
