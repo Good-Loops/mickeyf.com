@@ -84,11 +84,13 @@ test('child credential fields stay absent through consent and provider acquisiti
     assert.equal(view.all(node => node.type === 'input' && node.props.type === 'email').length, 0);
 });
 
-test('Brazilian consent is translated only for exact bound policy and mismatch blocks continuation', async t => {
-    for (const matches of [true, false]) {
+test('Brazilian consent requires exact bound policy and form version before continuation', async t => {
+    for (const scenario of ['matching', 'changed-consent', 'changed-form', 'missing-form']) {
+        const matches = scenario === 'matching';
         const policy = { ...config, audience: 'children-included', credentialsAfterApproval: true,
             countries: ['BR'], signedFormCountries: ['BR'], consentVersion: notice.consent.parent.version,
-            consentText: matches ? notice.consent.parent.text : 'Different terms' };
+            signedFormVersion: scenario === 'changed-form' ? 'different-form-version' : scenario === 'missing-form' ? undefined : notice.signedParentForm.version,
+            consentText: scenario === 'changed-consent' ? 'Different terms' : notice.consent.parent.text };
         const view = mount(t, { api: { config: async () => policy, listSignedForms: async () => [] } });
         view.render(); await view.settle();
         view.find(node => node.type === 'select').props.onChange({ target: { value: 'BR' } });
@@ -102,7 +104,7 @@ test('Brazilian consent is translated only for exact bound policy and mismatch b
 });
 
 test('changing country clears the previous adult, guardian and consent choices', async t => {
-    const policy = { ...config, countries: ['US', 'BR'], consentVersion: notice.consent.parent.version, consentText: notice.consent.parent.text };
+    const policy = { ...config, countries: ['US', 'BR'], signedFormVersion: notice.signedParentForm.version, consentVersion: notice.consent.parent.version, consentText: notice.consent.parent.text };
     const view = mount(t, { api: { config: async () => policy } });
     view.render(); await view.settle();
     view.find(node => node.type === 'select').props.onChange({ target: { value: 'US' } });

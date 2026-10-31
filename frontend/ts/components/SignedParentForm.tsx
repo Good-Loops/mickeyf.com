@@ -5,7 +5,8 @@ import { parsePrivacyNoticeUrl } from '@/config/privacyNoticeUrl';
 import './SignedParentForm.css';
 
 export function portugueseParentConsentAvailable(policy: Extract<ParentConfig, { enabled: true }>): boolean {
-    return policy.consentText === notice.consent.parent.text && policy.consentVersion === notice.consent.parent.version;
+    return policy.signedFormVersion === notice.signedParentForm.version
+        && policy.consentText === notice.consent.parent.text && policy.consentVersion === notice.consent.parent.version;
 }
 
 export function portugueseFormAvailable(request: SignedParentFormRequest, policy: Extract<ParentConfig, { enabled: true }>): boolean {

@@ -12,7 +12,7 @@ const server = await createViteTestServer({ root, configFile: false, esbuild: { 
     appType: 'custom', logLevel: 'silent', server: { middlewareMode: true } });
 after(() => server.close());
 const { default: Component } = await server.ssrLoadModule('/ts/components/SignedParentForm.tsx');
-const policy = { enabled: true, privacyNoticeUrl: notice.noticeUrl, policyVersion: 'preview-only', consentText: notice.consent.parent.text, consentVersion: notice.consent.parent.version };
+const policy = { enabled: true, privacyNoticeUrl: notice.noticeUrl, policyVersion: 'preview-only', consentText: notice.consent.parent.text, consentVersion: notice.consent.parent.version, signedFormVersion: notice.signedParentForm.version };
 const request = { reference: '00000000-0000-4000-8000-000000000001', parentAccountId: '00000000-0000-4000-8000-000000000002',
     country: 'US', userName: 'Synthetic child (preview only)', verifiedContact: 'synthetic-parent@example.test',
     policyVersion: 'preview-only', consentVersion: notice.consent.parent.version, status: 'pending',
@@ -50,6 +50,8 @@ test('Brazil form refuses unknown parent or public consent wording rather than t
         [br, { ...policy, consentText: 'Changed policy' }],
         [br, { ...policy, consentVersion: 'changed-version' }],
         [br, { ...policy, policyVersion: 'changed-version' }],
+        [br, { ...policy, signedFormVersion: 'different-form-version' }],
+        [br, { ...policy, signedFormVersion: undefined }],
         [br, { ...policy, privacyNoticeUrl: 'javascript:alert(1)' }],
         [{ ...br, consentVersion: 'changed-version' }, policy],
         [{ ...br, publicConsentText: 'Changed public terms' }, policy],
