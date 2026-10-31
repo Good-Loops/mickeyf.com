@@ -10,6 +10,9 @@ import type { childSchemaCommandSettings } from '../migrations/runChildSignedFor
 import { loadMigrationManifest } from '../migrations/migrationManifest';
 import { applyMigrations } from '../migrations/migrationRunner';
 import { createChildInactivitySqlStore } from './childInactivitySqlStore';
+import { createInAppInactivityQualityResolver } from './childInactivityInAppTarget';
+import { createChildInactivityParentService } from './childInactivityParentService';
+import type { ProviderAuthContext } from '../auth/providerAuthContext';
 import { acknowledgeInactivityWarning, confirmInactivityWarning, deleteInactiveChild, prepareInactivityWarning } from './childInactivityWorkflow';
 import { createAccountSession, revokeAccountSession } from '../auth/accountSessionRepository';
 import { runChildInactivityReview } from './runChildInactivityReview';
@@ -17,7 +20,7 @@ import { Readable } from 'node:stream';
 
 const config = loadMigrationConfig();
 const rootPassword = 'migration-test-root-only';
-const contactDigest = 'a'.repeat(64);
+const targetDigest = 'a'.repeat(64);
 let admin: Connection;
 let database: Pool;
 
@@ -93,14 +96,14 @@ async function managedFixture() {
 
 test('real SQL requires a confirmed warning, rechecks the SQL clock before journaling, and deletes only the exact child', async () => {
     const { parentId, childId, unrelatedId } = await managedFixture();
-    const store = createChildInactivitySqlStore(database, async () => ({ activityComplete: true, contactVerified: true, currentContactDigest: contactDigest }));
+    const store = createChildInactivitySqlStore(database, async () => ({ activityComplete: true, targetVerified: true, channel: 'email', currentTargetDigest: targetDigest }));
     const intents: string[] = [];
     const journal = { async recordRetentionIntent(intent: { childId: string }) { intents.push(intent.childId); }, async verifyRetentionIntent() { return true; }, async verifyActivityContinuity() { return true; } };
     const warning = await prepareInactivityWarning(store, parentId, childId); assert.ok(warning);
     assert.equal(await deleteInactiveChild(store, journal, parentId, childId, Date.now() + 31 * 86400_000), 'held');
     assert.deepEqual(intents, []);
     const [[clock]] = await admin.query<RowDataPacket[]>("SELECT DATE_FORMAT(UTC_TIMESTAMP(6),'%Y-%m-%dT%H:%i:%s.%fZ') AS nowValue");
-    const receipt = { warningId: warning.warningId, parentId, childId, contactDigest,
+    const receipt = { warningId: warning.warningId, parentId, childId, targetDigest,
         deliveredAt: clock.nowValue as string, receiptDigest: 'b'.repeat(64) };
     assert.equal(await confirmInactivityWarning(store, parentId, childId, {}, async () => receipt, Date.now() + 1000), true);
     await assert.rejects(deleteInactiveChild(store, journal, parentId, childId, Date.now() + 31 * 86400_000), /SQL deadline changed/u);
@@ -118,7 +121,7 @@ test('real SQL requires a confirmed warning, rechecks the SQL clock before journ
 
 test('a locked activity reread blocks concurrent activity writes and the changed timestamp invalidates the warning', async () => {
     const { parentId, childId } = await managedFixture();
-    const store = createChildInactivitySqlStore(database, async () => ({ activityComplete: true, contactVerified: true, currentContactDigest: contactDigest }));
+    const store = createChildInactivitySqlStore(database, async () => ({ activityComplete: true, targetVerified: true, channel: 'email', currentTargetDigest: targetDigest }));
     const warning = await prepareInactivityWarning(store, parentId, childId); assert.ok(warning);
     let release!: () => void, locked!: () => void;
     const lockedSignal = new Promise<void>(resolve => { locked = resolve; });
@@ -134,25 +137,30 @@ test('a locked activity reread blocks concurrent activity writes and the changed
     assert.equal(finished, false);
     release(); await hold; await update;
     assert.equal(await confirmInactivityWarning(store, parentId, childId, {}, async () => ({ warningId: warning.warningId,
-        parentId, childId, contactDigest, deliveredAt: new Date().toISOString().replace('Z', '000Z'), receiptDigest: 'b'.repeat(64) })), false);
+        parentId, childId, targetDigest, deliveredAt: new Date().toISOString().replace('Z', '000Z'), receiptDigest: 'b'.repeat(64) })), false);
 });
 
 test('real SQL accepts only the live parent session for exact-warning acknowledgment', async () => {
     const { parentId, childId } = await managedFixture();
-    const store = createChildInactivitySqlStore(database, async () => ({ activityComplete: true, contactVerified: true, currentContactDigest: contactDigest }));
+    const store = createChildInactivitySqlStore(database, createInAppInactivityQualityResolver(Buffer.alloc(32, 3), async () => true));
     const [[parent]] = await admin.query<RowDataPacket[]>('SELECT user_id FROM users WHERE account_uuid=?', [parentId]);
     const sessionId = randomBytes(32).toString('base64url');
     const account = { accountId: parentId, userId: parent.user_id as number };
     assert.equal(await createAccountSession(database, account, sessionId, Math.floor(Date.now() / 1000) + 1800), true);
-    const warning = await prepareInactivityWarning(store, parentId, childId); assert.ok(warning);
     const key = Buffer.alloc(32, 8), proof = { accountId: parentId, sessionId };
-    assert.equal(await acknowledgeInactivityWarning(store, parentId, childId, warning.warningId,
+    const context = { account, session: proof } as unknown as ProviderAuthContext;
+    const service = createChildInactivityParentService(store, key);
+    const result = await service.read(context, { childAccountId: childId });
+    assert.ok('warning' in result && result.warning);
+    assert.equal(result.warning.acknowledged, false);
+    const warningId = result.warning.warningId;
+    assert.equal(await acknowledgeInactivityWarning(store, parentId, childId, warningId,
         'ACKNOWLEDGE WARNING', proof, key), true);
     const [rows] = await admin.query<RowDataPacket[]>('SELECT delivered_at,receipt_digest FROM parent_child_inactivity_warnings WHERE child_uuid=?', [childId]);
     assert.equal(rows.length, 1); assert.ok(rows[0].delivered_at); assert.equal(rows[0].receipt_digest.length, 32);
-    assert.equal(await acknowledgeInactivityWarning(store, parentId, childId, warning.warningId,
+    assert.equal(await acknowledgeInactivityWarning(store, parentId, childId, warningId,
         'ACKNOWLEDGE WARNING', proof, key), true, 'valid repeated acknowledgment is idempotent');
     await revokeAccountSession(database, account.userId, parentId, sessionId);
-    assert.equal(await acknowledgeInactivityWarning(store, parentId, childId, warning.warningId,
+    assert.equal(await acknowledgeInactivityWarning(store, parentId, childId, warningId,
         'ACKNOWLEDGE WARNING', proof, key), false, 'revoked parent session cannot acknowledge');
 });

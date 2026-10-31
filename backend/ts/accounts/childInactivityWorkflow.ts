@@ -1,20 +1,20 @@
 import { createHmac, randomUUID } from 'node:crypto';
 import { isAccountId } from './deletionJournal';
-import { assessChildInactivity, INACTIVITY_NOTICE_DIGEST, type InactivitySnapshot, type InactivityWarning } from './childInactivityPolicy';
+import { assessChildInactivity, INACTIVITY_NOTICE_DIGEST, type InactivityChannel, type InactivitySnapshot, type InactivityWarning } from './childInactivityPolicy';
 import { isSessionId, type SessionProof } from '../security/sessionPolicy';
 
 export type PendingInactivityWarning = Readonly<{
-    warningId: string; parentId: string; childId: string; activityAt: string; contactDigest: string; noticeDigest: string;
+    warningId: string; parentId: string; childId: string; activityAt: string; targetDigest: string; channel: InactivityChannel; noticeDigest: string;
 }>;
 
 export type ConfirmedInactivityReceipt = Readonly<{
-    warningId: string; parentId: string; childId: string; contactDigest: string;
+    warningId: string; parentId: string; childId: string; targetDigest: string;
     deliveredAt: string; receiptDigest: string;
 }>;
 
 /**
  * Implementations must hold parent then child locks for the entire callback,
- * use a transaction, re-read the exact relationship/activity/contact and commit
+ * use a transaction, re-read the exact relationship/activity/target and commit
  * only after the callback succeeds. Missing rows must return null, not guesses.
  */
 export type LockedInactivityTarget = Readonly<{
@@ -50,9 +50,9 @@ export async function acknowledgeInactivityWarning(store: InactivityStore, paren
         if (!await target.parentSessionValid(proof)) return false;
         const snapshot = await target.snapshot();
         const pending = await target.pending();
-        if (!snapshot || !pending || pending.warningId !== warningId || pending.parentId !== parentId
+        if (!snapshot || !pending || pending.channel !== 'in-app' || snapshot.channel !== 'in-app' || pending.warningId !== warningId || pending.parentId !== parentId
             || pending.childId !== childId || snapshot.parentId !== parentId || snapshot.childId !== childId
-            || snapshot.activityAt !== pending.activityAt || snapshot.currentContactDigest !== pending.contactDigest
+            || snapshot.activityAt !== pending.activityAt || snapshot.currentTargetDigest !== pending.targetDigest
             || pending.noticeDigest !== INACTIVITY_NOTICE_DIGEST) return false;
         const deliveredAt = await target.databaseTimestamp();
         const now = Date.parse(deliveredAt) + 1;
@@ -75,21 +75,22 @@ function validIds(parentId: string, childId: string): void {
     if (!isAccountId(parentId) || !isAccountId(childId) || parentId === childId) throw new TypeError('Invalid parent or child account.');
 }
 
-/** No mail is sent here: the returned opaque warning ID is for a private operator workflow. */
+/** Email-only operator preparation; in-app preparation requires a live parent session. */
 export async function prepareInactivityWarning(store: InactivityStore, parentId: string, childId: string,
     now = Date.now()): Promise<PendingInactivityWarning | null> {
     validIds(parentId, childId);
     return store.withLockedChild(parentId, childId, async target => {
         const snapshot = await target.snapshot();
-        if (!snapshot || snapshot.parentId !== parentId || snapshot.childId !== childId
+        if (!snapshot || snapshot.channel !== 'email' || snapshot.parentId !== parentId || snapshot.childId !== childId
             || !['warning-due', 'await-confirmed-warning'].includes(assessChildInactivity(snapshot, now))
-            || !snapshot.activityAt || !snapshot.currentContactDigest) return null;
+            || !snapshot.activityAt || !snapshot.currentTargetDigest) return null;
         const existing = await target.pending();
+        if (existing && existing.channel !== snapshot.channel) return null;
         if (existing && existing.parentId === parentId && existing.childId === childId
-            && existing.activityAt === snapshot.activityAt && existing.contactDigest === snapshot.currentContactDigest
+            && existing.activityAt === snapshot.activityAt && existing.channel === snapshot.channel && existing.targetDigest === snapshot.currentTargetDigest
             && existing.noticeDigest === INACTIVITY_NOTICE_DIGEST) return existing;
         const pending = Object.freeze({ warningId: randomUUID(), parentId, childId, activityAt: snapshot.activityAt,
-            contactDigest: snapshot.currentContactDigest, noticeDigest: INACTIVITY_NOTICE_DIGEST });
+            targetDigest: snapshot.currentTargetDigest, channel: snapshot.channel, noticeDigest: INACTIVITY_NOTICE_DIGEST });
         await target.savePending(pending);
         return pending;
     });
@@ -109,10 +110,10 @@ export async function confirmInactivityWarning(store: InactivityStore, parentId:
     return store.withLockedChild(parentId, childId, async target => {
         const snapshot = await target.snapshot();
         const pending = await target.pending();
-        if (!snapshot || !pending || pending.warningId !== receipt.warningId || pending.parentId !== parentId
+        if (!snapshot || !pending || pending.channel !== 'email' || snapshot.channel !== 'email' || pending.warningId !== receipt.warningId || pending.parentId !== parentId
             || pending.childId !== childId || snapshot.parentId !== parentId || snapshot.childId !== childId
-            || snapshot.activityAt !== pending.activityAt || snapshot.currentContactDigest !== pending.contactDigest
-            || receipt.contactDigest !== pending.contactDigest || pending.noticeDigest !== INACTIVITY_NOTICE_DIGEST) return false;
+            || snapshot.activityAt !== pending.activityAt || snapshot.currentTargetDigest !== pending.targetDigest
+            || receipt.targetDigest !== pending.targetDigest || pending.noticeDigest !== INACTIVITY_NOTICE_DIGEST) return false;
         const warning: InactivityWarning = { ...pending, deliveredAt: receipt.deliveredAt, receiptDigest: receipt.receiptDigest };
         const decision = assessChildInactivity({ ...snapshot, warning }, now);
         if (decision !== 'grace' && decision !== 'eligible') return false;
@@ -124,7 +125,7 @@ export async function confirmInactivityWarning(store: InactivityStore, parentId:
 /** Retention intents must live outside the explicit-account-deletion journal and its replay. */
 export type RetentionIntent = Readonly<{
     parentId: string; childId: string; activityAt: string; warningId: string;
-    contactDigest: string; noticeDigest: string; deliveredAt: string; receiptDigest: string;
+    targetDigest: string; channel: InactivityChannel; noticeDigest: string; deliveredAt: string; receiptDigest: string;
 }>;
 export interface RetentionJournal {
     /** Must use an independent, immutable store; no generic deletion intent may be written. */
@@ -138,8 +139,8 @@ export interface RetentionJournal {
 function matchesIntent(snapshot: InactivitySnapshot, intent: RetentionIntent): boolean {
     const warning = snapshot.warning;
     return snapshot.parentId === intent.parentId && snapshot.childId === intent.childId
-        && snapshot.activityAt === intent.activityAt && snapshot.currentContactDigest === intent.contactDigest
-        && !!warning && warning.warningId === intent.warningId && warning.contactDigest === intent.contactDigest
+        && snapshot.activityAt === intent.activityAt && snapshot.channel === intent.channel && snapshot.currentTargetDigest === intent.targetDigest
+        && !!warning && warning.warningId === intent.warningId && warning.channel === intent.channel && warning.targetDigest === intent.targetDigest
         && warning.noticeDigest === intent.noticeDigest && warning.deliveredAt === intent.deliveredAt
         && warning.receiptDigest === intent.receiptDigest;
 }
@@ -170,10 +171,10 @@ export async function deleteInactiveChild(store: InactivityStore, journal: Reten
             const snapshot = await target.snapshot();
             if (!snapshot || snapshot.parentId !== parentId || snapshot.childId !== childId
                 || assessChildInactivity(snapshot, now) !== 'eligible' || !snapshot.warning || !snapshot.activityAt
-                || !snapshot.currentContactDigest) return 'held';
+                || !snapshot.currentTargetDigest) return 'held';
             const warning = snapshot.warning;
             const intent: RetentionIntent = { parentId, childId, activityAt: snapshot.activityAt, warningId: warning.warningId,
-                contactDigest: snapshot.currentContactDigest, noticeDigest: warning.noticeDigest,
+                targetDigest: snapshot.currentTargetDigest, channel: snapshot.channel, noticeDigest: warning.noticeDigest,
                 deliveredAt: warning.deliveredAt, receiptDigest: warning.receiptDigest };
             if (!await journal.verifyActivityContinuity(intent)) return 'held';
             await target.assertDeletionStillDue();

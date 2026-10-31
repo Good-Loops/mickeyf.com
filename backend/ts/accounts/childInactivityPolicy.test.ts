@@ -6,11 +6,11 @@ const parentId = '11111111-1111-4111-8111-111111111111';
 const childId = '22222222-2222-4222-8222-222222222222';
 const warningId = '33333333-3333-4333-8333-333333333333';
 const activityAt = '2028-01-01T00:00:00.000000Z';
-const contactDigest = 'a'.repeat(64);
+const targetDigest = 'a'.repeat(64);
 const deliveredAt = '2030-12-02T00:00:00.000000Z';
-const warning = { parentId, childId, warningId, activityAt, contactDigest, noticeDigest: INACTIVITY_NOTICE_DIGEST, deliveredAt, receiptDigest: 'b'.repeat(64) };
+const warning = { parentId, childId, warningId, activityAt, targetDigest, channel: 'email' as const, noticeDigest: INACTIVITY_NOTICE_DIGEST, deliveredAt, receiptDigest: 'b'.repeat(64) };
 const snapshot: InactivitySnapshot = { parentId, childId, activityAt, activityComplete: true,
-    currentContactDigest: contactDigest, contactVerified: true, warning: null };
+    currentTargetDigest: targetDigest, targetVerified: true, channel: 'email', warning: null };
 const at = (iso: string) => Date.parse(iso);
 
 test('warning starts no earlier than 30 days before three calendar years', () => {
@@ -32,7 +32,7 @@ test('changed activity, parent, child, contact or receipt invalidates the warnin
         { ...snapshot, activityAt: '2028-01-01T00:00:00.000001Z', warning },
         { ...snapshot, warning: { ...warning, parentId: childId } },
         { ...snapshot, warning: { ...warning, childId: parentId } },
-        { ...snapshot, currentContactDigest: 'c'.repeat(64), warning },
+        { ...snapshot, currentTargetDigest: 'c'.repeat(64), warning },
         { ...snapshot, warning: { ...warning, receiptDigest: '' } },
         { ...snapshot, warning: { ...warning, noticeDigest: 'd'.repeat(64) } },
         { ...snapshot, warning: { ...warning, deliveredAt: '2033-01-01T00:00:00.000000Z' } },
@@ -44,7 +44,7 @@ test('unknown, unhealthy, malformed or future evidence always holds', () => {
     const now = at('2031-01-01T00:00:00.000Z');
     for (const next of [
         { ...snapshot, activityAt: null }, { ...snapshot, activityComplete: false },
-        { ...snapshot, currentContactDigest: null }, { ...snapshot, contactVerified: false },
+        { ...snapshot, currentTargetDigest: null }, { ...snapshot, targetVerified: false },
         { ...snapshot, activityAt: '2028-02-30T00:00:00.000000Z' },
         { ...snapshot, activityAt: '2032-01-01T00:00:00.000000Z' },
         { ...snapshot, parentId: childId },

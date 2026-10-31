@@ -31,16 +31,18 @@ function thirdAnniversary(milliseconds: number): number {
 }
 
 export type InactivityWarning = Readonly<{
-    parentId: string; childId: string; activityAt: string; contactDigest: string;
+    parentId: string; childId: string; activityAt: string; targetDigest: string; channel: InactivityChannel;
     warningId: string; noticeDigest: string; deliveredAt: string; receiptDigest: string;
 }>;
+
+export type InactivityChannel = 'in-app' | 'email';
 
 export type InactivitySnapshot = Readonly<{
     parentId: string; childId: string;
     /** Missing activity or a known tracking failure must never be treated as inactivity. */
     activityAt: string | null; activityComplete: boolean;
-    /** HMAC-SHA-256 of a freshly verified contact, using an independent secret key. */
-    currentContactDigest: string | null; contactVerified: boolean;
+    /** Channel-specific HMAC target binding, never a raw email address. */
+    currentTargetDigest: string | null; targetVerified: boolean; channel: InactivityChannel;
     warning: InactivityWarning | null;
 }>;
 
@@ -50,8 +52,9 @@ export type InactivityDecision = 'hold' | 'warning-due' | 'await-confirmed-warni
 export function assessChildInactivity(snapshot: InactivitySnapshot, nowMs: number): InactivityDecision {
     if (!snapshot || !isAccountId(snapshot.parentId) || !isAccountId(snapshot.childId)
         || snapshot.parentId === snapshot.childId || snapshot.activityComplete !== true
-        || snapshot.contactVerified !== true || typeof snapshot.currentContactDigest !== 'string'
-        || !digest.test(snapshot.currentContactDigest) || !Number.isSafeInteger(nowMs) || nowMs < 0) return 'hold';
+        || !['in-app', 'email'].includes(snapshot.channel)
+        || snapshot.targetVerified !== true || typeof snapshot.currentTargetDigest !== 'string'
+        || !digest.test(snapshot.currentTargetDigest) || !Number.isSafeInteger(nowMs) || nowMs < 0) return 'hold';
     const activity = instant(snapshot.activityAt);
     if (activity === null || activity > nowMs) return 'hold';
     const anniversary = thirdAnniversary(activity);
@@ -60,7 +63,7 @@ export function assessChildInactivity(snapshot: InactivitySnapshot, nowMs: numbe
     const warning = snapshot.warning;
     const delivered = instant(warning.deliveredAt);
     if (warning.parentId !== snapshot.parentId || warning.childId !== snapshot.childId
-        || warning.activityAt !== snapshot.activityAt || warning.contactDigest !== snapshot.currentContactDigest
+        || warning.activityAt !== snapshot.activityAt || warning.channel !== snapshot.channel || warning.targetDigest !== snapshot.currentTargetDigest
         || !isAccountId(warning.warningId) || warning.noticeDigest !== INACTIVITY_NOTICE_DIGEST
         || typeof warning.receiptDigest !== 'string' || !digest.test(warning.receiptDigest)
         || delivered === null || delivered < anniversary - INACTIVITY_WARNING_DAYS * DAY || delivered > nowMs) {

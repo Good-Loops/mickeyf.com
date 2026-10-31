@@ -1,4 +1,5 @@
 import type { ProviderAuthContext } from '../auth/providerAuthContext';
+import { randomUUID } from 'node:crypto';
 import { isAccountId } from './deletionJournal';
 import { assessChildInactivity, INACTIVITY_NOTICE, INACTIVITY_NOTICE_DIGEST } from './childInactivityPolicy';
 import { acknowledgeInactivityWarning, type InactivityStore } from './childInactivityWorkflow';
@@ -18,13 +19,20 @@ export function createChildInactivityParentService(store: InactivityStore, recei
             try {
                 return await store.withLockedChild(context.account.accountId, input.childAccountId, async target => {
                     if (!await target.parentSessionValid(context.session!)) return { error: 'INVALID_CONTEXT' as const };
-                    const snapshot = await target.snapshot(); const pending = await target.pending();
+                    const snapshot = await target.snapshot(); let pending = await target.pending();
                     const timestamp = await target.databaseTimestamp(); const now = Date.parse(timestamp) + 1;
-                    if (!snapshot || !pending || snapshot.parentId !== context.account!.accountId || snapshot.childId !== input.childAccountId
-                        || pending.parentId !== snapshot.parentId || pending.childId !== snapshot.childId
-                        || pending.activityAt !== snapshot.activityAt || pending.contactDigest !== snapshot.currentContactDigest
-                        || pending.noticeDigest !== INACTIVITY_NOTICE_DIGEST
+                    if (!snapshot || snapshot.channel !== 'in-app' || snapshot.parentId !== context.account!.accountId || snapshot.childId !== input.childAccountId
                         || assessChildInactivity({ ...snapshot, warning: null }, now) !== 'warning-due') return { warning: null };
+                    if (pending && pending.channel !== 'in-app') return { warning: null };
+                    if (!pending || pending.parentId !== snapshot.parentId || pending.childId !== snapshot.childId
+                        || pending.activityAt !== snapshot.activityAt || pending.targetDigest !== snapshot.currentTargetDigest
+                        || pending.noticeDigest !== INACTIVITY_NOTICE_DIGEST) {
+                        if (!snapshot.activityAt || !snapshot.currentTargetDigest || !await target.parentSessionValid(context.session!)) return { error: 'INVALID_CONTEXT' as const };
+                        pending = { parentId: snapshot.parentId, childId: snapshot.childId, activityAt: snapshot.activityAt,
+                            targetDigest: snapshot.currentTargetDigest, channel: 'in-app', noticeDigest: INACTIVITY_NOTICE_DIGEST,
+                            warningId: randomUUID() };
+                        await target.savePending(pending);
+                    }
                     const acknowledged = snapshot.warning?.warningId === pending.warningId
                         && ['grace', 'eligible'].includes(assessChildInactivity(snapshot, now));
                     if (!await target.parentSessionValid(context.session!)) return { error: 'INVALID_CONTEXT' as const };

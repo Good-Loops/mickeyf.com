@@ -2,17 +2,18 @@ import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql
 import { withUserSubmissionLock } from '../leaderboards/userSubmissionLock';
 import { deleteOwnedAccountRows } from './accountDeletionRepository';
 import { readLiveSession } from '../auth/accountSessionRepository';
-import { INACTIVITY_NOTICE_DIGEST, type InactivitySnapshot, type InactivityWarning } from './childInactivityPolicy';
+import { INACTIVITY_NOTICE_DIGEST, type InactivityChannel, type InactivitySnapshot, type InactivityWarning } from './childInactivityPolicy';
 import type { InactivityStore, LockedInactivityTarget, PendingInactivityWarning } from './childInactivityWorkflow';
 
 const timeout = 10_000;
 type Queryable = Pick<Pool, 'getConnection'>;
-type TargetQuality = Readonly<{ activityComplete: boolean; contactVerified: boolean; currentContactDigest: string | null }>;
+type TargetQuality = Readonly<{ activityComplete: boolean; targetVerified: boolean; currentTargetDigest: string | null; channel: InactivityChannel }>;
 
 /**
- * Must read and lock current, independently verified contact evidence and
- * tracking health using this same transaction. Historical signup email alone is
- * insufficient. Return false/null on unknown evidence; never make network calls.
+ * Must resolve the exact notification channel/target and independently verified
+ * tracking health using this same transaction. An in-app target is not a verified
+ * email; historical signup email alone is insufficient for an email target.
+ * Return false/null on unknown evidence; never make network calls.
  */
 export type ResolveInactivityQuality = (connection: PoolConnection, parentId: string, childId: string) => Promise<TargetQuality>;
 
@@ -25,7 +26,7 @@ async function rows(connection: PoolConnection, sql: string, params: unknown[]):
 
 /** Draft adapter: no route, scheduled job, schema migration or mail transport is installed by importing this module. */
 export function createChildInactivitySqlStore(database: Queryable, resolveQuality: ResolveInactivityQuality): InactivityStore {
-    if (typeof resolveQuality !== 'function') throw new TypeError('Current contact and tracking verification are required.');
+    if (typeof resolveQuality !== 'function') throw new TypeError('Notification target and tracking verification are required.');
     return {
         async withLockedChild<T>(parentId: string, childId: string, operation: (target: LockedInactivityTarget) => Promise<T>): Promise<T> {
             const lookup = await database.getConnection();
@@ -55,7 +56,7 @@ export function createChildInactivitySqlStore(database: Queryable, resolveQualit
                             const result = await rows(connection, `SELECT DATE_FORMAT(a.retention_activity_at,'%Y-%m-%dT%H:%i:%s.%fZ') AS activityAt,
                                 w.parent_uuid AS warningParentId,w.child_uuid AS warningChildId,w.warning_uuid AS warningId,
                                 DATE_FORMAT(w.activity_at,'%Y-%m-%dT%H:%i:%s.%fZ') AS warningActivityAt,
-                                LOWER(HEX(w.contact_digest)) AS contactDigest,
+                                LOWER(HEX(w.target_digest)) AS targetDigest,w.channel AS warningChannel,
                                 LOWER(HEX(w.notice_digest)) AS noticeDigest,
                                 DATE_FORMAT(w.delivered_at,'%Y-%m-%dT%H:%i:%s.%fZ') AS deliveredAt,
                                 LOWER(HEX(w.receipt_digest)) AS receiptDigest
@@ -70,36 +71,36 @@ export function createChildInactivitySqlStore(database: Queryable, resolveQualit
                                 const quality = await resolveQuality(connection, parentId, childId);
                                 const warning: InactivityWarning | null = data.warningId && data.deliveredAt && data.receiptDigest
                                     ? { parentId: data.warningParentId, childId: data.warningChildId, warningId: data.warningId,
-                                        activityAt: data.warningActivityAt, contactDigest: data.contactDigest, noticeDigest: data.noticeDigest,
+                                        activityAt: data.warningActivityAt, targetDigest: data.targetDigest, channel: data.warningChannel, noticeDigest: data.noticeDigest,
                                         deliveredAt: data.deliveredAt, receiptDigest: data.receiptDigest } : null;
                                 return { parentId, childId, activityAt: data.activityAt,
-                                    activityComplete: quality.activityComplete === true, contactVerified: quality.contactVerified === true,
-                                    currentContactDigest: quality.currentContactDigest, warning };
+                                    activityComplete: quality.activityComplete === true, targetVerified: quality.targetVerified === true,
+                                    currentTargetDigest: quality.currentTargetDigest, channel: quality.channel, warning };
                             },
                             async pending(): Promise<PendingInactivityWarning | null> {
                                 const data = await getData();
                                 return data?.warningId ? { parentId: data.warningParentId, childId: data.warningChildId,
-                                    warningId: data.warningId, activityAt: data.warningActivityAt, contactDigest: data.contactDigest, noticeDigest: data.noticeDigest } : null;
+                                    warningId: data.warningId, activityAt: data.warningActivityAt, targetDigest: data.targetDigest, channel: data.warningChannel, noticeDigest: data.noticeDigest } : null;
                             },
                             async savePending(warning) {
                                 const [updated] = await connection.query<ResultSetHeader>({ sql: `UPDATE parent_child_inactivity_warnings SET
-                                    parent_uuid=?,warning_uuid=?,activity_at=?,contact_digest=UNHEX(?),notice_digest=UNHEX(?),prepared_at=UTC_TIMESTAMP(6),
+                                    parent_uuid=?,warning_uuid=?,activity_at=?,channel=?,target_digest=UNHEX(?),notice_digest=UNHEX(?),prepared_at=UTC_TIMESTAMP(6),
                                     delivered_at=NULL,receipt_digest=NULL WHERE child_uuid=?`, timeout },
-                                [parentId, warning.warningId, sqlTimestamp(warning.activityAt), warning.contactDigest, warning.noticeDigest, childId]);
+                                [parentId, warning.warningId, sqlTimestamp(warning.activityAt), warning.channel, warning.targetDigest, warning.noticeDigest, childId]);
                                 if (updated.affectedRows === 0) {
                                     const [inserted] = await connection.query<ResultSetHeader>({ sql: `INSERT INTO parent_child_inactivity_warnings
-                                        (child_uuid,parent_uuid,warning_uuid,activity_at,contact_digest,notice_digest,prepared_at)
-                                        VALUES (?,?,?,?,UNHEX(?),UNHEX(?),UTC_TIMESTAMP(6))`, timeout },
-                                    [childId, parentId, warning.warningId, sqlTimestamp(warning.activityAt), warning.contactDigest, warning.noticeDigest]);
+                                        (child_uuid,parent_uuid,warning_uuid,activity_at,channel,target_digest,notice_digest,prepared_at)
+                                        VALUES (?,?,?,?,?,UNHEX(?),UNHEX(?),UTC_TIMESTAMP(6))`, timeout },
+                                    [childId, parentId, warning.warningId, sqlTimestamp(warning.activityAt), warning.channel, warning.targetDigest, warning.noticeDigest]);
                                     if (inserted.affectedRows !== 1) throw new Error('Warning could not be prepared.');
                                 } else if (updated.affectedRows !== 1) throw new Error('Warning preparation was ambiguous.');
                             },
                             async saveConfirmed(warning) {
                                 const [result] = await connection.query<ResultSetHeader>({ sql: `UPDATE parent_child_inactivity_warnings SET
                                     delivered_at=?,receipt_digest=UNHEX(?) WHERE parent_uuid=? AND child_uuid=? AND warning_uuid=?
-                                    AND activity_at=? AND contact_digest=UNHEX(?) AND notice_digest=UNHEX(?) AND delivered_at IS NULL`, timeout },
+                                    AND activity_at=? AND channel=? AND target_digest=UNHEX(?) AND notice_digest=UNHEX(?) AND delivered_at IS NULL`, timeout },
                                 [sqlTimestamp(warning.deliveredAt), warning.receiptDigest, parentId, childId, warning.warningId,
-                                    sqlTimestamp(warning.activityAt), warning.contactDigest, warning.noticeDigest]);
+                                    sqlTimestamp(warning.activityAt), warning.channel, warning.targetDigest, warning.noticeDigest]);
                                 if (result.affectedRows !== 1) throw new Error('Warning receipt could not be recorded.');
                             },
                             async parentSessionValid(proof) {
