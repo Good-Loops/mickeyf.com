@@ -83,6 +83,33 @@ test('strict paused creation allows eligible adult provider login without allowi
     }
 });
 
+test('minor provider login fails before account lookup and is rechecked after the challenge', async () => {
+    const f = await fixture(undefined, true);
+    const policy = loadRegistrationPolicy({ REGISTRATION_ENABLED: 'true', REGISTRATION_POLICY_REVIEWED: 'true',
+        REGISTRATION_AUDIENCE: 'children-included', REGISTRATION_POLICY_VERSION: 'synthetic-paused-child-v1',
+        REGISTRATION_COUNTRY_RULES: '{"US":{"parentRequiredBelow":13}}' })!;
+    let ageBand = 'minor';
+    const database = { async query({ sql }: { sql: string }) {
+        assert.match(sql, /^SELECT country_code AS country/u);
+        return [[{ country: 'US', ageBand }]];
+    } } as unknown as Pick<Pool, 'query'>;
+    const registration = createRegistrationAuthorization(database, policy, policy.audience, false);
+    const flow = createProviderAuthFlow({ ...f.dependencies, enabled: true, registration });
+    f.controls.foundAccount = account;
+
+    assert.deepEqual(await flow.begin(f.context, { action: 'login', clientKey: 'google-web' }),
+        { ok: false, reason: 'REGISTRATION_REQUIRED' });
+    assert.deepEqual(f.events, [], 'minor cannot create a challenge or trigger provider/account work');
+    ageBand = 'adult';
+    const challenge = await flow.begin(f.context, { action: 'login', clientKey: 'google-web' });
+    assert.ok(challenge.ok);
+    f.events.length = 0;
+    ageBand = 'minor';
+    assert.deepEqual(await flow.complete(f.context, { action: 'login', clientKey: 'google-web', state: challenge.state,
+        idToken: signedToken(challenge.nonce) }), { ok: false, reason: 'REGISTRATION_REQUIRED' });
+    assert.deepEqual(f.events, [], 'a changed grant cannot consume an attempt or issue an account result');
+});
+
 function signedToken(nonce: string, provider: IdentityProvider = 'google', extra: Record<string, unknown> = {}): string {
     return jwt.sign({
         iss: provider === 'google' ? 'https://accounts.google.com' : 'https://appleid.apple.com',

@@ -134,7 +134,10 @@ export function createRegistrationAuthorization(database: Pick<Pool, 'query'> & 
         },
         async assertLoginAvailable(context: ProviderAuthContext | null): Promise<void> {
             if (audience !== 'children-included') throw new RegistrationRequiredError();
-            await read(database, context, false);
+            const { decision } = await read(database, context, false);
+            // Login does not yet bind a minor's privacy decision to an existing account.
+            // Refuse this path until public-score privacy can be enforced durably.
+            if (decision.ageBand !== 'adult') throw new RegistrationRequiredError();
         },
         /** Called inside the NEW account transaction; failures roll back user, identity, privacy and consumption together. */
         async consume(connection: PoolConnection, context: ProviderAuthContext | null, accountId: string): Promise<void> {

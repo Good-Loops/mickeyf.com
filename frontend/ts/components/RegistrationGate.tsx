@@ -80,7 +80,7 @@ export default function RegistrationGate({ children, purpose = 'signup' }: {
     async function submit(event: React.FormEvent) {
         event.preventDefault();
         if (operation.current || creationPaused || !countryPolicy || !ageBand || !countryPolicy.countries.some(item => item.country === country)) return;
-        operation.current = true; setBusy(true); setFeedback(null); began.current = true;
+        operation.current = true; setBusy(true); setFeedback(null);
         const current = ++generation.current;
         const started = Date.now();
         try {
@@ -91,7 +91,12 @@ export default function RegistrationGate({ children, purpose = 'signup' }: {
                 setFeedback('Your device could not confirm an age range. You can keep exploring without an account. A parent can use their own device for parent-led registration, or contact us through the privacy page for help.');
                 return;
             }
+            if (purpose === 'provider-login' && effectiveAge === 'minor') {
+                setFeedback('Google and Apple sign-in are temporarily unavailable. You can use your existing username and password, or continue as a guest.');
+                return;
+            }
             if (effectiveAge === 'parent-required') setParentStep(true);
+            began.current = true;
             const result = await beginRegistration({ country, ageBand: effectiveAge, policyVersion: countryPolicy.policyVersion });
             if (current !== generation.current) return;
             if (effectiveAge === 'parent-required') return;
@@ -119,7 +124,7 @@ export default function RegistrationGate({ children, purpose = 'signup' }: {
                 : signupPaused ? <p role="status">New account creation is temporarily paused. You can still play as a guest or log in to an existing account.</p>
                 : !countryPolicy ? <div role={purpose === 'signup' ? 'alert' : 'status'}>
                     <p>{purpose === 'signup' ? 'We can’t check sign-up availability right now. Please try again.'
-                        : config?.enabled === false ? 'New registrations are currently paused.' : 'Registration eligibility could not be confirmed. You can keep exploring without an account.'}</p>
+                        : config?.enabled === false ? 'Google and Apple sign-in are temporarily unavailable. You can use your existing username and password, or continue as a guest.' : 'Registration eligibility could not be confirmed. You can keep exploring without an account.'}</p>
                     {purpose === 'provider-login' && <button type="button" onClick={() => setRetry(value => value + 1)}>Check again</button>}
                 </div>
                 : parentStep || registrationAge.parentRequired() ? <ParentRegistrationUnavailable />
@@ -142,7 +147,7 @@ export default function RegistrationGate({ children, purpose = 'signup' }: {
                             <option value="adult">18 or older</option>
                         </select>
                     </label>}
-                    {ageBand === 'minor' && <p>Your account’s scores will be private and will not appear on public leaderboards.</p>}
+                    {purpose === 'signup' && ageBand === 'minor' && <p>Your account’s scores will be private and will not appear on public leaderboards.</p>}
                     <button className="signup__submit" type="submit" disabled={busy || !rule || !ageBand}>
                         {busy ? 'Checking…' : ageBand === 'parent-required' ? 'Continue with a parent' : 'Continue'}
                     </button>

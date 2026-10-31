@@ -8,6 +8,8 @@ import express from 'express';
 import type { Pool } from 'mysql2/promise';
 import { AccountDeletionPendingError } from '../accounts/accountDeletionRepository';
 import { createAppleTokenRepository } from '../accounts/appleTokenRepository';
+import { createRegistrationAuthorization } from '../accounts/registrationAuthorization';
+import { loadRegistrationPolicy } from '../config/registrationPolicy';
 import { readProviderAccountMethods, type ProviderAccountCreationResult } from '../accounts/providerAccountRepository';
 import { createProviderAuthContextReader } from '../auth/providerAuthContext';
 import { createProviderAuthFlow, type ProviderAuthClient, type ProviderChallengeResult, type ProviderCompletionResult } from '../auth/providerAuthFlow';
@@ -37,13 +39,14 @@ function signedCookie(value: string, name = '__session') {
 
 type Features = { signupEnabled?: boolean; accountDeletionEnabled?: boolean; withJournal?: boolean; missingProviderTable?: boolean;
     appleDeletionEnabled?: boolean; appleTokens?: boolean; appleStorage?: boolean; immediateRevocation?: boolean;
-    appleIssuanceAvailable?: () => boolean };
+    appleIssuanceAvailable?: () => boolean; childAudience?: boolean };
 
 function fixture(features: Features = {}) {
     const state = {
         events: [] as string[], contextReads: 0, databaseReads: 0, verifiedNonces: [] as string[],
         rememberMe: [] as boolean[], proofs: [] as SessionProof[], linked: true, accountExists: true,
         sessionExists: true, sessionFailure: false, contextFailure: false,
+        eligibilityAgeBand: 'adult' as 'adult' | 'minor',
         beginFailure: null as FailureReason | null, completionFailure: null as FailureReason | null,
         creation: { created: true, account } as ProviderAccountCreationResult,
         deletion: 'deleted' as 'deleted' | 'invalid-password' | 'not-found' | 'pending' | 'unavailable',
@@ -58,6 +61,9 @@ function fixture(features: Features = {}) {
     const database = { async query(query: { sql: string }) {
         state.databaseReads++;
         if (state.contextFailure) throw new Error('private database details');
+        if (features.childAudience && query.sql.startsWith('SELECT country_code AS country')) {
+            return [[{ country: 'US', ageBand: state.eligibilityAgeBand }], []];
+        }
         if (features.missingProviderTable && query.sql.includes('user_password IS NOT NULL')) {
             return [[{ hasPassword: state.methods?.hasPassword ? 1 : 0 }], []];
         }
@@ -88,7 +94,11 @@ function fixture(features: Features = {}) {
         }, async revoke() {} } } : {}),
         verifier: { async verify(_provider, token) { return token === 'accepted-token'
             ? { verified: true, identity: appleIdentity } : { verified: false, reason: 'INVALID_PROVIDER_TOKEN' }; } } };
-    const flow = createProviderAuthFlow({ registration: { assertAvailable: async () => undefined }, enabled: true, clients, signupEnabled: features.signupEnabled,
+    const policy = features.childAudience ? loadRegistrationPolicy({ REGISTRATION_ENABLED: 'true', REGISTRATION_POLICY_REVIEWED: 'true',
+        REGISTRATION_AUDIENCE: 'children-included', REGISTRATION_POLICY_VERSION: 'synthetic-child-v1',
+        REGISTRATION_COUNTRY_RULES: '{"US":{"parentRequiredBelow":13}}' }) : undefined;
+    const registration = policy ? createRegistrationAuthorization(database, policy, policy.audience, false) : undefined;
+    const flow = createProviderAuthFlow({ registration: registration ?? { assertAvailable: async () => undefined }, enabled: true, clients, signupEnabled: features.signupEnabled,
         deletionEnabled: features.accountDeletionEnabled && features.withJournal, attempts: {
         async create(attempt) { state.events.push('create'); attempts.set(attempt.stateHash.toString('hex'), attempt); return 'created'; },
         async consume(hash, binding, client, action) {
@@ -169,7 +179,7 @@ function fixture(features: Features = {}) {
             return { status: 'completed' as const, selected: 1, revoked: 1, retried: 0, expired: 0 };
         },
     } : undefined;
-    return { database, clients, services, state, appleTokenRepository, appleAccountRevocation };
+    return { database, clients, services, state, appleTokenRepository, appleAccountRevocation, registration };
 }
 
 async function withServer(run: (base: string, setup: ReturnType<typeof fixture>) => Promise<void>, enabled = true,
@@ -230,6 +240,37 @@ async function challenge(base: string, action = 'login', headers: Record<string,
     assert.ok(body.expiresInSeconds >= 1 && body.expiresInSeconds <= 300);
     return { ...body, cookie: response.headers.getSetCookie()[0]?.split(';')[0] ?? headers.cookie ?? '', response };
 }
+
+test('minor provider eligibility never issues an HTTP session, including a changed grant', async () => {
+    await withServer(async (base, { state }) => {
+        const cookie = signedCookie(['provider', 'v1', Date.now(), Buffer.alloc(32, 9).toString('base64url')].join(':'));
+        state.eligibilityAgeBand = 'minor';
+        const blocked = await post(base, 'begin', beginInput, { cookie });
+        assert.equal(blocked.status, 403);
+        assert.deepEqual(await blocked.json(), { error: 'REGISTRATION_REQUIRED' });
+        assert.equal(state.events.includes('session'), false);
+
+        state.eligibilityAgeBand = 'adult';
+        const started = await post(base, 'begin', beginInput, { cookie });
+        assert.equal(started.status, 200);
+        const { state: challengeState } = await started.json() as { state: string };
+        state.eligibilityAgeBand = 'minor';
+        const completion = await post(base, 'complete', { ...beginInput, state: challengeState, idToken: 'accepted-token' }, { cookie });
+        assert.equal(completion.status, 403);
+        assert.deepEqual(await completion.json(), { error: 'REGISTRATION_REQUIRED' });
+        assert.equal(completion.headers.getSetCookie().length, 0);
+        assert.equal(state.events.includes('session'), false);
+        assert.equal(state.events.includes('find'), false);
+
+        state.eligibilityAgeBand = 'adult';
+        const retry = await post(base, 'begin', beginInput, { cookie });
+        assert.equal(retry.status, 200);
+        const { state: adultChallenge } = await retry.json() as { state: string };
+        const accepted = await post(base, 'complete', { ...beginInput, state: adultChallenge, idToken: 'accepted-token' }, { cookie });
+        assert.equal(accepted.status, 200);
+        assert.equal(state.events.filter(event => event === 'session').length, 1);
+    }, true, { childAudience: true });
+});
 
 test('native Apple credential discovery exposes only the current Apple session subject without cookies or mutations', async () => {
     await withServer(async (base, { state }) => {

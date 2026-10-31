@@ -180,3 +180,24 @@ test('paused creation still mounts existing-account provider login after explici
     assert.deepEqual(view.calls[1], ['begin', { country: 'US', ageBand: 'adult', policyVersion: 'synthetic-reviewed' }]);
     assert(view.find(node => node.type === 'credentials'));
 });
+
+test('minor provider login shows a temporary notice and does not request a grant or mount provider controls', async t => {
+    const view = mount(t, creationPaused, 'provider-login'); view.render(); await view.settle();
+    await view.change('registration-country', 'US');
+    await view.change('registration-age', 'minor');
+    assert.equal(view.find(node => node.type === 'p' && typeof node.props.children === 'string'
+        && node.props.children.includes('scores will be private')), undefined);
+    await view.find(node => node.type === 'form').props.onSubmit({ preventDefault() {} });
+    view.render(); await view.settle();
+    assert(view.find(node => node.type === 'p' && node.props.role === 'alert'
+        && node.props.children.startsWith('Google and Apple sign-in are temporarily unavailable.')));
+    assert.deepEqual(view.calls, [['config']]);
+    assert.equal(view.children.length, 0);
+});
+
+test('disabled policy explains that provider sign-in is unavailable', async t => {
+    const view = mount(t, { enabled: false }, 'provider-login'); view.render(); await view.settle();
+    assert(view.find(node => node.type === 'p' && typeof node.props.children === 'string'
+        && node.props.children.startsWith('Google and Apple sign-in are temporarily unavailable.')));
+    assert.equal(view.children.length, 0);
+});

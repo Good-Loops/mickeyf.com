@@ -168,3 +168,18 @@ test('a strict creation pause keeps staged login eligibility while preventing al
     await assert.rejects(paused.consume(f.connection, context(), accountId), RegistrationRequiredError);
     assert.equal(f.calls.length, before, 'creation pause rejects before any new account transaction writes or reads');
 });
+
+test('child-audience provider login denies minor grants without changing signup grant behavior', async () => {
+    const childPolicy = { ...policy, audience: 'children-included' as const };
+    const minor = fixture('minor');
+    const service = createRegistrationAuthorization(minor.database, childPolicy, childPolicy.audience, true);
+    await assert.rejects(service.assertLoginAvailable(context()), RegistrationRequiredError);
+    await service.assertAvailable(context());
+    assert.equal(minor.calls.length, 2);
+    assert(minor.calls.every(call => call.sql.startsWith('SELECT')));
+    const adult = fixture('adult');
+    await createRegistrationAuthorization(adult.database, childPolicy, childPolicy.audience, true).assertLoginAvailable(context());
+    const missing = fixture('adult', false, true);
+    await assert.rejects(createRegistrationAuthorization(missing.database, childPolicy, childPolicy.audience, true)
+        .assertLoginAvailable(context()), RegistrationRequiredError);
+});
