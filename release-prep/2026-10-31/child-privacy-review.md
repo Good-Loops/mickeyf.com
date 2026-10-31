@@ -105,3 +105,14 @@ reliable activity signal, warning and grace period, delivery failure handling,
 parent choices, deletion and recovery replay, and an enforceable schedule. Do
 not infer inactivity from missing session rows, or delete accounts merely
 because this proposal exists.
+
+The current source does not retain a reliable per-child last-activity time or
+provide warning-email delivery, bounce handling, or a current-contact workflow.
+Sessions may be removed on logout or cleanup, and game scores are not a complete
+record of use. A possible implementation starts a prospective clock for newly
+created managed accounts, records minimal successful interactive activity, warns
+the parent at a currently verified contact and provides a keep-account action.
+A 30-day warning period is a proposal, not an owner decision. The process must
+stop for missing activity/contact or unconfirmed delivery, and must use a tested
+child-only deletion and recovery path. The existing withdrawal flow requires
+fresh parent proof and is not itself an automated inactivity-deletion job.
