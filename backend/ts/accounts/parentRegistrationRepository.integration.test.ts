@@ -615,7 +615,7 @@ test('browser creates a chosen nickname, separately publishes and removes scores
         const nextChallenge = await p.flow.begin(p.context, browserInput); assert.ok('state' in nextChallenge);
         const nextForm = await p.flow.requestSignedForm(p.context, { state: nextChallenge.state, idToken: 'synthetic-owner-proof' }); assert.ok('form' in nextForm);
         await ownerReview(await formReview(p, nextForm.form.reference));
-        const nextGrant = await approve(p, browserInput);
+        const nextGrant = await approve(p, { ...browserInput, formReference: nextForm.form.reference });
         const second = await p.flow.createChild(p.context, { grant: nextGrant.proof.grant, formReference: nextForm.form.reference,
             userName: `family-browser-${randomUUID()}`, password }); assert.ok('created' in second);
         await page.getByRole('button',{name:'Refresh child accounts',exact:true}).click();
@@ -784,6 +784,42 @@ test('restore reconciliation removes public scores and tombstones restored pendi
     }finally{await replayPool.end();}
 });
 
+test('form-bound challenge waits for the actual review commit and rejects a rolled-back approval', async () => {
+    await enableChildFormSchema();
+    const childPolicy: ParentRegistrationPolicy = { ...policy, version: 'synthetic-review-race-v1',
+        audience: 'children-included', countries: ['US'], signedFormsEnabled: true, signedFormCountries: ['US'] };
+    for (const commit of [false, true]) {
+        const base = await parent();
+        const store = createParentRegistrationRepository(database, journal, undefined, true,
+            { countries: ['US'], credentialsAfterApproval: true });
+        const flow = createParentRegistrationFlow({ store, clients: base.clients, policy: childPolicy });
+        const request = { ...input, country: 'US', policyVersion: childPolicy.version };
+        const challenge = await flow.begin(base.context, request); assert.ok('state' in challenge);
+        const requested = await flow.requestSignedForm(base.context, { state: challenge.state, idToken: 'synthetic-proof' });
+        assert.ok('form' in requested);
+        await admin.beginTransaction();
+        try {
+            await admin.query(`UPDATE parent_signed_forms SET status='approved', reviewed_at=UTC_TIMESTAMP(6),
+                reviewer='Synthetic race test', form_sha256=? WHERE reference=?`, [Buffer.alloc(32, 12), requested.form.reference]);
+            let settled = false;
+            const pending = flow.begin(base.context, { ...request, formReference: requested.form.reference }).then(value => { settled = true; return value; });
+            await new Promise(resolve => setTimeout(resolve, 150));
+            assert.equal(settled, false, 'the form lock prevents an uncommitted review from authorizing a challenge');
+            if (commit) await admin.commit(); else await admin.rollback();
+            const result = await pending;
+            if (!commit) assert.ok('error' in result, 'a rolled-back approval cannot authorize a challenge');
+            else {
+                assert.ok('state' in result);
+                const proof = await flow.complete(base.context, { state: result.state, idToken: 'synthetic-proof' });
+                assert.ok('grant' in proof);
+                const created = await flow.createChild(base.context, { grant: proof.grant, formReference: requested.form.reference,
+                    userName: `race-${randomUUID()}`, password });
+                assert.ok('created' in created);
+            }
+        } finally { await admin.rollback(); }
+    }
+});
+
 test('pending child-form extension enables parent-only BR/US approval, private child creation and deletion on isolated MySQL', async () => {
     await enableChildFormSchema();
     assert.equal((await admin.query<RowDataPacket[]>('SELECT version FROM schema_migrations'))[0].length, 26,
@@ -813,10 +849,20 @@ test('pending child-form extension enables parent-only BR/US approval, private c
             const pending = await approve(p, request);
             assert.deepEqual(await flow.createChild(p.context, { ...credentials, grant: pending.proof.grant }), { error: 'SIGNED_FORM_REQUIRED' });
             assert.equal(hashing.mock.calls.length, 0, 'a pending form cannot process a child password');
+            assert.ok('error' in await flow.begin(p.context, { ...request, formReference: form.reference }),
+                'a form-bound proof cannot start while the form is pending');
             await ownerReview(await formReview(p, form.reference, country === 'BR'));
+            assert.deepEqual(await flow.createChild(p.context, { ...credentials, grant: pending.proof.grant }), { error: 'SIGNED_FORM_REQUIRED' },
+                'a proof obtained before review must remain unusable after review');
+            const otherChallenge = await flow.begin(p.context, request); assert.ok('state' in otherChallenge);
+            const other = await flow.requestSignedForm(p.context, { state: otherChallenge.state, idToken: 'parent-only-proof' });
+            assert.ok('form' in other);
+            await ownerReview(await formReview(p, other.form.reference));
             const listed = await flow.listSignedForms(p.context, {}); assert.ok('forms' in listed);
             assert.equal(listed.forms.find(item => item.reference === form.reference)?.status, 'approved');
-            const fresh = await approve(p, request);
+            const fresh = await approve(p, { ...request, formReference: form.reference });
+            assert.deepEqual(await flow.createChild(p.context, { ...credentials, formReference: other.form.reference, grant: fresh.proof.grant }),
+                { error: 'SIGNED_FORM_REQUIRED' }, 'a proof cannot be transferred to another approved form');
             const created = await flow.createChild(p.context, { ...credentials, grant: fresh.proof.grant });
             assert.ok('created' in created, JSON.stringify(created)); assert.equal(created.child.scoreVisibility, 'private');
             assert.equal(hashing.mock.calls.length, 1);

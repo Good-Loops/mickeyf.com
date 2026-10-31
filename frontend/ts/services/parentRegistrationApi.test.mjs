@@ -184,3 +184,16 @@ test('strict parent policy covers both reviewed countries and requests a form wi
         await assert.rejects(createParentRegistrationApi('',async()=>response({...strict,...patch}),{requireChildAudience:true}).config(),{code:'UNAVAILABLE'});
     }
 });
+
+test('post-review challenge sends the exact form reference and form requests do not', async () => {
+    const sent = [];
+    const api = createParentRegistrationApi('', async (_url, options) => {
+        sent.push(JSON.parse(options.body)); return response({ state: random(), nonce: random(), expiresInSeconds: 300 });
+    }, { requireChildAudience: true });
+    const consent = { country: 'US', adultAttestation: true, guardianAttestation: true, consent: true };
+    const reference = randomUUID();
+    await api.begin(config, 'google-web', consent);
+    await api.begin(config, 'google-web', consent, undefined, undefined, reference);
+    assert.equal('formReference' in sent[0], false);
+    assert.equal(sent[1].formReference, reference);
+});

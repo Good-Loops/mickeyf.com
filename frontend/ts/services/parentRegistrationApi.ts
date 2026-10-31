@@ -97,10 +97,11 @@ export function createParentRegistrationApi(apiBase: string, fetchRequest: typeo
             return value as ParentConfig;
         },
         async begin(config: Extract<ParentConfig, { enabled: true }>, clientKey: string, consent: ParentConsent,
-            signal?: AbortSignal, isCurrent?: () => boolean): Promise<ProviderAuthenticationChallenge> {
+            signal?: AbortSignal, isCurrent?: () => boolean, formReference?: string): Promise<ProviderAuthenticationChallenge> {
             const value = await request('/begin', { purpose: 'create-child', policyVersion: config.policyVersion,
                 consentVersion: config.consentVersion, privacyNoticeUrl: config.privacyNoticeUrl, clientKey, country: consent.country,
-                adultAttestation: consent.adultAttestation, guardianAttestation: consent.guardianAttestation, consent: consent.consent }, signal, isCurrent);
+                adultAttestation: consent.adultAttestation, guardianAttestation: consent.guardianAttestation, consent: consent.consent,
+                ...(formReference ? { formReference } : {}) }, signal, isCurrent);
             if (!keys(value, 'expiresInSeconds,nonce,state') || !token(value.state) || !token(value.nonce)
                 || !expiry(value.expiresInSeconds)) throw new ParentRegistrationError('UNAVAILABLE');
             return value as ProviderAuthenticationChallenge;

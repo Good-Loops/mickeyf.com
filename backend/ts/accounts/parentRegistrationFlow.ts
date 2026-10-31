@@ -27,7 +27,7 @@ export type ParentRegistrationPolicy = Readonly<{
     audience?: 'children-included';
     signedFormCountries?: readonly string[];
 }>;
-export type ParentOperation = Readonly<{ purpose: 'create-child'; country: string }>
+export type ParentOperation = Readonly<{ purpose: 'create-child'; country: string; formReference?: string }>
     | Readonly<{ purpose: 'withdraw-child'; childAccountId: string }>
     | Readonly<{ purpose: 'delete-family'; familyDigest: Buffer }>
     | Readonly<{ purpose: 'publish-scores'; childAccountId: string }>;
@@ -115,11 +115,15 @@ function readOperation(input: Record<string, unknown>, policy: ParentRegistratio
             && input.confirmation === 'WITHDRAW AND DELETE' && typeof input.childAccountId === 'string'
             && ACCOUNT.test(input.childAccountId) ? { purpose: 'withdraw-child', childAccountId: input.childAccountId } : null;
     }
-    if (input.purpose !== 'create-child' || !keys(input, 'adultAttestation,clientKey,consent,consentVersion,country,guardianAttestation,policyVersion,privacyNoticeUrl,purpose')
+    const fields = 'adultAttestation,clientKey,consent,consentVersion,country,guardianAttestation,policyVersion,privacyNoticeUrl,purpose';
+    const withForm = policy.audience === 'children-included'
+        && keys(input, 'adultAttestation,clientKey,consent,consentVersion,country,formReference,guardianAttestation,policyVersion,privacyNoticeUrl,purpose')
+        && typeof input.formReference === 'string' && ACCOUNT.test(input.formReference);
+    if (input.purpose !== 'create-child' || !(keys(input, fields) || withForm)
         || input.adultAttestation !== true || input.guardianAttestation !== true || input.consent !== true
         || input.consentVersion !== policy.consentVersion || input.privacyNoticeUrl !== policy.privacyNoticeUrl || typeof input.country !== 'string'
         || !policy.countries.includes(input.country)) return null;
-    return { purpose: 'create-child', country: input.country };
+    return { purpose: 'create-child', country: input.country, ...(withForm ? { formReference: input.formReference as string } : {}) };
 }
 
 export function createParentRegistrationFlow({ policy: inputPolicy, publicationPolicy, clients, store, now = Date.now }: {

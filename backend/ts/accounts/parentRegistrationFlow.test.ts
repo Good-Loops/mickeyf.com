@@ -82,6 +82,18 @@ test('closed by default; a reviewed policy is copied rather than mutable through
     countries.push('US'); const config = flow.config(); assert.ok(config.enabled); assert.deepEqual(config.countries, ['ZZ']);
 });
 
+test('strict child flow binds only a valid form reference to a proof challenge', async () => {
+    const strict: ParentRegistrationPolicy = { ...policy, audience: 'children-included', countries: ['US'],
+        signedFormsEnabled: true, signedFormCountries: ['US'] };
+    const f = fixture(strict); const reference = randomUUID();
+    const request = { ...beginInput, country: 'US', formReference: reference };
+    const challenge = await f.flow.begin(f.context, request); assert.ok('state' in challenge);
+    assert.deepEqual(f.attempts.get(hash(challenge.state))?.value.operation, { purpose: 'create-child', country: 'US', formReference: reference });
+    assert.deepEqual(await f.flow.begin(f.context, { ...request, formReference: 'not-a-reference' }), { error: 'INVALID_REQUEST' });
+    const legacy = fixture({ ...policy, countries: ['US'], signedFormsEnabled: true });
+    assert.deepEqual(await legacy.flow.begin(legacy.context, request), { error: 'INVALID_REQUEST' });
+});
+
 for (const [name, patch] of Object.entries({ missingAdult: { adultAttestation: undefined }, falseGuardian: { guardianAttestation: false },
     noConsent: { consent: false }, staleConsent: { consentVersion: 'old' }, stalePolicy: { policyVersion: 'old' },
     unknownCountry: { country: 'US' }, childEmail: { email: 'child@example.test' }, unknownClient: { clientKey: '__proto__' } })) {

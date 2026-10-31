@@ -123,7 +123,8 @@ export default function ParentRegistration({ api, authenticated, accountKey, ses
         setBusy(true); setFeedback('');
         try {
             const challenge = await api.begin(config, client.clientKey,
-                { country, adultAttestation: true, guardianAttestation: true, consent: true }, controller.signal, isCurrent);
+                { country, adultAttestation: true, guardianAttestation: true, consent: true }, controller.signal, isCurrent,
+                credentialsAfterApproval ? selectedForm?.reference : undefined);
             if (!active()) { void api.cancel(challenge.state).catch(() => undefined); return; }
             challengeState.current = challenge.state;
             const credential = await acquire(client, challenge, controller.signal);

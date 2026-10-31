@@ -134,7 +134,7 @@ async function parent(country: string) {
         const result = await flow.complete(context, { state: challenge.state, idToken: 'SYNTHETIC-NO-PROVIDER-REQUEST' });
         assert.ok('grant' in result, JSON.stringify(result)); return result.grant;
     }
-    return { account, contact, context, flow, requestForm, proof };
+    return { account, contact, context, flow, request, requestForm, proof };
 }
 
 async function formRow(reference: string) {
@@ -188,7 +188,8 @@ for (const country of ['BR', 'US']) test(`${label}: ${country} actual operator C
     assert.deepEqual(await p.flow.createChild(p.context, { ...credentials, grant: premature }), { error: 'SIGNED_FORM_REQUIRED' });
     await operator('approve', approved);
     assert.equal((await operator('inspect', approved))?.status, 'approved');
-    const fresh = await p.proof();
+    assert.deepEqual(await p.flow.createChild(p.context, { ...credentials, grant: premature }), { error: 'SIGNED_FORM_REQUIRED' });
+    const fresh = await p.proof({ ...p.request, formReference: approved.reference });
     const created = await p.flow.createChild(p.context, { ...credentials, grant: fresh }); assert.ok('created' in created, JSON.stringify(created));
     assert.equal(created.child.scoreVisibility, 'private');
     const [[child]] = await admin.query<RowDataPacket[]>('SELECT email FROM users WHERE account_uuid=?', [created.child.accountId]);

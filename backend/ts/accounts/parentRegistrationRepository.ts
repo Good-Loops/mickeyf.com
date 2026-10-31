@@ -1,6 +1,6 @@
 import bcrypt from 'bcryptjs';
 import { randomUUID } from 'node:crypto';
-import { SIGNED_FORM_LIFETIME_DAYS, signedFormRequired, SignedParentFormRequiredError, type SignedParentFormRequest } from './signedParentForm';
+import { SIGNED_FORM_LIFETIME_DAYS, signedFormReferenceDigest, signedFormRequired, SignedParentFormRequiredError, type SignedParentFormRequest } from './signedParentForm';
 import type { ScoreParticipationPolicy } from '../config/scoreParticipationPolicy';
 import { scoreParticipationTarget, scoreProfileDigest, canAuthorizePublication, approveScoreParticipation, readScoreParticipation, removePublicScoreParticipation } from './scoreParticipationRepository';
 import { familySelectionDigest } from './familyDeletionSelection';
@@ -150,6 +150,15 @@ export function createParentRegistrationRepository(database: Database, journal: 
             return locked(context, async connection => {
                 await currentParent(connection, context, attempt.operation.purpose === 'create-child', true);
                 let profileDigest: Buffer | null = null;
+                if (credentialsAfterApproval && attempt.operation.purpose === 'create-child' && attempt.operation.formReference) {
+                    // Locking read observes the committed review before creating a proof challenge.
+                    const form = await rows(connection, `SELECT reference FROM parent_signed_forms
+                        WHERE reference=? AND parent_uuid=? AND country_code=? AND policy_digest=?
+                        AND status='approved' AND expires_at>UTC_TIMESTAMP(6) LIMIT 1 FOR UPDATE`,
+                    [attempt.operation.formReference, context.account!.accountId, attempt.operation.country, attempt.policyDigest]);
+                    if (form.length !== 1) throw new SignedParentFormRequiredError();
+                    profileDigest = signedFormReferenceDigest(attempt.operation.formReference);
+                }
                 if (attempt.operation.purpose === 'publish-scores') {
                     const target = await scoreParticipationTarget(connection, context, attempt.operation.childAccountId);
                     if (!journal.recordPublicScoreWithdrawal || !canAuthorizePublication(target, context.account!.accountId, publicationPolicy)
@@ -212,6 +221,8 @@ export function createParentRegistrationRepository(database: Database, journal: 
                 let formReference: string | null = null;
                 if (requiresSignedForm(approval.country_code)) {
                     if (!signedFormsEnabled || !credentials.formReference) throw new SignedParentFormRequiredError();
+                    if (credentialsAfterApproval && (!Buffer.isBuffer(approval.profile_digest)
+                        || !approval.profile_digest.equals(signedFormReferenceDigest(credentials.formReference)))) throw new SignedParentFormRequiredError();
                     const [form] = await rows(connection, `SELECT reference, user_name, provider, subject FROM parent_signed_forms
                         WHERE reference=? AND parent_uuid=? AND country_code=? AND policy_digest=? AND consent_version=? AND policy_version=?
                         AND status='approved' AND expires_at>UTC_TIMESTAMP(6) LIMIT 1 FOR UPDATE`,
