@@ -66,6 +66,7 @@ jobs:
           VITE_ENABLE_THREE_BOSSES_RELEASE: "1"
         run: |
           npm --prefix frontend test
+          node --test frontend/scripts/capacitor-cleanup-compat.test.mjs
           npm --prefix frontend run build
 
       - name: Reject development-only Three Bosses UI from release bundle
