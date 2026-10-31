@@ -14,6 +14,15 @@ const productionEnvironment = {
     CLOUD_SQL_CONNECTION_NAME: 'test-project:test-region:test-instance',
 };
 
+test('managed child online activity defaults off and rejects partial or malformed opt-in', () => {
+    assert.equal(loadRuntimeConfig(productionEnvironment).childOnlineActivityEnabled, false);
+    assert.equal(loadRuntimeConfig({ ...productionEnvironment, CHILD_ONLINE_ACTIVITY_ENABLED: 'false' }).childOnlineActivityEnabled, false);
+    for (const invalid of ['', 'TRUE', '1', ' true ']) {
+        assert.throws(() => loadRuntimeConfig({ ...productionEnvironment, CHILD_ONLINE_ACTIVITY_ENABLED: invalid }), /must be true or false/u);
+    }
+    assert.throws(() => loadRuntimeConfig({ ...productionEnvironment, CHILD_ONLINE_ACTIVITY_ENABLED: 'true' }), /Child activity requires/u);
+});
+
 test('child-audience runtime retains its contract while creation is closed and refuses opening without signed-parent support', () => {
     const childEnvironment = { ...productionEnvironment, REGISTRATION_AUDIENCE: 'children-included',
         REGISTRATION_ENABLED: 'true', REGISTRATION_POLICY_REVIEWED: 'true', REGISTRATION_POLICY_VERSION: 'synthetic-child-v1',

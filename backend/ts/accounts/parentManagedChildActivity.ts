@@ -11,13 +11,15 @@ async function initialize(connection: WriterConnection, childAccountId: string):
     if (result.affectedRows !== 1) throw new Error('Managed child activity could not be initialized.');
 }
 
-/** Call after successful password proof and session insertion, in the same transaction. */
-async function recordInteractiveSignIn(connection: WriterConnection, accountId: string): Promise<void> {
+/** Call only after authenticated interactive use, in the enclosing account transaction. */
+async function recordInteraction(connection: WriterConnection, accountId: string): Promise<boolean> {
     // No upsert: old accounts without a prospective record stay untracked.
-    await connection.query({ sql: `UPDATE parent_managed_child_activity
-        SET retention_activity_at=GREATEST(retention_activity_at, UTC_TIMESTAMP(6)) WHERE child_uuid=?`, timeout }, [accountId]);
+    const [result] = await connection.query<ResultSetHeader>({ sql: `UPDATE parent_managed_child_activity
+        SET retention_activity_at=GREATEST(retention_activity_at + INTERVAL 1 MICROSECOND, UTC_TIMESTAMP(6)) WHERE child_uuid=?`, timeout }, [accountId]);
+    if (result.affectedRows !== 0 && result.affectedRows !== 1) throw new Error('Managed child activity update is unavailable.');
+    return result.affectedRows === 1;
 }
 
-/** No runtime wiring enables this writer until schema, permissions and rollout are reviewed. */
-export const parentManagedChildActivity = Object.freeze({ initialize, recordInteractiveSignIn });
+/** Runtime wiring is default-off and requires successful storage readiness. */
+export const parentManagedChildActivity = Object.freeze({ initialize, recordInteraction });
 export type ParentManagedChildActivity = typeof parentManagedChildActivity;

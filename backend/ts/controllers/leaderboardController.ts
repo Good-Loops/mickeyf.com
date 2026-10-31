@@ -39,6 +39,7 @@ import {
 } from '../leaderboards/threeBossesRunTicket';
 import { authorizeThreeBossesMutation } from '../security/threeBossesMutationAuthorization';
 import { readActiveAccount } from '../security/activeAccount';
+import type { ParentManagedChildActivity } from '../accounts/parentManagedChildActivity';
 
 type LeaderboardControllerDependencies = {
     database: Pick<Pool, 'getConnection' | 'query'>;
@@ -47,6 +48,7 @@ type LeaderboardControllerDependencies = {
     sessionSecret: string;
     allowedMutationOrigins: readonly string[];
     threeBossesRunSubmissionsEnabled: boolean;
+    childActivity?: ParentManagedChildActivity;
 };
 type GameLeaderboardResponseBody = GameLeaderboardResponse
     | LeaderboardApiError<'UNKNOWN_GAME' | 'SERVER_ERROR'>;
@@ -113,6 +115,7 @@ export function createLeaderboardController({
     sessionSecret,
     allowedMutationOrigins,
     threeBossesRunSubmissionsEnabled,
+    childActivity,
 }: LeaderboardControllerDependencies) {
     const mutationPolicy = {
         submissionsEnabled: threeBossesRunSubmissionsEnabled,
@@ -212,7 +215,8 @@ export function createLeaderboardController({
             authorization.identity.userId,
             validation.input.runId,
             validation.input.completionTimeMs,
-            authorization.identity
+            authorization.identity,
+            childActivity
         );
         if (result.kind === 'user-not-found') {
             return res.status(401).json({

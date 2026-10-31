@@ -32,6 +32,8 @@ import { reviewSignedParentForm, cleanupSignedParentForms } from './signedParent
 import { verifySignedParentFormReadiness } from '../migrations/signedParentFormSchema';
 import { removePublicScoreParticipation } from './scoreParticipationRepository';
 import { parentManagedChildActivity } from './parentManagedChildActivity';
+import { verifyParentManagedChildActivityReadiness } from '../migrations/parentManagedChildActivityReadiness';
+import { keepManagedChild, recordOnlineInteraction } from './managedChildOnlineActivity';
 
 const config = loadMigrationConfig();
 let admin: Connection; let database: Pool; let passwordHash: string;
@@ -791,11 +793,19 @@ test('restore reconciliation removes public scores and tombstones restored pendi
 
 test('prospective child activity records only managed children and successful password sessions', async () => {
     const existingParent = await parent(); const existingChild = await child(existingParent);
+    await assert.rejects(verifyParentManagedChildActivityReadiness(database));
     const migration = readFileSync(path.join(__dirname, '../../migrations/pending/draft_create_parent_managed_child_activity.sql'), 'utf8');
     await admin.query(migration);
-    await admin.query(`GRANT SELECT (child_uuid, retention_activity_at), INSERT (child_uuid, retention_activity_at), UPDATE (retention_activity_at)
+    await admin.query(`GRANT SELECT, INSERT (child_uuid, retention_activity_at), UPDATE (retention_activity_at)
         ON parent_managed_child_activity TO 'parent_runtime_test'@'%'`);
     try {
+        await verifyParentManagedChildActivityReadiness(database);
+        await admin.query('ALTER TABLE parent_managed_child_activity ADD COLUMN unexpected INT NULL');
+        await assert.rejects(verifyParentManagedChildActivityReadiness(database));
+        await admin.query('ALTER TABLE parent_managed_child_activity DROP COLUMN unexpected');
+        await admin.query("REVOKE UPDATE (retention_activity_at) ON parent_managed_child_activity FROM 'parent_runtime_test'@'%'");
+        await assert.rejects(verifyParentManagedChildActivityReadiness(database));
+        await admin.query("GRANT UPDATE (retention_activity_at) ON parent_managed_child_activity TO 'parent_runtime_test'@'%'");
         const base = await parent();
         const store = createParentRegistrationRepository(database, journal, undefined, false, { childActivity: parentManagedChildActivity });
         const p = { ...base, store, flow: createParentRegistrationFlow({ store, clients: base.clients, policy }) };
@@ -820,7 +830,8 @@ test('prospective child activity records only managed children and successful pa
         assert.equal(await createAccountSession(database, target, session(), expiry(), 'wrong-hash', false, undefined, parentManagedChildActivity), false);
         assert.equal((await admin.query<RowDataPacket[]>('SELECT retention_activity_at FROM parent_managed_child_activity WHERE child_uuid=?', [target.accountId]))[0][0].retention_activity_at,
             '2000-01-01 00:00:00.000000');
-        assert.equal(await createAccountSession(database, target, session(), expiry(), user.user_password, false, undefined, parentManagedChildActivity), true);
+        const childSession = session();
+        assert.equal(await createAccountSession(database, target, childSession, expiry(), user.user_password, false, undefined, parentManagedChildActivity), true);
         assert.notEqual((await admin.query<RowDataPacket[]>('SELECT retention_activity_at FROM parent_managed_child_activity WHERE child_uuid=?', [target.accountId]))[0][0].retention_activity_at,
             '2000-01-01 00:00:00.000000');
         const [[old]] = await admin.query<RowDataPacket[]>('SELECT user_id,user_password FROM users WHERE account_uuid=?', [existingChild.child.accountId]);
@@ -829,6 +840,21 @@ test('prospective child activity records only managed children and successful pa
         assert.equal(await createAccountSession(database, p.account, session(), expiry(), passwordHash, false, undefined, parentManagedChildActivity), true);
         assert.equal((await admin.query<RowDataPacket[]>('SELECT child_uuid FROM parent_managed_child_activity'))[0].length, 1,
             'an existing child and an unrelated parent remain untouched');
+        const childContext = { ...p.context, account: target, session: { accountId: target.accountId, sessionId: childSession } };
+        await admin.query("UPDATE parent_managed_child_activity SET retention_activity_at='2000-01-01 00:00:00' WHERE child_uuid=?", [target.accountId]);
+        await recordOnlineInteraction(database, childContext, parentManagedChildActivity);
+        assert.notEqual((await admin.query<RowDataPacket[]>('SELECT retention_activity_at FROM parent_managed_child_activity WHERE child_uuid=?', [target.accountId]))[0][0].retention_activity_at,
+            '2000-01-01 00:00:00.000000');
+        await admin.query("UPDATE parent_managed_child_activity SET retention_activity_at='2000-01-01 00:00:00' WHERE child_uuid=?", [target.accountId]);
+        await assert.rejects(keepManagedChild(database, existingParent.context, target.accountId, parentManagedChildActivity));
+        await assert.rejects(recordOnlineInteraction(database, { ...childContext, session: { ...childContext.session, sessionId: session() } }, parentManagedChildActivity));
+        assert.equal((await admin.query<RowDataPacket[]>('SELECT retention_activity_at FROM parent_managed_child_activity WHERE child_uuid=?', [target.accountId]))[0][0].retention_activity_at,
+            '2000-01-01 00:00:00.000000');
+        await keepManagedChild(database, p.context, target.accountId, parentManagedChildActivity);
+        assert.notEqual((await admin.query<RowDataPacket[]>('SELECT retention_activity_at FROM parent_managed_child_activity WHERE child_uuid=?', [target.accountId]))[0][0].retention_activity_at,
+            '2000-01-01 00:00:00.000000');
+        await assert.rejects(keepManagedChild(database, existingParent.context, existingChild.child.accountId, parentManagedChildActivity), /tracking unavailable/u,
+            'older children without a trustworthy activity baseline remain on hold');
         const deletion = await approve(p, withdrawal(created.child.accountId));
         assert.deepEqual(await p.flow.withdrawChild(p.context, { grant: deletion.proof.grant, confirmation: 'WITHDRAW AND DELETE' }), { deleted: true });
         assert.equal((await admin.query<RowDataPacket[]>('SELECT child_uuid FROM parent_managed_child_activity'))[0].length, 0);

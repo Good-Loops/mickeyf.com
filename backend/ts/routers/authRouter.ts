@@ -39,6 +39,8 @@ import { assertNoManagedChildren, createParentRegistrationRepository } from '../
 import { createParentRegistrationRouter } from './parentRegistrationRouter';
 import { createAppleAndroidHandoffRepository } from '../auth/appleAndroidHandoffRepository';
 import { createAppleAndroidHandoffFlow } from '../auth/appleAndroidHandoffFlow';
+import { createManagedChildActivityRouter } from './managedChildActivityRouter';
+import type { ParentManagedChildActivity } from '../accounts/parentManagedChildActivity';
 
 export { authRoutesContract } from './authRouter.contract';
 
@@ -48,7 +50,7 @@ export function createAuthRouter(
     isProduction: boolean,
     allowedMutationOrigins: readonly string[],
     { accountDeletionEnabled = false, deletionJournal, providerAuth, registration = createRegistrationAuthorization(database),
-        parentRegistrationStorageReady = false, parentRegistrationPolicy, scoreParticipationPolicy, appleIssuanceAvailable }: {
+        parentRegistrationStorageReady = false, parentRegistrationPolicy, scoreParticipationPolicy, appleIssuanceAvailable, childActivity }: {
         scoreParticipationPolicy?: ScoreParticipationPolicy;
         parentRegistrationStorageReady?: boolean;
         parentRegistrationPolicy?: ParentRegistrationPolicy;
@@ -56,6 +58,7 @@ export function createAuthRouter(
         accountDeletionEnabled?: boolean;
         deletionJournal?: AccountDeletionJournal;
         appleIssuanceAvailable?: () => boolean;
+        childActivity?: ParentManagedChildActivity;
         providerAuth?: {
             enabled: boolean;
             signupEnabled?: boolean;
@@ -83,6 +86,9 @@ export function createAuthRouter(
         return res.type('text/plain').send('Return to Ludolume to finish sign-in. If the app did not resume, close this tab and try again in the app.');
     });
     const beforeAccountDeletion = parentRegistrationStorageReady ? assertNoManagedChildren : undefined;
+    if (childActivity && !parentRegistrationStorageReady) throw new Error('Child activity storage is not ready.');
+    if (childActivity) router.use('/child-activity', createManagedChildActivityRouter(database,
+        createProviderAuthContextReader({ database, sessionSecret, allowedOrigins: allowedMutationOrigins }), childActivity));
     if ((parentRegistrationPolicy || scoreParticipationPolicy) && (!parentRegistrationStorageReady || !deletionJournal || !providerAuth?.enabled)) {
         throw new Error('Parent registration dependencies are not ready.');
     }
@@ -91,7 +97,7 @@ export function createAuthRouter(
             policy: parentRegistrationPolicy, publicationPolicy: scoreParticipationPolicy, clients: providerAuth?.clients ?? {},
             store: createParentRegistrationRepository(database, deletionJournal, scoreParticipationPolicy, parentRegistrationPolicy?.signedFormsEnabled === true,
                 { countries: parentRegistrationPolicy?.signedFormCountries,
-                    credentialsAfterApproval: parentRegistrationPolicy?.audience === 'children-included' }),
+                    credentialsAfterApproval: parentRegistrationPolicy?.audience === 'children-included', childActivity }),
         }), createProviderAuthContextReader({ database, sessionSecret, allowedOrigins: allowedMutationOrigins }), isProduction));
     } else router.get('/parent-registration/config', (_req, res) => {
         res.setHeader('Cache-Control', 'no-store'); return res.json({ enabled: false });

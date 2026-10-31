@@ -161,7 +161,8 @@ export function createMainController({
             database,
             authorization.identity.userId,
             authorization.score,
-            authorization.identity
+            authorization.identity,
+            childActivity
         );
 
         if (personalBest === null) {

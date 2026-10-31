@@ -14,6 +14,7 @@ import { isValidP4VegaScore } from '../security/p4VegaScorePolicy';
 import { getGameDefinition } from './gameCatalog';
 import { LEADERBOARD_PAGE_SIZE } from './leaderboardContract';
 import { withUserSubmissionLock } from './userSubmissionLock';
+import type { ParentManagedChildActivity } from '../accounts/parentManagedChildActivity';
 import { readLiveSession } from '../auth/accountSessionRepository';
 import type { SessionProof } from '../security/sessionPolicy';
 
@@ -92,6 +93,7 @@ export async function submitP4VegaScore(
     userId: number,
     score: number,
     expectedSession?: SessionProof,
+    childActivity?: ParentManagedChildActivity,
 ): Promise<boolean | null> {
     if (!Number.isSafeInteger(userId) || userId <= 0) {
         throw new TypeError('p4-Vega score writes require a valid user ID.');
@@ -169,6 +171,9 @@ export async function submitP4VegaScore(
                     );
                 }
 
+                if (currentBest !== undefined && expectedSession && childActivity) {
+                    await childActivity.recordInteraction(connection, expectedSession.accountId);
+                }
                 await connection.commit();
                 transactionStarted = false;
                 return currentBest === undefined ? null : personalBest;

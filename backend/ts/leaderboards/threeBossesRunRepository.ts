@@ -14,6 +14,7 @@ import {
     LEADERBOARD_PAGE_SIZE,
 } from './leaderboardContract';
 import { withUserSubmissionLock } from './userSubmissionLock';
+import type { ParentManagedChildActivity } from '../accounts/parentManagedChildActivity';
 import { readLiveSession } from '../auth/accountSessionRepository';
 import type { SessionProof } from '../security/sessionPolicy';
 
@@ -171,6 +172,7 @@ export async function submitThreeBossesRun(
     runId: string,
     completionTimeMs: number,
     expectedSession?: SessionProof,
+    childActivity?: ParentManagedChildActivity,
 ): Promise<ThreeBossesRunResult> {
     const fingerprint = createThreeBossesPayloadFingerprint(
         userId,
@@ -356,6 +358,9 @@ export async function submitThreeBossesRun(
                     }
                 }
 
+                if (expectedSession && childActivity) {
+                    await childActivity.recordInteraction(connection, expectedSession.accountId);
+                }
                 await connection.commit();
                 transactionStarted = false;
                 return {

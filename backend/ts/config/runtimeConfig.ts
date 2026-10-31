@@ -29,6 +29,7 @@ export type RuntimeConfig = {
     providerAuth: ProviderAuthConfig;
     appleMaintenance: AppleMaintenanceConfig | undefined;
     localProviderRuntime: LocalProviderRuntime | undefined;
+    childOnlineActivityEnabled: boolean;
 };
 
 export type DatabaseConfig = {
@@ -126,6 +127,13 @@ export function loadRuntimeConfig(env: Environment = process.env): RuntimeConfig
     const registrationPolicy = loadRegistrationPolicy(env);
     const parentRegistrationPolicy = loadParentRegistrationPolicy(env, registrationPolicy);
     const registrationAudience = env.REGISTRATION_AUDIENCE === 'children-included' ? 'children-included' as const : undefined;
+    if (env.CHILD_ONLINE_ACTIVITY_ENABLED !== undefined && !['true', 'false'].includes(env.CHILD_ONLINE_ACTIVITY_ENABLED)) {
+        throw new Error('CHILD_ONLINE_ACTIVITY_ENABLED must be true or false.');
+    }
+    const childOnlineActivityEnabled = env.CHILD_ONLINE_ACTIVITY_ENABLED === 'true';
+    if (childOnlineActivityEnabled && (!registrationAudience || !parentRegistrationPolicy?.signedFormsEnabled || !accountDeletionEnabled)) {
+        throw new Error('Child activity requires the child audience, signed-parent policy, and deletion journal.');
+    }
     if (registrationAudience && (registrationPolicy && env.REGISTRATION_CREATION_ENABLED !== 'false'
         || env.PROVIDER_GOOGLE_SIGNUP_ENABLED === 'true' || env.PROVIDER_APPLE_SIGNUP_ENABLED === 'true'
         || env.PARENT_REGISTRATION_CREATION_ENABLED === 'true')
@@ -158,6 +166,7 @@ export function loadRuntimeConfig(env: Environment = process.env): RuntimeConfig
         providerAuth,
         appleMaintenance,
         localProviderRuntime,
+        childOnlineActivityEnabled,
     });
 }
 

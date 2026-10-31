@@ -47,8 +47,11 @@ import { verifyParentRegistrationReadiness } from './migrations/parentRegistrati
 import { cleanupParentRegistrationAttempts } from './accounts/parentRegistrationRepository';
 import { verifySignedParentFormReadiness } from './migrations/signedParentFormSchema';
 import { cleanupSignedParentForms } from './accounts/signedParentFormReview';
+import { parentManagedChildActivity } from './accounts/parentManagedChildActivity';
+import { verifyParentManagedChildActivityReadiness } from './migrations/parentManagedChildActivityReadiness';
 
 const runtimeConfig = loadRuntimeConfig();
+const childActivity = runtimeConfig.childOnlineActivityEnabled ? parentManagedChildActivity : undefined;
 const creationPolicy = registrationPolicyForCreation(runtimeConfig.registrationPolicy);
 const registration = createRegistrationAuthorization(pool,
     runtimeConfig.registrationAudience === 'children-included' ? runtimeConfig.registrationPolicy : creationPolicy,
@@ -115,6 +118,7 @@ app.use(cookieParser(runtimeConfig.sessionSecret));
 const generalApiRateLimiter = createGeneralApiRateLimiter();
 app.use(['/api', '/auth'], generalApiRateLimiter);
 app.use('/api/leaderboards', createLeaderboardRouter(pool, {
+    childActivity,
     scorePublicationDigest: runtimeConfig.scoreParticipationPolicy?.digest, scoreParticipationReady: true,
     sessionSecret: runtimeConfig.sessionSecret,
     allowedMutationOrigins: runtimeConfig.corsOrigins,
@@ -125,6 +129,7 @@ app.use('/api/leaderboards', createLeaderboardRouter(pool, {
 // parser so a disabled Three Bosses endpoint rejects before reading a body.
 app.use(express.json({ limit: '32kb', strict: true }));
 app.use('/api', createMainRouter({
+    childActivity,
     database: pool,
     scorePublicationDigest: runtimeConfig.scoreParticipationPolicy?.digest, scoreParticipationReady: true,
     registration,
@@ -146,6 +151,7 @@ async function startServer(): Promise<void> {
             await verifyAccountSessionReadiness(pool);
             await verifyRegistrationReadiness(pool);
             await verifyParentRegistrationReadiness(pool);
+            if (childActivity) await verifyParentManagedChildActivityReadiness(pool);
             await verifyScoreParticipationReadiness(pool);
             if (runtimeConfig.parentRegistrationPolicy?.signedFormsEnabled) await verifySignedParentFormReadiness(pool,
                 runtimeConfig.parentRegistrationPolicy.audience === 'children-included' && runtimeConfig.parentRegistrationPolicy.creationEnabled === true);
@@ -177,6 +183,7 @@ async function startServer(): Promise<void> {
             app.use('/auth', createAuthRouter(
                 pool, runtimeConfig.sessionSecret, runtimeConfig.isProduction, runtimeConfig.corsOrigins,
                 { accountDeletionEnabled: runtimeConfig.accountDeletionEnabled, deletionJournal, providerAuth, registration,
+                    childActivity,
                     parentRegistrationStorageReady: true, parentRegistrationPolicy: runtimeConfig.parentRegistrationPolicy,
                     scoreParticipationPolicy: runtimeConfig.scoreParticipationPolicy,
                     ...(localMaintenance ? { appleIssuanceAvailable: () => localMaintenance.isHealthy() } : {}) }

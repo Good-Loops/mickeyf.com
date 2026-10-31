@@ -18,6 +18,10 @@ import type { DeleteAccountResponse, ProviderAuthenticationInput, AcquireProvide
     ProviderAuthenticationOptions, ProviderAuthenticationResult, PreparedProviderLogin, PrepareProviderLoginResult,
     CompleteProviderLoginOptions, CompleteProviderLoginResult } from '@/services/authApi';
 import { watchSessionRenewalActivity } from '@/services/sessionRenewalActivity';
+import { watchChildOnlineActivity } from '@/services/childOnlineActivity';
+import { apiFetch } from '@/services/apiFetch';
+import { API_BASE } from '@/config/apiConfig';
+import type { PageRequestInit } from '@/services/pageOwnership';
 import Swal from '@/components/siteAlert';
 import { showScopedAlert } from '@/components/scopedAlert';
 
@@ -63,6 +67,20 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     const preparedLoginVersions = useRef(new WeakMap<PreparedProviderLogin, number>());
     const sessionMayExist = useRef(true);
     const renewalActivity = useRef<ReturnType<typeof watchSessionRenewalActivity> | null>(null);
+
+    useEffect(() => {
+        if (import.meta.env.VITE_ENABLE_CHILD_ONLINE_ACTIVITY !== '1' || !isAuthenticated || !userName) return;
+        const controller = new AbortController();
+        const action = authActionVersion.current;
+        const canReport = () => !controller.signal.aborted && authActionVersion.current === action;
+        const stop = watchChildOnlineActivity({ events: window, isVisible: () => document.visibilityState === 'visible', canReport,
+            async report() {
+                const init: PageRequestInit = { method: 'POST', credentials: 'include', signal: controller.signal,
+                    isCurrent: canReport, headers: { 'Content-Type': 'application/json' }, body: '{}' };
+                return (await apiFetch(`${API_BASE}/auth/child-activity/interaction`, init)).status === 204;
+            } });
+        return () => { controller.abort(); stop(); };
+    }, [isAuthenticated, userName]);
 
     useEffect(() => {
         let active = true;

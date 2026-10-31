@@ -9,6 +9,7 @@ import { apiFetch } from '@/services/apiFetch';
 import { API_BASE, LEGACY_PUBLIC_API_PREVIEW } from '@/config/apiConfig';
 import { providerAccountMethodsRequest } from '@/services/authService';
 import { capturePageOwnership, sameAccountIds } from '@/services/pageOwnership';
+import type { PageRequestInit } from '@/services/pageOwnership';
 
 const api = createParentRegistrationApi(API_BASE, apiFetch, { requireChildAudience: true });
 export default function ParentAccounts() {
@@ -59,6 +60,25 @@ export default function ParentAccounts() {
         // Refreshing the list must not cancel an independent in-flight withdrawal.
         return () => controller.abort();
     }, [isAuthenticated, userName, loading, sessionGeneration, retry]);
+    async function keepChild() {
+        if (operation.current || !isAuthenticated || !children.some(child => child.accountId === selected)) return;
+        const controller = new AbortController(); const ownsPage = capturePageOwnership();
+        const target = selected, account = userName, generation = sessionGeneration, action = captureAccountAction();
+        const isCurrent = () => ownsPage() && latest.current.isAuthenticated && !latest.current.loading
+            && latest.current.userName === account && latest.current.sessionGeneration === generation
+            && captureSessionGeneration() === generation && captureAccountAction() === action
+            && latest.current.selected === target && latest.current.children.some(child => child.accountId === target);
+        operation.current = controller; setBusy(true); setFeedback('');
+        try {
+            const init: PageRequestInit = { method: 'POST', credentials: 'include', signal: controller.signal,
+                headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ childAccountId: target }), isCurrent };
+            if (!isCurrent()) return;
+            const response = await apiFetch(`${API_BASE}/auth/child-activity/keep`, init);
+            if (!response.ok) throw new Error('Request unavailable.');
+            if (!controller.signal.aborted && isCurrent()) setFeedback('This child account has been kept active.');
+        } catch { if (!controller.signal.aborted && isCurrent()) setFeedback('We could not confirm that this child account was kept active. Please try again.'); }
+        finally { if (operation.current === controller) { operation.current = null; if (!controller.signal.aborted) setBusy(false); } }
+    }
     async function withdraw(client: PublicProviderClient) {
         if (operation.current || !isAuthenticated || !config?.enabled || confirmation !== 'WITHDRAW AND DELETE'
             || !children.some(child => child.accountId === selected)) return;
@@ -141,6 +161,7 @@ export default function ParentAccounts() {
                 </select></label>
                 {selected && <ScoreParticipation childAccountId={selected} authenticated={isAuthenticated} accountKey={userName ?? ''} sessionGeneration={sessionGeneration}
                     selectionIsCurrent={() => selectedNow.current === selected} captureAccountAction={captureAccountAction} captureSessionGeneration={captureSessionGeneration} />}
+                {selected && import.meta.env.VITE_ENABLE_CHILD_ONLINE_ACTIVITY === '1' && <p><button type="button" disabled={busy} onClick={() => void keepChild()}>Keep this child account active</button></p>}
                 <p>Withdrawing consent permanently deletes this child's account and scores and signs out its devices. It cannot be undone.</p>
                 <label>Type WITHDRAW AND DELETE<input disabled={busy} value={confirmation} onChange={event => setConfirmation(event.target.value)} /></label>
                 <div className="manage-account__actions">

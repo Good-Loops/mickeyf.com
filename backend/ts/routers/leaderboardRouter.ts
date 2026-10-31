@@ -5,6 +5,7 @@ import { createLeaderboardController } from '../controllers/leaderboardControlle
 import { asyncHandler } from '../middleware/errorHandling';
 import { leaderboardRequestErrorHandler } from './leaderboardRouter.handlers';
 import { createThreeBossesSubmissionIpRateLimiter } from '../security/requestRateLimits';
+import type { ParentManagedChildActivity } from '../accounts/parentManagedChildActivity';
 
 export { leaderboardRoutesContract } from './leaderboardRouter.contract';
 
@@ -14,6 +15,7 @@ export type LeaderboardRouterOptions = Readonly<{
     scoreParticipationReady?: boolean;
     allowedMutationOrigins: readonly string[];
     threeBossesRunSubmissionsEnabled: boolean;
+    childActivity?: ParentManagedChildActivity;
 }>;
 
 export function createLeaderboardRouter(

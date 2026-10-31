@@ -104,6 +104,19 @@ test('checks UUID and live session under the user lock before receipt replay or 
     }
 });
 
+test('accepted runs record managed-child activity in the same transaction', async () => {
+    const recorded: string[] = [];
+    const activity = { async initialize() {}, async recordInteraction(_connection: unknown, id: string) { recorded.push(id); return true; } };
+    const normal = submissionDatabase();
+    assert.equal((await submitThreeBossesRun(normal.database, 42, RUN_ID, 50_000, SESSION, activity)).kind, 'accepted');
+    assert.deepEqual(recorded, [ACCOUNT_ID]);
+    const failed = submissionDatabase();
+    await assert.rejects(submitThreeBossesRun(failed.database, 42, RUN_ID, 50_000, SESSION,
+        { ...activity, async recordInteraction() { throw new Error('synthetic failure'); } }));
+    assert.ok(failed.events.includes('rollback'));
+    assert.equal(failed.events.includes('commit'), false);
+});
+
 test('revoked or expired sessions cannot submit and malformed proofs fail closed', async () => {
     const missing = submissionDatabase(false);
     assert.deepEqual(await submitThreeBossesRun(missing.database, 42, RUN_ID, 50_000, SESSION),

@@ -123,6 +123,23 @@ function createFakeLeaderboardDatabase(
     return { database, queries };
 }
 
+test('managed-child activity records a valid non-best game and a tracking failure rolls back', async () => {
+    const recorded: string[] = [];
+    const activity = { async initialize() {}, async recordInteraction(_connection: unknown, id: string) { recorded.push(id); return true; } };
+    const normal = createFakeDatabase({ storedScore: 1000 });
+    assert.equal(await submitP4VegaScore(normal.database, 42, 900, SESSION, activity), false);
+    assert.deepEqual(recorded, [ACCOUNT_ID]);
+    const failed = createFakeDatabase();
+    await assert.rejects(submitP4VegaScore(failed.database, 42, 900, SESSION,
+        { ...activity, async recordInteraction() { throw new Error('synthetic failure'); } }));
+    assert.ok(failed.events.includes('rollback'));
+    assert.equal(failed.events.includes('commit'), false);
+    const expired = createFakeDatabase({ sessionExists: false });
+    recorded.length = 0;
+    await submitP4VegaScore(expired.database, 42, 900, SESSION, activity);
+    assert.deepEqual(recorded, []);
+});
+
 test('reads the bounded current p4-Vega leaderboard from generic storage', async () => {
     const fake = createFakeLeaderboardDatabase([
         { userName: 'legacy-outlier', score: 1_200, internalId: 88 },
