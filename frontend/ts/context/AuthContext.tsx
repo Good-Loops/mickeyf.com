@@ -280,6 +280,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
         const actionVersion = ++authActionVersion.current;
         await deleteFamilyRequest(grant, childAccountIds);
         if (actionVersion === authActionVersion.current) {
+            // Show confirmation before the signed-out UI replaces the account page.
+            // Do not await dismissal: the server has already invalidated the session.
+            try {
+                void Swal.fire({ title: 'Account deleted',
+                    text: 'Your account and the confirmed child accounts have been deleted, including their scores.',
+                    icon: 'success', confirmButtonText: 'Continue' }).catch(() => undefined);
+            } catch { /* A display error must never retain the deleted session. */ }
             setIsAuthenticated(false); setUserName(null); setLoading(false); sessionMayExist.current = false;
         }
     };

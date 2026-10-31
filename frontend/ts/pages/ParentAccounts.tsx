@@ -91,14 +91,13 @@ export default function ParentAccounts() {
             await deleteFamilyAccount(approval.grant, ids, expectedAction);
             if (controller.signal.aborted) return;
             pendingState.current = null;
-            setFeedback('Your parent account and the confirmed child accounts have been deleted, including their scores.');
         } catch { if (!controller.signal.aborted) setFeedback('Family deletion could not be confirmed. Recorded requests may still complete. Refresh the list before retrying; a changed family needs a new confirmation.'); }
         finally { if (!controller.signal.aborted) { const state = pendingState.current; pendingState.current = null;
             if (state) void api.cancel(state).catch(() => undefined); operation.current = null; setBusy(false); } }
     }
     if (LEGACY_PUBLIC_API_PREVIEW) return <p>Parent accounts are unavailable in this preview.</p>;
-    return <section className="manage-account"><div className="manage-account__form-wrapper">
-        <h1>Parent and child accounts</h1>
+    return <section className="manage-account parent-accounts"><div className="manage-account__form-wrapper">
+        <h1 className="manage-account__title">Parent and child accounts</h1>
         {loading ? <p>Checking your session.</p> : <ParentRegistration api={api} authenticated={isAuthenticated}
             accountKey={userName ?? ''} sessionGeneration={sessionGeneration} clients={clients} acquire={acquireProviderCredential} onCreated={() => setRetry(value => value + 1)} />}
         {isAuthenticated && config?.enabled && <section aria-label="Manage child accounts">
@@ -112,8 +111,10 @@ export default function ParentAccounts() {
                 {selected && <ScoreParticipation childAccountId={selected} authenticated={isAuthenticated} accountKey={userName ?? ''} sessionGeneration={sessionGeneration} />}
                 <p>Withdrawing consent permanently deletes this child's account and scores and signs out its devices. It cannot be undone.</p>
                 <label>Type WITHDRAW AND DELETE<input disabled={busy} value={confirmation} onChange={event => setConfirmation(event.target.value)} /></label>
-                {clients.map(client => <button key={client.clientKey} type="button" disabled={busy || !selected || confirmation !== 'WITHDRAW AND DELETE'}
-                    onClick={() => void withdraw(client)}>Confirm deletion with {client.provider === 'google' ? 'Google' : 'Apple'}</button>)}
+                <div className="manage-account__actions">
+                    {clients.map(client => <button key={client.clientKey} type="button" disabled={busy || !selected || confirmation !== 'WITHDRAW AND DELETE'}
+                        onClick={() => void withdraw(client)}>Confirm deletion with {client.provider === 'google' ? 'Google' : 'Apple'}</button>)}
+                </div>
             </>}
         </section>}
         {isAuthenticated && config?.enabled && <section aria-label="Delete family accounts">
@@ -125,9 +126,11 @@ export default function ParentAccounts() {
                 onChange={event => setFamilyAcknowledged(event.target.checked)} />I have checked this list and want to delete all these accounts.</label>
             <label>Type DELETE MY FAMILY<input value={familyConfirmation} disabled={busy || !childrenLoaded}
                 onChange={event => setFamilyConfirmation(event.target.value)} /></label>
-            {clients.map(client => <button type="button" key={client.clientKey}
-                disabled={busy || !childrenLoaded || !familyAcknowledged || familyConfirmation !== 'DELETE MY FAMILY'}
-                onClick={() => void deleteFamily(client)}>Delete family with {client.provider === 'google' ? 'Google' : 'Apple'}</button>)}
+            <div className="manage-account__actions">
+                {clients.map(client => <button type="button" key={client.clientKey}
+                    disabled={busy || !childrenLoaded || !familyAcknowledged || familyConfirmation !== 'DELETE MY FAMILY'}
+                    onClick={() => void deleteFamily(client)}>Delete family with {client.provider === 'google' ? 'Google' : 'Apple'}</button>)}
+            </div>
         </section>}
         {feedback && <p role="status">{feedback}</p>}<p><Link to="/account">Manage your own account</Link></p>
     </div></section>;
