@@ -51,7 +51,7 @@ test('persists an exact authenticated conditional intent and lists it for privat
     assert.equal(io.requests[0].params.ifGenerationMatch, 0);
     assert.equal(io.requests[0].retry, false);
     assert.equal(io.requests[0].maxRedirects, 0);
-    assert.match(String(io.requests[0].params.name), /^v1\/conditional\/[a-f0-9]{64}\.json$/);
+    assert.match(String(io.requests[0].params.name), /^v1\/conditional\/[a-f0-9]{64}\/[a-f0-9]{64}\.json$/);
     assert.equal(await store.verifyRetentionIntent(intent), true);
     assert.deepEqual(await store.readIntents(), [intent]);
     assert.equal(await store.verifyActivityContinuity(intent), true);
@@ -68,6 +68,23 @@ test('changed or absent intents, corrupted bodies, and a different signing key c
     const wrongKey = createGcsRetentionJournal({ bucket, expectedBucket: bucket, key: Buffer.alloc(32, 8),
         client: io.client, verifyActivityContinuity: async () => true });
     await assert.rejects(wrongKey.readIntents(), RetentionJournalUnavailableError);
+});
+
+test('per-child inventory uses an opaque prefix and never downloads another child’s intents', async () => {
+    const io = transport(); const store = journal(io.client);
+    const other = { ...intent, childId: '42a23d28-40cf-4d69-9fdb-74206ef3fa73' };
+    await store.recordRetentionIntent(intent);
+    await store.recordRetentionIntent(other);
+    io.requests.length = 0;
+    assert.deepEqual(await store.readIntentsForChild(intent.childId), [intent]);
+    const pages = io.requests.filter(request => request.url.endsWith('/o'));
+    assert.equal(pages.length, 4);
+    for (const page of pages) {
+        assert.match(String(page.params.prefix), /^v1\/conditional\/[a-f0-9]{64}\/$/);
+        assert.ok(!String(page.params.prefix).includes(intent.childId));
+    }
+    assert.equal(io.requests.filter(request => request.params.alt === 'media').length, 1);
+    await assert.rejects(store.readIntentsForChild('invalid'), /Invalid/);
 });
 
 test('unhealthy or unavailable continuity never becomes affirmative', async () => {

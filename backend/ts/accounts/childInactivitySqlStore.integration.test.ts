@@ -78,7 +78,7 @@ test('primary identity verifier checks a real isolated SQL server and respects a
         epoch: randomUUID(), expiresAt: new Date(Date.parse(identity.nowUtc) + 24 * 60 * 60_000).toISOString(), generation: '1' };
     let held = false;
     const journal = { async readRestoreGuard() { return held ? { ...guard, state: 'hold' as const } : guard; },
-        async readIntents() { return []; } };
+        async readIntentsForChild() { return []; } };
     const check = createPinnedPrimaryHealth({ database: identity.name, serverUuid: identity.id, journal });
     const connection = await database.getConnection();
     try {

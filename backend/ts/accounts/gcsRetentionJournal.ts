@@ -10,7 +10,7 @@ const LIMIT = 10_000;
 const READ_LIMIT = 60_000;
 const MAX_BODY = 2048;
 const MAX_OBJECTS = 10_000;
-const NAME = /^v1\/conditional\/[a-f0-9]{64}\.json$/u;
+const NAME = /^v1\/conditional\/[a-f0-9]{64}\/[a-f0-9]{64}\.json$/u;
 const HEX = /^[a-f0-9]{64}$/u;
 
 /** An unconfirmed write may have succeeded. Never retry or replay it automatically. */
@@ -38,6 +38,7 @@ export type ObservedRestoreGuard = RestoreGuard & Readonly<{ generation: string 
  */
 export function createGcsRetentionJournal(options: Options): RetentionJournal & {
     readIntents(): Promise<readonly RetentionIntent[]>;
+    readIntentsForChild(childId: string): Promise<readonly RetentionIntent[]>;
     readRestoreGuard(): Promise<ObservedRestoreGuard>;
     writeRestoreGuard(guard: RestoreGuard, expectedGeneration: string): Promise<string>;
 } {
@@ -71,11 +72,16 @@ export function createGcsRetentionJournal(options: Options): RetentionJournal & 
         finally { if (timer !== undefined) clearTimeout(timer); }
     }
 
+    function childPrefix(childId: string): string {
+        if (!isAccountId(childId)) throw new TypeError('Invalid child identity.');
+        const tag = createHmac('sha256', key).update('ludolume-retention-child-v1\0').update(childId).digest('hex');
+        return `v1/conditional/${tag}/`;
+    }
     function signed(intent: RetentionIntent): { name: string; body: string } {
         const normalized = validateIntent(intent);
         const payload = JSON.stringify(normalized);
         const mac = createHmac('sha256', key).update('ludolume-conditional-retention-v1\0').update(payload).digest('hex');
-        return { name: `v1/conditional/${mac}.json`, body: JSON.stringify({ version: 1, intent: normalized, mac }) };
+        return { name: `${childPrefix(normalized.childId)}${mac}.json`, body: JSON.stringify({ version: 1, intent: normalized, mac }) };
     }
     function info(input: unknown, expectedName?: string): ObjectInfo {
         if (!input || typeof input !== 'object' || Array.isArray(input)) throw new RetentionJournalUnavailableError();
@@ -134,7 +140,7 @@ export function createGcsRetentionJournal(options: Options): RetentionJournal & 
             || decoded.version !== 1 || typeof decoded.mac !== 'string' || !HEX.test(decoded.mac)) throw new RetentionJournalUnavailableError();
         const intent = validateIntent(decoded.intent);
         const expected = signed(intent);
-        const expectedMac = expected.name.slice('v1/conditional/'.length, -'.json'.length);
+        const expectedMac = expected.name.slice(expected.name.lastIndexOf('/') + 1, -'.json'.length);
         if (object.name !== expected.name || expected.body !== body
             || !timingSafeEqual(Buffer.from(decoded.mac, 'hex'), Buffer.from(expectedMac, 'hex'))) throw new RetentionJournalUnavailableError();
         return intent;
@@ -155,12 +161,12 @@ export function createGcsRetentionJournal(options: Options): RetentionJournal & 
         if (object.name !== entry.name) throw new RetentionJournalUnavailableError();
         return signed(await read(object)).body === entry.body;
     }
-    async function listObjects(softDeleted: boolean, deadline: number): Promise<ObjectInfo[]> {
+    async function listObjects(prefix: string, softDeleted: boolean, deadline: number): Promise<ObjectInfo[]> {
         const objects: ObjectInfo[] = []; const names = new Set<string>(); const tokens = new Set<string>();
         let pageToken: string | undefined;
         do {
             const value = await request({ method: 'GET', url: base, responseType: 'json',
-                params: { prefix: 'v1/conditional/', ...(softDeleted ? { softDeleted: true } : { versions: true }), maxResults: 100,
+                params: { prefix, ...(softDeleted ? { softDeleted: true } : { versions: true }), maxResults: 100,
                     fields: `kind,nextPageToken,items(${fields})`, ...(pageToken ? { pageToken } : {}) } }, deadline);
             if (!value || typeof value !== 'object' || Array.isArray(value)) throw new RetentionJournalUnavailableError();
             const page = value as Record<string, unknown>;
@@ -172,7 +178,7 @@ export function createGcsRetentionJournal(options: Options): RetentionJournal & 
             if (softDeleted && items.length) throw new RetentionJournalUnavailableError();
             for (const item of items) {
                 const object = info(item);
-                if (names.has(object.name)) throw new RetentionJournalUnavailableError();
+                if (!object.name.startsWith(prefix) || names.has(object.name)) throw new RetentionJournalUnavailableError();
                 names.add(object.name); objects.push(object);
             }
             if (page.nextPageToken === undefined) pageToken = undefined;
@@ -185,20 +191,23 @@ export function createGcsRetentionJournal(options: Options): RetentionJournal & 
         } while (pageToken);
         return objects.sort((a, b) => a.name.localeCompare(b.name));
     }
-    async function readIntents(): Promise<readonly RetentionIntent[]> {
+    async function readInventory(prefix: string): Promise<readonly RetentionIntent[]> {
         const deadline = Date.now() + READ_LIMIT;
-        await listObjects(true, deadline);
-        const objects = await listObjects(false, deadline);
+        await listObjects(prefix, true, deadline);
+        const objects = await listObjects(prefix, false, deadline);
         const results: RetentionIntent[] = [];
         for (const object of objects) results.push(await read(object, deadline));
-        await listObjects(true, deadline);
-        const after = await listObjects(false, deadline);
+        await listObjects(prefix, true, deadline);
+        const after = await listObjects(prefix, false, deadline);
         if (JSON.stringify(objects) !== JSON.stringify(after)) throw new RetentionJournalUnavailableError();
         // Even matching inventories are not a persistent fence. Recovery must stop
         // writers and repeat reconciliation before cutover; this is not replay authority.
         return Object.freeze(results);
     }
-    return { recordRetentionIntent, verifyRetentionIntent, readIntents, readRestoreGuard, writeRestoreGuard,
+    return { recordRetentionIntent, verifyRetentionIntent,
+        readIntents: () => readInventory('v1/conditional/'),
+        readIntentsForChild: async childId => readInventory(childPrefix(childId)),
+        readRestoreGuard, writeRestoreGuard,
         async verifyActivityContinuity(intent) {
             validateIntent(intent);
             try { return await verifyActivityContinuity(intent) === true; } catch { return false; }

@@ -19,7 +19,7 @@ function fixture({ guard = base, secondGuard, server = parent, name = database, 
     let calls = 0;
     const journal = {
         async readRestoreGuard() { if (throwGuard) throw new Error('private bucket detail'); return ++calls === 1 ? guard : (secondGuard ?? guard); },
-        async readIntents() { return intentChild ? [{ childId: intentChild } as RetentionIntent] : []; },
+        async readIntentsForChild(id: string) { return intentChild === id ? [{ childId: intentChild } as RetentionIntent] : []; },
     };
     const connection = { async query() { return [[{ databaseName: name, serverUuid: server, readOnly,
         superReadOnly: 0, nowUtc: sqlNow }], []]; } } as unknown as PoolConnection;

@@ -20,13 +20,17 @@ reconciliation reader validates object generations and HMACs, refuses
 soft-deleted records or changing inventories, and must be treated as private.
 It does not grant permission to replay deletion. The HMAC key must be independent,
 durably recoverable and inaccessible to browser clients.
+Per-child checks use a keyed, opaque prefix so that assessing one child does not
+list or download the entire journal. Global inventory remains available for
+administrative recovery.
 
 `createPinnedPrimaryHealth` checks the exact database and writable server UUID,
 an authenticated active restore guard with a bounded expiry and unchanged object
 generation, and the absence of an earlier conditional intent for that child.
 It fails closed on provider or database errors. A matching old intent requires
 manual reconciliation; this implementation does not yet provide an intent
-resolution command. GCS and SQL tests use a synthetic transport and disposable
+resolution command. This includes the same intent during attempted replay:
+the normal live-primary verifier holds it, so replay is not automatic. GCS and SQL tests use a synthetic transport and disposable
 database, respectively; no GCS bucket or guard has been created.
 
 **Administrative restoration is a critical assumption.** Before any restore,

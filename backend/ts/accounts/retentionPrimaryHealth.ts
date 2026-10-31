@@ -5,7 +5,7 @@ import type { ObservedRestoreGuard } from './gcsRetentionJournal';
 
 type Journal = Readonly<{
     readRestoreGuard(): Promise<ObservedRestoreGuard>;
-    readIntents(): Promise<readonly RetentionIntent[]>;
+    readIntentsForChild(childId: string): Promise<readonly RetentionIntent[]>;
 }>;
 type Connection = Pick<PoolConnection, 'query'>;
 const timeout = 10_000;
@@ -18,7 +18,7 @@ const MAX_ATTESTATION_MS = 90 * 24 * 60 * 60 * 1000;
  */
 export function createPinnedPrimaryHealth(options: Readonly<{ database: string; serverUuid: string; journal: Journal }>) {
     if (!/^[A-Za-z0-9_]{1,64}$/u.test(options.database) || !isAccountId(options.serverUuid)
-        || typeof options.journal?.readRestoreGuard !== 'function' || typeof options.journal?.readIntents !== 'function') {
+        || typeof options.journal?.readRestoreGuard !== 'function' || typeof options.journal?.readIntentsForChild !== 'function') {
         throw new TypeError('Invalid retention primary pin.');
     }
     async function identity(connection: Connection): Promise<number | null> {
@@ -44,10 +44,10 @@ export function createPinnedPrimaryHealth(options: Readonly<{ database: string; 
             if (before.state !== 'active' || before.serverUuid !== options.serverUuid || before.database !== options.database
                 || !isAccountId(before.epoch) || !/^[1-9][0-9]*$/u.test(before.generation)
                 || !Number.isFinite(expiry) || expiry <= now || expiry - now > MAX_ATTESTATION_MS) return false;
-            const intents = await options.journal.readIntents();
+            const intents = await options.journal.readIntentsForChild(childId);
             // Earlier attempts for this child need individual manual reconciliation;
             // they must never become automatic replay authority.
-            if (!Array.isArray(intents) || intents.some(intent => intent.childId === childId)) return false;
+            if (!Array.isArray(intents) || intents.length !== 0) return false;
             const after = await options.journal.readRestoreGuard();
             const nowAfter = await identity(connection);
             return nowAfter !== null && nowAfter >= now && nowAfter < expiry && JSON.stringify(before) === JSON.stringify(after);
