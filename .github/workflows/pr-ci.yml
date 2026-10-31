@@ -112,6 +112,8 @@ jobs:
         run: |
           npm --prefix backend test
           npm --prefix backend run test:unit
+          npm --prefix backend run test:child-inactivity:unit
+          npm --prefix backend run test:child-inactivity:sql
           npm --prefix backend run test:migrations
           node backend/scripts/run-apple-android-handoff-tests.mjs
           node backend/scripts/run-child-schema-tests.mjs
@@ -168,6 +170,7 @@ jobs:
         run: |
           npm --prefix backend test
           npm --prefix backend run test:unit
+          npm --prefix backend run test:child-inactivity:unit
           npm --prefix backend run test:migrations
           node backend/scripts/run-apple-android-handoff-tests.mjs
           node backend/scripts/run-child-schema-tests.mjs

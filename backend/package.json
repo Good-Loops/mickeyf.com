@@ -10,7 +10,7 @@
         "test": "tsc -p tsconfig.json --noEmit",
         "parent-form:review": "ts-node ts/accounts/runSignedParentFormReview.ts",
         "parent-form:retention": "ts-node ts/accounts/runSignedParentFormRetention.ts",
-        "test:child-inactivity:unit": "node --test -r ts-node/register ts/accounts/childInactivityPolicy.test.ts ts/accounts/childInactivityWorkflow.test.ts ts/accounts/childInactivityParentService.test.ts",
+        "test:child-inactivity:unit": "node --test -r ts-node/register ts/accounts/childInactivityPolicy.test.ts ts/accounts/childInactivityWorkflow.test.ts ts/accounts/childInactivityParentService.test.ts ts/routers/managedChildActivityRouter.test.ts",
         "test:child-inactivity:sql": "node scripts/run-child-inactivity-sql-rehearsal.mjs",
         "test:parent-form-retention:unit": "node --test -r ts-node/register ts/accounts/signedParentFormRetention.test.ts ts/accounts/runSignedParentFormRetention.test.ts",
         "migrations:child-signed-forms:plan": "ts-node ts/migrations/runChildSignedFormSchema.ts plan",
