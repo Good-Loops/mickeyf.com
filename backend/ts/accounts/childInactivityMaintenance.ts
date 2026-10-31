@@ -59,3 +59,24 @@ export async function runChildInactivityMaintenance(
     return Object.freeze({ examined: page.length, held, deleted,
         nextAfterChildId: candidates.length > size ? page[page.length - 1].childId : null });
 }
+
+/** Drain a bounded number of pages; an incomplete scan must be surfaced for follow-up. */
+export async function runChildInactivityMaintenanceCycle(
+    database: Database, store: InactivityStore, journal: RetentionJournal,
+    options: Readonly<{ afterChildId: string | null; batchSize?: number; maxPages?: number }>,
+    deleteOne: DeleteOne = deleteInactiveChild,
+): Promise<Readonly<{ examined: number; held: number; deleted: number; nextAfterChildId: string | null }>> {
+    const maxPages = options?.maxPages ?? 100;
+    if (!options || !Number.isInteger(maxPages) || maxPages < 1 || maxPages > 100) throw new TypeError('Invalid inactivity maintenance page limit.');
+    let cursor = options.afterChildId;
+    let examined = 0, held = 0, deleted = 0;
+    for (let page = 0; page < maxPages; page++) {
+        const result = await runChildInactivityMaintenance(database, store, journal,
+            { afterChildId: cursor, batchSize: options.batchSize }, deleteOne);
+        examined += result.examined; held += result.held; deleted += result.deleted;
+        if (result.nextAfterChildId === null) return Object.freeze({ examined, held, deleted, nextAfterChildId: null });
+        if (cursor !== null && result.nextAfterChildId <= cursor) throw new Error('Inactivity maintenance did not advance.');
+        cursor = result.nextAfterChildId;
+    }
+    return Object.freeze({ examined, held, deleted, nextAfterChildId: cursor });
+}

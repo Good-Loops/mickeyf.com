@@ -1,7 +1,7 @@
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import type { Pool } from 'mysql2/promise';
-import { runChildInactivityMaintenance } from './childInactivityMaintenance';
+import { runChildInactivityMaintenance, runChildInactivityMaintenanceCycle } from './childInactivityMaintenance';
 import { InactivityDeletionUncertainError, type InactivityStore, type RetentionJournal } from './childInactivityWorkflow';
 
 const parent = '11111111-1111-4111-8111-111111111111';
@@ -56,4 +56,22 @@ test('rejects invalid bounds before contacting the database', async () => {
     }
     await assert.rejects(runChildInactivityMaintenance(db, store, journal, { afterChildId: 'not-an-account' }));
     assert.equal(queried, false);
+});
+
+test('a maintenance cycle follows pages and reports an unfinished cursor at its limit', async () => {
+    const all = [first, second, third];
+    const db = { query: async (_query: unknown, values: [string | null, string | null]) => [
+        all.filter(child => values[0] === null || child > values[0]).map(childId => ({ parentId: parent, childId })).slice(0, 2), [],
+    ] } as unknown as Pick<Pool, 'query'>;
+    const seen: string[] = [];
+    const deleteOne = async (_store: InactivityStore, _journal: RetentionJournal, _parent: string, child: string) => {
+        seen.push(child); return 'held' as const;
+    };
+    assert.deepEqual(await runChildInactivityMaintenanceCycle(db, store, journal,
+        { afterChildId: null, batchSize: 1, maxPages: 2 }, deleteOne),
+    { examined: 2, held: 2, deleted: 0, nextAfterChildId: second });
+    assert.deepEqual(await runChildInactivityMaintenanceCycle(db, store, journal,
+        { afterChildId: second, batchSize: 1 }, deleteOne),
+    { examined: 1, held: 1, deleted: 0, nextAfterChildId: null });
+    assert.deepEqual(seen, all);
 });
