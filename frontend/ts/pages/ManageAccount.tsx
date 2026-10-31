@@ -59,6 +59,8 @@ export default function ManageAccount() {
         setBusy(true);
         setError('');
         const controller = new AbortController();
+        const pagePath = typeof window === 'undefined' ? null : window.location.pathname;
+        const isCurrent = () => (typeof window === 'undefined' ? null : window.location.pathname) === pagePath;
         deletionOperation.current = controller;
 
         try {
@@ -78,14 +80,14 @@ export default function ManageAccount() {
             // Provider presentation starts only after the destructive confirmation has closed.
             await confirmationClosed;
             confirmationPopup.current = null;
-            if (!decision.isConfirmed || controller.signal.aborted) return;
+            if (!decision.isConfirmed || controller.signal.aborted || !isCurrent()) return;
 
             const result = passwordless && deletionClient
                 ? await authenticateWithProvider({ action: 'delete', clientKey: deletionClient.clientKey, confirmation: 'DELETE' },
                     (challenge, signal) => acquireProviderCredential(deletionClient, challenge, signal),
-                    { signal: controller.signal })
+                    { signal: controller.signal, isCurrent })
                 : await deleteAccount(password);
-            if (controller.signal.aborted) return;
+            if (controller.signal.aborted || !isCurrent()) return;
             setPassword('');
             if ('deleted' in result) {
                 navigate('/', { replace: true });

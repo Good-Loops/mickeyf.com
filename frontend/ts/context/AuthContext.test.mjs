@@ -100,6 +100,36 @@ test('page departure suppresses login feedback while retaining confirmed authent
     assert.deepEqual(f.feedback, []);
 });
 
+test('a provider deletion already sent before navigation still clears the confirmed session', async t => {
+    let releaseDeletion;
+    const pending = new Promise(resolve => { releaseDeletion = resolve; });
+    const calls = [];
+    let current = true;
+    const controller = new AbortController();
+    const challenge = { state: Buffer.alloc(32, 1).toString('base64url'), nonce: Buffer.alloc(32, 2).toString('base64url'), expiresInSeconds: 300 };
+    const api = createAuthApi('https://api.example.test', async url => {
+        calls.push(url);
+        if (url.endsWith('/api/users')) return Response.json({ success: true, user_name: 'Synthetic' });
+        if (url.endsWith('/auth/verify-token')) return Response.json({ loggedIn: true, user_name: 'Synthetic' });
+        if (url.endsWith('/begin')) return Response.json(challenge);
+        if (url.endsWith('/complete')) { await pending; return Response.json({ success: true, deleted: true }); }
+        assert.fail('unexpected synthetic request');
+    });
+    const f = fixture(t, (operation, args) => api[operation](...args));
+    assert.equal(await f.render().login('Synthetic', 'synthetic', { showFeedback: false }), true);
+    const deletion = f.render().authenticateWithProvider({ action: 'delete', clientKey: 'apple-web', confirmation: 'DELETE' },
+        async () => ({ idToken: 'synthetic.header.signature', authorizationCode: 'synthetic-code' }),
+        { signal: controller.signal, isCurrent: () => current });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.ok(calls.some(url => url.endsWith('/complete')));
+    current = false;
+    controller.abort();
+    releaseDeletion();
+    assert.deepEqual(await deletion, { success: true, deleted: true });
+    assert.equal(f.render().isAuthenticated, false);
+    assert.equal(f.render().userName, null);
+});
+
 test('ordinary login still displays success feedback without a lifetime signal', async t => {
     const f = fixture(t, async operation => {
         assert.equal(operation, 'loginRequest');

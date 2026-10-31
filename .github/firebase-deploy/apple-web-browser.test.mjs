@@ -129,6 +129,56 @@ test('navigating away cancels Apple and ignores delayed SDK success without stor
     assert.equal(await page.evaluate(() => localStorage.length + sessionStorage.length), 0);
 });
 
+test('navigating away before Apple returns cannot submit a passwordless account deletion', async t => {
+    const context = await browser.newContext();
+    t.after(() => context.close());
+    const page = await context.newPage();
+    page.setDefaultTimeout(15000);
+    const calls = [];
+    await context.route('**/*', async route => {
+        const request = route.request();
+        const url = new URL(request.url());
+        if (request.url() === sdkUrl) return route.fulfill({ contentType: 'application/javascript', body: `
+            window.AppleID = { auth: { init(input) { window.__appleInit = input; }, signIn() {
+                window.__appleSignInCalls = (window.__appleSignInCalls ?? 0) + 1;
+                return new Promise(resolve => { window.__finishApple = () => resolve({ authorization: {
+                    state: window.__appleInit.state, id_token: 'synthetic.identity.signature', code: 'synthetic-code' } }); });
+            } } };` });
+        if (url.origin !== origin) return route.abort();
+        if (url.pathname.startsWith('/auth/') || url.pathname.startsWith('/api/')) {
+            const body = request.postDataJSON();
+            calls.push({ path: url.pathname, body });
+            let response = {};
+            if (url.pathname === '/auth/verify-token' || url.pathname === '/auth/renew') response = { loggedIn: true, user_name: 'Synthetic' };
+            else if (url.pathname === '/auth/providers/account') response = { hasPassword: false, googleLinked: false,
+                googleDeletionEnabled: false, appleLinked: true, appleDeletionEnabled: true, providerCollectionAllowed: true };
+            else if (url.pathname === '/auth/providers/config') response = { clients: [{ clientKey: 'apple-web', provider: 'apple',
+                platform: 'web', clientId: 'com.example.web', redirectUri: 'https://example.test/login' }] };
+            else if (url.pathname === '/auth/providers/begin') response = { state, nonce, expiresInSeconds: 300 };
+            else if (url.pathname === '/auth/providers/complete') response = { success: true, deleted: true };
+            return route.fulfill({ contentType: 'application/json', body: JSON.stringify(response) });
+        }
+        return route.continue();
+    });
+    await page.goto(`${origin}/account`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+    await page.locator('#delete-account-confirmation').fill('DELETE');
+    await page.getByRole('button', { name: 'Verify with Apple and delete' }).click();
+    await page.getByRole('button', { name: 'Delete permanently' }).click();
+    await page.waitForFunction(() => window.__appleSignInCalls === 1);
+    await page.evaluate(() => {
+        const push = history.pushState;
+        history.pushState = function (...args) {
+            const result = push.apply(this, args);
+            if (location.pathname === '/') queueMicrotask(() => { window.__finishApple(); window.__appleFinishedAfterNavigation = true; });
+            return result;
+        };
+    });
+    await page.getByRole('link', { name: 'Home', exact: true }).click();
+    await page.waitForFunction(() => window.__appleFinishedAfterNavigation === true);
+    await page.waitForLoadState('networkidle');
+    assert.equal(calls.filter(call => call.path === '/auth/providers/complete').length, 0);
+});
+
 test('Hosting CSP permits only the exact Apple SDK and preserves popup isolation and other restrictions', async () => {
     const config = JSON.parse(await readFile(new URL('../../firebase.json', import.meta.url), 'utf8'));
     const headers = config.hosting.headers.find(entry => entry.regex === '.*').headers;

@@ -1099,6 +1099,32 @@ test('a departed page waits for an already-sent challenge but does not open its 
     assert.equal(calls.length, 1);
 });
 
+test('provider deletion is cancelled before send after navigation, but an already-sent deletion is reconciled', async () => {
+    for (const clientKey of ['apple-web', 'apple-ios', 'apple-android', 'google-web', 'google-ios', 'google-android']) for (const departBeforeSend of [true, false]) {
+        let release;
+        const blocked = new Promise(resolve => { release = resolve; });
+        const calls = [];
+        let current = true;
+        const api = createAuthApi(apiBase, async url => {
+            if (url.endsWith('/begin')) { calls.push('begin'); return Response.json(providerChallenge); }
+            if (url.endsWith('/complete')) {
+                calls.push('complete');
+                if (!departBeforeSend) await blocked;
+                return Response.json({ success: true, deleted: true });
+            }
+            assert.fail('unexpected synthetic deletion request');
+        });
+        const operation = api.runProviderAuthentication({ action: 'delete', clientKey, confirmation: 'DELETE' },
+            async () => { if (departBeforeSend) await blocked; return credentialFor(clientKey); }, { isCurrent: () => current });
+        await nextTurn();
+        assert.deepEqual(calls, departBeforeSend ? ['begin'] : ['begin', 'complete']);
+        current = false;
+        release();
+        assert.deepEqual(await operation, departBeforeSend ? { error: 'CANCELLED' } : { success: true, deleted: true });
+        assert.deepEqual(calls, departBeforeSend ? ['begin'] : ['begin', 'complete']);
+    }
+});
+
 test('prepared challenge lifetime counts begin response latency and is checked again before queued completion', async t => {
     t.mock.timers.enable({ apis: ['Date'], now: Date.now() });
     for (const expireDuringBegin of [true, false]) {
