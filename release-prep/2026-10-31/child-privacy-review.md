@@ -93,3 +93,15 @@ and complete the child-data retention, service-provider, Portuguese-language and
 Brazilian safeguards assessments. The existing project rehearsal and relay
 evidence are useful partial evidence, not a substitute for the full lifecycle.
 Keep account creation closed until the actual prerequisites are met.
+
+## Owner decision: proposed inactivity policy
+
+On 31 October 2026, the owner selected a proposal to delete future
+parent-managed child accounts after three years of inactivity, with a warning
+to the parent before deletion. This is a product decision, not an enabled
+deletion job or a statement of the current notice. Existing accounts such as
+Good-Loops are outside its scope. Before implementation, define and verify a
+reliable activity signal, warning and grace period, delivery failure handling,
+parent choices, deletion and recovery replay, and an enforceable schedule. Do
+not infer inactivity from missing session rows, or delete accounts merely
+because this proposal exists.
