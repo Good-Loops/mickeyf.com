@@ -15,13 +15,14 @@ export async function establishProviderSession(
     authenticationMethod?: SessionAuthenticationMethod,
     appleProof?: AppleSessionProof,
     eligibilityCheck?: (connection: PoolConnection) => Promise<boolean>,
+    afterEligibility?: (connection: PoolConnection, account: Pick<ProviderAccount, 'userId' | 'accountId'>, proof: AppleSessionProof) => Promise<void>,
 ): Promise<boolean> {
     if ((authenticationMethod === 'apple') !== (appleProof !== undefined)) {
         throw new TypeError('Apple sessions require verified original authentication proof.');
     }
     const issued = issueSessionToken(account, sessionSecret, rememberMe, Date.now(), authenticationMethod);
     const created = await createAccountSession(database, account, issued.sessionId,
-        issued.expiresAt, undefined, rememberMe, appleProof, undefined, eligibilityCheck);
+        issued.expiresAt, undefined, rememberMe, appleProof, undefined, eligibilityCheck, afterEligibility);
     if (!created) return false;
     // A failed or uncertain commit must never send a usable authentication cookie.
     const name = req.headers.origin === 'capacitor://localhost' ? NATIVE_SESSION_COOKIE : WEB_SESSION_COOKIE;

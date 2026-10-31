@@ -11,7 +11,8 @@ import { attemptAppleAccountRevocation, type AppleAccountRevocation } from '../a
 import type { AccountDeletionJournal } from '../accounts/deletionJournal';
 import { readLiveSession, SessionEligibilityRejected } from '../auth/accountSessionRepository';
 import { createProviderAuthContextReader } from '../auth/providerAuthContext';
-import { createProviderAuthFlow, type ProviderAuthClient, type ProviderCompletionResult,
+import { stageAppleCredential } from '../auth/stagedAppleCredential';
+import { createProviderAuthFlow, takeStagedAppleCredential, type ProviderAuthClient, type ProviderCompletionResult,
     type ProviderAuthFlowDependencies } from '../auth/providerAuthFlow';
 import { consumeProviderAttempt, createProviderAttempt } from '../auth/providerAttemptRepository';
 import { establishProviderSession } from '../auth/providerSession';
@@ -71,14 +72,18 @@ export type ProviderAuthRouterOptions = Readonly<{
 function createServices(options: ProviderAuthRouterOptions): ProviderAuthRouterServices {
     const { database, sessionSecret, allowedOrigins, clients } = options;
     const registration = options.registration ?? createRegistrationAuthorization(database);
-    const credentialWriter = (refreshToken: string | undefined, identity: VerifiedProviderIdentity): ProviderCredentialWriter | undefined => {
-        if (refreshToken === undefined) return undefined;
+    const tokenRepository = (identity: VerifiedProviderIdentity) => {
         const repositories = options.appleTokenRepositories;
         const repository = repositories
             ? identity.provider === 'apple' && identity.appleClientId && Object.prototype.hasOwnProperty.call(repositories, identity.appleClientId)
                 ? repositories[identity.appleClientId] : undefined
             : options.appleTokenRepository;
         if (!repository) throw new Error('Apple token storage is unavailable.');
+        return repository;
+    };
+    const credentialWriter = (refreshToken: string | undefined, identity: VerifiedProviderIdentity): ProviderCredentialWriter | undefined => {
+        if (refreshToken === undefined) return undefined;
+        const repository = tokenRepository(identity);
         return async (connection, account) => {
             try { await repository.save(connection, repository.prepare(refreshToken, account.accountId)); }
             catch (error) { reportProviderAuthFailure('apple-token-store', error); throw error; }
@@ -104,7 +109,8 @@ function createServices(options: ProviderAuthRouterOptions): ProviderAuthRouterS
                     }),
                 ...(options.appleTokenRepository || options.appleTokenRepositories ? {
                     saveAppleToken: (account, identity, token) => persistProviderCredential(database, account, identity, credentialWriter(token, identity)!),
-                } satisfies Pick<ProviderAuthFlowDependencies['accounts'], 'saveAppleToken'> : {}),
+                    stageAppleToken: (account, identity, token) => stageAppleCredential(tokenRepository(identity), account, identity, token),
+                } satisfies Pick<ProviderAuthFlowDependencies['accounts'], 'saveAppleToken' | 'stageAppleToken'> : {}),
                 ...(options.deletionJournal ? {
                     delete: (target, identity, session, token) => {
                         const writer = credentialWriter(token, identity);
@@ -298,9 +304,20 @@ export function createProviderAuthRouter(options: ProviderAuthRouterOptions): Ro
                         try { await registration.assertLoginAvailableOnConnection(connection, context); return true; }
                         catch (error) { if (error instanceof RegistrationRequiredError) return false; throw error; }
                     } : undefined;
-                if (!await services.establishSession(database, req, res, result.account, rememberMe === true,
-                    sessionSecret, isProduction, result.authenticationMethod, result.appleSessionProof, eligibilityCheck)) return fail(res, 'ACCOUNT_GONE');
-                return res.json({ success: true, user_name: result.account.userName });
+                const staged = takeStagedAppleCredential(result);
+                try {
+                    const requiresStaged = req.body.action === 'login' && registration?.audience === 'children-included'
+                        && result.authenticationMethod === 'apple';
+                    if ((requiresStaged && (!staged || !eligibilityCheck || !result.appleSessionProof))
+                        || (staged && !requiresStaged)) return fail(res, 'UNAVAILABLE');
+                    const afterEligibility = staged ? staged.write : undefined;
+                    if (!await services.establishSession(database, req, res, result.account, rememberMe === true,
+                        sessionSecret, isProduction, result.authenticationMethod, result.appleSessionProof, eligibilityCheck,
+                        afterEligibility)) return fail(res, 'ACCOUNT_GONE');
+                    return res.json({ success: true, user_name: result.account.userName });
+                } finally {
+                    try { staged?.dispose(); } catch { /* Never expose prepared credential details. */ }
+                }
             } catch (error) {
                 if (error instanceof SessionEligibilityRejected) return fail(res, 'REGISTRATION_REQUIRED');
                 reportProviderAuthFailure(failureStage, error); return fail(res, 'UNAVAILABLE');

@@ -9,6 +9,7 @@ import type { IdentityProvider, VerifiedProviderIdentity } from './providerIdent
 import { type ProviderTokenVerifier, PROVIDER_TOKEN_MAX_LENGTH } from './providerTokenVerifier';
 import { AppleTokenClientError, type AppleTokenClient } from './appleTokenClient';
 import type { AppleSessionProof } from './appleSessionRevocation';
+import type { PoolConnection } from 'mysql2/promise';
 import { RegistrationRequiredError, type RegistrationAuthorization } from '../accounts/registrationAuthorization';
 import { reportProviderAuthFailure, type ProviderAuthFailureStage } from './providerAuthDiagnostics';
 
@@ -31,6 +32,18 @@ export type ProviderCompletionResult = Failure
     | { ok: true; type: 'linked' }
     | { ok: true; type: 'deleted' };
 
+export type StagedAppleCredential = Readonly<{
+    write(connection: PoolConnection, account: Pick<ProviderAccount, 'userId' | 'accountId'>, proof: AppleSessionProof): Promise<void>;
+    dispose(): void;
+}>;
+// The capability is internal and intentionally absent from JSON and object inspection.
+const stagedAppleCredentials = new WeakMap<object, StagedAppleCredential>();
+export function takeStagedAppleCredential(result: object): StagedAppleCredential | undefined {
+    const staged = stagedAppleCredentials.get(result);
+    stagedAppleCredentials.delete(result);
+    return staged;
+}
+
 export type ProviderAuthFlowDependencies = {
     attempts: {
         create(attempt: ProviderAttempt): Promise<ProviderAttemptCreateResult>;
@@ -43,6 +56,7 @@ export type ProviderAuthFlowDependencies = {
             context: ProviderAuthContext): Promise<ProviderAccountCreationResult>;
         delete?(target: AccountLinkTarget, identity: VerifiedProviderIdentity, session: SessionProof, appleRefreshToken?: string): Promise<AccountDeletionResult>;
         saveAppleToken?(account: ProviderAccount, identity: VerifiedProviderIdentity, refreshToken: string): Promise<void>;
+        stageAppleToken?(account: ProviderAccount, identity: VerifiedProviderIdentity, refreshToken: string): StagedAppleCredential;
     };
     clients: Readonly<Record<string, ProviderAuthClient>>;
     enabled?: boolean;
@@ -117,6 +131,8 @@ export function createProviderAuthFlow({ attempts, accounts, clients, enabled = 
         if (client.provider === 'apple' && (!client.appleTokens || !accounts.saveAppleToken)) {
             return { ok: false, reason: 'UNAVAILABLE' };
         }
+        if (client.provider === 'apple' && action === 'login' && registration?.audience === 'children-included'
+            && !accounts.stageAppleToken) return { ok: false, reason: 'UNAVAILABLE' };
         if (action === 'signup' && !signupAvailable(clientKey, client)) return { ok: false, reason: 'UNAVAILABLE' };
         if (action === 'delete' && (!deletionEnabled || !accounts.delete
             || (client.provider === 'apple' && client.deletionEnabled !== true))) {
@@ -225,8 +241,16 @@ export function createProviderAuthFlow({ attempts, accounts, clients, enabled = 
                     if (account) {
                         const token = await exchangeAppleToken();
                         failureStage = 'credential-save';
-                        if (token !== undefined) await accounts.saveAppleToken!(account, verified.identity, token);
-                        return verifiedAccountResult(account, verified.identity);
+                        const result = verifiedAccountResult(account, verified.identity);
+                        if (!result.ok) return result;
+                        if (token !== undefined && registration?.audience === 'children-included') {
+                            const staged = accounts.stageAppleToken!(account, verified.identity, token);
+                            if (!staged || typeof staged.write !== 'function' || typeof staged.dispose !== 'function') {
+                                return { ok: false, reason: 'UNAVAILABLE' };
+                            }
+                            stagedAppleCredentials.set(result, staged);
+                        } else if (token !== undefined) await accounts.saveAppleToken!(account, verified.identity, token);
+                        return result;
                     }
                     if (!signupAvailable(selection.clientKey, selection.client)) {
                         return { ok: false, reason: 'NOT_LINKED' };

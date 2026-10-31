@@ -29,7 +29,8 @@ const secret = 'synthetic-provider-http-test-secret';
 const origin = 'https://provider.example.test';
 const account = { userId: 42, userName: 'provider-player', accountId: '11111111-2222-4333-8444-555555555555' };
 const identity = { provider: 'google', subject: 'synthetic-provider-subject', email: 'synthetic@gmail.com' } as VerifiedProviderIdentity;
-const appleIdentity = { provider: 'apple', subject: 'synthetic-apple-subject' } as VerifiedProviderIdentity;
+const appleIdentity = { provider: 'apple', subject: 'synthetic-apple-subject', appleClientId: 'com.example.test',
+    appleIssuedAt: Math.floor(Date.now() / 1000) } as VerifiedProviderIdentity;
 const beginInput = { clientKey: 'google-test', action: 'login' };
 type FailureReason = Extract<ProviderCompletionResult, { ok: false }>['reason'];
 
@@ -40,7 +41,8 @@ function signedCookie(value: string, name = '__session') {
 
 type Features = { signupEnabled?: boolean; accountDeletionEnabled?: boolean; withJournal?: boolean; missingProviderTable?: boolean;
     appleDeletionEnabled?: boolean; appleTokens?: boolean; appleStorage?: boolean; immediateRevocation?: boolean;
-    appleIssuanceAvailable?: () => boolean; childAudience?: boolean; revokeOnVerify?: boolean };
+    appleIssuanceAvailable?: () => boolean; childAudience?: boolean; revokeOnVerify?: boolean; revokeOnAppleExchange?: boolean;
+    fabricateAppleResult?: boolean };
 
 function fixture(features: Features = {}) {
     const state = {
@@ -92,6 +94,7 @@ function fixture(features: Features = {}) {
     clients['apple-ios'] = { provider: 'apple', deletionEnabled: features.appleDeletionEnabled,
         ...(features.appleTokens ? { appleTokens: { async exchangeCode(code: string) {
             assert.equal(code, 'accepted-code');
+            if (features.revokeOnAppleExchange) state.eligibilityAgeBand = 'missing';
             return { idToken: 'accepted-token', refreshToken: 'synthetic-apple-refresh-token' };
         }, async revoke() {} } } : {}),
         verifier: { async verify(_provider, token) { return token === 'accepted-token'
@@ -111,8 +114,11 @@ function fixture(features: Features = {}) {
             return attempt;
         },
     }, accounts: {
-        ...(features.appleStorage ? { async saveAppleToken() { assert.fail('unused'); } } : {}),
-        async find(verified) { state.events.push('find'); assert.deepEqual(verified, identity); return state.linked ? account : null; },
+        ...(features.appleStorage ? { async saveAppleToken() { assert.fail('unused'); },
+            stageAppleToken() { state.events.push('stage'); return {
+                async write() { state.events.push('stage-write'); }, dispose() { state.events.push('stage-dispose'); },
+            }; } } : {}),
+        async find(verified) { state.events.push('find'); assert.deepEqual(verified, verified.provider === 'apple' ? appleIdentity : identity); return state.linked ? account : null; },
         async link(target, password, verified, proof) {
             state.events.push('link');
             assert.deepEqual(target, { userId: account.userId, accountId: account.accountId });
@@ -148,12 +154,16 @@ function fixture(features: Features = {}) {
                 return state.beginFailure ? { ok: false, reason: state.beginFailure } : flow.begin(context, input);
             },
             async complete(context, input): Promise<ProviderCompletionResult> {
+                if (features.fabricateAppleResult) return { ok: true, type: 'account-verified', account,
+                    authenticationMethod: 'apple', appleSessionProof: { subject: appleIdentity.subject,
+                        clientId: appleIdentity.appleClientId!, issuedAt: appleIdentity.appleIssuedAt! } };
                 return state.completionFailure ? { ok: false, reason: state.completionFailure } : flow.complete(context, input);
             },
         },
         async establishSession(_database, _req, res, verifiedAccount, rememberMe, sessionSecret, isProduction,
-            _method, _proof, eligibilityCheck) {
+            _method, _proof, eligibilityCheck, afterEligibility) {
             if (eligibilityCheck && !await eligibilityCheck(database as unknown as PoolConnection)) throw new SessionEligibilityRejected();
+            if (afterEligibility && _proof) await afterEligibility(database as unknown as PoolConnection, verifiedAccount, _proof);
             state.events.push('session');
             assert.deepEqual(verifiedAccount, account);
             state.rememberMe.push(rememberMe);
@@ -289,6 +299,58 @@ test('a grant revoked while provider verification runs cannot produce a session 
         assert.equal(state.events.includes('verify'), true);
         assert.equal(state.events.includes('session'), false);
     }, true, { childAudience: true, revokeOnVerify: true });
+});
+
+for (const revoked of [false, true]) {
+    test(`child-audience Apple login ${revoked ? 'disposes without writing after eligibility revocation' : 'writes only after eligibility and disposes'}`, async () => {
+        await withServer(async (base, { state }) => {
+            const cookie = signedCookie(['provider', 'v1', Date.now(), Buffer.alloc(32, 9).toString('base64url')].join(':'));
+            const input = { clientKey: 'apple-ios', action: 'login' };
+            const started = await post(base, 'begin', input, { cookie });
+            assert.equal(started.status, 200);
+            const { state: challengeState } = await started.json() as { state: string };
+            const response = await post(base, 'complete', { ...input, state: challengeState,
+                idToken: 'accepted-token', authorizationCode: 'accepted-code' }, { cookie });
+            assert.equal(response.status, revoked ? 403 : 200);
+            const body = await response.text();
+            assert.ok(!body.includes('synthetic-apple-refresh-token'));
+            assert.equal(response.headers.getSetCookie().length > 0, !revoked);
+            assert.equal(state.events.includes('stage'), true);
+            assert.equal(state.events.includes('stage-write'), !revoked);
+            assert.equal(state.events.filter(event => event === 'stage-dispose').length, 1);
+            assert.equal(state.events.includes('session'), !revoked);
+            if (!revoked) assert.ok(state.events.indexOf('stage-write') < state.events.indexOf('session'));
+        }, true, { childAudience: true, appleTokens: true, appleStorage: true, revokeOnAppleExchange: revoked });
+    });
+}
+
+test('child-audience Apple result without an internal staged capability fails closed', async () => {
+    await withServer(async (base, { state }) => {
+        const cookie = signedCookie(['provider', 'v1', Date.now(), Buffer.alloc(32, 9).toString('base64url')].join(':'));
+        const response = await post(base, 'complete', { clientKey: 'apple-ios', action: 'login' }, { cookie });
+        assert.equal(response.status, 503);
+        assert.deepEqual(await response.json(), { error: 'UNAVAILABLE' });
+        assert.equal(response.headers.getSetCookie().length, 0);
+        assert.equal(state.events.includes('session'), false);
+    }, true, { childAudience: true, appleTokens: true, appleStorage: true, fabricateAppleResult: true });
+});
+
+test('child-audience Apple session failure disposes the stage and sends no cookie', async () => {
+    await withServer(async (base, { state }) => {
+        state.sessionFailure = true;
+        const cookie = signedCookie(['provider', 'v1', Date.now(), Buffer.alloc(32, 9).toString('base64url')].join(':'));
+        const input = { clientKey: 'apple-ios', action: 'login' };
+        const started = await post(base, 'begin', input, { cookie });
+        assert.equal(started.status, 200);
+        const { state: challengeState } = await started.json() as { state: string };
+        const response = await post(base, 'complete', { ...input, state: challengeState,
+            idToken: 'accepted-token', authorizationCode: 'accepted-code' }, { cookie });
+        assert.equal(response.status, 503);
+        assert.equal(response.headers.getSetCookie().length, 0);
+        assert.equal(state.events.filter(event => event === 'stage-write').length, 1);
+        assert.equal(state.events.filter(event => event === 'stage-dispose').length, 1);
+        assert.ok(!(await response.text()).includes('synthetic-apple-refresh-token'));
+    }, true, { childAudience: true, appleTokens: true, appleStorage: true });
 });
 
 test('native Apple credential discovery exposes only the current Apple session subject without cookies or mutations', async () => {

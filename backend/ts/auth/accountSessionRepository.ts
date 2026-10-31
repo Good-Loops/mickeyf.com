@@ -66,6 +66,7 @@ export async function createAccountSession(
     appleProof?: AppleSessionProof,
     childActivity?: ParentManagedChildActivity,
     eligibilityCheck?: (connection: PoolConnection) => Promise<boolean>,
+    afterEligibility?: (connection: PoolConnection, account: AccountTarget, proof: AppleSessionProof) => Promise<void>,
 ): Promise<boolean> {
     const hash = sessionHash(target, sessionId);
     const appleHash = appleProof === undefined ? undefined : appleSubjectHash(appleProof);
@@ -76,6 +77,9 @@ export async function createAccountSession(
         || (expectedPasswordHash !== undefined && (typeof expectedPasswordHash !== 'string'
             || expectedPasswordHash.length === 0 || expectedPasswordHash.length > 255))) {
         throw new TypeError('A session expiry within thirty days and a valid optional password hash are required.');
+    }
+    if (afterEligibility && (!proof || !eligibilityCheck)) {
+        throw new TypeError('A staged Apple credential requires verified proof and eligibility.');
     }
     const account = { ...target };
     try {
@@ -112,6 +116,9 @@ export async function createAccountSession(
             // Initial provider verification cannot rule out revocation during sign-in.
             if (proof && !await assertFreshAppleSession(connection, account.accountId, proof)) throw new AppleSessionProofRejected();
             if (eligibilityCheck && !await eligibilityCheck(connection)) throw new SessionEligibilityRejected();
+            if (afterEligibility && proof) await afterEligibility(connection, account, proof);
+            // A slow credential write must not let an expired grant authorize a session.
+            if (afterEligibility && eligibilityCheck && !await eligibilityCheck(connection)) throw new SessionEligibilityRejected();
             // UTC arithmetic avoids depending on a pooled connection's session time zone.
             const [inserted] = await connection.query<ResultSetHeader>({
                 sql: `INSERT INTO account_sessions (session_hash, account_uuid, created_at, expires_at,

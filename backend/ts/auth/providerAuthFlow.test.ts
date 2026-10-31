@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
+import { inspect } from 'node:util';
 import { createHash, generateKeyPairSync } from 'node:crypto';
 import test from 'node:test';
 import jwt from 'jsonwebtoken';
 import { issueSessionToken } from '../security/sessionPolicy';
-import type { Pool } from 'mysql2/promise';
+import type { Pool, PoolConnection } from 'mysql2/promise';
 import type { ProviderAccount, ProviderLinkResult, ProviderAccountCreationResult } from '../accounts/providerAccountRepository';
 import { AccountDeletionPendingError } from '../accounts/accountDeletionRepository';
 import { createProviderAuthContextReader, type ProviderAuthContext } from './providerAuthContext';
-import { createProviderAuthFlow, type ProviderAuthClient, type ProviderAuthFlowDependencies } from './providerAuthFlow';
+import { createProviderAuthFlow, takeStagedAppleCredential, type ProviderAuthClient, type ProviderAuthFlowDependencies } from './providerAuthFlow';
 import type { ProviderAttempt, ProviderAttemptAction } from './providerAttemptRepository';
 import type { IdentityProvider } from './providerIdentity';
 import { createProviderTokenVerifier, PROVIDER_TOKEN_MAX_LENGTH, type ProviderTokenVerificationResult } from './providerTokenVerifier';
@@ -30,6 +31,41 @@ const appleSession = { authenticationMethod: 'apple', appleSessionProof: {
     subject: appleIdentity.subject, clientId: appleIdentity.appleClientId, issuedAt: appleIdentity.appleIssuedAt,
 } };
 const hash = (value: string) => createHash('sha256').update(value).digest();
+
+test('child-audience Apple login stages a one-shot internal capability without early token persistence', async () => {
+    const f = await fixture();
+    const calls: string[] = [];
+    const flow = createProviderAuthFlow({ ...f.dependencies, enabled: true,
+        registration: { audience: 'children-included', async assertAvailable() {}, async assertLoginAvailable() {} },
+        accounts: { ...f.dependencies.accounts, stageAppleToken(target, identity, token) {
+            assert.deepEqual(target, account); assert.deepEqual(identity, appleIdentity); assert.equal(token, appleRefreshToken);
+            calls.push('stage');
+            return { async write() { calls.push('write'); }, dispose() { calls.push('dispose'); } };
+        } },
+    });
+    const challenge = await flow.begin(f.context, { clientKey: 'apple-ios', action: 'login' });
+    assert.ok(challenge.ok);
+    const result = await flow.complete(f.context, { clientKey: 'apple-ios', action: 'login', state: challenge.state,
+        idToken: signedToken(challenge.nonce, 'apple'), authorizationCode: appleCode });
+    assert.ok(result.ok && result.type === 'account-verified');
+    assert.deepEqual(f.savedAppleTokens, []);
+    assert.deepEqual(calls, ['stage']);
+    assert.ok(!JSON.stringify(result).includes(appleRefreshToken));
+    assert.ok(!inspect(result, { showHidden: true }).includes(appleRefreshToken));
+    const staged = takeStagedAppleCredential(result);
+    assert.ok(staged); assert.equal(takeStagedAppleCredential(result), undefined);
+    await staged.write({} as PoolConnection, account, appleSession.appleSessionProof);
+    staged.dispose();
+    assert.deepEqual(calls, ['stage', 'write', 'dispose']);
+});
+
+test('child-audience Apple login fails closed if staging is unavailable', async () => {
+    const f = await fixture();
+    const flow = createProviderAuthFlow({ ...f.dependencies, enabled: true,
+        registration: { audience: 'children-included', async assertAvailable() {}, async assertLoginAvailable() {} } });
+    assert.deepEqual(await flow.begin(f.context, { clientKey: 'apple-ios', action: 'login' }), { ok: false, reason: 'UNAVAILABLE' });
+    assert.deepEqual(f.savedAppleTokens, []);
+});
 
 test('child-audience provider login requires current eligibility before creating challenges or verifying tokens', async () => {
     const f = await fixture();
