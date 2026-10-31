@@ -148,6 +148,9 @@ jobs:
       - name: Inspect bundled privacy manifests
         if: ${{ inputs.audit_privacy_manifests && inputs.compile_only }}
         run: |
+          test ! -e .privacy-inspection && test ! -L .privacy-inspection
+          mkdir .privacy-inspection
+          ditto "$RUNNER_TEMP/ludolume-derived-data/Build/Products/Release-iphonesimulator/App.app" .privacy-inspection/App.app
           python3 ../scripts/ios-privacy-manifests.py > "$RUNNER_TEMP/ludolume-privacy-manifests.json"
           {
             echo '### Unsigned simulator privacy manifest inventory'

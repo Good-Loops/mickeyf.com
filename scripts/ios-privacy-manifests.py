@@ -99,18 +99,15 @@ def report(bundle):
 def main():
     if len(sys.argv) != 1:
         raise ValueError('This inventory accepts no path arguments')
-    runner_temp = os.environ.get('RUNNER_TEMP')
-    if not runner_temp:
-        raise ValueError('RUNNER_TEMP must identify the isolated runner directory')
-    # The CI runner owns this root. Do not scan an arbitrary caller-supplied
-    # directory or a build directory redirected outside the runner by a symlink.
-    root = os.path.realpath(runner_temp)
-    expected = Path(root) / 'ludolume-derived-data' / 'Build' / 'Products' / 'Release-iphonesimulator' / 'App.app'
+    # CI copies its unsigned build into this fixed workspace-owned directory.
+    # No caller-provided environment variable or path may redirect the scan.
+    root = os.path.realpath(Path(__file__).resolve().parent.parent)
+    expected = Path(root) / 'frontend' / '.privacy-inspection' / 'App.app'
     if expected.is_symlink():
         raise ValueError('Simulator app must not be a symlink')
     bundle = os.path.realpath(expected)
     if os.path.commonpath([root, bundle]) != root:
-        raise ValueError('Simulator app must remain inside the runner directory')
+        raise ValueError('Simulator app must remain inside the workspace directory')
     print(json.dumps(report(bundle), indent=2, sort_keys=True))
 
 
