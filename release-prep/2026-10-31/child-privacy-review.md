@@ -86,6 +86,18 @@ configuration facts, not proof that a particular category of child information
 is logged, proof of its actual lifetime in every copy, or a universal erasure
 deadline. Determine actual data and restore behavior before publishing schedules.
 
+The owner's existing private setup marker records that two-step verification
+was enabled on the form mailbox on 21 October. The Google security page could
+not be rechecked on 31 October because browser control timed out; the earlier
+record is not proof of its current state. On 31 October the `ParentForms`
+directory and its subdirectories were not marked EFS-encrypted. An attempt to
+set encryption reported access denied on the existing contents; a separate
+readback showed the root directory remained unencrypted even after an apparent
+success. The known contents were setup materials and synthetic data. Keep real
+forms out until directory inheritance, existing copies and a separately tested
+recovery backup are verified. The owner previously deferred a restore test on
+another Windows device.
+
 Record the exact tested build and reviewed notice/form/consent versions; qualify
 the parent review and all-copy deletion process with synthetic records; validate
 the restore and deletion-replay procedures and real device age-signal behavior;
