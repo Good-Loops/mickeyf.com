@@ -93,10 +93,8 @@ configuration facts, not proof that a particular category of child information
 is logged, proof of its actual lifetime in every copy, or a universal erasure
 deadline. Determine actual data and restore behavior before publishing schedules.
 
-The owner's existing private setup marker records that two-step verification
-was enabled on the form mailbox on 21 October. The Google security page could
-not be rechecked on 31 October because browser control timed out; the earlier
-record is not proof of its current state. On 31 October the `ParentForms`
+On 31 October the Google security page for `mickeyf.plays@gmail.com` showed
+two-step verification enabled since 12 April 2024. On 31 October the `ParentForms`
 directory and its subdirectories were not marked EFS-encrypted. An attempt to
 set encryption reported access denied on the existing contents; a separate
 readback showed the root directory remained unencrypted even after an apparent
