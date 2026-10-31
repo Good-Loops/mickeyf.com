@@ -1,8 +1,43 @@
 # Retention history and recovery: implementation boundary
 
-Status: **design only; no durable activity journal or continuity verifier is
-implemented**. The inactivity deletion candidate must remain disabled. A parent
-who has not confirmed the warning remains pending.
+Status: the source now includes a separate GCS conditional-intent store and a
+pinned-primary/restore-guard verifier, but neither is provisioned, wired or
+qualified in production. There is no independent per-activity history. The
+inactivity deletion candidate remains disabled. A parent who has not confirmed
+the warning remains pending.
+
+The proposed product signal is successfully recorded, authenticated online
+activity; offline use or a failed activity report is not observable. The parent
+notice must state this limitation before enabling the feature. The verifier
+does not claim to detect those missed events.
+
+## Concrete conditional journal and restore guard
+
+`createGcsRetentionJournal` uses a pinned bucket separate from the unconditional
+deletion journal. It creates an authenticated, conditional record with a
+create-only precondition and does not blindly retry an uncertain write. Its
+reconciliation reader validates object generations and HMACs, refuses
+soft-deleted records or changing inventories, and must be treated as private.
+It does not grant permission to replay deletion. The HMAC key must be independent,
+durably recoverable and inaccessible to browser clients.
+
+`createPinnedPrimaryHealth` checks the exact database and writable server UUID,
+an authenticated active restore guard with a bounded expiry and unchanged object
+generation, and the absence of an earlier conditional intent for that child.
+It fails closed on provider or database errors. A matching old intent requires
+manual reconciliation; this implementation does not yet provide an intent
+resolution command. GCS and SQL tests use a synthetic transport and disposable
+database, respectively; no GCS bucket or guard has been created.
+
+**Administrative restoration is a critical assumption.** Before any restore,
+an authorized operator must change the signed guard to `hold` using its current
+generation, stop and drain all old writers and maintenance jobs, reconcile the
+complete conditional-intent inventory against the primary and restored target,
+and only then requalify the target and create a new active guard/epoch. The
+health verifier checks the guard but cannot detect a restore that bypasses this
+procedure and preserves the same server UUID. A guard change is not itself a
+writer fence. Keep cutover and deletion disabled whenever that process or the
+outcome of a conditional intent is uncertain.
 
 ## Why the existing journal is insufficient
 
@@ -77,10 +112,10 @@ and [request preconditions](https://docs.cloud.google.com/storage/docs/request-p
 
 ## Current unresolved work
 
-No independently durable activity or intent writer, writer fence, coverage
-monitor, history lifecycle, or restore verifier exists in this candidate. The
-existing `verifyActivityContinuity` dependency is only a fail-closed contract,
-not evidence of any of them. The activity writer presently updates SQL only;
-using it as proof across outages or restores would be unsafe. The contact,
-warning-notification workflow, schema/grants, restricted runtime tests and
-end-to-end device validation are also separate prerequisites.
+No independent per-activity history, writer fence, intent-resolution operation,
+automated restore integration, or provisioned GCS journal exists. The new
+primary verifier depends on the administrative restore protocol above; it does
+not prove that offline or failed client activity was seen. The activity writer
+presently updates SQL only. Runtime composition, warning notification,
+schema/grants, restricted-runtime tests and end-to-end device validation are
+separate prerequisites.

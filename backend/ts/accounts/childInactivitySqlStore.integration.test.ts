@@ -11,6 +11,7 @@ import { loadMigrationManifest } from '../migrations/migrationManifest';
 import { applyMigrations } from '../migrations/migrationRunner';
 import { createChildInactivitySqlStore } from './childInactivitySqlStore';
 import { createInAppInactivityQualityResolver } from './childInactivityInAppTarget';
+import { createPinnedPrimaryHealth } from './retentionPrimaryHealth';
 import { createChildInactivityParentService } from './childInactivityParentService';
 import type { ProviderAuthContext } from '../auth/providerAuthContext';
 import { acknowledgeInactivityWarning, confirmInactivityWarning, deleteInactiveChild, prepareInactivityWarning } from './childInactivityWorkflow';
@@ -60,6 +61,24 @@ before(async () => {
         password: rootPassword, connectionLimit: 5, multipleStatements: false, dateStrings: true, timezone: 'Z' });
 });
 after(async () => { if (database) await database.end(); if (admin) await admin.end(); });
+
+test('primary identity verifier checks a real isolated SQL server and respects an external restore hold', async () => {
+    const [[identity]] = await admin.query<RowDataPacket[]>(`SELECT DATABASE() AS name, @@GLOBAL.server_uuid AS id,
+        DATE_FORMAT(UTC_TIMESTAMP(6),'%Y-%m-%dT%H:%i:%s.%fZ') AS nowUtc`);
+    const accounts = await managedFixture();
+    const guard = { state: 'active' as const, database: identity.name as string, serverUuid: identity.id as string,
+        epoch: randomUUID(), expiresAt: new Date(Date.parse(identity.nowUtc) + 24 * 60 * 60_000).toISOString(), generation: '1' };
+    let held = false;
+    const journal = { async readRestoreGuard() { return held ? { ...guard, state: 'hold' as const } : guard; },
+        async readIntents() { return []; } };
+    const check = createPinnedPrimaryHealth({ database: identity.name, serverUuid: identity.id, journal });
+    const connection = await database.getConnection();
+    try {
+        assert.equal(await check(connection, accounts.parentId, accounts.childId), true);
+        held = true;
+        assert.equal(await check(connection, accounts.parentId, accounts.childId), false);
+    } finally { connection.release(); }
+});
 
 test('read-only operator report scans real SQL and withholds recent activity without disclosing contact', async () => {
     const due = await managedFixture(), recent = await managedFixture(), missing = await managedFixture();
