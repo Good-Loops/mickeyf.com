@@ -1,0 +1,45 @@
+{
+    "name": "frontend",
+    "version": "0.6.0",
+    "packageManager": "npm@11.6.2",
+    "engines": {
+        "node": ">=22.0.0 <23.0.0",
+        "npm": ">=11.0.0 <12.0.0"
+    },
+    "scripts": {
+        "dev": "npm --prefix .. run frontend:dev:local --",
+        "dev:vite": "vite",
+        "test": "tsc -p tsconfig.json --noEmit && node --experimental-strip-types --test \"ts/**/*.test.mjs\"",
+        "build": "vite build",
+        "preview": "vite preview"
+    },
+    "type": "module",
+    "dependencies": {
+        "@capacitor/android": "^8.5.0",
+        "@capacitor/core": "^8.5.0",
+        "@capacitor/ios": "^8.5.0",
+        "pitchy": "^4.0.7",
+        "pixi-filters": "^6.0.3",
+        "pixi.js": "^8.1.5",
+        "react": "^19.2.0",
+        "react-dom": "^19.2.0",
+        "react-router-dom": "^7.9.5",
+        "sweetalert2": "^11.10.8",
+        "tone": "^15.0.4"
+    },
+    "devDependencies": {
+        "@types/node": "^20.19.24",
+        "@types/react": "^19.2.2",
+        "@types/react-dom": "^19.2.2",
+        "@vitejs/plugin-react": "^5.1.0",
+        "sass": "^1.49.8",
+        "typescript": "^5.9.3",
+        "vite": "^7.1.12",
+        "xcode": "3.0.1"
+    },
+    "overrides": {
+        "xcode": {
+            "uuid": "11.1.1"
+        }
+    }
+}

@@ -1,0 +1,78 @@
+name: Registration pause website verification
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - fix/registration-pause-web-ci
+
+permissions:
+  contents: read
+
+jobs:
+  website:
+    name: Website audit, test, browser and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      CI: "true"
+      NPM_CONFIG_FUND: "false"
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 22.23.3
+      - run: npm install --global npm@11.6.2 --no-audit --no-fund
+      # The full PR checks remain unchanged. This isolated website build omits only
+      # the native Capacitor CLI. Its xcode test dependency remains installed.
+      - name: Verify and install the website dependency tree
+        run: |
+          node .github/website-build/verify-manifest.mjs
+          cp .github/website-build/package.json frontend/package.json
+          cp .github/website-build/package-lock.json frontend/package-lock.json
+          npm --prefix frontend ci --no-audit
+          npm --prefix .github/firebase-deploy ci --ignore-scripts --no-audit --no-fund
+      - name: Audit installed website and browser test dependencies
+        run: |
+          npm --prefix frontend audit --audit-level=low
+          npm --prefix .github/firebase-deploy run audit:hosting
+      - name: Test and build website
+        env:
+          VITE_ENABLE_THREE_BOSSES_RELEASE: "1"
+          VITE_PROD_API_URL: https://mickeyf-org-j7yuum4tiq-uc.a.run.app
+        run: |
+          npm run three-bosses:webgl:release:validate
+          cd frontend
+          npx --no-install tsc -p tsconfig.website.json --noEmit
+          node --experimental-strip-types --test "ts/**/*.test.mjs"
+          cd ..
+          npm --prefix frontend run build
+      - name: Reject development-only Three Bosses UI from release bundle
+        run: |
+          if grep -R -F -n -- "Local WebGL playability prototype" frontend/dist/index.html frontend/dist/assets; then exit 1; fi
+          if grep -R -F -n -- "/__local/three-bosses/" frontend/dist/index.html frontend/dist/assets; then exit 1; fi
+      - name: Verify signup, provider controls, and navigation in Chrome
+        run: |
+          npm --prefix .github/firebase-deploy run test:auth-browser
+          node --test .github/firebase-deploy/registration-built-browser.test.mjs
+      - name: Record build hashes
+        run: |
+          cd frontend/dist
+          find . -type f -print0 | sort -z | xargs -0 sha256sum > ../../website-dist-sha256.txt
+          cd ../..
+          sha256sum .github/website-build/package.json .github/website-build/package-lock.json > website-dependencies-sha256.txt
+          printf '%s\n' "$GITHUB_SHA" > website-source-sha.txt
+          printf '%s\n' "run_id=$GITHUB_RUN_ID" "run_attempt=$GITHUB_RUN_ATTEMPT" "workflow_ref=$GITHUB_WORKFLOW_REF" > website-run-metadata.txt
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: registration-pause-website-${{ github.sha }}-${{ github.run_id }}-${{ github.run_attempt }}
+          path: |
+            frontend/dist/
+            website-dist-sha256.txt
+            website-dependencies-sha256.txt
+            website-source-sha.txt
+            website-run-metadata.txt
+          if-no-files-found: error
+          include-hidden-files: true
