@@ -32,6 +32,7 @@ import { reviewSignedParentForm, cleanupSignedParentForms } from './signedParent
 import { verifySignedParentFormReadiness } from '../migrations/signedParentFormSchema';
 import { removePublicScoreParticipation } from './scoreParticipationRepository';
 import { parentManagedChildActivity } from './parentManagedChildActivity';
+import { ACTIVITY_DRAFT_SQL, assertActivityDraft } from './inactivitySchema.testFixture';
 import { verifyParentManagedChildActivityReadiness } from '../migrations/parentManagedChildActivityReadiness';
 import { keepManagedChild, recordOnlineInteraction } from './managedChildOnlineActivity';
 
@@ -807,8 +808,8 @@ test('restore reconciliation removes public scores and tombstones restored pendi
 test('prospective child activity records only managed children and successful password sessions', async () => {
     const existingParent = await parent(); const existingChild = await child(existingParent);
     await assert.rejects(verifyParentManagedChildActivityReadiness(database));
-    const migration = readFileSync(path.join(__dirname, '../../migrations/pending/draft_create_parent_managed_child_activity.sql'), 'utf8');
-    await admin.query(migration);
+    assertActivityDraft(readFileSync(path.join(__dirname, '../../migrations/pending/draft_create_parent_managed_child_activity.sql'), 'utf8'));
+    await admin.query(ACTIVITY_DRAFT_SQL);
     await admin.query(`GRANT SELECT, INSERT (child_uuid, retention_activity_at), UPDATE (retention_activity_at)
         ON parent_managed_child_activity TO 'parent_runtime_test'@'%'`);
     try {

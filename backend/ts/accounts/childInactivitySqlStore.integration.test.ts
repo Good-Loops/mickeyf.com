@@ -14,6 +14,7 @@ import type { childSchemaCommandSettings } from '../migrations/runChildSignedFor
 import { loadMigrationManifest } from '../migrations/migrationManifest';
 import { applyMigrations } from '../migrations/migrationRunner';
 import { createChildInactivitySqlStore } from './childInactivitySqlStore';
+import { ACTIVITY_DRAFT_SQL, WARNING_DRAFT_SQL, assertActivityDraft, assertWarningDraft } from './inactivitySchema.testFixture';
 import { createInAppInactivityQualityResolver } from './childInactivityInAppTarget';
 import { createPinnedPrimaryHealth } from './retentionPrimaryHealth';
 import { reconcileDeletedRetentionIntent, reconcileKeptRetentionIntent, reconcileRestoredDeletedIntent } from './retentionReconciliation';
@@ -106,10 +107,10 @@ before(async () => {
         [...new Set(migrations.filter(migration => migration.version > '0003').map(migration => migration.effect))]]) {
         await applyMigrations(admin as unknown as MigrationConnection, migrations, config, { allowedEffectKinds });
     }
-    await admin.query(readFileSync(path.resolve(__dirname, '../../migrations/pending/draft_create_parent_managed_child_activity.sql'), 'utf8'));
-    const sql = readFileSync(path.resolve(__dirname, '../../migrations/pending/draft_parent_child_inactivity_warnings.sql'), 'utf8');
-    assert.match(sql, /CREATE TABLE parent_child_inactivity_warnings/u);
-    await admin.query(sql);
+    assertActivityDraft(readFileSync(path.resolve(__dirname, '../../migrations/pending/draft_create_parent_managed_child_activity.sql'), 'utf8'));
+    assertWarningDraft(readFileSync(path.resolve(__dirname, '../../migrations/pending/draft_parent_child_inactivity_warnings.sql'), 'utf8'));
+    await admin.query(ACTIVITY_DRAFT_SQL);
+    await admin.query(WARNING_DRAFT_SQL);
     database = mysql.createPool({ host: config.host, port: config.port, database: config.database, user: 'root',
         password: rootPassword, connectionLimit: 5, multipleStatements: false, dateStrings: true, timezone: 'Z' });
 });
