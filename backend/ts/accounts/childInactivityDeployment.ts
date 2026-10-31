@@ -13,6 +13,11 @@ import { createRetentionKeepReconciler } from './retentionKeepReconciler';
 /** Compose real storage and primary verification before exposing either operation. */
 export async function prepareChildInactivityDeployment(database: Pool, config: ChildInactivityDeployment,
     options: Readonly<{ client?: JournalHttpClient }> = {}) {
+    // A pinned writable primary and an administratively managed restore guard
+    // cannot prove that activity was not lost in an undeclared in-place restore.
+    // There is no independently durable activity/keep history yet. Fail before
+    // mounting warnings or scheduling irreversible automatic deletions.
+    assertIndependentActivityContinuityAvailable();
     let health: ReturnType<typeof createPinnedPrimaryHealth>;
     const journal = createGcsRetentionJournal({ bucket: config.bucket, expectedBucket: config.bucket, key: config.journalKey, client: options.client,
         async verifyActivityContinuity(intent, connection) {
@@ -36,4 +41,8 @@ export async function prepareChildInactivityDeployment(database: Pool, config: C
             return result.nextAfterChildId === null && result.held === 0 ? 0 : 1;
         },
     });
+}
+
+function assertIndependentActivityContinuityAvailable(): void {
+    throw new Error('Child inactivity deployment is disabled until independent activity continuity is implemented and verified.');
 }
