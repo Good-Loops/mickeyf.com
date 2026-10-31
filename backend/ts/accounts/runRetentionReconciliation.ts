@@ -14,11 +14,13 @@ type Environment = Readonly<Record<string, string | undefined>>;
 type Journal = ReturnType<typeof createGcsRetentionJournal>;
 type Pins = Readonly<{ database: string; serverUuid: string; currentUser: string; originalServerUuid: string }>;
 
-function decodeKey(value: string | undefined): Buffer {
-    if (!value || value.length > 172 || !/^[A-Za-z0-9+/]+={0,2}$/u.test(value)) throw new Error(FAILURE);
-    const key = Buffer.from(value, 'base64');
-    if (key.length < 32 || key.length > 128 || key.toString('base64') !== value) throw new Error(FAILURE);
-    return key;
+export function parseRetentionKeyBundle(value: string | undefined): { journalKey: Buffer; auditKey: Buffer } {
+    if (!value || !/^[a-f0-9]{64}:[a-f0-9]{64}:[a-f0-9]{64}$/u.test(value)) throw new Error(FAILURE);
+    const [journalKey, targetKey, receiptKey] = value.split(':').map(item => Buffer.from(item, 'hex'));
+    if (timingSafeEqual(journalKey, targetKey) || timingSafeEqual(journalKey, receiptKey)
+        || timingSafeEqual(targetKey, receiptKey)) throw new Error(FAILURE);
+    // The receipt key is domain-separated for the administrative evidence MAC.
+    return { journalKey, auditKey: receiptKey };
 }
 async function readInput(input: AsyncIterable<string | Uint8Array>): Promise<Record<string, unknown>> {
     const parts: Buffer[] = []; let length = 0;
@@ -107,8 +109,7 @@ export async function runRetentionReconciliation(args = process.argv.slice(2), e
         || currentUser.slice(0, currentUser.lastIndexOf('@')) !== config.user || config.user === 'cms_mickeyf') throw new Error(FAILURE);
     const source = env.RETENTION_RECONCILIATION_SOURCE_COMMIT ?? '';
     assertChildSchemaCleanSource(source, undefined, env);
-    const key = decodeKey(env.RETENTION_JOURNAL_KEY_BASE64), auditKey = decodeKey(env.RETENTION_AUDIT_KEY_BASE64);
-    if (key.length === auditKey.length && timingSafeEqual(key, auditKey)) throw new Error(FAILURE);
+    const { journalKey: key, auditKey } = parseRetentionKeyBundle(env.CHILD_INACTIVITY_KEYS);
     const bucket = env.RETENTION_JOURNAL_BUCKET ?? '', expectedBucket = env.RETENTION_CONFIRM_BUCKET ?? '';
     const journal = createGcsRetentionJournal({ bucket, expectedBucket, key, verifyActivityContinuity: async () => false });
     const pool = mysql.createPool({ host: config.host, port: config.port, user: config.user, password: config.password,

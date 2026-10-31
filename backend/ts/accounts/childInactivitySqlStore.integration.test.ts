@@ -184,6 +184,39 @@ test('administrator reconciliation verifies actual primary identity and absence 
     assert.equal(recorded, null);
 });
 
+test('administrator fence rejects a live runtime SQL session and releases its global lock', async () => {
+    const [[identity]] = await admin.query<RowDataPacket[]>('SELECT DATABASE() AS db,CURRENT_USER() AS user,@@GLOBAL.server_uuid AS id');
+    const guard = { state: 'hold' as const, database: identity.db as string, serverUuid: identity.id as string,
+        epoch: randomUUID(), expiresAt: '2099-01-01T00:00:00.000Z', generation: '1' };
+    const intent: RetentionIntent = { parentId: randomUUID(), childId: randomUUID(), warningId: randomUUID(),
+        activityAt: '2020-01-01T00:00:00.000000Z', deliveredAt: '2023-01-01T00:00:00.000000Z', channel: 'in-app',
+        targetDigest: 'a'.repeat(64), noticeDigest: 'b'.repeat(64), receiptDigest: 'c'.repeat(64) };
+    let recorded = false;
+    const journal = { async readRestoreGuard() { return guard; }, async verifyRetentionIntent() { return true; },
+        async readResolution() { return null; }, async recordResolution() { recorded = true; } };
+    const pins = { database: guard.database, serverUuid: guard.serverUuid, currentUser: identity.user as string,
+        confirmation: 'ORIGINAL PRIMARY DRAINED AND ACCOUNT ABSENT' };
+    await admin.query("CREATE USER 'cms_mickeyf'@'%' IDENTIFIED BY 'synthetic-runtime-only'");
+    let runtime: Connection | undefined;
+    try {
+        await admin.query("GRANT SELECT ON mickeyf_migration_test.* TO 'cms_mickeyf'@'%'");
+        runtime = await mysql.createConnection({ host: config.host, port: config.port, database: config.database,
+            user: 'cms_mickeyf', password: 'synthetic-runtime-only', multipleStatements: false });
+        const candidate = await mysql.createConnection({ host: config.host, port: config.port, database: config.database,
+            user: 'root', password: rootPassword, multipleStatements: false });
+        await assert.rejects(reconcileDeletedRetentionIntent(candidate as unknown as mysql.PoolConnection, journal,
+            intent, pins, Buffer.alloc(32, 8)), /Keep restoration on hold/);
+        assert.equal(recorded, false);
+        const probe = randomUUID();
+        await admin.query({ sql: 'INSERT INTO users (user_name,email,user_password,account_uuid) VALUES (?,?,?,?)', timeout: 2000 },
+            [`probe-${probe}`, `${probe}@example.test`, 'synthetic', probe]);
+        await admin.query('DELETE FROM users WHERE account_uuid=?', [probe]);
+    } finally {
+        if (runtime) await runtime.end();
+        await admin.query("DROP USER 'cms_mickeyf'@'%'");
+    }
+});
+
 test('operator command pins a real SQL target before confirming a deleted intent', async () => {
     const [[identity]] = await admin.query<RowDataPacket[]>('SELECT DATABASE() AS db,CURRENT_USER() AS user,@@GLOBAL.server_uuid AS id');
     const guard = { state: 'hold' as const, database: identity.db as string, serverUuid: identity.id as string,

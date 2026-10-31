@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Pool } from 'mysql2/promise';
-import { executeRetentionReconciliation } from './runRetentionReconciliation';
+import { executeRetentionReconciliation, parseRetentionKeyBundle } from './runRetentionReconciliation';
 import type { createGcsRetentionJournal } from './gcsRetentionJournal';
 
 const serverUuid = '11111111-1111-4111-8111-111111111111';
@@ -55,4 +55,11 @@ test('first guard can only be initialized on the pinned original with an empty j
     await assert.rejects(executeRetentionReconciliation('initialize-hold', { confirmation: 'INITIALIZE RETENTION HOLD' },
         pins, journal, database, Buffer.alloc(32, 1)));
     assert.equal(writes, 1);
+});
+test('operator reads the same three independent key values as the runtime', () => {
+    const keys = parseRetentionKeyBundle(`${'11'.repeat(32)}:${'22'.repeat(32)}:${'33'.repeat(32)}`);
+    assert.deepEqual(keys.journalKey, Buffer.alloc(32, 0x11)); assert.deepEqual(keys.auditKey, Buffer.alloc(32, 0x33));
+    for (const bad of ['', 'not-a-key', `${'11'.repeat(32)}:${'22'.repeat(32)}:${'11'.repeat(32)}`]) {
+        assert.throws(() => parseRetentionKeyBundle(bad));
+    }
 });

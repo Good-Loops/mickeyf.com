@@ -12,9 +12,11 @@ The command uses the existing loopback-only authenticated SQL proxy and
 original primary UUID, `RETENTION_RECONCILIATION_SOURCE_COMMIT` to the exact
 reviewed clean source commit, and `RETENTION_JOURNAL_BUCKET` plus
 `RETENTION_CONFIRM_BUCKET` to the exact same separately provisioned bucket.
-Provide the distinct journal and audit HMAC keys via
-`RETENTION_JOURNAL_KEY_BASE64` and `RETENTION_AUDIT_KEY_BASE64`; never put
-those values in a command transcript or source control.
+Load the same private `CHILD_INACTIVITY_KEYS` bundle used by the runtime; it
+contains three independently generated 32-byte hexadecimal keys separated by
+colons. The first signs journal records; the third signs receipt and
+domain-separated administrative evidence. Never put the bundle or its parts in
+a command transcript or source control.
 
 Read the private inventory:
 
