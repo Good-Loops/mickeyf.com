@@ -6,7 +6,7 @@
 import React, { lazy, useRef } from "react";
 import { useSafariBackgroundEdges } from '@/hooks/useSafariBackgroundEdges';
 import { useNativePresentation } from '@/hooks/useNativePresentation';
-import { Routes, Route, useLocation } from "react-router-dom";
+import { Link, Routes, Route, useLocation } from "react-router-dom";
 import RouteContentBoundary from '@/components/RouteContentBoundary';
 import PrivacyNoticeLink from '@/components/PrivacyNoticeLink';
 import { parsePrivacyNoticeUrl } from '@/config/privacyNoticeUrl';
@@ -35,6 +35,7 @@ const Leaderboard = lazy(() => import('@/pages/Leaderboard'));
 const GameLeaderboard = lazy(() => import('@/pages/leaderboards/GameLeaderboard'));
 const Connect = lazy(() => import('@/pages/Connect'));
 const Privacy = lazy(() => import('@/pages/Privacy'));
+const ThirdPartyLicenses = lazy(() => import('@/pages/ThirdPartyLicenses'));
 const Login = lazy(() => import('@/pages/Login'));
 const SignUp = lazy(() => import('@/pages/SignUp'));
 const ManageAccount = lazy(() => import('@/pages/ManageAccount'));
@@ -92,6 +93,7 @@ const App: React.FC = () => {
 					<Route path="/leaderboards/:gameId" element={<GameLeaderboard />} />
 					<Route path="/connect" element={<Connect />} />
 					<Route path="/privacy" element={<Privacy />} />
+					<Route path="/licenses" element={<ThirdPartyLicenses />} />
 					<Route path="/login" element={<Login />} />
 					<Route path="/signup" element={<SignUp />} />
 					<Route path="/account" element={<ManageAccount />} />
@@ -108,6 +110,7 @@ const App: React.FC = () => {
                     aria-label="Privacy notice (opens in a new tab)">
 					Privacy notice
 				</a>}</>
+			{' · '}<Link to="/licenses">Third-party licenses</Link>
 			</p>
 		</footer>
     </div>
