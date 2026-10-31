@@ -15,7 +15,7 @@ function readWarning(value: unknown): Warning | null | undefined {
     if (warning === null) return null;
     if (!warning || typeof warning !== 'object') return undefined;
     const item = warning as Partial<Warning>;
-    if (typeof item.warningId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(item.warningId)
+    if (typeof item.warningId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[14][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/.test(item.warningId)
         || typeof item.acknowledged !== 'boolean' || !item.notice || typeof item.notice.version !== 'string' || !item.notice.version
         || typeof item.notice.en !== 'string' || !item.notice.en || typeof item.notice.ptBR !== 'string' || !item.notice.ptBR
         || item.notice.en.length > 4000 || item.notice.ptBR.length > 4000) return undefined;
