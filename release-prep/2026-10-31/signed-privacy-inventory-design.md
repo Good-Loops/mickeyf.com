@@ -6,7 +6,8 @@ and temporary signing material after upload; the already-uploaded build 40.1.0
 therefore cannot be retroactively inspected with the local workflow. See
 [Apple's privacy-report instructions](https://developer.apple.com/documentation/bundleresources/describing-data-use-in-privacy-manifests).
 
-`scripts/ios-signed-privacy-summary.py` is an **unwired experimental helper**.
+`scripts/ios-signed-privacy-summary.py` and the default-off
+`audit_signed_privacy` workflow path are an **isolated experimental proposal**.
 It can compare app-bundle manifests inside a future owned archive and the IPA's
 extracted application, emitting a bounded summary rather than the signed app,
 raw manifests, domains, arbitrary path names, unknown strings, or credentials.
@@ -17,16 +18,21 @@ incomplete. It does not examine unknown fields nested inside manifest entries
 or assess accessed-API reasons. An empty or unreadable scan fails closed.
 
 The helper itself does **not** verify a code signature or the claimed bundle
-identity. Before any future integration, the signing job must verify archive
-and exported code signatures, identity, entitlements and manifest coverage,
-invoke it only within the same owned run, and independently review and test how
-the bounded output is handled. Scanning must occur after build subprocesses
+identity. The proposed protected job invokes it only after archive and export
+signature, identity and entitlement verification within the same owned run.
+It does not load the App Store Connect API private key or run the Apple upload
+command. A fixed disabled-child-lifecycle setting, reviewed signing branch,
+manual opt-in and exclusive signing concurrency are required. It emits a
+bounded summary and the IPA digest, then uses the existing cleanup routine;
+it does not upload signed files, raw manifests or signing material. GitHub
+Actions logs and summaries for this public repository are public.
+
+The job and helper still require **independent security review and a real
+macOS qualification** before use. Scanning must occur after build subprocesses
 have stopped modifying the inspected directories; the helper does not protect
-against concurrent path swaps. GitHub Actions logs and summaries for this
-public repository are public. It must not log credentials, raw signing output,
-archive files, or IPA contents. Keep the existing cleanup and protected
-environment restrictions. The current production workflow does not call this
-helper, and no inspection or upload was performed by preparing it.
+against concurrent path swaps. No proposed workflow was dispatched, no real
+archive inspected, and no Apple upload was performed. The production branch is
+unchanged.
 
 A newly built archive—even from the same commit and configuration—has a new
 build identity and is not the historical build 40.1.0. This custom summary is

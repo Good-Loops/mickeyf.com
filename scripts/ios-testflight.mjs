@@ -1,6 +1,6 @@
 // Manual GitHub-hosted macOS signing only. Never use this helper for App Review.
 import { spawnSync } from 'node:child_process';
-import { createPrivateKey, randomBytes, sign, X509Certificate } from 'node:crypto';
+import { createHash, createPrivateKey, randomBytes, sign, X509Certificate } from 'node:crypto';
 import { appendFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { createRequire } from 'node:module';
@@ -20,6 +20,15 @@ const requireThat = (condition, message) => { if (!condition) throw new Error(me
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
 export const signingBranchAllowed = ref => SIGNING_BRANCHES.has(ref);
+
+// This path is only a protected, no-upload inspection of a newly signed build.
+export function validateSignedPrivacyEnvironment(env) {
+    requireThat(env.LUDOLUME_SIGNED_PRIVACY_INSPECTION === '1'
+        && !env.ASC_PRIVATE_KEY_P8 && env.IOS_UPLOAD_DISTRIBUTION === 'app-store-draft'
+        && env.VITE_ENABLE_CHILD_ONLINE_ACTIVITY === '0' && env.VITE_ENABLE_CHILD_INACTIVITY_WARNING === '0'
+        && /^[a-f0-9]{40}$/.test(env.GITHUB_SHA ?? '') && isAbsolute(env.GITHUB_STEP_SUMMARY ?? ''),
+    'Signed privacy inspection requires the isolated no-upload mode and fixed disabled child lifecycle.');
+}
 
 export function buildNumber(runNumber, attempt) {
     requireThat(/^[1-9]\d{0,3}$/.test(runNumber) && /^[1-9]\d?$/.test(attempt),
@@ -261,7 +270,7 @@ export function applySigningSettings(project, config, signing) {
         CURRENT_PROJECT_VERSION: config.build });
 }
 
-function archiveAndExport(config, signing) {
+function archiveAndExport(config, signing, { diagnostics = true } = {}) {
     // Capacitor already supplies this parser through the locked frontend dependencies.
     const xcode = createRequire(new URL('../frontend/package.json', import.meta.url))('xcode');
     const projectPath = resolve('ios/App/App.xcodeproj/project.pbxproj');
@@ -273,13 +282,13 @@ function archiveAndExport(config, signing) {
     console.log('Archiving signed iPhone app.');
     run('Signed iPhone archive', 'xcodebuild', ['-quiet', '-workspace', 'ios/App/App.xcworkspace', '-scheme', 'App',
         '-configuration', 'Release', '-sdk', 'iphoneos', '-destination', 'generic/platform=iOS',
-        '-derivedDataPath', join(config.root, 'derived-data'), '-archivePath', archive, 'archive'], { diagnostics: true });
+        '-derivedDataPath', join(config.root, 'derived-data'), '-archivePath', archive, 'archive'], { diagnostics });
     const options = join(config.root, 'ExportOptions.plist');
     privateFile(options, JSON.stringify(exportOptions(signing, config.distribution)));
     run('Encode export options', 'plutil', ['-convert', 'xml1', options]);
     const exportPath = join(config.root, 'export');
     run(`Export ${config.distribution} IPA`, 'xcodebuild', ['-quiet', '-exportArchive', '-archivePath', archive,
-        '-exportPath', exportPath, '-exportOptionsPlist', options], { diagnostics: true });
+        '-exportPath', exportPath, '-exportOptionsPlist', options], { diagnostics });
     const files = readdirSync(exportPath).filter(file => file.endsWith('.ipa'));
     requireThat(files.length === 1, 'Expected exactly one exported IPA.');
     return join(exportPath, files[0]);
@@ -304,6 +313,26 @@ function verifyIpa(config, signing, ipa) {
     run('Inspect application signing certificate', 'codesign', ['-d', `--extract-certificates=${certificatePrefix}`, app]);
     requireThat(new X509Certificate(readFileSync(`${certificatePrefix}0`)).fingerprint.replaceAll(':', '') === signing.fingerprint,
         'Exported IPA uses a different signing certificate.');
+    return info;
+}
+
+function verifyArchive(config, signing) {
+    const app = join(config.root, 'Ludolume.xcarchive', 'Products', 'Applications', 'App.app');
+    requireThat(existsSync(app) && lstatSync(app).isDirectory() && !lstatSync(app).isSymbolicLink(),
+        'The signed archive must contain the expected real app bundle.');
+    const info = readPlist(join(app, 'Info.plist'));
+    requireThat(info.CFBundleIdentifier === BUNDLE && info.CFBundleVersion === config.build
+        && info.CFBundleExecutable === 'App' && info.CFBundleSupportedPlatforms?.includes('iPhoneOS'),
+    'Archive identity, build number or platform is wrong.');
+    run('Verify signed archive application and embedded frameworks', 'codesign', ['--verify', '--deep', '--strict', app]);
+    const embedded = readProfile(join(app, 'embedded.mobileprovision'));
+    requireThat(embedded.uuid === signing.profile.uuid, 'Archive uses a different provisioning profile.');
+    verifySignedEntitlements(app, embedded);
+    verifyAgeFrameworkLinkage(run('Inspect archive optional age framework linkage', 'otool', ['-l', join(app, 'App')]).stdout);
+    const prefix = join(config.root, 'archive-certificate-');
+    run('Inspect archive application signing certificate', 'codesign', ['-d', `--extract-certificates=${prefix}`, app]);
+    requireThat(new X509Certificate(readFileSync(`${prefix}0`)).fingerprint.replaceAll(':', '') === signing.fingerprint,
+        'Archive uses a different signing certificate.');
     return info;
 }
 
@@ -360,13 +389,48 @@ async function upload() {
     } finally { cleanup(config); }
 }
 
+function inspectSignedPrivacy() {
+    const config = configuration();
+    validateSignedPrivacyEnvironment(process.env);
+    for (const name of SECRET_NAMES.filter(name => name !== 'ASC_PRIVATE_KEY_P8')) {
+        requireThat(process.env[name]?.trim(), `Missing protected secret ${name}.`);
+    }
+    requireThat(!existsSync(config.root) && !existsSync(config.profilePath), 'Refusing to overwrite an existing signing path.');
+    mkdirSync(config.root, { mode: 0o700 });
+    privateFile(join(config.root, 'owner.json'), JSON.stringify({ runId: process.env.GITHUB_RUN_ID,
+        attempt: process.env.GITHUB_RUN_ATTEMPT, root: config.root }));
+    try {
+        const signing = installSigningMaterial(config);
+        // Inspection never publishes raw Xcode error lines to public job logs.
+        const ipa = archiveAndExport(config, signing, { diagnostics: false });
+        const archiveInfo = verifyArchive(config, signing);
+        const ipaInfo = verifyIpa(config, signing, ipa);
+        requireThat(archiveInfo.CFBundleShortVersionString === ipaInfo.CFBundleShortVersionString,
+            'Archive and exported application marketing versions do not match.');
+        const result = run('Inspect signed privacy manifests', 'python3', ['../scripts/ios-signed-privacy-summary.py'],
+            { env: childEnvironment({ LUDOLUME_SIGNED_PRIVACY_INSPECTION: '1' }) });
+        requireThat(Buffer.byteLength(result.stdout, 'utf8') <= 700_000,
+            'Signed privacy summary exceeded its bounded output limit.');
+        let report;
+        try { report = JSON.parse(result.stdout); }
+        catch { throw new Error('Signed privacy summary was not valid JSON; raw output was not logged.'); }
+        const sha = createHash('sha256').update(readFileSync(ipa)).digest('hex');
+        appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+            '### Custom verified signed-build manifest inventory (not an Apple privacy report)\n\n'
+            + `Source: ${process.env.GITHUB_SHA}; build: ${config.build}; exported IPA SHA-256: ${sha}.\n\n`
+            + 'This newly signed build was not uploaded. The inventory does not establish actual collection, sharing, retention or compliance.\n\n'
+            + `\`\`\`json\n${JSON.stringify(report, null, 2)}\n\`\`\`\n`);
+    } finally { cleanup(config); }
+}
+
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
     try {
         const command = process.argv[2];
         if (command === 'preflight') preflight();
         else if (command === 'upload') await upload();
+        else if (command === 'inspect-signed-privacy') inspectSignedPrivacy();
         else if (command === 'cleanup') cleanup(configuration());
-        else throw new Error('Use preflight, upload, or cleanup.');
+        else throw new Error('Use preflight, upload, inspect-signed-privacy, or cleanup.');
     } catch (error) {
         console.error(error.message);
         process.exitCode = 1;

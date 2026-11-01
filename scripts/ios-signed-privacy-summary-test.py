@@ -19,6 +19,8 @@ spec.loader.exec_module(summary)
 
 class SignedPrivacySummaryTest(unittest.TestCase):
     def make_fixture(self, directory):
+        # macOS commonly exposes /var as a symlink to /private/var.
+        directory = str(Path(directory).resolve())
         root = Path(directory) / 'ludolume-testflight-41-1'
         root.mkdir()
         (root / 'owner.json').write_text(json.dumps({'runId': '41', 'attempt': '1', 'root': str(root)}))
