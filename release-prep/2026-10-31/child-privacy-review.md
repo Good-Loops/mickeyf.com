@@ -159,12 +159,17 @@ stop for missing activity/contact or unconfirmed delivery, and must use a tested
 child-only deletion and recovery path. The existing withdrawal flow requires
 fresh parent proof and is not itself an automated inactivity-deletion job.
 
-## Follow-up implementation decision
+## Follow-up implementation decision and later owner revision
 
-The owner confirmed that a parent-managed child account stays pending when the
-parent does not respond to the warning. A sent message or lack of a bounce is
-not confirmation. The candidate measures authenticated online activity and
-discloses that offline play may not update the timer; it must hold when the
+The owner initially chose to keep a parent-managed child account pending when
+the parent does not respond to the warning. The owner later revised that choice:
+allow deletion after 12 additional months of nonresponse. The later decision is
+not implemented or enabled; the additional period's start, delivery failures,
+exceptions, retention and recovery require a reviewed specification and tests.
+The current disabled candidate still holds when confirmation is absent. A sent
+message or lack of a bounce is not confirmation. The candidate measures
+authenticated online activity and discloses that offline play may not update
+the timer; it must hold when the
 reliability of activity tracking is unknown. A warning is considered no sooner
 than 30 days before the third calendar anniversary, and deletion is considered
 no sooner than both that anniversary and 30 days after the parent's confirmed

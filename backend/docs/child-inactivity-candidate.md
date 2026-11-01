@@ -2,6 +2,13 @@
 
 This code is a local candidate, not an enabled feature or a deployable release. No warning is sent and no account is deleted by importing it. The parent router is not mounted; the schema is a pending draft and is not in the migration manifest. Do not enable or apply it as-is.
 
+The owner later chose to allow deletion after 12 additional months of parent
+nonresponse. That product decision supersedes the earlier indefinite hold, but
+is **not implemented or enabled** in this candidate. The precise start of the
+additional period, delivery failures, exceptions, retention, and recovery still
+need a reviewed specification and tests. Until an updated, qualified process is
+implemented, the candidate's behavior remains to hold without confirmation.
+
 The warning service can now be explicitly injected into the auth router after
 `prepareChildInactivityRuntime` verifies its table and restricted grants. Its
 authenticated `/pending` route reports only whether a parent has an unacknowledged
