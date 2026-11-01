@@ -5,6 +5,10 @@ import { createAuthApi } from './authApi.ts';
 import { createRegistrationApi, readRegistrationConfig } from './registrationApi.ts';
 import { selectProviderDeletionClient } from './providerClient.ts';
 
+Object.defineProperty(globalThis.navigator, 'locks', { configurable: true, value: {
+    request: async (_name, _options, callback) => callback(),
+} });
+
 const policy = { enabled: true, audience: 'children-included', creationEnabled: true, policyVersion: 'synthetic-children',
     parentRegistrationAvailable: true, countries: [{ country: 'US', parentRequiredBelow: 13, adultFrom: 18 },
         { country: 'BR', parentRequiredBelow: 18, adultFrom: 18 }] };
@@ -22,6 +26,7 @@ function fixture(change = () => undefined) {
         const replacement = await change(call);
         if (replacement) return replacement;
         if (url.endsWith('/registration/config')) return Response.json(policy);
+        if (url.endsWith('/registration/bootstrap')) return Response.json({ ready: true });
         if (url.endsWith('/registration/begin')) return Response.json(approved);
         if (url.endsWith('/registration/cancel')) return Response.json({ cancelled: true });
         if (url.endsWith('/providers/begin')) return Response.json(challenge);
@@ -98,7 +103,7 @@ test('parent-required observation reaches only the restriction endpoint and cann
         assert('error' in result); assert(['PARENT_REQUIRED', 'UNAVAILABLE'].includes(result.error));
         assert.deepEqual(await api.signupRequest(credentials), { error: 'REGISTRATION_REQUIRED' });
         assert.deepEqual(await api.prepareProviderLogin('google-web'), { error: 'REGISTRATION_REQUIRED' });
-        assert.deepEqual(calls.map(call => call.url), ['/auth/registration/config', '/auth/registration/begin']);
+        assert.deepEqual(calls.map(call => call.url), ['/auth/registration/config', '/auth/registration/bootstrap', '/auth/registration/begin']);
     }
 });
 
@@ -106,9 +111,9 @@ test('a staged private grant permits one password signup, then requires a fresh 
     const { api, calls } = fixture();
     assert.deepEqual(await api.beginRegistration(input), approved);
     assert.deepEqual(await api.signupRequest(credentials), { success: true });
-    assert.deepEqual(calls.map(call => call.url), ['/auth/registration/config', '/auth/registration/begin', '/api/users']);
-    assert.deepEqual(calls[1].body, input);
-    assert.deepEqual(calls[2].body, { type: 'signup', ...credentials });
+    assert.deepEqual(calls.map(call => call.url), ['/auth/registration/config', '/auth/registration/bootstrap', '/auth/registration/begin', '/api/users']);
+    assert.deepEqual(calls[2].body, input);
+    assert.deepEqual(calls[3].body, { type: 'signup', ...credentials });
     assert.deepEqual(await api.signupRequest(credentials), { error: 'REGISTRATION_REQUIRED' });
 });
 
@@ -181,5 +186,41 @@ test('public visibility and expired approvals never authorize credential collect
     let now = 1000;
     t.mock.method(Date, 'now', () => now);
     const { api } = fixture(); await api.beginRegistration(input); now += 300_001;
+    assert.deepEqual(await api.signupRequest(credentials), { error: 'REGISTRATION_REQUIRED' });
+});
+
+test('observation sends no credentials, clears the staged grant, and never authorizes creation', async () => {
+    const { api, calls } = fixture(call => call.url.endsWith('/registration/observe') ? Response.json({ observed: true }) : undefined);
+    assert.deepEqual(await api.beginRegistration(input), approved);
+    assert.equal(await api.observeRegistration({ ...input, ageBand: 'minor' }), true);
+    assert.deepEqual(await api.signupRequest(credentials), { error: 'REGISTRATION_REQUIRED' });
+    const observed = calls.find(call => call.url.endsWith('/registration/observe'));
+    assert.deepEqual(observed.body, { ...input, ageBand: 'minor' });
+    assert.equal(calls.some(call => call.url === '/api/users'), false);
+});
+
+test('an uncertain observation fails closed without permitting a staged signup', async () => {
+    const { api } = fixture(call => call.url.endsWith('/registration/observe') ? Response.json({ observed: false }) : undefined);
+    assert.deepEqual(await api.beginRegistration(input), approved);
+    assert.equal(await api.observeRegistration({ ...input, ageBand: 'parent-required' }), false);
+    assert.deepEqual(await api.signupRequest(credentials), { error: 'REGISTRATION_REQUIRED' });
+});
+
+test('native reservation and completion use an opaque single-use attempt without authorizing account creation', async () => {
+    const attempt = 'A'.repeat(43);
+    const { api, calls } = fixture(call => {
+        if (call.url.endsWith('/age-check/start')) return Response.json({ attempt });
+        if (call.url.endsWith('/age-check/finish')) return Response.json({ observed: true });
+    });
+    assert.equal(await api.beginNativeAgeCheck(), attempt);
+    assert.deepEqual(await api.signupRequest(credentials), { error: 'REGISTRATION_REQUIRED' });
+    assert.equal(await api.finishNativeAgeCheck({ attempt, ...input }), true);
+    assert.deepEqual(await api.signupRequest(credentials), { error: 'REGISTRATION_REQUIRED' });
+    assert.deepEqual(calls.find(call => call.url.endsWith('/age-check/finish')).body, { attempt, ...input });
+});
+
+test('unknown or rejected native completion cannot authorize account creation', async () => {
+    const { api } = fixture(call => call.url.endsWith('/age-check/finish') ? Response.json({ error: 'UNAVAILABLE' }, { status: 503 }) : undefined);
+    assert.equal(await api.finishNativeAgeCheck({ attempt: 'A'.repeat(43), ...input }), false);
     assert.deepEqual(await api.signupRequest(credentials), { error: 'REGISTRATION_REQUIRED' });
 });

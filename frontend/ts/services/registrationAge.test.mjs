@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import test from 'node:test';
 import { createRegistrationAge, readNativeAgeRange, PARENT_RESTRICTION_MS } from './registrationAge.ts';
 
@@ -30,7 +31,7 @@ test('shared ranges use the youngest possible age and never weaken a selected mi
     ]) assert.equal(await fixture(range).check(selected, threshold), expected);
 });
 
-test('native refusal, unsupported OS, verification, failure and malformed data never become adult evidence', async () => {
+test('native refusal, unsupported Android, verification, failure and malformed data never become adult evidence', async () => {
     for (const status of ['not-shared', 'verification-required', 'unsupported', 'unavailable']) {
         assert.equal(await fixture({ status, minimumAge: null, maximumAge: null }).check('adult', 13), null);
     }
@@ -39,6 +40,42 @@ test('native refusal, unsupported OS, verification, failure and malformed data n
     assert.equal(await throwing.check('adult', 13), null);
     const web = createRegistrationAge({ storage: () => store(), load: async () => null });
     assert.equal(await web.check('minor', 13), 'minor');
+});
+
+test('only pre-26 iOS may use the neutral self-declared band when the native API does not exist', async () => {
+    const storage = store();
+    const make = range => createRegistrationAge({ storage: () => storage,
+        load: async () => ({ legacyIosFallback: true, request: async () => range }) });
+    const unsupported = { status: 'unsupported', minimumAge: null, maximumAge: null };
+    assert.equal(await make(unsupported).check('adult', 13), 'adult');
+    assert.equal(await make(unsupported).check('minor', 13), 'minor');
+    for (const status of ['not-shared', 'verification-required', 'unavailable']) {
+        assert.equal(await make({ status, minimumAge: null, maximumAge: null }).check('adult', 13), null);
+    }
+    assert.equal(await make({ status: 'unsupported', minimumAge: 18, maximumAge: null }).check('adult', 13), null);
+    assert.equal(await make(shared(0, 12)).check('adult', 13), 'parent-required');
+    assert.equal(await make(unsupported).check('adult', 13), 'parent-required');
+});
+
+test('the iOS bridge reserves unsupported for OS versions without the age-range API', () => {
+    const swift = readFileSync(new URL('../../ios/App/App/LudolumeAgePlugin.swift', import.meta.url), 'utf8');
+    assert.match(swift, /guard #available\(iOS 26\.0, \*\) else \{\s*call\.resolve\(LudolumeAgeRangeResult\.nonShared\(\.unsupported\)\)/u);
+    assert.equal((swift.match(/nonShared\(\.unsupported\)/gu) ?? []).length, 1);
+});
+
+test('only native age requests require a successful reservation before opening the prompt', async () => {
+    const calls = [];
+    const web = createRegistrationAge({ storage: () => store(), load: async () => null });
+    assert.equal(await web.check('adult', 13, async () => { calls.push('reserve'); return false; }), 'adult');
+    assert.deepEqual(calls, []);
+    const native = createRegistrationAge({ storage: () => store(), load: async () => ({
+        request: async () => { calls.push('prompt'); return shared(18, null); },
+    }) });
+    assert.equal(await native.check('adult', 13, async () => { calls.push('reserve'); return false; }), null);
+    assert.deepEqual(calls, ['reserve']);
+    calls.length = 0;
+    assert.equal(await native.check('adult', 13, async () => { calls.push('reserve'); return true; }), 'adult');
+    assert.deepEqual(calls, ['reserve', 'prompt']);
 });
 
 test('a parent-required observation survives remount, adult retry and country switch without persisting ages', async () => {

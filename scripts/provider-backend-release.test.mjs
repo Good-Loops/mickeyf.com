@@ -106,11 +106,23 @@ test('reviewed child preparation preserves login and management while every crea
     assert.ok(render(fixture('prepare-child').pins.candidate.deployment).steps.length);
 });
 
-test('Android release activation remains blocked without actual reviewed Play certificate/OAuth pins', () => {
-    assert.deepEqual(PROVIDER_ANDROID_PRESENTER_PINS, []);
+test('Android release accepts only the reviewed Play certificate and OAuth presenter', () => {
+    assert.deepEqual(PROVIDER_ANDROID_PRESENTER_PINS, [{
+        packageName: 'com.mickeyf.app', signer: 'play-app-signing',
+        certificateSha1: 'D7F8253276437C861ED1332EC25D29412C2B5FAB',
+        certificateSha256: 'A0129DF3CF1C6B64F60C97C6254DCE67B5DD141C64126084AD2316B1177C7135',
+        clientId: '1012884798546-np0a4m1eq3nm948m5o8ocpck3qcflpk4.apps.googleusercontent.com',
+    }]);
     assert.equal(Object.isFrozen(PROVIDER_ANDROID_PRESENTER_PINS), true);
+    assert.equal(Object.isFrozen(PROVIDER_ANDROID_PRESENTER_PINS[0]), true);
     const config = JSON.parse(read('./provider-release-general.json'));
     assert.equal(providerConfigurationSha256(config), 'cd57fc2f92f300610d21a98c5fa88476ccd20f8ed82e3974c4e0e96a09b95d01');
+    const reviewed = structuredClone(config);
+    reviewed.environment.GOOGLE_ANDROID_CLIENT_ID = PROVIDER_ANDROID_PRESENTER_PINS[0].clientId;
+    for (const rollback of [false, true]) {
+        assert.equal(providerReleaseEnvironment(reviewed, rollback).GOOGLE_ANDROID_CLIENT_ID,
+            PROVIDER_ANDROID_PRESENTER_PINS[0].clientId);
+    }
     const approvedOnlyInTests = androidPresenterPins();
     for (const changes of [
         { GOOGLE_ANDROID_CLIENT_ID: approvedOnlyInTests[0].clientId },

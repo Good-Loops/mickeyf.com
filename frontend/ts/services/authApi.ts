@@ -214,7 +214,13 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
     function enqueueMutation<Result>(operation: () => Promise<Result>): Promise<Result> {
         // Set-Cookie takes effect before React sees a response. Serialize the
         // transport itself so a late login cannot recreate a logged-out session.
-        const result = pendingMutation.then(operation);
+        const guarded = async (): Promise<Result> => {
+            if (registrationOptions.requireChildAudience && typeof navigator !== 'undefined' && navigator.locks?.request) {
+                return await navigator.locks.request('ludolume-auth-cookie-v1', { mode: 'exclusive' }, async () => await operation());
+            }
+            return operation();
+        };
+        const result = pendingMutation.then(guarded);
         pendingMutation = result.then(() => undefined, () => undefined);
         return result;
     }
@@ -580,7 +586,8 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
         });
     }
 
-    const registration = createRegistrationApi(apiBase, fetchRequest, { requireChildAudience: registrationOptions.requireChildAudience });
+    const registration = createRegistrationApi(apiBase, fetchRequest, { requireChildAudience: registrationOptions.requireChildAudience,
+        alreadyLocked: registrationOptions.requireChildAudience });
     return {
         registrationConfigRequest: registration.config,
         // A general grant contains no country, age, account details or provider credential.
@@ -613,6 +620,21 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
                 }
                 return result;
             });
+        },
+        beginNativeAgeCheck: () => {
+            invalidatePreparedLogins(); generalRegistrationDeadline = 0; registrationAllowsCreation = false;
+            return enqueueMutation(() => registration.beginNativeAgeCheck());
+        },
+        finishNativeAgeCheck: (input: Readonly<{ attempt: string; country: string;
+            ageBand: 'adult' | 'minor' | 'parent-required'; policyVersion: string }>) => {
+            invalidatePreparedLogins(); generalRegistrationDeadline = 0; registrationAllowsCreation = false;
+            return enqueueMutation(() => registration.finishNativeAgeCheck(input));
+        },
+        observeRegistration: (input: Readonly<{ country: string; ageBand: 'minor' | 'parent-required'; policyVersion: string }>) => {
+            invalidatePreparedLogins();
+            generalRegistrationDeadline = 0;
+            registrationAllowsCreation = false;
+            return enqueueMutation(() => registration.observe(input));
         },
         cancelRegistration: () => {
             invalidatePreparedLogins();

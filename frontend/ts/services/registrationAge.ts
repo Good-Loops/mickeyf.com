@@ -5,7 +5,7 @@ export type NativeAgeRange = Readonly<{
     minimumAge: number | null;
     maximumAge: number | null;
 }>;
-type AgeSource = { request: () => Promise<unknown> } | null;
+type AgeSource = { request: () => Promise<unknown>; legacyIosFallback?: boolean } | null;
 const unavailable: NativeAgeRange = { status: 'unavailable', minimumAge: null, maximumAge: null };
 const parentKey = 'ludolume.parent-registration-until';
 const minorProviderKey = 'ludolume.minor-provider-until';
@@ -29,10 +29,11 @@ export function readNativeAgeRange(value: unknown): NativeAgeRange {
 async function loadAgeSource(): Promise<AgeSource> {
     const { Capacitor, registerPlugin } = await import('@capacitor/core');
     if (!Capacitor.isNativePlatform()) return null;
-    if (!['ios', 'android'].includes(Capacitor.getPlatform())) return { request: async () => unavailable };
+    const platform = Capacitor.getPlatform();
+    if (!['ios', 'android'].includes(platform)) return { request: async () => unavailable };
     const plugin = registerPlugin<{ requestAgeRange(options: Record<string, never>): Promise<unknown> }>('LudolumeAge');
     // Never resolve a Capacitor proxy directly: its synthetic `then` method is not a Promise.
-    return { request: () => plugin.requestAgeRange({}) };
+    return { request: () => plugin.requestAgeRange({}), legacyIosFallback: platform === 'ios' };
 }
 
 export function createRegistrationAge({ load = loadAgeSource, storage = () => typeof window === 'undefined' ? null : window.sessionStorage,
@@ -81,15 +82,20 @@ export function createRegistrationAge({ load = loadAgeSource, storage = () => ty
         parentRequired,
         minorProviderRestricted,
         rememberMinorProvider,
-        async check(selected: RegistrationAgeBand, parentRequiredBelow: number): Promise<RegistrationAgeBand | null> {
+        async check(selected: RegistrationAgeBand, parentRequiredBelow: number,
+            beforeNativeCheck?: () => Promise<boolean>): Promise<RegistrationAgeBand | null> {
             if (selected === 'parent-required') { rememberParent(); return selected; }
             if (parentRequired()) return 'parent-required';
             if (!Number.isInteger(parentRequiredBelow) || parentRequiredBelow < 1 || parentRequiredBelow > 18) return null;
             try {
                 const source = await load();
                 if (!source) return parentRequired() ? 'parent-required' : selected; // Web retains its neutral age screen.
+                if (beforeNativeCheck && !await beforeNativeCheck()) return null;
                 const range = readNativeAgeRange(await source.request());
                 if (parentRequired()) return 'parent-required';
+                // iOS emits unsupported only for versions before the native API exists.
+                // A refusal, failure or Android Play error must never be treated as this case.
+                if (source.legacyIosFallback && range.status === 'unsupported') return selected;
                 if (range.status !== 'shared') return null;
                 const youngest = range.minimumAge ?? 0;
                 const indicated = youngest < parentRequiredBelow ? 'parent-required' : youngest < 18 ? 'minor' : 'adult';

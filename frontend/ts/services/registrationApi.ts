@@ -58,12 +58,33 @@ export function readRegistrationConfig(value: unknown): RegistrationConfig | nul
 
 /** No browser storage or credentials; the explicit server policy selects the anonymous grant contract. */
 export function createRegistrationApi(apiBase: string, fetchRequest: typeof fetch = fetch,
-    options: { requireChildAudience?: boolean } = {}) {
+    options: { requireChildAudience?: boolean; alreadyLocked?: boolean; timeoutMs?: number } = {}) {
+    async function requestJson(url: string, init: RequestInit) {
+        if (!options.requireChildAudience) {
+            const response = await fetchRequest(url, init);
+            return { response, result: await response.json() as unknown };
+        }
+        const controller = new AbortController();
+        const outer = init.signal;
+        const abort = () => controller.abort();
+        if (outer?.aborted) throw new DOMException('Aborted', 'AbortError');
+        outer?.addEventListener('abort', abort, { once: true });
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        try {
+            const timeout = new Promise<never>((_resolve, reject) => {
+                timer = setTimeout(() => { controller.abort(); reject(new Error('Request timed out')); }, options.timeoutMs ?? 15_000);
+            });
+            return await Promise.race([timeout, (async () => {
+                const response = await fetchRequest(url, { ...init, signal: controller.signal });
+                return { response, result: await response.json() as unknown };
+            })()]);
+        } finally { if (timer) clearTimeout(timer); outer?.removeEventListener('abort', abort); }
+    }
     return {
         async config(signal?: AbortSignal): Promise<RegistrationConfig | null> {
             try {
-                const response = await fetchRequest(`${apiBase}/auth/registration/config`, { credentials: 'include', signal });
-                const policy = response.ok ? readRegistrationConfig(await response.json()) : null;
+                const { response, result } = await requestJson(`${apiBase}/auth/registration/config`, { credentials: 'include', signal });
+                const policy = response.ok ? readRegistrationConfig(result) : null;
                 return options.requireChildAudience && policy?.enabled && !supportsChildAudience(policy) ? null : policy;
             } catch { return null; }
         },
@@ -72,11 +93,16 @@ export function createRegistrationApi(apiBase: string, fetchRequest: typeof fetc
                 return { error: 'REGISTRATION_REQUIRED' };
             }
             try {
-                const response = await fetchRequest(`${apiBase}/auth/registration/begin`, { method: 'POST', credentials: 'include',
+                const send = async (): Promise<RegistrationResult> => {
+                if (options.requireChildAudience) {
+                    const { response: boot, result } = await requestJson(`${apiBase}/auth/registration/bootstrap`, { method: 'POST', credentials: 'include',
+                        headers: { 'Content-Type': 'application/json' }, body: '{}' });
+                    if (!boot.ok || !record(result) || !keys(result, 'ready') || result.ready !== true) return { error: 'UNAVAILABLE' };
+                }
+                const { response, result } = await requestJson(`${apiBase}/auth/registration/begin`, { method: 'POST', credentials: 'include',
                     headers: { 'Content-Type': 'application/json' }, body: JSON.stringify('country' in input
                         ? { country: input.country, ageBand: input.ageBand, policyVersion: input.policyVersion }
                         : { policyVersion: input.policyVersion }) });
-                const result: unknown = await response.json();
                 if (!record(result)) return { error: 'UNAVAILABLE' };
                 if (response.status === 200 && keys(result, 'authorized,expiresInSeconds,scoreVisibility') && result.authorized === true
                     && (!('country' in input) || input.ageBand !== 'parent-required')
@@ -86,14 +112,65 @@ export function createRegistrationApi(apiBase: string, fetchRequest: typeof fetc
                     PARENT_REQUIRED: 403, INVALID_CONTEXT: 403, REGISTRATION_REQUIRED: 403, RATE_LIMITED: 429, UNAVAILABLE: 503 };
                 if (keys(result, 'error') && typeof result.error === 'string' && Object.prototype.hasOwnProperty.call(statuses, result.error)
                     && statuses[result.error] === response.status) return { error: result.error };
+                return { error: 'UNAVAILABLE' };
+                };
+                if (!options.requireChildAudience) return await send();
+                // Establish the cookie once across tabs before observing any age.
+                if (typeof navigator === 'undefined' || !navigator.locks?.request) return { error: 'UNAVAILABLE' };
+                if (options.alreadyLocked) return await send();
+                return await navigator.locks.request('ludolume-auth-cookie-v1', { mode: 'exclusive' }, send);
             } catch { /* Uncertain delivery cannot authorize the credential form. */ }
             return { error: 'UNAVAILABLE' };
         },
+        async beginNativeAgeCheck(): Promise<string | null> {
+            if (!options.requireChildAudience || typeof navigator === 'undefined' || !navigator.locks?.request) return null;
+            const run = async (): Promise<string | null> => {
+                const init = { method: 'POST', credentials: 'include' as const,
+                    headers: { 'Content-Type': 'application/json' }, body: '{}' };
+                const { response: boot, result: ready } = await requestJson(`${apiBase}/auth/registration/bootstrap`, init);
+                if (!boot.ok || !record(ready) || !keys(ready, 'ready') || ready.ready !== true) return null;
+                const { response, result } = await requestJson(`${apiBase}/auth/registration/age-check/start`, init);
+                return response.ok && record(result) && keys(result, 'attempt') && typeof result.attempt === 'string'
+                    && /^[A-Za-z0-9_-]{43}$/u.test(result.attempt) ? result.attempt : null;
+            };
+            try { return options.alreadyLocked ? await run()
+                : await navigator.locks.request('ludolume-auth-cookie-v1', { mode: 'exclusive' }, run); }
+            catch { return null; }
+        },
+        async finishNativeAgeCheck(input: Readonly<{ attempt: string; country: string;
+            ageBand: 'adult' | 'minor' | 'parent-required'; policyVersion: string }>): Promise<boolean> {
+            if (!options.requireChildAudience || typeof navigator === 'undefined' || !navigator.locks?.request
+                || !/^[A-Za-z0-9_-]{43}$/u.test(input.attempt)) return false;
+            const run = async (): Promise<boolean> => {
+                const { response, result } = await requestJson(`${apiBase}/auth/registration/age-check/finish`, {
+                    method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ attempt: input.attempt, country: input.country, ageBand: input.ageBand, policyVersion: input.policyVersion }) });
+                return response.ok && record(result) && keys(result, 'observed') && result.observed === true;
+            };
+            try { return options.alreadyLocked ? await run()
+                : await navigator.locks.request('ludolume-auth-cookie-v1', { mode: 'exclusive' }, run); }
+            catch { return false; }
+        },
+        async observe(input: Readonly<{ country: string; ageBand: 'minor' | 'parent-required'; policyVersion: string }>): Promise<boolean> {
+            if (!options.requireChildAudience || typeof navigator === 'undefined' || !navigator.locks?.request
+                || !['minor', 'parent-required'].includes(input.ageBand)) return false;
+            const send = async (): Promise<boolean> => {
+                const init = { method: 'POST', credentials: 'include' as const,
+                    headers: { 'Content-Type': 'application/json' } };
+                const { response: boot, result: ready } = await requestJson(`${apiBase}/auth/registration/bootstrap`, { ...init, body: '{}' });
+                if (!boot.ok || !record(ready) || !keys(ready, 'ready') || ready.ready !== true) return false;
+                const { response: observed, result } = await requestJson(`${apiBase}/auth/registration/observe`, { ...init,
+                    body: JSON.stringify({ country: input.country, ageBand: input.ageBand, policyVersion: input.policyVersion }) });
+                return observed.ok && record(result) && keys(result, 'observed') && result.observed === true;
+            };
+            try { return options.alreadyLocked ? await send()
+                : await navigator.locks.request('ludolume-auth-cookie-v1', { mode: 'exclusive' }, send); }
+            catch { return false; }
+        },
         async cancel(): Promise<boolean> {
             try {
-                const response = await fetchRequest(`${apiBase}/auth/registration/cancel`, { method: 'POST', credentials: 'include',
+                const { response, result } = await requestJson(`${apiBase}/auth/registration/cancel`, { method: 'POST', credentials: 'include',
                     headers: { 'Content-Type': 'application/json' }, body: '{}' });
-                const result: unknown = await response.json();
                 return response.status === 200 && record(result) && keys(result, 'cancelled') && result.cancelled === true;
             } catch { return false; }
         },

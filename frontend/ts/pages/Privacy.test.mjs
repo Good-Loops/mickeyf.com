@@ -54,6 +54,22 @@ test('Portuguese notice includes every English section and both separate permiss
     assert.match(translated, /Não envie senhas ou códigos de acesso/u);
 });
 
+test('both notices describe entered age, server screening and older iOS fallback', () => {
+    const section = (sections, id) => sections.find(item => item.id === id)?.text ?? '';
+    const englishAge = section(notice.sections, 'children');
+    const portugueseAge = section(notice.ptBR.sections, 'children');
+    const englishScreen = section(notice.sections, 'age-assurance');
+    const portugueseScreen = section(notice.ptBR.sections, 'age-assurance');
+    assert.match(englishAge, /age in years.*broad category.*country to our server/u);
+    assert.match(portugueseAge, /idade em anos.*categoria ampla.*país ao nosso servidor/u);
+    assert.match(englishScreen, /iOS versions before the native age-range API.*age entered/u);
+    assert.match(portugueseScreen, /versões do iOS anteriores.*idade informada/u);
+    assert.match(englishScreen, /pseudonymous server records.*up to 24 hours.*removed during maintenance/u);
+    assert.match(portugueseScreen, /registros pseudonimizados.*até 24 horas.*removidos durante a manutenção/u);
+    assert.match(englishScreen, /country and broad age category/u);
+    assert.match(portugueseScreen, /país e uma categoria etária ampla/u);
+});
+
 test('public deletion section offers browser controls and a scoped email request without an authenticated session', () => {
     const deletion = markup.match(/<section aria-labelledby="privacy-deletion">([\s\S]*?)<\/section>/u)?.[1];
     assert.ok(deletion, 'the public notice must include a directly linkable deletion section');

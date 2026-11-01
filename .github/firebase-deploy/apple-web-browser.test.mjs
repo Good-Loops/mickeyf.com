@@ -58,6 +58,7 @@ async function fixture(t, mode = 'success') {
                 enabled: true, audience: 'children-included', creationEnabled: true, policyVersion: 'synthetic-reviewed', parentRegistrationAvailable: true,
                 countries: [{ country: 'US', parentRequiredBelow: 13, adultFrom: 18 }],
             };
+            else if (url.pathname === '/auth/registration/bootstrap') response = { ready: true };
             else if (url.pathname === '/auth/registration/begin') {
                 assert.deepEqual(body, { country: 'US', ageBand: 'adult', policyVersion: 'synthetic-reviewed' });
                 response = { authorized: true, expiresInSeconds: 300, scoreVisibility: 'private' };
@@ -73,7 +74,7 @@ async function fixture(t, mode = 'success') {
     // A fresh isolated Vite cache compiles the module graph before DOMContentLoaded.
     await page.goto(`${origin}/login`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
     await page.locator('#registration-country').selectOption('US');
-    await page.locator('#registration-age').selectOption('adult');
+    await page.locator('#registration-age').fill('18');
     await page.getByRole('button', { name: 'Continue', exact: true }).click();
     return { page, calls };
 }

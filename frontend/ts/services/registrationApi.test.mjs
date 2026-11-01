@@ -88,3 +88,94 @@ test('cancellation never treats a malformed response as proof', async () => {
         assert.equal(await createRegistrationApi('', async () => response(body)).cancel(), false);
     }
 });
+
+Object.defineProperty(navigator, 'locks', { value: undefined, configurable: true, writable: true });
+
+test('child screening fails closed without a shared browser lock and on a rejected bootstrap', async t => {
+    const calls = [];
+    const fetcher = async url => { calls.push(url); return response({ ready: true }); };
+    navigator.locks = undefined;
+    assert.deepEqual(await createRegistrationApi('', fetcher, { requireChildAudience: true }).begin(input), { error: 'UNAVAILABLE' });
+    assert.deepEqual(calls, []);
+    navigator.locks = { request: async (_name, _options, work) => work() };
+    assert.deepEqual(await createRegistrationApi('', async () => response({ ready: false }), { requireChildAudience: true }).begin(input),
+        { error: 'UNAVAILABLE' });
+});
+
+test('concurrent screens hold the browser lock through bootstrap and age observation', async t => {
+    let tail = Promise.resolve();
+    navigator.locks = { request(_name, _options, work) {
+        const current = tail.then(work);
+        tail = current.catch(() => {});
+        return current;
+    } };
+    t.after(() => { navigator.locks = undefined; });
+    const calls = []; let release;
+    const waiting = new Promise(resolve => { release = resolve; });
+    const fetcher = async (url, options) => {
+        const band = options.body === '{}' ? 'bootstrap' : JSON.parse(options.body).ageBand;
+        calls.push(band);
+        if (band === 'parent-required') { await waiting; return response({ error: 'PARENT_REQUIRED' }, 403); }
+        return response(band === 'bootstrap' ? { ready: true } : approved);
+    };
+    const apiA = createRegistrationApi('', fetcher, { requireChildAudience: true });
+    const apiB = createRegistrationApi('', fetcher, { requireChildAudience: true });
+    const younger = apiA.begin({ ...input, ageBand: 'parent-required' });
+    const adult = apiB.begin({ ...input, ageBand: 'adult' });
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(calls, ['bootstrap', 'parent-required']);
+    release();
+    await younger; await adult;
+    assert.deepEqual(calls, ['bootstrap', 'parent-required', 'bootstrap', 'adult']);
+});
+
+test('screening bootstrap waits for a concurrent login in another auth instance', async t => {
+    let tail = Promise.resolve();
+    navigator.locks = { request(_name, _options, work) {
+        const current = tail.then(work); tail = current.catch(() => {}); return current;
+    } };
+    t.after(() => { navigator.locks = undefined; });
+    let finishLogin;
+    const delayedLogin = new Promise(resolve => { finishLogin = resolve; });
+    const calls = [];
+    const fetcher = async (url, options = {}) => {
+        calls.push(url);
+        if (url === '/api/users') return delayedLogin;
+        if (url.endsWith('/verify-token')) return response({ loggedIn: true, user_name: 'test-user' });
+        if (url.endsWith('/registration/config')) return response({ enabled: true, audience: 'children-included', creationEnabled: true,
+            policyVersion: input.policyVersion, parentRegistrationAvailable: true,
+            countries: [{ country: 'ZZ', parentRequiredBelow: 15, adultFrom: 18 }] });
+        if (url.endsWith('/registration/bootstrap')) return response({ error: 'INVALID_CONTEXT' }, 403);
+        if (url.endsWith('/registration/begin')) return response(approved);
+        throw new Error('unexpected synthetic endpoint');
+    };
+    const loginApi = createAuthApi('', fetcher, undefined, { requireChildAudience: true });
+    const signupApi = createAuthApi('', fetcher, undefined, { requireChildAudience: true });
+    const login = loginApi.loginRequest({ user_name: 'test-user', user_password: 'synthetic' });
+    const screening = signupApi.beginRegistration(input);
+    await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(calls, ['/api/users']);
+    finishLogin(response({ success: true, user_name: 'test-user' }));
+    assert.deepEqual(await login, { success: true, user_name: 'test-user' });
+    assert.deepEqual(await screening, { error: 'UNAVAILABLE' });
+    assert.deepEqual(calls, ['/api/users', '/auth/verify-token', '/auth/registration/config',
+        '/auth/registration/bootstrap']);
+});
+
+test('stalled screening transport is aborted and cannot hold the shared lock indefinitely', async t => {
+    let tail = Promise.resolve();
+    navigator.locks = { request(_name, _options, work) { const current = tail.then(work); tail = current.catch(() => {}); return current; } };
+    t.after(() => { navigator.locks = undefined; });
+    let stalledSignal;
+    const stalled = createRegistrationApi('', async (_url, init) => {
+        stalledSignal = init.signal;
+        return new Promise(() => {});
+    }, { requireChildAudience: true, timeoutMs: 20 });
+    const waiting = stalled.observe({ ...input, ageBand: 'minor' });
+    const available = createRegistrationApi('', async url => response(url.endsWith('/bootstrap') ? { ready: true } : approved),
+        { requireChildAudience: true, timeoutMs: 200 });
+    const next = available.begin(input);
+    assert.equal(await waiting, false);
+    assert.equal(stalledSignal.aborted, true);
+    assert.deepEqual(await next, approved);
+});

@@ -20,9 +20,13 @@ export const PROVIDER_FIXED_ENV = Object.freeze({
     APPLE_SIGN_IN_PRIVATE_KEY_SECRET_VERSION: 'projects/1012884798546/secrets/ludolume-apple-signin-private-key/versions/1',
     APPLE_TOKEN_ENCRYPTION_KEYS_SECRET_VERSION: 'projects/1012884798546/secrets/ludolume-apple-token-encryption-keys/versions/1',
 });
-// Remains empty until actual Play app-signing certificates and their OAuth clients are reviewed.
-// Upload/debug certificates do not identify apps delivered by Play.
-export const PROVIDER_ANDROID_PRESENTER_PINS = Object.freeze([]);
+// Play-delivered packages use the app-signing certificate, not the upload key.
+export const PROVIDER_ANDROID_PRESENTER_PINS = Object.freeze([Object.freeze({
+    packageName: 'com.mickeyf.app', signer: 'play-app-signing',
+    certificateSha1: 'D7F8253276437C861ED1332EC25D29412C2B5FAB',
+    certificateSha256: 'A0129DF3CF1C6B64F60C97C6254DCE67B5DD141C64126084AD2316B1177C7135',
+    clientId: '1012884798546-np0a4m1eq3nm948m5o8ocpck3qcflpk4.apps.googleusercontent.com',
+})]);
 const androidEnvironmentKeys = ['GOOGLE_ANDROID_CLIENT_ID', 'GOOGLE_ANDROID_CLIENT_IDS'];
 const googleClientId = value => typeof value === 'string' && value.length <= 255 && value === value.trim()
     && /^[A-Za-z0-9_-]+\.apps\.googleusercontent\.com$/u.test(value);

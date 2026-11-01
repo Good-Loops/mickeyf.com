@@ -100,6 +100,8 @@ test('strict paused creation allows eligible adult provider login without allowi
             REGISTRATION_COUNTRY_RULES: '{"US":{"parentRequiredBelow":13}}' })!;
         let eligible = false;
         const database = { async query({ sql }: { sql: string }) {
+            if (sql.startsWith('SELECT policy_digest, country_code')) return [[]];
+        if (sql.startsWith('SELECT binding_hash, policy_digest')) return [[]];
             assert.match(sql, /^SELECT country_code AS country/u);
             return [eligible ? [{ country: 'US', ageBand: 'adult' }] : []];
         } } as unknown as Pick<Pool, 'query'>;
@@ -126,6 +128,8 @@ test('minor provider login fails before account lookup and is rechecked after th
         REGISTRATION_COUNTRY_RULES: '{"US":{"parentRequiredBelow":13}}' })!;
     let ageBand = 'minor';
     const database = { async query({ sql }: { sql: string }) {
+        if (sql.startsWith('SELECT policy_digest, country_code')) return [[]];
+        if (sql.startsWith('SELECT binding_hash, policy_digest')) return [[]];
         assert.match(sql, /^SELECT country_code AS country/u);
         return [[{ country: 'US', ageBand }]];
     } } as unknown as Pick<Pool, 'query'>;
@@ -153,7 +157,7 @@ function signedToken(nonce: string, provider: IdentityProvider = 'google', extra
     }, key.privateKey, { algorithm: 'RS256', keyid: 'test-key' });
 }
 
-async function trustedContext(currentAccount?: ProviderAccount, bindingByte = 1) {
+async function trustedContext(currentAccount?: ProviderAccount, bindingByte = 1, screening = false) {
     const database = {
         async query(_query: unknown, values: unknown[]) {
             assert.equal(values[0], currentAccount?.userId);
@@ -163,7 +167,7 @@ async function trustedContext(currentAccount?: ProviderAccount, bindingByte = 1)
     const request = {
         method: 'POST', headers: { origin, 'content-type': 'application/json' }, cookies: {},
         signedCookies: { session: currentAccount ? issueSessionToken(currentAccount, secret).token
-            : ['provider', 'v1', Date.now(), Buffer.alloc(32, bindingByte).toString('base64url')].join(':') },
+            : ['provider', screening ? 'v2' : 'v1', Date.now(), Buffer.alloc(32, bindingByte).toString('base64url')].join(':') },
     };
     const context = await createProviderAuthContextReader({ database, sessionSecret: secret, allowedOrigins: [origin] })(request);
     assert(context);
@@ -171,7 +175,7 @@ async function trustedContext(currentAccount?: ProviderAccount, bindingByte = 1)
 }
 
 async function fixture(currentAccount?: ProviderAccount, newActions = false, appleActions = false, appleClientKey = 'apple-ios') {
-    const context = await trustedContext(currentAccount);
+    const context = await trustedContext(currentAccount, 1, newActions);
     const events: string[] = [];
     const pending = new Map<string, ProviderAttempt>();
     const created: ProviderAttempt[] = [];

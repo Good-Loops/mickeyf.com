@@ -42,7 +42,7 @@ after(async () => {
     if (server) await new Promise((resolve, reject) => server.close(error => error ? reject(error) : resolve()));
 });
 
-async function fixture(t, initialConfig) {
+async function fixture(t, initialConfig, { bootstrapAvailable = true } = {}) {
     let config = initialConfig;
     const calls = [];
     const context = await browser.newContext({ viewport: { width: 390, height: 900 } });
@@ -58,8 +58,14 @@ async function fixture(t, initialConfig) {
                 body: JSON.stringify(config ?? { error: 'UNAVAILABLE' }) });
         }
         if (url.pathname === '/auth/providers/config') return route.fulfill({ json: { clients: [] } });
+        if (url.pathname === '/auth/registration/bootstrap') return bootstrapAvailable
+            ? route.fulfill({ json: { ready: true } })
+            : route.fulfill({ status: 503, json: { error: 'UNAVAILABLE' } });
+        if (url.pathname === '/auth/registration/observe') return route.fulfill({ json: { observed: true } });
         if (url.pathname === '/auth/registration/begin') {
-            assert.deepEqual(route.request().postDataJSON(), { country: 'US', ageBand: 'adult', policyVersion: policy.policyVersion });
+            if (route.request().postDataJSON()?.ageBand === 'parent-required') {
+                return route.fulfill({ status: 403, json: { error: 'PARENT_REQUIRED' } });
+            }
             return route.fulfill({ json: { authorized: true, expiresInSeconds: 300, scoreVisibility: 'private' } });
         }
         return route.fulfill({ json: { loggedIn: false } });
@@ -98,7 +104,7 @@ test('built website requires country and age eligibility before signup when regi
     assert.equal(await page.locator('#signup-username, #signup-email, #signup-password').count(), 0);
     assertNoSignupRequests(calls);
     await page.locator('#registration-country').selectOption('US');
-    await page.locator('#registration-age').selectOption('adult');
+    await page.locator('#registration-age').fill('18');
     await page.getByRole('button', { name: 'Continue', exact: true }).click();
     await page.locator('#signup-password').waitFor();
     assert.equal(await page.locator('#signup-username, #signup-email, #signup-password').count(), 3);
@@ -107,3 +113,29 @@ test('built website requires country and age eligibility before signup when regi
     // All endpoints are synthetic, and merely displaying the form must not create a user.
     assert.deepEqual(calls.filter(call => ['/auth/providers/complete', '/api/users'].includes(call.path)), []);
 });
+
+test('built website does not reveal credentials when the registration bootstrap fails', async t => {
+    const { page, calls } = await fixture(t, policy, { bootstrapAvailable: false });
+    await page.locator('#registration-country').selectOption('US');
+    await page.locator('#registration-age').fill('18');
+    await page.getByRole('button', { name: 'Continue', exact: true }).click();
+    await page.getByRole('alert').filter({ hasText: 'We could not confirm this registration step.' }).waitFor();
+    assert.equal(await page.locator('#signup-username, #signup-email, #signup-password').count(), 0);
+    assertNoSignupRequests(calls);
+});
+
+for (const { country, age } of [{ country: 'US', age: '12' }, { country: 'BR', age: '17' }]) {
+    test(`built website routes ${country} age ${age} to parent-led registration`, async t => {
+        const { page, calls } = await fixture(t, policy);
+        await page.locator('#registration-country').selectOption(country);
+        await page.locator('#registration-age').fill(age);
+        const begin = page.waitForResponse(response => new URL(response.url()).pathname === '/auth/registration/begin');
+        await page.getByRole('button', { name: 'Continue', exact: true }).click();
+        await begin;
+        await page.getByRole('heading', { name: 'A parent or guardian needs to lead this step' }).waitFor();
+        assert.equal(await page.locator('#signup-username, #signup-email, #signup-password').count(), 0);
+        assert.deepEqual(calls.find(call => call.path === '/auth/registration/begin')?.body,
+            { country, ageBand: 'parent-required', policyVersion: policy.policyVersion });
+        assert.deepEqual(calls.filter(call => ['/auth/providers/complete', '/api/users'].includes(call.path)), []);
+    });
+}

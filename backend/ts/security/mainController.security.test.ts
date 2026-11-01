@@ -248,9 +248,18 @@ test('login commits a revocable session before its signed cookie, with matching 
                 };
             },
         } as unknown as Pick<Pool, 'getConnection' | 'query'>;
-        await createTestController(database, false)(request({ type: 'login', user_name: 'player',
+        // Existing password login remains available even when new-account
+        // eligibility is blocked by an outstanding native screening check.
+        const controller = createMainController({ database, sessionSecret, isProduction: false,
+            p4VegaScoreSubmissionsEnabled: false, allowedMutationOrigins: origins,
+            registration: { ...createRegistrationAuthorization(database),
+                assertAvailable: async () => { throw new Error('screening is pending'); } } });
+        const login = request({ type: 'login', user_name: 'player',
             user_password: 'valid-password', ...(rememberMe === undefined ? {} : { remember_me: rememberMe }) },
-            undefined, { origin }), response);
+        undefined, { origin });
+        login.signedCookies = { [origin === origins[1] ? 'session' : '__session']:
+            `provider:v2:${Date.now()}:${Buffer.alloc(32, 1).toString('base64url')}` };
+        await controller(login, response);
 
         assert.equal(committed, true);
         assert.deepEqual(state.body, { success: true, user_name: 'player' });
