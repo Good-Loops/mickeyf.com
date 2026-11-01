@@ -438,6 +438,7 @@ def fails(call):
 test('source preflight accepts exact image-only contract and rejects source/approval/image/step/trigger drift', () => {
     const code = fixtureCode + String.raw`
 verify_source(build,trigger,pins,now)
+verify_source(build,{**trigger,"disabled":True},pins,now)
 for path, value in [
     (("source","gitSource","revision"),"main"), (("sourceProvenance","resolvedGitSource","revision"),"b"*40),
     (("approval","state"),"PENDING"), (("serviceAccount",),DEPLOY_SA), (("finishTime",),"2026-09-08T12:00:00Z"),
@@ -451,7 +452,7 @@ for path, value in [
     for key in path[:-1]: cursor=cursor[key]
     cursor[path[-1]]=value
     fails(lambda: verify_source(changed,trigger,pins,now))
-for change in [{"build":{}},{"disabled":True},{"approvalConfig":{"approvalRequired":False}},{"github":{}},{"sourceToBuild":{}}]:
+for change in [{"build":{}},{"disabled":"true"},{"approvalConfig":{"approvalRequired":False}},{"github":{}},{"sourceToBuild":{}}]:
     fails(lambda: verify_source(build,{**trigger,**change},pins,now))
 print("source fixtures passed")
 `;
