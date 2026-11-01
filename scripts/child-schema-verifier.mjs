@@ -97,7 +97,7 @@ export function createChildSchemaVerifier({ run = runVerification, environment =
 const TRIGGERS = ['9fbd63bf-d129-4877-bb26-26d38e1ca468', '181b8f84-2303-4c2b-a03e-92dae4b1938c',
     '1c9c6502-f53f-4e04-ac9e-06bf49668acf', '648fadca-3cd1-4b57-9d35-0f62a1468443',
     'd71109da-8350-4f2f-a3be-2053bb6ccd45', 'ef5a2981-95be-4f4d-af91-f997fde73356',
-    'eb4a2af9-2d5b-45a2-aba8-63778520566e'].sort();
+    'eb4a2af9-2d5b-45a2-aba8-63778520566e', 'a0bbef22-8fad-40b1-ab8a-30337488b450'].sort();
 const DRAIN_MS = 300_000;
 const PROOF_FIELDS = ['schemaVersion', 'operation', 'observedAt', 'sourceCommit', 'sqlSha256', 'target',
     'pinsSha256', 'serviceSha256', 'candidateSha256', 'fallbackSha256', 'readerSince', 'readerVerifiedAt',
@@ -213,7 +213,7 @@ export function createChildMigrationPrerequisiteReader(token, fetcher = fetch, {
         ]);
         requireThat(same(triggers.map(item => item?.id).sort(), TRIGGERS) && triggers.every(item => item.disabled === true)
             && regionalTriggers.length === 0 && globalBuilds.length === 0 && regionalBuilds.length === 0,
-        'The exact seven global triggers must remain disabled with no regional triggers or ongoing builds');
+        'The exact eight global triggers must remain disabled with no regional triggers or ongoing builds');
         return fingerprint({ triggers: triggers.sort((a, b) => a.id.localeCompare(b.id)), regionalTriggers, globalBuilds, regionalBuilds });
     }
     function settled(service, pins) {
