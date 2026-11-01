@@ -69,7 +69,7 @@ def sanitized_bundle_summary(bundle):
             'unknown_key_count': len(item['other_keys']),
         })
     return {'manifests': manifests, 'skipped_symlinks': raw['skipped_symlinks'],
-            'complete': raw['skipped_symlinks'] == 0 and all(
+            'known_collection_vocabulary_complete': raw['skipped_symlinks'] == 0 and all(
                 item['unknown_collected_type_count'] == 0 and item['unknown_purpose_count'] == 0
                 and item['unknown_key_count'] == 0 for item in manifests)}
 
@@ -121,10 +121,11 @@ def inspect_owned(env):
     export_items = {(item['source_id'], item['manifest_sha256']) for item in export['manifests']}
     return {'kind': 'custom signed-build manifest inventory; not an Apple Organizer report',
             'signature_verification': 'not performed by this helper; caller must independently verify both artifacts',
-            'limitations': 'Manifests declare SDK data uses; they do not prove actual collection, sharing or runtime behavior.',
+            'limitations': 'Only known collection types, purposes and top-level keys are assessed; unknown nested fields and accessed API reasons are not checked. Manifests do not prove collection, sharing or runtime behavior.',
             'archive': archive, 'exported_application': export,
             'manifest_path_hash_and_content_sets_match': archive_items == export_items,
-            'comparison_complete': archive['complete'] and export['complete']}
+            'known_collection_vocabulary_complete_in_both': (
+                archive['known_collection_vocabulary_complete'] and export['known_collection_vocabulary_complete'])}
 
 
 def main():
@@ -133,10 +134,15 @@ def main():
     print(json.dumps(inspect_owned(os.environ), indent=2, sort_keys=True))
 
 
-if __name__ == '__main__':
+def run_cli():
     try:
         main()
-    except (OSError, ValueError, json.JSONDecodeError, TypeError):
+    except Exception:
         # No raw filesystem path, manifest contents, or signing information in logs.
         print('Signed privacy inventory failed; no raw inspection details were logged.', file=sys.stderr)
-        sys.exit(1)
+        return 1
+    return 0
+
+
+if __name__ == '__main__':
+    sys.exit(run_cli())

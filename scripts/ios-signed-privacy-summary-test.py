@@ -1,4 +1,6 @@
 import importlib.util
+import contextlib
+import io
 import json
 import os
 from pathlib import Path
@@ -7,6 +9,7 @@ import sys
 import tempfile
 import unittest
 from unittest import mock
+from xml.parsers.expat import ExpatError
 
 sys.dont_write_bytecode = True
 spec = importlib.util.spec_from_file_location('summary', Path(__file__).with_name('ios-signed-privacy-summary.py'))
@@ -44,7 +47,7 @@ class SignedPrivacySummaryTest(unittest.TestCase):
             root, env = self.make_fixture(temp)
             result = summary.inspect_owned(env)
             self.assertTrue(result['manifest_path_hash_and_content_sets_match'])
-            self.assertTrue(result['comparison_complete'])
+            self.assertTrue(result['known_collection_vocabulary_complete_in_both'])
             self.assertIn('not performed', result['signature_verification'])
             text = json.dumps(result)
             self.assertNotIn('private-source-name.example', text)
@@ -69,7 +72,7 @@ class SignedPrivacySummaryTest(unittest.TestCase):
             encoded = json.dumps(result)
             for value in ('SensitivePayloadValue', 'SecretCustomKey', 'SensitiveCustomDataType', 'SensitiveCustomPurpose'):
                 self.assertNotIn(value, encoded)
-            self.assertFalse(result['comparison_complete'])
+            self.assertFalse(result['known_collection_vocabulary_complete_in_both'])
             self.assertFalse(result['manifest_path_hash_and_content_sets_match'])
             item = result['exported_application']['manifests'][0]
             self.assertEqual(item['unknown_collected_type_count'], 1)
@@ -113,7 +116,7 @@ class SignedPrivacySummaryTest(unittest.TestCase):
                 self.skipTest('Symlink creation unavailable on this system')
             result = summary.inspect_owned(env)
             self.assertEqual(result['exported_application']['skipped_symlinks'], 1)
-            self.assertFalse(result['comparison_complete'])
+            self.assertFalse(result['known_collection_vocabulary_complete_in_both'])
 
     def test_real_directory_rejects_a_resolved_path_escape_without_symlink_privilege(self):
         with tempfile.TemporaryDirectory() as temp, tempfile.TemporaryDirectory() as outside:
@@ -131,6 +134,13 @@ class SignedPrivacySummaryTest(unittest.TestCase):
         with mock.patch.object(summary.sys, 'platform', 'darwin'), mock.patch.object(summary.sys, 'argv', ['summary', 'other.app']):
             with self.assertRaisesRegex(ValueError, 'no arguments'):
                 summary.main()
+
+    def test_cli_redacts_unexpected_parser_errors_and_paths(self):
+        with mock.patch.object(summary, 'main', side_effect=ExpatError('secret path or raw data')):
+            with contextlib.redirect_stderr(io.StringIO()) as error:
+                self.assertEqual(summary.run_cli(), 1)
+            self.assertIn('no raw inspection details', error.getvalue())
+            self.assertNotIn('secret path or raw data', error.getvalue())
 
 
 if __name__ == '__main__':

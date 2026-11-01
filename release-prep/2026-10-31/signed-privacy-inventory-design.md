@@ -11,15 +11,18 @@ It can compare app-bundle manifests inside a future owned archive and the IPA's
 extracted application, emitting a bounded summary rather than the signed app,
 raw manifests, domains, arbitrary path names, unknown strings, or credentials.
 SDK names in that summary are recognized path components, not proof of SDK
-identity or runtime collection. Skipped symlinks, unknown keys, data types or
-purposes make the summary explicitly incomplete. An empty or unreadable scan
-fails closed.
+identity or runtime collection. Skipped symlinks, unknown top-level keys,
+collected-data types or purposes make its known-collection vocabulary check
+incomplete. It does not examine unknown fields nested inside manifest entries
+or assess accessed-API reasons. An empty or unreadable scan fails closed.
 
 The helper itself does **not** verify a code signature or the claimed bundle
 identity. Before any future integration, the signing job must verify archive
 and exported code signatures, identity, entitlements and manifest coverage,
 invoke it only within the same owned run, and independently review and test how
-the bounded output is handled. GitHub Actions logs and summaries for this
+the bounded output is handled. Scanning must occur after build subprocesses
+have stopped modifying the inspected directories; the helper does not protect
+against concurrent path swaps. GitHub Actions logs and summaries for this
 public repository are public. It must not log credentials, raw signing output,
 archive files, or IPA contents. Keep the existing cleanup and protected
 environment restrictions. The current production workflow does not call this
