@@ -198,6 +198,23 @@ test('general signup has a separate version, no new parent-account creation, and
     python('compile(data["smoke"],"general-smoke","exec")', { smoke });
 });
 
+test('a paused general-audience baseline keeps all creation paths closed and cannot be a deployment candidate', () => {
+    const general = JSON.parse(read('./provider-release-general.json'));
+    const paused = { phase: 'paused-general', environment: providerReleaseEnvironment(general, true) };
+    assert.deepEqual(providerReleaseEnvironment(paused), paused.environment);
+    for (const name of PROVIDER_CREATION_FLAGS) {
+        const changed = structuredClone(paused);
+        changed.environment[name] = 'true';
+        assert.throws(() => providerReleaseEnvironment(changed), /requires explicit/u);
+    }
+    assert.throws(() => providerReleaseEnvironment({ ...childProviderConfig('prepare-child'), phase: 'paused-general' }), /general-audience/u);
+    const pins = fixture().pins.candidate.deployment;
+    pins.previousProviderRelease = paused;
+    assert.ok(render(pins).steps.length);
+    pins.providerRelease = paused;
+    assert.throws(() => render(pins), /existing baseline only/u);
+});
+
 test('provider rendering retains canonical scan/no-traffic checks and transports consent only as data', () => {
     const pins = fixture().pins.candidate.deployment; const config = render(pins);
     const bundle = JSON.parse(Buffer.from(config.steps[0].args.slice(3).join(''), 'base64'));

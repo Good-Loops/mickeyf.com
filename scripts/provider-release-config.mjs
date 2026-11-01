@@ -84,7 +84,7 @@ export function validateAndroidPresenterPins(env, reviewedPins) {
 /** Child preparation preserves reviewed login/management while every new-account path is closed. */
 export function providerReleaseEnvironment(config, rollback = false) {
     keys(config, ['phase', 'environment'], 'configuration');
-    if (!['prepare', 'prepare-child', 'active'].includes(config.phase)) fail('phase must be prepare, prepare-child or active');
+    if (!['prepare', 'prepare-child', 'paused-general', 'active'].includes(config.phase)) fail('invalid release phase');
     const env = config.environment;
     const generalAudience = record(env) && generalPolicyKeys.some(name => Object.hasOwn(env, name));
     const childAudience = record(env) && childPolicyKeys.some(name => Object.hasOwn(env, name));
@@ -95,6 +95,7 @@ export function providerReleaseEnvironment(config, rollback = false) {
         fail('children-included registration requires its reviewed staged policy, without general signup');
     }
     if (config.phase === 'prepare-child' && !childAudience) fail('prepare-child requires the explicit children-included policy');
+    if (config.phase === 'paused-general' && (!generalAudience || childAudience)) fail('paused-general requires a general-audience policy');
     for (const [name, value] of Object.entries(env)) {
         if (typeof value !== 'string' || value.length > 16_384 || value.includes('\0')) fail(`${name} must be bounded public text`);
     }
@@ -108,7 +109,7 @@ export function providerReleaseEnvironment(config, rollback = false) {
         for (const name of flags) {
             const publicClosed = childAudience && env.PUBLIC_SCORE_PARTICIPATION_ENABLED === 'false'
                 && ['PUBLIC_SCORE_PARTICIPATION_ENABLED', 'PUBLIC_SCORE_POLICY_REVIEWED', 'PUBLIC_SCORE_ASSURANCE_REVIEWED'].includes(name);
-            const creationClosed = config.phase === 'prepare-child' && PROVIDER_CREATION_FLAGS.includes(name);
+            const creationClosed = ['prepare-child', 'paused-general'].includes(config.phase) && PROVIDER_CREATION_FLAGS.includes(name);
             const expected = generalAudience && name === 'PARENT_REGISTRATION_CREATION_ENABLED' || publicClosed || creationClosed ? 'false' : 'true';
             if (env[name] !== expected) fail(`${config.phase} release requires explicit ${name}=${expected}`);
         }
