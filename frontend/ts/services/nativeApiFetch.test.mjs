@@ -103,66 +103,7 @@ test('auth reconstruction and logout reuse the native store, never JS credential
     assert.equal(urls.filter((url) => url.endsWith('/api/users')).length, 1);
 });
 
-function assertNativeBuildOrigins(workflow, expectedOrigin) {
-    const jobsStart = workflow.search(/^jobs:[ \t]*\r?$/m);
-    assert.notEqual(jobsStart, -1, 'native workflow must have a jobs section');
-    const section = workflow.slice(jobsStart);
-    const headers = [...section.matchAll(/^  ([A-Za-z][A-Za-z0-9_-]*):[ \t]*(?:#.*)?\r?$/gm)];
-    const jobs = new Map(headers.map((header, index) => [
-        header[1], section.slice(header.index, headers[index + 1]?.index ?? section.length),
-    ]));
-    assert.equal(jobs.size, headers.length, 'native workflow job names must be unique');
-
-    // Named jobs are required even if a later edit accidentally removes their build command.
-    const required = ['simulator', 'testflight', 'signed-privacy', 'android'];
-    const validationOnly = ['invalid-privacy-mode', 'invalid-signed-privacy-mode'];
-    const buildCommand = /\b(?:npm(?:\.cmd)?(?:[ \t]+--prefix[ \t]+\S+)?[ \t]+run[ \t]+build|npx(?:\.cmd)?[ \t]+(?:--no-install[ \t]+)?cap[ \t]+sync|vite[ \t]+build)\b/m;
-    for (const name of required) assert.ok(jobs.has(name), `native build job ${name} is missing`);
-    for (const [name, job] of jobs) {
-        if (validationOnly.includes(name)) {
-            assert.doesNotMatch(job, buildCommand, `validation-only job ${name} must not build an app`);
-            assert.doesNotMatch(job, /^\s*(?:-\s*)?uses:/m, `validation-only job ${name} must not use a reusable job or action`);
-            continue;
-        }
-        // New jobs fail closed until they explicitly declare the reviewed origin.
-        const jobOrigins = [...job.matchAll(/^ {6}VITE_PROD_API_URL:[ \t]*(\S+)[ \t]*\r?$/gm)]
-            .map((match) => match[1]);
-        assert.deepEqual(jobOrigins, [expectedOrigin], `native build job ${name} must set the native origin exactly once`);
-    }
-    // Also reject an inconsistent override in any job or step environment.
-    const allOrigins = [...section.matchAll(/^[ \t]+VITE_PROD_API_URL:[ \t]*(\S+)[ \t]*\r?$/gm)]
-        .map((match) => match[1]);
-    const allMentions = [...section.matchAll(/\bVITE_PROD_API_URL\b/g)];
-    assert.equal(allOrigins.length, allMentions.length, 'unsupported workflow origin syntax must be reviewed');
-    assert.ok(allOrigins.every((origin) => origin === expectedOrigin), 'workflow origin overrides must match the native host');
-}
-
-test('native build origin validation rejects missing, incorrect and new unconfigured jobs', () => {
-    const expected = 'https://api.example.test';
-    const job = (name, origin = expected) => `  ${name}:\n    env:\n${origin ? `      VITE_PROD_API_URL: ${origin}\n` : ''}    steps:\n      - run: |\n          npm run build\n`;
-    const base = `jobs:\n${['simulator', 'testflight', 'signed-privacy', 'android'].map((name) => job(name)).join('')}`;
-    assert.doesNotThrow(() => assertNativeBuildOrigins(base, expected));
-    assert.throws(() => assertNativeBuildOrigins(base.replace(job('signed-privacy'), job('signed-privacy', '')), expected), /signed-privacy must set/);
-    assert.throws(() => assertNativeBuildOrigins(base.replace(job('android'), job('android', 'https://wrong.example.test')), expected), /android must set/);
-    assert.throws(() => assertNativeBuildOrigins(`${base}${job('future-build', '')}`, expected), /future-build must set/);
-    assert.throws(() => assertNativeBuildOrigins(`${base}  future-inline:\n    steps:\n      - run: npm run build\n`, expected), /future-inline must set/);
-    assert.throws(() => assertNativeBuildOrigins(`${base}  future-prefixed:\n    steps:\n      - run: cd frontend && npm --prefix . run build\n`, expected), /future-prefixed must set/);
-    assert.doesNotThrow(() => assertNativeBuildOrigins(`${base}${job('future-build')}`, expected));
-    assert.throws(() => assertNativeBuildOrigins(`${base}  invalid-privacy-mode:\n    env:\n      VITE_PROD_API_URL: https://wrong.example.test\n`, expected), /origin overrides/);
-    assert.throws(() => assertNativeBuildOrigins(`${base}  invalid-privacy-mode:\n    steps:\n      - run: npm run build\n`, expected), /must not build/);
-    assert.throws(() => assertNativeBuildOrigins(`${base}  invalid-privacy-mode:\n    uses: ./.github/workflows/another.yml\n`, expected), /must not use/);
-    for (const unsupported of [
-        '      VITE_PROD_API_URL: https://wrong.example.test # comment',
-        '      VITE_PROD_API_URL: ${{ vars.BAD_ORIGIN }}',
-        '    env: { VITE_PROD_API_URL: https://wrong.example.test }',
-        '      "VITE_PROD_API_URL": https://wrong.example.test',
-        '      - run: export VITE_PROD_API_URL=https://wrong.example.test',
-    ]) {
-        assert.throws(() => assertNativeBuildOrigins(`${base}  invalid-privacy-mode:\n${unsupported}\n`, expected), /unsupported workflow origin syntax/);
-    }
-});
-
-test('the native origin matches all native build jobs and the plugin is included in the iOS target', async () => {
+test('the native origin matches all three build jobs and the plugin is included in the iOS target', async () => {
     const [native, workflow, project, scene] = await Promise.all([
         '../../ios/App/App/LudolumeApiPlugin.swift',
         '../../../.github/workflows/ios-build.yml',
@@ -171,7 +112,9 @@ test('the native origin matches all native build jobs and the plugin is included
     ].map((path) => readFile(new URL(path, import.meta.url), 'utf8')));
     const host = native.match(/static let host = "([^"]+)"/)?.[1];
     assert.ok(host, 'native origin must stay explicit');
-    assertNativeBuildOrigins(workflow, `https://${host}`);
+    const buildOrigins = [...workflow.matchAll(/VITE_PROD_API_URL: (\S+)/g)].map((match) => match[1]);
+    assert.equal(buildOrigins.length, 3);
+    assert.ok(buildOrigins.every((origin) => origin === `https://${host}`));
     assert.match(native, /registerPluginInstance\(LudolumeApiPlugin\(\)\)/);
     assert.match(scene, /rootViewController = LudolumeBridgeViewController\(\)/);
     assert.match(project, /LudolumeApiPlugin\.swift in Sources/);

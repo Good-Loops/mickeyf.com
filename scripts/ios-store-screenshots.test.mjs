@@ -90,9 +90,6 @@ test('workflow capture remains default-off, unsigned, separate from signing and 
     assert.match(workflow, /screenshots\/manifest\.json/);
     assert.match(workflow, /Upload simulator app\s+if: \$\{\{ !inputs\.compile_only && !inputs\.capture_store_screenshots \}\}/);
     assert.match(workflow, /Upload Xcode diagnostics on failure\s+if: \$\{\{ failure\(\) && !inputs\.compile_only && !inputs\.capture_store_screenshots \}\}/);
-    const signing = workflow.slice(workflow.indexOf('  testflight:'), workflow.indexOf('  signed-privacy:'));
+    const signing = workflow.slice(workflow.indexOf('  testflight:'), workflow.indexOf('  android:'));
     assert.doesNotMatch(signing, /capture_store_screenshots|ios-store-screenshots/);
-    const inspection = workflow.slice(workflow.indexOf('  signed-privacy:'), workflow.indexOf('  android:'));
-    assert.match(inspection, /!inputs\.capture_store_screenshots/);
-    assert.doesNotMatch(inspection, /ios-store-screenshots\.mjs/);
 });

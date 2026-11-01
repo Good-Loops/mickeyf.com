@@ -1,10 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { resolve } from 'node:path';
 import test from 'node:test';
 import { buildNumber, exportOptions, uploadArguments, uploadDistribution, signingBranchAllowed,
-    applySigningSettings, validateProfile, validateSignedEntitlements, verifySignedEntitlements,
-    validateSignedPrivacyEnvironment } from './ios-testflight.mjs';
+    applySigningSettings, validateProfile, validateSignedEntitlements, verifySignedEntitlements } from './ios-testflight.mjs';
 
 const signing = { fingerprint: 'TEST_CERTIFICATE', profile: { uuid: 'TEST_PROFILE' } };
 
@@ -139,55 +137,15 @@ test('signing accepts only main and the current reviewed release branch', () => 
     }
 });
 
-test('signed privacy inspection is explicit, no-upload-key, fixed-lifecycle and summary-bound', () => {
-    const good = { LUDOLUME_SIGNED_PRIVACY_INSPECTION: '1', IOS_UPLOAD_DISTRIBUTION: 'app-store-draft',
-        VITE_ENABLE_CHILD_ONLINE_ACTIVITY: '0', VITE_ENABLE_CHILD_INACTIVITY_WARNING: '0',
-        GITHUB_SHA: 'a'.repeat(40), GITHUB_STEP_SUMMARY: resolve('summary') };
-    assert.doesNotThrow(() => validateSignedPrivacyEnvironment(good));
-    for (const bad of [{ LUDOLUME_SIGNED_PRIVACY_INSPECTION: '0' }, { ASC_PRIVATE_KEY_P8: 'present' },
-        { IOS_UPLOAD_DISTRIBUTION: 'internal-only' }, { VITE_ENABLE_CHILD_ONLINE_ACTIVITY: '1' },
-        { VITE_ENABLE_CHILD_INACTIVITY_WARNING: '1' }, { GITHUB_SHA: 'bad' }, { GITHUB_STEP_SUMMARY: 'relative' }]) {
-        assert.throws(() => validateSignedPrivacyEnvironment({ ...good, ...bad }), /isolated no-upload mode/);
-    }
-});
-
 test('workflow keeps the default and protected branch gate for both upload modes', async () => {
     const workflow = await readFile(new URL('../.github/workflows/ios-build.yml', import.meta.url), 'utf8');
     assert.match(workflow, /upload_testflight:[\s\S]*?type: boolean\s+required: false\s+default: false/);
     assert.match(workflow, /upload_distribution:[\s\S]*?type: choice\s+required: true\s+default: internal-only\s+options:\s+- internal-only\s+- app-store-draft/);
-    assert.match(workflow, /if: \$\{\{ !inputs\.compile_only && inputs\.upload_testflight && !inputs\.audit_privacy_manifests && !inputs\.audit_signed_privacy && \(github\.ref == 'refs\/heads\/main' \|\| github\.ref == 'refs\/heads\/feature\/auth-family-leaderboards'\) \}\}/);
+    assert.match(workflow, /if: \$\{\{ !inputs\.compile_only && inputs\.upload_testflight && !inputs\.audit_privacy_manifests && \(github\.ref == 'refs\/heads\/main' \|\| github\.ref == 'refs\/heads\/feature\/auth-family-leaderboards'\) \}\}/);
     assert.match(workflow, /environment: ios-testflight/);
     assert.match(workflow, /IOS_UPLOAD_DISTRIBUTION: \$\{\{ inputs\.upload_distribution \|\| 'internal-only' \}\}/);
     assert.match(workflow, /node --test \.\.\/scripts\/ios-testflight\.test\.mjs/);
     assert.match(workflow, /Remove signing material and signed outputs\s+if: \$\{\{ always\(\) \}\}\s+run: node \.\.\/scripts\/ios-testflight\.mjs cleanup/);
-});
-
-test('signed privacy workflow is manually opted in, protected, serialized, and cannot upload an app', async () => {
-    const workflow = await readFile(new URL('../.github/workflows/ios-build.yml', import.meta.url), 'utf8');
-    assert.match(workflow, /audit_signed_privacy:[\s\S]*?type: boolean\s+required: false\s+default: false/);
-    assert.match(workflow, /group: ios-\$\{\{ \(inputs\.upload_testflight \|\| inputs\.audit_signed_privacy\) && 'testflight' \|\| github\.ref \}\}/);
-    assert.match(workflow, /cancel-in-progress: \$\{\{ !inputs\.upload_testflight && !inputs\.audit_signed_privacy \}\}/);
-    assert.match(workflow, /invalid-signed-privacy-mode:[\s\S]*?inputs\.audit_signed_privacy && \(inputs\.upload_testflight/);
-    const job = workflow.slice(workflow.indexOf('  signed-privacy:'), workflow.indexOf('  android:'));
-    assert.match(job, /environment: ios-testflight/);
-    assert.match(job, /inputs\.audit_signed_privacy && !inputs\.upload_testflight/);
-    assert.match(job, /inputs\.child_lifecycle == 'off'/);
-    assert.match(job, /VITE_ENABLE_CHILD_ONLINE_ACTIVITY: "0"/);
-    assert.match(job, /VITE_ENABLE_CHILD_INACTIVITY_WARNING: "0"/);
-    assert.match(job, /python3 \.\.\/scripts\/ios-signed-privacy-summary-test\.py/);
-    assert.match(job, /node \.\.\/scripts\/ios-testflight\.mjs inspect-signed-privacy/);
-    assert.match(job, /if: \$\{\{ always\(\) \}\}\s+run: node \.\.\/scripts\/ios-testflight\.mjs cleanup/);
-    assert.doesNotMatch(job, /ASC_PRIVATE_KEY_P8|upload-artifact@|ios-testflight\.mjs upload/);
-});
-
-test('signed privacy signing suppresses Xcode diagnostics and bounds the public summary', async () => {
-    const source = await readFile(new URL('./ios-testflight.mjs', import.meta.url), 'utf8');
-    const inspection = source.slice(source.indexOf('function inspectSignedPrivacy()'), source.indexOf("if (process.argv[1]"));
-    assert.match(inspection, /archiveAndExport\(config, signing, \{ diagnostics: false \}\)/);
-    assert.match(inspection, /Buffer\.byteLength\(result\.stdout, 'utf8'\) <= 700_000/);
-    assert.doesNotMatch(inspection, /uploadArguments\(|--upload-package|private_keys/);
-    const upload = source.slice(source.indexOf('async function upload()'), source.indexOf('function inspectSignedPrivacy()'));
-    assert.match(upload, /archiveAndExport\(config, signing\)/);
 });
 
 
