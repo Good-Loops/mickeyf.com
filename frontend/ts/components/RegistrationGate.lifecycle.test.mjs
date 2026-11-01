@@ -203,10 +203,36 @@ test('minor provider login shows a temporary notice and does not request a grant
     assert.equal(view.children.length, 0);
 });
 
-test('disabled policy explains that provider sign-in is unavailable', async t => {
+test('disabled policy explains available login choices without asking for an unavailable age check', async t => {
     const view = mount(t, { enabled: false }, 'provider-login'); view.render(); await view.settle();
     assert(view.find(node => node.type === 'p' && typeof node.props.children === 'string'
-        && node.props.children.startsWith('Google and Apple sign-in are temporarily unavailable.')));
+        && node.props.children === 'Google and Apple sign-in are currently unavailable.'));
+    assert(view.find(node => node.type === 'h2' && node.props.children === 'Other sign-in options'));
+    assert(view.find(node => node.props?.to === '/'));
+    assert.equal(view.find(node => node.type === 'button' && node.props.children === 'Check again'), undefined);
+    assert.equal(view.find(node => node.type === 'p' && typeof node.props.children === 'string'
+        && (node.props.children.includes('choose your country') || node.props.children.includes('parent-managed'))), undefined);
+    assert.equal(view.find(node => node.type === 'form' || node.type === 'select'), undefined);
+    assert.equal(view.children.length, 0);
+});
+
+test('provider availability is clearly labeled while loading and can be checked again', async t => {
+    let policy = null;
+    const view = mount(t, () => policy, 'provider-login'); view.render();
+    assert(view.find(node => node.type === 'p' && node.props.role === 'status' && node.props.children === 'Checking sign-in options…'));
+    await view.settle();
+    policy = creationPaused;
+    view.find(node => node.type === 'button' && node.props.children === 'Check again').props.onClick();
+    view.render(); await view.settle();
+    assert(view.find(node => node.type === 'p' && node.props.children === 'Choose your country and age range to continue.'));
+    assert.equal(view.children.length, 0, 'retry must not mount provider controls without a grant');
+    assert.deepEqual(view.calls, [['config'], ['config']]);
+});
+
+test('provider eligibility asks for age only when the eligibility form is actually available', async t => {
+    const view = mount(t, creationPaused, 'provider-login'); view.render(); await view.settle();
+    assert(view.find(node => node.type === 'p' && node.props.children === 'Choose your country and age range to continue.'));
+    assert(view.find(node => node.type === 'form'));
     assert.equal(view.children.length, 0);
 });
 

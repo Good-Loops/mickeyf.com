@@ -140,7 +140,7 @@ for (const scenario of scenarios) {
                     assert.equal((markup.match(/type="button" disabled=""/g) ?? []).length, 2,
                         'provider placeholders cannot start authentication before capability discovery');
                 } else {
-                    assert.match(markup, /Use Google or Apple|Checking registration availability/);
+                    assert.match(markup, /Other sign-in options|Checking sign-in options/);
                     assert.doesNotMatch(markup, /class="provider-sign-in"|Continue with Google|Continue with Apple/,
                         'password login remains available while external provider controls await eligibility');
                 }

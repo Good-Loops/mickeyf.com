@@ -7,7 +7,7 @@ import { registrationAge } from '@/services/registrationAge';
 export const REGISTRATION_CONFIG_TIMEOUT_MS = 10_000;
 
 export function ParentRegistrationUnavailable() {
-    return <div role="status">
+    return <div className="registration-parent-notice" role="status">
         <h2>A parent or guardian needs to lead this step</h2>
         <p><Link to="/parent-accounts">Continue to parent-led registration</Link> to check availability and sign in to your own parent account.</p>
         <p>No child name, email, password or identity document is needed here. Please do not enter an adult age range for a child.</p>
@@ -119,18 +119,21 @@ export default function RegistrationGate({ children, purpose = 'signup' }: {
     const names = new Intl.DisplayNames(['en'], { type: 'region' });
     const titleId = purpose === 'signup' ? 'registration-title' : 'provider-eligibility-title';
     return <section className={purpose === 'signup' ? 'signup' : 'provider-eligibility'} aria-labelledby={titleId}>
-        <div className="signup__form-wrapper">
-            {purpose === 'signup' ? <h1 id={titleId}>{signupPaused ? 'Sign up' : 'Check eligibility'}</h1> : <h2 id={titleId}>Use Google or Apple</h2>}
-            {purpose === 'provider-login' && <p>First choose your country and age range. Children with a parent-managed account can use their nickname and password above.</p>}
-            {loading ? <p role="status">Checking registration availability…</p>
+        <div className={purpose === 'signup' ? 'signup__form-wrapper' : 'provider-eligibility__content'}>
+            {purpose === 'signup' ? <h1 id={titleId}>{signupPaused ? 'Sign up' : 'Check eligibility'}</h1> : <h2 id={titleId}>Other sign-in options</h2>}
+            {loading ? <p role="status">{purpose === 'signup' ? 'Checking registration availability…' : 'Checking sign-in options…'}</p>
                 : signupPaused ? <p role="status">New account creation is temporarily paused. You can still play as a guest or log in to an existing account.</p>
-                : !countryPolicy ? <div role={purpose === 'signup' ? 'alert' : 'status'}>
+                : !countryPolicy ? <div className={purpose === 'provider-login' ? 'provider-eligibility__message' : undefined} role={purpose === 'signup' ? 'alert' : 'status'}>
                     <p>{purpose === 'signup' ? 'We can’t check sign-up availability right now. Please try again.'
-                        : config?.enabled === false ? 'Google and Apple sign-in are temporarily unavailable. You can use your existing username and password, or continue as a guest.' : 'Registration eligibility could not be confirmed. You can keep exploring without an account.'}</p>
-                    {purpose === 'provider-login' && <button type="button" onClick={() => setRetry(value => value + 1)}>Check again</button>}
+                        : config?.enabled === false ? 'Google and Apple sign-in are currently unavailable.' : 'We couldn’t check other sign-in options right now.'}</p>
+                    {purpose === 'provider-login' && <>
+                        <p>Use your username and password to log in, or <Link to="/">continue as a guest</Link>.</p>
+                        {config?.enabled !== false && <button className="provider-eligibility__retry" type="button" onClick={() => setRetry(value => value + 1)}>Check again</button>}
+                    </>}
                 </div>
                 : parentStep || registrationAge.parentRequired() ? <ParentRegistrationUnavailable />
                 : <form className="signup__form" onSubmit={submit} aria-busy={busy}>
+                    {purpose === 'provider-login' && <p>Choose your country and age range to continue.</p>}
                     <label className="signup__field" htmlFor="registration-country"><span className="signup__label">Country where you live</span>
                         <select id="registration-country" className="signup__input" required disabled={busy} value={country}
                             onChange={event => { setCountry(event.target.value); setAgeBand(''); setFeedback(null); }}>
