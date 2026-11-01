@@ -14,6 +14,7 @@ import { CHILD_SIGNED_FORM_SQL_SHA256, childSignedFormFingerprint, planChildSign
 import { observeSignedParentFormRetention, type SignedParentFormRetentionReport } from '../accounts/signedParentFormRetention';
 import { runSignedParentFormRetention } from '../accounts/runSignedParentFormRetention';
 import { createChildSchemaConnection, type childSchemaCommandSettings } from './runChildSignedFormSchema';
+import { verifySignedParentFormReadiness } from './signedParentFormSchema';
 
 const config = loadMigrationConfig();
 let admin: Connection;
@@ -110,6 +111,11 @@ test('actual metadata observer reads only metadata and recognizes exact legacy s
     assert.equal(row.user_name, 'SYNTHETIC LEGACY REQUEST'); assert.equal(row.status, 'pending');
 });
 
+test('runtime readiness accepts legacy schema with creation paused and rejects enabling child creation', async () => {
+    await verifySignedParentFormReadiness(metadataConnection(runtime), false);
+    await assert.rejects(verifySignedParentFormReadiness(metadataConnection(runtime), true), /child signed parent form schema is missing/iu);
+});
+
 test('wrong database/server/operator/version pins fail before any migration or data change', async () => {
     for (const changed of [
         { ...settings, target: { ...settings.target, database: 'wrong_database' } },
@@ -201,6 +207,10 @@ test('reviewed operation executes one exact ALTER, preserves legacy requests/his
     assert.deepEqual(after.history, before.history); assert.notEqual(after.schemaSha256, before.schemaSha256);
     const verified = await verifyChildSignedFormOperation(deps);
     assert.deepEqual({ ...verified, verifiedAt: receipt.verifiedAt }, receipt);
+    // A compatible paused fallback and an enabled candidate both need to start
+    // against the extended schema with the runtime's column-scoped grants.
+    await verifySignedParentFormReadiness(metadataConnection(runtime), false);
+    await verifySignedParentFormReadiness(metadataConnection(runtime), true);
     const [[row]] = await admin.query<RowDataPacket[]>('SELECT user_name,status FROM parent_signed_forms WHERE reference=?', [requestId]);
     assert.equal(row.user_name, 'SYNTHETIC LEGACY REQUEST'); assert.equal(row.status, 'pending');
     await assert.rejects(runtime.query('UPDATE parent_signed_forms SET reviewed_at=UTC_TIMESTAMP(6) WHERE reference=?', [requestId]), /command denied/iu);

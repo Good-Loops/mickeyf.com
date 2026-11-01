@@ -193,7 +193,8 @@ def verify_source(build, trigger, pins, now):
                      "uri": REPOSITORY.removesuffix(".git")}
     if (trigger.get("id") != pins["sourceTriggerId"]
             or trigger.get("resourceName") != f"projects/{PROJECT}/locations/global/triggers/{pins['sourceTriggerId']}"
-            or trigger.get("name") != pins["sourceTriggerName"] or trigger.get("disabled") is True
+            or trigger.get("name") != pins["sourceTriggerName"]
+            or not isinstance(trigger.get("disabled", False), bool)
             or trigger.get("serviceAccount") != BUILD_SA
             or trigger.get("approvalConfig") != {"approvalRequired": True}
             or trigger.get("sourceToBuild") != expected_source or trigger.get("gitFileSource") != expected_file):

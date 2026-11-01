@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { spawnSync } from 'node:child_process';
@@ -13,6 +13,13 @@ const first = '00000000-0000-4000-8000-000000000001';
 const second = '00000000-0000-4000-8000-000000000002';
 const run = (ledger, ...options) => spawnSync('pwsh', ['-NoProfile', '-NonInteractive', '-ExecutionPolicy', 'Bypass', '-File', script, '-LedgerPath', ledger, ...options],
     { encoding: 'utf8', timeout: 15_000 });
+async function removeOwnedTemp(temp) {
+    const parent = await realpath(os.tmpdir());
+    const resolved = await realpath(temp);
+    assert.equal(path.dirname(resolved).toLowerCase(), parent.toLowerCase());
+    assert.match(path.basename(resolved), /^synthetic-(?:parent-register|parent-deadlines|unmatched-parent|parent-cleanup)-/u);
+    await rm(resolved, { recursive: true, force: true });
+}
 
 test('private ledger conversion emits only unique outstanding references and fails closed',
     { skip: process.platform !== 'win32' }, async () => {
@@ -61,7 +68,7 @@ test('private ledger conversion emits only unique outstanding references and fai
             assert.notEqual(result.status, 0, 'more than 100 active rows must not produce a truncated list');
             assert.equal(result.stdout.trim(), '');
         } finally {
-            await rm(temp, { recursive: true, force: true });
+            await removeOwnedTemp(temp);
         }
     });
 
@@ -111,7 +118,7 @@ test('deadline report sorts entered deadlines, flags missing dates, and emits no
             assert.match(result.stdout, /No outstanding rows in this register/u);
             assert.match(result.stdout, /does not prove deletion/u);
         } finally {
-            await rm(temp, { recursive: true, force: true });
+            await removeOwnedTemp(temp);
         }
     });
 
@@ -164,5 +171,48 @@ test('unmatched messages stay local and are due within 14 days of receipt',
                 assert.equal(result.stdout.trim(), '', 'invalid unmatched row must suppress the entire report');
                 assert.doesNotMatch(result.stderr, /PRIVATE-UNMATCHED-LOCATOR/u);
             }
-        } finally { await rm(temp, { recursive: true, force: true }); }
+        } finally { await removeOwnedTemp(temp); }
+    });
+
+test('overdue and missing synthetic cases do not delete archive or snapshot copies',
+    { skip: process.platform !== 'win32' }, async () => {
+        const temp = await mkdtemp(path.join(os.tmpdir(), 'synthetic-parent-cleanup-'));
+        try {
+            const fixture = await readFile(source, 'utf8');
+            const [header, sample] = fixture.trimEnd().split(/\r?\n/u);
+            const fields = sample.split(',');
+            fields[9] = new Date(Date.now() - 86_400_000).toISOString();
+            const unmatched = [...fields];
+            unmatched[0] = `unmatched:${second}`;
+            unmatched[1] = new Date(Date.now() - 15 * 86_400_000).toISOString();
+            unmatched[9] = '';
+            const ledger = path.join(temp, 'register.csv');
+            const contents = `${header}\n${fields.join(',')}\n${unmatched.join(',')}\n`;
+            await writeFile(ledger, contents);
+            const copies = ['archive', 'snapshot-old', 'snapshot-new'].map(name => path.join(temp, name));
+            for (const folder of copies) {
+                await mkdir(folder);
+                await writeFile(path.join(folder, 'SYNTHETIC-form.txt'), 'synthetic form only');
+            }
+            const deadline = run(ledger, '-DeadlineReport');
+            assert.equal(deadline.status, 0, deadline.stderr);
+            assert.match(deadline.stdout, /000000000001.*DUE OR OVERDUE/u);
+            assert.match(deadline.stdout, /unmatched:.*UNMATCHED MESSAGE - DUE OR OVERDUE/u);
+            const input = run(ledger);
+            assert.equal(input.status, 0, input.stderr);
+            assert.deepEqual(JSON.parse(input.stdout), { references: [first] });
+            const report = { schemaVersion: 1, operation: 'observe-signed-parent-form-retention',
+                observedAt: new Date().toISOString(), sourceCommit: 'a'.repeat(40), target: { privateTarget: 'SYNTHETIC' },
+                schemaSha256: 'b'.repeat(64), grantsSha256: 'c'.repeat(64),
+                requests: [{ reference: first, state: 'not-found', expiresAt: null }] };
+            const summary = spawnSync(process.execPath, [path.join(root, 'scripts/parent-form-retention-summary.mjs')],
+                { input: JSON.stringify(report), encoding: 'utf8', timeout: 10_000 });
+            assert.equal(summary.status, 0, summary.stderr);
+            assert.match(summary.stdout, /not-found.*absence alone does not prove deletion/u);
+            assert.match(summary.stdout, /encrypted archive and backups separately/u);
+            assert.equal(await readFile(ledger, 'utf8'), contents, 'reports must not mark the case deleted');
+            for (const folder of copies) {
+                assert.equal(await readFile(path.join(folder, 'SYNTHETIC-form.txt'), 'utf8'), 'synthetic form only');
+            }
+        } finally { await removeOwnedTemp(temp); }
     });

@@ -86,6 +86,7 @@ export function validateProviderPins(value) {
     if (session.accountDeletion !== undefined || session.googleSignIn !== undefined) {
         throw new Error('Provider release owns the complete account/provider environment; do not combine legacy options.');
     }
+    if (providerRelease?.phase === 'paused-general') throw new Error('paused-general describes the existing baseline only');
     providerReleaseEnvironment(providerRelease);
     if (previousProviderRelease !== undefined) providerReleaseEnvironment(previousProviderRelease);
     return { ...validateSessionPins({ ...session, accountDeletion: { enabled: true,

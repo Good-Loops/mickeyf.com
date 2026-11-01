@@ -1,8 +1,56 @@
 import notice from '../../../shared/privacyNotice.json' with { type: 'json' };
+import { useRef, useState, type RefObject } from 'react';
+import { Capacitor } from '@capacitor/core';
 import type { SignedParentFormRequest, ParentConfig } from '@/services/parentRegistrationApi';
 import PrivacyNoticeLink from './PrivacyNoticeLink';
 import { parsePrivacyNoticeUrl } from '@/config/privacyNoticeUrl';
 import './SignedParentForm.css';
+
+/** Use the displayed form itself so that the copied consent cannot drift from the printed wording. */
+export function formTextForCopy(content: Pick<HTMLElement, 'innerText' | 'querySelector'>): string {
+    const privacyUrl = content.querySelector<HTMLAnchorElement>('a[href]')?.href;
+    return `${content.innerText.trim()}${privacyUrl ? `\n\nPrivacy notice / Aviso de privacidade: ${privacyUrl}` : ''}`;
+}
+
+function FormActions({ contentRef, portuguese, allowCopy }: {
+    contentRef: RefObject<HTMLDivElement | null>; portuguese: boolean; allowCopy: boolean;
+}) {
+    const [formText, setFormText] = useState('');
+    const [copied, setCopied] = useState(false);
+    const prepareText = () => {
+        if (!contentRef.current) return;
+        setCopied(false);
+        setFormText(formTextForCopy(contentRef.current));
+    };
+    const copyText = async () => {
+        try {
+            await navigator.clipboard.writeText(formText);
+            setCopied(true);
+        } catch {
+            setCopied(false);
+        }
+    };
+    return <div className="signed-parent-form__actions">
+        {(Capacitor.getPlatform() !== 'android' || !allowCopy) && <button type="button" onClick={() => window.print()}>
+            {portuguese ? notice.signedParentForm.ptBR.labels.print : 'Print signed parent form'}
+        </button>}
+        {allowCopy && <>
+            <button type="button" onClick={prepareText}>{portuguese ? 'Preparar texto do formulário' : 'Prepare form text'}</button>
+            {formText && <div>
+                <p>{portuguese
+                    ? 'Copie o texto sem alterá-lo para um documento, imprima e assine à mão. Envie uma foto ou digitalização pelo e-mail verificado do responsável. O texto contém seu e-mail, identificador da conta, país e referência da solicitação.'
+                    : 'Copy the unchanged text into a document, print it, and sign it by hand. Send a photo or scan from the verified parent email. The text contains your email, account ID, country, and request reference.'}</p>
+                <label>{portuguese ? 'Texto do formulário' : 'Form text'}
+                    <textarea readOnly value={formText} onFocus={event => event.currentTarget.select()} rows={8} />
+                </label>
+                <button type="button" onClick={copyText}>{portuguese ? 'Copiar texto' : 'Copy text'}</button>
+                <p role="status">{copied
+                    ? portuguese ? 'Texto copiado.' : 'Text copied.'
+                    : portuguese ? 'Se o botão não funcionar, selecione e copie o texto acima.' : 'If the button does not work, select and copy the text above.'}</p>
+            </div>}
+        </>}
+    </div>;
+}
 
 export function portugueseParentConsentAvailable(policy: Extract<ParentConfig, { enabled: true }>): boolean {
     return policy.signedFormVersion === notice.signedParentForm.version
@@ -17,6 +65,7 @@ export function portugueseFormAvailable(request: SignedParentFormRequest, policy
 }
 
 function PortugueseSignedParentForm({ request, policy }: { request: SignedParentFormRequest; policy: Extract<ParentConfig, { enabled: true }> }) {
+    const contentRef = useRef<HTMLDivElement>(null);
     const pt = notice.signedParentForm.ptBR;
     const label = pt.labels;
     const privacyUrl = parsePrivacyNoticeUrl(policy.privacyNoticeUrl);
@@ -24,6 +73,7 @@ function PortugueseSignedParentForm({ request, policy }: { request: SignedParent
         return <p lang="pt-BR" role="alert">{label.unavailable}</p>;
     }
     return <article className="signed-parent-form" lang="pt-BR" aria-label={label.formAria}>
+        <div ref={contentRef}>
         <h3>{label.title}</h3>
         <p>{notice.operatorName}<br />{notice.operatorAddress}<br />{notice.operatorTelephone}<br />{notice.contactEmail}</p>
         <p>{pt.notice}</p>
@@ -45,13 +95,16 @@ function PortugueseSignedParentForm({ request, policy }: { request: SignedParent
         </>}
         <p>{label.guardian}</p><p>{label.name}</p><p>{label.signature}</p><p>{label.date}</p>
         <p>{label.formVersion}: {notice.signedParentForm.version} · {label.privacyVersion}: {notice.version}</p>
-        <button className="signed-parent-form__print" type="button" onClick={() => window.print()}>{label.print}</button>
+        </div>
+        <FormActions key={request.reference} contentRef={contentRef} portuguese allowCopy={policy.credentialsAfterApproval === true} />
     </article>;
 }
 
 export default function SignedParentForm({ request, policy }: { request: SignedParentFormRequest; policy: Extract<ParentConfig, { enabled: true }> }) {
+    const contentRef = useRef<HTMLDivElement>(null);
     if (request.country === 'BR') return <PortugueseSignedParentForm request={request} policy={policy} />;
     return <article className="signed-parent-form" aria-label="Signed parent consent form">
+        <div ref={contentRef}>
         <h3>Ludolume parent consent form</h3>
         <p>{notice.operatorName}<br />{notice.operatorAddress}<br />{notice.operatorTelephone}<br />{notice.contactEmail}</p>
         <p>{notice.signedParentForm.notice}</p>
@@ -78,6 +131,7 @@ export default function SignedParentForm({ request, policy }: { request: SignedP
         <p>Handwritten signature: ________________________________________</p>
         <p>Date: ____________________</p>
         <p>Form version: {notice.signedParentForm.version} · Privacy notice: {notice.version}</p>
-        <button className="signed-parent-form__print" type="button" onClick={() => window.print()}>Print signed parent form</button>
+        </div>
+        <FormActions key={request.reference} contentRef={contentRef} portuguese={false} allowCopy={policy.credentialsAfterApproval === true} />
     </article>;
 }

@@ -100,6 +100,7 @@ async function fixture(t, width, { pendingBegin = false, pendingApple = false, p
             }
             else if (url.pathname === '/auth/registration/config') result = closedSignup === 'disabled'
                 ? { enabled: false } : closedSignup ? { ...policy, creationEnabled: false } : policy;
+            else if (url.pathname === '/auth/registration/bootstrap') result = { ready: true };
             else if (url.pathname === '/auth/registration/begin') {
                 assert.deepEqual(route.request().postDataJSON(), { country: 'US', ageBand: 'adult', policyVersion: policy.policyVersion });
                 result = { authorized: true, expiresInSeconds: 300, scoreVisibility: 'private' };
@@ -123,7 +124,7 @@ async function fixture(t, width, { pendingBegin = false, pendingApple = false, p
 
 async function approveAdult(page) {
     await page.locator('#registration-country').selectOption('US');
-    await page.locator('#registration-age').selectOption('adult');
+    await page.locator('#registration-age').fill('18');
     await page.getByRole('button', { name: 'Continue', exact: true }).click();
 }
 

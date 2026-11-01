@@ -501,6 +501,16 @@ separately from the single-page queue.
 
 ## Client configuration and controls
 
+**Android Google candidate, 2026-11-01:** The candidate Android resource is
+enabled with the public web client ID as the server audience. The source-owned
+presenter table pins the reviewed Play app-signing certificate and the Android
+OAuth client for `com.mickeyf.app`; it is not the upload-key certificate. The
+Google Cloud OAuth app remains in Testing with the owner as its sole test user.
+The backend deployment configuration must still provide the pinned Android
+presenter ID, and a signed Play-installed candidate must verify the full flow.
+These source changes do not establish deployment or general availability. See
+[Android readiness](../release-prep/2026-10-20/android-readiness.md#android-google-sign-in-candidate--2026-11-01).
+
 - `GOOGLE_WEB_CLIENT_ID` configures exact audience/key `google-web` for ordinary
   browsers. Google's official GIS button appears directly on the login form;
   its own click opens the provider prompt. The SDK loads when the configured
@@ -536,9 +546,9 @@ separately from the single-page queue.
   Tokens are transient: no provider token/profile is persisted or logged.
   Capacitor bridge payload logging is disabled, including debug builds.
 - Unsupported native Google and web Apple IDs are rejected when opt-in is enabled,
-  rather than accidentally advertising unusable clients. Android and iOS Google
-  still need their official native SDK/client configuration; Apple web remains
-  a separate Services ID/callback milestone.
+  rather than accidentally advertising unusable clients. Native provider source
+  configuration and real-device acceptance are separate from this historical
+  checkpoint; see the current Android candidate note above.
 - Controls appear only for server-configured and platform-capable clients.
   Google login uses its official button without a separate selector or provider
   heading. Password accounts retain the linking dialog and current-password proof;

@@ -64,6 +64,10 @@ function fixture(features: Features = {}) {
     const database = { async query(query: { sql: string }) {
         state.databaseReads++;
         if (state.contextFailure) throw new Error('private database details');
+        if (features.childAudience && query.sql.startsWith('SELECT policy_digest, country_code')) return [[], []];
+        if (features.childAudience && query.sql.startsWith('SELECT binding_hash, policy_digest')) return [[], []];
+        if (features.childAudience && query.sql.startsWith('INSERT IGNORE INTO registration_authorizations')) return [{ affectedRows: 1 }, []];
+        if (features.childAudience && query.sql.startsWith('SELECT binding_hash FROM registration_authorizations')) return [[{ binding_hash: Buffer.alloc(32) }], []];
         if (features.childAudience && query.sql.startsWith('SELECT country_code AS country')) {
             return [state.eligibilityAgeBand === 'missing' ? [] : [{ country: 'US', ageBand: state.eligibilityAgeBand }], []];
         }
@@ -257,7 +261,7 @@ async function challenge(base: string, action = 'login', headers: Record<string,
 
 test('minor provider eligibility never issues an HTTP session, including a changed grant', async () => {
     await withServer(async (base, { state }) => {
-        const cookie = signedCookie(['provider', 'v1', Date.now(), Buffer.alloc(32, 9).toString('base64url')].join(':'));
+        const cookie = signedCookie(['provider', 'v2', Date.now(), Buffer.alloc(32, 9).toString('base64url')].join(':'));
         state.eligibilityAgeBand = 'minor';
         const blocked = await post(base, 'begin', beginInput, { cookie });
         assert.equal(blocked.status, 403);
@@ -288,7 +292,7 @@ test('minor provider eligibility never issues an HTTP session, including a chang
 
 test('a grant revoked while provider verification runs cannot produce a session cookie', async () => {
     await withServer(async (base, { state }) => {
-        const cookie = signedCookie(['provider', 'v1', Date.now(), Buffer.alloc(32, 9).toString('base64url')].join(':'));
+        const cookie = signedCookie(['provider', 'v2', Date.now(), Buffer.alloc(32, 9).toString('base64url')].join(':'));
         const started = await post(base, 'begin', beginInput, { cookie });
         assert.equal(started.status, 200);
         const { state: challengeState } = await started.json() as { state: string };
@@ -304,7 +308,7 @@ test('a grant revoked while provider verification runs cannot produce a session 
 for (const revoked of [false, true]) {
     test(`child-audience Apple login ${revoked ? 'disposes without writing after eligibility revocation' : 'writes only after eligibility and disposes'}`, async () => {
         await withServer(async (base, { state }) => {
-            const cookie = signedCookie(['provider', 'v1', Date.now(), Buffer.alloc(32, 9).toString('base64url')].join(':'));
+            const cookie = signedCookie(['provider', 'v2', Date.now(), Buffer.alloc(32, 9).toString('base64url')].join(':'));
             const input = { clientKey: 'apple-ios', action: 'login' };
             const started = await post(base, 'begin', input, { cookie });
             assert.equal(started.status, 200);
@@ -326,7 +330,7 @@ for (const revoked of [false, true]) {
 
 test('child-audience Apple result without an internal staged capability fails closed', async () => {
     await withServer(async (base, { state }) => {
-        const cookie = signedCookie(['provider', 'v1', Date.now(), Buffer.alloc(32, 9).toString('base64url')].join(':'));
+        const cookie = signedCookie(['provider', 'v2', Date.now(), Buffer.alloc(32, 9).toString('base64url')].join(':'));
         const response = await post(base, 'complete', { clientKey: 'apple-ios', action: 'login' }, { cookie });
         assert.equal(response.status, 503);
         assert.deepEqual(await response.json(), { error: 'UNAVAILABLE' });
@@ -338,7 +342,7 @@ test('child-audience Apple result without an internal staged capability fails cl
 test('child-audience Apple session failure disposes the stage and sends no cookie', async () => {
     await withServer(async (base, { state }) => {
         state.sessionFailure = true;
-        const cookie = signedCookie(['provider', 'v1', Date.now(), Buffer.alloc(32, 9).toString('base64url')].join(':'));
+        const cookie = signedCookie(['provider', 'v2', Date.now(), Buffer.alloc(32, 9).toString('base64url')].join(':'));
         const input = { clientKey: 'apple-ios', action: 'login' };
         const started = await post(base, 'begin', input, { cookie });
         assert.equal(started.status, 200);

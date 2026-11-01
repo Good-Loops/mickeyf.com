@@ -9,6 +9,7 @@ import { isSessionId, type SessionProof } from '../security/sessionPolicy';
 import { readLiveSession } from './accountSessionRepository';
 
 const BINDING_PREFIX = 'provider:v1';
+const SCREENING_PREFIX = 'provider:v2';
 const BINDING_LIFETIME_MS = 5 * 60 * 1000;
 export const PARENT_BINDING_LIFETIME_MS = 24 * 60 * 60 * 1000;
 
@@ -31,6 +32,7 @@ export type ProviderAuthContext = Readonly<{
     bindingExpiresAt: number | null;
     anonymousCookie: Readonly<{ name: SessionCookieName; value: string; maxAge: number }> | null;
     parentRequired?: true;
+    screening?: true;
     [trustedProviderContext]: true;
 }>;
 
@@ -44,7 +46,7 @@ export function createProviderAuthContextReader({ database, sessionSecret, allow
     if (!sessionSecret) throw new TypeError('Provider authentication requires session configuration.');
     const origins = new Set(allowedOrigins);
     return async function readProviderAuthContext(
-        req: ContextRequest, mode: 'begin' | 'complete' | 'parent-required' = 'complete',
+        req: ContextRequest, mode: 'begin' | 'complete' | 'parent-required' | 'screening-bootstrap' = 'complete',
     ): Promise<ProviderAuthContext | null> {
         const origin = req.headers.origin;
         // Unlike existing bearer-compatible mutations, even anonymous login must
@@ -61,8 +63,19 @@ export function createProviderAuthContextReader({ database, sessionSecret, allow
         let bindingExpiresAt: number | null = null;
         let anonymousCookie: ProviderAuthContext['anonymousCookie'] = null;
         let parentRequired = false;
+        let screening = false;
         const now = Date.now();
-        if (typeof token === 'string' && token.startsWith(`${BINDING_PREFIX}:`)) {
+        if (typeof token === 'string' && token.startsWith(`${SCREENING_PREFIX}:`)) {
+            const parts = token.split(':');
+            const issuedAt = Number(parts[2]);
+            if (parts.length !== 4 || !/^\d{13}$/u.test(parts[2]) || !isSessionId(parts[3])
+                || !Number.isSafeInteger(issuedAt) || issuedAt > now) return null;
+            bindingExpiresAt = issuedAt + PARENT_BINDING_LIFETIME_MS;
+            if (bindingExpiresAt <= now) {
+                if (mode !== 'screening-bootstrap') return null;
+                token = undefined;
+            } else screening = true;
+        } else if (typeof token === 'string' && token.startsWith(`${BINDING_PREFIX}:`)) {
             // Only cookie-parser's authenticated signedCookies reach here. This
             // purpose-separated value is NOT a JWT and cannot authenticate a user.
             const parts = token.split(':');
@@ -85,7 +98,14 @@ export function createProviderAuthContextReader({ database, sessionSecret, allow
                 session = Object.freeze({ accountId, sessionId });
             } catch { throw new ProviderAccountUnavailableError(); }
         }
-        if (account === null && parentRequired) {
+        if (account === null && mode === 'screening-bootstrap' && !parentRequired && !screening) {
+            token = `${SCREENING_PREFIX}:${now}:${randomBytes(32).toString('base64url')}`;
+            screening = true;
+            bindingExpiresAt = now + PARENT_BINDING_LIFETIME_MS;
+            anonymousCookie = Object.freeze({ name, value: token as string, maxAge: PARENT_BINDING_LIFETIME_MS });
+        } else if (account === null && screening) {
+            // No repeated Set-Cookie: a delayed anonymous response must not replace a newer session.
+        } else if (account === null && parentRequired) {
             // A fresh begin/cancel cannot erase an observed parent requirement. No age or account is encoded.
             anonymousCookie = Object.freeze({ name, value: token as string, maxAge: bindingExpiresAt! - now });
         } else if (account === null && mode !== 'complete') {
@@ -104,6 +124,6 @@ export function createProviderAuthContextReader({ database, sessionSecret, allow
             'provider-auth-v2', origin, token, account,
         ])).digest();
         return Object.freeze({ bindingHash, account, session, bindingExpiresAt, anonymousCookie,
-            ...(parentRequired ? { parentRequired: true } : {}) }) as ProviderAuthContext;
+            ...(parentRequired ? { parentRequired: true } : {}), ...(screening ? { screening: true } : {}) }) as ProviderAuthContext;
     };
 }

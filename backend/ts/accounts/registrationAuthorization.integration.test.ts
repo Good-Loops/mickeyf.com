@@ -39,6 +39,7 @@ const generalPolicy = loadRegistrationPolicy({ REGISTRATION_ENABLED: 'true', REG
     REGISTRATION_GENERAL_AUDIENCE_POLICY_VERSION: 'synthetic-general-v1' })!;
 const context = () => ({ bindingHash: randomBytes(32), account: null, session: null,
     bindingExpiresAt: Date.now() + 300_000, anonymousCookie: null }) as ProviderAuthContext;
+const childContext = () => ({ ...context(), screening: true as const });
 const identity = (name: string) => ({ provider: 'google', subject: name, email: `${name}@example.test` }) as VerifiedProviderIdentity;
 
 before(async () => {
@@ -131,7 +132,7 @@ async function stagedAppleFixture() {
         REGISTRATION_AUDIENCE: 'children-included', REGISTRATION_POLICY_VERSION: 'synthetic-stage-v1',
         REGISTRATION_COUNTRY_RULES: '{"ZZ":{"parentRequiredBelow":15}}' })!;
     const registration = createRegistrationAuthorization(generalDatabase, childPolicy, childPolicy.audience, false);
-    const binding = context();
+    const binding = childContext();
     assert.equal((await registration.begin(binding, { country: 'ZZ', ageBand: 'adult', policyVersion: childPolicy.version })).allowed, true);
     const userName = `stage-${randomUUID()}`;
     await administrator.query('INSERT INTO users (user_name,email,user_password) VALUES (?,?,?)',
@@ -286,7 +287,7 @@ test('provider session checks a current adult grant under a transaction lock', a
         REGISTRATION_COUNTRY_RULES: '{"ZZ":{"parentRequiredBelow":15}}' })!;
     const registration = createRegistrationAuthorization(generalDatabase, childPolicy, childPolicy.audience, false);
     const makeGrant = async () => {
-        const binding = context();
+        const binding = childContext();
         assert.equal((await registration.begin(binding, { country: 'ZZ', ageBand: 'adult', policyVersion: childPolicy.version })).allowed, true);
         return binding;
     };

@@ -55,11 +55,15 @@ function fixture(ageBand: 'minor' | 'adult' = 'minor', failProfile = false, miss
         assert.equal(options.timeout, 10_000);
         const sql = options.sql.replace(/\s+/gu, ' ').trim();
         calls.push({ sql, values });
+        if (sql.startsWith('SELECT policy_digest, country_code')) return [[]];
+        if (sql.startsWith('SELECT binding_hash, policy_digest')) return [[]];
+        if (sql.startsWith('SELECT binding_hash FROM registration_authorizations')) return [[{ binding_hash: values?.[0] }]];
         if (sql.startsWith('SELECT')) return [missing ? [] : [{ country: 'ZZ', ageBand }]];
         if (sql.startsWith('INSERT INTO account_registration_profiles') && failProfile) throw new Error('synthetic profile conflict');
         return [{ affectedRows: 1 }];
-    } } as unknown as Pick<Pool, 'query'>;
-    return { calls, database, connection: database as PoolConnection, service: createRegistrationAuthorization(database, policy) };
+    }, async beginTransaction() {}, async commit() {}, async rollback() {}, release() {}, destroy() {},
+        async getConnection() { return this; } } as unknown as Pool;
+    return { calls, database, connection: database as unknown as PoolConnection, service: createRegistrationAuthorization(database, policy) };
 }
 
 test('closed and parent-required preflight touch neither SQL nor account credentials', async () => {
@@ -157,15 +161,12 @@ test('a strict creation pause keeps staged login eligibility while preventing al
     const childPolicy = { ...policy, audience: 'children-included' as const };
     const paused = createRegistrationAuthorization(f.database, childPolicy, childPolicy.audience, false);
     assert.equal(paused.creationEnabled, false); assert.equal(paused.policy, childPolicy);
-    assert.deepEqual(await paused.begin(context(), { country: 'ZZ', ageBand: 'parent-required', policyVersion: policy.version }),
-        { allowed: false, reason: 'PARENT_REQUIRED' });
-    assert.deepEqual(f.calls, []);
-    assert.deepEqual(await paused.begin(context(), { country: 'ZZ', ageBand: 'adult', policyVersion: policy.version }),
+    assert.deepEqual(await paused.begin(({ ...context(), screening: true } as ProviderAuthContext), { country: 'ZZ', ageBand: 'adult', policyVersion: policy.version }),
         { allowed: true, country: 'ZZ', ageBand: 'adult' });
-    await paused.assertLoginAvailable(context());
+    await paused.assertLoginAvailable(({ ...context(), screening: true } as ProviderAuthContext));
     const before = f.calls.length;
-    await assert.rejects(paused.assertAvailable(context()), RegistrationRequiredError);
-    await assert.rejects(paused.consume(f.connection, context(), accountId), RegistrationRequiredError);
+    await assert.rejects(paused.assertAvailable(({ ...context(), screening: true } as ProviderAuthContext)), RegistrationRequiredError);
+    await assert.rejects(paused.consume(f.connection, ({ ...context(), screening: true } as ProviderAuthContext), accountId), RegistrationRequiredError);
     assert.equal(f.calls.length, before, 'creation pause rejects before any new account transaction writes or reads');
 });
 
@@ -173,24 +174,44 @@ test('child-audience provider login denies minor grants without changing signup 
     const childPolicy = { ...policy, audience: 'children-included' as const };
     const minor = fixture('minor');
     const service = createRegistrationAuthorization(minor.database, childPolicy, childPolicy.audience, true);
-    await assert.rejects(service.assertLoginAvailable(context()), RegistrationRequiredError);
-    await service.assertAvailable(context());
-    assert.equal(minor.calls.length, 2);
+    await assert.rejects(service.assertLoginAvailable(({ ...context(), screening: true } as ProviderAuthContext)), RegistrationRequiredError);
+    await service.assertAvailable(({ ...context(), screening: true } as ProviderAuthContext));
+    assert(minor.calls.some(call => call.sql.startsWith('SELECT country_code')));
     assert(minor.calls.every(call => call.sql.startsWith('SELECT')));
     const adult = fixture('adult');
-    await createRegistrationAuthorization(adult.database, childPolicy, childPolicy.audience, true).assertLoginAvailable(context());
+    await createRegistrationAuthorization(adult.database, childPolicy, childPolicy.audience, true).assertLoginAvailable(({ ...context(), screening: true } as ProviderAuthContext));
     const missing = fixture('adult', false, true);
     await assert.rejects(createRegistrationAuthorization(missing.database, childPolicy, childPolicy.audience, true)
-        .assertLoginAvailable(context()), RegistrationRequiredError);
+        .assertLoginAvailable(({ ...context(), screening: true } as ProviderAuthContext)), RegistrationRequiredError);
 });
 
 test('transactional provider eligibility locks and rechecks the adult grant', async () => {
     const childPolicy = { ...policy, audience: 'children-included' as const };
     const adult = fixture('adult');
     const service = createRegistrationAuthorization(adult.database, childPolicy, childPolicy.audience, false);
-    await service.assertLoginAvailableOnConnection(adult.connection, context());
-    assert.match(adult.calls[0].sql, /FOR UPDATE$/u);
+    await service.assertLoginAvailableOnConnection(adult.connection, ({ ...context(), screening: true } as ProviderAuthContext));
+    assert(adult.calls.some(call => /FOR UPDATE$/u.test(call.sql)));
     const missing = fixture('adult', false, true);
     await assert.rejects(createRegistrationAuthorization(missing.database, childPolicy, childPolicy.audience, false)
-        .assertLoginAvailableOnConnection(missing.connection, context()), RegistrationRequiredError);
+        .assertLoginAvailableOnConnection(missing.connection, ({ ...context(), screening: true } as ProviderAuthContext)), RegistrationRequiredError);
+});
+
+test('uncertain native reservation commit discards the connection and never returns an attempt token', async () => {
+    const childPolicy = { ...policy, audience: 'children-included' as const };
+    let destroyed = 0; let released = 0; let rolledBack = 0;
+    const connection = {
+        async query({ sql }: { sql: string }) {
+            if (sql === 'COMMIT') throw new Error('synthetic uncertain commit');
+            if (sql === 'ROLLBACK') rolledBack++;
+            if (sql.startsWith('SELECT binding_hash, policy_digest') || sql.startsWith('SELECT policy_digest, country_code')) return [[]];
+            if (sql.startsWith('SELECT binding_hash FROM registration_authorizations')) return [[{ binding_hash: Buffer.alloc(32) }]];
+            return [{ affectedRows: 1 }];
+        },
+        release() { released++; }, destroy() { destroyed++; },
+    };
+    const database = { async query() { return [{ affectedRows: 0 }]; }, async getConnection() { return connection; } } as unknown as Pool;
+    const service = createRegistrationAuthorization(database, childPolicy, childPolicy.audience);
+    await assert.rejects(service.beginNativeAgeCheck({ ...context(), screening: true,
+        bindingExpiresAt: Date.now() + 10 * 60_000 } as ProviderAuthContext));
+    assert.equal(destroyed, 1); assert.equal(released, 0); assert.equal(rolledBack, 0);
 });

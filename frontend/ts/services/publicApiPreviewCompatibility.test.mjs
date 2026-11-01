@@ -30,10 +30,15 @@ for (const scenario of scenarios) {
     test(`${scenario.name} keeps authentication and UI within the selected backend capabilities`, async (t) => {
         t.mock.method(Capacitor, 'isNativePlatform', () => scenario.native === true);
         const calls = [];
+        Object.defineProperty(navigator, 'locks', { configurable: true, value: {
+            request: async (_name, _options, callback) => callback(),
+        } });
+        t.after(() => { delete navigator.locks; });
         let registrationConfig = legacyRegistration;
         t.mock.method(globalThis, 'fetch', async (url, init) => {
             calls.push({ url, init });
             if (url === `${scenario.apiBase}/auth/registration/config`) return Response.json(registrationConfig);
+            if (url === `${scenario.apiBase}/auth/registration/bootstrap`) return Response.json({ ready: true });
             if (url === `${scenario.apiBase}/auth/registration/begin`) {
                 assert.notEqual(scenario.legacy, true, 'legacy preview does not issue staged grants');
                 assert.deepEqual(JSON.parse(init.body), eligibility);

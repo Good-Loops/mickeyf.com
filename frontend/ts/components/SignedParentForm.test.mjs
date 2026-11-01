@@ -11,7 +11,7 @@ const server = await createViteTestServer({ root, configFile: false, esbuild: { 
     resolve: { alias: { '@': `${root}/ts` } },
     appType: 'custom', logLevel: 'silent', server: { middlewareMode: true } });
 after(() => server.close());
-const { default: Component } = await server.ssrLoadModule('/ts/components/SignedParentForm.tsx');
+const { default: Component, formTextForCopy } = await server.ssrLoadModule('/ts/components/SignedParentForm.tsx');
 const policy = { enabled: true, privacyNoticeUrl: notice.noticeUrl, policyVersion: 'preview-only', consentText: notice.consent.parent.text, consentVersion: notice.consent.parent.version, signedFormVersion: notice.signedParentForm.version };
 const request = { reference: '00000000-0000-4000-8000-000000000001', parentAccountId: '00000000-0000-4000-8000-000000000002',
     country: 'US', userName: 'Synthetic child (preview only)', verifiedContact: 'synthetic-parent@example.test',
@@ -19,6 +19,8 @@ const request = { reference: '00000000-0000-4000-8000-000000000001', parentAccou
     expiresAt: '2026-10-20T00:00:00.000Z', publicPolicyDigest: 'c'.repeat(64),
     publicConsentText: notice.consent.publicScores.text, publicConsentVersion: notice.consent.publicScores.version };
 const render = value => renderToStaticMarkup(React.createElement(Component, { request: value, policy }));
+const escapeHtml = text => text.replace(/&/gu, '&amp;').replace(/</gu, '&lt;').replace(/>/gu, '&gt;')
+    .replace(/"/gu, '&quot;').replace(/'/gu, '&#x27;');
 const markup = render(request);
 test('printable form contains exact parent/request references, notice versions, contacts and separate unselected choices', () => {
     for (const text of [request.reference, request.parentAccountId, request.verifiedContact, request.userName,
@@ -62,4 +64,33 @@ test('Brazil form refuses unknown parent or public consent wording rather than t
         assert.ok(value.includes(notice.signedParentForm.ptBR.labels.unavailable));
         assert.doesNotMatch(value, /<button|Assinatura à mão/u);
     }
+});
+
+test('the copyable form is offered only for the flow that collects credentials after approval', () => {
+    for (const country of ['US', 'BR']) {
+        const value = renderToStaticMarkup(React.createElement(Component, {
+            request: { ...request, country, userName: null }, policy: { ...policy, credentialsAfterApproval: true },
+        }));
+        assert.match(value, country === 'BR' ? /Preparar texto do formulário/u : /Prepare form text/u);
+        assert.ok(value.includes(request.reference));
+        assert.ok(value.includes(request.verifiedContact));
+        for (const text of [request.parentAccountId, request.expiresAt, request.policyVersion, request.consentVersion,
+            request.publicConsentVersion, request.publicPolicyDigest, notice.signedParentForm.version, notice.version,
+            country === 'BR' ? notice.signedParentForm.ptBR.notice : notice.signedParentForm.notice,
+            country === 'BR' ? notice.signedParentForm.ptBR.parentConsent : policy.consentText,
+            country === 'BR' ? notice.signedParentForm.ptBR.publicConsent : request.publicConsentText]) {
+            assert.ok(value.includes(escapeHtml(text)), `${country} form is missing ${text}`);
+        }
+        assert.doesNotMatch(value, /Synthetic child|childPassword/u);
+    }
+    assert.doesNotMatch(markup, /Prepare form text/u);
+});
+
+test('copy text uses the displayed form verbatim and includes the privacy notice destination', () => {
+    const displayed = `Form title\n${request.reference}\n${request.verifiedContact}\n${notice.consent.parent.text}\n□ Parent signature`;
+    const text = formTextForCopy({ innerText: displayed, querySelector: () => ({ href: notice.noticeUrl }) });
+    assert.ok(text.startsWith(displayed));
+    assert.ok(text.includes(notice.noticeUrl));
+    assert.doesNotMatch(text, /Synthetic child|childPassword/u);
+    assert.equal(formTextForCopy({ innerText: ' Example ', querySelector: () => null }), 'Example');
 });

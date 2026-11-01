@@ -1,11 +1,15 @@
 import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
-import { createHash } from 'node:crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import type { ProviderAuthContext } from '../auth/providerAuthContext';
 import { decideRegistration, type RegistrationPolicy } from '../config/registrationPolicy';
 import { assertAccountId } from './deletionJournal';
 import { createProviderAttempt } from '../auth/providerAttemptRepository';
+import { guardConnectionQueries } from '../db/queryTimeoutConnection';
 
 const TIMEOUT_MS = 10_000;
+// Reserve enough time for a normal native prompt and both transport calls;
+// this is not a guarantee that an operating-system prompt will return.
+const NATIVE_CHECK_MIN_REMAINING_MS = 5 * 60_000 + TIMEOUT_MS;
 const GENERAL_CLIENT = 'registration-general';
 /** Bounded cleanup for maintenance; expiry rejects use independently of physical deletion. */
 export async function cleanupRegistrationAuthorizations(database: Pick<Pool, 'query'>): Promise<{ deleted: number; backlog: boolean }> {
@@ -36,6 +40,64 @@ function anonymousBinding(context: ProviderAuthContext | null): Buffer {
     return context.bindingHash;
 }
 
+/** Screening records share the existing short-lived authorization store but have purpose-separated keys.
+ * The mutex serializes younger observations with grant use and account/session commit. */
+function screeningKey(context: ProviderAuthContext, purpose: 'mutex' | 'minor' | 'parent' | 'pending'): Buffer {
+    return createHash('sha256').update(`ludolume:age-screen:${purpose}:v1\0`).update(context.bindingHash).digest();
+}
+function expiry(context: ProviderAuthContext): string {
+    if (!context.screening || !context.bindingExpiresAt || context.bindingExpiresAt <= Date.now()) throw new RegistrationRequiredError();
+    return new Date(context.bindingExpiresAt).toISOString().replace('T', ' ').replace('Z', '');
+}
+function requireNativeCheckLifetime(context: ProviderAuthContext): void {
+    expiry(context);
+    if (context.bindingExpiresAt! - Date.now() <= NATIVE_CHECK_MIN_REMAINING_MS) throw new RegistrationRequiredError();
+}
+async function screeningLock(connection: Pick<PoolConnection, 'query'>, context: ProviderAuthContext, policy: RegistrationPolicy) {
+    const until = expiry(context);
+    const key = screeningKey(context, 'mutex');
+    await connection.query({ sql: `INSERT IGNORE INTO registration_authorizations
+        (binding_hash, policy_digest, country_code, age_band, expires_at) VALUES (?, ?, 'ZZ', 'adult', ?)`, timeout: TIMEOUT_MS },
+    [key, policy.digest, until]);
+    const [rows] = await connection.query<RowDataPacket[]>({ sql: `SELECT binding_hash FROM registration_authorizations
+        WHERE binding_hash = ? AND policy_digest = ? AND country_code = 'ZZ' AND age_band = 'adult'
+        AND consumed_at IS NULL AND expires_at > UTC_TIMESTAMP(6) FOR UPDATE`, timeout: TIMEOUT_MS }, [key, policy.digest]);
+    if (!Array.isArray(rows) || rows.length !== 1) throw new RegistrationRequiredError();
+    expiry(context);
+}
+async function screeningMarkers(connection: Pick<PoolConnection, 'query'>, context: ProviderAuthContext, policy: RegistrationPolicy) {
+    const minor = screeningKey(context, 'minor');
+    const parent = screeningKey(context, 'parent');
+    const [rows] = await connection.query<RowDataPacket[]>({ sql: `SELECT binding_hash, policy_digest, country_code,
+        age_band, consumed_at, expires_at > UTC_TIMESTAMP(6) AS valid_expiry FROM registration_authorizations
+        WHERE binding_hash IN (?, ?)`, timeout: TIMEOUT_MS }, [minor, parent]);
+    if (!Array.isArray(rows) || rows.length > 2 || rows.some(row => !Buffer.isBuffer(row.binding_hash)
+        || !Buffer.isBuffer(row.policy_digest) || !row.policy_digest.equals(policy.digest) || row.country_code !== 'ZZ'
+        || row.age_band !== 'minor' || row.consumed_at !== null || Number(row.valid_expiry) !== 1)) throw new RegistrationRequiredError();
+    const has = (key: Buffer) => rows.some(row => row.binding_hash.equals(key));
+    return { minor: has(minor), parent: has(parent) };
+}
+async function screeningPending(connection: Pick<PoolConnection, 'query'>, context: ProviderAuthContext): Promise<Buffer | null> {
+    const [rows] = await connection.query<RowDataPacket[]>({ sql: `SELECT policy_digest, country_code, age_band, consumed_at,
+        expires_at > UTC_TIMESTAMP(6) AS valid_expiry FROM registration_authorizations WHERE binding_hash = ?`, timeout: TIMEOUT_MS },
+    [screeningKey(context, 'pending')]);
+    if (!Array.isArray(rows) || rows.length > 1) throw new RegistrationRequiredError();
+    if (rows.length === 0) return null;
+    const row = rows[0];
+    if (!Buffer.isBuffer(row.policy_digest) || row.policy_digest.length !== 32 || row.country_code !== 'PN'
+        || row.age_band !== 'adult' || row.consumed_at !== null || Number(row.valid_expiry) !== 1) throw new RegistrationRequiredError();
+    return row.policy_digest;
+}
+function attemptDigest(policy: RegistrationPolicy, attempt: string): Buffer {
+    return createHash('sha256').update('ludolume:native-age-attempt:v1\0').update(policy.digest).update(attempt).digest();
+}
+async function screeningObserve(connection: Pick<PoolConnection, 'query'>, context: ProviderAuthContext, policy: RegistrationPolicy,
+    purpose: 'minor' | 'parent') {
+    await connection.query({ sql: `INSERT IGNORE INTO registration_authorizations
+        (binding_hash, policy_digest, country_code, age_band, expires_at) VALUES (?, ?, 'ZZ', 'minor', ?)`, timeout: TIMEOUT_MS },
+    [screeningKey(context, purpose), policy.digest, expiry(context)]);
+}
+
 /** Eligibility may support existing provider login while all new-account consumption stays closed. */
 export function createRegistrationAuthorization(database: Pick<Pool, 'query'> & Partial<Pick<Pool, 'getConnection'>>, policy?: RegistrationPolicy,
     audience: RegistrationPolicy['audience'] = policy?.audience, creationEnabled = true) {
@@ -64,6 +126,13 @@ export function createRegistrationAuthorization(database: Pick<Pool, 'query'> & 
     async function read(connection: Pick<PoolConnection, 'query'>, context: ProviderAuthContext | null, lock: boolean) {
         if (!policy) throw new RegistrationRequiredError();
         const binding = anonymousBinding(context);
+        if (audience === 'children-included') {
+            if (!context?.screening) throw new RegistrationRequiredError();
+            if (lock) await screeningLock(connection, context, policy);
+            const markers = await screeningMarkers(connection, context, policy);
+            if (await screeningPending(connection, context)) throw new RegistrationRequiredError();
+            if (markers.parent) throw new RegistrationRequiredError();
+        }
         const [rows] = await connection.query<RowDataPacket[]>({
             sql: `SELECT country_code AS country, age_band AS ageBand FROM registration_authorizations
                 WHERE binding_hash = ? AND policy_digest = ? AND consumed_at IS NULL
@@ -72,6 +141,8 @@ export function createRegistrationAuthorization(database: Pick<Pool, 'query'> & 
         if (!Array.isArray(rows) || rows.length !== 1) throw new RegistrationRequiredError();
         const decision = decideRegistration(policy, { country: rows[0].country, ageBand: rows[0].ageBand, policyVersion: policy.version });
         if (!decision.allowed) throw new RegistrationRequiredError();
+        if (audience === 'children-included' && decision.ageBand === 'adult'
+            && (await screeningMarkers(connection, context!, policy)).minor) throw new RegistrationRequiredError();
         return { binding, decision };
     }
     async function assertAdultLogin(connection: Pick<PoolConnection, 'query'>, context: ProviderAuthContext | null, lock: boolean) {
@@ -106,8 +177,49 @@ export function createRegistrationAuthorization(database: Pick<Pool, 'query'> & 
             const binding = anonymousBinding(context);
             await database.query({ sql: 'DELETE FROM registration_authorizations WHERE binding_hash = ? AND consumed_at IS NULL', timeout: TIMEOUT_MS }, [binding]);
         },
-        async begin(context: ProviderAuthContext | null, input: unknown) {
+        async begin(context: ProviderAuthContext | null, input: unknown, observeOnly = false) {
             const decision = decideRegistration(policy, input);
+            if (observeOnly && (audience !== 'children-included' || !policy
+                || decision.allowed && decision.ageBand !== 'minor'
+                || !decision.allowed && decision.reason !== 'PARENT_REQUIRED')) {
+                return { allowed: false as const, reason: 'INVALID_REGISTRATION' as const };
+            }
+            if (audience === 'children-included' && policy && (decision.allowed || decision.reason === 'PARENT_REQUIRED')) {
+                if (!context?.screening || context.parentRequired || !database.getConnection) throw new RegistrationRequiredError();
+                const binding = anonymousBinding(context);
+                // Bounded opportunistic cleanup supplements the scheduled expiry job.
+                await database.query({ sql: 'DELETE FROM registration_authorizations WHERE expires_at <= UTC_TIMESTAMP(6) LIMIT 100', timeout: TIMEOUT_MS });
+                const connection = guardConnectionQueries(await database.getConnection());
+                let phase: 'begin' | 'active' | 'commit' = 'begin';
+                let reusable = true;
+                try {
+                    await connection.query({ sql: 'START TRANSACTION', timeout: TIMEOUT_MS }); phase = 'active';
+                    await screeningLock(connection, context, policy);
+                    const markers = await screeningMarkers(connection, context, policy);
+                    const pending = await screeningPending(connection, context);
+                    if (pending && !observeOnly) throw new RegistrationRequiredError();
+                    if (!decision.allowed || decision.ageBand === 'minor') {
+                        await screeningObserve(connection, context, policy, decision.allowed ? 'minor' : 'parent');
+                    }
+                    await connection.query({ sql: 'DELETE FROM registration_authorizations WHERE binding_hash = ? AND consumed_at IS NULL', timeout: TIMEOUT_MS }, [binding]);
+                    if (observeOnly) { phase = 'commit'; await connection.query({ sql: 'COMMIT', timeout: TIMEOUT_MS }); return decision; }
+                    if (!decision.allowed || markers.parent || (decision.ageBand === 'adult' && markers.minor)) {
+                        phase = 'commit'; await connection.query({ sql: 'COMMIT', timeout: TIMEOUT_MS });
+                        return { allowed: false as const, reason: 'PARENT_REQUIRED' as const };
+                    }
+                    const [inserted] = await connection.query<ResultSetHeader>({ sql: `INSERT INTO registration_authorizations
+                        (binding_hash, policy_digest, country_code, age_band, expires_at)
+                        VALUES (?, ?, ?, ?, LEAST(?, UTC_TIMESTAMP(6) + INTERVAL 5 MINUTE))`, timeout: TIMEOUT_MS },
+                    [binding, policy.digest, decision.country, decision.ageBand, expiry(context)]);
+                    if (inserted.affectedRows !== 1) throw new RegistrationRequiredError();
+                    phase = 'commit'; await connection.query({ sql: 'COMMIT', timeout: TIMEOUT_MS });
+                    return decision;
+                } catch (error) {
+                    if (phase !== 'active') reusable = false;
+                    else { try { await connection.query({ sql: 'ROLLBACK', timeout: TIMEOUT_MS }); } catch { reusable = false; } }
+                    throw error;
+                } finally { if (reusable) connection.release(); else connection.destroy(); }
+            }
             if (!decision.allowed) return decision;
             if (context?.parentRequired) return { allowed: false as const, reason: 'PARENT_REQUIRED' as const };
             if (policy?.mode === 'general-audience') {
@@ -133,6 +245,64 @@ export function createRegistrationAuthorization(database: Pick<Pool, 'query'> & 
                 new Date(context!.bindingExpiresAt!).toISOString().replace('T', ' ').replace('Z', '')]);
             if (inserted.affectedRows !== 1) throw new RegistrationRequiredError();
             return decision;
+        },
+        /** A single unresolved native check blocks grants until its matching completion or expiry. */
+        async beginNativeAgeCheck(context: ProviderAuthContext | null): Promise<string> {
+            if (audience !== 'children-included' || !policy || !context?.screening || context.parentRequired || !database.getConnection)
+                throw new RegistrationRequiredError();
+            const binding = anonymousBinding(context);
+            requireNativeCheckLifetime(context);
+            await database.query({ sql: 'DELETE FROM registration_authorizations WHERE expires_at <= UTC_TIMESTAMP(6) LIMIT 100', timeout: TIMEOUT_MS });
+            const connection = guardConnectionQueries(await database.getConnection());
+            let phase: 'begin' | 'active' | 'commit' = 'begin'; let reusable = true;
+            try {
+                await connection.query({ sql: 'START TRANSACTION', timeout: TIMEOUT_MS }); phase = 'active';
+                await screeningLock(connection, context, policy);
+                requireNativeCheckLifetime(context);
+                await screeningMarkers(connection, context, policy);
+                if (await screeningPending(connection, context)) throw new RegistrationRequiredError();
+                const attempt = randomBytes(32).toString('base64url');
+                const [inserted] = await connection.query<ResultSetHeader>({ sql: `INSERT INTO registration_authorizations
+                    (binding_hash, policy_digest, country_code, age_band, expires_at) VALUES (?, ?, 'PN', 'adult', ?)`, timeout: TIMEOUT_MS },
+                [screeningKey(context, 'pending'), attemptDigest(policy, attempt), expiry(context)]);
+                if (inserted.affectedRows !== 1) throw new RegistrationRequiredError();
+                await connection.query({ sql: 'DELETE FROM registration_authorizations WHERE binding_hash = ? AND consumed_at IS NULL', timeout: TIMEOUT_MS }, [binding]);
+                requireNativeCheckLifetime(context);
+                phase = 'commit'; await connection.query({ sql: 'COMMIT', timeout: TIMEOUT_MS }); return attempt;
+            } catch (error) {
+                if (phase !== 'active') reusable = false;
+                else { try { await connection.query({ sql: 'ROLLBACK', timeout: TIMEOUT_MS }); } catch { reusable = false; } }
+                throw error;
+            } finally { if (reusable) connection.release(); else connection.destroy(); }
+        },
+        async finishNativeAgeCheck(context: ProviderAuthContext | null, attempt: unknown, input: unknown): Promise<void> {
+            if (audience !== 'children-included' || !policy || !context?.screening || context.parentRequired || !database.getConnection
+                || typeof attempt !== 'string' || !/^[A-Za-z0-9_-]{43}$/u.test(attempt)) throw new RegistrationRequiredError();
+            const decision = decideRegistration(policy, input);
+            if (!decision.allowed && decision.reason !== 'PARENT_REQUIRED') throw new RegistrationRequiredError();
+            const binding = anonymousBinding(context);
+            const connection = guardConnectionQueries(await database.getConnection());
+            let phase: 'begin' | 'active' | 'commit' = 'begin'; let reusable = true;
+            try {
+                await connection.query({ sql: 'START TRANSACTION', timeout: TIMEOUT_MS }); phase = 'active';
+                await screeningLock(connection, context, policy);
+                await screeningMarkers(connection, context, policy);
+                const pending = await screeningPending(connection, context);
+                const expected = attemptDigest(policy, attempt);
+                if (!pending || !timingSafeEqual(pending, expected)) throw new RegistrationRequiredError();
+                if (!decision.allowed || decision.ageBand === 'minor')
+                    await screeningObserve(connection, context, policy, decision.allowed ? 'minor' : 'parent');
+                await connection.query({ sql: 'DELETE FROM registration_authorizations WHERE binding_hash = ? AND consumed_at IS NULL', timeout: TIMEOUT_MS }, [binding]);
+                const [removed] = await connection.query<ResultSetHeader>({ sql: 'DELETE FROM registration_authorizations WHERE binding_hash = ? AND policy_digest = ? AND consumed_at IS NULL', timeout: TIMEOUT_MS },
+                    [screeningKey(context, 'pending'), expected]);
+                if (removed.affectedRows !== 1) throw new RegistrationRequiredError();
+                expiry(context);
+                phase = 'commit'; await connection.query({ sql: 'COMMIT', timeout: TIMEOUT_MS });
+            } catch (error) {
+                if (phase !== 'active') reusable = false;
+                else { try { await connection.query({ sql: 'ROLLBACK', timeout: TIMEOUT_MS }); } catch { reusable = false; } }
+                throw error;
+            } finally { if (reusable) connection.release(); else connection.destroy(); }
         },
         async assertAvailable(context: ProviderAuthContext | null): Promise<void> {
             if (!creationEnabled) throw new RegistrationRequiredError();

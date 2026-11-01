@@ -26,15 +26,20 @@ async function fixture(t, signup = async () => ({ error: 'REGISTRATION_REQUIRED'
     const context = await browser.newContext(); t.after(() => context.close());
     const page = await context.newPage(); page.setDefaultTimeout(10_000);
     const calls = [];
+    let markSignupObserved;
+    const signupObserved = new Promise(resolve => { markSignupObserved = resolve; });
     await context.route('**/*', async route => {
         const request = route.request(), url = new URL(request.url());
         // Every API/provider response is synthetic; no account or production state can change.
         if (url.origin !== origin) return route.abort();
         if (url.pathname.startsWith('/auth/') || url.pathname.startsWith('/api/')) {
             const body = request.postDataJSON(); calls.push({ path: url.pathname, body });
+            if (url.pathname === '/api/users' && body?.type === 'signup') markSignupObserved();
             let result = { status: 200, body: {} };
             if (url.pathname === '/auth/providers/config') result.body = { clients: [] };
             else if (url.pathname === '/auth/registration/config') result.body = config;
+            else if (url.pathname === '/auth/registration/bootstrap') result.body = { ready: true };
+            else if (url.pathname === '/auth/registration/observe') result.body = { observed: true };
             else if (url.pathname === '/auth/registration/begin') {
                 if (body.ageBand === 'parent-required') {
                     assert(['US', 'BR'].includes(body.country));
@@ -55,7 +60,7 @@ async function fixture(t, signup = async () => ({ error: 'REGISTRATION_REQUIRED'
     // A fresh isolated Vite cache compiles the module graph before DOMContentLoaded.
     await page.goto(`${origin}/signup`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
     if (eligible) await approveAdult(page);
-    return { page, calls };
+    return { page, calls, signupObserved };
 }
 async function fillSynthetic(page) {
     await page.locator('#signup-username').fill('Synthetic Layout Player');
@@ -65,7 +70,7 @@ async function fillSynthetic(page) {
 
 async function approveAdult(page) {
     await page.locator('#registration-country').selectOption('US');
-    await page.locator('#registration-age').selectOption('adult');
+    await page.locator('#registration-age').fill('18');
     await page.getByRole('button', { name: 'Continue', exact: true }).click();
     await page.locator('#signup-password').waitFor();
 }
@@ -87,9 +92,9 @@ test('signup collects country and coarse age before mounting account credentials
 for (const country of ['US', 'BR']) test(`${country} parent-required signup preserves restriction across reload and navigation without credentials or a grant`, async t => {
     const { page, calls } = await fixture(t, undefined, { eligible: false });
     await page.locator('#registration-country').selectOption(country);
-    await page.locator('#registration-age').selectOption('parent-required');
+    await page.locator('#registration-age').fill(country === 'US' ? '12' : '17');
     const restricted = page.waitForResponse(response => new URL(response.url()).pathname === '/auth/registration/begin');
-    await page.getByRole('button', { name: 'Continue with a parent', exact: true }).click();
+    await page.getByRole('button', { name: 'Continue', exact: true }).click();
     await restricted;
     await page.getByRole('link', { name: 'Continue to parent-led registration', exact: true }).waitFor();
     assert.equal(await page.locator('#signup-username, #signup-email, #signup-password').count(), 0);
@@ -132,29 +137,31 @@ test('server registration rejection does not invent authorization, claim success
     assert.equal(page.url(), `${origin}/signup`);
 });
 
-test('duplicate submit events send only one signup while the result is unresolved', async t => {
+test('duplicate submit events send only one signup while the result is unresolved', { timeout: 30_000 }, async t => {
     let release;
     const pending = new Promise(resolve => { release = resolve; });
-    const { page, calls } = await fixture(t, async () => { await pending; return { error: 'DUPLICATE_USER' }; });
+    const { page, calls, signupObserved } = await fixture(t, async () => { await pending; return { error: 'DUPLICATE_USER' }; });
     await fillSynthetic(page);
     await page.locator('.signup__form').evaluate(form => {
         form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
         form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
     });
     await page.getByRole('button', { name: 'Signing up…', exact: true }).waitFor();
+    await signupObserved;
     assert.equal(calls.filter(call => call.path === '/api/users').length, 1);
     release();
     await page.getByRole('heading', { name: 'Duplicate user', exact: true }).waitFor();
     assert.equal(calls.filter(call => call.path === '/api/users').length, 1);
 });
 
-test('leaving an unresolved signup ignores its late result and does not open a stale dialog', async t => {
+test('leaving an unresolved signup ignores its late result and does not open a stale dialog', { timeout: 30_000 }, async t => {
     let release;
     const pending = new Promise(resolve => { release = resolve; });
-    const { page, calls } = await fixture(t, async () => { await pending; return { error: 'REGISTRATION_REQUIRED' }; });
+    const { page, calls, signupObserved } = await fixture(t, async () => { await pending; return { error: 'REGISTRATION_REQUIRED' }; });
     await fillSynthetic(page);
     await page.getByRole('button', { name: 'Sign up', exact: true }).click();
     await page.getByRole('button', { name: 'Signing up…', exact: true }).waitFor();
+    await signupObserved;
     await page.getByRole('link', { name: 'Log in', exact: true }).click();
     await page.locator('#login-password').waitFor();
     const finished = page.waitForResponse(response => new URL(response.url()).pathname === '/api/users');
