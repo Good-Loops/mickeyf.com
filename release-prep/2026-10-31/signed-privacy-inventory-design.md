@@ -26,6 +26,11 @@ manual opt-in and exclusive signing concurrency are required. It emits a
 bounded summary and the IPA digest, then uses the existing cleanup routine;
 it does not upload signed files, raw manifests or signing material. GitHub
 Actions logs and summaries for this public repository are public.
+If the hosted job is forcibly canceled or reaches its hard timeout, neither
+`finally` nor the cleanup step is guaranteed to run; this depends on disposal
+of GitHub's ephemeral hosted runner. Signing jobs are not configured to cancel
+an active job when another is queued, but pending runs in the same concurrency
+group can still be replaced.
 
 The job and helper still require **independent security review and a real
 macOS qualification** before use. Scanning must occur after build subprocesses
