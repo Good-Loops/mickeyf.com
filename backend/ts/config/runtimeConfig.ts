@@ -14,6 +14,7 @@ type Environment = Readonly<Record<string, string | undefined>>;
 export type RuntimeConfig = {
     registrationPolicy: RegistrationPolicy | undefined;
     registrationAudience?: 'children-included';
+    adultOnlyRegistration: boolean;
     scoreParticipationPolicy: ScoreParticipationPolicy | undefined;
     parentRegistrationPolicy: ParentRegistrationPolicy | undefined;
     nodeEnv: RuntimeEnvironment;
@@ -127,6 +128,14 @@ export function loadRuntimeConfig(env: Environment = process.env): RuntimeConfig
     const registrationPolicy = loadRegistrationPolicy(env);
     const parentRegistrationPolicy = loadParentRegistrationPolicy(env, registrationPolicy);
     const registrationAudience = env.REGISTRATION_AUDIENCE === 'children-included' ? 'children-included' as const : undefined;
+    if (env.REGISTRATION_ADULT_ONLY !== undefined && !['true', 'false'].includes(env.REGISTRATION_ADULT_ONLY)) {
+        throw new Error('REGISTRATION_ADULT_ONLY must be true or false.');
+    }
+    const adultOnlyRegistration = env.REGISTRATION_ADULT_ONLY === 'true';
+    if (adultOnlyRegistration && (!registrationAudience || !registrationPolicy || registrationPolicy.mode === 'general-audience'
+        || env.PARENT_REGISTRATION_CREATION_ENABLED === 'true')) {
+        throw new Error('Adult-only registration requires a child-audience age policy and closed child creation.');
+    }
     if (env.CHILD_ONLINE_ACTIVITY_ENABLED !== undefined && !['true', 'false'].includes(env.CHILD_ONLINE_ACTIVITY_ENABLED)) {
         throw new Error('CHILD_ONLINE_ACTIVITY_ENABLED must be true or false.');
     }
@@ -137,12 +146,13 @@ export function loadRuntimeConfig(env: Environment = process.env): RuntimeConfig
     if (registrationAudience && (registrationPolicy && env.REGISTRATION_CREATION_ENABLED !== 'false'
         || env.PROVIDER_GOOGLE_SIGNUP_ENABLED === 'true' || env.PROVIDER_APPLE_SIGNUP_ENABLED === 'true'
         || env.PARENT_REGISTRATION_CREATION_ENABLED === 'true')
-        && (!parentRegistrationPolicy?.creationEnabled || !parentRegistrationPolicy.signedFormsEnabled)) {
+        && !adultOnlyRegistration && (!parentRegistrationPolicy?.creationEnabled || !parentRegistrationPolicy.signedFormsEnabled)) {
         throw new Error('Child-audience account creation requires the enabled reviewed signed-parent policy.');
     }
     return Object.freeze({
         registrationPolicy,
         registrationAudience,
+        adultOnlyRegistration,
         scoreParticipationPolicy: loadScoreParticipationPolicy(env, registrationPolicy),
         parentRegistrationPolicy,
         nodeEnv,

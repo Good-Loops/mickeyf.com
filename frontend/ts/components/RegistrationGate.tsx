@@ -27,12 +27,14 @@ export function classifyRegistrationAge(value: string, parentRequiredBelow: numb
     return age < parentRequiredBelow ? 'parent-required' : age < adultFrom ? 'minor' : 'adult';
 }
 
-export function ParentRegistrationUnavailable() {
+export function ParentRegistrationUnavailable({ available = true }: { available?: boolean }) {
     return <div className="registration-parent-notice" role="status">
-        <h2>A parent or guardian needs to lead this step</h2>
-        <p><Link to="/parent-accounts">Continue to parent-led registration</Link> to check availability and sign in to your own parent account.</p>
+        <h2>{available ? 'A parent or guardian needs to lead this step' : 'Account creation is not available yet'}</h2>
+        {available ? <p><Link to="/parent-accounts">Continue to parent-led registration</Link> to check availability and sign in to your own parent account.</p>
+            : <p>Parent-led registration is not available yet. You can continue exploring as a guest.</p>}
         <p>No child name, email, password or identity document is needed here. Please do not enter an adult age for a child.</p>
-        <p>A parent can use their own device and account for registration. For an incorrect age result, <Link to="/privacy#privacy-children">contact us for help</Link>. You can keep exploring without an account.</p>
+        {available && <p>A parent can use their own device and account for registration.</p>}
+        <p>For an incorrect age result, <Link to="/privacy#privacy-children">contact us for help</Link>. You can keep exploring without an account.</p>
     </div>;
 }
 
@@ -179,7 +181,7 @@ export default function RegistrationGate({ children, purpose = 'signup' }: {
                         {config?.enabled !== false && <button className="provider-eligibility__retry" type="button" onClick={() => setRetry(value => value + 1)}>Check again</button>}
                     </>}
                 </div>
-                : parentStep || registrationAge.parentRequired() ? <ParentRegistrationUnavailable />
+                : parentStep || registrationAge.parentRequired() ? <ParentRegistrationUnavailable available={countryPolicy.parentRegistrationAvailable} />
                 : <form className="signup__form" onSubmit={submit} aria-busy={busy}>
                     {purpose === 'provider-login' && <p>Enter your country and age to continue.</p>}
                     <label className="signup__field" htmlFor="registration-country"><span className="signup__label">Country where you live</span>

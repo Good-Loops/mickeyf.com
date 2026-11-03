@@ -84,17 +84,19 @@ export function validateAndroidPresenterPins(env, reviewedPins) {
 /** Child preparation preserves reviewed login/management while every new-account path is closed. */
 export function providerReleaseEnvironment(config, rollback = false) {
     keys(config, ['phase', 'environment'], 'configuration');
-    if (!['prepare', 'prepare-child', 'paused-general', 'active'].includes(config.phase)) fail('invalid release phase');
+    if (!['prepare', 'prepare-child', 'prepare-adult', 'paused-general', 'active', 'active-adult'].includes(config.phase)) fail('invalid release phase');
     const env = config.environment;
+    const adultFirst = ['prepare-adult', 'active-adult'].includes(config.phase);
     const generalAudience = record(env) && generalPolicyKeys.some(name => Object.hasOwn(env, name));
     const childAudience = record(env) && childPolicyKeys.some(name => Object.hasOwn(env, name));
     keys(env, [...Object.keys(PROVIDER_FIXED_ENV), ...flags, ...(config.phase !== 'prepare' ? policyKeys : []),
-        ...(generalAudience ? generalPolicyKeys : []), ...(childAudience ? childPolicyKeys : []),
+        ...(generalAudience ? generalPolicyKeys : []), ...(childAudience ? childPolicyKeys : []), ...(adultFirst ? ['REGISTRATION_ADULT_ONLY'] : []),
         ...androidEnvironmentKeys.filter(name => record(env) && Object.hasOwn(env, name))], 'environment');
     if (childAudience && (config.phase === 'prepare' || generalAudience || env.REGISTRATION_AUDIENCE !== 'children-included')) {
         fail('children-included registration requires its reviewed staged policy, without general signup');
     }
-    if (config.phase === 'prepare-child' && !childAudience) fail('prepare-child requires the explicit children-included policy');
+    if (['prepare-child', 'prepare-adult', 'active-adult'].includes(config.phase) && !childAudience) fail('child or adult preparation requires the explicit children-included policy');
+    if (adultFirst && env.REGISTRATION_ADULT_ONLY !== 'true') fail('adult-first release requires adult-only enforcement');
     if (config.phase === 'paused-general' && (!generalAudience || childAudience)) fail('paused-general requires a general-audience policy');
     for (const [name, value] of Object.entries(env)) {
         if (typeof value !== 'string' || value.length > 16_384 || value.includes('\0')) fail(`${name} must be bounded public text`);
@@ -109,8 +111,8 @@ export function providerReleaseEnvironment(config, rollback = false) {
         for (const name of flags) {
             const publicClosed = childAudience && env.PUBLIC_SCORE_PARTICIPATION_ENABLED === 'false'
                 && ['PUBLIC_SCORE_PARTICIPATION_ENABLED', 'PUBLIC_SCORE_POLICY_REVIEWED', 'PUBLIC_SCORE_ASSURANCE_REVIEWED'].includes(name);
-            const creationClosed = ['prepare-child', 'paused-general'].includes(config.phase) && PROVIDER_CREATION_FLAGS.includes(name);
-            const expected = generalAudience && name === 'PARENT_REGISTRATION_CREATION_ENABLED' || publicClosed || creationClosed ? 'false' : 'true';
+            const creationClosed = ['prepare-child', 'prepare-adult', 'paused-general'].includes(config.phase) && PROVIDER_CREATION_FLAGS.includes(name);
+            const expected = (generalAudience || adultFirst) && name === 'PARENT_REGISTRATION_CREATION_ENABLED' || publicClosed || creationClosed ? 'false' : 'true';
             if (env[name] !== expected) fail(`${config.phase} release requires explicit ${name}=${expected}`);
         }
         if (generalAudience && (env.REGISTRATION_GENERAL_AUDIENCE_ENABLED !== 'true'
@@ -145,7 +147,7 @@ export function providerReleaseEnvironment(config, rollback = false) {
             if (!Array.isArray(signedCountries) || signedCountries.length !== parents.length
                 || new Set(signedCountries).size !== signedCountries.length
                 || signedCountries.some(country => !['BR', 'US'].includes(country) || !parents.includes(country))
-                || Object.keys(rules).some(country => !parents.includes(country))) {
+                || !adultFirst && Object.keys(rules).some(country => !parents.includes(country))) {
                 fail('every child country requires an explicit supported signed-parent-form policy');
             }
         }

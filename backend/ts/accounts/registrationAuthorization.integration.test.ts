@@ -127,6 +127,36 @@ async function assertGeneralPrivate(name: string) {
 }
 
 /** Every account, credential, provider identity and age grant below is synthetic. */
+test('adult-only mode refuses minor grants, including grants issued before the change, and permits adult creation', async () => {
+    const childPolicy = loadRegistrationPolicy({ REGISTRATION_ENABLED: 'true', REGISTRATION_POLICY_REVIEWED: 'true',
+        REGISTRATION_AUDIENCE: 'children-included', REGISTRATION_POLICY_VERSION: 'synthetic-adult-first',
+        REGISTRATION_COUNTRY_RULES: '{"US":{"parentRequiredBelow":13}}' })!;
+    const adultOnly = createRegistrationAuthorization(generalDatabase, childPolicy, childPolicy.audience, true, true);
+    const minor = childContext();
+    assert.deepEqual(await adultOnly.begin(minor, { country: 'US', ageBand: 'minor', policyVersion: childPolicy.version }),
+        { allowed: false, reason: 'PARENT_REQUIRED' });
+    await assert.rejects(adultOnly.assertAvailable(minor), RegistrationRequiredError);
+
+    const prior = childContext();
+    const previous = createRegistrationAuthorization(generalDatabase, childPolicy, childPolicy.audience, true);
+    assert.equal((await previous.begin(prior, { country: 'US', ageBand: 'minor', policyVersion: childPolicy.version })).allowed, true);
+    await assert.rejects(adultOnly.assertAvailable(prior), RegistrationRequiredError);
+    const refusedName = `minor-refused-${randomUUID()}`;
+    await assert.rejects(createRegisteredPasswordAccount(generalDatabase, passwordInput(refusedName),
+        (connection, id) => adultOnly.consume(connection, prior, id)), RegistrationRequiredError);
+    assert.equal((await administrator.query<RowDataPacket[]>('SELECT user_id FROM users WHERE user_name=?', [refusedName]))[0].length, 0);
+
+    const adult = childContext();
+    assert.equal((await adultOnly.begin(adult, { country: 'US', ageBand: 'adult', policyVersion: childPolicy.version })).allowed, true);
+    await adultOnly.assertAvailable(adult);
+    const adultName = `adult-created-${randomUUID()}`;
+    assert.equal(await createRegisteredPasswordAccount(generalDatabase, passwordInput(adultName),
+        (connection, id) => adultOnly.consume(connection, adult, id)), 'created');
+    const created = await account(adultName);
+    const [profiles] = await administrator.query<RowDataPacket[]>('SELECT age_band FROM account_registration_profiles WHERE account_uuid=?', [created.accountId]);
+    assert.equal(profiles[0]?.age_band, 'adult');
+});
+
 async function stagedAppleFixture() {
     const childPolicy = loadRegistrationPolicy({ REGISTRATION_ENABLED: 'true', REGISTRATION_POLICY_REVIEWED: 'true',
         REGISTRATION_AUDIENCE: 'children-included', REGISTRATION_POLICY_VERSION: 'synthetic-stage-v1',

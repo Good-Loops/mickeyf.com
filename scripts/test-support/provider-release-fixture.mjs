@@ -46,9 +46,20 @@ export function childProviderConfig(phase = 'active') {
     return config;
 }
 
+export function adultProviderConfig(phase = 'active-adult') {
+    const config = childProviderConfig();
+    config.phase = phase;
+    Object.assign(config.environment, { REGISTRATION_ADULT_ONLY: 'true', PARENT_REGISTRATION_CREATION_ENABLED: 'false',
+        PARENT_REGISTRATION_COUNTRIES: '["US"]', PARENT_SIGNED_FORM_COUNTRIES: '["US"]' });
+    if (phase === 'prepare-adult') for (const name of ['REGISTRATION_CREATION_ENABLED', 'PROVIDER_GOOGLE_SIGNUP_ENABLED',
+        'PROVIDER_APPLE_SIGNUP_ENABLED', 'PARENT_REGISTRATION_CREATION_ENABLED']) config.environment[name] = 'false';
+    return config;
+}
+
 export function fixture(phase = 'active', previousProvider) {
     const f = sessionFixture();
-    f.pins.candidate.deployment.providerRelease = phase === 'prepare-child' ? childProviderConfig(phase) : providerConfig(phase);
+    f.pins.candidate.deployment.providerRelease = phase === 'prepare-child' ? childProviderConfig(phase)
+        : phase === 'prepare-adult' ? adultProviderConfig(phase) : providerConfig(phase);
     function setEnvironment(revision, config, rollback = false) {
         const additions = providerReleaseEnvironment(config, rollback);
         const base = revision.containers[0].env.filter(item => ['NODE_ENV', 'CLOUD_SQL_CONNECTION_NAME', 'DB_USER', 'DB_NAME',

@@ -411,6 +411,22 @@ test('under-threshold signup records the protective server context without mount
     assert.equal(view.find(node => node.type === 'button' && node.props.children === 'Back to registration'), undefined);
 });
 
+test('a restricted signup shows the unavailable parent flow without mounting credentials', async t => {
+    const view = mount(t, { enabled: true, audience: 'children-included', creationEnabled: true,
+        policyVersion: 'synthetic-reviewed', parentRegistrationAvailable: false,
+        countries: [{ country: 'US', parentRequiredBelow: 13, adultFrom: 18 }] });
+    view.hooks.begin = async input => { view.calls.push(['begin', input]); return { error: 'PARENT_REQUIRED' }; };
+    view.render(); await view.start();
+    await view.change('registration-country', 'US');
+    await view.change('registration-age', '17');
+    await view.find(node => node.type === 'form').props.onSubmit({ preventDefault() {} });
+    view.render(); await view.settle();
+    const notice = view.find(node => typeof node.type === 'function' && node.type.name === 'ParentRegistrationUnavailable');
+    assert.equal(notice.props.available, false);
+    assert.equal(view.children.length, 0);
+    assert(view.find(node => node.props?.to === '/'));
+});
+
 test('an older general backend cannot mount credentials or provider controls in the new source', async t => {
     const view = mount(t, { enabled: true, mode: 'general-audience', policyVersion: 'old-general',
         parentRegistrationAvailable: false, optionalDetails: false });
