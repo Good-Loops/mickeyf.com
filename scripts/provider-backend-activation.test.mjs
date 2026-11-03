@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { readFileSync } from 'node:fs';
 import { createChildSchemaVerifier } from './child-schema-verifier.mjs';
-import { fixture, childProviderConfig, now } from './test-support/provider-release-fixture.mjs';
+import { fixture, childProviderConfig, adultProviderConfig, now } from './test-support/provider-release-fixture.mjs';
 import { SERVICE, PROJECT, REGION, IMAGE, REVISION_TYPE, fingerprint, sessionRevisionName } from './frozen-backend-traffic.mjs';
 import { observeProviderReaderBoundary, planProviderActiveRevision, applyProviderActiveRevision, activeRevisionTemplate,
     planProviderActiveTraffic, applyProviderActiveTraffic, activeRevisionName, activeRollbackRevisionName,
@@ -10,10 +10,10 @@ import { observeProviderReaderBoundary, planProviderActiveRevision, applyProvide
     CHILD_SIGNED_FORM_SQL_SHA256 } from './provider-backend-activation.mjs';
 
 const activeConfiguration = JSON.parse(readFileSync(new URL('./provider-release-general.json', import.meta.url), 'utf8'));
-function activationFixture({ retireUnrouted = false, child = false } = {}) {
-    const f = fixture(child ? 'prepare-child' : 'prepare');
+function activationFixture({ retireUnrouted = false, child = false, adult = false } = {}) {
+    const f = fixture(child ? 'prepare-child' : adult ? 'prepare-adult' : 'prepare');
     f.candidate.launchStage = f.rollback.launchStage = f.service.launchStage = 'GA';
-    const pins = { closed: f.pins, activeConfiguration: child ? childProviderConfig() : structuredClone(activeConfiguration) };
+    const pins = { closed: f.pins, activeConfiguration: child ? childProviderConfig() : adult ? adultProviderConfig() : structuredClone(activeConfiguration) };
     if (child) {
         pins.childSchemaReceipt = { schemaVersion: 1, operation: 'verify-child-signed-form-schema',
             verifiedAt: new Date(now).toISOString(), sourceCommit: f.pins.candidate.deployment.sourceCommit,
@@ -201,6 +201,29 @@ test('active configuration, complete runtime and safe fallback are pinned', asyn
     }
     f.candidate.unreviewedSetting = 'silently discard me';
     assert.throws(() => activeRevisionTemplate(f.candidate, f.activationPins), /unreviewed runtime field/);
+});
+
+test('adult-first activation pins an identical closed fallback and cannot open child creation', async () => {
+    const f = activationFixture({ adult: true });
+    validateProviderActivationPins(f.activationPins);
+    for (const mutate of [p => { p.activeConfiguration.environment.REGISTRATION_ADULT_ONLY = 'false'; },
+        p => { p.activeConfiguration.environment.PARENT_REGISTRATION_CREATION_ENABLED = 'true'; },
+        p => { p.closed.candidate.deployment.providerRelease.environment.REGISTRATION_ADULT_ONLY = 'false'; },
+        p => { p.activeConfiguration.phase = 'active'; }]) {
+        const changed = structuredClone(f.activationPins); mutate(changed);
+        assert.throws(() => validateProviderActivationPins(changed));
+    }
+    const { active, fallback, when } = await prepared(f);
+    const env = receipt => Object.fromEntries(receipt.plan.request.template.containers[0].env.map(e => [e.name, e.value]));
+    assert.equal(env(active).REGISTRATION_ADULT_ONLY, 'true');
+    assert.equal(env(active).REGISTRATION_CREATION_ENABLED, 'true');
+    assert.equal(env(active).PARENT_REGISTRATION_CREATION_ENABLED, 'false');
+    assert.equal(env(fallback).REGISTRATION_CREATION_ENABLED, 'false');
+    assert.equal(env(fallback).REGISTRATION_ADULT_ONLY, 'true');
+    const plan = await planProviderActiveTraffic(f.provider, active, 'activate', when);
+    await applyProviderActiveTraffic(f.provider, plan, fingerprint(plan), when);
+    const close = await planProviderActiveTraffic(f.provider, active, 'close-active', when + 1000);
+    await applyProviderActiveTraffic(f.provider, close, fingerprint(close), when + 1000);
 });
 
 test('strict child activation retains the reviewed policy, compatible closure and exact schema receipt through traffic changes', async () => {

@@ -100,9 +100,12 @@ async function screeningObserve(connection: Pick<PoolConnection, 'query'>, conte
 
 /** Eligibility may support existing provider login while all new-account consumption stays closed. */
 export function createRegistrationAuthorization(database: Pick<Pool, 'query'> & Partial<Pick<Pool, 'getConnection'>>, policy?: RegistrationPolicy,
-    audience: RegistrationPolicy['audience'] = policy?.audience, creationEnabled = true) {
+    audience: RegistrationPolicy['audience'] = policy?.audience, creationEnabled = true, adultOnly = false) {
     if (audience === 'children-included' && policy?.mode === 'general-audience') {
         throw new TypeError('Child registration requires staged eligibility.');
+    }
+    if (adultOnly && (audience !== 'children-included' || !policy || policy.mode === 'general-audience')) {
+        throw new TypeError('Adult-only registration requires child-audience age screening.');
     }
     function generalGrant(context: ProviderAuthContext | null) {
         const original = anonymousBinding(context);
@@ -203,7 +206,8 @@ export function createRegistrationAuthorization(database: Pick<Pool, 'query'> & 
                     }
                     await connection.query({ sql: 'DELETE FROM registration_authorizations WHERE binding_hash = ? AND consumed_at IS NULL', timeout: TIMEOUT_MS }, [binding]);
                     if (observeOnly) { phase = 'commit'; await connection.query({ sql: 'COMMIT', timeout: TIMEOUT_MS }); return decision; }
-                    if (!decision.allowed || markers.parent || (decision.ageBand === 'adult' && markers.minor)) {
+                    if (!decision.allowed || (adultOnly && decision.ageBand !== 'adult')
+                        || markers.parent || (decision.ageBand === 'adult' && markers.minor)) {
                         phase = 'commit'; await connection.query({ sql: 'COMMIT', timeout: TIMEOUT_MS });
                         return { allowed: false as const, reason: 'PARENT_REQUIRED' as const };
                     }
@@ -307,7 +311,10 @@ export function createRegistrationAuthorization(database: Pick<Pool, 'query'> & 
         async assertAvailable(context: ProviderAuthContext | null): Promise<void> {
             if (!creationEnabled) throw new RegistrationRequiredError();
             if (policy?.mode === 'general-audience') await readGeneral(database, context, false);
-            else await read(database, context, false);
+            else {
+                const { decision } = await read(database, context, false);
+                if (adultOnly && decision.ageBand !== 'adult') throw new RegistrationRequiredError();
+            }
         },
         async assertLoginAvailable(context: ProviderAuthContext | null): Promise<void> {
             await assertAdultLogin(database, context, false);
@@ -338,6 +345,7 @@ export function createRegistrationAuthorization(database: Pick<Pool, 'query'> & 
                 return;
             }
             const { binding, decision } = await read(connection, context, true);
+            if (adultOnly && decision.ageBand !== 'adult') throw new RegistrationRequiredError();
             const [profile] = await connection.query<ResultSetHeader>({
                 sql: `INSERT INTO account_registration_profiles
                     (account_uuid, country_code, age_band, policy_version, score_visibility)

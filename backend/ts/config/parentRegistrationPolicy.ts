@@ -25,7 +25,8 @@ export function loadParentRegistrationPolicy(env: Readonly<Record<string, string
             || childAudience && (env.PARENT_SIGNED_FORMS_ENABLED !== 'true' || !Array.isArray(signedCountries)
                 || signedCountries.length !== countries.length || new Set(signedCountries).size !== signedCountries.length
                 || signedCountries.some(country => !['BR', 'US'].includes(country) || !countries.includes(country))
-                || Object.keys(registration.countries).some(country => !countries.includes(country)))) throw new Error();
+                || (env.REGISTRATION_ADULT_ONLY !== 'true' || env.PARENT_REGISTRATION_CREATION_ENABLED === 'true')
+                    && Object.keys(registration.countries).some(country => !countries.includes(country)))) throw new Error();
         return Object.freeze({ version, consentVersion, consentText, privacyNoticeUrl, countries: Object.freeze([...countries].sort()),
             creationEnabled: env.PARENT_REGISTRATION_CREATION_ENABLED === 'true',
             ...(childAudience ? { audience: 'children-included' as const, signedFormCountries: Object.freeze([...(signedCountries as string[])].sort()) } : {}),

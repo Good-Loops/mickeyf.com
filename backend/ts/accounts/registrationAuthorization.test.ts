@@ -185,6 +185,29 @@ test('child-audience provider login denies minor grants without changing signup 
         .assertLoginAvailable(({ ...context(), screening: true } as ProviderAuthContext)), RegistrationRequiredError);
 });
 
+test('adult-only screening rejects minor signup before credentials and again in the account transaction', async () => {
+    const childPolicy = { ...policy, audience: 'children-included' as const };
+    const screened = { ...context(), screening: true } as ProviderAuthContext;
+    const minor = fixture('minor');
+    const service = createRegistrationAuthorization(minor.database, childPolicy, childPolicy.audience, true, true);
+    assert.deepEqual(await service.begin(screened, { country: 'ZZ', ageBand: 'minor', policyVersion: policy.version }),
+        { allowed: false, reason: 'PARENT_REQUIRED' });
+    assert(!minor.calls.some(call => call.sql.startsWith('INSERT INTO registration_authorizations') && call.sql.includes('LEAST')));
+    await assert.rejects(service.assertAvailable(screened), RegistrationRequiredError);
+    await assert.rejects(service.consume(minor.connection, screened, accountId), RegistrationRequiredError);
+    assert(!minor.calls.some(call => call.sql.startsWith('INSERT INTO account_registration_profiles')));
+
+    const adult = fixture('adult');
+    const eligible = createRegistrationAuthorization(adult.database, childPolicy, childPolicy.audience, true, true);
+    assert.deepEqual(await eligible.begin(screened, { country: 'ZZ', ageBand: 'adult', policyVersion: policy.version }),
+        { allowed: true, country: 'ZZ', ageBand: 'adult' });
+    await eligible.assertAvailable(screened);
+    await eligible.assertLoginAvailable(screened);
+    await eligible.consume(adult.connection, screened, accountId);
+    assert(adult.calls.some(call => call.sql.startsWith('INSERT INTO account_registration_profiles')));
+    assert.throws(() => createRegistrationAuthorization(adult.database, policy, undefined, true, true), /age screening/u);
+});
+
 test('transactional provider eligibility locks and rechecks the adult grant', async () => {
     const childPolicy = { ...policy, audience: 'children-included' as const };
     const adult = fixture('adult');

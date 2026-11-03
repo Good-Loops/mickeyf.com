@@ -51,3 +51,14 @@ test('child audiences require explicit signed form coverage for every configured
         assert.throws(() => loadParentRegistrationPolicy({ ...childEnv, ...changes }, registration));
     }
 });
+
+test('adult-only registration can retain an existing narrower parent management policy without opening child creation', () => {
+    const childEnv = { ...env, REGISTRATION_AUDIENCE: 'children-included', REGISTRATION_ADULT_ONLY: 'true',
+        REGISTRATION_COUNTRY_RULES: '{"US":{"parentRequiredBelow":13},"BR":{"parentRequiredBelow":18}}',
+        PARENT_REGISTRATION_COUNTRIES: '["US"]', PARENT_SIGNED_FORM_COUNTRIES: '["US"]', PARENT_SIGNED_FORMS_ENABLED: 'true' };
+    const registration = loadRegistrationPolicy(childEnv)!;
+    assert.deepEqual(loadParentRegistrationPolicy(childEnv, registration)?.countries, ['US']);
+    assert.equal(loadParentRegistrationPolicy(childEnv, registration)?.creationEnabled, false);
+    assert.throws(() => loadParentRegistrationPolicy({ ...childEnv, PARENT_REGISTRATION_CREATION_ENABLED: 'true' }, registration));
+    assert.throws(() => loadParentRegistrationPolicy({ ...childEnv, PARENT_SIGNED_FORM_COUNTRIES: '["BR"]' }, registration));
+});

@@ -59,7 +59,7 @@ const childActivity = runtimeConfig.childOnlineActivityEnabled ? parentManagedCh
 const creationPolicy = registrationPolicyForCreation(runtimeConfig.registrationPolicy);
 const registration = createRegistrationAuthorization(pool,
     runtimeConfig.registrationAudience === 'children-included' ? runtimeConfig.registrationPolicy : creationPolicy,
-    runtimeConfig.registrationAudience, !!creationPolicy);
+    runtimeConfig.registrationAudience, !!creationPolicy, runtimeConfig.adultOnlyRegistration);
 const deletionJournal = runtimeConfig.accountDeletionEnabled
     ? createGcsDeletionJournal({ bucket: runtimeConfig.journalBucket }) : undefined;
 const app = express();

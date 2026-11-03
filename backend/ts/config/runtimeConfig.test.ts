@@ -35,6 +35,20 @@ test('child-audience runtime retains its contract while creation is closed and r
         'children-included', 'closed policy must still gate provider collection for known managed children');
 });
 
+test('adult-only creation is explicit, age-screened and incompatible with enabling child creation', () => {
+    const childEnvironment = { ...productionEnvironment, REGISTRATION_AUDIENCE: 'children-included',
+        REGISTRATION_ENABLED: 'true', REGISTRATION_POLICY_REVIEWED: 'true', REGISTRATION_POLICY_VERSION: 'synthetic-child-v1',
+        REGISTRATION_COUNTRY_RULES: '{"US":{"parentRequiredBelow":13},"BR":{"parentRequiredBelow":18}}' };
+    assert.equal(loadRuntimeConfig(productionEnvironment).adultOnlyRegistration, false);
+    assert.equal(loadRuntimeConfig({ ...childEnvironment, REGISTRATION_ADULT_ONLY: 'true' }).adultOnlyRegistration, true);
+    assert.throws(() => loadRuntimeConfig({ ...childEnvironment, REGISTRATION_ADULT_ONLY: 'true',
+        PARENT_REGISTRATION_CREATION_ENABLED: 'true' }), /closed child creation/u);
+    assert.throws(() => loadRuntimeConfig({ ...productionEnvironment, REGISTRATION_ADULT_ONLY: 'true' }), /age policy/u);
+    for (const invalid of ['', 'TRUE', '1', ' true ']) {
+        assert.throws(() => loadRuntimeConfig({ ...childEnvironment, REGISTRATION_ADULT_ONLY: invalid }), /must be true or false/u);
+    }
+});
+
 test('production runtime configuration allows only the website, packaged iOS and exact local preview origins', () => {
     const config = loadRuntimeConfig(productionEnvironment);
 

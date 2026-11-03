@@ -4,7 +4,7 @@ import { readFileSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
-import { providerConfig, childProviderConfig, fixture, deploymentFixture, now, androidPresenterPins } from './test-support/provider-release-fixture.mjs';
+import { providerConfig, childProviderConfig, adultProviderConfig, fixture, deploymentFixture, now, androidPresenterPins } from './test-support/provider-release-fixture.mjs';
 import { providerReleaseEnvironment, providerConfigurationSha256, PROVIDER_CREATION_FLAGS,
     PROVIDER_ANDROID_PRESENTER_PINS, validateAndroidPresenterPins } from './provider-release-config.mjs';
 import { providerDeploymentApproval, renderProviderBackendDeployConfig, resolveProviderDeploymentSteps,
@@ -19,6 +19,21 @@ const read = path => readFileSync(new URL(path, import.meta.url), 'utf8');
 const input = { canonical: read('../cloudbuild.deploy.yaml'), candidate: read('../cloudbuild.candidate.yaml'),
     preflight: read('./render-frozen-backend-deploy.preflight.py') };
 const render = pins => renderProviderBackendDeployConfig({ ...input, pins });
+
+test('adult-first release retains its age restriction and cannot enable child creation', () => {
+    const active = adultProviderConfig();
+    const closed = adultProviderConfig('prepare-adult');
+    assert.deepEqual(providerReleaseEnvironment(active, true), providerReleaseEnvironment(closed));
+    assert.equal(providerReleaseEnvironment(active).PARENT_REGISTRATION_CREATION_ENABLED, 'false');
+    assert.ok(render(fixture('prepare-adult').pins.candidate.deployment).steps.length);
+    for (const change of [{ REGISTRATION_ADULT_ONLY: 'false' }, { PARENT_REGISTRATION_CREATION_ENABLED: 'true' },
+        { PARENT_SIGNED_FORM_COUNTRIES: '["BR"]' }, { REGISTRATION_AUDIENCE: 'general' },
+        { REGISTRATION_GENERAL_AUDIENCE_ENABLED: 'true' }]) {
+        assert.throws(() => providerReleaseEnvironment({ ...active, environment: { ...active.environment, ...change } }));
+    }
+    assert.throws(() => providerReleaseEnvironment({ ...active, phase: 'active' }));
+    assert.throws(() => providerReleaseEnvironment({ ...closed, phase: 'prepare-child' }));
+});
 function python(code, data = {}) {
     const result = spawnSync(process.platform === 'win32' ? 'python' : 'python3', ['-B', '-c', 'import json,sys\ndata=json.load(sys.stdin)\n' + code],
         { input: JSON.stringify(data), encoding: 'utf8', timeout: 20_000 });

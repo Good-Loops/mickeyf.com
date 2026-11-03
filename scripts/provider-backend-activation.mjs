@@ -27,13 +27,18 @@ export const activeRevisionName = pins => `mickeyf-org-session-active-${pins.clo
 export const activeRollbackRevisionName = pins => `mickeyf-org-auth-rollback-${pins.closed.candidate.deployment.sourceBuildId.replaceAll('-', '')}`;
 
 export function validateProviderActivationPins(pins) {
-    const child = pins?.activeConfiguration?.environment?.REGISTRATION_AUDIENCE === 'children-included';
+    const adultFirst = pins?.activeConfiguration?.phase === 'active-adult';
+    const child = pins?.activeConfiguration?.environment?.REGISTRATION_AUDIENCE === 'children-included' && !adultFirst;
     keys(pins, ['closed', 'activeConfiguration', ...(child ? ['childSchemaReceipt'] : [])], 'Activation pins');
     validateProviderTrafficPins(pins.closed);
     const active = providerReleaseEnvironment(pins.activeConfiguration);
-    requireThat(pins.activeConfiguration.phase === 'active', 'Activation requires an active policy');
+    requireThat(['active', 'active-adult'].includes(pins.activeConfiguration.phase), 'Activation requires an active policy');
     const closed = pins.closed.candidate.deployment.providerRelease;
-    if (child) {
+    if (adultFirst) {
+        requireThat(closed.phase === 'prepare-adult'
+            && same(providerReleaseEnvironment(closed), providerReleaseEnvironment(pins.activeConfiguration, true)),
+        'Adult activation requires the exact matching creation-closed adult preparation');
+    } else if (child) {
         requireThat(closed.phase === 'prepare-child'
             && same(providerReleaseEnvironment(closed), providerReleaseEnvironment(pins.activeConfiguration, true)),
         'Child activation requires the exact matching reviewed creation-closed child preparation');
