@@ -33,7 +33,7 @@ test('verifies the published Svix signature example without relying on a locally
 
 test('accepts a signed delivery event only for the exact expected message and recipient', () => {
     assert.deepEqual(check(signed()), { eventId: 'msg_synthetic', providerEmailId: expected.providerEmailId,
-        observedAt: '2031-01-05T11:59:59.500000Z', kind: 'delivered', reason: 'delivered', recipientRoute: 'direct' });
+        observedAt: '2031-01-05T11:59:59.500000Z', kind: 'delivered', reason: 'delivered', recipientRoute: 'other' });
     assert.equal(check(signed({ ...event, type: 'email.sent' })), null);
     assert.equal(check(signed({ ...event, data: { ...event.data, to: ['other@example.test'] } })), null);
     assert.equal(check(signed({ ...event, data: { ...event.data, to: [expected.recipient, 'other@example.test'] } })), null);
@@ -50,11 +50,16 @@ test('authenticates delivery failures as holds rather than ignoring or treating 
     }
 });
 
-test('distinguishes delivery to an Apple relay from delivery to a direct address', () => {
-    const relay = 'synthetic@privaterelay.appleid.com';
-    const binding = { ...expected, recipient: relay };
-    const notice = { ...event, data: { ...event.data, to: [relay] } };
-    assert.equal(check(signed(notice), binding)?.recipientRoute, 'apple-relay');
+test('identifies Apple relay domains and treats icloud.com as ambiguous', () => {
+    for (const [recipient, route] of [
+        ['synthetic@privaterelay.appleid.com', 'apple-relay'],
+        ['synthetic@Private.iCloud.com', 'apple-relay'],
+        ['synthetic@icloud.com', 'icloud-ambiguous'],
+    ]) {
+        const binding = { ...expected, recipient };
+        const notice = { ...event, data: { ...event.data, to: [recipient] } };
+        assert.equal(check(signed(notice), binding)?.recipientRoute, route);
+    }
 });
 
 test('rejects altered bodies, invalid signatures, stale timestamps, and invalid secrets', () => {

@@ -15,7 +15,8 @@ export type ExpectedDelivery = Readonly<{
 }>;
 export type DeliveryObservation = Readonly<{ eventId: string; providerEmailId: string; observedAt: string;
     kind: 'delivered' | 'hold'; reason: 'delivered' | 'bounced' | 'failed' | 'suppressed' | 'delivery_delayed' | 'complained';
-    recipientRoute: 'direct' | 'apple-relay' }>;
+    /** Domain hint only; all email providers can forward or filter mail. */
+    recipientRoute: 'other' | 'apple-relay' | 'icloud-ambiguous' }>;
 export type DeliveryHeaders = Readonly<{ id: unknown; timestamp: unknown; signature: unknown }>;
 
 /** Authenticate raw bytes, including the provider's webhook timestamp and message ID. */
@@ -93,8 +94,9 @@ export function verifyInactivityDeliveryEvent(rawBody: Buffer, headers: Delivery
             || data.email_id !== expected.providerEmailId || data.from !== expected.from
             || !Array.isArray(data.to) || data.to.length !== 1 || data.to[0] !== expected.recipient) return null;
         const recipientDomain = expected.recipient.slice(expected.recipient.lastIndexOf('@') + 1).toLowerCase();
+        const recipientRoute = ['privaterelay.appleid.com', 'private.icloud.com'].includes(recipientDomain) ? 'apple-relay'
+            : recipientDomain === 'icloud.com' ? 'icloud-ambiguous' : 'other';
         return { eventId: headers.id as string, providerEmailId: expected.providerEmailId, observedAt: observed.canonical,
-            kind: reason === 'delivered' ? 'delivered' : 'hold', reason,
-            recipientRoute: recipientDomain === 'privaterelay.appleid.com' ? 'apple-relay' : 'direct' };
+            kind: reason === 'delivered' ? 'delivered' : 'hold', reason, recipientRoute };
     } catch { return null; }
 }
