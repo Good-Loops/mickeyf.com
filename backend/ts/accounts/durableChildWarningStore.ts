@@ -33,7 +33,7 @@ export type WarningStoreOptions = Readonly<{
     transport: AppendOnlyObjectTransport;
     /** Must verify independent activity history on this same locked transaction. */
     verifyActivity(connection: PoolConnection, childId: string): Promise<void>;
-    /** Must verify current contact AND its independent continuity; historical signup email is insufficient. */
+    /** Resolve the immutable used-form contact and its still-linked provider identity. */
     resolveContext(connection: PoolConnection, parentId: string, childId: string): Promise<WarningContext>;
     clock?: () => number;
 }>;
@@ -79,8 +79,8 @@ export function createDurableChildWarningStore(database: Pick<Pool, 'getConnecti
         const resolved = await options.resolveContext(connection, parentId, childId);
         if (!resolved || resolved.snapshot.parentId !== parentId || resolved.snapshot.childId !== childId
             || resolved.snapshot.channel !== 'email') throw unavailable();
-        // Bind the actual recipient as well as the independently verified contact
-        // revision. A resolver cannot accidentally keep the same digest after an address change.
+        // Bind the actual recipient as well as the immutable form/identity revision.
+        // A resolver cannot accidentally keep the same digest after an address change.
         const targetDigest = resolved.recipient && /^[a-f0-9]{64}$/u.test(resolved.snapshot.currentTargetDigest ?? '')
             ? createHmac('sha256', key).update('warning-target-v1\0').update(parentId).update('\0')
                 .update(resolved.snapshot.currentTargetDigest!).update('\0').update(resolved.recipient).digest('hex') : null;

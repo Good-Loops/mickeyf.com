@@ -59,7 +59,7 @@ export function assertContinuityDraft(source: string): void {
     assert.equal(source.replace(/\r\n/gu, '\n'), `${CONTINUITY_DRAFT_SQL}\n`, 'continuity draft differs from fixed test SQL');
 }
 
-export const WARNING_HISTORY_DRAFT_SQL = `-- Candidate only: not in the general migration manifest or production grant profiles.
+export const WARNING_HISTORY_DRAFT_SQL = `-- Separate opt-in warning schema; applied through the guarded inactivity operation.
 CREATE TABLE parent_child_warning_history (
     child_uuid CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     state_json JSON NOT NULL,

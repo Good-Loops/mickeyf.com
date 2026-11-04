@@ -57,6 +57,7 @@ import { verifyChildActivityContinuityReadiness } from './migrations/childActivi
 import { verifyParentManagedChildActivityReadiness } from './migrations/parentManagedChildActivityReadiness';
 import { loadChildInactivityDeployment } from './config/childInactivityDeployment';
 import { prepareChildInactivityDeployment } from './accounts/childInactivityDeployment';
+import { CHILD_WARNING_WEBHOOK_PATH } from './routers/childWarningWebhookRouter';
 
 const runtimeConfig = loadRuntimeConfig();
 const childInactivityConfig = loadChildInactivityDeployment(process.env);
@@ -119,6 +120,9 @@ async function runConfiguredMaintenance(): Promise<number> {
         && inactivity.status === 'fulfilled' && inactivity.value === 0 ? 0 : 1;
 }
 app.use(APPLE_MAINTENANCE_PATH, createAppleMaintenanceRouter(runtimeConfig.appleMaintenance, runConfiguredMaintenance));
+// Authenticate provider callbacks before the general body parsers; no browser session is accepted.
+app.use(CHILD_WARNING_WEBHOOK_PATH, (req, res, next) => childInactivityDeployment
+    ? childInactivityDeployment.receiveBrevo(req, res, next) : res.status(404).end());
 const localMaintenance = runtimeConfig.localProviderRuntime?.maintenanceEnabled
     ? createLocalProviderMaintenance(runConfiguredMaintenance) : undefined;
 
@@ -198,7 +202,8 @@ async function startServer(): Promise<void> {
             if (runtimeConfig.accountDeletionEnabled) {
                 await verifyAccountDeletionReadiness(pool, runtimeConfig.accountIdentityEpoch!);
             }
-            if (childInactivityConfig) childInactivityDeployment = await prepareChildInactivityDeployment(pool, childInactivityConfig);
+            if (childInactivityConfig) childInactivityDeployment = await prepareChildInactivityDeployment(pool, childInactivityConfig,
+                { activityConfig: childContinuityConfig, activity: childActivity, transport: childContinuityTransport });
             // Explicit local maintenance performs real queue cleanup only after all startup schema/identity gates pass.
             await localMaintenance?.start();
             const googleWeb = providerAuth.publicClients.find(client => client.clientKey === 'google-web');

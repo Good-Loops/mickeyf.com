@@ -1,4 +1,4 @@
-import { verifyChildActivityContinuitySchema } from './childActivityContinuitySchema';
+import { verifyChildActivityContinuitySchema, verifyChildWarningHistorySchema } from './childActivityContinuitySchema';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -14,6 +14,7 @@ const files = [
     { name: 'draft_create_parent_managed_child_activity.sql', sha256: 'bd927931230a1b677b279612c4e1f9958fa80f8bedac614aa4bf84df0a623eff' },
     { name: 'draft_parent_child_inactivity_warnings.sql', sha256: '67c60d54a5d435a8e8a4204f164943e17c5f2418d7ebea78c4ce5aad439f1add' },
     { name: 'draft_parent_child_activity_continuity.sql', sha256: '66557568ab311ec8165dd47333b14948a1e9699366e2de3a50a8944753a8c0fc' },
+    { name: 'draft_parent_child_warning_history.sql', sha256: '7de0df0892b38d26c259c6f4daf849338c142cab2df9c7473c063858d39d4b41' },
 ] as const;
 const tableNames = ['parent_child_inactivity_warnings', 'parent_managed_child_activity'] as const;
 type Snapshot = Readonly<{ database: string; user: string; serverUuid: string; serverVersion: string; versionComment: string; history: string }>;
@@ -61,9 +62,9 @@ async function snapshot(deps: InactivitySchemaDependencies): Promise<Snapshot> {
 async function assertTables(deps: InactivitySchemaDependencies, present: boolean): Promise<void> {
     const [rows] = await deps.connection.query(`SELECT TABLE_NAME AS name,ENGINE AS engine,TABLE_TYPE AS type
         FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE()
-        AND TABLE_NAME IN ('parent_managed_child_activity','parent_child_inactivity_warnings','parent_child_activity_continuity') ORDER BY TABLE_NAME`);
-    const allTables = ['parent_child_activity_continuity', ...tableNames];
-    if (!Array.isArray(rows) || (!present && rows.length !== 0) || (present && (rows.length !== 3
+        AND TABLE_NAME IN ('parent_managed_child_activity','parent_child_inactivity_warnings','parent_child_activity_continuity','parent_child_warning_history') ORDER BY TABLE_NAME`);
+    const allTables = ['parent_child_activity_continuity', 'parent_child_inactivity_warnings', 'parent_child_warning_history', 'parent_managed_child_activity'];
+    if (!Array.isArray(rows) || (!present && rows.length !== 0) || (present && (rows.length !== 4
         || rows.some((row, index) => row.name !== allTables[index] || row.engine !== 'InnoDB' || row.type !== 'BASE TABLE')))) return fail();
     if (!present) return;
     const [columns] = await deps.connection.query(`SELECT TABLE_NAME AS tableName,COLUMN_NAME AS name,COLUMN_TYPE AS type,
@@ -106,6 +107,7 @@ async function assertTables(deps: InactivitySchemaDependencies, present: boolean
     if (!Array.isArray(checks) || checks.length !== 1 || checks[0].tableName !== tableNames[0]
         || checks[0].name !== 'chk_inactivity_warning_receipt') return fail();
     await verifyChildActivityContinuitySchema(deps.connection);
+    await verifyChildWarningHistorySchema(deps.connection);
 }
 export async function planInactivitySchema(deps: InactivitySchemaDependencies): Promise<InactivitySchemaPlan> {
     try {

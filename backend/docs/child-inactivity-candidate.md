@@ -1,5 +1,9 @@
 # Child inactivity lifecycle candidate — disabled
 
+This document describes the older parent-acknowledged 30-day candidate. The current
+release uses [automatic warning/nonresponse handling](child-warning-production-wiring.md)
+with a twelve-month wait; the new deployment does not invoke this older deletion path.
+
 This code is a local candidate, not an enabled feature or a deployable release. No warning is sent and no account is deleted by importing it. The parent router is not mounted; the schema is a pending draft and is not in the migration manifest. Do not enable or apply it as-is.
 
 The owner later chose to allow deletion after 12 additional months of parent

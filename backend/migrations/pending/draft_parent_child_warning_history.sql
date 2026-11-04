@@ -1,4 +1,4 @@
--- Candidate only: not in the general migration manifest or production grant profiles.
+-- Separate opt-in warning schema; applied through the guarded inactivity operation.
 CREATE TABLE parent_child_warning_history (
     child_uuid CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
     state_json JSON NOT NULL,

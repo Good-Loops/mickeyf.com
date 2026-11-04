@@ -82,6 +82,7 @@ export async function sendBrevoInactivityWarning(apiKey: string, attempt: Warnin
         replyTo: { email: 'mickeyf.plays@gmail.com' },
         subject: portuguese ? 'Aviso sobre uma conta infantil no Ludolume' : 'Notice about a child account on Ludolume',
         textContent: `${portuguese ? NONRESPONSE_NOTICE.ptBR : NONRESPONSE_NOTICE.en}\n\nhttps://mickeyf.com/parent-accounts`,
+        tags: [`ludolume-warning:${attempt.attemptId}`],
         headers: { idempotencyKey: attempt.attemptId } };
     try {
         const response = await fetcher(`${API}/smtp/email`, { method: 'POST', redirect: 'error',

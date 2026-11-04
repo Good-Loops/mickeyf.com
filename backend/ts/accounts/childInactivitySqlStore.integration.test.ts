@@ -512,8 +512,8 @@ test('production inactivity composition is disabled without independent activity
     }), /independent activity continuity/u);
 });
 
-test('schema plan creates the three reviewed tables and holds partial DDL or changed metadata', async () => {
-    async function run(partial: 'none' | 'warning' | 'continuity') {
+test('schema plan creates the four reviewed tables and holds partial DDL or changed metadata', async () => {
+    async function run(partial: 'none' | 'warning' | 'continuity' | 'history') {
         const db = `inactivity_test_${randomBytes(5).toString('hex')}`;
         await admin.query(`CREATE DATABASE \`${db}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
         const connection = await mysql.createConnection({ host: config.host, port: config.port, database: db, user: 'root', password: rootPassword });
@@ -539,12 +539,13 @@ test('schema plan creates the three reviewed tables and holds partial DDL or cha
                 const create = /CREATE TABLE (parent_[a-z_]+)/u.exec(sql);
                 if (create) attempted.push(create[1]);
                 if ((partial === 'warning' && create?.[1] === 'parent_child_inactivity_warnings')
-                    || (partial === 'continuity' && create?.[1] === 'parent_child_activity_continuity')) throw new Error('synthetic interrupted DDL');
+                    || (partial === 'continuity' && create?.[1] === 'parent_child_activity_continuity')
+                    || (partial === 'history' && create?.[1] === 'parent_child_warning_history')) throw new Error('synthetic interrupted DDL');
                 return await connection.query(sql, values as never) as [unknown, unknown];
             }, destroy() {} };
             const deps = { connection: wrapped, settings, source, assertSource() {}, observeSafety: async () => safety, now: () => at };
             const plan = await planInactivitySchema(deps);
-            assert.equal(plan.sqlHashes.length, 3);
+            assert.equal(plan.sqlHashes.length, 4);
             await assert.rejects(verifyInactivitySchema(deps), /blocked/u);
             await assert.rejects(applyInactivitySchema(deps, plan, { allow: true, planSha256: '0'.repeat(64), serverUuid: target.serverUuid }),
                 error => error instanceof InactivitySchemaError && error.state === 'blocked');
@@ -556,9 +557,11 @@ test('schema plan creates the three reviewed tables and holds partial DDL or cha
                 WHERE TABLE_SCHEMA=? AND TABLE_NAME LIKE 'parent_%' ORDER BY TABLE_NAME`, [db]);
             assert.deepEqual(tables.map(row => row.name), partial === 'warning' ? ['parent_child_consents','parent_managed_child_activity']
                 : partial === 'continuity' ? ['parent_child_consents','parent_child_inactivity_warnings','parent_managed_child_activity']
-                : ['parent_child_activity_continuity','parent_child_consents','parent_child_inactivity_warnings','parent_managed_child_activity']);
+                : partial === 'history' ? ['parent_child_activity_continuity','parent_child_consents','parent_child_inactivity_warnings','parent_managed_child_activity']
+                : ['parent_child_activity_continuity','parent_child_consents','parent_child_inactivity_warnings','parent_child_warning_history','parent_managed_child_activity']);
             assert.deepEqual(attempted, partial === 'warning' ? ['parent_managed_child_activity', 'parent_child_inactivity_warnings']
-                : ['parent_managed_child_activity', 'parent_child_inactivity_warnings', 'parent_child_activity_continuity']);
+                : partial === 'continuity' ? ['parent_managed_child_activity', 'parent_child_inactivity_warnings', 'parent_child_activity_continuity']
+                : ['parent_managed_child_activity', 'parent_child_inactivity_warnings', 'parent_child_activity_continuity', 'parent_child_warning_history']);
             await assert.rejects(planInactivitySchema(deps), /blocked/u, 'existing or partial tables cannot be silently reused');
             if (partial === 'none') {
                 await verifyInactivitySchema(deps);
@@ -570,11 +573,12 @@ test('schema plan creates the three reviewed tables and holds partial DDL or cha
                 await assert.rejects(verifyInactivitySchema(deps), /blocked/u, 'administrative verification must detect triggers hidden from runtime');
                 await connection.query('DROP TRIGGER synthetic_continuity_trigger');
                 await verifyInactivitySchema(deps);
-                assert.equal(attempted.length, 3, 'verification never creates or rewrites tables');
+                assert.equal(attempted.length, 4, 'verification never creates or rewrites tables');
             } else await assert.rejects(verifyInactivitySchema(deps), /blocked/u);
         } finally { await connection.end(); await admin.query(`DROP DATABASE \`${db}\``); }
     }
     await run('none');
     await run('warning');
     await run('continuity');
+    await run('history');
 });

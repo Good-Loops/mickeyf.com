@@ -58,6 +58,30 @@ export function createChildWarningNonresponse(store: DurableWarningStore, mail: 
         throw new TypeError('Invalid warning workflow configuration.');
     }
     return Object.freeze({
+        async recordFailure(parentId: string, childId: string, failed: Readonly<{ messageId: string; recipient: string }>): Promise<void> {
+            await store.withChild(parentId, childId, async target => {
+                const attempt = latest(target);
+                if (!attempt || halted(attempt) || !matches(target, attempt)
+                    || target.context.recipient !== failed.recipient
+                    || !attempt.events.some(event => event.kind === 'accepted' && event.messageId === failed.messageId)) return;
+                await target.append({ kind: 'hold', attemptId: attempt.prepared.attemptId, at: target.now });
+            });
+        },
+        async nextAction(parentId: string, childId: string): Promise<'prepare' | 'dispatch' | 'observe' | 'waiting' | 'candidate' | 'held'> {
+            return store.withChild(parentId, childId, async target => {
+                const attempt = latest(target);
+                if (!attempt || !matches(target, attempt)) {
+                    return assessNonresponseCandidate(target.context.snapshot, null, 'not-acknowledged', Date.parse(target.now), () => false)
+                        === 'warning-due' ? 'prepare' : 'held';
+                }
+                if (halted(attempt)) return 'held';
+                if (attempt.events.length === 1) return 'dispatch';
+                if (!attempt.events.some(event => event.kind === 'accepted')) return 'held';
+                if (!attempt.events.some(event => event.kind === 'delivered')) return 'observe';
+                const decision = assessLocked(target);
+                return decision === 'waiting' || decision === 'candidate' ? decision : 'held';
+            });
+        },
         async prepare(parentId: string, childId: string, language: 'en' | 'pt-BR'): Promise<string | null> {
             if (!['en', 'pt-BR'].includes(language)) throw new TypeError('Invalid warning language.');
             return store.withChild(parentId, childId, async target => {
@@ -101,7 +125,7 @@ export function createChildWarningNonresponse(store: DurableWarningStore, mail: 
                 return 'uncertain';
             });
         },
-        async observe(parentId: string, childId: string): Promise<'delivered' | 'held'> {
+        async observe(parentId: string, childId: string): Promise<'delivered' | 'pending' | 'held'> {
             return store.withChild(parentId, childId, async target => {
                 const attempt = latest(target);
                 if (!attempt || !matches(target, attempt) || halted(attempt)) return 'held';
@@ -113,7 +137,7 @@ export function createChildWarningNonresponse(store: DurableWarningStore, mail: 
                     notBeforeMs: Date.parse(dispatched.at) }, Date.parse(target.now)); }
                 catch { result = { kind: 'hold' }; }
                 const previous = attempt.events.find(event => event.kind === 'delivered');
-                if (result?.kind === 'pending' && !previous) return 'held';
+                if (result?.kind === 'pending' && !previous) return 'pending';
                 const deliveredAt = result?.kind === 'delivered' ? micros(result.observedAt) : null;
                 const delivered = parseInactivityInstant(deliveredAt), now = Date.parse(target.now);
                 if (delivered === null || delivered > now || deliveredAt! < dispatched.at) {

@@ -6,7 +6,7 @@ export const CHILD_RETENTION_BUCKET = 'ludolume-retention-history-1012884798546'
 type Environment = Readonly<Record<string, string | undefined>>;
 export type ChildInactivityDeployment = Readonly<{
     bucket: string; database: string; serverUuid: string;
-    journalKey: Buffer; targetKey: Buffer; receiptKey: Buffer;
+    journalKey: Buffer; targetKey: Buffer; receiptKey: Buffer; brevoApiKey?: string;
 }>;
 
 /** An absent switch preserves the existing application; explicit activation is strict. */
@@ -29,7 +29,10 @@ export function loadChildInactivityDeployment(env: Environment): ChildInactivity
     }
     const [journalKey, targetKey, receiptKey] = bundle.split(':').map(value => Buffer.from(value, 'hex'));
     if (timingSafeEqual(journalKey, targetKey) || timingSafeEqual(journalKey, receiptKey)
-        || timingSafeEqual(targetKey, receiptKey)) throw new Error('Inactivity keys must be distinct.');
+        || timingSafeEqual(targetKey, receiptKey) || [journalKey, targetKey, receiptKey].some(key => key.every(byte => byte === 0))) throw new Error('Inactivity keys must be distinct.');
+    if (!env.CHILD_WARNING_BREVO_API_KEY || !/^xkeysib-[A-Za-z0-9_-]{20,500}$/u.test(env.CHILD_WARNING_BREVO_API_KEY)) {
+        throw new Error('Inactivity requires a restricted private Brevo transactional key.');
+    }
     return Object.freeze({ bucket: CHILD_RETENTION_BUCKET, database: env.DB_NAME,
-        serverUuid: env.APPLE_MAINTENANCE_EXPECTED_SERVER_UUID, journalKey, targetKey, receiptKey });
+        serverUuid: env.APPLE_MAINTENANCE_EXPECTED_SERVER_UUID, journalKey, targetKey, receiptKey, brevoApiKey: env.CHILD_WARNING_BREVO_API_KEY });
 }

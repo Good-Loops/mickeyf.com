@@ -5,11 +5,11 @@ export type RuntimeDatabaseAccount = Readonly<{
 
 export type RuntimeDmlPrivilege = 'SELECT' | 'INSERT' | 'UPDATE';
 
-export type RuntimeGrantProfile = 'google' | 'google-apple' | 'google-apple-parent' | 'google-apple-parent-signed' | 'google-apple-parent-signed-inactivity' | 'google-apple-parent-signed-continuity';
+export type RuntimeGrantProfile = 'google' | 'google-apple' | 'google-apple-parent' | 'google-apple-parent-signed' | 'google-apple-parent-signed-inactivity' | 'google-apple-parent-signed-continuity' | 'google-apple-parent-signed-warnings';
 
 export function parseRuntimeGrantProfile(value: string | undefined): RuntimeGrantProfile {
     if (value === undefined) return 'google-apple';
-    if (value === 'google-apple-parent-signed-continuity') return value;
+    if (value === 'google-apple-parent-signed-continuity' || value === 'google-apple-parent-signed-warnings') return value;
     if (value === 'google' || value === 'google-apple' || value === 'google-apple-parent' || value === 'google-apple-parent-signed' || value === 'google-apple-parent-signed-inactivity') return value;
     throw new Error('Runtime grant profile is not recognized');
 }
@@ -23,7 +23,7 @@ export type RuntimeTableGrant = Readonly<{
     table: 'users' | 'game_submission_receipts' | 'game_personal_bests' | 'schema_migrations' | 'account_sessions'
         | 'account_provider_identities' | 'provider_auth_attempts' | 'apple_provider_tokens' | 'apple_auth_revocations'
         | 'registration_authorizations' | 'account_registration_profiles' | 'parent_registration_attempts' | 'parent_child_consents' | 'account_score_permissions' | 'parent_signed_forms'
-        | 'parent_managed_child_activity' | 'parent_child_inactivity_warnings' | 'parent_child_activity_continuity';
+        | 'parent_managed_child_activity' | 'parent_child_inactivity_warnings' | 'parent_child_activity_continuity' | 'parent_child_warning_history';
     grants: readonly RuntimeColumnGrant[];
     tablePrivileges: readonly ('DELETE' | 'SELECT')[];
 }>;
@@ -323,7 +323,16 @@ export const CONTINUITY_RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = O
     ]) }),
 ]);
 
+export const WARNING_RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freeze([
+    ...CONTINUITY_RUNTIME_GRANT_MANIFEST,
+    Object.freeze({ table: 'parent_child_warning_history' as const, tablePrivileges: Object.freeze(['SELECT' as const]), grants: Object.freeze([
+        Object.freeze({ privilege: 'INSERT' as const, columns: Object.freeze(['child_uuid', 'state_json', 'head_json', 'ledger_json']) }),
+        Object.freeze({ privilege: 'UPDATE' as const, columns: Object.freeze(['state_json', 'head_json', 'ledger_json']) }),
+    ]) }),
+]);
+
 function manifestForProfile(profile: RuntimeGrantProfile | undefined): readonly RuntimeTableGrant[] {
+    if (profile === 'google-apple-parent-signed-warnings') return WARNING_RUNTIME_GRANT_MANIFEST;
     if (profile === 'google-apple-parent-signed-continuity') return CONTINUITY_RUNTIME_GRANT_MANIFEST;
     if (profile === 'google-apple-parent-signed-inactivity') return INACTIVITY_RUNTIME_GRANT_MANIFEST;
     if (profile === 'google-apple-parent-signed') return SIGNED_PARENT_RUNTIME_GRANT_MANIFEST;

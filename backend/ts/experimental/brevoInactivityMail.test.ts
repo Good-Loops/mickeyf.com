@@ -27,6 +27,7 @@ test('one attempt sends exactly one recipient the fixed, version-bound notice', 
         assert.deepEqual(body.to, [{ email: attempt.recipient, contactPixelTrackingConsent: false }]);
         assert.deepEqual(body.replyTo, { email: 'mickeyf.plays@gmail.com' });
         assert.equal(body.headers.idempotencyKey, attempt.attemptId);
+        assert.deepEqual(body.tags, [`ludolume-warning:${attempt.attemptId}`]);
         assert.match(body.textContent, /https:\/\/mickeyf\.com\/parent-accounts/u);
         assert.ok(body.textContent.startsWith(NONRESPONSE_NOTICE.en));
         assert.equal(body.cc, undefined); assert.equal(body.bcc, undefined); assert.equal(body.attachment, undefined);

@@ -147,6 +147,8 @@ The prepared pinned
 administrative command is described in `retention-reconciliation-command.md`
 and requires a reviewed cutover and drained writers. The new
 primary verifier depends on the administrative restore protocol above; it does
-not prove that offline or failed client activity was seen. Current-contact and
-delivery/failure processing, schema/grants, production composition and integrated
-deletion/recovery qualification remain prerequisites.
+not prove that offline or failed client activity was seen. Used-form contact
+resolution, authenticated failure ingestion, schema/grants and bounded maintenance
+are now composed in the candidate. Actual cloud configuration, relay forwarding,
+monitoring and integrated production deletion/recovery qualification remain open;
+see `child-warning-production-wiring.md`.
