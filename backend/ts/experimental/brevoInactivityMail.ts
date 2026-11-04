@@ -7,8 +7,11 @@ const MESSAGE_ID = /^<[^\s<>\x00-\x1f\x7f]{1,250}>$/u;
 const MAX_BODY_BYTES = 128 * 1024;
 const LIMIT = 100;
 const FAILURE_EVENTS = new Set(['hardBounce', 'softBounce', 'hard_bounce', 'soft_bounce', 'deferred',
-    'blocked', 'invalid', 'invalid_email', 'error', 'spam', 'unsubscribed']);
-const OTHER_EVENTS = new Set(['request', 'sent', 'opened', 'uniqueOpened', 'click', 'proxy_open', 'unique_proxy_open']);
+    'blocked', 'invalid', 'invalid_email', 'error', 'spam', 'unsubscribed',
+    // Tracking is disabled for these messages; an observed tracking event is
+    // an anomaly requiring investigation, not routine delivery evidence.
+    'opened', 'uniqueOpened', 'click', 'proxy_open', 'unique_proxy_open']);
+const OTHER_EVENTS = new Set(['request', 'sent']);
 
 export type WarningAttempt = Readonly<{ attemptId: string; recipient: string; sender: string;
     language: 'en' | 'pt-BR'; noticeDigest: string }>;

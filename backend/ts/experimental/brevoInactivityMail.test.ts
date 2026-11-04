@@ -78,7 +78,8 @@ test('bounces, provider errors, mismatches, incomplete reports and unknown event
         { events: [{ ...event, messageId: '<other@example.test>' }] }, { events: [{ ...event, email: 'other@example.test' }] },
         { events: [{ ...event, from: 'other@example.test' }] }, { events: [{ ...event, date: '2031-02-30T00:00:00Z' }] },
         { events: [{ ...event, date: '2031-02-01T00:00:01Z' }] }, { events: [{ ...event, event: 'new-provider-event' }] }];
-    for (const name of ['hardBounce', 'softBounce', 'hard_bounce', 'soft_bounce', 'deferred', 'blocked', 'invalid', 'invalid_email', 'error', 'spam', 'unsubscribed']) {
+    for (const name of ['hardBounce', 'softBounce', 'hard_bounce', 'soft_bounce', 'deferred', 'blocked', 'invalid', 'invalid_email', 'error', 'spam', 'unsubscribed',
+        'opened', 'uniqueOpened', 'click', 'proxy_open', 'unique_proxy_open']) {
         checks.push({ events: [event, { ...event, event: name }] });
     }
     for (const body of checks) assert.deepEqual(await observeBrevoInactivityWarning(key, binding, now, fake(() => response(body))), { kind: 'hold' });
