@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { NONRESPONSE_NOTICE, NONRESPONSE_NOTICE_DIGEST } from './childInactivityNonresponsePolicy';
-import { observeBrevoInactivityWarning, sendBrevoInactivityWarning, type WarningAttempt, type WarningBinding } from './brevoInactivityMail';
+import { observeBrevoInactivityWarning, sendBrevoInactivityWarning, verifyBrevoWarningAccess, type WarningAttempt, type WarningBinding } from './brevoInactivityMail';
 
 const key = 'synthetic-api-key-only';
 const now = Date.parse('2031-02-01T00:00:00Z');
@@ -14,6 +14,18 @@ type Fetch = typeof fetch;
 const response = (value: unknown, status = 200) => new Response(JSON.stringify(value), { status });
 const fake = (run: (url: string, init: RequestInit) => Promise<Response> | Response): Fetch =>
     ((url: string | URL | Request, init?: RequestInit) => Promise.resolve(run(String(url), init ?? {}))) as Fetch;
+
+test('quiet-period access check sends no email and rejects unavailable or revoked credentials', async () => {
+    assert.equal(await verifyBrevoWarningAccess(key, fake((url, init) => {
+        assert.equal(url, 'https://api.brevo.com/v3/smtp/statistics/aggregatedReport?days=1');
+        assert.equal(init.method, 'GET'); assert.equal(init.body, undefined); assert.equal(init.redirect, 'error');
+        return response({});
+    })), true);
+    for (const status of [401, 403, 429, 500]) {
+        assert.equal(await verifyBrevoWarningAccess(key, fake(() => response({}, status))), false);
+    }
+    assert.equal(await verifyBrevoWarningAccess(key, fake(() => { throw new Error('private provider failure'); })), false);
+});
 
 test('one attempt sends exactly one recipient the fixed, version-bound notice', async () => {
     let calls = 0;

@@ -15,6 +15,10 @@ claim prevents resending after uncertain outcomes. Initial reports remain pendin
 the first authenticated delivery receipt starts the twelve-month wait. Waiting
 accounts use that saved receipt, so expiration of provider logs does not erase it.
 An unfinished scan or held candidate reports maintenance failure/backlog.
+Each scheduled run first makes a bounded, read-only aggregate API request. This
+exercises the key even with no eligible children (Brevo expires keys after 90
+days unused) and holds processing when provider access is unavailable. It sends
+no email and stores no aggregate report. Alert on failed or missing daily runs.
 
 `POST /maintenance/child-warnings/brevo` accepts only a private bearer token,
 derived as HMAC-SHA256(receiptKey, `brevo-warning-webhook-v1`) in base64url. Configure

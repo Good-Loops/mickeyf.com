@@ -65,7 +65,7 @@ async function readJson(response: Response): Promise<unknown> {
 
 /**
  * Send exactly one already-persisted, approved warning attempt. This adapter is
- * not wired to production. All unknown outcomes require reconciliation; neither
+ * enabled only through the guarded runtime. Unknown outcomes need reconciliation; neither
  * this function nor its callers may automatically resend an uncertain attempt.
  */
 export async function sendBrevoInactivityWarning(apiKey: string, attempt: WarningAttempt,
@@ -94,6 +94,19 @@ export async function sendBrevoInactivityWarning(apiKey: string, attempt: Warnin
         return typeof messageId === 'string' && MESSAGE_ID.test(messageId)
             ? { kind: 'accepted', messageId } : { kind: 'uncertain' };
     } catch { return { kind: 'uncertain' }; }
+}
+
+/** Keep the production credential exercised during quiet periods and surface expiry without sending mail. */
+export async function verifyBrevoWarningAccess(apiKey: string, fetcher: Fetch = fetch): Promise<boolean> {
+    if (!validKey(apiKey)) return false;
+    try {
+        const response = await fetcher(`${API}/smtp/statistics/aggregatedReport?days=1`, {
+            method: 'GET', redirect: 'error', cache: 'no-store',
+            headers: { 'api-key': apiKey, accept: 'application/json' }, signal: AbortSignal.timeout(10_000),
+        });
+        await response.body?.cancel();
+        return response.status === 200;
+    } catch { return false; }
 }
 
 /**

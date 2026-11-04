@@ -18,6 +18,7 @@ import type { JournalHttpClient } from './gcsDeletionJournal';
 import { createPinnedPrimaryHealth } from './retentionPrimaryHealth';
 import { createRetentionKeepReconciler } from './retentionKeepReconciler';
 import { createChildWarningParentService } from './childWarningParentService';
+import { verifyBrevoWarningAccess } from '../experimental/brevoInactivityMail';
 
 /** Compose real storage and primary verification before exposing either operation. */
 export async function prepareChildInactivityDeployment(database: Pool, config: ChildInactivityDeployment,
@@ -63,6 +64,9 @@ export async function prepareChildInactivityDeployment(database: Pool, config: C
         reconcileChildKeep: createRetentionKeepReconciler(keepStore, journal, config.receiptKey),
         async runMaintenance(): Promise<number> {
             await requireReadyPrimary();
+            // Brevo expires even undated keys after 90 days unused. The scheduled
+            // read also prevents destructive maintenance while provider access is unavailable.
+            if (!await verifyBrevoWarningAccess(config.brevoApiKey!)) return 1;
             let cursor: string | null = null, held = 0;
             for (let page = 0; page < 100; page++) {
                 const result = await runChildWarningMaintenance(database, warnings, workflow, journal, { afterChildId: cursor });
