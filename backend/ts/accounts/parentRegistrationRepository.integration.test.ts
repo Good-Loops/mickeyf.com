@@ -937,14 +937,15 @@ test('pending child-form extension enables parent-only BR/US approval, private c
         const credentials = { formReference: form.reference, userName: `approved-${country}-${randomUUID()}`, password };
         const hashing = mock.method(bcrypt, 'hash');
         try {
-            const pending = await approve(p, request);
-            assert.deepEqual(await flow.createChild(p.context, { ...credentials, grant: pending.proof.grant }), { error: 'SIGNED_FORM_REQUIRED' });
+            const pending = await flow.begin(p.context, request); assert.ok('state' in pending);
+            assert.ok('error' in await flow.complete(p.context, { state: pending.state, idToken: 'synthetic-proof' }),
+                'a proof without an approved form cannot produce a child-creation grant');
             assert.equal(hashing.mock.calls.length, 0, 'a pending form cannot process a child password');
             assert.ok('error' in await flow.begin(p.context, { ...request, formReference: form.reference }),
                 'a form-bound proof cannot start while the form is pending');
             await ownerReview(await formReview(p, form.reference, country === 'BR'));
-            assert.deepEqual(await flow.createChild(p.context, { ...credentials, grant: pending.proof.grant }), { error: 'SIGNED_FORM_REQUIRED' },
-                'a proof obtained before review must remain unusable after review');
+            assert.ok('error' in await flow.complete(p.context, { state: pending.state, idToken: 'synthetic-proof' }),
+                'a proof attempted before review remains unusable after review');
             const otherChallenge = await flow.begin(p.context, request); assert.ok('state' in otherChallenge);
             const other = await flow.requestSignedForm(p.context, { state: otherChallenge.state, idToken: 'parent-only-proof' });
             assert.ok('form' in other);

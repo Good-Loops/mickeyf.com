@@ -107,6 +107,8 @@ export default function ParentRegistration({ api, authenticated, accountKey, ses
         ? tr('An approved signed parent form for this exact child, country and notice is required. No child account was created.', 'É necessário um formulário assinado e aprovado para esta solicitação, país e aviso. Nenhuma conta infantil foi criada.')
         : error instanceof ParentRegistrationError && error.code === 'PROVIDER_NOT_LINKED'
         ? tr('Use the Google or Apple account already linked to your own Ludolume account.', 'Use a conta Google ou Apple já vinculada à sua própria conta Ludolume.')
+        : error instanceof ParentRegistrationError && error.code === 'INVALID_ATTEMPT' && selectedForm
+        ? tr('The approval could not be confirmed. Try again; if your provider’s verified email changed since you requested the form, request a new form.', 'Não foi possível confirmar a aprovação. Tente novamente; se o e-mail verificado do provedor mudou desde a solicitação, peça um novo formulário.')
         : tr('This request could not be confirmed. If you submitted child account details, check the account before trying again.', 'Não foi possível confirmar esta solicitação. Se você enviou dados da conta infantil, verifique a conta antes de tentar novamente.');
 
     const approve = async (client: PublicProviderClient) => {

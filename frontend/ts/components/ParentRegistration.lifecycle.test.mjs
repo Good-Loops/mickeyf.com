@@ -24,6 +24,7 @@ const server = await createViteTestServer({ root, configFile: `${root}/vite.conf
 });
 after(() => server.close());
 const { default: Component } = await server.ssrLoadModule('/ts/components/ParentRegistration.tsx');
+const { ParentRegistrationError } = await server.ssrLoadModule('/ts/services/parentRegistrationApi.ts');
 const config = { enabled: true, creationEnabled: true, policyVersion: 'test', consentVersion: 'consent-test', consentText: 'Synthetic consent.', privacyNoticeUrl: 'https://notice.example.test/privacy', countries: ['ZZ'] };
 const random = () => randomBytes(32).toString('base64url');
 const deferred = () => { let resolve; let reject; const promise = new Promise((yes, no) => { resolve = yes; reject = no; }); return { resolve, reject, promise }; };
@@ -181,6 +182,23 @@ test('the mixed-audience parent surface refuses legacy creation contracts withou
     assert.match(view.text(),/New child accounts are paused/u);
     assert.equal(view.all(node=>node.type==='input').length,0);
     assert.equal(view.begins.length,0);assert.equal(view.acquisitions.length,0);
+});
+
+test('a failed form-bound approval offers a path when the verified contact has changed', async t => {
+    const policy = { ...config, audience: 'children-included', credentialsAfterApproval: true, countries: ['US'], signedFormCountries: ['US'] };
+    const form = { reference: randomUUID(), parentAccountId: randomUUID(), country: 'US', userName: null,
+        verifiedContact: 'synthetic-parent@example.test', status: 'approved', expiresAt: new Date(Date.now() + 86400000).toISOString() };
+    const view = mount(t, { requireChildAudience: true, api: { config: async () => policy, listSignedForms: async () => [form] } });
+    view.render(); await view.settle();
+    view.find(node => node.type === 'select').props.onChange({ target: { value: 'US' } }); view.render(); await view.settle();
+    view.button('approved').props.onClick(); view.render();
+    view.all(node => node.type === 'input' && node.props.type === 'checkbox').forEach(node => node.props.onChange({ target: { checked: true } }));
+    view.render(); view.button('Confirm with Google').props.onClick(); await view.settle();
+    view.begins[0].resolve({ state: random(), nonce: random(), expiresInSeconds: 300 }); await view.settle();
+    view.acquisitions[0].resolve('synthetic-proof'); await view.settle();
+    view.proofs[0].reject(new ParentRegistrationError('INVALID_ATTEMPT')); await view.settle();
+    assert.match(view.text(), /verified email changed.*request a new form/u);
+    assert.equal(view.creations.length, 0);
 });
 
 test('late begin response after cancellation is explicitly cancelled and cannot launch provider collection', async t => {

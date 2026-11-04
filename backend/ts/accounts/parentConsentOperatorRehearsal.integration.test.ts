@@ -142,7 +142,7 @@ async function parent(country: string, provider: 'google' | 'apple' = 'google') 
         const result = await flow.complete(context, { state: challenge.state, idToken: 'SYNTHETIC-NO-PROVIDER-REQUEST' });
         assert.ok('grant' in result, JSON.stringify(result)); return result.grant;
     }
-    return { account, contact, context, flow, request, requestForm, proof, subject: name };
+    return { account, contact, context, flow, request, requestForm, proof, identity, subject: name };
 }
 
 async function formRow(reference: string) {
@@ -253,13 +253,44 @@ for (const country of ['BR', 'US']) test(`${label}: ${country} actual operator C
     assert.equal((await formRow(approved.reference)).status, 'pending', 'wrong server confirmation cannot approve a request');
     const credentials = { formReference: approved.reference, userName: `synthetic-child-${country}-${randomUUID()}`,
         password: 'SYNTHETIC-CHILD-PASSWORD-NOT-A-REAL-ACCOUNT' };
-    const premature = await p.proof();
-    assert.deepEqual(await p.flow.createChild(p.context, { ...credentials, grant: premature }), { error: 'SIGNED_FORM_REQUIRED' });
+    const premature = await p.flow.begin(p.context, p.request); assert.ok('state' in premature);
+    assert.ok('error' in await p.flow.complete(p.context, { state: premature.state, idToken: 'SYNTHETIC-NO-PROVIDER-REQUEST' }),
+        'a proof without a reviewed form cannot produce a child-creation grant');
     await operator('approve', approved);
+    const changedContactChallenge = await p.flow.begin(p.context, { ...p.request, formReference: approved.reference });
+    assert.ok('state' in changedContactChallenge);
+    Object.assign(p.identity, { email: 'synthetic-changed-contact@example.test' });
+    try {
+        const changedContact = await p.flow.complete(p.context, { state: changedContactChallenge.state, idToken: 'SYNTHETIC-NO-PROVIDER-REQUEST' });
+        assert.ok('error' in changedContact, 'a different verified contact must not authorize the reviewed form');
+    } finally { Object.assign(p.identity, { email: p.contact }); }
+    const missingContactChallenge = await p.flow.begin(p.context, { ...p.request, formReference: approved.reference });
+    assert.ok('state' in missingContactChallenge);
+    Object.assign(p.identity, { email: undefined });
+    try {
+        assert.deepEqual(await p.flow.complete(p.context, { state: missingContactChallenge.state, idToken: 'SYNTHETIC-NO-PROVIDER-REQUEST' }),
+            { error: 'VERIFIED_CONTACT_REQUIRED' });
+    } finally { Object.assign(p.identity, { email: p.contact }); }
+    if (country === 'BR') {
+        const extraReferences = Array.from({ length: 100 }, () => randomUUID());
+        try {
+            for (const reference of extraReferences) await admin.query(`INSERT INTO parent_signed_forms
+                (reference,parent_uuid,country_code,user_name,policy_digest,consent_version,policy_version,provider,subject,verified_contact,
+                 status,submitted_at,expires_at,reviewed_at,reviewer,form_sha256,public_policy_digest,public_approved,public_withdrawn,child_uuid)
+                SELECT ?,parent_uuid,country_code,user_name,policy_digest,consent_version,policy_version,provider,subject,verified_contact,
+                 status,submitted_at,expires_at,reviewed_at,reviewer,form_sha256,public_policy_digest,public_approved,public_withdrawn,child_uuid
+                FROM parent_signed_forms WHERE reference=?`, [reference, approved.reference]);
+            const oversized = await p.flow.begin(p.context, { ...p.request, formReference: approved.reference });
+            assert.ok('state' in oversized);
+            assert.ok('error' in await p.flow.complete(p.context, { state: oversized.state, idToken: 'SYNTHETIC-NO-PROVIDER-REQUEST' }),
+                'an oversized candidate set fails closed instead of accepting a truncated search');
+        } finally {
+            for (const reference of extraReferences) await admin.query('DELETE FROM parent_signed_forms WHERE reference=?', [reference]);
+        }
+    }
     const afterApproval = pendingOutreach(); assert.equal(afterApproval.status, 0, afterApproval.stderr);
     assert.equal(JSON.parse(afterApproval.stdout).requests.some((request: { reference: string }) => request.reference === approved.reference), false);
     assert.equal((await operator('inspect', approved))?.status, 'approved');
-    assert.deepEqual(await p.flow.createChild(p.context, { ...credentials, grant: premature }), { error: 'SIGNED_FORM_REQUIRED' });
     const fresh = await p.proof({ ...p.request, formReference: approved.reference });
     const created = await p.flow.createChild(p.context, { ...credentials, grant: fresh }); assert.ok('created' in created, JSON.stringify(created));
     assert.equal(created.child.scoreVisibility, 'private');
@@ -278,14 +309,16 @@ for (const country of ['BR', 'US']) test(`${label}: ${country} actual operator C
     const afterRejection = pendingOutreach(); assert.equal(afterRejection.status, 0, afterRejection.stderr);
     assert.equal(JSON.parse(afterRejection.stdout).requests.some((request: { reference: string }) => request.reference === rejected.reference), false);
     await operator('approve', rejected, false);
-    assert.deepEqual(await p.flow.createChild(p.context, { ...credentials, formReference: rejected.reference, grant: await p.proof() }), { error: 'SIGNED_FORM_REQUIRED' });
+    assert.ok('error' in await p.flow.begin(p.context, { ...p.request, formReference: rejected.reference }),
+        'a rejected form cannot start a child-creation proof');
     const expired = await p.requestForm();
     await admin.query('UPDATE parent_signed_forms SET expires_at=UTC_TIMESTAMP(6)-INTERVAL 1 SECOND WHERE reference=?', [expired.reference]);
     const afterExpiry = pendingOutreach(); assert.equal(afterExpiry.status, 0, afterExpiry.stderr);
     assert.equal(JSON.parse(afterExpiry.stdout).requests.some((request: { reference: string }) => request.reference === expired.reference), false);
     await operator('approve', expired, false);
     const expiredRow = await formRow(expired.reference); assert.equal(expiredRow.status, 'pending'); assert.equal(expiredRow.reviewer, null);
-    assert.deepEqual(await p.flow.createChild(p.context, { ...credentials, formReference: expired.reference, grant: await p.proof() }), { error: 'SIGNED_FORM_REQUIRED' });
+    assert.ok('error' in await p.flow.begin(p.context, { ...p.request, formReference: expired.reference }),
+        'an expired form cannot start a child-creation proof');
     assert.deepEqual(await cleanupSignedParentForms(database), { backlog: false });
     assert.equal((await admin.query<RowDataPacket[]>('SELECT reference FROM parent_signed_forms WHERE reference=?', [expired.reference]))[0].length, 0);
     assert.equal((await formRow(rejected.reference)).status, 'rejected', 'unexpired rejected review history survives expiry cleanup');
