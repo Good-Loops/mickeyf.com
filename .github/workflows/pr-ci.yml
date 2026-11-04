@@ -39,12 +39,18 @@ jobs:
       - name: Use project npm version
         run: npm install --global npm@11.6.2 --no-audit --no-fund
 
+      - name: Verify TypeDoc compatibility package provenance
+        run: python3 scripts/typedoc-minimatch-compat.py
+
       - name: Install locked dependencies
         run: |
           npm ci --no-audit
           npm --prefix frontend ci --no-audit
           npm --prefix backend ci --no-audit
           npm --prefix .github/firebase-deploy ci --ignore-scripts --no-audit --no-fund
+
+      - name: Test TypeDoc matcher compatibility and audit visibility
+        run: node --test scripts/typedoc-minimatch-compat.test.mjs scripts/typedoc-audit-visibility.test.mjs
 
       - name: Validate Firebase deploy dependency tree
         run: |
