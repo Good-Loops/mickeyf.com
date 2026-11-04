@@ -111,7 +111,7 @@ jobs:
 
       - name: Test backend development and migration launchers
         run: |
-          node --test backend/scripts/dev-isolated.test.cjs backend/scripts/run-migration-tests.test.mjs backend/scripts/run-apple-android-handoff-tests.test.mjs backend/scripts/run-child-schema-tests.test.mjs backend/scripts/run-parent-consent-rehearsal.test.mjs backend/scripts/run-parent-relay-state-rehearsal.test.mjs scripts/start-local-provider-backend.test.mjs
+          node --test backend/scripts/dev-isolated.test.cjs backend/scripts/run-migration-tests.test.mjs backend/scripts/run-apple-android-handoff-tests.test.mjs backend/scripts/run-child-schema-tests.test.mjs backend/scripts/run-parent-consent-rehearsal.test.mjs backend/scripts/run-child-continuity-sql-rehearsal.test.mjs backend/scripts/run-parent-relay-state-rehearsal.test.mjs scripts/start-local-provider-backend.test.mjs
           npm run test:parent-form-retention-summary
 
       - name: Test and build backend
@@ -119,9 +119,11 @@ jobs:
           npm --prefix backend test
           npm --prefix backend run test:unit
           npm --prefix backend run test:child-inactivity:unit
+          npm --prefix backend run test:child-continuity:unit
           npm --prefix backend run test:migrations
           node backend/scripts/run-apple-android-handoff-tests.mjs
           npm --prefix backend run test:child-inactivity:sql
+          npm --prefix backend run test:child-continuity:sql
           node backend/scripts/run-child-schema-tests.mjs
           node backend/scripts/run-parent-consent-rehearsal.mjs
           node backend/scripts/run-parent-relay-state-rehearsal.mjs
@@ -179,6 +181,7 @@ jobs:
           npm --prefix backend test
           npm --prefix backend run test:unit
           npm --prefix backend run test:child-inactivity:unit
+          npm --prefix backend run test:child-continuity:unit
           npm --prefix backend run test:migrations
           node backend/scripts/run-apple-android-handoff-tests.mjs
           node backend/scripts/run-child-schema-tests.mjs
