@@ -25,6 +25,7 @@ test('one attempt sends exactly one recipient the fixed, version-bound notice', 
         const body = JSON.parse(String(init.body));
         assert.deepEqual(body.sender, { email: attempt.sender });
         assert.deepEqual(body.to, [{ email: attempt.recipient, contactPixelTrackingConsent: false }]);
+        assert.deepEqual(body.replyTo, { email: 'mickeyf.plays@gmail.com' });
         assert.equal(body.headers.idempotencyKey, attempt.attemptId);
         assert.match(body.textContent, /https:\/\/mickeyf\.com\/parent-accounts/u);
         assert.ok(body.textContent.startsWith(NONRESPONSE_NOTICE.en));
