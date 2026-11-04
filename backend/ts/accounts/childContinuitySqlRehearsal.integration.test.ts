@@ -24,6 +24,13 @@ import { guardConnectionQueries } from '../db/queryTimeoutConnection';
 import { submitP4VegaScore } from '../leaderboards/p4VegaScoreRepository';
 import { submitThreeBossesRun } from '../leaderboards/threeBossesRunRepository';
 import { createParentRegistrationRepository } from './parentRegistrationRepository';
+import { WARNING_HISTORY_DRAFT_SQL, assertWarningHistoryDraft } from './inactivitySchema.testFixture';
+import { createDurableChildWarningStore } from './durableChildWarningStore';
+import { createChildWarningNonresponse } from './childWarningNonresponse';
+import type { MailObservation, SendResult } from '../experimental/brevoInactivityMail';
+
+// These tests use the same SQL/witness fixture as activity and keep. No second
+// test framework, real email recipient, cloud bucket or production credential.
 
 const config = loadMigrationConfig();
 const bucket = 'synthetic-continuity-sql';
@@ -67,9 +74,13 @@ before(async () => {
     await admin.query(CONTINUITY_DRAFT_SQL);
     assertWarningDraft(readFileSync(path.resolve(__dirname, '../../migrations/pending/draft_parent_child_inactivity_warnings.sql'), 'utf8'));
     await admin.query(WARNING_DRAFT_SQL);
+    assertWarningHistoryDraft(readFileSync(path.resolve(__dirname, '../../migrations/pending/draft_parent_child_warning_history.sql'), 'utf8'));
+    await admin.query(WARNING_HISTORY_DRAFT_SQL);
     await admin.query("CREATE USER 'continuity_runtime_test'@'%' IDENTIFIED BY 'continuity-runtime-test-only'");
     for (const sql of renderRuntimeGrantStatements(config.database, { user: 'continuity_runtime_test', host: '%' },
         'google-apple-parent-signed-continuity')) await admin.query(sql);
+    // Test-only grants: the warning schema is deliberately absent from production profiles.
+    await admin.query("GRANT SELECT, INSERT, UPDATE(state_json,head_json,ledger_json) ON mickeyf_migration_test.parent_child_warning_history TO 'continuity_runtime_test'@'%'");
     database = mysql.createPool({ ...options, connectionLimit: 5, user: 'continuity_runtime_test', password: 'continuity-runtime-test-only' });
     seedDatabase = mysql.createPool({ ...options, connectionLimit: 5 });
 });
@@ -139,9 +150,11 @@ async function save(connection: Sql, childId: string, value: Witness): Promise<v
     assert.ok(result.affectedRows === 1 || result.affectedRows === 2);
 }
 
-async function fixture() {
+async function fixture(createdAt?: number) {
     const storage = provider();
-    const durable = createDurableChildActivity({ bucket, key, database: config.database, serverUuid }, storage.transport);
+    let creating = createdAt !== undefined;
+    const durable = createDurableChildActivity({ bucket, key, database: config.database, serverUuid }, storage.transport,
+        () => creating ? createdAt! : Date.now());
     const parentId = randomUUID(), childId = randomUUID();
     const addUser = async (connection: Sql, id: string) => {
         const userName = `synthetic-${id}`;
@@ -151,6 +164,7 @@ async function fixture() {
     };
     const parent = await addUser(admin, parentId);
     const child = await withUserSubmissionLock(seedDatabase, parent.userId, async parentLock => {
+        if (createdAt !== undefined) await parentLock.connection.query('SET timestamp=?', [createdAt / 1000]);
         await parentLock.connection.beginTransaction();
         try {
             const created = await addUser(parentLock.connection, childId);
@@ -164,6 +178,7 @@ async function fixture() {
             });
             return created;
         } catch (error) { await parentLock.connection.rollback(); throw error; }
+        finally { await parentLock.connection.query('SET timestamp=0'); creating = false; }
     });
     async function context(account: typeof parent): Promise<ProviderAuthContext> {
         const sessionId = randomBytes(32).toString('base64url'), expiresAt = Math.floor(Date.now() / 1000) + 3600;
@@ -191,6 +206,156 @@ async function fixture() {
         keep: (db: Pick<Pool, 'getConnection'> = database) => keepManagedChild(db, parentContext, childId, activity),
         play: () => recordOnlineInteraction(database, childContext, activity) };
 }
+
+async function warningFixture() {
+    const now = { value: Math.floor(Date.now() / 1000) * 1000 };
+    const old = new Date(now.value); old.setUTCFullYear(old.getUTCFullYear() - 4);
+    const f = await fixture(old.getTime()), warningStorage = provider();
+    const activity = createDurableChildActivity({ bucket, key, database: config.database, serverUuid }, f.storage.transport, () => now.value);
+    let targetDigest = 'a'.repeat(64), sends = 0, uncertain = false, commitFault: 'before' | 'after' | null = null;
+    let observation: MailObservation = { kind: 'delivered', observedAt: new Date(now.value + 1000).toISOString() };
+    const timedDatabase = { async getConnection() {
+        const connection = await database.getConnection();
+        await connection.query('SET timestamp=?', [now.value / 1000]);
+        const query = connection.query.bind(connection);
+        connection.query = (async (...args: Parameters<typeof query>) => {
+            const sql = typeof args[0] === 'string' ? args[0] : (args[0] as { sql?: string }).sql;
+            if (sql === 'COMMIT' && commitFault === 'before') { commitFault = null; throw new Error('synthetic commit not sent'); }
+            const result = await query(...args);
+            if (sql === 'COMMIT' && commitFault === 'after') { commitFault = null; throw new Error('synthetic commit response lost'); }
+            return result;
+        }) as typeof connection.query;
+        // Do not return a synthetic-clock or fault-injected connection to the pool.
+        connection.release = () => connection.destroy();
+        return connection;
+    } };
+    const store = createDurableChildWarningStore(timedDatabase, { database: config.database, serverUuid,
+        bucket, key: Buffer.alloc(32, 17), transport: warningStorage.transport, clock: () => now.value,
+        verifyActivity: activity.verifyActivity,
+        async resolveContext(connection, parentId, childId) {
+            const [[row]] = await connection.query<RowDataPacket[]>(`SELECT DATE_FORMAT(retention_activity_at,'%Y-%m-%dT%H:%i:%s.%fZ') AS activityAt
+                FROM parent_managed_child_activity WHERE child_uuid=?`, [childId]);
+            // Synthetic contact proof only. A real contact-history source remains a deployment prerequisite.
+            return { recipient: 'synthetic@example.test', snapshot: { parentId, childId, activityAt: row.activityAt,
+                activityComplete: true, currentTargetDigest: targetDigest, targetVerified: true, channel: 'email', warning: null } };
+        } });
+    const mail = {
+        async send(): Promise<SendResult> { sends++; return uncertain ? { kind: 'uncertain' } : { kind: 'accepted', messageId: '<synthetic@brevo.test>' }; },
+        async observe(): Promise<MailObservation> { return observation; },
+    };
+    let coverageCalls = 0;
+    const service = createChildWarningNonresponse(store, mail, 'accounts@notify.mickeyf.com', async proof => {
+        assert.match(proof.historyDigest, /^[a-f0-9]{64}$/u);
+        assert.match(proof.outreach.targetDigest, /^[a-f0-9]{64}$/u);
+        assert.equal(proof.outreach.childId, f.childId);
+        assert.equal(Date.parse(proof.checkedAt), now.value); coverageCalls++;
+        return true; // Synthetic qualification only; no production completeness claim.
+    });
+    const prepare = () => service.prepare(f.parent.accountId, f.childId, 'en');
+    const dispatch = () => service.dispatch(f.parent.accountId, f.childId);
+    const observe = () => service.observe(f.parent.accountId, f.childId);
+    const assess = () => service.assess(f.parent.accountId, f.childId);
+    const read = async () => {
+        const [[row]] = await admin.query<RowDataPacket[]>('SELECT CAST(state_json AS CHAR) AS state, CAST(head_json AS CHAR) AS head, CAST(ledger_json AS CHAR) AS ledger FROM parent_child_warning_history WHERE child_uuid=?', [f.childId]);
+        return row;
+    };
+    const delivered = async () => { await prepare(); assert.equal(await dispatch(), 'accepted'); now.value += 2000; assert.equal(await observe(), 'delivered'); };
+    return { f, now, store, service, prepare, dispatch, observe, assess, read, delivered, warningStorage,
+        defaultCoverage: createChildWarningNonresponse(store, mail, 'accounts@notify.mickeyf.com'),
+        sends: () => sends, coverageCalls: () => coverageCalls,
+        changeContact() { targetDigest = 'b'.repeat(64); }, uncertain() { uncertain = true; },
+        holdDelivery() { observation = { kind: 'hold' }; }, loseCommit(value: 'before' | 'after') { commitFault = value; } };
+}
+
+test('an initial pending report can become delivered without a resend or a backdated waiting clock', async () => {
+    const w = await warningFixture(); await w.prepare(); await w.dispatch();
+    let pending = true;
+    const service = createChildWarningNonresponse(w.store, { async send() { throw new Error('must not send'); },
+        async observe() { return pending ? { kind: 'pending' } : { kind: 'delivered', observedAt: new Date(w.now.value - 1000).toISOString() }; } },
+    'accounts@notify.mickeyf.com');
+    assert.equal(await service.observe(w.f.parent.accountId, w.f.childId), 'held');
+    assert.equal(JSON.parse((await w.read()).state).events.length, 3);
+    pending = false; w.now.value += 2000;
+    assert.equal(await service.observe(w.f.parent.accountId, w.f.childId), 'delivered');
+    assert.equal(await w.assess(), 'waiting'); assert.equal(w.sends(), 1);
+});
+
+test('durable warning integrates the additional calendar year and requires qualified final nonresponse coverage', async () => {
+    const w = await warningFixture(); await w.delivered();
+    assert.equal(await w.assess(), 'waiting');
+    const row = JSON.parse((await w.read()).state);
+    const delivery = row.events.find((event: { kind: string }) => event.kind === 'delivered');
+    const deadline = new Date(Date.parse(delivery.deliveredAt) + 30 * 86_400_000);
+    deadline.setUTCFullYear(deadline.getUTCFullYear() + 1);
+    w.now.value = deadline.getTime() - 1;
+    assert.equal(await w.assess(), 'waiting'); assert.equal(w.coverageCalls(), 0);
+    w.now.value++;
+    assert.equal(await w.defaultCoverage.assess(w.f.parent.accountId, w.f.childId), 'hold');
+    assert.equal(await w.assess(), 'candidate'); assert.equal(w.coverageCalls(), 1);
+    assert.equal(w.sends(), 1);
+    assert.equal(w.warningStorage.objects.length, 4);
+    assert(!w.warningStorage.objects.some(item => item.body.includes('synthetic@example.test')));
+    await assert.rejects(database.query('DELETE FROM parent_child_warning_history WHERE child_uuid=?', [w.f.childId]), /denied/);
+});
+
+test('concurrent dispatchers send once and do not resend an accepted warning', async () => {
+    const w = await warningFixture(); await w.prepare();
+    assert.deepEqual((await Promise.all([w.dispatch(), w.dispatch()])).sort(), ['accepted', 'held']);
+    assert.equal(await w.dispatch(), 'held'); assert.equal(w.sends(), 1);
+});
+
+test('an uncertain send is durable and cannot be retried automatically', async () => {
+    const w = await warningFixture(); await w.prepare(); w.uncertain();
+    assert.equal(await w.dispatch(), 'uncertain'); assert.equal(await w.dispatch(), 'held');
+    assert.equal(await w.prepare(), null); assert.equal(await w.assess(), 'hold'); assert.equal(w.sends(), 1);
+});
+
+test('a delivery hold remains durable and cannot be erased by a later observation', async () => {
+    const w = await warningFixture(); await w.delivered(); const before = await w.read();
+    w.holdDelivery(); assert.equal(await w.observe(), 'held');
+    assert.equal(await w.assess(), 'hold'); assert.equal(await w.observe(), 'held');
+    await admin.query('UPDATE parent_child_warning_history SET state_json=?,head_json=?,ledger_json=? WHERE child_uuid=?',
+        [before.state, before.head, before.ledger, w.f.childId]);
+    await assert.rejects(w.assess(), held);
+});
+
+test('an authenticated parent response holds nonresponse; invalid sessions cannot record one', async () => {
+    const w = await warningFixture(); const attempt = await w.prepare(); await w.dispatch(); w.now.value += 2000; await w.observe();
+    const proof = w.f.parentContext.session!;
+    assert.equal(await w.service.recordParentResponse(w.f.parent.accountId, w.f.childId, attempt!,
+        { accountId: w.f.parent.accountId, sessionId: 'invalid' }), false);
+    assert.equal(await w.service.recordParentResponse(w.f.parent.accountId, w.f.childId, attempt!, proof), true);
+    assert.equal(await w.assess(), 'hold');
+});
+
+test('real parent keep and changed contact invalidate an older warning', async () => {
+    const kept = await warningFixture(); await kept.delivered(); await kept.f.keep();
+    assert.equal(await kept.assess(), 'hold'); assert.equal(await kept.prepare(), null);
+    const changed = await warningFixture(); await changed.delivered(); changed.changeContact();
+    assert.equal(await changed.assess(), 'hold'); assert.equal(await changed.observe(), 'held');
+});
+
+test('lost independent warning-write response leaves SQL uncommitted and holds subsequent attempts', async () => {
+    const w = await warningFixture(); w.warningStorage.loseResponse();
+    await assert.rejects(w.prepare(), held); assert.equal(await w.read(), undefined);
+    await assert.rejects(w.prepare(), held); assert.equal(w.sends(), 0);
+});
+
+for (const fault of ['before', 'after'] as const) test(`lost ${fault}-commit acknowledgment cannot send an unconfirmed dispatch`, async () => {
+    const w = await warningFixture(); await w.prepare(); w.loseCommit(fault);
+    await assert.rejects(w.dispatch(), held); assert.equal(w.sends(), 0);
+    if (fault === 'before') await assert.rejects(w.dispatch(), held);
+    else assert.equal(await w.dispatch(), 'held');
+    assert.equal(w.sends(), 0);
+});
+
+test('partial warning-state restoration and independent storage outage both hold review', async () => {
+    const restored = await warningFixture(); await restored.delivered();
+    await admin.query("UPDATE parent_child_warning_history SET state_json=JSON_REMOVE(state_json,'$.events[3]') WHERE child_uuid=?", [restored.f.childId]);
+    await assert.rejects(restored.assess(), held);
+    const outage = await warningFixture(); await outage.delivered(); outage.warningStorage.unavailable();
+    await assert.rejects(outage.assess(), held);
+});
 
 test('startup verifies the exact schema using restricted runtime grants and rejects a different primary', async () => {
     await verifyChildActivityContinuityReadiness(database, { database: config.database, serverUuid });

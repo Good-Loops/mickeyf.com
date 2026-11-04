@@ -17,7 +17,8 @@ export type WarningAttempt = Readonly<{ attemptId: string; recipient: string; se
     language: 'en' | 'pt-BR'; noticeDigest: string }>;
 export type SendResult = Readonly<{ kind: 'accepted'; messageId: string }> | Readonly<{ kind: 'uncertain' }>;
 export type WarningBinding = Readonly<{ recipient: string; sender: string; messageId: string; notBeforeMs: number }>;
-export type MailObservation = Readonly<{ kind: 'delivered'; observedAt: string }> | Readonly<{ kind: 'hold' }>;
+export type MailObservation = Readonly<{ kind: 'delivered'; observedAt: string }>
+    | Readonly<{ kind: 'pending' }> | Readonly<{ kind: 'hold' }>;
 type Fetch = typeof fetch;
 
 function validEmail(value: unknown): value is string {
@@ -120,8 +121,12 @@ export async function observeBrevoInactivityWarning(apiKey: string, binding: War
             signal: AbortSignal.timeout(10_000) });
         const body = await readJson(response);
         if (!body || typeof body !== 'object' || Array.isArray(body)) return { kind: 'hold' };
+        // Live reports can be empty until provider events arrive. This is no
+        // delivery evidence, but an initial poll must not permanently poison a valid attempt.
+        if (Object.keys(body).length === 0) return { kind: 'pending' };
         const events = (body as Record<string, unknown>).events;
-        if (!Array.isArray(events) || events.length === 0 || events.length >= LIMIT) return { kind: 'hold' };
+        if (!Array.isArray(events) || events.length >= LIMIT) return { kind: 'hold' };
+        if (events.length === 0) return { kind: 'pending' };
         let deliveredAt: number | null = null;
         for (const value of events) {
             if (!value || typeof value !== 'object' || Array.isArray(value)) return { kind: 'hold' };
@@ -138,6 +143,6 @@ export async function observeBrevoInactivityWarning(apiKey: string, binding: War
         // A relay accepting a message does not establish forwarding to the
         // actual parent. icloud.com can be either a relay or a normal inbox.
         if (['privaterelay.appleid.com', 'private.icloud.com', 'icloud.com'].includes(domain)) return { kind: 'hold' };
-        return deliveredAt === null ? { kind: 'hold' } : { kind: 'delivered', observedAt: new Date(deliveredAt).toISOString() };
+        return deliveredAt === null ? { kind: 'pending' } : { kind: 'delivered', observedAt: new Date(deliveredAt).toISOString() };
     } catch { return { kind: 'hold' }; }
 }

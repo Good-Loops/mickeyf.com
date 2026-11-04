@@ -75,7 +75,7 @@ test('provider observations bind message, recipient and sender and do not assert
 });
 
 test('bounces, provider errors, mismatches, incomplete reports and unknown events hold', async () => {
-    const checks: unknown[] = [null, {}, { events: [] }, { events: Array(100).fill(event) },
+    const checks: unknown[] = [null, { unexpected: true }, { events: Array(100).fill(event) },
         { events: [{ ...event, messageId: '<other@example.test>' }] }, { events: [{ ...event, email: 'other@example.test' }] },
         { events: [{ ...event, from: 'other@example.test' }] }, { events: [{ ...event, date: '2031-02-30T00:00:00Z' }] },
         { events: [{ ...event, date: '2031-02-01T00:00:01Z' }] }, { events: [{ ...event, event: 'new-provider-event' }] }];
@@ -130,9 +130,15 @@ test('live report shape accepts requests and numeric UTC offsets without treatin
         fake(() => response({ events: [delivered, request] }))),
     { kind: 'delivered', observedAt: '2031-01-31T23:59:59.001Z' });
     assert.deepEqual(await observeBrevoInactivityWarning(key, binding, now,
-        fake(() => response({ events: [request] }))), { kind: 'hold' });
+        fake(() => response({ events: [request] }))), { kind: 'pending' });
     assert.deepEqual(await observeBrevoInactivityWarning(key, binding, now,
         fake(() => response({ events: [delivered, request, { ...delivered, event: 'hardBounce' }] }))), { kind: 'hold' });
+});
+
+test('an initial empty report is pending and never delivery evidence', async () => {
+    for (const body of [{}, { events: [] }]) {
+        assert.deepEqual(await observeBrevoInactivityWarning(key, binding, now, fake(() => response(body))), { kind: 'pending' });
+    }
 });
 
 test('offset dates preserve calendar validation, event bounds and conservative precision', async () => {
