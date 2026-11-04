@@ -45,6 +45,9 @@ it does not approve a form or send mail. If `nextAfter` is not null, continue wi
 `npm --prefix backend run parent-form:review -- pending --after=<nextAfter>` until
 the final page. A failed command is not an empty queue. Treat the output as
 private account data; do not save it to a shared location or post it to chat.
+The operator needs read access to `account_uuid`, `provider`, and `subject` in
+`account_provider_identities` for the linked-identity check. Verify the existing
+operator's actual grants during setup; this command does not change privileges.
 If `providerLinked` is false, the contact is withheld: do not send a message or
 approve the request. A true value only confirms the original provider identity
 is still linked; it cannot prove that the provider's address has not changed.
