@@ -98,8 +98,9 @@ export async function observeBrevoInactivityWarning(apiKey: string, binding: War
     url.searchParams.set('days', '90');
     url.searchParams.set('limit', String(LIMIT));
     try {
-        const response = await fetcher(url.toString(), { method: 'GET', redirect: 'error',
-            headers: { 'api-key': apiKey, accept: 'application/json' }, signal: AbortSignal.timeout(10_000) });
+        const response = await fetcher(url.toString(), { method: 'GET', redirect: 'error', cache: 'no-store',
+            headers: { 'api-key': apiKey, accept: 'application/json', 'cache-control': 'no-cache, no-store' },
+            signal: AbortSignal.timeout(10_000) });
         const body = await readJson(response);
         if (!body || typeof body !== 'object' || Array.isArray(body)) return { kind: 'hold' };
         const events = (body as Record<string, unknown>).events;

@@ -67,7 +67,8 @@ test('provider observations bind message, recipient and sender and do not assert
         assert.equal(parsed.pathname, '/v3/smtp/statistics/events');
         assert.equal(parsed.searchParams.get('messageId'), messageId);
         assert.equal(parsed.searchParams.get('email'), null);
-        assert.equal(init.method, 'GET'); assert.equal(init.redirect, 'error');
+        assert.equal(init.method, 'GET'); assert.equal(init.redirect, 'error'); assert.equal(init.cache, 'no-store');
+        assert.equal((init.headers as Record<string, string>)['cache-control'], 'no-cache, no-store');
         return response({ events: [event] });
     }));
     assert.deepEqual(received, { kind: 'delivered', observedAt: '2031-02-01T00:00:00.000Z' });
