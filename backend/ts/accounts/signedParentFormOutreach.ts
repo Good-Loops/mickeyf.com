@@ -8,6 +8,7 @@ const pageSize = 50;
 export async function pendingParentFormOutreach(database: Pick<Pool, 'query'>, after: string | null) {
     if (after !== null && (typeof after !== 'string' || !uuid.test(after))) throw new TypeError('Invalid pending-request cursor.');
     const [rows] = await database.query<RowDataPacket[]>({ sql: `SELECT f.reference, f.verified_contact, f.country_code, f.provider,
+        HEX(f.policy_digest) AS policy_digest, f.policy_version, f.consent_version,
         DATE_FORMAT(f.submitted_at,'%Y-%m-%dT%H:%i:%s.%fZ') AS submitted_at,
         DATE_FORMAT(f.expires_at,'%Y-%m-%dT%H:%i:%s.%fZ') AS expires_at,
         EXISTS (SELECT 1 FROM account_provider_identities i WHERE i.account_uuid=f.parent_uuid
@@ -23,6 +24,9 @@ export async function pendingParentFormOutreach(database: Pick<Pool, 'query'>, a
             || /[\u0000-\u001f\u007f]/u.test(row.verified_contact)
             || !['US', 'BR'].includes(row.country_code) || !['google', 'apple'].includes(row.provider)
             || ![0, 1].includes(row.provider_linked)
+            || typeof row.policy_digest !== 'string' || !/^[0-9a-f]{64}$/iu.test(row.policy_digest)
+            || typeof row.policy_version !== 'string' || !/^[A-Za-z0-9._-]{1,64}$/u.test(row.policy_version)
+            || typeof row.consent_version !== 'string' || !/^[A-Za-z0-9._-]{1,64}$/u.test(row.consent_version)
             || typeof row.submitted_at !== 'string' || !timestamp.test(row.submitted_at)
             || typeof row.expires_at !== 'string' || !timestamp.test(row.expires_at)
             || !Number.isFinite(Date.parse(row.submitted_at)) || !Number.isFinite(Date.parse(row.expires_at))
@@ -30,7 +34,8 @@ export async function pendingParentFormOutreach(database: Pick<Pool, 'query'>, a
         previous = row.reference;
         return { reference: row.reference, verifiedContact: row.provider_linked === 1 ? row.verified_contact : null,
             providerLinked: row.provider_linked === 1, country: row.country_code,
-            provider: row.provider, submittedAt: row.submitted_at, expiresAt: row.expires_at };
+            provider: row.provider, policyDigest: row.policy_digest.toUpperCase(), policyVersion: row.policy_version,
+            consentVersion: row.consent_version, submittedAt: row.submitted_at, expiresAt: row.expires_at };
     });
     const hasMore = requests.length > pageSize;
     const page = requests.slice(0, pageSize);

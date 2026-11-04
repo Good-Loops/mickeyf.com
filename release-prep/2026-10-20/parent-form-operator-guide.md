@@ -55,9 +55,14 @@ Handle bounces or uncertainty as a hold and ask the parent to start a new reques
 
 For each pending reference, inspect the exact request again immediately before
 writing the message with `npm --prefix backend run parent-form:review -- inspect <reference>`.
-Confirm it is still pending, unexpired, the contact matches the
-queue, and `provider_linked` is 1. Treat any mismatch, failure or uncertain state
-as a hold. This check cannot prove the provider email has not changed since the
+Confirm it is still pending, unexpired, the contact and policy digest match the
+queue, and `provider_linked` is 1. Compare the policy and consent versions and
+digest to the current approved release receipt; an old or unknown policy is a
+hold, because the parent may no longer be able to use that form. Release
+qualification must produce and verify that digest from the exact deployed policy;
+the queue does not derive it and an operator must not assume it from the form.
+Treat any
+mismatch, failure or uncertain state as a hold. This check cannot prove the provider email has not changed since the
 request. Then search the registered `mickeyf.plays@gmail.com` mailbox's Sent
 folder for that exact reference. If an initial message has already
 been sent, check the existing conversation and any returned form; do not send a

@@ -195,6 +195,8 @@ for (const country of ['BR', 'US']) test(`${label}: ${country} actual operator C
     const found = JSON.parse(queue.stdout).requests.find((request: { reference: string }) => request.reference === approved.reference);
     assert.equal(found.verifiedContact, p.contact); assert.equal(found.country, country);
     assert.equal(found.provider, 'google'); assert.equal(found.providerLinked, true);
+    assert.equal(found.policyDigest, (await formRow(approved.reference)).policy_digest.toString('hex').toUpperCase());
+    assert.equal(found.policyVersion, policy.version); assert.equal(found.consentVersion, policy.consentVersion);
     const [[identity]] = await admin.query<RowDataPacket[]>('SELECT subject FROM account_provider_identities WHERE account_uuid=? AND provider=\'google\'', [p.account.accountId]);
     await admin.query('DELETE FROM account_provider_identities WHERE account_uuid=? AND provider=\'google\'', [p.account.accountId]);
     try {
