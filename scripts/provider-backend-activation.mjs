@@ -35,9 +35,15 @@ export function validateProviderActivationPins(pins) {
     requireThat(['active', 'active-adult'].includes(pins.activeConfiguration.phase), 'Activation requires an active policy');
     const closed = pins.closed.candidate.deployment.providerRelease;
     if (adultFirst) {
-        requireThat(closed.phase === 'prepare-adult'
-            && same(providerReleaseEnvironment(closed), providerReleaseEnvironment(pins.activeConfiguration, true)),
-        'Adult activation requires the exact matching creation-closed adult preparation');
+        const matchingPreparation = closed.phase === 'prepare-adult'
+            && same(providerReleaseEnvironment(closed), providerReleaseEnvironment(pins.activeConfiguration, true));
+        // Schema maintenance closes every signup path. Reopen only the exact adult
+        // policy bound to the captured pre-maintenance revision, never a new policy.
+        const restorePreviousAdult = closed.phase === 'prepare-child'
+            && pins.closed.baseline.providerRelease?.phase === 'active-adult'
+            && same(pins.activeConfiguration, pins.closed.baseline.providerRelease);
+        requireThat(matchingPreparation || restorePreviousAdult,
+            'Adult activation requires matching adult preparation or the exact captured previous adult policy');
     } else if (child) {
         requireThat(closed.phase === 'prepare-child'
             && same(providerReleaseEnvironment(closed), providerReleaseEnvironment(pins.activeConfiguration, true)),

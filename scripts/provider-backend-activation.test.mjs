@@ -10,10 +10,11 @@ import { observeProviderReaderBoundary, planProviderActiveRevision, applyProvide
     CHILD_SIGNED_FORM_SQL_SHA256 } from './provider-backend-activation.mjs';
 
 const activeConfiguration = JSON.parse(readFileSync(new URL('./provider-release-general.json', import.meta.url), 'utf8'));
-function activationFixture({ retireUnrouted = false, child = false, adult = false } = {}) {
-    const f = fixture(child ? 'prepare-child' : adult ? 'prepare-adult' : 'prepare');
+function activationFixture({ retireUnrouted = false, child = false, adult = false, restoreAdult = false } = {}) {
+    const f = fixture(child || restoreAdult ? 'prepare-child' : adult ? 'prepare-adult' : 'prepare',
+        restoreAdult ? adultProviderConfig() : undefined);
     f.candidate.launchStage = f.rollback.launchStage = f.service.launchStage = 'GA';
-    const pins = { closed: f.pins, activeConfiguration: child ? childProviderConfig() : adult ? adultProviderConfig() : structuredClone(activeConfiguration) };
+    const pins = { closed: f.pins, activeConfiguration: child ? childProviderConfig() : adult || restoreAdult ? adultProviderConfig() : structuredClone(activeConfiguration) };
     if (child) {
         pins.childSchemaReceipt = { schemaVersion: 1, operation: 'verify-child-signed-form-schema',
             verifiedAt: new Date(now).toISOString(), sourceCommit: f.pins.candidate.deployment.sourceCommit,
@@ -224,6 +225,46 @@ test('adult-first activation pins an identical closed fallback and cannot open c
     await applyProviderActiveTraffic(f.provider, plan, fingerprint(plan), when);
     const close = await planProviderActiveTraffic(f.provider, active, 'close-active', when + 1000);
     await applyProviderActiveTraffic(f.provider, close, fingerprint(close), when + 1000);
+});
+
+test('schema maintenance can restore the captured adult policy and retain a compatible closed fallback', async () => {
+    const f = activationFixture({ restoreAdult: true });
+    const { active, fallback, when } = await prepared(f);
+    const environment = receipt => Object.fromEntries(receipt.plan.request.template.containers[0].env.map(e => [e.name, e.value]));
+    for (const [name, value] of Object.entries(f.pins.baseline.providerRelease.environment)) {
+        assert.equal(environment(active)[name], value);
+    }
+    assert.equal(environment(active).PARENT_REGISTRATION_CREATION_ENABLED, 'false');
+    assert.equal(environment(active).REGISTRATION_ADULT_ONLY, 'true');
+    for (const name of ['REGISTRATION_CREATION_ENABLED', 'PROVIDER_GOOGLE_SIGNUP_ENABLED',
+        'PROVIDER_APPLE_SIGNUP_ENABLED', 'PARENT_REGISTRATION_CREATION_ENABLED']) {
+        assert.equal(environment(fallback)[name], 'false');
+    }
+    const plan = await planProviderActiveTraffic(f.provider, active, 'activate', when);
+    await applyProviderActiveTraffic(f.provider, plan, fingerprint(plan), when);
+    const close = await planProviderActiveTraffic(f.provider, active, 'close-active', when + 1000);
+    await applyProviderActiveTraffic(f.provider, close, fingerprint(close), when + 1000);
+});
+
+test('adult restoration rejects policy expansion, child creation and an invented baseline', async () => {
+    const f = activationFixture({ restoreAdult: true });
+    for (const mutate of [
+        p => { p.activeConfiguration.environment.REGISTRATION_POLICY_VERSION = 'unreviewed-new-policy'; },
+        p => { p.activeConfiguration.environment.PARENT_REGISTRATION_CREATION_ENABLED = 'true'; },
+        p => { p.activeConfiguration.environment.REGISTRATION_ADULT_ONLY = 'false'; },
+        p => { delete p.closed.baseline.providerRelease; delete p.closed.candidate.deployment.previousProviderRelease; },
+        p => { p.closed.candidate.deployment.previousProviderRelease = adultProviderConfig('prepare-adult'); },
+    ]) {
+        const changed = structuredClone(f.activationPins); mutate(changed);
+        assert.throws(() => validateProviderActivationPins(changed));
+    }
+    const forged = structuredClone(f.activationPins);
+    for (const config of [forged.activeConfiguration, forged.closed.baseline.providerRelease,
+        forged.closed.candidate.deployment.previousProviderRelease]) {
+        config.environment.REGISTRATION_POLICY_VERSION = 'invented-baseline';
+    }
+    await assert.rejects(observeProviderReaderBoundary(f.provider, forged, now), /environment differs|drifted/);
+    assert.equal(f.patches.length, 0);
 });
 
 test('strict child activation retains the reviewed policy, compatible closure and exact schema receipt through traffic changes', async () => {
