@@ -7,7 +7,7 @@ import React, { useEffect, useRef, useState } from "react";
 import { useAuth } from '@/context/AuthContext';
 import { p4Vega, type P4VegaController, type P4VegaState } from '@/games/p4-Vega/p4-Vega';
 import FullscreenButton from "@/components/FullscreenButton";
-import ScoreSubmissionNotice from '@/components/ScoreSubmissionNotice';
+import ScoreSubmissionNotice, { useShowScoreSubmissionNotice } from '@/components/ScoreSubmissionNotice';
 import Dropdown from '@/components/Dropdown';
 import P4VegaHelp from './P4VegaHelp';
 import P4VegaResults from './P4VegaResults';
@@ -43,7 +43,7 @@ const P4Vega: React.FC = () => {
 
     const [selectedKey, setSelectedKey] = useState<string>('C');
     const [selectedScale, setSelectedScale] = useState<string>('Major');
-    const showSubmissionNotice = !loading;
+    const showSubmissionNotice = useShowScoreSubmissionNotice();
     const paused = gameState === 'paused';
     const canTogglePause = gameState === 'running' || paused;
     const [joystickSide, setJoystickSide] = useState<JoystickSide>(() => {
@@ -136,6 +136,7 @@ const P4Vega: React.FC = () => {
             <ScoreSubmissionNotice
                 isAuthenticated={isAuthenticated}
                 loading={loading}
+                show={showSubmissionNotice}
             />
 
             <div
