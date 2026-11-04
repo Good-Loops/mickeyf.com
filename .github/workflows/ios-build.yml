@@ -159,6 +159,9 @@ jobs:
             cat "$RUNNER_TEMP/ludolume-privacy-manifests.json"
             echo '```'
           } >> "$GITHUB_STEP_SUMMARY"
+          # The inventory contains bundled declarations only and must also be
+          # available through the standard Actions log for automated review.
+          cat "$RUNNER_TEMP/ludolume-privacy-manifests.json"
 
       - name: Report resolved CocoaPods lock
         if: ${{ always() && inputs.compile_only }}
