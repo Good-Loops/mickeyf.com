@@ -22,21 +22,21 @@ before(async () => {
 });
 after(async () => { await browser?.close(); await server?.close(); });
 
-async function fixture(t, signup = async () => ({ error: 'REGISTRATION_REQUIRED' }), { eligible = true, config = policy } = {}) {
+async function fixture(t, signup = async () => ({ error: 'REGISTRATION_REQUIRED' }), { eligible = true, config = policy, clients = [] } = {}) {
     const context = await browser.newContext(); t.after(() => context.close());
     const page = await context.newPage(); page.setDefaultTimeout(10_000);
-    const calls = [];
+    const calls = [], external = [];
     let markSignupObserved;
     const signupObserved = new Promise(resolve => { markSignupObserved = resolve; });
     await context.route('**/*', async route => {
         const request = route.request(), url = new URL(request.url());
         // Every API/provider response is synthetic; no account or production state can change.
-        if (url.origin !== origin) return route.abort();
+        if (url.origin !== origin) { external.push(url.origin); return route.abort(); }
         if (url.pathname.startsWith('/auth/') || url.pathname.startsWith('/api/')) {
             const body = request.postDataJSON(); calls.push({ path: url.pathname, body });
             if (url.pathname === '/api/users' && body?.type === 'signup') markSignupObserved();
             let result = { status: 200, body: {} };
-            if (url.pathname === '/auth/providers/config') result.body = { clients: [] };
+            if (url.pathname === '/auth/providers/config') result.body = { clients };
             else if (url.pathname === '/auth/registration/config') result.body = config;
             else if (url.pathname === '/auth/registration/bootstrap') result.body = { ready: true };
             else if (url.pathname === '/auth/registration/observe') result.body = { observed: true };
@@ -60,8 +60,57 @@ async function fixture(t, signup = async () => ({ error: 'REGISTRATION_REQUIRED'
     // A fresh isolated Vite cache compiles the module graph before DOMContentLoaded.
     await page.goto(`${origin}/signup`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
     if (eligible) await approveAdult(page);
-    return { page, calls, signupObserved };
+    return { page, calls, external, signupObserved };
 }
+
+const signupProviders = [
+    { clientKey: 'google-web', provider: 'google', platform: 'web', clientId: 'synthetic-google', signup: true },
+    { clientKey: 'apple-web', provider: 'apple', platform: 'web', clientId: 'synthetic-apple', redirectUri: 'https://example.test/login', signup: true },
+];
+
+test('provider choices precede eligibility without starting provider authentication', async t => {
+    const { page, calls, external } = await fixture(t, undefined, { eligible: false, clients: signupProviders });
+    const google = page.getByRole('button', { name: 'Continue with Google', exact: true });
+    const apple = page.getByRole('button', { name: 'Continue with Apple', exact: true });
+    await google.waitFor(); await apple.waitFor();
+    const placement = await page.evaluate(() => ({
+        choices: document.querySelector('.signup-provider-choice').getBoundingClientRect().bottom,
+        eligibility: document.querySelector('.signup__eligibility-title').getBoundingClientRect().top,
+    }));
+    assert.ok(placement.choices <= placement.eligibility, JSON.stringify(placement));
+    await google.click();
+    assert.equal(await google.getAttribute('aria-pressed'), 'true');
+    assert.equal(await page.locator('#registration-country').evaluate(node => node === document.activeElement), true);
+    assert.match(await page.getByRole('status').last().innerText(), /country and age.*Continue with Google/i);
+    assert.equal(calls.filter(call => ['/auth/providers/begin', '/auth/providers/complete', '/api/users'].includes(call.path)).length, 0);
+    assert.deepEqual(external, []);
+    await page.locator('#registration-country').selectOption('US');
+    await page.locator('#registration-age').fill('12');
+    await page.getByRole('button', { name: 'Continue', exact: true }).click();
+    await page.getByRole('link', { name: 'Continue to parent-led registration', exact: true }).waitFor();
+    assert.equal(calls.filter(call => ['/auth/providers/begin', '/auth/providers/complete', '/api/users'].includes(call.path)).length, 0);
+    assert.deepEqual(external, []);
+});
+
+test('the early choice only advertises providers available for signup', async t => {
+    const clients = [signupProviders[0], { ...signupProviders[1], signup: undefined, issuance: false }];
+    delete clients[1].signup;
+    const { page } = await fixture(t, undefined, { eligible: false, clients });
+    await page.getByRole('button', { name: 'Continue with Google', exact: true }).waitFor();
+    assert.equal(await page.getByRole('button', { name: 'Continue with Apple', exact: true }).count(), 0);
+});
+
+test('an adult can complete eligibility and sees their chosen provider before the password form', async t => {
+    const { page } = await fixture(t, undefined, { eligible: false, clients: signupProviders });
+    await page.getByRole('button', { name: 'Continue with Apple', exact: true }).click();
+    await approveAdult(page);
+    await page.getByText('Select Continue with Apple to finish signing up.').waitFor();
+    const placement = await page.evaluate(() => ({
+        provider: document.querySelector('.provider-sign-in')?.getBoundingClientRect().top,
+        password: document.querySelector('#signup-password').getBoundingClientRect().top,
+    }));
+    assert.ok(placement.provider < placement.password, JSON.stringify(placement));
+});
 async function fillSynthetic(page) {
     await page.locator('#signup-username').fill('Synthetic Layout Player');
     await page.locator('#signup-email').fill('synthetic@example.test');

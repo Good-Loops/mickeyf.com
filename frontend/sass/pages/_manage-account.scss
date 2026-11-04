@@ -84,6 +84,15 @@
         input:focus-visible { outline: .2rem solid $primary-light; outline-offset: .3rem; }
     }
 
+    &:not(.parent-accounts) .score-participation > button:not([class]) {
+        align-self: stretch;
+        width: 100%;
+        min-height: 4.4rem;
+        text-align: center;
+    }
+
+    &:not(.parent-accounts) .provider-sign-in__button { min-height: 4.4rem; }
+
     &__danger {
         display: flex;
         flex-direction: column;
