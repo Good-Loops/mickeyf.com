@@ -134,7 +134,7 @@ export async function createAccountSession(
                 ...(proof ? [proof.issuedAt, proof.issuedAt] : [])]);
             if (proof && inserted.affectedRows === 0) throw new AppleSessionProofRejected();
             if (inserted.affectedRows !== 1) throw new AccountSessionUnavailableError();
-            if (childActivity && expectedPasswordHash !== undefined) await childActivity.recordInteraction(connection, account.accountId);
+            if (childActivity && expectedPasswordHash !== undefined) await childActivity.recordInteraction(connection, account.accountId, 'password-login');
             return true;
         }, 'READ COMMITTED'));
     } catch (error) {

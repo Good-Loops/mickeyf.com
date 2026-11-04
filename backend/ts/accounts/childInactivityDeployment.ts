@@ -15,8 +15,9 @@ export async function prepareChildInactivityDeployment(database: Pool, config: C
     options: Readonly<{ client?: JournalHttpClient }> = {}) {
     // A pinned writable primary and an administratively managed restore guard
     // cannot prove that activity was not lost in an undeclared in-place restore.
-    // There is no independently durable activity/keep history yet. Fail before
-    // mounting warnings or scheduling irreversible automatic deletions.
+    // Activity/keep history now has a production adapter, but warning/contact
+    // continuity, nonresponse deletion and restore operations remain unqualified.
+    // Fail before mounting warnings or scheduling automatic deletions.
     assertIndependentActivityContinuityAvailable();
     let health: ReturnType<typeof createPinnedPrimaryHealth>;
     const journal = createGcsRetentionJournal({ bucket: config.bucket, expectedBucket: config.bucket, key: config.journalKey, client: options.client,

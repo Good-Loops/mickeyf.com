@@ -50,7 +50,10 @@ import { cleanupSignedParentForms } from './accounts/signedParentFormReview';
 import { verifyParentFormAppleRelayReadiness } from './accounts/parentFormAppleRelayReadiness';
 import { cleanupParentFormAppleRelayState, recordParentFormAppleRelayEvent,
     verifyParentFormAppleRelayWriteAccess } from './accounts/parentFormAppleRelayState';
-import { parentManagedChildActivity } from './accounts/parentManagedChildActivity';
+import { loadChildActivityContinuity } from './config/childActivityContinuity';
+import { createDurableChildActivity } from './accounts/durableChildActivity';
+import { createGcsChildContinuityTransport } from './accounts/gcsChildContinuityTransport';
+import { verifyChildActivityContinuityReadiness } from './migrations/childActivityContinuityReadiness';
 import { verifyParentManagedChildActivityReadiness } from './migrations/parentManagedChildActivityReadiness';
 import { loadChildInactivityDeployment } from './config/childInactivityDeployment';
 import { prepareChildInactivityDeployment } from './accounts/childInactivityDeployment';
@@ -58,7 +61,11 @@ import { prepareChildInactivityDeployment } from './accounts/childInactivityDepl
 const runtimeConfig = loadRuntimeConfig();
 const childInactivityConfig = loadChildInactivityDeployment(process.env);
 let childInactivityDeployment: Awaited<ReturnType<typeof prepareChildInactivityDeployment>> | undefined;
-const childActivity = runtimeConfig.childOnlineActivityEnabled ? parentManagedChildActivity : undefined;
+const childContinuityConfig = loadChildActivityContinuity(process.env, runtimeConfig.childOnlineActivityEnabled);
+const childContinuityTransport = childContinuityConfig ? createGcsChildContinuityTransport({
+    bucket: childContinuityConfig.bucket, expectedBucket: childContinuityConfig.bucket }) : undefined;
+const childActivity = childContinuityConfig && childContinuityTransport
+    ? createDurableChildActivity(childContinuityConfig, childContinuityTransport) : undefined;
 const creationPolicy = registrationPolicyForCreation(runtimeConfig.registrationPolicy);
 const registration = createRegistrationAuthorization(pool,
     runtimeConfig.registrationAudience === 'children-included' ? runtimeConfig.registrationPolicy : creationPolicy,
@@ -162,7 +169,11 @@ async function startServer(): Promise<void> {
             await verifyAccountSessionReadiness(pool);
             await verifyRegistrationReadiness(pool);
             await verifyParentRegistrationReadiness(pool);
-            if (childActivity) await verifyParentManagedChildActivityReadiness(pool);
+            if (childActivity) {
+                await verifyParentManagedChildActivityReadiness(pool);
+                await verifyChildActivityContinuityReadiness(pool, childContinuityConfig!);
+                await childContinuityTransport!.verifyConfiguration('1012884798546');
+            }
             await verifyScoreParticipationReadiness(pool);
             if (runtimeConfig.parentRegistrationPolicy?.signedFormsEnabled) await verifySignedParentFormReadiness(pool,
                 runtimeConfig.parentRegistrationPolicy.audience === 'children-included' && runtimeConfig.parentRegistrationPolicy.creationEnabled === true);

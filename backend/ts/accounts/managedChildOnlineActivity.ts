@@ -33,7 +33,7 @@ export async function recordOnlineInteraction(database: Database, context: Provi
     return withUserSubmissionLock(database, account.userId, lock => transaction(lock, async connection => {
         if (!await readLiveSession(connection, account.userId, account.accountId, session.sessionId)) throw new Error('Session unavailable.');
         // An absent row is deliberately not backfilled; lifecycle assessment must hold it.
-        return activity.recordInteraction(connection, account.accountId);
+        return activity.recordInteraction(connection, account.accountId, 'online');
     }));
 }
 
@@ -51,7 +51,7 @@ export async function keepManagedChild(database: Database, context: ProviderAuth
             if (!await readLiveSession(connection, account.userId, account.accountId, session.sessionId)) throw new Error('Session unavailable.');
             const [owned] = await connection.query<RowDataPacket[]>({ sql: `SELECT c.child_uuid FROM parent_child_consents c
                 WHERE c.parent_uuid=? AND c.child_uuid=? LIMIT 1 FOR SHARE`, timeout }, [account.accountId, childAccountId]);
-            if (owned.length !== 1 || !await activity.recordInteraction(connection, childAccountId)) throw new Error('Child tracking unavailable.');
+            if (owned.length !== 1 || !await activity.recordInteraction(connection, childAccountId, 'parent-keep')) throw new Error('Child tracking unavailable.');
         }));
     });
 }

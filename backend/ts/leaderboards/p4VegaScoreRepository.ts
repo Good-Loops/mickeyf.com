@@ -172,7 +172,7 @@ export async function submitP4VegaScore(
                 }
 
                 if (currentBest !== undefined && expectedSession && childActivity) {
-                    await childActivity.recordInteraction(connection, expectedSession.accountId);
+                    await childActivity.recordInteraction(connection, expectedSession.accountId, 'score');
                 }
                 await connection.commit();
                 transactionStarted = false;

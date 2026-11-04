@@ -2,7 +2,9 @@
 
 Status: the source now includes a separate GCS conditional-intent store and a
 pinned-primary/restore-guard verifier, but neither is provisioned, wired or
-qualified in production. There is no independent per-activity history. The
+qualified in production. The default-off activity adapter now records independent per-activity history;
+see `child-continuity-sql-rehearsal.md` for source integration and test coverage.
+It is not qualified for deployment or warning/deletion continuity. The
 inactivity deletion candidate remains disabled. A parent who has not confirmed
 the warning remains pending.
 

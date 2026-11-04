@@ -3,7 +3,46 @@ import { createServer, type AddressInfo, type Socket } from 'node:net';
 import test from 'node:test';
 import mysql from 'mysql2';
 import type { PoolConnection } from 'mysql2/promise';
-import { guardConnectionQueries } from './queryTimeoutConnection';
+import { assertActiveGuardedTransaction, guardConnectionQueries } from './queryTimeoutConnection';
+
+test('only a successful explicit begin qualifies and all transaction exits revoke qualification', async () => {
+    for (const end of ['COMMIT', 'ROLLBACK', 'ALTER TABLE t ADD c INT', 'SET AUTOCOMMIT=1']) {
+        const raw = { async query() { return [[], []]; }, release() {}, destroy() {} } as unknown as PoolConnection;
+        const guarded = guardConnectionQueries(raw);
+        assert.throws(() => assertActiveGuardedTransaction(guarded));
+        await guarded.query('START TRANSACTION');
+        assert.doesNotThrow(() => assertActiveGuardedTransaction(guarded));
+        assert.throws(() => assertActiveGuardedTransaction(raw));
+        await assert.rejects(guarded.query('START TRANSACTION'), /Nested/);
+        await guarded.query(end);
+        assert.throws(() => assertActiveGuardedTransaction(guarded));
+        guarded.release();
+    }
+});
+
+test('failed begins and begins settling after discard never qualify a guarded transaction', async () => {
+    const failed = guardConnectionQueries({ async beginTransaction() { throw new Error('begin failed'); } } as unknown as PoolConnection);
+    await assert.rejects(failed.beginTransaction());
+    assert.throws(() => assertActiveGuardedTransaction(failed));
+    let resolve!: () => void;
+    const delayed = guardConnectionQueries({ beginTransaction() { return new Promise<void>(done => { resolve = done; }); },
+        destroy() {} } as unknown as PoolConnection);
+    const pending = delayed.beginTransaction();
+    delayed.destroy(); resolve(); await pending;
+    assert.throws(() => assertActiveGuardedTransaction(delayed));
+});
+
+test('a failed commit or connection release clears transaction qualification', async () => {
+    for (const action of ['commit', 'release', 'destroy']) {
+        const connection = guardConnectionQueries({ async beginTransaction() {}, async commit() { throw new Error('lost response'); },
+            release() {}, destroy() {} } as unknown as PoolConnection);
+        await connection.beginTransaction();
+        if (action === 'commit') await assert.rejects(connection.commit());
+        else if (action === 'release') connection.release();
+        else connection.destroy();
+        assert.throws(() => assertActiveGuardedTransaction(connection));
+    }
+});
 
 test('a real mysql2 stalled query discards its pool slot and cannot queue rollback behind it', async () => {
     const sockets = new Set<Socket>();

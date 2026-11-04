@@ -50,6 +50,19 @@ test('omitting the profile preserves the existing full manifest', () => {
         renderRuntimeGrantStatements('cms', PRODUCTION_RUNTIME_DATABASE_ACCOUNT, 'google-apple'));
 });
 
+test('continuity is an explicit opt-in with no direct witness deletion or identity rewriting', () => {
+    const profile = parseRuntimeGrantProfile('google-apple-parent-signed-continuity');
+    const columns = runtimeColumnPrivilegeInventory(profile);
+    const table = 'parent_child_activity_continuity';
+    assert.deepEqual(columns.filter(row => row.tableName !== table), runtimeColumnPrivilegeInventory('google-apple-parent-signed-inactivity'));
+    assert.deepEqual(columns.filter(row => row.tableName === table), [
+        ...['child_uuid', 'head_json', 'ledger_json'].map(columnName => ({ tableName: table, columnName, privilegeType: 'INSERT' })),
+        ...['head_json', 'ledger_json'].map(columnName => ({ tableName: table, columnName, privilegeType: 'UPDATE' })),
+    ]);
+    assert.deepEqual(runtimeTablePrivilegeInventory(profile).filter(row => row.tableName === table),
+        [{ tableName: table, privilegeType: 'SELECT' }]);
+});
+
 test('parent grants require explicit selection and cannot reassign consent, identity or policy binding', () => {
     assert.equal(parseRuntimeGrantProfile('google-apple-parent'), 'google-apple-parent');
     const columns = runtimeColumnPrivilegeInventory('google-apple-parent');
