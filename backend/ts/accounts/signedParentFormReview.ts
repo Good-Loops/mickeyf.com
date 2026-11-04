@@ -27,9 +27,11 @@ export async function reviewSignedParentForm(database: Pick<Pool, 'getConnection
     let phase: 'before' | 'active' | 'commit' | 'done' = 'before';
     try {
         await connection.query({ sql: 'START TRANSACTION', timeout }); phase = 'active';
-        const [forms] = await connection.query<RowDataPacket[]>({ sql: `SELECT reference, public_policy_digest FROM parent_signed_forms
-            WHERE reference=? AND parent_uuid=? AND BINARY verified_contact=BINARY ? AND policy_digest=?
-            AND status='pending' AND expires_at>UTC_TIMESTAMP(6) LIMIT 1 FOR UPDATE`, timeout },
+        const [forms] = await connection.query<RowDataPacket[]>({ sql: `SELECT f.reference, f.public_policy_digest FROM parent_signed_forms f
+            WHERE f.reference=? AND f.parent_uuid=? AND BINARY f.verified_contact=BINARY ? AND f.policy_digest=?
+            AND f.status='pending' AND f.expires_at>UTC_TIMESTAMP(6)
+            AND EXISTS (SELECT 1 FROM account_provider_identities i WHERE i.account_uuid=f.parent_uuid
+                AND i.provider=f.provider AND i.subject=f.subject FOR SHARE) LIMIT 1 FOR UPDATE`, timeout },
         [review.reference, review.parentAccountId, review.verifiedContact, review.policyDigest]);
         if (forms.length !== 1 || (review.publicApproved && !Buffer.isBuffer(forms[0].public_policy_digest))) throw new Error('The exact pending signed form request is unavailable.');
         const [result] = await connection.query<ResultSetHeader>({ sql: `UPDATE parent_signed_forms SET status=?, reviewed_at=UTC_TIMESTAMP(6),

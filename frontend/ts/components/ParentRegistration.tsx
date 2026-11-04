@@ -139,7 +139,7 @@ export default function ParentRegistration({ api, authenticated, accountKey, ses
                     credentialsAfterApproval ? undefined : userName, controller.signal, isCurrent);
                 if (!active()) return;
                 challengeState.current = null; setSelectedForm(form); setForms(current => [form, ...current]);
-                setFeedback(tr('Print and sign the form, then email the scan from the verified parent address shown. The child account is waiting for review and has not been created.', 'Imprima e assine o formulário; depois, envie a digitalização ou fotografia pelo e-mail verificado do responsável indicado. A solicitação aguarda análise e a conta infantil ainda não foi criada.'));
+                setFeedback(tr('Print and sign the form. We will email the verified parent address; check Spam and reply to that message with the signed scan or photo. The child account has not been created.', 'Imprima e assine o formulário. Enviaremos uma mensagem ao e-mail verificado do responsável; confira o Spam e responda com a digitalização ou foto assinada. A conta infantil ainda não foi criada.'));
                 return;
             }
             const proof = await api.complete(challenge.state, typeof credential === 'string' ? credential : credential.idToken, controller.signal, isCurrent);
@@ -185,8 +185,12 @@ export default function ParentRegistration({ api, authenticated, accountKey, ses
         setUserName(credentialsAfterApproval ? '' : form.userName ?? '');
         setAdult(false); setGuardian(false); setConsent(false);
         setFeedback(form.country === 'BR'
-            ? form.status === 'approved' ? 'Formulário assinado aprovado. Confirme novamente com o mesmo provedor vinculado e depois escolha a senha da criança.' : 'Esta conta infantil ainda não foi criada. Devolva o formulário assinado e aguarde a análise.'
-            : form.status === 'approved' ? 'Signed form approved. Confirm again with the same linked provider, then choose the child password.' : 'This child account has not been created. Return the signed form and wait for review.');
+            ? form.status === 'approved' ? 'Formulário assinado aprovado. Confirme novamente com o mesmo provedor vinculado e depois escolha a senha da criança.'
+                : form.status === 'rejected' ? 'O formulário não foi aprovado. A conta infantil não foi criada; cancele esta solicitação para iniciar outra ou entre em contato para obter ajuda.'
+                    : 'Esta conta infantil ainda não foi criada. Verifique a caixa de entrada e o Spam, responda à nossa mensagem com o formulário assinado e aguarde a análise.'
+            : form.status === 'approved' ? 'Signed form approved. Confirm again with the same linked provider, then choose the child password.'
+                : form.status === 'rejected' ? 'The form was not approved. No child account was created; cancel this request to start another, or contact us for help.'
+                    : 'This child account has not been created. Check your inbox and Spam for our email, reply with the signed form, and wait for review.');
     };
     const cancelForm = async () => {
         if (!selectedForm || operation.current) return;
@@ -210,7 +214,7 @@ export default function ParentRegistration({ api, authenticated, accountKey, ses
             <button type="button" disabled={busy} onClick={() => setFormRefresh(value => value + 1)}>{tr('Refresh signed form requests', 'Atualizar solicitações de formulário assinado')}</button>
             {forms.map(form => <button type="button" key={form.reference} disabled={busy} onClick={() => selectForm(form)}>{form.userName ?? (form.country === 'BR' ? 'Solicitação de conta infantil' : 'Child account request')}: {form.country === 'BR' ? ({ pending: 'pendente', approved: 'aprovado', rejected: 'recusado' } as const)[form.status] : form.status}</button>)}
             {selectedForm && <>
-                <SignedParentForm request={selectedForm} policy={config} />
+                {selectedForm.status !== 'rejected' && <SignedParentForm request={selectedForm} policy={config} />}
                 <button type="button" disabled={busy} onClick={() => void cancelForm()}>{tr('Cancel this signed form request', 'Cancelar esta solicitação de formulário assinado')}</button>
             </>}
         </div>}
@@ -230,11 +234,11 @@ export default function ParentRegistration({ api, authenticated, accountKey, ses
                 }}>
                     <option value="">{tr('Choose a country / Escolha um país', 'Escolha um país')}</option>{config.countries.map(value => <option key={value} value={value}>{value}</option>)}
                 </select></label>
-                {config.signedFormCountries?.includes(country) && <>
+                {config.signedFormCountries?.includes(country) && selectedForm?.status !== 'rejected' && <>
                     <p lang={portuguese ? 'pt-BR' : undefined}>{portuguese ? pt.notice : notice.signedParentForm.notice}</p>
                     {!selectedForm && !credentialsAfterApproval && <label>{tr("Child's chosen nickname", 'Apelido escolhido para a criança')}<input maxLength={64} value={userName} disabled={busy} onChange={event => setUserName(event.target.value)} /></label>}
                     {credentialsAfterApproval && <p>{portuguese ? pt.labels.credentialsAfterApproval : "The child's nickname and password are chosen only after the signed parent form is approved."}</p>}
-                    {selectedForm && selectedForm.status !== 'approved' && <p>{portuguese ? pt.labels.awaiting : 'Awaiting signed form review. The child account is not active.'}</p>}
+                    {selectedForm?.status === 'pending' && <p>{portuguese ? pt.labels.awaiting : 'Awaiting signed form return or review. The child account is not active.'}</p>}
                 </>}
                 <label><input type="checkbox" checked={adult} disabled={busy} onChange={event => setAdult(event.target.checked)} />{portuguese ? pt.labels.adult : 'I am 18 or older.'}</label>
                 <label><input type="checkbox" checked={guardian} disabled={busy} onChange={event => setGuardian(event.target.checked)} />{portuguese ? pt.labels.guardianCheck : "I am this child's parent or legal guardian and can give this consent."}</label>

@@ -83,6 +83,7 @@ before(async () => {
     await admin.query("CREATE USER 'parent_rehearsal_operator'@'%' IDENTIFIED BY 'synthetic-operator-only'");
     await admin.query("GRANT SELECT ON mickeyf_migration_test.schema_migrations TO 'parent_rehearsal_operator'@'%'");
     await admin.query("GRANT SELECT ON mickeyf_migration_test.parent_signed_forms TO 'parent_rehearsal_operator'@'%'");
+    await admin.query("GRANT SELECT (account_uuid,provider,subject) ON mickeyf_migration_test.account_provider_identities TO 'parent_rehearsal_operator'@'%'");
     await admin.query("GRANT UPDATE (status,reviewed_at,reviewer,form_sha256,public_approved) ON mickeyf_migration_test.parent_signed_forms TO 'parent_rehearsal_operator'@'%'");
     database = mysql.createPool({ host: config.host, port: config.port, database: config.database, user: 'parent_rehearsal_runtime',
         password: 'synthetic-runtime-only', multipleStatements: false, connectionLimit: 4, dateStrings: true, timezone: 'Z' });
@@ -173,9 +174,42 @@ async function operator(command: 'inspect' | 'approve' | 'reject', form: SignedP
     return output;
 }
 
+function pendingOutreach(confirmedServerUuid = serverUuid) {
+    const result = spawnSync(process.execPath, ['-r', 'ts-node/register', 'ts/accounts/runSignedParentFormReview.ts', 'pending'], {
+        cwd: backendDirectory, env: { ...process.env, MIGRATION_DB_USER: 'parent_rehearsal_operator', MIGRATION_DB_PASS: 'synthetic-operator-only',
+            MIGRATION_CONFIRM_ACCOUNT: 'parent_rehearsal_operator@%', SIGNED_FORM_CONFIRM_DATABASE: 'mickeyf_migration_test',
+            SIGNED_FORM_CONFIRM_SERVER_UUID: confirmedServerUuid },
+        encoding: 'utf8', timeout: 30_000, maxBuffer: 128 * 1024, windowsHide: true, shell: false,
+    });
+    assert.equal(result.error, undefined);
+    assert.doesNotMatch(result.stdout + result.stderr, /synthetic-operator-only|synthetic-runtime-only|migration-test-root-only/u);
+    return result;
+}
+
 for (const country of ['BR', 'US']) test(`${label}: ${country} actual operator CLI approves/rejects, rejects expiry, creates privately and withdraws/deletes`, async () => {
     const p = await parent(country);
     const approved = await p.requestForm();
+    const incorrect = pendingOutreach('00000000-0000-4000-8000-000000000001');
+    assert.equal(incorrect.status, 1); assert.equal(incorrect.stdout, '');
+    const queue = pendingOutreach(); assert.equal(queue.status, 0, queue.stderr);
+    const found = JSON.parse(queue.stdout).requests.find((request: { reference: string }) => request.reference === approved.reference);
+    assert.equal(found.verifiedContact, p.contact); assert.equal(found.country, country);
+    assert.equal(found.provider, 'google'); assert.equal(found.providerLinked, true);
+    assert.equal(found.policyDigest, (await formRow(approved.reference)).policy_digest.toString('hex').toUpperCase());
+    assert.equal(found.policyVersion, policy.version); assert.equal(found.consentVersion, policy.consentVersion);
+    const [[identity]] = await admin.query<RowDataPacket[]>('SELECT subject FROM account_provider_identities WHERE account_uuid=? AND provider=\'google\'', [p.account.accountId]);
+    await admin.query('DELETE FROM account_provider_identities WHERE account_uuid=? AND provider=\'google\'', [p.account.accountId]);
+    try {
+        const unlinked = pendingOutreach(); assert.equal(unlinked.status, 0, unlinked.stderr);
+        const held = JSON.parse(unlinked.stdout).requests.find((request: { reference: string }) => request.reference === approved.reference);
+        assert.equal(held.providerLinked, false); assert.equal(held.verifiedContact, null);
+        assert.equal((await operator('inspect', approved))?.provider_linked, 0);
+        await operator('approve', approved, false);
+        assert.equal((await formRow(approved.reference)).status, 'pending');
+    } finally {
+        await admin.query("INSERT INTO account_provider_identities (provider,subject,account_uuid,linked_at) VALUES ('google',?,?,UTC_TIMESTAMP(6))",
+            [identity.subject, p.account.accountId]);
+    }
     const pending = await operator('inspect', approved); assert.equal(pending?.status, 'pending'); assert.equal(pending?.user_name, null);
     assert.equal(pending?.country_code, country);
     await assert.rejects(database.query("UPDATE parent_signed_forms SET status='approved',reviewed_at=UTC_TIMESTAMP(6) WHERE reference=?", [approved.reference]),
@@ -187,6 +221,8 @@ for (const country of ['BR', 'US']) test(`${label}: ${country} actual operator C
     const premature = await p.proof();
     assert.deepEqual(await p.flow.createChild(p.context, { ...credentials, grant: premature }), { error: 'SIGNED_FORM_REQUIRED' });
     await operator('approve', approved);
+    const afterApproval = pendingOutreach(); assert.equal(afterApproval.status, 0, afterApproval.stderr);
+    assert.equal(JSON.parse(afterApproval.stdout).requests.some((request: { reference: string }) => request.reference === approved.reference), false);
     assert.equal((await operator('inspect', approved))?.status, 'approved');
     assert.deepEqual(await p.flow.createChild(p.context, { ...credentials, grant: premature }), { error: 'SIGNED_FORM_REQUIRED' });
     const fresh = await p.proof({ ...p.request, formReference: approved.reference });
@@ -204,10 +240,14 @@ for (const country of ['BR', 'US']) test(`${label}: ${country} actual operator C
 
     const rejected = await p.requestForm(); await operator('reject', rejected);
     assert.equal((await operator('inspect', rejected))?.status, 'rejected');
+    const afterRejection = pendingOutreach(); assert.equal(afterRejection.status, 0, afterRejection.stderr);
+    assert.equal(JSON.parse(afterRejection.stdout).requests.some((request: { reference: string }) => request.reference === rejected.reference), false);
     await operator('approve', rejected, false);
     assert.deepEqual(await p.flow.createChild(p.context, { ...credentials, formReference: rejected.reference, grant: await p.proof() }), { error: 'SIGNED_FORM_REQUIRED' });
     const expired = await p.requestForm();
     await admin.query('UPDATE parent_signed_forms SET expires_at=UTC_TIMESTAMP(6)-INTERVAL 1 SECOND WHERE reference=?', [expired.reference]);
+    const afterExpiry = pendingOutreach(); assert.equal(afterExpiry.status, 0, afterExpiry.stderr);
+    assert.equal(JSON.parse(afterExpiry.stdout).requests.some((request: { reference: string }) => request.reference === expired.reference), false);
     await operator('approve', expired, false);
     const expiredRow = await formRow(expired.reference); assert.equal(expiredRow.status, 'pending'); assert.equal(expiredRow.reviewer, null);
     assert.deepEqual(await p.flow.createChild(p.context, { ...credentials, formReference: expired.reference, grant: await p.proof() }), { error: 'SIGNED_FORM_REQUIRED' });

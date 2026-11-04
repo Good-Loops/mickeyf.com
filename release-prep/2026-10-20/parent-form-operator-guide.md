@@ -30,6 +30,73 @@ This is a guide to the manual process, not evidence that the process is already
 qualified or permission to delete any particular message or file. Keep new child
 registration closed until the operating procedure and deadlines are verified.
 
+## Start the email conversation
+
+The form now asks every parent to reply to an initial message. This is necessary
+for the tested Apple Hide My Email route: the parent can reply through the relay
+without revealing the forwarding address. It also avoids separate instructions
+for Google and Apple parents. **No email is sent automatically.** Until this
+owner-operated process has been rehearsed and adopted, child creation stays closed.
+
+On each review pass, after completing the same private administrative/proxy setup
+required below, run `npm --prefix backend run parent-form:review -- pending`.
+The command lists up to 50 unexpired pending requests and their verified contacts;
+it does not approve a form or send mail. If `nextAfter` is not null, continue with
+`npm --prefix backend run parent-form:review -- pending --after=<nextAfter>` until
+the final page. A failed command is not an empty queue. Treat the output as
+private account data; do not save it to a shared location or post it to chat.
+The operator needs read access to `account_uuid`, `provider`, and `subject` in
+`account_provider_identities` for the linked-identity check. Verify the existing
+operator's actual grants during setup; this command does not change privileges.
+If `providerLinked` is false, the contact is withheld: do not send a message or
+approve the request. A true value only confirms the original provider identity
+is still linked; it cannot prove that the provider's address has not changed.
+Handle bounces or uncertainty as a hold and ask the parent to start a new request.
+
+For each pending reference, inspect the exact request again immediately before
+writing the message with `npm --prefix backend run parent-form:review -- inspect <reference>`.
+Confirm it is still pending, unexpired, the contact and policy digest match the
+queue, and `provider_linked` is 1. Compare the policy and consent versions and
+digest to the current approved release receipt; an old or unknown policy is a
+hold, because the parent may no longer be able to use that form. Release
+qualification must produce and verify that digest from the exact deployed policy;
+the queue does not derive it and an operator must not assume it from the form.
+Treat any
+mismatch, failure or uncertain state as a hold. This check cannot prove the provider email has not changed since the
+request. Then search the registered `mickeyf.plays@gmail.com` mailbox's Sent
+folder for that exact reference. If an initial message has already
+been sent, check the existing conversation and any returned form; do not send a
+duplicate automatically. Otherwise address a new message to the exact verified
+contact from the queue. Include only the request reference and the instructions
+below, with no child details, account IDs, passwords or attachments. Send it from
+the registered mailbox so Apple can relay it. A Sent message is not proof of
+delivery or reading; investigate bounces or an absent reply and never approve
+without the exact form and human review.
+
+> Subject: Your Ludolume parent form request
+>
+> You requested a parent form in Ludolume. Please reply to this message with a
+> photo or scan of the signed form for request `<reference>`. Do not include
+> passwords, identity documents or the child's name. Check that the reference on
+> the form matches. If you did not request this, you can ignore this message.
+
+For Brazil, use the Portuguese equivalent:
+
+> Assunto: Sua solicitação de formulário do responsável no Ludolume
+>
+> Você solicitou um formulário do responsável no Ludolume. Responda a esta
+> mensagem com uma foto ou digitalização do formulário assinado para a solicitação
+> `<referência>`. Não inclua senhas, documentos de identidade ou o nome da criança.
+> Confira se a referência no formulário é a mesma. Se você não fez esta
+> solicitação, ignore esta mensagem.
+
+The parent-facing text instructs parents to check Spam and reply, including when
+using Apple Hide My Email. An earlier synthetic relay rehearsal received the
+initial message and its intact reply but found the initial message in Spam.
+This procedure has not yet been demonstrated end to end with the new queue and
+real parent-review setup. Handle unanswered or expired requests under the
+retention process; do not change a verified contact to force a match.
+
 ## What the reviewer checks
 
 1. Open the returned scan or photograph in the private operator environment. The published return address is `mickeyf.plays@gmail.com`. The parent must return it from the exact verified contact recorded for the request; a matching display name or forwarded message alone is insufficient. Do not change the recorded contact to fit a message.

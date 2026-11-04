@@ -38,8 +38,8 @@ function FormActions({ contentRef, portuguese, allowCopy }: {
             <button type="button" onClick={prepareText}>{portuguese ? 'Preparar texto do formulário' : 'Prepare form text'}</button>
             {formText && <div>
                 <p>{portuguese
-                    ? 'Copie o texto sem alterá-lo para um documento, imprima e assine à mão. Envie uma foto ou digitalização pelo e-mail verificado do responsável. O texto contém seu e-mail, identificador da conta, país e referência da solicitação.'
-                    : 'Copy the unchanged text into a document, print it, and sign it by hand. Send a photo or scan from the verified parent email. The text contains your email, account ID, country, and request reference.'}</p>
+                    ? 'Copie o texto sem alterá-lo para um documento, imprima e assine à mão. Responda à nossa mensagem com uma foto ou digitalização assinada. O texto contém seu e-mail, identificador da conta, país e referência da solicitação.'
+                    : 'Copy the unchanged text into a document, print it, and sign it by hand. Reply to our message with a signed photo or scan. The text contains your email, account ID, country, and request reference.'}</p>
                 <label>{portuguese ? 'Texto do formulário' : 'Form text'}
                     <textarea readOnly value={formText} onFocus={event => event.currentTarget.select()} rows={8} />
                 </label>
