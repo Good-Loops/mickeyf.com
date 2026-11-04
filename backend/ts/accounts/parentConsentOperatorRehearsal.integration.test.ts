@@ -204,6 +204,8 @@ for (const country of ['BR', 'US']) test(`${label}: ${country} actual operator C
         const held = JSON.parse(unlinked.stdout).requests.find((request: { reference: string }) => request.reference === approved.reference);
         assert.equal(held.providerLinked, false); assert.equal(held.verifiedContact, null);
         assert.equal((await operator('inspect', approved))?.provider_linked, 0);
+        await operator('approve', approved, false);
+        assert.equal((await formRow(approved.reference)).status, 'pending');
     } finally {
         await admin.query("INSERT INTO account_provider_identities (provider,subject,account_uuid,linked_at) VALUES ('google',?,?,UTC_TIMESTAMP(6))",
             [identity.subject, p.account.accountId]);
