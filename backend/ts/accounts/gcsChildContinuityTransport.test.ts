@@ -27,7 +27,8 @@ function fixture(handler: (request: JournalHttpRequest) => Promise<{ status: num
 }
 
 test('startup pins bucket policy and verifies create/read-only runtime access without changing it', async () => {
-    const f = fixture(async request => ({ status: 200, data: request.url.includes('/iam/testPermissions?')
+    const f = fixture(async request => ({ status: request.url.includes('storage.objects.setIamPolicy') ? 400 : 200,
+        data: request.url.includes('/iam/testPermissions?')
         ? { kind: 'storage#testIamPermissionsResponse', permissions } : bucketConfig }));
     await f.transport.verifyConfiguration(projectNumber);
     assert.equal(f.calls.length, 3);

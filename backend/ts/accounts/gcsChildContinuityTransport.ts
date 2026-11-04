@@ -74,8 +74,10 @@ export function createGcsChildContinuityTransport(options: Readonly<{
                 || (value.lifecycle?.rule !== undefined && (!Array.isArray(value.lifecycle.rule) || value.lifecycle.rule.length !== 0))
                 || value.hierarchicalNamespace?.enabled === true) throw new Error('Child continuity bucket configuration differs.');
             const required = ['storage.buckets.get', 'storage.objects.create', 'storage.objects.get', 'storage.objects.list'];
+            // Uniform access disables object ACLs; asking testIamPermissions about
+            // objects.setIamPolicy returns HTTP 400 rather than a denied permission.
             const forbidden = ['storage.buckets.update', 'storage.buckets.delete', 'storage.buckets.setIamPolicy', 'storage.buckets.restore',
-                'storage.objects.delete', 'storage.objects.move', 'storage.objects.update', 'storage.objects.setIamPolicy',
+                'storage.objects.delete', 'storage.objects.move', 'storage.objects.update',
                 'storage.objects.restore', 'storage.objects.setRetention', 'storage.objects.overrideUnlockedRetention',
                 'storage.folders.rename', 'storage.managedFolders.setIamPolicy'];
             const query = [...required, ...forbidden].map(permission => `permissions=${encodeURIComponent(permission)}`).join('&');
