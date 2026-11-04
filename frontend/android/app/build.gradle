@@ -67,6 +67,19 @@ dependencies {
 
 apply from: 'capacitor.build.gradle'
 
+// A native release without its API origin can build successfully but cannot sign in.
+// Check the actual synced web assets, not the environment of a later Gradle process.
+tasks.register('verifyReleaseApiOrigin') {
+    doLast {
+        def bundles = fileTree('src/main/assets/public/assets') { include 'index-*.js' }.files
+        def expected = 'productionUrl:"https://mickeyf-org-j7yuum4tiq-uc.a.run.app"'
+        if (bundles.size() != 1 || !bundles.first().getText('UTF-8').contains(expected)) {
+            throw new GradleException('Android release assets are missing the production API origin. Rebuild the web assets with the approved release configuration and sync Capacitor.')
+        }
+    }
+}
+tasks.matching { it.name == 'preReleaseBuild' }.configureEach { dependsOn('verifyReleaseApiOrigin') }
+
 try {
     def servicesJSON = file('google-services.json')
     if (servicesJSON.text) {
