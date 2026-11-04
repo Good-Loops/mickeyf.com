@@ -233,14 +233,22 @@ async function revokeMatchingSessions(database: RevocationDatabase, hash: Buffer
     });
 }
 
-/** Only verified Apple messages reach here. No raw JWS, tokens or notification history is retained. */
-export async function applyAppleNotification(database: RevocationDatabase, notification: VerifiedAppleNotification): Promise<void> {
+/** Only verified Apple messages reach here. Never retain raw JWS or tokens. */
+export async function applyAppleNotification(database: RevocationDatabase, notification: VerifiedAppleNotification,
+    forwardingEvents?: { record(notification: VerifiedAppleNotification): Promise<void> }): Promise<void> {
     const hash = appleSubjectHash({ clientId: notification?.audience, subject: notification?.subject });
     if (!notification || !isEpoch(notification.eventTime)
         || !['consent-revoked', 'account-deleted', 'email-enabled', 'email-disabled'].includes(notification.eventType)) {
         throw new TypeError('A verified Apple notification is required.');
     }
-    if (notification.eventType === 'email-enabled' || notification.eventType === 'email-disabled') return;
+    if (notification.eventType === 'email-enabled' || notification.eventType === 'email-disabled') {
+        if (forwardingEvents) {
+            if (!notification.relayEmail) throw new AppleSessionRevocationUnavailableError();
+            try { await forwardingEvents.record(notification); }
+            catch { throw new AppleSessionRevocationUnavailableError(); }
+        }
+        return;
+    }
     try {
         await storeWatermark(database, hash, notification.eventTime);
         // Even an old event must remove surviving pre-event sessions after its watermark TTL elapsed.

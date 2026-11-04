@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Pool } from 'mysql2/promise';
-import { pendingParentFormOutreach, redactUnlinkedFormContact } from './signedParentFormOutreach';
+import { pendingParentFormOutreach, redactUnavailableFormContact } from './signedParentFormOutreach';
 
 const reference = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const row = (n: number) => ({ reference: reference(n), verified_contact: `parent${n}@example.test`,
-    country_code: 'US', provider: 'apple', provider_linked: 1, policy_digest: 'A'.repeat(64),
+    country_code: 'US', provider: 'apple', provider_linked: 1, relay_forwarding_status: 'unknown', policy_digest: 'A'.repeat(64),
     policy_version: 'synthetic-policy', consent_version: 'synthetic-consent',
     submitted_at: '2026-11-01T01:02:03.000000Z', expires_at: '2026-11-15T01:02:03.000000Z' });
 function fixture(rows: unknown) {
@@ -22,7 +22,7 @@ test('returns a bounded pending page and a cursor without approving or sending',
     assert.equal(result.requests.length, 50);
     assert.equal(result.nextAfter, reference(51));
     assert.deepEqual(result.requests[0], { reference: reference(2), verifiedContact: 'parent2@example.test',
-        providerLinked: true, deliveryStatus: 'unknown', country: 'US', provider: 'apple', policyDigest: 'A'.repeat(64), policyVersion: 'synthetic-policy',
+        providerLinked: true, deliveryStatus: 'unknown', relayForwardingStatus: 'unknown', country: 'US', provider: 'apple', policyDigest: 'A'.repeat(64), policyVersion: 'synthetic-policy',
         consentVersion: 'synthetic-consent', submittedAt: '2026-11-01T01:02:03.000000Z', expiresAt: '2026-11-15T01:02:03.000000Z' });
     assert.deepEqual(f.calls[0].values, [reference(1), reference(1)]);
     assert.match(f.calls[0].sql, /status='pending'[\s\S]*expires_at>UTC_TIMESTAMP\(6\)/u);
@@ -49,9 +49,21 @@ test('a no-longer-linked provider is a hold and the address is not disclosed', a
 });
 
 test('inspection withholds an unlinked contact and never claims delivery is known', () => {
-    const form = { provider_linked: 0, verified_contact: 'parent@privaterelay.appleid.com', reference: reference(1) };
-    assert.deepEqual(redactUnlinkedFormContact(form), { ...form, verified_contact: null, delivery_status: 'unknown' });
-    assert.deepEqual(redactUnlinkedFormContact({ ...form, provider_linked: 1 }), { ...form, provider_linked: 1, delivery_status: 'unknown' });
-    assert.throws(() => redactUnlinkedFormContact({ ...form, provider_linked: null }));
-    assert.throws(() => redactUnlinkedFormContact({ ...form, provider_linked: 1, verified_contact: null }));
+    const form = { provider_linked: 0, verified_contact: 'parent@privaterelay.appleid.com', reference: reference(1), relay_forwarding_status: 'unknown' };
+    assert.deepEqual(redactUnavailableFormContact(form), { ...form, verified_contact: null, delivery_status: 'unknown' });
+    assert.deepEqual(redactUnavailableFormContact({ ...form, provider_linked: 1 }), { ...form, provider_linked: 1, delivery_status: 'unknown' });
+    assert.throws(() => redactUnavailableFormContact({ ...form, provider_linked: null }));
+    assert.throws(() => redactUnavailableFormContact({ ...form, provider_linked: 1, verified_contact: null }));
+});
+
+test('known disabled relay holds the contact; an enabled relay still does not prove delivery', async () => {
+    const disabled = await pendingParentFormOutreach(fixture([{ ...row(1), relay_forwarding_status: 'last-event-disabled' }]).database, null, true);
+    assert.equal(disabled.requests[0].verifiedContact, null);
+    assert.equal(disabled.requests[0].relayForwardingStatus, 'last-event-disabled');
+    const enabled = await pendingParentFormOutreach(fixture([{ ...row(1), relay_forwarding_status: 'last-event-enabled' }]).database, null, true);
+    assert.equal(enabled.requests[0].verifiedContact, row(1).verified_contact);
+    assert.equal(enabled.requests[0].deliveryStatus, 'unknown');
+    assert.equal(redactUnavailableFormContact({ provider_linked: 1, verified_contact: row(1).verified_contact,
+        relay_forwarding_status: 'last-event-disabled' }).verified_contact, null);
+    await assert.rejects(pendingParentFormOutreach(fixture([{ ...row(1), relay_forwarding_status: 'bad' }]).database, null, true));
 });

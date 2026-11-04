@@ -21,6 +21,8 @@ export type VerifiedAppleNotification = Readonly<{
     issuedAt: number;
     /** Authentication must be strictly newer; same-second Apple logins are invalidated. */
     eventTime: number;
+    /** Present only for a signed, well-formed private forwarding notification. */
+    relayEmail?: string;
     [verifiedAppleNotification]: true;
 }>;
 
@@ -81,9 +83,18 @@ function verifiedClaims(
     const eventTimeMs = normalizedEventTime(event.event_time);
     if (eventTimeMs === undefined || eventTimeMs > nowMs + CLOCK_TOLERANCE_SECONDS * 1_000
         || eventTimeMs > (claims.iat + CLOCK_TOLERANCE_SECONDS) * 1_000) return undefined;
+    let relayEmail: string | undefined;
+    if ((event.type === 'email-enabled' || event.type === 'email-disabled') && event.email !== undefined) {
+        if (typeof event.email !== 'string' || (event.is_private_email !== true && event.is_private_email !== 'true')) return undefined;
+        const email = event.email.trim().toLowerCase();
+        if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email)
+            || /[\u0000-\u001f\u007f]/u.test(email)) return undefined;
+        relayEmail = email;
+    }
     return Object.freeze({
         audience: claims.aud, subject: event.sub, eventType: event.type,
         issuedAt: claims.iat, eventTime: Math.floor(eventTimeMs / 1_000),
+        ...(relayEmail ? { relayEmail } : {}),
     }) as VerifiedAppleNotification;
 }
 

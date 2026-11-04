@@ -6,6 +6,7 @@ import { DELETION_JOURNAL_BUCKET } from '../accounts/gcsDeletionJournal';
 import { loadProviderAuthConfig, type ProviderAuthConfig } from './providerAuthConfig';
 import { loadAppleMaintenanceConfig, type AppleMaintenanceConfig } from './appleMaintenanceConfig';
 import { loadLocalProviderRuntime, type LocalProviderRuntime } from './localProviderRuntime';
+import { parentFormRelayEnabled } from './parentFormRelayConfig';
 
 export type RuntimeEnvironment = 'development' | 'test' | 'production';
 
@@ -31,6 +32,7 @@ export type RuntimeConfig = {
     appleMaintenance: AppleMaintenanceConfig | undefined;
     localProviderRuntime: LocalProviderRuntime | undefined;
     childOnlineActivityEnabled: boolean;
+    parentFormRelayEnabled: boolean;
 };
 
 export type DatabaseConfig = {
@@ -127,6 +129,11 @@ export function loadRuntimeConfig(env: Environment = process.env): RuntimeConfig
 
     const registrationPolicy = loadRegistrationPolicy(env);
     const parentRegistrationPolicy = loadParentRegistrationPolicy(env, registrationPolicy);
+    const relayEnabled = parentFormRelayEnabled(env.PARENT_FORM_RELAY_STATE_ENABLED, {
+        signedForms: parentRegistrationPolicy?.signedFormsEnabled === true,
+        appleNotifications: !!providerAuth.appleNotifications,
+        maintenance: !!appleMaintenance,
+    });
     const registrationAudience = env.REGISTRATION_AUDIENCE === 'children-included' ? 'children-included' as const : undefined;
     if (env.REGISTRATION_ADULT_ONLY !== undefined && !['true', 'false'].includes(env.REGISTRATION_ADULT_ONLY)) {
         throw new Error('REGISTRATION_ADULT_ONLY must be true or false.');
@@ -177,6 +184,7 @@ export function loadRuntimeConfig(env: Environment = process.env): RuntimeConfig
         appleMaintenance,
         localProviderRuntime,
         childOnlineActivityEnabled,
+        parentFormRelayEnabled: relayEnabled,
     });
 }
 

@@ -62,20 +62,43 @@ test('raw notification claims cannot cross the branded verified boundary', () =>
     assert.equal(verified, plain);
 });
 
-test('all four signed Apple events are immutable and discard email, raw token and notification identifiers', async () => {
+test('only forwarding events expose their signed relay address; tokens and notification identifiers are discarded', async () => {
     const { verifier, calls } = fixture();
     for (const eventType of ['consent-revoked', 'account-deleted', 'email-enabled', 'email-disabled']) {
         const result = await verifier.verify(signedToken({ ...claims(), events: {
             ...event, type: eventType, email: 'private@privaterelay.appleid.com', is_private_email: true,
         } }));
+        const forwarding = eventType === 'email-enabled' || eventType === 'email-disabled';
         assert.deepEqual(result, { verified: true, notification: { audience, subject: event.sub,
-            eventType, issuedAt: nowSeconds - 2, eventTime: event.event_time } });
+            eventType, issuedAt: nowSeconds - 2, eventTime: event.event_time,
+            ...(forwarding ? { relayEmail: 'private@privaterelay.appleid.com' } : {}) } });
         if (result.verified) assert.ok(Object.isFrozen(result.notification));
     }
     assert.equal(calls.length, 1);
     assert.equal(calls[0].url, 'https://appleid.apple.com/auth/keys');
     assert.equal(calls[0].init?.redirect, 'error');
     assert.equal(calls[0].init?.signal instanceof AbortSignal, true);
+});
+
+test('forwarding contacts must be signed, private and well formed; missing contact stays unknown', async () => {
+    const { verifier } = fixture();
+    const forwarding = { ...event, type: 'email-disabled' };
+    const withoutEmail = await verifier.verify(signedToken({ ...claims(), events: forwarding }));
+    assert.ok(withoutEmail.verified);
+    assert.equal(withoutEmail.notification.relayEmail, undefined);
+    for (const fields of [
+        { email: 'not-an-address', is_private_email: 'true' },
+        { email: 'a@example.test', is_private_email: false },
+        { email: 'a@example.test', is_private_email: undefined },
+        { email: 'x\n@example.test', is_private_email: true },
+    ]) {
+        assert.deepEqual(await verifier.verify(signedToken({ ...claims(), events: { ...forwarding, ...fields } })), invalid);
+    }
+    const normalized = await verifier.verify(signedToken({ ...claims(), events: {
+        ...forwarding, email: ' Parent@Private.ICloud.com ', is_private_email: 'true',
+    } }));
+    assert.ok(normalized.verified);
+    assert.equal(normalized.notification.relayEmail, 'parent@private.icloud.com');
 });
 
 test('documented seconds and historical serialized millisecond events normalize to the same cutoff second', async () => {
