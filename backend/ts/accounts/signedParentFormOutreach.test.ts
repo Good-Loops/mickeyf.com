@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import type { Pool } from 'mysql2/promise';
-import { pendingParentFormOutreach } from './signedParentFormOutreach';
+import { pendingParentFormOutreach, redactUnlinkedFormContact } from './signedParentFormOutreach';
 
 const reference = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
 const row = (n: number) => ({ reference: reference(n), verified_contact: `parent${n}@example.test`,
@@ -22,7 +22,7 @@ test('returns a bounded pending page and a cursor without approving or sending',
     assert.equal(result.requests.length, 50);
     assert.equal(result.nextAfter, reference(51));
     assert.deepEqual(result.requests[0], { reference: reference(2), verifiedContact: 'parent2@example.test',
-        providerLinked: true, country: 'US', provider: 'apple', policyDigest: 'A'.repeat(64), policyVersion: 'synthetic-policy',
+        providerLinked: true, deliveryStatus: 'unknown', country: 'US', provider: 'apple', policyDigest: 'A'.repeat(64), policyVersion: 'synthetic-policy',
         consentVersion: 'synthetic-consent', submittedAt: '2026-11-01T01:02:03.000000Z', expiresAt: '2026-11-15T01:02:03.000000Z' });
     assert.deepEqual(f.calls[0].values, [reference(1), reference(1)]);
     assert.match(f.calls[0].sql, /status='pending'[\s\S]*expires_at>UTC_TIMESTAMP\(6\)/u);
@@ -46,4 +46,12 @@ test('a no-longer-linked provider is a hold and the address is not disclosed', a
     assert.equal(result.requests[0].providerLinked, false);
     assert.equal(result.requests[0].verifiedContact, null);
     await assert.rejects(pendingParentFormOutreach(fixture([{ ...row(1), provider_linked: null }]).database, null));
+});
+
+test('inspection withholds an unlinked contact and never claims delivery is known', () => {
+    const form = { provider_linked: 0, verified_contact: 'parent@privaterelay.appleid.com', reference: reference(1) };
+    assert.deepEqual(redactUnlinkedFormContact(form), { ...form, verified_contact: null, delivery_status: 'unknown' });
+    assert.deepEqual(redactUnlinkedFormContact({ ...form, provider_linked: 1 }), { ...form, provider_linked: 1, delivery_status: 'unknown' });
+    assert.throws(() => redactUnlinkedFormContact({ ...form, provider_linked: null }));
+    assert.throws(() => redactUnlinkedFormContact({ ...form, provider_linked: 1, verified_contact: null }));
 });

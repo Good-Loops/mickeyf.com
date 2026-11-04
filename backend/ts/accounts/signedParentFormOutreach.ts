@@ -33,11 +33,22 @@ export async function pendingParentFormOutreach(database: Pick<Pool, 'query'>, a
             || row.expires_at <= row.submitted_at) throw new Error('Pending requests are unavailable.');
         previous = row.reference;
         return { reference: row.reference, verifiedContact: row.provider_linked === 1 ? row.verified_contact : null,
-            providerLinked: row.provider_linked === 1, country: row.country_code,
+            providerLinked: row.provider_linked === 1, deliveryStatus: 'unknown' as const, country: row.country_code,
             provider: row.provider, policyDigest: row.policy_digest.toUpperCase(), policyVersion: row.policy_version,
             consentVersion: row.consent_version, submittedAt: row.submitted_at, expiresAt: row.expires_at };
     });
     const hasMore = requests.length > pageSize;
     const page = requests.slice(0, pageSize);
     return { requests: page, nextAfter: hasMore ? page[page.length - 1].reference : null };
+}
+
+/** Provider linkage is not evidence that a recorded contact can still receive mail. */
+export function redactUnlinkedFormContact<T extends { provider_linked: unknown; verified_contact: unknown }>(
+    form: T,
+): Omit<T, 'verified_contact'> & { verified_contact: unknown; delivery_status: 'unknown' } {
+    if (!form || ![0, 1].includes(form.provider_linked as number)) throw new Error('Request is unavailable.');
+    if (form.provider_linked === 1 && (typeof form.verified_contact !== 'string' || !form.verified_contact)) {
+        throw new Error('Request is unavailable.');
+    }
+    return { ...form, verified_contact: form.provider_linked === 1 ? form.verified_contact : null, delivery_status: 'unknown' };
 }

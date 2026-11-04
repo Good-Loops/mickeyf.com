@@ -51,6 +51,9 @@ operator's actual grants during setup; this command does not change privileges.
 If `providerLinked` is false, the contact is withheld: do not send a message or
 approve the request. A true value only confirms the original provider identity
 is still linked; it cannot prove that the provider's address has not changed.
+The queue and inspection report delivery as unknown. Apple can disable relay
+forwarding without unlinking the account, and the current notification handler
+does not record that change.
 Handle bounces or uncertainty as a hold and ask the parent to start a new request.
 
 For each pending reference, inspect the exact request again immediately before
