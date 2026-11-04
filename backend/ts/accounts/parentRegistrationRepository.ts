@@ -201,6 +201,21 @@ export function createParentRegistrationRepository(database: Database, journal: 
         approve: (approval, context) => locked(context, async connection => {
             await currentParent(connection, context);
             if (!await linked(connection, context, approval.identity)) return false;
+            if (credentialsAfterApproval && approval.operation.purpose === 'create-child'
+                && requiresSignedForm(approval.operation.country)) {
+                if (!signedFormsEnabled || !approval.identity.email) return false;
+                // The challenge stores only a nonce, so resolve its reviewed form without persisting another copy of the contact.
+                // Refuse an oversized set rather than accidentally accepting a truncated search.
+                const forms = await rows(connection, `SELECT reference, provider, subject, verified_contact FROM parent_signed_forms
+                    WHERE parent_uuid=? AND country_code=? AND policy_digest=? AND status='approved'
+                    AND expires_at>UTC_TIMESTAMP(6) LIMIT 101 FOR UPDATE`,
+                [context.account!.accountId, approval.operation.country, approval.policyDigest]);
+                if (forms.length > 100) return false;
+                const form = forms.find(row => signedFormProofNonce(approval.stateHash, row.reference) === approval.nonce);
+                if (!form || form.provider !== approval.identity.provider || !Buffer.isBuffer(form.subject)
+                    || !form.subject.equals(Buffer.from(approval.identity.subject, 'ascii'))
+                    || form.verified_contact !== approval.identity.email) return false;
+            }
             const [result] = await connection.query<ResultSetHeader>({ sql: `UPDATE parent_registration_attempts
                 SET phase = 'approved', grant_hash = ?, provider = ?, subject = ?, consent_version = ?, policy_version = ?
                 WHERE state_hash = ? AND binding_hash = ? AND parent_uuid = ? AND policy_digest = ?
