@@ -20,7 +20,7 @@
     "firebase-tools@15.34.0": {
       "chokidar": "4.0.3"
     },
-    "qs": "6.16.0",
+    "qs": "6.16.1",
     "re2": "1.26.1",
     "@opentelemetry/core": "2.8.0",
     "gaxios": {
