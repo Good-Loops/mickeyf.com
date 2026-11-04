@@ -72,6 +72,27 @@ async function waitForCancellation(cancelled) {
     finally { clearTimeout(timeout); }
 }
 
+for (const width of [320, 390, 1024]) test(`account leaderboard choice stays usable at ${width}px`, async t => {
+    const {page, calls} = await fixture(t);
+    await page.setViewportSize({ width, height: 850 });
+    await page.goto(`${origin}/account`);
+    const choice = page.getByLabel('Synthetic publication consent');
+    await choice.waitFor();
+    const join = page.getByRole('button', { name: 'Join leaderboards with Apple' });
+    assert.equal(await join.isEnabled(), false);
+    const geometry = await page.evaluate(() => {
+        const checkbox = document.querySelector('.score-participation__consent input').getBoundingClientRect();
+        const text = document.querySelector('.score-participation__consent span').getBoundingClientRect();
+        return { checkboxWidth: checkbox.width, checkboxHeight: checkbox.height,
+            gap: text.left - checkbox.right, overflow: document.documentElement.scrollWidth - innerWidth };
+    });
+    assert.ok(geometry.checkboxWidth >= 20 && geometry.checkboxHeight >= 20, JSON.stringify(geometry));
+    assert.ok(geometry.gap >= 8 && geometry.overflow <= 1, JSON.stringify(geometry));
+    await choice.check();
+    assert.equal(await join.isEnabled(), true);
+    assert.equal(calls.filter(call => call.path === '/auth/parent-registration/scores/publish').length, 0);
+});
+
 for (const mode of ['withdraw-child','delete-family']) test(`navigation prevents ${mode} approval and destructive send`, async t => {
     const {page,calls,external,cancelled} = await fixture(t);
     if (mode === 'withdraw-child') {

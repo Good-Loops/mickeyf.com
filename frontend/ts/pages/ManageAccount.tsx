@@ -140,7 +140,6 @@ export default function ManageAccount() {
                     Manage account
                 </RouteHeading>
                 <PublicAccountPreviewNotice />
-                {!LEGACY_PUBLIC_API_PREVIEW && isAuthenticated && <p><Link to="/parent-accounts">Manage parent and child accounts</Link>. You can review and delete your parent account together with its linked child accounts there.</p>}
                 {LEGACY_PUBLIC_API_PREVIEW ? <>
                     {loading ? <p role="status">Checking your session…</p> : isAuthenticated
                         ? <p className="manage-account__identity">Signed in as <strong>{userName}</strong></p>
@@ -152,58 +151,61 @@ export default function ManageAccount() {
                 ) : (
                     <>
                         <p className="manage-account__identity">Signed in as <strong>{userName}</strong></p>
+                        <p className="manage-account__family"><Link to="/parent-accounts">Manage parent and child accounts</Link></p>
                         {methods?.hasPassword && methods.providerCollectionAllowed === true && <ProviderSignInControls action="link" disabled={busy}
                             operationLock={submitting} onBusyChange={setProviderBusy}
                             onSuccess={() => setMethodsRetry(value => value + 1)} />}
                         <ScoreParticipation authenticated={isAuthenticated} accountKey={userName ?? ''} sessionGeneration={sessionGeneration}
                             captureAccountAction={captureAccountAction} captureSessionGeneration={captureSessionGeneration} />
-                        <h2 className="manage-account__subtitle">Delete account</h2>
-                        <p id="deletion-consequences">
-                            Permanently remove your username, account details, personal bests,
-                            public leaderboard entries and remaining score-submission receipts.
-                            This cannot be undone. Guest play remains available.
-                        </p>
-                        {methodsLoading ? <p role="status">Loading account options…</p> : !methods ? (
-                            <div role="alert"><p>Could not load your account options.</p>
-                                <button type="button" onClick={() => setMethodsRetry(value => value + 1)}>Try again</button></div>
-                        ) : <form className="manage-account__form" onSubmit={handleDelete} aria-busy={controlsBusy} aria-describedby="deletion-consequences">
-                            {passwordless ? <p>{deletionReady
-                                ? `After confirming, verify the ${deletionProviderName} account linked to Ludolume. No password is needed.`
-                                : 'Provider verification for deletion is unavailable here. Contact mickeyf.plays@gmail.com for account help.'}</p> : <label className="manage-account__field" htmlFor="delete-account-password">
-                                <span className="manage-account__label">Current password</span>
-                                <input
-                                    id="delete-account-password"
-                                    className="manage-account__input"
-                                    type="password"
-                                    name="current-password"
-                                    autoComplete="current-password"
-                                    required
-                                    disabled={controlsBusy}
-                                    value={password}
-                                    onChange={(event) => setPassword(event.target.value)}
-                                />
-                            </label>}
-                            <label className="manage-account__field" htmlFor="delete-account-confirmation">
-                                <span className="manage-account__label">Type DELETE to confirm</span>
-                                <input
-                                    id="delete-account-confirmation"
-                                    className="manage-account__input"
-                                    type="text"
-                                    autoComplete="off"
-                                    autoCapitalize="characters"
-                                    spellCheck={false}
-                                    pattern="DELETE"
-                                    required
-                                    disabled={controlsBusy}
-                                    value={confirmation}
-                                    onChange={(event) => setConfirmation(event.target.value)}
-                                />
-                            </label>
-                            {error && <p className="manage-account__error" role="alert">{error}</p>}
-                            <button className="manage-account__submit" type="submit" disabled={controlsBusy || !deletionReady || (!passwordless && !password) || confirmation !== 'DELETE'}>
-                                {busy ? 'Please wait…' : passwordless && deletionClient ? `Verify with ${deletionProviderName} and delete` : 'Delete account'}
-                            </button>
-                        </form>}
+                        <section className="manage-account__danger" aria-labelledby="delete-account-heading">
+                            <h2 id="delete-account-heading" className="manage-account__subtitle">Delete account</h2>
+                            <p id="deletion-consequences">
+                                Permanently remove your username, account details, personal bests,
+                                public leaderboard entries and remaining score-submission receipts.
+                                This cannot be undone. Guest play remains available.
+                            </p>
+                            {methodsLoading ? <p role="status">Loading account options…</p> : !methods ? (
+                                <div role="alert"><p>Could not load your account options.</p>
+                                    <button type="button" onClick={() => setMethodsRetry(value => value + 1)}>Try again</button></div>
+                            ) : <form className="manage-account__form" onSubmit={handleDelete} aria-busy={controlsBusy} aria-describedby="deletion-consequences">
+                                {passwordless ? <p>{deletionReady
+                                    ? `After confirming, verify the ${deletionProviderName} account linked to Ludolume. No password is needed.`
+                                    : 'Provider verification for deletion is unavailable here. Contact mickeyf.plays@gmail.com for account help.'}</p> : <label className="manage-account__field" htmlFor="delete-account-password">
+                                    <span className="manage-account__label">Current password</span>
+                                    <input
+                                        id="delete-account-password"
+                                        className="manage-account__input"
+                                        type="password"
+                                        name="current-password"
+                                        autoComplete="current-password"
+                                        required
+                                        disabled={controlsBusy}
+                                        value={password}
+                                        onChange={(event) => setPassword(event.target.value)}
+                                    />
+                                </label>}
+                                <label className="manage-account__field" htmlFor="delete-account-confirmation">
+                                    <span className="manage-account__label">Type DELETE to confirm</span>
+                                    <input
+                                        id="delete-account-confirmation"
+                                        className="manage-account__input"
+                                        type="text"
+                                        autoComplete="off"
+                                        autoCapitalize="characters"
+                                        spellCheck={false}
+                                        pattern="DELETE"
+                                        required
+                                        disabled={controlsBusy}
+                                        value={confirmation}
+                                        onChange={(event) => setConfirmation(event.target.value)}
+                                    />
+                                </label>
+                                {error && <p className="manage-account__error" role="alert">{error}</p>}
+                                <button className="manage-account__submit" type="submit" disabled={controlsBusy || !deletionReady || (!passwordless && !password) || confirmation !== 'DELETE'}>
+                                    {busy ? 'Please wait…' : passwordless && deletionClient ? `Verify with ${deletionProviderName} and delete` : 'Delete account'}
+                                </button>
+                            </form>}
+                        </section>
                     </>
                 )}
             </div>

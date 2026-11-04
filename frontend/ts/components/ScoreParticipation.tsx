@@ -72,14 +72,14 @@ export default function ScoreParticipation({ childAccountId = null, authenticate
         finally { if (operation.current === controller) { const canUpdate = !controller.signal.aborted; cancel(); if (canUpdate) setBusy(false); } }
     }
     if (!authenticated) return null;
-    return <section aria-label={childAccountId ? 'Child leaderboard participation' : 'Your leaderboard participation'}>
+    return <section className="score-participation" aria-label={childAccountId ? 'Child leaderboard participation' : 'Your leaderboard participation'}>
         <h2>Public leaderboards</h2>
         <p>Participation shows the chosen nickname and game results, including existing and future best scores. It does not show parent contact details or the account's age, country or ID.</p>
         <p>Use a nickname you are comfortable making public. You can remove public entries here while keeping the account and its private scores.</p>
-        {status && <p>Current visibility: {status.visibility}.</p>}
+        {status && <p className="score-participation__status">Current visibility: <strong>{status.visibility}</strong></p>}
         {policy?.enabled && status?.canPublish && <>
             <PrivacyNoticeLink url={policy.privacyNoticeUrl} />
-            <label><input type="checkbox" checked={consent} disabled={busy} onChange={event => setConsent(event.target.checked)} />{policy.consentText}</label>
+            <label className="score-participation__consent"><input type="checkbox" checked={consent} disabled={busy} onChange={event => setConsent(event.target.checked)} /><span>{policy.consentText}</span></label>
             {clients.map(client => <button key={client.clientKey} type="button" disabled={busy || !consent}
                 onClick={() => void change(client)}>Join leaderboards with {client.provider === 'google' ? 'Google' : 'Apple'}</button>)}
         </>}

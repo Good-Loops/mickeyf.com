@@ -269,7 +269,7 @@ test('the desktop keyboard guide stays aligned with the live Unity bindings', as
     assert.match(pauseController, /Keyboard\.current\?\.escapeKey\.wasPressedThisFrame/);
 });
 
-test('signed-out players are told to authenticate before starting a ranked run', () => {
+test('players are told how to save scores and choose public leaderboard participation', () => {
     const signedOutHtml = renderToStaticMarkup(
         React.createElement(
             MemoryRouter,
@@ -307,7 +307,8 @@ test('signed-out players are told to authenticate before starting a ranked run',
     assert.match(signedOutHtml, /href="\/login"/);
     assert.match(signedOutHtml, /href="\/signup"/);
     assert.match(signedOutHtml, /role="status"/);
-    assert.equal(signedInHtml, '');
+    assert.match(signedInHtml, /Public leaderboard participation is optional/);
+    assert.match(signedInHtml, /href="\/account"/);
     assert.equal(loadingHtml, '');
 });
 
