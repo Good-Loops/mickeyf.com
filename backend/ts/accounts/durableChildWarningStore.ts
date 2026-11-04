@@ -7,6 +7,8 @@ import { isAccountId } from './deletionJournal';
 import { parseInactivityInstant, type InactivitySnapshot } from './childInactivityPolicy';
 import { deleteOwnedAccountRows } from './accountDeletionRepository';
 import type { RetentionIntent, RetentionJournal } from './childInactivityWorkflow';
+import { readLiveSession } from '../auth/accountSessionRepository';
+import { isSessionId, type SessionProof } from '../security/sessionPolicy';
 
 const timeout = 10_000;
 const limit = 16_384;
@@ -24,6 +26,7 @@ export type LockedWarning = Readonly<{
     append(event: WarningEvent): Promise<void>;
     verifyJournal(intent: RetentionIntent, journal: RetentionJournal): Promise<boolean>;
     deleteChild(): Promise<void>;
+    parentSessionValid(proof: SessionProof): Promise<boolean>;
 }>;
 export type DurableWarningStore = Readonly<{
     withChild<T>(parentId: string, childId: string, run: (target: LockedWarning) => Promise<T>): Promise<T>;
@@ -71,7 +74,7 @@ export function createDurableChildWarningStore(database: Pick<Pool, 'getConnecti
         if (bytes.length > limit) throw unavailable();
         return bytes;
     };
-    async function locked<T>(connection: PoolConnection, childUserId: number, parentId: string, childId: string,
+    async function locked<T>(connection: PoolConnection, parentUserId: number, childUserId: number, parentId: string, childId: string,
         run: (target: LockedWarning) => Promise<T>): Promise<T> {
         const relation = await rows(connection, 'SELECT parent_uuid FROM parent_child_consents WHERE child_uuid=? FOR SHARE', [childId]);
         if (relation.length !== 1 || relation[0].parent_uuid !== parentId) throw unavailable();
@@ -110,6 +113,8 @@ export function createDurableChildWarningStore(database: Pick<Pool, 'getConnecti
         let appended = false;
         const target: LockedWarning = {
             context, now, history,
+            parentSessionValid: async proof => !!proof && proof.accountId === parentId && isSessionId(proof.sessionId)
+                && !!await readLiveSession(connection, parentUserId, parentId, proof.sessionId),
             verifyJournal: (intent, journal) => journal.verifyActivityContinuity(intent, connection),
             async deleteChild() {
                 await options.verifyActivity(connection, childId);
@@ -160,7 +165,7 @@ export function createDurableChildWarningStore(database: Pick<Pool, 'getConnecti
                         let phase: 'begin' | 'active' | 'commit' = 'begin';
                         try {
                             await lock.connection.query({ sql: 'START TRANSACTION', timeout }); phase = 'active';
-                            const value = await locked(lock.connection, found[0].user_id, parentId, childId, run);
+                            const value = await locked(lock.connection, parentUserId, found[0].user_id, parentId, childId, run);
                             phase = 'commit'; await lock.connection.query({ sql: 'COMMIT', timeout }); return value;
                         } catch (error) {
                             if (phase !== 'active') lock.invalidateConnection();

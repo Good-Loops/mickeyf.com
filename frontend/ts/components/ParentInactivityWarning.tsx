@@ -76,7 +76,10 @@ export default function ParentInactivityWarning({ childAccountId, sessionGenerat
         <h3>Inactivity warning</h3>
         <p lang="en">{status.warning.notice.en}</p>
         <p lang="pt-BR">{status.warning.notice.ptBR}</p>
-        {status.warning.acknowledged ? <p role="status">You acknowledged this warning.</p> :
+        {status.warning.notice.version.startsWith('child-inactivity-nonresponse-')
+            ? <p>Use “Keep this child account active” below to restart the timer.
+                <span lang="pt-BR"> Use o botão abaixo para manter a conta ativa e reiniciar o prazo.</span></p>
+            : status.warning.acknowledged ? <p role="status">You acknowledged this warning.</p> :
             <button type="button" disabled={busy} onClick={() => void acknowledge()}>I have read this warning</button>}
     </section>;
 }

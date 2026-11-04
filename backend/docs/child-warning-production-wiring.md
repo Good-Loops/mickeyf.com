@@ -4,7 +4,8 @@ The default remains off. When explicitly enabled, the backend now connects the
 existing activity writer, immutable used-form contact, independent warning history,
 Brevo delivery lookup, failure callback and conditional deletion journal. It uses
 the existing authenticated maintenance endpoint and parent Keep account action.
-The older in-app acknowledgment UI and its 30-day policy must remain disabled.
+The parent screen reads the saved twelve-month notice and directs the parent to
+Keep account. It neither acknowledges the email nor starts the older 30-day policy.
 
 ## Delivery processing
 

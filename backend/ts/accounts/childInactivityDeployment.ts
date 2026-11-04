@@ -17,6 +17,7 @@ import { createGcsRetentionJournal } from './gcsRetentionJournal';
 import type { JournalHttpClient } from './gcsDeletionJournal';
 import { createPinnedPrimaryHealth } from './retentionPrimaryHealth';
 import { createRetentionKeepReconciler } from './retentionKeepReconciler';
+import { createChildWarningParentService } from './childWarningParentService';
 
 /** Compose real storage and primary verification before exposing either operation. */
 export async function prepareChildInactivityDeployment(database: Pool, config: ChildInactivityDeployment,
@@ -57,8 +58,7 @@ export async function prepareChildInactivityDeployment(database: Pool, config: C
     }));
     const webhookToken = createHmac('sha256', config.receiptKey).update('brevo-warning-webhook-v1').digest('base64url');
     return Object.freeze({
-        // Do not mount the older in-app notice with its separate 30-day policy.
-        service: undefined,
+        service: createChildWarningParentService(database, warnings),
         receiveBrevo: createChildWarningWebhookRouter(database, workflow, webhookToken),
         reconcileChildKeep: createRetentionKeepReconciler(keepStore, journal, config.receiptKey),
         async runMaintenance(): Promise<number> {

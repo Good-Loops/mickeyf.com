@@ -36,6 +36,7 @@ import { resolveChildWarningContact } from './childWarningContact';
 import { runChildWarningMaintenance } from './childWarningMaintenance';
 import { verifyChildWarningReadiness } from '../migrations/childWarningReadiness';
 import { createChildWarningWebhookRouter } from '../routers/childWarningWebhookRouter';
+import { createChildWarningParentService } from './childWarningParentService';
 
 // These tests use the same SQL/witness fixture as activity and keep. No second
 // test framework, real email recipient, cloud bucket or production credential.
@@ -786,4 +787,21 @@ test('bounded maintenance sends once, retains delivery across provider expiry, a
     await w.due();
     assert.equal((await cycle()).deleted, 1); assert.equal(w.deleted.length, 1);
     assert.equal((await cycle()).examined, 0);
+});
+
+test('the parent screen reads the twelve-month notice only with a live owning session and clears after keep', async () => {
+    const w = await warningFixture(true); await w.delivered();
+    const service = createChildWarningParentService(database, w.store);
+    const input = { childAccountId: w.f.childId };
+    const result = await service.read(w.f.parentContext, input);
+    assert.ok('warning' in result && result.warning);
+    assert.match(result.warning.notice.version, /^child-inactivity-nonresponse-/);
+    assert.match(result.warning.notice.en, /12 months/);
+    assert.deepEqual(await service.pending(w.f.parentContext, {}), { pending: true });
+    const invalid = { ...w.f.parentContext, session: { accountId: w.f.parent.accountId, sessionId: randomBytes(32).toString('base64url') } };
+    assert.deepEqual(await service.read(invalid, input), { error: 'INVALID_CONTEXT' });
+    assert.deepEqual(await service.acknowledge(w.f.parentContext, { ...input, warningId: result.warning.warningId, acknowledge: true }), { error: 'INVALID_REQUEST' });
+    await w.f.keep();
+    assert.deepEqual(await service.read(w.f.parentContext, input), { warning: null });
+    assert.deepEqual(await service.pending(w.f.parentContext, {}), { pending: false });
 });

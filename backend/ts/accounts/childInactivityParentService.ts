@@ -66,7 +66,7 @@ export function createChildInactivityParentService(store: InactivityStore, recei
                 for (const childAccountId of children) {
                     // Each read rechecks the exact parent session and ownership while holding the relationship locks.
                     const result = await service.read(context, { childAccountId });
-                    if ('error' in result) return { error: result.error };
+                    if ('error' in result && result.error) return { error: result.error };
                     if (result.warning && !result.warning.acknowledged) return { pending: true as const };
                 }
                 return { pending: false as const };
@@ -75,4 +75,10 @@ export function createChildInactivityParentService(store: InactivityStore, recei
     };
     return service;
 }
-export type ChildInactivityParentService = ReturnType<typeof createChildInactivityParentService>;
+type ParentWarningError = Readonly<{ error: 'INVALID_CONTEXT' | 'INVALID_REQUEST' | 'UNAVAILABLE' }>;
+export type ChildInactivityParentService = Readonly<{
+    read(context: ProviderAuthContext | null, input: unknown): Promise<ParentWarningError | { warning: null | {
+        warningId: string; acknowledged: boolean; notice: { version: string; en: string; ptBR: string } } }>;
+    acknowledge(context: ProviderAuthContext | null, input: unknown): Promise<ParentWarningError | { acknowledged: boolean }>;
+    pending(context: ProviderAuthContext | null, input: unknown): Promise<ParentWarningError | { pending: boolean }>;
+}>;
