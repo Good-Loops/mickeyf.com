@@ -5,17 +5,21 @@ import { loadMigrationConfig } from '../config/migrationConfig';
 import { verifySignedParentFormReadiness } from '../migrations/signedParentFormSchema';
 import type { MigrationConnection } from '../migrations/leaderboardSchema';
 import { reviewSignedParentForm } from './signedParentFormReview';
+import { pendingParentFormOutreach } from './signedParentFormOutreach';
 
 async function main() {
     const [command, reference, ...arguments_] = process.argv.slice(2);
-    if (!['inspect', 'approve', 'reject'].includes(command) || !/^[0-9a-f-]{36}$/u.test(reference ?? '')) throw new Error('Usage: inspect|approve|reject <reference> [review options]');
+    if (!['pending', 'inspect', 'approve', 'reject'].includes(command)) throw new Error('Unknown review command.');
+    if (command === 'pending') {
+        if ((reference !== undefined && !/^--after=[0-9a-f-]{36}$/u.test(reference)) || arguments_.length !== 0) throw new Error('Invalid pending-request cursor.');
+    } else if (!/^[0-9a-f-]{36}$/u.test(reference ?? '')) throw new Error('Invalid request reference.');
     const values = new Map<string, string>();
     for (const argument of arguments_) {
         const match = /^--([a-z-]+)=(.+)$/u.exec(argument);
         if (!match || values.has(match[1])) throw new Error('Review options must be unique --name=value pairs.');
         values.set(match[1], match[2]);
     }
-    const expectedOptions = command === 'inspect' ? [] : ['contact', 'form-file', 'parent-account', 'policy-digest', 'public-permission', 'reviewer', 'signed-parent-reviewed'];
+    const expectedOptions = command === 'inspect' || command === 'pending' ? [] : ['contact', 'form-file', 'parent-account', 'policy-digest', 'public-permission', 'reviewer', 'signed-parent-reviewed'];
     if ([...values.keys()].sort().join(',') !== expectedOptions.sort().join(',')) throw new Error('Missing or unknown review option.');
     const config = loadMigrationConfig();
     const database = mysql.createPool({ host: config.host, port: config.port, user: config.user,
@@ -27,10 +31,16 @@ async function main() {
             || identity[0].serverUuid !== process.env.SIGNED_FORM_CONFIRM_SERVER_UUID
             || identity[0].currentUser !== process.env.MIGRATION_CONFIRM_ACCOUNT) throw new Error('Database, server or administrative account confirmation mismatch.');
         await verifySignedParentFormReadiness(database as unknown as MigrationConnection);
+        if (command === 'pending') {
+            console.log(JSON.stringify(await pendingParentFormOutreach(database, reference?.slice('--after='.length) ?? null), null, 2)); return;
+        }
         if (command === 'inspect') {
-            const [forms] = await database.query<RowDataPacket[]>({ sql: `SELECT reference, parent_uuid, country_code, user_name, verified_contact,
-                HEX(policy_digest) AS policy_digest, consent_version, policy_version, status, expires_at,
-                HEX(public_policy_digest) AS public_policy_digest FROM parent_signed_forms WHERE reference=? LIMIT 1`, timeout: 10_000 }, [reference]);
+            const [forms] = await database.query<RowDataPacket[]>({ sql: `SELECT f.reference, f.parent_uuid, f.country_code, f.user_name, f.verified_contact,
+                HEX(f.policy_digest) AS policy_digest, f.consent_version, f.policy_version, f.status, f.expires_at,
+                HEX(f.public_policy_digest) AS public_policy_digest, f.provider,
+                EXISTS (SELECT 1 FROM account_provider_identities i WHERE i.account_uuid=f.parent_uuid
+                    AND i.provider=f.provider AND i.subject=f.subject) AS provider_linked
+                FROM parent_signed_forms f WHERE f.reference=? LIMIT 1`, timeout: 10_000 }, [reference]);
             if (forms.length !== 1) throw new Error('Request is unavailable.');
             console.log(JSON.stringify(forms[0], null, 2)); return;
         }
