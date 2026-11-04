@@ -43,7 +43,7 @@ const P4Vega: React.FC = () => {
 
     const [selectedKey, setSelectedKey] = useState<string>('C');
     const [selectedScale, setSelectedScale] = useState<string>('Major');
-    const showSubmissionNotice = !loading && !isAuthenticated;
+    const showSubmissionNotice = !loading;
     const paused = gameState === 'paused';
     const canTogglePause = gameState === 'running' || paused;
     const [joystickSide, setJoystickSide] = useState<JoystickSide>(() => {

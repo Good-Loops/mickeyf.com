@@ -35,7 +35,7 @@ before(async () => {
 });
 after(async () => { await browser?.close(); await server?.close(); });
 
-async function fixture(t, width, height, native = true) {
+async function fixture(t, width, height, native = true, signedIn = false) {
     // Native CSS does not use Safari's browser-only background extension controller.
     // Keep Chromium's actual UA instead of accidentally enabling that unrelated web path.
     const context = await browser.newContext({ viewport: { width, height }, hasTouch: native,
@@ -58,7 +58,7 @@ async function fixture(t, width, height, native = true) {
         const url = new URL(route.request().url());
         if (url.origin !== origin) return route.abort();
         if (url.pathname.startsWith('/auth/') || url.pathname.startsWith('/api/')) {
-            const body = /renew|verify-token/.test(url.pathname) ? { loggedIn: false }
+            const body = /renew|verify-token/.test(url.pathname) ? (signedIn ? { loggedIn: true, user_name: 'Synthetic' } : { loggedIn: false })
                 : /leaderboard/.test(url.pathname) ? { games: [] } : { clients: [] };
             return route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
         }
@@ -140,6 +140,24 @@ for (const [width, height] of [[393, 852], [852, 393], [390, 844], [390, 667], [
                 assert.ok(scroll.moved > 0, 'Unity drag scrolls the actual native main region');
                 assert.equal(scroll.fullscreen, scroll.moved, 'Fullscreen keeps the scroll chain stationary');
                 assert.equal(scroll.documentScroll, 0, 'The native document remains locked');
+            }
+        });
+    }
+}
+
+for (const [width, height] of [[390, 844], [844, 390]]) {
+    for (const game of ['p4-Vega', 'three-bosses']) {
+        test(`${game} shows the optional leaderboard choice for signed-in players at ${width}x${height}`, async t => {
+            const page = await fixture(t, width, height, true, true);
+            await open(page, game);
+            const notice = page.locator('.score-submission-notice');
+            assert.match(await notice.innerText(), /leaderboard participation is optional/i);
+            assert.equal(await notice.locator('a').getAttribute('href'), '/account');
+            const data = await geometry(page, game === 'p4-Vega' ? 'p4-vega' : game);
+            assert.ok(data.outerOverflow <= 1 && data.mainOverflow <= 1, JSON.stringify(data));
+            if (game === 'p4-Vega') {
+                assert.ok(data.notice.y >= data.main.y - 1 && data.preference.bottom <= data.main.bottom + 1,
+                    'The notice and game controls remain within the native page');
             }
         });
     }
