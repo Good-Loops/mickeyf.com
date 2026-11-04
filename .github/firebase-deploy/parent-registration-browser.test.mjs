@@ -145,16 +145,16 @@ for (const country of ['BR','US']) test(`${country} signed parent flow collects 
     assert.deepEqual(external,[]);
 });
 
-test('rejected signed consent cannot mount child credentials or reach account creation',async t => {
-    const {page,calls,setStatus} = await fixture(t,'BR');
-    const text = labels('BR');
-    await confirmParent(page,'BR');
+for (const country of ['BR','US']) test(`${country} rejected consent cannot be submitted again or create a child`,async t => {
+    const {page,calls,setStatus} = await fixture(t,country);
+    const text = labels(country);
+    await confirmParent(page,country);
     await page.getByRole('article',{name:text.form}).waitFor();
     setStatus('rejected');
     await page.getByRole('button',{name:text.refresh,exact:true}).click();
     await page.getByRole('button',{name:text.rejected,exact:true}).waitFor();
     await page.getByRole('button',{name:text.rejected,exact:true}).click();
-    await page.getByText(/O formulário não foi aprovado/).waitFor();
+    await page.getByText(country === 'BR' ? /O formulário não foi aprovado/ : /The form was not approved/).waitFor();
     assert.equal(await page.getByRole('article',{name:text.form}).count(),0);
     assert.equal(await page.getByRole('button',{name:text.confirm,exact:true}).isDisabled(),true);
     assert.equal(await page.locator('input:not([type=checkbox])').count(),0);
