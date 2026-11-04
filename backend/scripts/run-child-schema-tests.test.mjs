@@ -2,6 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { MYSQL_IMAGE } from './run-apple-android-handoff-tests.mjs';
 import { CHILD_SCHEMA_TEST_COMMAND, childSchemaTestEnvironment, runChildSchemaTests } from './run-child-schema-tests.mjs';
+import { RUNTIME_IMAGE, runChildSchemaImageTests } from './run-child-schema-image-tests.mjs';
 
 const id = 'a'.repeat(64);
 const verified = { NODE_ENV: 'test', APPLE_ANDROID_HANDOFF_TEST_ENABLED: '1', APPLE_ANDROID_HANDOFF_TEST_CONTAINER: id,
@@ -22,7 +23,7 @@ test('child schema fixture refuses an unverified target and strips inherited pro
     }
 });
 
-for (const fail of [false, true]) test(`child schema tests retain container/cleanup guards after ${fail ? 'failure' : 'success'}`, async () => {
+for (const imageProbe of [false, true]) for (const fail of [false, true]) test(`child schema ${imageProbe ? 'image' : 'source'} tests retain container/cleanup guards after ${fail ? 'failure' : 'success'}`, async () => {
     const calls = [];
     const run = async (executable, args, options) => {
         calls.push({ executable, args, options });
@@ -40,11 +41,20 @@ for (const fail of [false, true]) test(`child schema tests retain container/clea
         if (args.includes('ps')) return id;
         assert.equal(executable, process.execPath); assert.deepEqual(args, CHILD_SCHEMA_TEST_COMMAND);
         assert.equal(options.env.CHILD_SCHEMA_TEST_ENABLED, '1'); assert.equal(options.env.DB_HOST, undefined);
+        assert.equal(options.env.NODE_OPTIONS, undefined); assert.equal(options.env.GOOGLE_APPLICATION_CREDENTIALS, undefined);
+        assert.equal(options.env.CHILD_SCHEMA_IMAGE_TEST, imageProbe ? '1' : undefined);
+        assert.equal(options.env.CHILD_SCHEMA_RUNTIME_IMAGE, imageProbe ? RUNTIME_IMAGE : undefined);
         if (fail) throw new Error('SYNTHETIC_FAILURE');
         return 'Disposable child schema tests';
     };
-    const execution = runChildSchemaTests({ run, environment: { DB_HOST: 'production' }, report() {} });
+    const execution = (imageProbe ? runChildSchemaImageTests : runChildSchemaTests)({ run,
+        environment: { DB_HOST: 'production', NODE_OPTIONS: '--require unsafe', GOOGLE_APPLICATION_CREDENTIALS: 'private',
+            CHILD_SCHEMA_RUNTIME_IMAGE: 'unreviewed:latest', CHILD_SCHEMA_IMAGE_TEST: '1' }, report() {} });
     if (fail) await assert.rejects(execution, /SYNTHETIC_FAILURE/u); else await execution;
     assert.equal(calls.filter(call => call.executable === process.execPath).length, 1);
     assert(calls.at(-1).args.includes('down')); assert(calls.at(-1).args.includes('--volumes'));
+    assert(calls.at(-1).args.includes('--remove-orphans'));
+    for (const call of calls.filter(call => call.args.includes('compose'))) {
+        assert.equal(call.args.filter(arg => arg === '--file').length, imageProbe ? 2 : 1);
+    }
 });

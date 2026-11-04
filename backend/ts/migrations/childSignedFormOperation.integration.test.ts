@@ -15,6 +15,7 @@ import { observeSignedParentFormRetention, type SignedParentFormRetentionReport 
 import { runSignedParentFormRetention } from '../accounts/runSignedParentFormRetention';
 import { createChildSchemaConnection, type childSchemaCommandSettings } from './runChildSignedFormSchema';
 import { verifySignedParentFormReadiness } from './signedParentFormSchema';
+import { probeChildSchemaImage } from './childSchemaImageProbe';
 
 const config = loadMigrationConfig();
 let admin: Connection;
@@ -114,6 +115,7 @@ test('actual metadata observer reads only metadata and recognizes exact legacy s
 test('runtime readiness accepts legacy schema with creation paused and rejects enabling child creation', async () => {
     await verifySignedParentFormReadiness(metadataConnection(runtime), false);
     await assert.rejects(verifySignedParentFormReadiness(metadataConnection(runtime), true), /child signed parent form schema is missing/iu);
+    await probeChildSchemaImage(admin, 'legacy');
 });
 
 test('wrong database/server/operator/version pins fail before any migration or data change', async () => {
@@ -211,6 +213,7 @@ test('reviewed operation executes one exact ALTER, preserves legacy requests/his
     // against the extended schema with the runtime's column-scoped grants.
     await verifySignedParentFormReadiness(metadataConnection(runtime), false);
     await verifySignedParentFormReadiness(metadataConnection(runtime), true);
+    await probeChildSchemaImage(admin, 'extended');
     const [[row]] = await admin.query<RowDataPacket[]>('SELECT user_name,status FROM parent_signed_forms WHERE reference=?', [requestId]);
     assert.equal(row.user_name, 'SYNTHETIC LEGACY REQUEST'); assert.equal(row.status, 'pending');
     await assert.rejects(runtime.query('UPDATE parent_signed_forms SET reviewed_at=UTC_TIMESTAMP(6) WHERE reference=?', [requestId]), /command denied/iu);
