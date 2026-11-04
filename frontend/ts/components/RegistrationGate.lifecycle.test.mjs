@@ -6,6 +6,7 @@ import { createViteTestServer } from '../testSupport/createViteTestServer.mjs';
 const key = '__registrationGateLifecycle';
 const scope = `globalThis.${key}`;
 const mocks = {
+    SignupProviderChoices: 'export default "SignupProviderChoices";',
     react: `export const useState = value => ${scope}.state(value); export const useRef = value => ${scope}.ref(value);
         export const useEffect = (callback, deps) => ${scope}.effect(callback, deps);`,
     'jsx-runtime': 'export const jsx = (type, props) => ({ type, props }); export const jsxs = jsx;',

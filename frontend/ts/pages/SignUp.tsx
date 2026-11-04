@@ -14,8 +14,9 @@ import { useAuth } from "@/context/AuthContext";
 import { signupAndLogin } from "./signupFlow.ts";
 import PublicAccountPreviewNotice from '@/components/PublicAccountPreviewNotice';
 import { LEGACY_PUBLIC_API_PREVIEW } from '@/config/apiConfig';
+import type { SignupProvider } from '@/components/SignupProviderChoices';
 
-export const SignupCredentials: React.FC<{ onEligibilityRequired?: () => void }> = ({ onEligibilityRequired } = {}) => {
+export const SignupCredentials: React.FC<{ onEligibilityRequired?: () => void; preferredProvider?: SignupProvider | null }> = ({ onEligibilityRequired, preferredProvider } = {}) => {
     const [userName, setUserName] = useState("");
     const [email, setEmail] = useState("");
     const [userPassword, setUserPassword] = useState("");
@@ -125,6 +126,11 @@ export const SignupCredentials: React.FC<{ onEligibilityRequired?: () => void }>
             <h1 id="signup-title" className="u-visually-hidden">Sign up</h1>
             <div className="signup__form-wrapper">
                 <PublicAccountPreviewNotice />
+                {preferredProvider && <p className="signup__provider-hint">Select Continue with {preferredProvider === 'google' ? 'Google' : 'Apple'} to finish signing up. If it is unavailable, you can use email and a password below.</p>}
+                {!LEGACY_PUBLIC_API_PREVIEW && <ProviderSignInControls action="signup" userName={userName} rememberMe={rememberMe}
+                    onEligibilityRequired={onEligibilityRequired}
+                    disabled={loading} operationLock={submitting} onBusyChange={setProviderBusy}
+                    onSuccess={() => { void showSignupSuccess(); }} />}
                 <form className="signup__form" onSubmit={handleSubmit} aria-busy={busy}>
                     <label className="signup__field" htmlFor="signup-username">
                         <span className="signup__label">Username</span>
@@ -178,10 +184,6 @@ export const SignupCredentials: React.FC<{ onEligibilityRequired?: () => void }>
                         {loading ? "Signing up…" : "Sign up"}
                     </button>
                 </form>
-                {!LEGACY_PUBLIC_API_PREVIEW && <ProviderSignInControls action="signup" userName={userName} rememberMe={rememberMe}
-                    onEligibilityRequired={onEligibilityRequired}
-                    disabled={loading} operationLock={submitting} onBusyChange={setProviderBusy}
-                    onSuccess={() => { void showSignupSuccess(); }} />}
                 <p className="signup__account-link">Already have an account? <Link to="/login">Log in</Link></p>
             </div>
         </section>
@@ -189,6 +191,6 @@ export const SignupCredentials: React.FC<{ onEligibilityRequired?: () => void }>
 };
 
 const SignUp: React.FC = () => LEGACY_PUBLIC_API_PREVIEW ? <SignupCredentials />
-    : <RegistrationGate>{reset => <SignupCredentials onEligibilityRequired={reset} />}</RegistrationGate>;
+    : <RegistrationGate>{(reset, _visibility, provider) => <SignupCredentials onEligibilityRequired={reset} preferredProvider={provider} />}</RegistrationGate>;
 
 export default SignUp;

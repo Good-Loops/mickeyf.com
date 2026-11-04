@@ -99,11 +99,24 @@ for (const width of [320, 390, 1024]) test(`account leaderboard choice stays usa
     const geometry = await page.evaluate(() => {
         const checkbox = document.querySelector('.score-participation__consent input').getBoundingClientRect();
         const text = document.querySelector('.score-participation__consent span').getBoundingClientRect();
+        const buttons = [...document.querySelectorAll('.score-participation > button')].map(button => {
+            const rect = button.getBoundingClientRect();
+            return { x: rect.x, width: rect.width, height: rect.height, top: rect.top, bottom: rect.bottom,
+                textAlign: getComputedStyle(button).textAlign };
+        });
+        const deleteButton = document.querySelector('.manage-account__submit').getBoundingClientRect();
         return { checkboxWidth: checkbox.width, checkboxHeight: checkbox.height,
-            gap: text.left - checkbox.right, overflow: document.documentElement.scrollWidth - innerWidth };
+            gap: text.left - checkbox.right, overflow: document.documentElement.scrollWidth - innerWidth,
+            buttons, deleteWidth: deleteButton.width, deleteHeight: deleteButton.height };
     });
     assert.ok(geometry.checkboxWidth >= 20 && geometry.checkboxHeight >= 20, JSON.stringify(geometry));
     assert.ok(geometry.gap >= 8 && geometry.overflow <= 1, JSON.stringify(geometry));
+    assert.ok(geometry.buttons.length >= 3, JSON.stringify(geometry));
+    for (const [index, button] of geometry.buttons.entries()) {
+        assert.ok(Math.abs(button.width - geometry.deleteWidth) <= 1 && button.height >= 44 && geometry.deleteHeight >= 44, JSON.stringify(geometry));
+        assert.equal(button.textAlign, 'center');
+        if (index) assert.ok(button.top - geometry.buttons[index - 1].bottom >= 8, JSON.stringify(geometry));
+    }
     await choice.check();
     assert.equal(await join.isEnabled(), true);
     assert.equal(calls.filter(call => call.path === '/auth/parent-registration/scores/publish').length, 0);

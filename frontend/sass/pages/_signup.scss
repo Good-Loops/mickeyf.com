@@ -5,6 +5,17 @@
 
     h1:not(.u-visually-hidden) { margin: 0 0 1.8rem; font-size: 2.2rem; font-weight: 600; line-height: 1.25; }
 
+    &__eligibility-title { margin: 1.8rem 0 1.2rem; color: $primary-light; font-size: 1.7rem; }
+    &__provider-hint { margin-bottom: 1.4rem; font-size: 1.4rem; line-height: 1.5; }
+    &__form > p { font-size: 1.4rem; line-height: 1.5; }
+
+    .provider-sign-in {
+        margin: 0 0 2rem;
+        padding: 0 0 2rem;
+        border-top: 0;
+        border-bottom: .1rem solid rgba($white, .16);
+    }
+
     a, a:visited {
         color: rgba($white, .9);
         text-decoration: underline;
@@ -24,6 +35,16 @@
         text-align: center;
     }
 
+}
+
+.signup-provider-choice {
+    display: grid;
+    gap: 1.2rem;
+    margin-bottom: 1.6rem;
+    font-size: 1.4rem;
+    line-height: 1.5;
+
+    button[aria-pressed='true'] { outline: .2rem solid $primary-light; outline-offset: .2rem; }
 }
 
 .registration-parent-notice {

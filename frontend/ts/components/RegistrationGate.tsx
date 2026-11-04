@@ -4,6 +4,7 @@ import { registrationConfigRequest, beginRegistration, cancelRegistration, obser
     beginNativeAgeCheck, finishNativeAgeCheck } from '@/services/authService';
 import { supportsChildAudience, type RegistrationAgeBand, type RegistrationConfig } from '@/services/registrationApi';
 import { registrationAge } from '@/services/registrationAge';
+import SignupProviderChoices, { type SignupProvider } from './SignupProviderChoices';
 
 export const REGISTRATION_CONFIG_TIMEOUT_MS = 10_000;
 export const REGISTRATION_CHECK_TIMEOUT_MS = 10_000;
@@ -40,7 +41,7 @@ export function ParentRegistrationUnavailable({ available = true }: { available?
 
 /** Credentials mount only after the server approves this browser's short-lived preflight. */
 export default function RegistrationGate({ children, purpose = 'signup' }: {
-    children: (reset: () => void, scoreVisibility: 'private' | 'public') => ReactNode;
+    children: (reset: () => void, scoreVisibility: 'private' | 'public', provider: SignupProvider | null) => ReactNode;
     purpose?: 'signup' | 'provider-login';
 }) {
     const [config, setConfig] = useState<RegistrationConfig | null>(null);
@@ -51,6 +52,7 @@ export default function RegistrationGate({ children, purpose = 'signup' }: {
     const [parentStep, setParentStep] = useState(false);
     const [busy, setBusy] = useState(false);
     const [feedback, setFeedback] = useState<string | null>(null);
+    const [provider, setProvider] = useState<SignupProvider | null>(null);
     const [grant, setGrant] = useState<{ expiresAt: number; visibility: 'private' | 'public' } | null>(null);
     const operation = useRef(false);
     const began = useRef(false);
@@ -164,13 +166,13 @@ export default function RegistrationGate({ children, purpose = 'signup' }: {
         }
     }
 
-    if (grant) return children(reset, grant.visibility);
+    if (grant) return children(reset, grant.visibility, provider);
     const countries = countryPolicy?.countries ?? [];
     const names = new Intl.DisplayNames(['en'], { type: 'region' });
     const titleId = purpose === 'signup' ? 'registration-title' : 'provider-eligibility-title';
     return <section className={purpose === 'signup' ? 'signup' : 'provider-eligibility'} aria-labelledby={titleId}>
         <div className={purpose === 'signup' ? 'signup__form-wrapper' : 'provider-eligibility__content'}>
-            {purpose === 'signup' ? <h1 id={titleId}>{signupPaused ? 'Sign up' : 'Check eligibility'}</h1> : <h2 id={titleId}>Other sign-in options</h2>}
+            {purpose === 'signup' ? <h1 id={titleId}>Sign up</h1> : <h2 id={titleId}>Other sign-in options</h2>}
             {loading ? <p role="status">{purpose === 'signup' ? 'Checking registration availability…' : 'Checking sign-in options…'}</p>
                 : signupPaused ? <p role="status">New account creation is temporarily paused. You can still play as a guest or log in to an existing account.</p>
                 : !countryPolicy ? <div className={purpose === 'provider-login' ? 'provider-eligibility__message' : undefined} role={purpose === 'signup' ? 'alert' : 'status'}>
@@ -182,7 +184,17 @@ export default function RegistrationGate({ children, purpose = 'signup' }: {
                     </>}
                 </div>
                 : parentStep || registrationAge.parentRequired() ? <ParentRegistrationUnavailable available={countryPolicy.parentRegistrationAvailable} />
-                : <form className="signup__form" onSubmit={submit} aria-busy={busy}>
+                : <>
+                    {purpose === 'signup' && <>
+                        <SignupProviderChoices selected={provider} disabled={busy} onChoose={choice => {
+                            if (operation.current) return;
+                            setProvider(choice);
+                            document.getElementById('registration-country')?.focus();
+                        }} />
+                        <h2 className="signup__eligibility-title">Check eligibility</h2>
+                        {provider && <p className="signup__provider-hint" role="status">Enter your country and age, then select Continue with {provider === 'google' ? 'Google' : 'Apple'} to finish signing up.</p>}
+                    </>}
+                    <form className="signup__form" onSubmit={submit} aria-busy={busy}>
                     {purpose === 'provider-login' && <p>Enter your country and age to continue.</p>}
                     <label className="signup__field" htmlFor="registration-country"><span className="signup__label">Country where you live</span>
                         <select id="registration-country" className="signup__input" required disabled={busy} value={country}
@@ -205,7 +217,8 @@ export default function RegistrationGate({ children, purpose = 'signup' }: {
                     <button className="signup__submit" type="submit" disabled={busy || !rule || !ageBand}>
                         {busy ? 'Checking…' : 'Continue'}
                     </button>
-                </form>}
+                    </form>
+                </>}
             {purpose === 'signup' && (loading ? retry > 0 : signupPaused || !countryPolicy) && <button type="button" className="signup__submit"
                 aria-disabled={loading} onClick={() => { if (!loading) setRetry(value => value + 1); }}>Check again</button>}
             {feedback && <p role="alert">{feedback}</p>}
