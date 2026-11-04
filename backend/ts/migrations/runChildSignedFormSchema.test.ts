@@ -63,6 +63,14 @@ test('authenticated cloud reader subprocess strips SQL credentials and inherited
     assert.deepEqual(result, { Path: 'synthetic-bin', USERPROFILE: 'synthetic-user', CLOUDSDK_CONFIG: 'synthetic-auth-config' });
 });
 
+test('cloud reader can use system trust without inheriting TLS bypasses or alternate CA files', () => {
+    assert.deepEqual(childSchemaPrerequisiteEnvironment({ NODE_USE_SYSTEM_CA: '1',
+        NODE_TLS_REJECT_UNAUTHORIZED: '0', NODE_EXTRA_CA_CERTS: 'unreviewed.pem' }), { NODE_USE_SYSTEM_CA: '1' });
+    for (const value of ['0', 'true', '1 --require unreviewed']) {
+        assert.deepEqual(childSchemaPrerequisiteEnvironment({ NODE_USE_SYSTEM_CA: value }), {});
+    }
+});
+
 test('prerequisites execute only fixed reader with bounded reviewed pins and full approved plan on stdin', () => {
     const directory = mkdtempSync(path.join(os.tmpdir(), 'child-schema-cli-unit-'));
     const pins = path.join(directory, 'reviewed-pins.json');

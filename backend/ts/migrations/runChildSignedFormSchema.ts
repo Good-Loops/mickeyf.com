@@ -54,7 +54,10 @@ export function childSchemaPrerequisiteEnvironment(env: Environment): NodeJS.Pro
     // The cloud reader never needs SQL credentials or Node preload hooks.
     const allowed = new Set(['PATH', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'TMPDIR', 'LANG', 'LC_ALL',
         'HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'CLOUDSDK_CONFIG', 'CLOUDSDK_PYTHON', 'CLOUDSDK_PYTHON_SITEPACKAGES']);
-    return Object.fromEntries(Object.entries(env).filter(([key, value]) => allowed.has(key.toUpperCase()) && typeof value === 'string'));
+    const filtered = Object.fromEntries(Object.entries(env).filter(([key, value]) => allowed.has(key.toUpperCase()) && typeof value === 'string'));
+    // Windows-managed trusted roots may be required; this retains TLS verification.
+    if (env.NODE_USE_SYSTEM_CA === '1') filtered.NODE_USE_SYSTEM_CA = '1';
+    return filtered;
 }
 
 export function readChildSchemaPrerequisites(pinsPath: string, approvedPlan?: ChildSignedFormPlan | InactivitySchemaPlan,
