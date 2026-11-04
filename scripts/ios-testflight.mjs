@@ -347,6 +347,12 @@ async function upload() {
         const signing = installSigningMaterial(config);
         const ipa = archiveAndExport(config, signing);
         const info = verifyIpa(config, signing, ipa);
+        // Capture declarations from this exact verified export before upload and cleanup.
+        // The helper emits only bounded public vocabulary, hashes and counts.
+        const inventory = run('Inspect signed export privacy manifests', 'python3',
+            [resolve('../scripts/ios-upload-privacy.py')]).stdout;
+        appendFileSync(process.env.GITHUB_STEP_SUMMARY,
+            `### Signed export privacy inventory (before Apple upload)\n\n\`\`\`json\n${inventory}\n\`\`\`\n`);
         // altool's documented relative key lookup keeps credentials inside owned temp storage.
         const keyDirectory = join(config.root, 'private_keys');
         mkdirSync(keyDirectory, { mode: 0o700 });

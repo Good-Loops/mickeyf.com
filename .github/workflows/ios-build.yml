@@ -267,6 +267,7 @@ jobs:
       - name: Check pinned signing tools and public configuration
         run: |
           node --test ../scripts/ios-testflight.test.mjs
+          python3 ../scripts/ios-upload-privacy-test.py
           node ../scripts/ios-testflight.mjs preflight
           pod --version
 
