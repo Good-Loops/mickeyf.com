@@ -35,7 +35,7 @@ before(async () => {
 });
 after(async () => { await browser?.close(); await server?.close(); });
 
-async function fixture(t, width, height, native = true, signedIn = false) {
+async function fixture(t, width, height, native = true, signedIn = false, visibility = 'private') {
     // Native CSS does not use Safari's browser-only background extension controller.
     // Keep Chromium's actual UA instead of accidentally enabling that unrelated web path.
     const context = await browser.newContext({ viewport: { width, height }, hasTouch: native,
@@ -58,7 +58,11 @@ async function fixture(t, width, height, native = true, signedIn = false) {
         const url = new URL(route.request().url());
         if (url.origin !== origin) return route.abort();
         if (url.pathname.startsWith('/auth/') || url.pathname.startsWith('/api/')) {
-            const body = /renew|verify-token/.test(url.pathname) ? (signedIn ? { loggedIn: true, user_name: 'Synthetic' } : { loggedIn: false })
+            if (/scores\/status/.test(url.pathname) && visibility === 'unavailable') {
+                return route.fulfill({ status: 503, contentType: 'application/json', body: JSON.stringify({ error: 'UNAVAILABLE' }) });
+            }
+            const body = /scores\/status/.test(url.pathname) ? { visibility, canPublish: true }
+                : /renew|verify-token/.test(url.pathname) ? (signedIn ? { loggedIn: true, user_name: 'Synthetic' } : { loggedIn: false })
                 : /leaderboard/.test(url.pathname) ? { games: [] } : { clients: [] };
             return route.fulfill({ contentType: 'application/json', body: JSON.stringify(body) });
         }
@@ -67,6 +71,32 @@ async function fixture(t, width, height, native = true, signedIn = false) {
     const page = await context.newPage();
     page.setDefaultTimeout(10_000); page.setDefaultNavigationTimeout(30_000);
     return page;
+}
+
+test('the notice remains available if the participation status cannot be checked', async t => {
+    const page = await fixture(t, 390, 844, true, true, 'unavailable');
+    await open(page, 'p4-Vega');
+    assert.match(await page.locator('.score-submission-notice').innerText(), /leaderboard participation is optional/i);
+});
+
+for (const [width, height] of [[390, 844], [844, 390]]) {
+    for (const game of ['p4-Vega', 'three-bosses']) {
+        test(`${game} hides the notice for public participants at ${width}x${height}`, async t => {
+            const page = await fixture(t, width, height, true, true, 'public');
+            const status = page.waitForResponse(response => response.url().includes('/scores/status'));
+            await page.goto(`${origin}/games/${game}?three-bosses-mobile-preview=1`);
+            assert.equal((await status).ok(), true);
+            await page.locator(`.${game === 'p4-Vega' ? 'p4-vega' : game}__canvas-wrapper`).waitFor();
+            await page.waitForTimeout(100);
+            assert.equal(await page.locator('.score-submission-notice').count(), 0);
+            const data = await geometry(page, game === 'p4-Vega' ? 'p4-vega' : game);
+            assert.ok(data.outerOverflow <= 1 && data.mainOverflow <= 1, JSON.stringify(data));
+            if (game === 'p4-Vega') {
+                assert.ok(data.canvas.y >= data.main.y - 1 && data.preference.bottom <= data.main.bottom + 1,
+                    'Game controls remain inside the native page without the notice');
+            }
+        });
+    }
 }
 
 async function open(page, game, native = true) {

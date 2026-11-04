@@ -1,6 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import FullscreenButton from '@/components/FullscreenButton';
-import ScoreSubmissionNotice from '@/components/ScoreSubmissionNotice';
+import ScoreSubmissionNotice, { useShowScoreSubmissionNotice } from '@/components/ScoreSubmissionNotice';
 import PersonalBestAlert from '@/components/PersonalBestAlert';
 import {
     isThreeBossesLocalEnabled,
@@ -204,6 +204,7 @@ export const readThreeBossesSubmissionGate = async (
 
 const ThreeBosses: React.FC = () => {
     const { isAuthenticated, loading: authLoading } = useAuth();
+    const showSubmissionNotice = useShowScoreSubmissionNotice();
     const canvasRef = useRef<HTMLCanvasElement | null>(null);
     const frameRef = useRef<HTMLDivElement | null>(null);
     const [loadState, setLoadState] = useState<LoadState>({ kind: 'loading', progress: 0 });
@@ -300,6 +301,7 @@ const ThreeBosses: React.FC = () => {
             <ScoreSubmissionNotice
                 isAuthenticated={isAuthenticated}
                 loading={authLoading}
+                show={showSubmissionNotice}
             />
 
             <div

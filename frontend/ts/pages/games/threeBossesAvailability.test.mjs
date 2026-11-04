@@ -277,6 +277,7 @@ test('players are told how to save scores and choose public leaderboard particip
             React.createElement(ScoreSubmissionNotice, {
                 isAuthenticated: false,
                 loading: false,
+                show: true,
             }),
         ),
     );
@@ -287,6 +288,7 @@ test('players are told how to save scores and choose public leaderboard particip
             React.createElement(ScoreSubmissionNotice, {
                 isAuthenticated: true,
                 loading: false,
+                show: true,
             }),
         ),
     );
@@ -297,6 +299,7 @@ test('players are told how to save scores and choose public leaderboard particip
             React.createElement(ScoreSubmissionNotice, {
                 isAuthenticated: false,
                 loading: true,
+                show: false,
             }),
         ),
     );
