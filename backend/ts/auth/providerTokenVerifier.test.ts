@@ -99,6 +99,8 @@ test('Apple exposes only its signed verified shared or relay email; missing cont
     for (const [extra, expected] of [
         [{ email: ' Player@Example.COM ', email_verified: true }, 'player@example.com'],
         [{ email: ' Hidden@privaterelay.appleid.com ', email_verified: 'true', is_private_email: 'true' }, 'hidden@privaterelay.appleid.com'],
+        [{ email: 'hidden@private.icloud.com', email_verified: 'true', is_private_email: 'true' }, 'hidden@private.icloud.com'],
+        [{ email: 'hidden@icloud.com', email_verified: 'true', is_private_email: 'true' }, 'hidden@icloud.com'],
         [{}, undefined],
         [{ email: '', email_verified: true }, undefined],
         [{ email: 'player@example.com', email_verified: false }, undefined],
