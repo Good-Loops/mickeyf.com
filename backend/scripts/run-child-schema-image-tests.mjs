@@ -22,10 +22,38 @@ export function imageTestInvocation(executable, args, execution) {
 }
 
 export function runChildSchemaImageTests({ run = runProcess, ...options } = {}) {
-    return runChildSchemaTests({ ...options, run: (executable, args, execution) => {
+    return runChildSchemaTests({ ...options, run: async (executable, args, execution) => {
         const invocation = imageTestInvocation(executable, args, execution);
-        return run(executable, invocation.args, invocation.execution);
+        let cleanupFailure;
+        if (args.includes('compose') && args.includes('down')) {
+            const project = args[args.indexOf('--project-name') + 1];
+            try {
+                await cleanupImageProbes(run, executable, args.slice(0, args.indexOf('compose')), project, execution);
+            } catch { cleanupFailure = new Error('OWNED_IMAGE_PROBE_CLEANUP_FAILED'); }
+        }
+        const output = await run(executable, invocation.args, invocation.execution);
+        if (cleanupFailure) throw cleanupFailure;
+        return output;
     } });
+}
+
+// Compose does not reliably remove containers it did not create. Verify every
+// probe before removing it, then let the existing outer cleanup handle MySQL.
+export async function cleanupImageProbes(run, executable, dockerHost, project, execution) {
+    if (!/^mickeyf-apple-handoff-[1-9][0-9]*-[a-f0-9]{12}$/u.test(project)) throw new Error('INVALID_TEST_PROJECT');
+    const invoke = args => run(executable, [...dockerHost, ...args], execution);
+    const output = await invoke(['ps', '--all', '--no-trunc', '--filter', `label=com.mickeyf.schema-project=${project}`, '--format', '{{.ID}}']);
+    const ids = output.trim() ? output.trim().split(/\r?\n/u) : [];
+    if (ids.length > 4 || ids.some(id => !/^[a-f0-9]{64}$/u.test(id))) throw new Error('INVALID_PROBE_INVENTORY');
+    for (const id of ids) {
+        const containers = JSON.parse(await invoke(['inspect', '--type', 'container', id]));
+        const container = containers.length === 1 ? containers[0] : null;
+        if (container?.Id !== id || container.Config?.Image !== RUNTIME_IMAGE
+            || container.Config?.Labels?.['com.mickeyf.schema-project'] !== project
+            || !/^[0-9a-f-]{36}$/u.test(container.Config?.Labels?.['com.mickeyf.probe'] ?? '')
+            || container.HostConfig?.NetworkMode !== 'none') throw new Error('PROBE_OWNERSHIP_MISMATCH');
+        await invoke(['rm', '--force', id]);
+    }
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

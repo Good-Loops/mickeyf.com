@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import test from 'node:test';
 import { MYSQL_IMAGE } from './run-apple-android-handoff-tests.mjs';
 import { CHILD_SCHEMA_TEST_COMMAND, childSchemaTestEnvironment, runChildSchemaTests } from './run-child-schema-tests.mjs';
-import { RUNTIME_IMAGE, runChildSchemaImageTests } from './run-child-schema-image-tests.mjs';
+import { RUNTIME_IMAGE, cleanupImageProbes, runChildSchemaImageTests } from './run-child-schema-image-tests.mjs';
 
 const id = 'a'.repeat(64);
 const verified = { NODE_ENV: 'test', APPLE_ANDROID_HANDOFF_TEST_ENABLED: '1', APPLE_ANDROID_HANDOFF_TEST_CONTAINER: id,
@@ -21,6 +21,22 @@ test('child schema fixture refuses an unverified target and strips inherited pro
             .map(port => ({ APPLE_ANDROID_HANDOFF_TEST_PORT: port }))]) {
         assert.throws(() => childSchemaTestEnvironment({ ...verified, ...patch }), /VERIFIED_DISPOSABLE_CHILD_SCHEMA_TEST_REQUIRED/u);
     }
+});
+
+for (const foreign of [false, true]) test(`image orphan cleanup ${foreign ? 'rejects foreign metadata' : 'removes the owned probe'}`, async () => {
+    const project = 'mickeyf-apple-handoff-123-abcdef012345';
+    const removed = [];
+    const run = async (_exe, args) => {
+        if (args.includes('ps')) return id;
+        if (args.includes('inspect')) return JSON.stringify([{ Id: id, Config: {
+            Image: foreign ? 'unreviewed:latest' : RUNTIME_IMAGE,
+            Labels: { 'com.mickeyf.schema-project': project, 'com.mickeyf.probe': '12345678-1234-1234-1234-123456789abc' },
+        }, HostConfig: { NetworkMode: 'none' } }]);
+        assert(args.includes('rm')); removed.push(args.at(-1)); return '';
+    };
+    const operation = cleanupImageProbes(run, 'docker', ['--host', 'unix:///var/run/docker.sock'], project, {});
+    if (foreign) await assert.rejects(operation, /PROBE_OWNERSHIP_MISMATCH/u); else await operation;
+    assert.deepEqual(removed, foreign ? [] : [id]);
 });
 
 for (const imageProbe of [false, true]) for (const fail of [false, true]) test(`child schema ${imageProbe ? 'image' : 'source'} tests retain container/cleanup guards after ${fail ? 'failure' : 'success'}`, async () => {

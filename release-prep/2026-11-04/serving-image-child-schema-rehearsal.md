@@ -27,7 +27,9 @@ git diff --check
 The integration suite passed **11/11** tests, with no skips. It also checks
 history and grants, exact ALTER execution, preservation of synthetic legacy
 requests, rejection of partial schema changes, and retention observations.
-TypeScript and the harness tests passed. The retained local log is
+TypeScript and all seven harness tests passed. A separate real-container check
+confirmed that the outer cleanup helper removes an owned orphan probe; its
+negative unit case refuses a different image. The retained local log is
 `C:\Users\User\Ludolume-Release-Evidence-2026-11-01\child-schema-exact-image-2026-11-04.log`.
 
 The runtime containers use `NODE_ENV=production`, the image's normal entrypoint,
@@ -35,8 +37,10 @@ the column-scoped runtime account and a disposable MySQL Unix socket. They have
 no network, a read-only root filesystem, an unprivileged UID and no capabilities.
 Only the private test socket is mounted. MySQL's host port remains loopback-only;
 the runner validates the exact disposable container before connecting. The socket
-volume and runtime containers belong to the unique Compose project so outer
-cleanup can remove orphaned probes if the inner test process stops unexpectedly.
+volume and runtime containers are tied to the unique test project. Before
+removing MySQL, outer cleanup inventories probes by that project label and
+verifies each exact image, container ID, ownership marker and network isolation.
+It explicitly removes verified probes if the inner test process stopped.
 Normal completion also verifies and removes each probe by its ownership label.
 
 This is **schema compatibility evidence**, not full production qualification.

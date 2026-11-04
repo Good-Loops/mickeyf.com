@@ -47,8 +47,7 @@ export async function probeChildSchemaImage(admin: Connection, schema: 'legacy' 
         let id: string | undefined;
         try {
             id = await invoke(['create', '--pull=never', '--name', name, '--label', `com.mickeyf.probe=${owner}`,
-                '--label', `com.docker.compose.project=${mysql.Config.Labels['com.docker.compose.project']}`,
-                '--label', 'com.docker.compose.service=schema-image-probe',
+                '--label', `com.mickeyf.schema-project=${mysql.Config.Labels['com.docker.compose.project']}`,
                 '--network=none', '--read-only', '--cap-drop=ALL', '--security-opt=no-new-privileges',
                 '--user=1000:1000', '--mount', `type=volume,source=${socket.Name},target=/cloudsql,readonly`,
                 ...Object.entries(environment).flatMap(([key, value]) => ['--env', `${key}=${value}`]), IMAGE]);
