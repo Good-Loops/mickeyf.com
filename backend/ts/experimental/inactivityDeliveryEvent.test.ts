@@ -33,13 +33,21 @@ test('verifies the published Svix signature example without relying on a locally
 
 test('accepts a signed delivery event only for the exact expected message and recipient', () => {
     assert.deepEqual(check(signed()), { eventId: 'msg_synthetic', providerEmailId: expected.providerEmailId,
-        observedAt: '2031-01-05T11:59:59.500000Z', recipientRoute: 'direct' });
+        observedAt: '2031-01-05T11:59:59.500000Z', kind: 'delivered', reason: 'delivered', recipientRoute: 'direct' });
     assert.equal(check(signed({ ...event, type: 'email.sent' })), null);
-    assert.equal(check(signed({ ...event, type: 'email.bounced' })), null);
     assert.equal(check(signed({ ...event, data: { ...event.data, to: ['other@example.test'] } })), null);
     assert.equal(check(signed({ ...event, data: { ...event.data, to: [expected.recipient, 'other@example.test'] } })), null);
     assert.equal(check(signed({ ...event, data: { ...event.data, from: 'other@example.test' } })), null);
     assert.equal(check(signed({ ...event, data: { ...event.data, email_id: '882ed45a-c57d-4c82-9b50-d4585331bcec' } })), null);
+});
+
+test('authenticates delivery failures as holds rather than ignoring or treating them as delivery', () => {
+    for (const reason of ['bounced', 'failed', 'suppressed', 'delivery_delayed', 'complained']) {
+        const failure = check(signed({ ...event, type: `email.${reason}` }));
+        assert.equal(failure?.kind, 'hold');
+        assert.equal(failure?.reason, reason);
+        assert.equal(check(signed({ ...event, type: `email.${reason}` }), { ...expected, recipient: 'other@example.test' }), null);
+    }
 });
 
 test('distinguishes delivery to an Apple relay from delivery to a direct address', () => {

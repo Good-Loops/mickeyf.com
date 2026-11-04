@@ -14,6 +14,7 @@ export type ExpectedDelivery = Readonly<{
     notBeforeMs: number;
 }>;
 export type DeliveryObservation = Readonly<{ eventId: string; providerEmailId: string; observedAt: string;
+    kind: 'delivered' | 'hold'; reason: 'delivered' | 'bounced' | 'failed' | 'suppressed' | 'delivery_delayed' | 'complained';
     recipientRoute: 'direct' | 'apple-relay' }>;
 export type DeliveryHeaders = Readonly<{ id: unknown; timestamp: unknown; signature: unknown }>;
 
@@ -62,8 +63,9 @@ function parseProviderInstant(value: unknown): { canonical: string; ceilingMs: n
 
 /**
  * Verifies a raw Resend/Svix webhook for a previously persisted send attempt.
- * A successful return means the recipient's mail server accepted the message;
- * it is not a read receipt, forwarding guarantee, or authorization to delete.
+ * Only a delivered observation means the recipient server accepted the message;
+ * a hold observation identifies a potentially invalidating provider event. Neither
+ * is a read receipt, forwarding guarantee, or authorization to delete.
  * The caller must durably deduplicate eventId and independently account for later
  * bounces, complaints, contact changes, provider loss, and database restores.
  */
@@ -79,7 +81,12 @@ export function verifyInactivityDeliveryEvent(rawBody: Buffer, headers: Delivery
         const event: unknown = JSON.parse(rawBody.toString('utf8'));
         if (!event || typeof event !== 'object' || Array.isArray(event)) return null;
         const record = event as Record<string, unknown>;
-        if (record.type !== 'email.delivered' || !record.data || typeof record.data !== 'object' || Array.isArray(record.data)) return null;
+        const kinds: Record<string, DeliveryObservation['reason']> = { 'email.delivered': 'delivered',
+            'email.bounced': 'bounced', 'email.failed': 'failed', 'email.suppressed': 'suppressed',
+            'email.delivery_delayed': 'delivery_delayed', 'email.complained': 'complained' };
+        if (typeof record.type !== 'string' || !Object.prototype.hasOwnProperty.call(kinds, record.type)
+            || !record.data || typeof record.data !== 'object' || Array.isArray(record.data)) return null;
+        const reason = kinds[record.type];
         const data = record.data as Record<string, unknown>;
         const observed = parseProviderInstant(record.created_at);
         if (!observed || observed.floorMs < expected.notBeforeMs || observed.ceilingMs > nowMs
@@ -87,6 +94,7 @@ export function verifyInactivityDeliveryEvent(rawBody: Buffer, headers: Delivery
             || !Array.isArray(data.to) || data.to.length !== 1 || data.to[0] !== expected.recipient) return null;
         const recipientDomain = expected.recipient.slice(expected.recipient.lastIndexOf('@') + 1).toLowerCase();
         return { eventId: headers.id as string, providerEmailId: expected.providerEmailId, observedAt: observed.canonical,
+            kind: reason === 'delivered' ? 'delivered' : 'hold', reason,
             recipientRoute: recipientDomain === 'privaterelay.appleid.com' ? 'apple-relay' : 'direct' };
     } catch { return null; }
 }
