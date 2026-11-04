@@ -77,10 +77,38 @@ and [permission test API](https://docs.cloud.google.com/storage/docs/json_api/v1
 ## Activation requirements still open
 
 No cloud resource, key, live SQL schema/grant or feature flag is changed by this
-work. The continuity table is a pending draft outside the migration manifest.
-The older two-table inactivity schema operation does not install it. A reviewed,
-pinned schema operation and rollback procedure must be qualified before use.
-The new grant profile is explicit so older schema operations remain unchanged.
+work. The continuity table is a pending draft outside the general migration manifest.
+The inactivity schema command now plans all three reviewed drafts in dependency
+order and pins their exact SHA-256 values. It requires all three tables absent
+before application and refuses existing or partial installations. The separate
+continuity grant profile must be selected explicitly; older grant profiles do
+not acquire its privileges.
+
+The same schema contract is used by runtime startup and administrative
+post-application verification. The administrative check can detect triggers that
+would be hidden from the restricted runtime identity. The command's new
+`verify` mode reads metadata under the same source, primary and creation-closed
+prerequisite pins without issuing DDL:
+
+```text
+npm --prefix backend run child-inactivity:schema -- plan --pins <reviewed-pins-file>
+npm --prefix backend run child-inactivity:schema -- verify --pins <reviewed-pins-file>
+```
+
+These are operator commands, not approval or qualification of a live target.
+Application still requires a fresh approved plan, its exact digest, the server
+UUID and the existing mutation authorization. The plan expires after five
+minutes; source, target, backup/recovery and serving-state proofs are rechecked
+under the migration/grant locks before DDL. A failure after DDL starts is
+indeterminate: inspect the actual tables and preserve them rather than retrying
+or dropping data. Grant application and runtime readiness remain separate.
+
+Rollback keeps child creation and inactivity processing closed, preserves both
+SQL history and independent events, and requires old writers to be stopped.
+An interval using a writer that does not record independent history invalidates
+continuity for affected accounts; ordinary startup cannot certify that gap.
+Do not resume inactivity deletion until reviewed reconciliation restores a
+qualified baseline. A live cutover and rollback rehearsal remain outstanding.
 
 The bounded lookup checks the current sequence and later events, not all older
 events. Independent protection against event removal and storage rollback,

@@ -1,7 +1,7 @@
 import { assertMutationAuthorized } from '../config/migrationConfig';
 import { assertChildSchemaCleanSource, childSchemaCommandSettings, createChildSchemaConnection,
     readChildSchemaPrerequisites } from './runChildSignedFormSchema';
-import { applyInactivitySchema, planInactivitySchema, InactivitySchemaError, type InactivitySchemaPlan } from './childInactivitySchemaOperation';
+import { applyInactivitySchema, planInactivitySchema, verifyInactivitySchema, InactivitySchemaError, type InactivitySchemaPlan } from './childInactivitySchemaOperation';
 
 const failure = 'Inactivity schema command blocked; private database details were not logged.';
 async function readPlan(): Promise<InactivitySchemaPlan> {
@@ -15,7 +15,7 @@ async function readPlan(): Promise<InactivitySchemaPlan> {
 }
 
 export async function runChildInactivitySchema(args = process.argv.slice(2), env: NodeJS.ProcessEnv = process.env): Promise<void> {
-    if (args.length !== 3 || !['plan', 'apply'].includes(args[0]) || args[1] !== '--pins' || !args[2]) throw new Error(failure);
+    if (args.length !== 3 || !['plan', 'apply', 'verify'].includes(args[0]) || args[1] !== '--pins' || !args[2]) throw new Error(failure);
     const loaded = childSchemaCommandSettings(env);
     const assertSource = () => assertChildSchemaCleanSource(loaded.source.sourceCommit, undefined, env);
     assertSource();
@@ -29,6 +29,9 @@ export async function runChildInactivitySchema(args = process.argv.slice(2), env
             await applyInactivitySchema(deps, plan, { allow: env.MIGRATION_ALLOW_APPLY === '1',
                 planSha256: env.MIGRATION_APPROVED_PLAN_SHA256 ?? '', serverUuid: env.MIGRATION_CONFIRM_SERVER_UUID ?? '' });
             process.stdout.write('{"created":true}\n');
+        } else if (args[0] === 'verify') {
+            await verifyInactivitySchema(deps);
+            process.stdout.write('{"verified":true}\n');
         } else process.stdout.write(`${JSON.stringify(await planInactivitySchema(deps), null, 2)}\n`);
     } finally { await session.close(); }
 }

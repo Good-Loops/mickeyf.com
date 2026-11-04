@@ -314,7 +314,7 @@ export const INACTIVITY_RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = O
     ]) }),
 ]);
 
-/** Separate opt-in preserves the older two-table schema operation until its replacement is qualified. */
+/** Separate opt-in keeps older grant profiles from acquiring continuity-write privileges. */
 export const CONTINUITY_RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freeze([
     ...INACTIVITY_RUNTIME_GRANT_MANIFEST,
     Object.freeze({ table: 'parent_child_activity_continuity' as const, tablePrivileges: Object.freeze(['SELECT' as const]), grants: Object.freeze([

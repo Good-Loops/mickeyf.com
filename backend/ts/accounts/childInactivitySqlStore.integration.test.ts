@@ -38,7 +38,7 @@ import { issueSessionToken } from '../security/sessionPolicy';
 import { verifyChildInactivityWarningReadiness } from './childInactivityRuntime';
 import { verifyParentManagedChildActivityReadiness } from '../migrations/parentManagedChildActivityReadiness';
 import { renderRuntimeGrantStatements } from '../security/runtimeGrantManifest';
-import { applyInactivitySchema, planInactivitySchema, InactivitySchemaError } from '../migrations/childInactivitySchemaOperation';
+import { applyInactivitySchema, planInactivitySchema, verifyInactivitySchema, InactivitySchemaError } from '../migrations/childInactivitySchemaOperation';
 import { CHILD_SIGNED_FORM_SQL_SHA256, childSignedFormFingerprint } from '../migrations/childSignedFormOperation';
 import type { ChildSignedFormMetadataSettings } from '../migrations/childSignedFormMetadata';
 import { createRetentionKeepReconciler } from './retentionKeepReconciler';
@@ -512,8 +512,8 @@ test('production inactivity composition is disabled without independent activity
     }), /independent activity continuity/u);
 });
 
-test('schema plan creates only the two reviewed tables and reports partial DDL without retrying', async () => {
-    async function run(partial: boolean) {
+test('schema plan creates the three reviewed tables and holds partial DDL or changed metadata', async () => {
+    async function run(partial: 'none' | 'warning' | 'continuity') {
         const db = `inactivity_test_${randomBytes(5).toString('hex')}`;
         await admin.query(`CREATE DATABASE \`${db}\` CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci`);
         const connection = await mysql.createConnection({ host: config.host, port: config.port, database: db, user: 'root', password: rootPassword });
@@ -534,24 +534,47 @@ test('schema plan creates only the two reviewed tables and reports partial DDL w
                 cloudSqlSha256: hash };
             const safety = { ...proofBase, observedAt, pitr: { earliestRecoveryTime: new Date(at-3600_000).toISOString(),
                 latestRecoveryTime: new Date(at-1000).toISOString() }, stableSha256: childSignedFormFingerprint(proofBase) };
+            const attempted: string[] = [];
             const wrapped: MigrationConnection = { query: async (sql, values) => {
-                if (partial && /CREATE TABLE parent_child_inactivity_warnings/u.test(sql)) throw new Error('synthetic interrupted DDL');
+                const create = /CREATE TABLE (parent_[a-z_]+)/u.exec(sql);
+                if (create) attempted.push(create[1]);
+                if ((partial === 'warning' && create?.[1] === 'parent_child_inactivity_warnings')
+                    || (partial === 'continuity' && create?.[1] === 'parent_child_activity_continuity')) throw new Error('synthetic interrupted DDL');
                 return await connection.query(sql, values as never) as [unknown, unknown];
             }, destroy() {} };
             const deps = { connection: wrapped, settings, source, assertSource() {}, observeSafety: async () => safety, now: () => at };
             const plan = await planInactivitySchema(deps);
+            assert.equal(plan.sqlHashes.length, 3);
+            await assert.rejects(verifyInactivitySchema(deps), /blocked/u);
             await assert.rejects(applyInactivitySchema(deps, plan, { allow: true, planSha256: '0'.repeat(64), serverUuid: target.serverUuid }),
                 error => error instanceof InactivitySchemaError && error.state === 'blocked');
+            assert.deepEqual(attempted, []);
             const approval = { allow: true, planSha256: plan.sha256, serverUuid: target.serverUuid };
-            if (partial) await assert.rejects(applyInactivitySchema(deps, plan, approval), error => error instanceof InactivitySchemaError && error.state === 'indeterminate');
+            if (partial !== 'none') await assert.rejects(applyInactivitySchema(deps, plan, approval), error => error instanceof InactivitySchemaError && error.state === 'indeterminate');
             else await applyInactivitySchema(deps, plan, approval);
             const [tables] = await connection.query<RowDataPacket[]>(`SELECT TABLE_NAME AS name FROM information_schema.TABLES
                 WHERE TABLE_SCHEMA=? AND TABLE_NAME LIKE 'parent_%' ORDER BY TABLE_NAME`, [db]);
-            assert.deepEqual(tables.map(row => row.name), partial ? ['parent_child_consents','parent_managed_child_activity']
-                : ['parent_child_consents','parent_child_inactivity_warnings','parent_managed_child_activity']);
+            assert.deepEqual(tables.map(row => row.name), partial === 'warning' ? ['parent_child_consents','parent_managed_child_activity']
+                : partial === 'continuity' ? ['parent_child_consents','parent_child_inactivity_warnings','parent_managed_child_activity']
+                : ['parent_child_activity_continuity','parent_child_consents','parent_child_inactivity_warnings','parent_managed_child_activity']);
+            assert.deepEqual(attempted, partial === 'warning' ? ['parent_managed_child_activity', 'parent_child_inactivity_warnings']
+                : ['parent_managed_child_activity', 'parent_child_inactivity_warnings', 'parent_child_activity_continuity']);
             await assert.rejects(planInactivitySchema(deps), /blocked/u, 'existing or partial tables cannot be silently reused');
+            if (partial === 'none') {
+                await verifyInactivitySchema(deps);
+                await connection.query('ALTER TABLE parent_child_activity_continuity ALTER CHECK chk_child_continuity_head NOT ENFORCED');
+                await assert.rejects(verifyInactivitySchema(deps), /blocked/u);
+                await connection.query('ALTER TABLE parent_child_activity_continuity ALTER CHECK chk_child_continuity_head ENFORCED');
+                await connection.query(`CREATE TRIGGER synthetic_continuity_trigger BEFORE UPDATE ON parent_child_activity_continuity
+                    FOR EACH ROW SET NEW.ledger_json=NEW.ledger_json`);
+                await assert.rejects(verifyInactivitySchema(deps), /blocked/u, 'administrative verification must detect triggers hidden from runtime');
+                await connection.query('DROP TRIGGER synthetic_continuity_trigger');
+                await verifyInactivitySchema(deps);
+                assert.equal(attempted.length, 3, 'verification never creates or rewrites tables');
+            } else await assert.rejects(verifyInactivitySchema(deps), /blocked/u);
         } finally { await connection.end(); await admin.query(`DROP DATABASE \`${db}\``); }
     }
-    await run(false);
-    await run(true);
+    await run('none');
+    await run('warning');
+    await run('continuity');
 });

@@ -1,3 +1,4 @@
+import { verifyChildActivityContinuitySchema } from './childActivityContinuitySchema';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -12,6 +13,7 @@ import type { ChildSignedFormMetadataSettings, ChildSignedFormSource } from './c
 const files = [
     { name: 'draft_create_parent_managed_child_activity.sql', sha256: 'bd927931230a1b677b279612c4e1f9958fa80f8bedac614aa4bf84df0a623eff' },
     { name: 'draft_parent_child_inactivity_warnings.sql', sha256: '67c60d54a5d435a8e8a4204f164943e17c5f2418d7ebea78c4ce5aad439f1add' },
+    { name: 'draft_parent_child_activity_continuity.sql', sha256: '66557568ab311ec8165dd47333b14948a1e9699366e2de3a50a8944753a8c0fc' },
 ] as const;
 const tableNames = ['parent_child_inactivity_warnings', 'parent_managed_child_activity'] as const;
 type Snapshot = Readonly<{ database: string; user: string; serverUuid: string; serverVersion: string; versionComment: string; history: string }>;
@@ -59,9 +61,10 @@ async function snapshot(deps: InactivitySchemaDependencies): Promise<Snapshot> {
 async function assertTables(deps: InactivitySchemaDependencies, present: boolean): Promise<void> {
     const [rows] = await deps.connection.query(`SELECT TABLE_NAME AS name,ENGINE AS engine,TABLE_TYPE AS type
         FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE()
-        AND TABLE_NAME IN ('parent_managed_child_activity','parent_child_inactivity_warnings') ORDER BY TABLE_NAME`);
-    if (!Array.isArray(rows) || (!present && rows.length !== 0) || (present && (rows.length !== 2
-        || rows.some((row, index) => row.name !== tableNames[index] || row.engine !== 'InnoDB' || row.type !== 'BASE TABLE')))) return fail();
+        AND TABLE_NAME IN ('parent_managed_child_activity','parent_child_inactivity_warnings','parent_child_activity_continuity') ORDER BY TABLE_NAME`);
+    const allTables = ['parent_child_activity_continuity', ...tableNames];
+    if (!Array.isArray(rows) || (!present && rows.length !== 0) || (present && (rows.length !== 3
+        || rows.some((row, index) => row.name !== allTables[index] || row.engine !== 'InnoDB' || row.type !== 'BASE TABLE')))) return fail();
     if (!present) return;
     const [columns] = await deps.connection.query(`SELECT TABLE_NAME AS tableName,COLUMN_NAME AS name,COLUMN_TYPE AS type,
         IS_NULLABLE AS nullable,CHARACTER_SET_NAME AS charset,COLLATION_NAME AS collation,EXTRA AS extra,GENERATION_EXPRESSION AS generation FROM information_schema.COLUMNS
@@ -102,6 +105,7 @@ async function assertTables(deps: InactivitySchemaDependencies, present: boolean
         WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME IN ('parent_managed_child_activity','parent_child_inactivity_warnings') AND CONSTRAINT_TYPE='CHECK'`);
     if (!Array.isArray(checks) || checks.length !== 1 || checks[0].tableName !== tableNames[0]
         || checks[0].name !== 'chk_inactivity_warning_receipt') return fail();
+    await verifyChildActivityContinuitySchema(deps.connection);
 }
 export async function planInactivitySchema(deps: InactivitySchemaDependencies): Promise<InactivitySchemaPlan> {
     try {
@@ -153,4 +157,15 @@ export async function applyInactivitySchema(deps: InactivitySchemaDependencies, 
             }
         }
     }
+}
+
+/** Read-only verification of the exact pinned schema while creation is closed. */
+export async function verifyInactivitySchema(deps: InactivitySchemaDependencies): Promise<void> {
+    try {
+        sqlFiles(deps);
+        const safety = await deps.observeSafety(); assertChildReleaseSafety(safety, deps, (deps.now ?? Date.now)());
+        await snapshot(deps);
+        await assertTables(deps, true);
+        sqlFiles(deps);
+    } catch { return fail(); }
 }
