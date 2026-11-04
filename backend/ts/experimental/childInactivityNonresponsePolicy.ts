@@ -15,8 +15,8 @@ const digest = /^[a-f0-9]{64}$/u;
 export type AcceptedOutreach = Readonly<{
     parentId: string; childId: string; activityAt: string; targetDigest: string;
     warningId: string; noticeDigest: string; channel: 'email'; acceptedAt: string;
-    /** Opaque digest only; actual provider evidence must be checked by the caller. */
-    acceptanceDigest: string;
+    /** Opaque digests only; the caller must authenticate both provider events. */
+    acceptanceDigest: string; deliveredAt: string; deliveryDigest: string;
 }>;
 export type NonresponseDecision = 'hold' | 'warning-due' | 'waiting' | 'candidate';
 
@@ -28,21 +28,22 @@ function addCalendarYears(instant: number, years: number): number {
 }
 
 /**
- * A provider acceptance is evidence of a send attempt, not a read receipt.
- * `verifyOutreach` must independently authenticate the provider receipt and
- * the exact current verified recipient and notice; no such adapter is wired.
+ * Acceptance can precede delivery by days. A provider-reported delivery is
+ * also not proof of inbox placement or reading. `verifyDeliveredOutreach` must
+ * authenticate both events, their timestamps, the recipient and notice, and
+ * reject subsequent failures; no such adapter is wired.
  * A candidate is not permission to delete: activity continuity and restore
  * safety must be checked again under the deletion transaction's locks.
  */
 export function assessNonresponseCandidate(snapshot: InactivitySnapshot, outreach: AcceptedOutreach | null,
     acknowledgement: 'not-acknowledged' | 'acknowledged' | 'unknown', now: number,
-    verifyOutreach: (outreach: AcceptedOutreach) => boolean): NonresponseDecision {
+    verifyDeliveredOutreach: (outreach: AcceptedOutreach) => boolean): NonresponseDecision {
     if (!snapshot || !isAccountId(snapshot.parentId) || !isAccountId(snapshot.childId)
         || snapshot.parentId === snapshot.childId || snapshot.activityComplete !== true
         || snapshot.channel !== 'email' || snapshot.targetVerified !== true
         || typeof snapshot.currentTargetDigest !== 'string' || !digest.test(snapshot.currentTargetDigest)
         || acknowledgement !== 'not-acknowledged' || snapshot.warning !== null
-        || !Number.isSafeInteger(now) || now < 0 || typeof verifyOutreach !== 'function') return 'hold';
+        || !Number.isSafeInteger(now) || now < 0 || typeof verifyDeliveredOutreach !== 'function') return 'hold';
     const activity = parseInactivityInstant(snapshot.activityAt);
     if (activity === null || activity > now) return 'hold';
     const thirdAnniversary = addCalendarYears(activity, 3);
@@ -53,19 +54,22 @@ export function assessNonresponseCandidate(snapshot: InactivitySnapshot, outreac
     if (!Number.isSafeInteger(warningStart) || !Number.isSafeInteger(inactivityDeadline) || now < warningStart) return 'hold';
     if (!outreach) return 'warning-due';
     const acceptedAt = parseInactivityInstant(outreach.acceptedAt);
+    const deliveredAt = parseInactivityInstant(outreach.deliveredAt);
     if (outreach.parentId !== snapshot.parentId || outreach.childId !== snapshot.childId
         || outreach.activityAt !== snapshot.activityAt || outreach.targetDigest !== snapshot.currentTargetDigest
         || outreach.channel !== 'email' || !isAccountId(outreach.warningId)
         || outreach.noticeDigest !== NONRESPONSE_NOTICE_DIGEST
         || typeof outreach.acceptanceDigest !== 'string' || !digest.test(outreach.acceptanceDigest)
+        || typeof outreach.deliveryDigest !== 'string' || !digest.test(outreach.deliveryDigest)
         // The instant parser rounds up for deletion deadlines. For the earliest
         // allowed warning, compare its actual millisecond floor instead.
-        || acceptedAt === null || Date.parse(outreach.acceptedAt) < warningStart || acceptedAt > now) return 'hold';
+        || acceptedAt === null || Date.parse(outreach.acceptedAt) < warningStart || acceptedAt > now
+        || deliveredAt === null || outreach.deliveredAt < outreach.acceptedAt || deliveredAt > now) return 'hold';
     // Interpret the owner's additional 12 months as starting after the later
     // of the three-year anniversary and the original 30-day warning period.
-    const outreachDeadline = addCalendarYears(Math.max(thirdAnniversary, acceptedAt + 30 * DAY), 1);
+    const outreachDeadline = addCalendarYears(Math.max(thirdAnniversary, deliveredAt + 30 * DAY), 1);
     if (!Number.isSafeInteger(outreachDeadline)) return 'hold';
-    try { if (verifyOutreach(Object.freeze({ ...outreach })) !== true) return 'hold'; }
+    try { if (verifyDeliveredOutreach(Object.freeze({ ...outreach })) !== true) return 'hold'; }
     catch { return 'hold'; }
     return now >= inactivityDeadline && now >= outreachDeadline ? 'candidate' : 'waiting';
 }
