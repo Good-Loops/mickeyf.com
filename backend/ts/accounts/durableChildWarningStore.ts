@@ -5,13 +5,13 @@ import { openAppendOnlyContinuitySession, type AppendOnlyObjectTransport } from 
 import { ContinuityHeadUnavailableError, type ContinuityHead, type ContinuityLedgerRow } from './childContinuityHead';
 import { isAccountId } from './deletionJournal';
 import { parseInactivityInstant, type InactivitySnapshot } from './childInactivityPolicy';
-import { readLiveSession } from '../auth/accountSessionRepository';
-import { isSessionId, type SessionProof } from '../security/sessionPolicy';
+import { deleteOwnedAccountRows } from './accountDeletionRepository';
+import type { RetentionIntent, RetentionJournal } from './childInactivityWorkflow';
 
 const timeout = 10_000;
 const limit = 16_384;
 export type WarningEvent = Readonly<{
-    kind: 'prepared' | 'dispatch' | 'accepted' | 'delivered' | 'hold' | 'response';
+    kind: 'prepared' | 'dispatch' | 'accepted' | 'delivered' | 'hold';
     attemptId: string; at: string;
     activityAt?: string; targetDigest?: string; noticeDigest?: string; language?: 'en' | 'pt-BR';
     messageId?: string; deliveredAt?: string;
@@ -22,7 +22,8 @@ type Witness = Readonly<{ head: ContinuityHead; ledgerRows: readonly ContinuityL
 export type LockedWarning = Readonly<{
     context: WarningContext; now: string; history: WarningHistory;
     append(event: WarningEvent): Promise<void>;
-    parentSessionValid(proof: SessionProof): Promise<boolean>;
+    verifyJournal(intent: RetentionIntent, journal: RetentionJournal): Promise<boolean>;
+    deleteChild(): Promise<void>;
 }>;
 export type DurableWarningStore = Readonly<{
     withChild<T>(parentId: string, childId: string, run: (target: LockedWarning) => Promise<T>): Promise<T>;
@@ -70,7 +71,7 @@ export function createDurableChildWarningStore(database: Pick<Pool, 'getConnecti
         if (bytes.length > limit) throw unavailable();
         return bytes;
     };
-    async function locked<T>(connection: PoolConnection, parentUserId: number, parentId: string, childId: string,
+    async function locked<T>(connection: PoolConnection, childUserId: number, parentId: string, childId: string,
         run: (target: LockedWarning) => Promise<T>): Promise<T> {
         const relation = await rows(connection, 'SELECT parent_uuid FROM parent_child_consents WHERE child_uuid=? FOR SHARE', [childId]);
         if (relation.length !== 1 || relation[0].parent_uuid !== parentId) throw unavailable();
@@ -109,9 +110,12 @@ export function createDurableChildWarningStore(database: Pick<Pool, 'getConnecti
         let appended = false;
         const target: LockedWarning = {
             context, now, history,
-            async parentSessionValid(proof) {
-                return proof?.accountId === parentId && isSessionId(proof.sessionId)
-                    && !!await readLiveSession(connection, parentUserId, parentId, proof.sessionId);
+            verifyJournal: (intent, journal) => journal.verifyActivityContinuity(intent, connection),
+            async deleteChild() {
+                await options.verifyActivity(connection, childId);
+                // The relationship and warning were read while these same account
+                // locks were held; ordinary activity/keep cannot interleave.
+                await deleteOwnedAccountRows(connection, childUserId, childId);
             },
             async append(event) {
                 if (appended || event.at !== now || !isAccountId(event.attemptId) || history.events.length >= 64) throw unavailable();
@@ -156,7 +160,7 @@ export function createDurableChildWarningStore(database: Pick<Pool, 'getConnecti
                         let phase: 'begin' | 'active' | 'commit' = 'begin';
                         try {
                             await lock.connection.query({ sql: 'START TRANSACTION', timeout }); phase = 'active';
-                            const value = await locked(lock.connection, parentUserId, parentId, childId, run);
+                            const value = await locked(lock.connection, found[0].user_id, parentId, childId, run);
                             phase = 'commit'; await lock.connection.query({ sql: 'COMMIT', timeout }); return value;
                         } catch (error) {
                             if (phase !== 'active') lock.invalidateConnection();
@@ -173,7 +177,7 @@ export function createDurableChildWarningStore(database: Pick<Pool, 'getConnecti
 function normalizeHistory(value: WarningHistory): WarningHistory {
     if (Object.keys(value).sort().join(',') !== 'childId,events,parentId,version') throw new ContinuityHeadUnavailableError();
     const events = value.events.map(event => {
-        if (!event || !['prepared', 'dispatch', 'accepted', 'delivered', 'hold', 'response'].includes(event.kind)
+        if (!event || !['prepared', 'dispatch', 'accepted', 'delivered', 'hold'].includes(event.kind)
             || !isAccountId(event.attemptId) || parseInactivityInstant(event.at) === null
             || Object.keys(event).some(key => !['kind', 'attemptId', 'at', 'activityAt', 'targetDigest',
                 'noticeDigest', 'language', 'messageId', 'deliveredAt'].includes(key))) {

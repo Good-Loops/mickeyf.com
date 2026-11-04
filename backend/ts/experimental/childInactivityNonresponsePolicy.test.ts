@@ -13,29 +13,29 @@ const deliveryDigest = 'e'.repeat(64);
 const snapshot: InactivitySnapshot = { parentId, childId, activityAt, activityComplete: true,
     channel: 'email', targetVerified: true, currentTargetDigest: targetDigest, warning: null };
 const outreach: AcceptedOutreach = { parentId, childId, activityAt, targetDigest, warningId, channel: 'email',
-    noticeDigest: NONRESPONSE_NOTICE_DIGEST, acceptedAt: '2030-12-02T00:00:00.000000Z', acceptanceDigest,
-    deliveredAt: '2030-12-02T00:00:00.000000Z', deliveryDigest };
+    noticeDigest: NONRESPONSE_NOTICE_DIGEST, acceptedAt: '2031-01-01T00:00:00.000000Z', acceptanceDigest,
+    deliveredAt: '2031-01-01T00:00:00.000000Z', deliveryDigest };
 const verified = (value: AcceptedOutreach) => value.acceptanceDigest === acceptanceDigest && value.deliveryDigest === deliveryDigest;
 const at = (iso: string) => Date.parse(iso);
 
-test('no-response candidate waits twelve months beyond the later of three years or the warning period', () => {
+test('no-response candidate waits twelve months from delivery after three years of inactivity', () => {
     assert.equal(assessNonresponseCandidate(snapshot, outreach, 'not-acknowledged', at('2031-12-31T23:59:59.999Z'), verified), 'waiting');
     assert.equal(assessNonresponseCandidate(snapshot, outreach, 'not-acknowledged', at('2032-01-01T00:00:00.000Z'), verified), 'candidate');
     const late = { ...outreach, acceptedAt: '2032-04-10T00:00:00.000000Z', deliveredAt: '2032-04-10T00:00:00.000000Z' };
-    assert.equal(assessNonresponseCandidate(snapshot, late, 'not-acknowledged', at('2033-05-09T23:59:59.999Z'), verified), 'waiting');
-    assert.equal(assessNonresponseCandidate(snapshot, late, 'not-acknowledged', at('2033-05-10T00:00:00.000Z'), verified), 'candidate');
+    assert.equal(assessNonresponseCandidate(snapshot, late, 'not-acknowledged', at('2033-04-09T23:59:59.999Z'), verified), 'waiting');
+    assert.equal(assessNonresponseCandidate(snapshot, late, 'not-acknowledged', at('2033-04-10T00:00:00.000Z'), verified), 'candidate');
 });
 
 test('a queued warning starts its response window at delivery, not acceptance', () => {
     const queued = { ...outreach, acceptedAt: '2032-04-10T00:00:00.000000Z', deliveredAt: '2032-04-17T00:00:00.000001Z' };
-    assert.equal(assessNonresponseCandidate(snapshot, queued, 'not-acknowledged', at('2033-05-17T00:00:00.000Z'), verified), 'waiting');
-    assert.equal(assessNonresponseCandidate(snapshot, queued, 'not-acknowledged', at('2033-05-17T00:00:00.001Z'), verified), 'candidate');
+    assert.equal(assessNonresponseCandidate(snapshot, queued, 'not-acknowledged', at('2033-04-17T00:00:00.000Z'), verified), 'waiting');
+    assert.equal(assessNonresponseCandidate(snapshot, queued, 'not-acknowledged', at('2033-04-17T00:00:00.001Z'), verified), 'candidate');
 });
 
 test('missing or unverifiable outreach never becomes a deletion candidate', () => {
     const now = at('2035-01-01T00:00:00.000Z');
-    assert.equal(assessNonresponseCandidate(snapshot, null, 'not-acknowledged', at('2030-12-01T23:59:59.999Z'), verified), 'hold');
-    assert.equal(assessNonresponseCandidate(snapshot, null, 'not-acknowledged', at('2030-12-02T00:00:00.000Z'), verified), 'warning-due');
+    assert.equal(assessNonresponseCandidate(snapshot, null, 'not-acknowledged', at('2030-12-31T23:59:59.999Z'), verified), 'hold');
+    assert.equal(assessNonresponseCandidate(snapshot, null, 'not-acknowledged', at('2031-01-01T00:00:00.000Z'), verified), 'warning-due');
     assert.equal(assessNonresponseCandidate(snapshot, null, 'not-acknowledged', now, verified), 'warning-due');
     assert.equal(assessNonresponseCandidate(snapshot, outreach, 'not-acknowledged', now, () => false), 'hold');
     assert.equal(assessNonresponseCandidate(snapshot, outreach, 'not-acknowledged', now, () => { throw new Error('unknown provider state'); }), 'hold');
@@ -60,10 +60,10 @@ test('changed target, relationship, activity, notice, or invalid acceptance hold
         { ...outreach, parentId: childId }, { ...outreach, childId: parentId },
         { ...outreach, activityAt: '2028-01-01T00:00:00.000001Z' }, { ...outreach, targetDigest: 'c'.repeat(64) },
         { ...outreach, warningId: 'bad' }, { ...outreach, noticeDigest: 'd'.repeat(64) },
-        { ...outreach, acceptanceDigest: '' }, { ...outreach, acceptedAt: '2030-12-01T23:59:59.999999Z' },
+        { ...outreach, acceptanceDigest: '' }, { ...outreach, acceptedAt: '2030-12-31T23:59:59.999999Z' },
         { ...outreach, acceptedAt: '2036-01-01T00:00:00.000000Z' },
         { ...outreach, deliveryDigest: '' }, { ...outreach, deliveredAt: '' },
-        { ...outreach, deliveredAt: '2030-12-01T23:59:59.999999Z' },
+        { ...outreach, deliveredAt: '2030-12-31T23:59:59.999999Z' },
         { ...outreach, deliveredAt: '2036-01-01T00:00:00.000000Z' },
     ]) assert.equal(assessNonresponseCandidate(snapshot, changed, 'not-acknowledged', now, verified), 'hold');
     for (const changed of [{ ...snapshot, activityAt: null }, { ...snapshot, activityComplete: false },
@@ -75,10 +75,10 @@ test('changed target, relationship, activity, notice, or invalid acceptance hold
 
 test('four-year and outreach anniversaries round leap days forward and preserve microsecond safety', () => {
     const leap = { ...snapshot, activityAt: '2028-02-29T12:00:00.000001Z' };
-    const accepted = { ...outreach, activityAt: leap.activityAt, acceptedAt: '2031-01-30T12:00:00.001000Z', deliveredAt: '2031-01-30T12:00:00.001000Z' };
+    const accepted = { ...outreach, activityAt: leap.activityAt, acceptedAt: '2031-03-01T12:00:00.001000Z', deliveredAt: '2031-03-01T12:00:00.001000Z' };
     assert.equal(assessNonresponseCandidate(leap, accepted, 'not-acknowledged', at('2032-03-01T12:00:00.000Z'), verified), 'waiting');
     assert.equal(assessNonresponseCandidate(leap, accepted, 'not-acknowledged', at('2032-03-01T12:00:00.001Z'), verified), 'candidate');
     const leapOutreach = { ...outreach, acceptedAt: '2032-02-29T12:00:00.000000Z', deliveredAt: '2032-02-29T12:00:00.000000Z' };
-    assert.equal(assessNonresponseCandidate(snapshot, leapOutreach, 'not-acknowledged', at('2033-03-30T11:59:59.999Z'), verified), 'waiting');
-    assert.equal(assessNonresponseCandidate(snapshot, leapOutreach, 'not-acknowledged', at('2033-03-30T12:00:00.000Z'), verified), 'candidate');
+    assert.equal(assessNonresponseCandidate(snapshot, leapOutreach, 'not-acknowledged', at('2033-03-01T11:59:59.999Z'), verified), 'waiting');
+    assert.equal(assessNonresponseCandidate(snapshot, leapOutreach, 'not-acknowledged', at('2033-03-01T12:00:00.000Z'), verified), 'candidate');
 });

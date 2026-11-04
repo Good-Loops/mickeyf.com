@@ -148,5 +148,5 @@ administrative command is described in `retention-reconciliation-command.md`
 and requires a reviewed cutover and drained writers. The new
 primary verifier depends on the administrative restore protocol above; it does
 not prove that offline or failed client activity was seen. Current-contact and
-response/failure coverage, schema/grants, production composition and integrated
+delivery/failure processing, schema/grants, production composition and integrated
 deletion/recovery qualification remain prerequisites.

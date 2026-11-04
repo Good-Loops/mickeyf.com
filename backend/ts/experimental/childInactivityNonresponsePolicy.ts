@@ -2,15 +2,14 @@ import { createHash } from 'node:crypto';
 import { isAccountId } from '../accounts/deletionJournal';
 import { parseInactivityInstant, type InactivitySnapshot } from '../accounts/childInactivityPolicy';
 
-/** Local policy candidate only: it is not connected to the deletion workflow. */
+/** Automatic nonresponse policy; production activation is separately gated. */
 export const NONRESPONSE_NOTICE = Object.freeze({
-    version: 'child-inactivity-nonresponse-candidate-1',
-    en: "This child's account has been inactive online for almost three years or longer. If it remains inactive, we may delete it no earlier than four years after the last online activity and 12 months after the 30-day warning period ends, even if you do not reply. Sign in to the child's account or use the parent keep-account control to restart the timer. Offline play may not update the timer.",
-    ptBR: 'Esta conta infantil está sem atividade on-line há quase três anos ou mais. Se continuar inativa, poderemos excluí-la após pelo menos quatro anos da última atividade on-line e 12 meses depois do fim do prazo de aviso de 30 dias, mesmo que você não responda. Entre na conta da criança ou use o controle do responsável para manter a conta e reiniciar o prazo. O uso off-line pode não atualizar o prazo.',
+    version: 'child-inactivity-nonresponse-2026-11-04.2',
+    en: "This child's account has been inactive online for at least three years. If it remains inactive, we may delete it after a further 12 months from delivery of this warning. Sign in to the child's account or use Keep account on the parent account page to restart the timer. Offline play may not update the timer. Replying to this email alone does not restart the timer.",
+    ptBR: 'Esta conta infantil está sem atividade on-line há pelo menos três anos. Se continuar inativa, poderemos excluí-la após mais 12 meses a partir da entrega deste aviso. Entre na conta da criança ou use Manter conta na página da conta do responsável para reiniciar o prazo. O uso off-line pode não atualizar o prazo. Responder a este e-mail, por si só, não reinicia o prazo.',
 });
 export const NONRESPONSE_NOTICE_DIGEST = createHash('sha256').update(JSON.stringify(NONRESPONSE_NOTICE)).digest('hex');
 
-const DAY = 86_400_000;
 const digest = /^[a-f0-9]{64}$/u;
 export type AcceptedOutreach = Readonly<{
     parentId: string; childId: string; activityAt: string; targetDigest: string;
@@ -31,7 +30,8 @@ function addCalendarYears(instant: number, years: number): number {
  * Acceptance can precede delivery by days. A provider-reported delivery is
  * also not proof of inbox placement or reading. `verifyDeliveredOutreach` must
  * authenticate both events, their timestamps, the recipient and notice, and
- * reject subsequent failures; no such adapter is wired.
+ * reject subsequent recorded failures. The durable warning workflow supplies
+ * this verification; production scheduling remains separately gated.
  * A candidate is not permission to delete: activity continuity and restore
  * safety must be checked again under the deletion transaction's locks.
  */
@@ -47,7 +47,7 @@ export function assessNonresponseCandidate(snapshot: InactivitySnapshot, outreac
     const activity = parseInactivityInstant(snapshot.activityAt);
     if (activity === null || activity > now) return 'hold';
     const thirdAnniversary = addCalendarYears(activity, 3);
-    const warningStart = thirdAnniversary - 30 * DAY;
+    const warningStart = thirdAnniversary;
     // Add the extension to the already rounded third anniversary. For a
     // February 29 start, adding four years in one step would be a day early.
     const inactivityDeadline = addCalendarYears(thirdAnniversary, 1);
@@ -65,9 +65,7 @@ export function assessNonresponseCandidate(snapshot: InactivitySnapshot, outreac
         // allowed warning, compare its actual millisecond floor instead.
         || acceptedAt === null || Date.parse(outreach.acceptedAt) < warningStart || acceptedAt > now
         || deliveredAt === null || outreach.deliveredAt < outreach.acceptedAt || deliveredAt > now) return 'hold';
-    // Interpret the owner's additional 12 months as starting after the later
-    // of the three-year anniversary and the original 30-day warning period.
-    const outreachDeadline = addCalendarYears(Math.max(thirdAnniversary, deliveredAt + 30 * DAY), 1);
+    const outreachDeadline = addCalendarYears(Math.max(thirdAnniversary, deliveredAt), 1);
     if (!Number.isSafeInteger(outreachDeadline)) return 'hold';
     try { if (verifyDeliveredOutreach(Object.freeze({ ...outreach })) !== true) return 'hold'; }
     catch { return 'hold'; }

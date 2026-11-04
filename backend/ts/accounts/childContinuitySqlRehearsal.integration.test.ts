@@ -26,7 +26,8 @@ import { submitThreeBossesRun } from '../leaderboards/threeBossesRunRepository';
 import { createParentRegistrationRepository } from './parentRegistrationRepository';
 import { WARNING_HISTORY_DRAFT_SQL, assertWarningHistoryDraft } from './inactivitySchema.testFixture';
 import { createDurableChildWarningStore } from './durableChildWarningStore';
-import { createChildWarningNonresponse } from './childWarningNonresponse';
+import { createChildWarningNonresponse, deleteChildAfterNonresponse } from './childWarningNonresponse';
+import { InactivityDeletionUncertainError, type RetentionIntent, type RetentionJournal } from './childInactivityWorkflow';
 import type { MailObservation, SendResult } from '../experimental/brevoInactivityMail';
 
 // These tests use the same SQL/witness fixture as activity and keep. No second
@@ -243,14 +244,7 @@ async function warningFixture() {
         async send(): Promise<SendResult> { sends++; return uncertain ? { kind: 'uncertain' } : { kind: 'accepted', messageId: '<synthetic@brevo.test>' }; },
         async observe(): Promise<MailObservation> { return observation; },
     };
-    let coverageCalls = 0;
-    const service = createChildWarningNonresponse(store, mail, 'accounts@notify.mickeyf.com', async proof => {
-        assert.match(proof.historyDigest, /^[a-f0-9]{64}$/u);
-        assert.match(proof.outreach.targetDigest, /^[a-f0-9]{64}$/u);
-        assert.equal(proof.outreach.childId, f.childId);
-        assert.equal(Date.parse(proof.checkedAt), now.value); coverageCalls++;
-        return true; // Synthetic qualification only; no production completeness claim.
-    });
+    const service = createChildWarningNonresponse(store, mail, 'accounts@notify.mickeyf.com');
     const prepare = () => service.prepare(f.parent.accountId, f.childId, 'en');
     const dispatch = () => service.dispatch(f.parent.accountId, f.childId);
     const observe = () => service.observe(f.parent.accountId, f.childId);
@@ -260,9 +254,20 @@ async function warningFixture() {
         return row;
     };
     const delivered = async () => { await prepare(); assert.equal(await dispatch(), 'accepted'); now.value += 2000; assert.equal(await observe(), 'delivered'); };
+    const due = async () => {
+        const event = JSON.parse((await read()).state).events.find((value: { kind: string }) => value.kind === 'delivered');
+        const date = new Date(event.deliveredAt); date.setUTCFullYear(date.getUTCFullYear() + 1); now.value = date.getTime();
+    };
+    const intents: RetentionIntent[] = [], deleted: RetentionIntent[] = [];
+    const journal: RetentionJournal = {
+        async recordRetentionIntent(intent) { intents.push(structuredClone(intent)); },
+        async verifyRetentionIntent(intent) { return intents.some(value => JSON.stringify(value) === JSON.stringify(intent)); },
+        async verifyActivityContinuity(_intent, connection) { assert.ok(connection); await activity.verifyActivity(connection, f.childId); return true; },
+        async recordCommittedDeletion(intent) { deleted.push(structuredClone(intent)); },
+    };
     return { f, now, store, service, prepare, dispatch, observe, assess, read, delivered, warningStorage,
-        defaultCoverage: createChildWarningNonresponse(store, mail, 'accounts@notify.mickeyf.com'),
-        sends: () => sends, coverageCalls: () => coverageCalls,
+        due, intents, deleted, journal, remove: (replay?: RetentionIntent) => deleteChildAfterNonresponse(store, journal, f.parent.accountId, f.childId, replay),
+        sends: () => sends,
         changeContact() { targetDigest = 'b'.repeat(64); }, uncertain() { uncertain = true; },
         holdDelivery() { observation = { kind: 'hold' }; }, loseCommit(value: 'before' | 'after') { commitFault = value; } };
 }
@@ -280,18 +285,17 @@ test('an initial pending report can become delivered without a resend or a backd
     assert.equal(await w.assess(), 'waiting'); assert.equal(w.sends(), 1);
 });
 
-test('durable warning integrates the additional calendar year and requires qualified final nonresponse coverage', async () => {
+test('durable warning waits one calendar year from delivery using the locked SQL clock', async () => {
     const w = await warningFixture(); await w.delivered();
     assert.equal(await w.assess(), 'waiting');
     const row = JSON.parse((await w.read()).state);
     const delivery = row.events.find((event: { kind: string }) => event.kind === 'delivered');
-    const deadline = new Date(Date.parse(delivery.deliveredAt) + 30 * 86_400_000);
+    const deadline = new Date(delivery.deliveredAt);
     deadline.setUTCFullYear(deadline.getUTCFullYear() + 1);
     w.now.value = deadline.getTime() - 1;
-    assert.equal(await w.assess(), 'waiting'); assert.equal(w.coverageCalls(), 0);
+    assert.equal(await w.assess(), 'waiting');
     w.now.value++;
-    assert.equal(await w.defaultCoverage.assess(w.f.parent.accountId, w.f.childId), 'hold');
-    assert.equal(await w.assess(), 'candidate'); assert.equal(w.coverageCalls(), 1);
+    assert.equal(await w.assess(), 'candidate');
     assert.equal(w.sends(), 1);
     assert.equal(w.warningStorage.objects.length, 4);
     assert(!w.warningStorage.objects.some(item => item.body.includes('synthetic@example.test')));
@@ -319,13 +323,30 @@ test('a delivery hold remains durable and cannot be erased by a later observatio
     await assert.rejects(w.assess(), held);
 });
 
-test('an authenticated parent response holds nonresponse; invalid sessions cannot record one', async () => {
-    const w = await warningFixture(); const attempt = await w.prepare(); await w.dispatch(); w.now.value += 2000; await w.observe();
-    const proof = w.f.parentContext.session!;
-    assert.equal(await w.service.recordParentResponse(w.f.parent.accountId, w.f.childId, attempt!,
-        { accountId: w.f.parent.accountId, sessionId: 'invalid' }), false);
-    assert.equal(await w.service.recordParentResponse(w.f.parent.accountId, w.f.childId, attempt!, proof), true);
-    assert.equal(await w.assess(), 'hold');
+test('automatic nonresponse deletion rechecks the deadline and commits its conditional journal outcome', async () => {
+    const w = await warningFixture(); await w.delivered();
+    assert.equal(await w.remove(), 'held'); assert.equal(w.intents.length, 0);
+    await w.due(); assert.equal(await w.remove(), 'deleted');
+    const [[count]] = await admin.query<RowDataPacket[]>('SELECT COUNT(*) AS count FROM users WHERE account_uuid=?', [w.f.childId]);
+    assert.equal(count.count, 0); assert.equal(await w.read(), undefined);
+    assert.equal(w.intents.length, 1); assert.deepEqual(w.deleted, w.intents);
+});
+
+test('uncertain deletion commit preserves the intent and a subsequent keep invalidates its replay', async () => {
+    const w = await warningFixture(); await w.delivered(); await w.due(); w.loseCommit('before');
+    await assert.rejects(w.remove(), InactivityDeletionUncertainError);
+    assert.equal(w.intents.length, 1); assert.equal(w.deleted.length, 0);
+    // Restore the fixture clock for a real authenticated keep; activity history remains independent.
+    w.now.value = Math.floor(Date.now() / 1000) * 1000 + 3000;
+    await w.f.keep();
+    assert.equal(await w.remove(w.intents[0]), 'held');
+});
+
+test('unchanged, verified conditional intent can reconcile a deletion that rolled back', async () => {
+    const w = await warningFixture(); await w.delivered(); await w.due(); w.loseCommit('before');
+    await assert.rejects(w.remove(), InactivityDeletionUncertainError);
+    assert.equal(await w.remove(w.intents[0]), 'deleted');
+    assert.equal(w.intents.length, 1); assert.equal(w.deleted.length, 1);
 });
 
 test('real parent keep and changed contact invalidate an older warning', async () => {
