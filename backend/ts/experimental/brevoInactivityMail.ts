@@ -55,7 +55,9 @@ export async function sendBrevoInactivityWarning(apiKey: string, attempt: Warnin
         throw new TypeError('Invalid inactivity warning configuration.');
     }
     const portuguese = attempt.language === 'pt-BR';
-    const payload = { sender: { email: attempt.sender }, to: [{ email: attempt.recipient }],
+    // This per-recipient field requires Brevo's per-contact tracking-consent
+    // setting to be enabled; activation must verify that account setting too.
+    const payload = { sender: { email: attempt.sender }, to: [{ email: attempt.recipient, contactPixelTrackingConsent: false }],
         subject: portuguese ? 'Aviso sobre uma conta infantil no Ludolume' : 'Notice about a child account on Ludolume',
         textContent: `${portuguese ? NONRESPONSE_NOTICE.ptBR : NONRESPONSE_NOTICE.en}\n\nhttps://mickeyf.com/parent-accounts`,
         headers: { idempotencyKey: attempt.attemptId } };
