@@ -4,7 +4,9 @@ import notice from '../../../shared/privacyNotice.json' with { type: 'json' };
 /** Public notice needs no account, API response or consent submission. */
 export default function Privacy() {
     useEffect(() => {
-        if (window.location.hash === '#portugues') document.getElementById('portugues')?.scrollIntoView();
+        const target = window.location.hash === '#privacy-deletion' ? 'privacy-deletion'
+            : window.location.hash === '#portugues' ? 'portugues' : null;
+        if (target) document.getElementById(target)?.scrollIntoView();
     }, []);
     return <article className="privacy-notice" aria-labelledby="privacy-title">
         <h1 id="privacy-title">Ludolume privacy notice</h1>
