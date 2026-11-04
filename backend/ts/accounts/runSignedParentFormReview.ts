@@ -5,7 +5,7 @@ import { loadMigrationConfig } from '../config/migrationConfig';
 import { verifySignedParentFormReadiness } from '../migrations/signedParentFormSchema';
 import type { MigrationConnection } from '../migrations/leaderboardSchema';
 import { reviewSignedParentForm } from './signedParentFormReview';
-import { pendingParentFormOutreach } from './signedParentFormOutreach';
+import { pendingParentFormOutreach, redactUnlinkedFormContact } from './signedParentFormOutreach';
 
 async function main() {
     const [command, reference, ...arguments_] = process.argv.slice(2);
@@ -42,7 +42,8 @@ async function main() {
                     AND i.provider=f.provider AND i.subject=f.subject) AS provider_linked
                 FROM parent_signed_forms f WHERE f.reference=? LIMIT 1`, timeout: 10_000 }, [reference]);
             if (forms.length !== 1) throw new Error('Request is unavailable.');
-            console.log(JSON.stringify(forms[0], null, 2)); return;
+            const form = forms[0] as RowDataPacket & { provider_linked: unknown; verified_contact: unknown };
+            console.log(JSON.stringify(redactUnlinkedFormContact(form), null, 2)); return;
         }
         if (values.get('signed-parent-reviewed') !== 'true' || !['true', 'false'].includes(values.get('public-permission')!)
             || !/^[0-9a-f]{64}$/iu.test(values.get('policy-digest')!)) throw new Error('Explicit completed review and exact policy digest are required.');

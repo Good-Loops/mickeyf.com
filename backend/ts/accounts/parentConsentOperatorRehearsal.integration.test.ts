@@ -203,7 +203,9 @@ for (const country of ['BR', 'US']) test(`${label}: ${country} actual operator C
         const unlinked = pendingOutreach(); assert.equal(unlinked.status, 0, unlinked.stderr);
         const held = JSON.parse(unlinked.stdout).requests.find((request: { reference: string }) => request.reference === approved.reference);
         assert.equal(held.providerLinked, false); assert.equal(held.verifiedContact, null);
-        assert.equal((await operator('inspect', approved))?.provider_linked, 0);
+        const inspectedHeld = await operator('inspect', approved);
+        assert.equal(inspectedHeld?.provider_linked, 0); assert.equal(inspectedHeld?.verified_contact, null);
+        assert.equal(inspectedHeld?.delivery_status, 'unknown');
         await operator('approve', approved, false);
         assert.equal((await formRow(approved.reference)).status, 'pending');
     } finally {
