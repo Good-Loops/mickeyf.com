@@ -27,7 +27,7 @@ import { createProviderAuthRouter } from './providerAuthRouter';
 import type { ProviderAuthClient } from '../auth/providerAuthFlow';
 import type { PublicProviderAuthClient } from '../config/providerAuthConfig';
 import type { AppleTokenLifecycle } from '../config/appleTokenConfig';
-import type { AppleNotificationVerifier } from '../auth/appleNotificationVerifier';
+import type { AppleNotificationVerifier, VerifiedAppleNotification } from '../auth/appleNotificationVerifier';
 import { applyAppleNotification } from '../auth/appleSessionRevocation';
 import { createAppleNotificationRouter } from './appleNotificationRouter';
 import { createAppleTokenRevocationWorker } from '../accounts/appleTokenRevocation';
@@ -71,6 +71,8 @@ export function createAuthRouter(
             publicClients?: readonly PublicProviderAuthClient[];
             appleTokenLifecycle?: AppleTokenLifecycle;
             appleNotifications?: AppleNotificationVerifier;
+            /** Only supplied after the relay-state schema and grants are verified. */
+            appleForwardingEvents?: { record(notification: VerifiedAppleNotification): Promise<void> };
         };
     } = {}
 ): Router {
@@ -124,7 +126,7 @@ export function createAuthRouter(
             vault: appleLifecycle.web.repository, appleTokens: appleLifecycle.web.client }] : [],
     }) : undefined;
     router.use('/providers/apple-notifications', createAppleNotificationRouter(providerAuth?.appleNotifications,
-        notification => applyAppleNotification(database, notification)));
+        notification => applyAppleNotification(database, notification, providerAuth?.appleForwardingEvents)));
 
     // Only public identifiers are exposed, never verifier configuration or credentials.
     function canIssueApple(): boolean {

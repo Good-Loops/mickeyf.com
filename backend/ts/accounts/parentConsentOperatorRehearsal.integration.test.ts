@@ -19,6 +19,9 @@ import { renderRuntimeGrantStatements } from '../security/runtimeGrantManifest';
 import { createParentRegistrationFlow, type ParentRegistrationPolicy } from './parentRegistrationFlow';
 import { createParentRegistrationRepository } from './parentRegistrationRepository';
 import { cleanupSignedParentForms } from './signedParentFormReview';
+import { recordParentFormAppleRelayEvent, verifyParentFormAppleRelayWriteAccess } from './parentFormAppleRelayState';
+import type { VerifiedAppleNotification } from '../auth/appleNotificationVerifier';
+import { applyAppleNotification } from '../auth/appleSessionRevocation';
 import type { SignedParentFormRequest } from './signedParentForm';
 
 const label = 'SYNTHETIC TEST ONLY - NOT VALID CONSENT';
@@ -78,11 +81,14 @@ before(async () => {
     const migrationSource = readFileSync(path.join(backendDirectory, 'migrations/pending/0028_extend_child_signed_parent_forms.sql'), 'utf8');
     assert.equal(migrationSource.replace(/\r\n/gu, '\n').trim(), childSchema);
     await admin.query(childSchema);
+    await admin.query(readFileSync(path.join(backendDirectory, 'migrations/pending/draft_parent_form_apple_relay_state.sql'), 'utf8'));
     await admin.query("CREATE USER 'parent_rehearsal_runtime'@'%' IDENTIFIED BY 'synthetic-runtime-only'");
     for (const sql of renderRuntimeGrantStatements(config.database, { user: 'parent_rehearsal_runtime', host: '%' }, 'google-apple-parent-signed')) await admin.query(sql);
+    await admin.query("GRANT SELECT,INSERT,UPDATE,DELETE ON mickeyf_migration_test.parent_form_apple_relay_state TO 'parent_rehearsal_runtime'@'%'");
     await admin.query("CREATE USER 'parent_rehearsal_operator'@'%' IDENTIFIED BY 'synthetic-operator-only'");
     await admin.query("GRANT SELECT ON mickeyf_migration_test.schema_migrations TO 'parent_rehearsal_operator'@'%'");
     await admin.query("GRANT SELECT ON mickeyf_migration_test.parent_signed_forms TO 'parent_rehearsal_operator'@'%'");
+    await admin.query("GRANT SELECT ON mickeyf_migration_test.parent_form_apple_relay_state TO 'parent_rehearsal_operator'@'%'");
     await admin.query("GRANT SELECT (account_uuid,provider,subject) ON mickeyf_migration_test.account_provider_identities TO 'parent_rehearsal_operator'@'%'");
     await admin.query("GRANT UPDATE (status,reviewed_at,reviewer,form_sha256,public_approved) ON mickeyf_migration_test.parent_signed_forms TO 'parent_rehearsal_operator'@'%'");
     database = mysql.createPool({ host: config.host, port: config.port, database: config.database, user: 'parent_rehearsal_runtime',
@@ -102,26 +108,27 @@ after(async () => {
     }
 });
 
-async function parent(country: string) {
+async function parent(country: string, provider: 'google' | 'apple' = 'google') {
     const accountId = randomUUID();
     const name = `synthetic-parent-${country}-${randomUUID()}`;
-    const contact = `${name}@example.test`;
+    const contact = `${name.toLowerCase()}@${provider === 'apple' ? 'privaterelay.appleid.com' : 'example.test'}`;
     const [insert] = await admin.query<ResultSetHeader>('INSERT INTO users (user_name,email,user_password,account_uuid) VALUES (?,?,?,?)',
         [name, contact, parentPasswordHash, accountId]);
     const account = { userId: insert.insertId, accountId };
-    const identity = { provider: 'google', subject: name, email: contact } as VerifiedProviderIdentity;
-    await admin.query("INSERT INTO account_provider_identities (provider,subject,account_uuid,linked_at) VALUES ('google',?,?,UTC_TIMESTAMP(6))",
-        [Buffer.from(name, 'ascii'), accountId]);
+    const identity = { provider, subject: name, email: contact } as VerifiedProviderIdentity;
+    await admin.query('INSERT INTO account_provider_identities (provider,subject,account_uuid,linked_at) VALUES (?,?,?,UTC_TIMESTAMP(6))',
+        [provider, Buffer.from(name, 'ascii'), accountId]);
     const sessionId = randomBytes(32).toString('base64url');
     assert(await createAccountSession(database, account, sessionId, Math.floor(Date.now() / 1000) + 1800, parentPasswordHash));
     const context = { account, session: { accountId, sessionId }, bindingHash: randomBytes(32),
         bindingExpiresAt: null, anonymousCookie: null } as ProviderAuthContext;
     const store = createParentRegistrationRepository(database, { async recordAccountDeletion(id) { deletionIntents.push(id); } },
         undefined, true, { countries: ['BR', 'US'], credentialsAfterApproval: true });
-    const flow = createParentRegistrationFlow({ store, policy, clients: { 'google-web': { provider: 'google', verifier: {
+    const clientKey = `${provider}-web`;
+    const flow = createParentRegistrationFlow({ store, policy, clients: { [clientKey]: { provider, verifier: {
         async verify() { return { verified: true, identity }; },
     } } } });
-    const request = { purpose: 'create-child', country, clientKey: 'google-web', policyVersion: policy.version,
+    const request = { purpose: 'create-child', country, clientKey, policyVersion: policy.version,
         consentVersion: policy.consentVersion, privacyNoticeUrl: policy.privacyNoticeUrl,
         adultAttestation: true, guardianAttestation: true, consent: true };
     async function requestForm() {
@@ -135,7 +142,7 @@ async function parent(country: string) {
         const result = await flow.complete(context, { state: challenge.state, idToken: 'SYNTHETIC-NO-PROVIDER-REQUEST' });
         assert.ok('grant' in result, JSON.stringify(result)); return result.grant;
     }
-    return { account, contact, context, flow, request, requestForm, proof };
+    return { account, contact, context, flow, request, requestForm, proof, subject: name };
 }
 
 async function formRow(reference: string) {
@@ -144,7 +151,7 @@ async function formRow(reference: string) {
 }
 
 async function operator(command: 'inspect' | 'approve' | 'reject', form: SignedParentFormRequest, decisionSucceeds = true,
-    confirmedServerUuid = serverUuid) {
+    confirmedServerUuid = serverUuid, relayStateEnabled = false) {
     const file = path.join(directory!, `${form.reference}.SYNTHETIC-NOT-VALID-CONSENT.txt`);
     const contents = `${label}\nNo human signed this file. No consent or guardian identity is verified.\nRequest: ${form.reference}\nCountry: ${form.country}\n`;
     if (command !== 'inspect') writeFileSync(file, contents, { flag: 'w' });
@@ -155,7 +162,7 @@ async function operator(command: 'inspect' | 'approve' | 'reject', form: SignedP
     const result = spawnSync(process.execPath, ['-r', 'ts-node/register', 'ts/accounts/runSignedParentFormReview.ts', command, form.reference, ...options], {
         cwd: backendDirectory, env: { ...process.env, MIGRATION_DB_USER: 'parent_rehearsal_operator', MIGRATION_DB_PASS: 'synthetic-operator-only',
             MIGRATION_CONFIRM_ACCOUNT: 'parent_rehearsal_operator@%', SIGNED_FORM_CONFIRM_DATABASE: 'mickeyf_migration_test',
-            SIGNED_FORM_CONFIRM_SERVER_UUID: confirmedServerUuid },
+            SIGNED_FORM_CONFIRM_SERVER_UUID: confirmedServerUuid, PARENT_FORM_RELAY_STATE_ENABLED: relayStateEnabled ? '1' : '0' },
         encoding: 'utf8', timeout: 30_000, maxBuffer: 128 * 1024, windowsHide: true, shell: false,
     });
     assert.equal(result.error, undefined, 'the real review CLI must finish within its local rehearsal bound');
@@ -174,17 +181,43 @@ async function operator(command: 'inspect' | 'approve' | 'reject', form: SignedP
     return output;
 }
 
-function pendingOutreach(confirmedServerUuid = serverUuid) {
+function pendingOutreach(confirmedServerUuid = serverUuid, relayStateEnabled = false) {
     const result = spawnSync(process.execPath, ['-r', 'ts-node/register', 'ts/accounts/runSignedParentFormReview.ts', 'pending'], {
         cwd: backendDirectory, env: { ...process.env, MIGRATION_DB_USER: 'parent_rehearsal_operator', MIGRATION_DB_PASS: 'synthetic-operator-only',
             MIGRATION_CONFIRM_ACCOUNT: 'parent_rehearsal_operator@%', SIGNED_FORM_CONFIRM_DATABASE: 'mickeyf_migration_test',
-            SIGNED_FORM_CONFIRM_SERVER_UUID: confirmedServerUuid },
+            SIGNED_FORM_CONFIRM_SERVER_UUID: confirmedServerUuid, PARENT_FORM_RELAY_STATE_ENABLED: relayStateEnabled ? '1' : '0' },
         encoding: 'utf8', timeout: 30_000, maxBuffer: 128 * 1024, windowsHide: true, shell: false,
     });
     assert.equal(result.error, undefined);
     assert.doesNotMatch(result.stdout + result.stderr, /synthetic-operator-only|synthetic-runtime-only|migration-test-root-only/u);
     return result;
 }
+
+test(`${label}: operator holds a disabled Apple relay and keeps delivery unknown after re-enablement`, async () => {
+    await verifyParentFormAppleRelayWriteAccess(database);
+    await admin.query("REVOKE DELETE ON mickeyf_migration_test.parent_form_apple_relay_state FROM 'parent_rehearsal_runtime'@'%'");
+    try { await assert.rejects(verifyParentFormAppleRelayWriteAccess(database)); }
+    finally { await admin.query("GRANT DELETE ON mickeyf_migration_test.parent_form_apple_relay_state TO 'parent_rehearsal_runtime'@'%'"); }
+    const p = await parent('US', 'apple');
+    const form = await p.requestForm();
+    const [[clock]] = await admin.query<RowDataPacket[]>('SELECT UNIX_TIMESTAMP(UTC_TIMESTAMP()) AS now');
+    const now = Number(clock.now);
+    const event = { audience: 'com.example.app', subject: p.subject, eventType: 'email-disabled',
+        issuedAt: now, eventTime: now, relayEmail: p.contact } as VerifiedAppleNotification;
+    const recorder = { record: (value: VerifiedAppleNotification) => recordParentFormAppleRelayEvent(database, value) };
+    await applyAppleNotification(database, event, recorder);
+    const result = pendingOutreach(serverUuid, true);
+    assert.equal(result.status, 0, result.stderr);
+    const held = JSON.parse(result.stdout).requests.find((request: { reference: string }) => request.reference === form.reference);
+    assert.equal(held.relayForwardingStatus, 'last-event-disabled'); assert.equal(held.deliveryStatus, 'unknown');
+    assert.equal(held.verifiedContact, null);
+    const inspected = await operator('inspect', form, true, serverUuid, true);
+    assert.equal(inspected?.relay_forwarding_status, 'last-event-disabled'); assert.equal(inspected?.verified_contact, null);
+    await applyAppleNotification(database, { ...event, eventType: 'email-enabled', eventTime: now + 1 }, recorder);
+    const resumed = await operator('inspect', form, true, serverUuid, true);
+    assert.equal(resumed?.relay_forwarding_status, 'last-event-enabled'); assert.equal(resumed?.verified_contact, p.contact);
+    assert.equal(resumed?.delivery_status, 'unknown');
+});
 
 for (const country of ['BR', 'US']) test(`${label}: ${country} actual operator CLI approves/rejects, rejects expiry, creates privately and withdraws/deletes`, async () => {
     const p = await parent(country);

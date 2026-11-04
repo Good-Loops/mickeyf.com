@@ -47,6 +47,9 @@ import { verifyParentRegistrationReadiness } from './migrations/parentRegistrati
 import { cleanupParentRegistrationAttempts } from './accounts/parentRegistrationRepository';
 import { verifySignedParentFormReadiness } from './migrations/signedParentFormSchema';
 import { cleanupSignedParentForms } from './accounts/signedParentFormReview';
+import { verifyParentFormAppleRelayReadiness } from './accounts/parentFormAppleRelayReadiness';
+import { cleanupParentFormAppleRelayState, recordParentFormAppleRelayEvent,
+    verifyParentFormAppleRelayWriteAccess } from './accounts/parentFormAppleRelayState';
 import { parentManagedChildActivity } from './accounts/parentManagedChildActivity';
 import { verifyParentManagedChildActivityReadiness } from './migrations/parentManagedChildActivityReadiness';
 import { loadChildInactivityDeployment } from './config/childInactivityDeployment';
@@ -92,18 +95,20 @@ app.use(helmet({
 // Mount before CORS/preflight and body parsers so they cannot bypass its checks.
 async function runConfiguredMaintenance(): Promise<number> {
     // Independent cleanup must still run if Apple's provider request fails.
-    const [apple, registrationCleanup, parentCleanup, formCleanup, inactivity] = await Promise.allSettled([
+    const [apple, registrationCleanup, parentCleanup, formCleanup, relayCleanup, inactivity] = await Promise.allSettled([
         runAppleMaintenance({ database: pool, expectedServerUuid: runtimeConfig.appleMaintenance!.expectedServerUuid,
             loadLifecycle: loadRuntimeAppleLifecycle, appleAndroidEnabled: runtimeConfig.providerAuth.appleAndroidEnabled === true }),
         cleanupRegistrationAuthorizations(pool),
         cleanupParentRegistrationAttempts(pool),
         runtimeConfig.parentRegistrationPolicy?.signedFormsEnabled ? cleanupSignedParentForms(pool) : Promise.resolve({ backlog: false }),
+        runtimeConfig.parentFormRelayEnabled ? cleanupParentFormAppleRelayState(pool) : Promise.resolve({ backlog: false }),
         childInactivityDeployment ? childInactivityDeployment.runMaintenance() : Promise.resolve(0),
     ]);
     return apple.status === 'fulfilled' && apple.value === 0
         && registrationCleanup.status === 'fulfilled' && !registrationCleanup.value.backlog
         && parentCleanup.status === 'fulfilled' && !parentCleanup.value.backlog
         && formCleanup.status === 'fulfilled' && !formCleanup.value.backlog
+        && relayCleanup.status === 'fulfilled' && !relayCleanup.value.backlog
         && inactivity.status === 'fulfilled' && inactivity.value === 0 ? 0 : 1;
 }
 app.use(APPLE_MAINTENANCE_PATH, createAppleMaintenanceRouter(runtimeConfig.appleMaintenance, runConfiguredMaintenance));
@@ -165,6 +170,10 @@ async function startServer(): Promise<void> {
                 { loadLifecycle: loadRuntimeAppleLifecycle });
             if (providerAuth.appleTokenLifecycle) await verifyAppleTokenReadiness(pool);
             if (runtimeConfig.providerAuth.appleNotifications) await verifyAppleRevocationReadiness(pool);
+            if (runtimeConfig.parentFormRelayEnabled) {
+                await verifyParentFormAppleRelayReadiness(pool);
+                await verifyParentFormAppleRelayWriteAccess(pool);
+            }
             if (runtimeConfig.providerAuth.appleAndroidEnabled) await verifyAppleAndroidHandoffReadiness(pool);
             if (runtimeConfig.providerAuth.signupEnabled) {
                 await verifyPasswordlessAccountSchema(pool);
@@ -189,7 +198,10 @@ async function startServer(): Promise<void> {
                 appleWebSignup: appleWeb?.signup === true && registration.creationEnabled && appleAvailable };
             app.use('/auth', createAuthRouter(
                 pool, runtimeConfig.sessionSecret, runtimeConfig.isProduction, runtimeConfig.corsOrigins,
-                { accountDeletionEnabled: runtimeConfig.accountDeletionEnabled, deletionJournal, providerAuth, registration,
+                { accountDeletionEnabled: runtimeConfig.accountDeletionEnabled, deletionJournal,
+                    providerAuth: runtimeConfig.parentFormRelayEnabled ? { ...providerAuth,
+                        appleForwardingEvents: { record: notification => recordParentFormAppleRelayEvent(pool, notification) } } : providerAuth,
+                    registration,
                     childActivity, childInactivity: childInactivityDeployment?.service,
                     reconcileChildKeep: childInactivityDeployment?.reconcileChildKeep,
                     parentRegistrationStorageReady: true, parentRegistrationPolicy: runtimeConfig.parentRegistrationPolicy,
