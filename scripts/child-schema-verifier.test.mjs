@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { fixture, now as fixtureNow } from './test-support/provider-release-fixture.mjs';
@@ -91,7 +92,8 @@ function cloudFixture() {
     const triggers = ['9fbd63bf-d129-4877-bb26-26d38e1ca468', '181b8f84-2303-4c2b-a03e-92dae4b1938c',
         '1c9c6502-f53f-4e04-ac9e-06bf49668acf', '648fadca-3cd1-4b57-9d35-0f62a1468443',
         'd71109da-8350-4f2f-a3be-2053bb6ccd45', 'ef5a2981-95be-4f4d-af91-f997fde73356',
-        'eb4a2af9-2d5b-45a2-aba8-63778520566e', 'a0bbef22-8fad-40b1-ab8a-30337488b450'].map(id => ({ id, disabled: true }));
+        'eb4a2af9-2d5b-45a2-aba8-63778520566e', 'a0bbef22-8fad-40b1-ab8a-30337488b450',
+        '850e052f-be82-4069-824d-2d36ba294a21'].map(id => ({ id, disabled: true }));
     const instance = { name: 'cms-mickeyf', project: PROJECT, region: REGION, connectionName: `${PROJECT}:${REGION}:cms-mickeyf`,
         databaseVersion: 'MYSQL_8_0_31', state: 'RUNNABLE', settings: { settingsVersion: '1', deletionProtectionEnabled: true,
             availabilityType: 'REGIONAL', backupConfiguration: { enabled: true, binaryLogEnabled: true,
@@ -156,18 +158,24 @@ test('authenticated metadata reader watches actual monotonic duration and binds 
     assert.notEqual(refreshed.pitr.latestRecoveryTime, proof.pitr.latestRecoveryTime);
 });
 
-test('inactivity schema recheck requires the exact approved target, source and both pinned DDL hashes', async () => {
+test('inactivity schema recheck accepts all four actual DDL files and rejects incomplete or changed plans', async () => {
     const f = cloudFixture(), safety = await f.reader.read(f.pins);
+    const sqlHashes = await Promise.all(['draft_create_parent_managed_child_activity.sql',
+        'draft_parent_child_inactivity_warnings.sql', 'draft_parent_child_activity_continuity.sql',
+        'draft_parent_child_warning_history.sql'].map(async name => createHash('sha256')
+        .update(await readFile(new URL(`../backend/migrations/pending/${name}`, import.meta.url))).digest('hex')));
     const body = { version: 1, operation: 'create-inactivity-tables', createdAt: new Date(f.clock.now).toISOString(),
-        sourceCommit: safety.sourceCommit, sqlHashes: ['bd927931230a1b677b279612c4e1f9958fa80f8bedac614aa4bf84df0a623eff',
-            '67c60d54a5d435a8e8a4204f164943e17c5f2418d7ebea78c4ce5aad439f1add'],
+        sourceCommit: safety.sourceCommit, sqlHashes,
         snapshot: { database:'cms', user:'synthetic-admin@%', serverUuid:uuid, serverVersion:'8.0.31', versionComment:'Synthetic', history:'a'.repeat(64) }, safety };
     const plan = { ...body, sha256: fingerprint(body) };
     await f.reader.read(f.pins, { approvedPlan: plan, confirmation: plan.sha256 });
     assert.equal(f.clock.sleeps.length, 6);
-    const changed = structuredClone(body); changed.sqlHashes[0] = 'f'.repeat(64);
-    const bad = { ...changed, sha256: fingerprint(changed) };
-    await assert.rejects(f.reader.read(f.pins, { approvedPlan: bad, confirmation: bad.sha256 }), /approved inactivity/u);
+    for (const hashes of [sqlHashes.slice(0, 2), sqlHashes.slice(0, 3),
+        ...sqlHashes.map((_, index) => sqlHashes.map((hash, position) => position === index ? 'f'.repeat(64) : hash))]) {
+        const changed = { ...body, sqlHashes: hashes };
+        const bad = { ...changed, sha256: fingerprint(changed) };
+        await assert.rejects(f.reader.read(f.pins, { approvedPlan: bad, confirmation: bad.sha256 }), /approved inactivity/u);
+    }
 });
 
 test('reader rejects general/active/old-source pins before any cloud call', async () => {

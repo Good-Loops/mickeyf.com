@@ -97,7 +97,8 @@ export function createChildSchemaVerifier({ run = runVerification, environment =
 const TRIGGERS = ['9fbd63bf-d129-4877-bb26-26d38e1ca468', '181b8f84-2303-4c2b-a03e-92dae4b1938c',
     '1c9c6502-f53f-4e04-ac9e-06bf49668acf', '648fadca-3cd1-4b57-9d35-0f62a1468443',
     'd71109da-8350-4f2f-a3be-2053bb6ccd45', 'ef5a2981-95be-4f4d-af91-f997fde73356',
-    'eb4a2af9-2d5b-45a2-aba8-63778520566e', 'a0bbef22-8fad-40b1-ab8a-30337488b450'].sort();
+    'eb4a2af9-2d5b-45a2-aba8-63778520566e', 'a0bbef22-8fad-40b1-ab8a-30337488b450',
+    '850e052f-be82-4069-824d-2d36ba294a21'].sort();
 const DRAIN_MS = 300_000;
 const PROOF_FIELDS = ['schemaVersion', 'operation', 'observedAt', 'sourceCommit', 'sqlSha256', 'target',
     'pinsSha256', 'serviceSha256', 'candidateSha256', 'fallbackSha256', 'readerSince', 'readerVerifiedAt',
@@ -144,7 +145,10 @@ function approvedProof(plan, confirmation, pins, now) {
         const { sha256, ...body } = plan;
         requireThat(SHA.test(confirmation) && sha256 === confirmation && fingerprint(body) === confirmation && plan.version === 1
             && plan.sourceCommit === pins.candidate.deployment.sourceCommit
-            && same(plan.sqlHashes, ['bd927931230a1b677b279612c4e1f9958fa80f8bedac614aa4bf84df0a623eff', '67c60d54a5d435a8e8a4204f164943e17c5f2418d7ebea78c4ce5aad439f1add'])
+            && same(plan.sqlHashes, ['bd927931230a1b677b279612c4e1f9958fa80f8bedac614aa4bf84df0a623eff',
+                '67c60d54a5d435a8e8a4204f164943e17c5f2418d7ebea78c4ce5aad439f1add',
+                '66557568ab311ec8165dd47333b14948a1e9699366e2de3a50a8944753a8c0fc',
+                '7de0df0892b38d26c259c6f4daf849338c142cab2df9c7473c063858d39d4b41'])
             && plan.snapshot.database === TARGET.database && plan.snapshot.serverUuid === TARGET.serverUuid && SHA.test(plan.snapshot.history)
             && typeof plan.snapshot.user === 'string' && /^[^\s@'`\x00-\x1f\x7f]+@[^\s@'`\x00-\x1f\x7f]+$/u.test(plan.snapshot.user)
             && plan.snapshot.user !== 'cms_mickeyf@%' && /^8\.0\.31(?:[-.]|$)/u.test(plan.snapshot.serverVersion)
@@ -213,7 +217,7 @@ export function createChildMigrationPrerequisiteReader(token, fetcher = fetch, {
         ]);
         requireThat(same(triggers.map(item => item?.id).sort(), TRIGGERS) && triggers.every(item => item.disabled === true)
             && regionalTriggers.length === 0 && globalBuilds.length === 0 && regionalBuilds.length === 0,
-        'The exact eight global triggers must remain disabled with no regional triggers or ongoing builds');
+        'The exact nine global triggers must remain disabled with no regional triggers or ongoing builds');
         return fingerprint({ triggers: triggers.sort((a, b) => a.id.localeCompare(b.id)), regionalTriggers, globalBuilds, regionalBuilds });
     }
     function settled(service, pins) {

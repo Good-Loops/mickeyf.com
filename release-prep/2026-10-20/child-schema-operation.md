@@ -30,7 +30,7 @@ GCP project: the authenticated proxy and separate cloud checks supply that bindi
 `plan` first observes authenticated cloud metadata. It requires only the reviewed
 new `prepare-child` candidate at100% traffic with no tags, a ready matching
 compatible fallback, all four creation flags false, exact runtime/attachment,
-all six global triggers disabled, no regional triggers or ongoing builds, and no
+all nine reviewed global triggers disabled, no regional triggers or ongoing builds, and no
 pending Cloud SQL operations. It checks regional/deletion/backup protection,
 seven days of logs, a successful backup at most two hours old, and PITR no more
 than15 minutes behind. Recovery metadata is not a tested restore or a recovery
