@@ -52,8 +52,12 @@ If `providerLinked` is false, the contact is withheld: do not send a message or
 approve the request. A true value only confirms the original provider identity
 is still linked; it cannot prove that the provider's address has not changed.
 The queue and inspection report delivery as unknown. Apple can disable relay
-forwarding without unlinking the account, and the current notification handler
-does not record that change.
+forwarding without unlinking the account. By default the notification handler
+does not record that change. The optional relay-state candidate must not be
+enabled until its separate schema, event handling, cleanup and recovery checks
+are qualified. If it is enabled and shows `last-event-disabled`, the contact is
+withheld; hold the request. `last-event-enabled` only describes Apple's last
+observed event and does not establish current forwarding or delivery.
 Handle bounces or uncertainty as a hold and ask the parent to start a new request.
 
 For each pending reference, inspect the exact request again immediately before

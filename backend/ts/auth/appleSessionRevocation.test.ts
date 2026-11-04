@@ -228,6 +228,17 @@ test('email changes are authenticated no-ops; account-deleted only revokes Apple
     assert.equal(f.accounts.length, 1);
 });
 
+test('an explicitly configured forwarding recorder must commit before acknowledging the notification', async () => {
+    const f = fixture(); const recorded: VerifiedAppleNotification[] = [];
+    const forwarding = notification({ eventType: 'email-disabled', relayEmail: 'parent@privaterelay.appleid.com' });
+    await applyAppleNotification(f.database, forwarding, { async record(value) { recorded.push(value); } });
+    assert.deepEqual(recorded, [forwarding]);
+    await assert.rejects(applyAppleNotification(f.database, notification({ eventType: 'email-disabled' }),
+        { async record() { assert.fail('missing contact cannot be recorded'); } }), AppleSessionRevocationUnavailableError);
+    await assert.rejects(applyAppleNotification(f.database, forwarding,
+        { async record() { throw new Error('sensitive database detail'); } }), AppleSessionRevocationUnavailableError);
+});
+
 test('bounded global capacity allows updates but refuses new subject growth and cleans only expiry batch', async () => {
     const full = fixture({ count: 10_000 });
     await assert.rejects(applyAppleNotification(full.database, notification()), AppleSessionRevocationUnavailableError);

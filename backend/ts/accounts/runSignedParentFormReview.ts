@@ -5,7 +5,8 @@ import { loadMigrationConfig } from '../config/migrationConfig';
 import { verifySignedParentFormReadiness } from '../migrations/signedParentFormSchema';
 import type { MigrationConnection } from '../migrations/leaderboardSchema';
 import { reviewSignedParentForm } from './signedParentFormReview';
-import { pendingParentFormOutreach, redactUnlinkedFormContact } from './signedParentFormOutreach';
+import { pendingParentFormOutreach, redactUnavailableFormContact, relayForwardingStatusSql } from './signedParentFormOutreach';
+import { verifyParentFormAppleRelayReadiness } from './parentFormAppleRelayReadiness';
 
 async function main() {
     const [command, reference, ...arguments_] = process.argv.slice(2);
@@ -21,6 +22,9 @@ async function main() {
     }
     const expectedOptions = command === 'inspect' || command === 'pending' ? [] : ['contact', 'form-file', 'parent-account', 'policy-digest', 'public-permission', 'reviewer', 'signed-parent-reviewed'];
     if ([...values.keys()].sort().join(',') !== expectedOptions.sort().join(',')) throw new Error('Missing or unknown review option.');
+    const relayFlag = process.env.PARENT_FORM_RELAY_STATE_ENABLED;
+    if (relayFlag !== undefined && !['0', '1'].includes(relayFlag)) throw new Error('Invalid relay-state configuration.');
+    const relayStateEnabled = relayFlag === '1';
     const config = loadMigrationConfig();
     const database = mysql.createPool({ host: config.host, port: config.port, user: config.user,
         password: config.password, database: config.database, connectTimeout: config.operationTimeoutMs,
@@ -31,19 +35,21 @@ async function main() {
             || identity[0].serverUuid !== process.env.SIGNED_FORM_CONFIRM_SERVER_UUID
             || identity[0].currentUser !== process.env.MIGRATION_CONFIRM_ACCOUNT) throw new Error('Database, server or administrative account confirmation mismatch.');
         await verifySignedParentFormReadiness(database as unknown as MigrationConnection);
+        if (relayStateEnabled) await verifyParentFormAppleRelayReadiness(database);
         if (command === 'pending') {
-            console.log(JSON.stringify(await pendingParentFormOutreach(database, reference?.slice('--after='.length) ?? null), null, 2)); return;
+            console.log(JSON.stringify(await pendingParentFormOutreach(database, reference?.slice('--after='.length) ?? null, relayStateEnabled), null, 2)); return;
         }
         if (command === 'inspect') {
             const [forms] = await database.query<RowDataPacket[]>({ sql: `SELECT f.reference, f.parent_uuid, f.country_code, f.user_name, f.verified_contact,
                 HEX(f.policy_digest) AS policy_digest, f.consent_version, f.policy_version, f.status, f.expires_at,
                 HEX(f.public_policy_digest) AS public_policy_digest, f.provider,
+                ${relayForwardingStatusSql(relayStateEnabled)} AS relay_forwarding_status,
                 EXISTS (SELECT 1 FROM account_provider_identities i WHERE i.account_uuid=f.parent_uuid
                     AND i.provider=f.provider AND i.subject=f.subject) AS provider_linked
                 FROM parent_signed_forms f WHERE f.reference=? LIMIT 1`, timeout: 10_000 }, [reference]);
             if (forms.length !== 1) throw new Error('Request is unavailable.');
-            const form = forms[0] as RowDataPacket & { provider_linked: unknown; verified_contact: unknown };
-            console.log(JSON.stringify(redactUnlinkedFormContact(form), null, 2)); return;
+            const form = forms[0] as RowDataPacket & { provider_linked: unknown; verified_contact: unknown; relay_forwarding_status: unknown };
+            console.log(JSON.stringify(redactUnavailableFormContact(form), null, 2)); return;
         }
         if (values.get('signed-parent-reviewed') !== 'true' || !['true', 'false'].includes(values.get('public-permission')!)
             || !/^[0-9a-f]{64}$/iu.test(values.get('policy-digest')!)) throw new Error('Explicit completed review and exact policy digest are required.');

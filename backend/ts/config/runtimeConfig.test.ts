@@ -14,6 +14,15 @@ const productionEnvironment = {
     CLOUD_SQL_CONNECTION_NAME: 'test-project:test-region:test-instance',
 };
 
+test('parent relay state is off by default and rejects incomplete activation', () => {
+    assert.equal(loadRuntimeConfig(productionEnvironment).parentFormRelayEnabled, false);
+    assert.equal(loadRuntimeConfig({ ...productionEnvironment, PARENT_FORM_RELAY_STATE_ENABLED: '0' }).parentFormRelayEnabled, false);
+    assert.throws(() => loadRuntimeConfig({ ...productionEnvironment, PARENT_FORM_RELAY_STATE_ENABLED: '1' }),
+        /requires signed forms, Apple notifications and configured maintenance/u);
+    assert.throws(() => loadRuntimeConfig({ ...productionEnvironment, PARENT_FORM_RELAY_STATE_ENABLED: 'true' }),
+        /must be 0 or 1/u);
+});
+
 test('managed child online activity defaults off and rejects partial or malformed opt-in', () => {
     assert.equal(loadRuntimeConfig(productionEnvironment).childOnlineActivityEnabled, false);
     assert.equal(loadRuntimeConfig({ ...productionEnvironment, CHILD_ONLINE_ACTIVITY_ENABLED: 'false' }).childOnlineActivityEnabled, false);

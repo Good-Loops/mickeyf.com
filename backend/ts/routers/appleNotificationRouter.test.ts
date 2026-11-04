@@ -3,12 +3,14 @@ import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import test from 'node:test';
 import express from 'express';
+import type { Pool } from 'mysql2/promise';
 import {
     createAppleNotificationVerifier, type AppleNotificationVerifier,
     type AppleNotificationVerificationResult, type VerifiedAppleNotification,
 } from '../auth/appleNotificationVerifier';
 import { notFoundHandler, requestErrorHandler } from '../middleware/errorHandling';
 import { createAppleNotificationRouter } from './appleNotificationRouter';
+import { createAuthRouter } from './authRouter';
 
 const notification = Object.freeze({ audience: 'com.example.app', subject: 'private-apple-subject',
     eventType: 'consent-revoked', issuedAt: 1_800_000_000, eventTime: 1_799_999_998 }) as VerifiedAppleNotification;
@@ -181,4 +183,23 @@ test('email events are acknowledged through the verified consumer without leakin
         }
         assert.equal(state.applied.length, 2);
     });
+});
+
+test('auth router forwards verified relay events to the configured recorder and retries storage failures', async () => {
+    const forwarding = { ...notification, eventType: 'email-disabled', relayEmail: 'parent@privaterelay.appleid.com' } as VerifiedAppleNotification;
+    const captured: VerifiedAppleNotification[] = []; let fail = true;
+    const verifier: AppleNotificationVerifier = { async verify() { return { verified: true, notification: forwarding }; } };
+    const app = express(); app.use(express.json());
+    app.use('/auth', createAuthRouter({} as Pick<Pool, 'query' | 'getConnection'>,
+        'synthetic-session-secret', false, [], { providerAuth: { enabled: false, clients: {}, appleNotifications: verifier,
+            appleForwardingEvents: { async record(value) { if (fail) throw new Error('private email'); captured.push(value); } } } }));
+    app.use(notFoundHandler); app.use(requestErrorHandler);
+    const server = app.listen(0, '127.0.0.1'); await once(server, 'listening');
+    try {
+        const url = `http://127.0.0.1:${(server.address() as AddressInfo).port}/auth/providers/apple-notifications`;
+        const failure = await post(url); assert.equal(failure.status, 503);
+        assert.deepEqual(await failure.json(), { error: 'UNAVAILABLE' });
+        fail = false; const success = await post(url); assert.equal(success.status, 200);
+        assert.deepEqual(await success.json(), { received: true }); assert.deepEqual(captured, [forwarding]);
+    } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())); }
 });
