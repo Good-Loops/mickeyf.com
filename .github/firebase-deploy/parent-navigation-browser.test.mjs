@@ -64,6 +64,22 @@ async function fixture(t) {
     return {page,calls,external,cancelled};
 }
 
+test('a direct privacy deletion link opens at the account deletion instructions', async t => {
+    const context = await browser.newContext({ viewport: { width: 1024, height: 768 } });
+    t.after(() => context.close());
+    const page = await context.newPage();
+    await page.route('**/*', route => new URL(route.request().url()).origin === origin ? route.continue() : route.abort());
+    await page.goto(`${origin}/privacy#privacy-deletion`);
+    const heading = page.locator('#privacy-deletion');
+    await heading.waitFor();
+    await page.waitForFunction(() => {
+        const rect = document.querySelector('#privacy-deletion')?.getBoundingClientRect();
+        return rect && rect.top >= 0 && rect.top < 150;
+    });
+    assert.match(await heading.innerText(), /account and family deletion/i);
+    assert.equal(await page.locator('a[href^="mailto:"]').filter({ hasText: 'email an account deletion request' }).count(), 1);
+});
+
 async function waitForCancellation(cancelled) {
     let timeout;
     try { await Promise.race([cancelled, new Promise((_,reject) => {
