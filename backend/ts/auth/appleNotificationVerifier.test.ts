@@ -92,7 +92,9 @@ test('forwarding contacts must be signed, private and well formed; missing conta
         { email: 'a@example.test', is_private_email: undefined },
         { email: 'x\n@example.test', is_private_email: true },
     ]) {
-        assert.deepEqual(await verifier.verify(signedToken({ ...claims(), events: { ...forwarding, ...fields } })), invalid);
+        const result = await verifier.verify(signedToken({ ...claims(), events: { ...forwarding, ...fields } }));
+        assert.ok(result.verified, 'the signature remains valid when the optional contact is unusable');
+        assert.equal(result.notification.relayEmail, undefined);
     }
     const normalized = await verifier.verify(signedToken({ ...claims(), events: {
         ...forwarding, email: ' Parent@Private.ICloud.com ', is_private_email: 'true',

@@ -85,11 +85,11 @@ function verifiedClaims(
         || eventTimeMs > (claims.iat + CLOCK_TOLERANCE_SECONDS) * 1_000) return undefined;
     let relayEmail: string | undefined;
     if ((event.type === 'email-enabled' || event.type === 'email-disabled') && event.email !== undefined) {
-        if (typeof event.email !== 'string' || (event.is_private_email !== true && event.is_private_email !== 'true')) return undefined;
-        const email = event.email.trim().toLowerCase();
-        if (email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email)
-            || /[\u0000-\u001f\u007f]/u.test(email)) return undefined;
-        relayEmail = email;
+        if (typeof event.email === 'string' && (event.is_private_email === true || event.is_private_email === 'true')) {
+            const email = event.email.trim().toLowerCase();
+            if (email.length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/u.test(email)
+                && !/[\u0000-\u001f\u007f]/u.test(email)) relayEmail = email;
+        }
     }
     return Object.freeze({
         audience: claims.aud, subject: event.sub, eventType: event.type,
