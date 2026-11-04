@@ -78,6 +78,7 @@
             height: 2rem;
             margin: .15rem 0 0;
             accent-color: $primary-light;
+            color-scheme: dark;
         }
 
         input:focus-visible { outline: .2rem solid $primary-light; outline-offset: .3rem; }
