@@ -121,3 +121,28 @@ test('the event timestamp is rounded forward and cannot land after the trusted c
     assert.deepEqual(await observeBrevoInactivityWarning(key, binding, now,
         fake(() => response({ events: [fractional] }))), { kind: 'delivered', observedAt: '2031-01-31T23:59:59.200Z' });
 });
+
+test('live report shape accepts requests and numeric UTC offsets without treating requests as delivery', async () => {
+    // Shape observed during the owner-controlled rehearsal; identifiers are synthetic.
+    const request = { ...event, event: 'requests', date: '2031-01-31T20:59:58.377-03:00' };
+    const delivered = { ...event, date: '2031-01-31T20:59:59.000-03:00' };
+    assert.deepEqual(await observeBrevoInactivityWarning(key, binding, now,
+        fake(() => response({ events: [delivered, request] }))),
+    { kind: 'delivered', observedAt: '2031-01-31T23:59:59.001Z' });
+    assert.deepEqual(await observeBrevoInactivityWarning(key, binding, now,
+        fake(() => response({ events: [request] }))), { kind: 'hold' });
+    assert.deepEqual(await observeBrevoInactivityWarning(key, binding, now,
+        fake(() => response({ events: [delivered, request, { ...delivered, event: 'hardBounce' }] }))), { kind: 'hold' });
+});
+
+test('offset dates preserve calendar validation, event bounds and conservative precision', async () => {
+    for (const date of ['2031-02-30T20:59:59-03:00', '2031-01-31T23:59:59+14:01',
+        '2031-01-31T23:59:59+15:00', '2031-01-31T23:59:59+00:60', '2031-01-31T23:59:59-00:00',
+        '2031-01-31T20:59:49-03:00', '2031-01-31T21:00:00-03:00']) {
+        assert.deepEqual(await observeBrevoInactivityWarning(key, binding, now,
+            fake(() => response({ events: [{ ...event, date }] }))), { kind: 'hold' });
+    }
+    assert.deepEqual(await observeBrevoInactivityWarning(key, binding, now,
+        fake(() => response({ events: [{ ...event, date: '2031-02-01T05:29:59.1+05:30' }] }))),
+    { kind: 'delivered', observedAt: '2031-01-31T23:59:59.200Z' });
+});

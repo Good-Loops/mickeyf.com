@@ -8,10 +8,10 @@ const MAX_BODY_BYTES = 128 * 1024;
 const LIMIT = 100;
 const FAILURE_EVENTS = new Set(['hardBounce', 'softBounce', 'hard_bounce', 'soft_bounce', 'deferred',
     'blocked', 'invalid', 'invalid_email', 'error', 'spam', 'unsubscribed',
-    // Tracking is disabled for these messages; an observed tracking event is
-    // an anomaly requiring investigation, not routine delivery evidence.
+    // Anonymous aggregate tracking is permitted. An engagement event returned
+    // for this exact recipient/message would identify them and must still hold.
     'opened', 'uniqueOpened', 'click', 'proxy_open', 'unique_proxy_open']);
-const OTHER_EVENTS = new Set(['request', 'sent']);
+const OTHER_EVENTS = new Set(['request', 'requests', 'sent']);
 
 export type WarningAttempt = Readonly<{ attemptId: string; recipient: string; sender: string;
     language: 'en' | 'pt-BR'; noticeDigest: string }>;
@@ -25,6 +25,23 @@ function validEmail(value: unknown): value is string {
 }
 function validKey(value: unknown): value is string {
     return typeof value === 'string' && /^[\x21-\x7e]{16,512}$/u.test(value);
+}
+
+function eventTime(value: unknown): { floorMs: number; conservativeMs: number } | null {
+    if (typeof value !== 'string') return null;
+    // Live reports use the account's numeric UTC offset, not necessarily Z.
+    const match = /^(\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2})(?:\.(\d{1,3}))?(Z|[+-](\d{2}):(\d{2}))$/u.exec(value);
+    if (!match) return null;
+    const localMs = Date.parse(`${match[1]}Z`);
+    if (!Number.isSafeInteger(localMs) || new Date(localMs).toISOString().slice(0, 19) !== match[1]
+        || match[3] === '-00:00' || (match[3] !== 'Z' && (Number(match[4]) > 14 || Number(match[5]) > 59
+            || (Number(match[4]) === 14 && Number(match[5]) !== 0)))) return null;
+    const floorMs = Date.parse(value);
+    // Round forward by one unit of the report's stated precision. This remains
+    // conservative for both truncated timestamps and exact milliseconds.
+    const conservativeMs = floorMs + 10 ** (3 - (match[2] ?? '').length);
+    return Number.isSafeInteger(floorMs) && Number.isSafeInteger(conservativeMs)
+        ? { floorMs, conservativeMs } : null;
 }
 
 /** Bounded responses; malformed or oversized replies are never treated as evidence. */
@@ -58,8 +75,8 @@ export async function sendBrevoInactivityWarning(apiKey: string, attempt: Warnin
         throw new TypeError('Invalid inactivity warning configuration.');
     }
     const portuguese = attempt.language === 'pt-BR';
-    // This per-recipient field requires Brevo's per-contact tracking-consent
-    // setting to be enabled; activation must verify that account setting too.
+    // This field requires account consent enforcement and anonymizes opens;
+    // it does not remove pixels. Account-wide anonymization is also required.
     const payload = { sender: { email: attempt.sender }, to: [{ email: attempt.recipient, contactPixelTrackingConsent: false }],
         replyTo: { email: 'mickeyf.plays@gmail.com' },
         subject: portuguese ? 'Aviso sobre uma conta infantil no Ludolume' : 'Notice about a child account on Ludolume',
@@ -110,19 +127,11 @@ export async function observeBrevoInactivityWarning(apiKey: string, binding: War
             if (!value || typeof value !== 'object' || Array.isArray(value)) return { kind: 'hold' };
             const event = value as Record<string, unknown>;
             if (event.messageId !== binding.messageId || event.email !== binding.recipient || event.from !== binding.sender
-                || typeof event.event !== 'string' || typeof event.date !== 'string'
-                || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d{1,3})?Z$/u.test(event.date)) return { kind: 'hold' };
-            const eventMs = Date.parse(event.date);
-            const fraction = /\.(\d{1,3})Z$/u.exec(event.date)?.[1] ?? '';
-            // The event API can omit fractional seconds. Round forward by one
-            // unit of its stated precision rather than starting a timer early.
-            const conservativeMs = eventMs + 10 ** (3 - fraction.length);
-            if (!Number.isSafeInteger(eventMs) || eventMs < binding.notBeforeMs || eventMs > nowMs
-                || !Number.isSafeInteger(conservativeMs) || conservativeMs > nowMs
-                || new Date(eventMs).toISOString() !== event.date.replace(/(?:\.(\d{1,3}))?Z$/u,
-                    (_match, fraction: string | undefined) => `.${(fraction ?? '').padEnd(3, '0')}Z`)) return { kind: 'hold' };
+                || typeof event.event !== 'string') return { kind: 'hold' };
+            const observed = eventTime(event.date);
+            if (!observed || observed.floorMs < binding.notBeforeMs || observed.conservativeMs > nowMs) return { kind: 'hold' };
             if (FAILURE_EVENTS.has(event.event)) return { kind: 'hold' };
-            if (event.event === 'delivered') deliveredAt = Math.max(deliveredAt ?? 0, conservativeMs);
+            if (event.event === 'delivered') deliveredAt = Math.max(deliveredAt ?? 0, observed.conservativeMs);
             else if (!OTHER_EVENTS.has(event.event)) return { kind: 'hold' };
         }
         const domain = binding.recipient.slice(binding.recipient.lastIndexOf('@') + 1).toLowerCase();
