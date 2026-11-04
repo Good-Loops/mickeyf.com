@@ -3,17 +3,16 @@ import { createServer } from 'node:http';
 import { existsSync, realpathSync } from 'node:fs';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { delimiter, join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { test } from 'node:test';
 import { gunzipSync } from 'node:zlib';
 
 function npmCli() {
-    if (process.env.npm_execpath && existsSync(process.env.npm_execpath)) return process.env.npm_execpath;
-    for (const directory of (process.env.PATH ?? '').split(delimiter)) {
-        const path = process.platform === 'win32' ? join(directory, 'node_modules/npm/bin/npm-cli.js') : join(directory, 'npm');
-        if (existsSync(path)) return realpathSync(path);
-    }
-    throw new Error('npm CLI was not found');
+    const nodeDirectory = dirname(process.execPath);
+    const path = process.platform === 'win32' ? join(nodeDirectory, 'node_modules/npm/bin/npm-cli.js')
+        : join(nodeDirectory, '../lib/node_modules/npm/bin/npm-cli.js');
+    if (!existsSync(path)) throw new Error('npm CLI was not found beside Node.js');
+    return realpathSync(path);
 }
 
 test('npm audit sends vendored minimatch and TypeDoc versions and reports their advisories', { timeout: 70000 }, async t => {
