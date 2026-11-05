@@ -37,7 +37,8 @@ export function prepareMaintenanceStage(service, source) {
     container.command = ['node'];
     container.args = [`--import=data:text/javascript;base64,${Buffer.from(source).toString('base64')}`, '--eval', '0'];
     const traffic = [...structuredClone(service.traffic), { type: REVISION_TYPE, revision: MAINTENANCE, tag: TAG }];
-    return { uid: service.uid, generation: service.generation, baseline, template, traffic,
+    return { uid: service.uid, generation: service.generation, baseline, template, traffic, baseTraffic: structuredClone(service.traffic),
+        revision: MAINTENANCE, tag: TAG, restoreRevision: RESTORE,
         patch: { name: SERVICE, etag: service.etag, template, traffic } };
 }
 
@@ -64,25 +65,28 @@ export function verifyMaintenanceRestored(service, plan) {
 }
 
 /** The provider supplies bounded read/patch/wait and a synthetic-only smoke test. */
-export async function executeMaintenanceStage(provider, source) {
-    const plan = prepareMaintenanceStage(await provider.read(), source);
+export async function executeMaintenanceStage(provider, source, operations = {}) {
+    const prepare = operations.prepare ?? prepareMaintenanceStage;
+    const prepareRestore = operations.prepareRestore ?? prepareMaintenanceRestore;
+    const verifyRestored = operations.verifyRestored ?? verifyMaintenanceRestored;
+    const plan = prepare(await provider.read(), source);
     let issuePossible = false, failure, smoke;
     try {
         issuePossible = true; // A timeout can hide a successful request; reconcile by reading, never retry it.
         await provider.stage(plan.patch);
         const staged = await provider.wait(plan, 'stage');
-        prepareMaintenanceRestore(staged, plan);
+        prepareRestore(staged, plan);
         assert(staged.terminalCondition?.state === 'CONDITION_SUCCEEDED', 'Maintenance revision is not ready');
-        smoke = await provider.smoke(staged, TAG);
+        smoke = await provider.smoke(staged, plan.tag);
     } catch (error) { failure = error; }
     if (issuePossible) {
         try {
             const settled = await provider.wait(plan, 'stage');
             if (settled.generation !== plan.generation) {
-                await provider.restore(prepareMaintenanceRestore(settled, plan));
-                verifyMaintenanceRestored(await provider.wait(plan, 'restore'), plan);
+                await provider.restore(prepareRestore(settled, plan));
+                verifyRestored(await provider.wait(plan, 'restore'), plan);
             } else {
-                assert(equal(settled.template, plan.baseline) && equal(trafficShape(settled.traffic), trafficShape(BASE_TRAFFIC)),
+                assert(equal(settled.template, plan.baseline) && equal(trafficShape(settled.traffic), trafficShape(plan.baseTraffic)),
                     'Stage outcome is uncertain; inspect before retrying');
             }
         } catch (restoreError) {
@@ -91,7 +95,7 @@ export async function executeMaintenanceStage(provider, source) {
         }
     }
     if (failure) throw failure;
-    return { revision: MAINTENANCE, tag: TAG, restoredRevision: RESTORE, smoke };
+    return { revision: plan.revision, tag: plan.tag, restoredRevision: plan.restoreRevision, smoke };
 }
 
 export const maintenanceStageIds = Object.freeze({ revision: MAINTENANCE, restoreRevision: RESTORE, tag: TAG });
