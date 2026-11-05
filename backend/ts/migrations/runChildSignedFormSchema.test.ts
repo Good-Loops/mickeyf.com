@@ -57,10 +57,10 @@ test('clean source is actual exact HEAD plus no tracked/untracked drift, using f
 });
 
 test('authenticated cloud reader subprocess strips SQL credentials and inherited executable hooks', () => {
-    const result = childSchemaPrerequisiteEnvironment({ ...env, Path: 'synthetic-bin', USERPROFILE: 'synthetic-user',
+    const result = childSchemaPrerequisiteEnvironment({ ...env, Path: 'synthetic-bin', PATHEXT: '.COM;.EXE;.BAT;.CMD', USERPROFILE: 'synthetic-user',
         CLOUDSDK_CONFIG: 'synthetic-auth-config', NODE_OPTIONS: '--require unreviewed', NODE_PATH: 'unreviewed',
         GOOGLE_APPLICATION_CREDENTIALS: 'unreviewed', DB_PASS: 'private', REGISTRATION_AUDIENCE: 'general' });
-    assert.deepEqual(result, { Path: 'synthetic-bin', USERPROFILE: 'synthetic-user', CLOUDSDK_CONFIG: 'synthetic-auth-config' });
+    assert.deepEqual(result, { Path: 'synthetic-bin', PATHEXT: '.COM;.EXE;.BAT;.CMD', USERPROFILE: 'synthetic-user', CLOUDSDK_CONFIG: 'synthetic-auth-config' });
 });
 
 test('cloud reader can use system trust without inheriting TLS bypasses or alternate CA files', () => {

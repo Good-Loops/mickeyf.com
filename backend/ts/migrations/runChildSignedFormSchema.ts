@@ -52,7 +52,7 @@ export function childSchemaCommandSettings(env: Environment) {
 
 export function childSchemaPrerequisiteEnvironment(env: Environment): NodeJS.ProcessEnv {
     // The cloud reader never needs SQL credentials or Node preload hooks.
-    const allowed = new Set(['PATH', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'TMPDIR', 'LANG', 'LC_ALL',
+    const allowed = new Set(['PATH', 'PATHEXT', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'TMPDIR', 'LANG', 'LC_ALL',
         'HOME', 'USERPROFILE', 'APPDATA', 'LOCALAPPDATA', 'CLOUDSDK_CONFIG', 'CLOUDSDK_PYTHON', 'CLOUDSDK_PYTHON_SITEPACKAGES']);
     const filtered = Object.fromEntries(Object.entries(env).filter(([key, value]) => allowed.has(key.toUpperCase()) && typeof value === 'string'));
     // Windows-managed trusted roots may be required; this retains TLS verification.
