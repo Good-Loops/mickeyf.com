@@ -3,10 +3,11 @@ import { API_BASE } from '@/config/apiConfig';
 import { apiFetch } from '@/services/apiFetch';
 import { capturePageOwnership } from '@/services/pageOwnership';
 import type { PageRequestInit } from '@/services/pageOwnership';
+import type { ParentLanguage } from './parentAccountText';
 
 type Warning = { warningId: string; acknowledged: boolean; notice: { version: string; en: string; ptBR: string } };
 type Status = { kind: 'loading' } | { kind: 'empty' } | { kind: 'unavailable' } | { kind: 'warning'; warning: Warning };
-type Props = { childAccountId: string; sessionGeneration: number; refreshKey: number; selectionIsCurrent: () => boolean;
+type Props = { language?: ParentLanguage; childAccountId: string; sessionGeneration: number; refreshKey: number; selectionIsCurrent: () => boolean;
     captureAccountAction: () => number; captureSessionGeneration: () => number };
 
 function readWarning(value: unknown): Warning | null | undefined {
@@ -23,8 +24,9 @@ function readWarning(value: unknown): Warning | null | undefined {
 }
 
 /** This candidate requires a separately qualified backend and is never rendered by default. */
-export default function ParentInactivityWarning({ childAccountId, sessionGeneration, refreshKey, selectionIsCurrent,
+export default function ParentInactivityWarning({ language = 'en', childAccountId, sessionGeneration, refreshKey, selectionIsCurrent,
     captureAccountAction, captureSessionGeneration }: Props) {
+    const tr = (en: string, pt: string) => language === 'pt-BR' ? pt : en;
     const [status, setStatus] = useState<Status>({ kind: 'loading' });
     const [retry, setRetry] = useState(0);
     const [busy, setBusy] = useState(false);
@@ -69,17 +71,16 @@ export default function ParentInactivityWarning({ childAccountId, sessionGenerat
         finally { if (active.current === controller) { active.current = null; if (isCurrent()) setBusy(false); } }
     }
 
-    if (status.kind === 'loading') return <p>Checking for an inactivity warning.</p>;
+    if (status.kind === 'loading') return <p>{tr('Checking for an inactivity warning.', 'Verificando se há aviso de inatividade.')}</p>;
     if (status.kind === 'empty') return null;
-    if (status.kind === 'unavailable') return <p role="status">We could not check the inactivity warning. <button type="button" onClick={() => setRetry(value => value + 1)}>Try again</button></p>;
-    return <section aria-label="Child account inactivity warning">
-        <h3>Inactivity warning</h3>
+    if (status.kind === 'unavailable') return <p role="status">{tr('We could not check the inactivity warning.', 'Não foi possível consultar o aviso de inatividade.')} <button type="button" onClick={() => setRetry(value => value + 1)}>{tr('Try again', 'Tentar novamente')}</button></p>;
+    return <section aria-label={tr('Child account inactivity warning', 'Aviso de inatividade da conta infantil')} lang={language}>
+        <h3>{tr('Inactivity warning', 'Aviso de inatividade')}</h3>
         <p lang="en">{status.warning.notice.en}</p>
         <p lang="pt-BR">{status.warning.notice.ptBR}</p>
         {status.warning.notice.version.startsWith('child-inactivity-nonresponse-')
-            ? <p>Use “Keep this child account active” below to restart the timer.
-                <span lang="pt-BR"> Use o botão abaixo para manter a conta ativa e reiniciar o prazo.</span></p>
-            : status.warning.acknowledged ? <p role="status">You acknowledged this warning.</p> :
-            <button type="button" disabled={busy} onClick={() => void acknowledge()}>I have read this warning</button>}
+            ? <p>{tr('Use “Keep this child account active” below to restart the timer.', 'Use “Manter esta conta infantil ativa” abaixo para reiniciar o prazo.')}</p>
+            : status.warning.acknowledged ? <p role="status">{tr('You acknowledged this warning.', 'Você confirmou a leitura deste aviso.')}</p> :
+            <button type="button" disabled={busy} onClick={() => void acknowledge()}>{tr('I have read this warning', 'Li este aviso')}</button>}
     </section>;
 }

@@ -27,7 +27,7 @@ const nodes = value => !value || typeof value !== 'object' ? [] : [value, ...[va
 const text = value => typeof value === 'string' ? value : typeof value === 'object' && value ? [value.props?.children].flat(Infinity).map(text).join(' ') : '';
 const reply = value => ({ ok:true, json:async () => value });
 
-function mount(t) {
+function mount(t, language = 'en') {
     const slots=[], effects=[], requests=[]; let cursor=0, dirty=false, tree;
     const childAccountId=randomUUID(), warningId=randomUUID();
     let generation=1, refreshKey=0, selectionCurrent=true;
@@ -37,7 +37,7 @@ function mount(t) {
         ref(initial){return slots[cursor++]??={current:initial};},
         effect(callback,deps){const index=cursor++;const before=slots[index];if(!before||deps.some((v,i)=>!Object.is(v,before.deps[i]))){const slot=slots[index]={deps,cleanup:before?.cleanup};effects.push(()=>{slot.cleanup?.();slot.cleanup=callback();});}},
     };
-    const render=()=>{cursor=0;dirty=false;tree=Component({childAccountId,sessionGeneration:1,refreshKey,selectionIsCurrent,captureSessionGeneration,captureAccountAction});effects.splice(0).forEach(run=>run());};
+    const render=()=>{cursor=0;dirty=false;tree=Component({language,childAccountId,sessionGeneration:1,refreshKey,selectionIsCurrent,captureSessionGeneration,captureAccountAction});effects.splice(0).forEach(run=>run());};
     const settle=async()=>{for(let i=0;i<8;i++){await new Promise(resolve=>setImmediate(resolve));if(dirty)render();}assert.equal(dirty,false);};
     const button=label=>nodes(tree).find(node=>node.type==='button'&&text(node).includes(label));
     const warning={warningId,acknowledged:false,notice:{version:'test-version',en:'Exact English warning.',ptBR:'Aviso exato em português.'}};
@@ -83,4 +83,16 @@ test('keeping an account refreshes the warning instead of leaving a stale acknow
 test('a late warning response after changing selection cannot expose the old child notice',async t=>{
     const view=mount(t);view.render();await view.settle();view.changeSelection();view.requests[0].resolve(reply({warning:view.warning}));await view.settle();
     assert.doesNotMatch(view.text(),/Exact English warning/u);assert.equal(view.button('I have read'),undefined);
+});
+
+test('Portuguese warning retry preserves the server notice and distinguishes Keep from acknowledgment',async t=>{
+    const view=mount(t,'pt-BR');view.render();await view.settle();
+    view.requests[0].resolve(reply({warning:{...view.warning,notice:{}}}));await view.settle();
+    assert.match(view.text(),/Não foi possível consultar o aviso/u);
+    view.button('Tentar novamente').props.onClick();await view.settle();
+    view.requests[1].resolve(reply({warning:{...view.warning,notice:{...view.warning.notice,version:'child-inactivity-nonresponse-test'}}}));await view.settle();
+    assert.match(view.text(),/Aviso exato em português/u);
+    assert.match(view.text(),/Manter esta conta infantil ativa.*reiniciar o prazo/u);
+    assert.equal(view.button('Li este aviso'),undefined);
+    assert.equal(view.requests.length,2);
 });

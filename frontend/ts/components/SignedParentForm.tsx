@@ -103,7 +103,7 @@ function PortugueseSignedParentForm({ request, policy }: { request: SignedParent
 export default function SignedParentForm({ request, policy }: { request: SignedParentFormRequest; policy: Extract<ParentConfig, { enabled: true }> }) {
     const contentRef = useRef<HTMLDivElement>(null);
     if (request.country === 'BR') return <PortugueseSignedParentForm request={request} policy={policy} />;
-    return <article className="signed-parent-form" aria-label="Signed parent consent form">
+    return <article className="signed-parent-form" lang="en" aria-label="Signed parent consent form">
         <div ref={contentRef}>
         <h3>Ludolume parent consent form</h3>
         <p>{notice.operatorName}<br />{notice.operatorAddress}<br />{notice.operatorTelephone}<br />{notice.contactEmail}</p>

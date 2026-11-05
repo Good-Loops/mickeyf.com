@@ -5,12 +5,23 @@ import { apiFetch } from '@/services/apiFetch';
 import { API_BASE } from '@/config/apiConfig';
 import PrivacyNoticeLink from './PrivacyNoticeLink';
 import { capturePageOwnership, requestIsCurrent } from '@/services/pageOwnership';
+import type { ParentLanguage } from './parentAccountText';
+import notice from '../../../shared/privacyNotice.json' with { type: 'json' };
+
+const portugueseFeedback: Record<string, string> = {
+    'Leaderboard choices could not be loaded. Please retry.': 'Não foi possível carregar as opções dos rankings. Tente novamente.',
+    'Leaderboard participation is enabled.': 'A participação nos rankings está habilitada.',
+    'Public entries have been removed. Your account and private scores are kept.': 'Os registros públicos foram removidos. Sua conta e seus resultados privados foram mantidos.',
+    'The change could not be confirmed. Refresh before retrying. A recorded removal request may still complete.': 'Não foi possível confirmar a alteração. Atualize antes de tentar novamente. Uma solicitação de remoção registrada ainda pode ser concluída.',
+    'Approval cancelled. Any submitted change may still complete; refresh to check.': 'Aprovação cancelada. Uma alteração já enviada ainda pode ser concluída; atualize para conferir.',
+};
 
 const api = createParentRegistrationApi(API_BASE, apiFetch);
-export default function ScoreParticipation({ childAccountId = null, authenticated, accountKey, sessionGeneration, selectionIsCurrent, captureAccountAction, captureSessionGeneration }: {
-    childAccountId?: string | null; authenticated: boolean; accountKey: string; sessionGeneration: number; selectionIsCurrent?: () => boolean;
+export default function ScoreParticipation({ language = 'en', childAccountId = null, authenticated, accountKey, sessionGeneration, selectionIsCurrent, captureAccountAction, captureSessionGeneration }: {
+    language?: ParentLanguage; childAccountId?: string | null; authenticated: boolean; accountKey: string; sessionGeneration: number; selectionIsCurrent?: () => boolean;
     captureAccountAction?: () => number; captureSessionGeneration?: () => number;
 }) {
+    const tr = (en: string, pt: string) => language === 'pt-BR' ? pt : en;
     const [policy, setPolicy] = useState<ScoreParticipationConfig | null>(null);
     const [status, setStatus] = useState<{ visibility: 'public' | 'private'; canPublish: boolean } | null>(null);
     const [clients, setClients] = useState<PublicProviderClient[]>([]);
@@ -72,22 +83,24 @@ export default function ScoreParticipation({ childAccountId = null, authenticate
         finally { if (operation.current === controller) { const canUpdate = !controller.signal.aborted; cancel(); if (canUpdate) setBusy(false); } }
     }
     if (!authenticated) return null;
-    return <section className="score-participation" aria-label={childAccountId ? 'Child leaderboard participation' : 'Your leaderboard participation'}>
-        <h2>Public leaderboards</h2>
-        <p>Participation shows the chosen nickname and game results, including existing and future best scores. It does not show parent contact details or the account's age, country or ID.</p>
-        <p>Use a nickname you are comfortable making public. You can remove public entries here while keeping the account and its private scores.</p>
-        {status && <p className="score-participation__status">Current visibility: <strong>{status.visibility}</strong></p>}
+    return <section className="score-participation" lang={language} aria-label={childAccountId ? tr('Child leaderboard participation', 'Participação da criança nos rankings') : tr('Your leaderboard participation', 'Sua participação nos rankings')}>
+        <h2>{tr('Public leaderboards', 'Rankings públicos')}</h2>
+        <p>{tr("Participation shows the chosen nickname and game results, including existing and future best scores. It does not show parent contact details or the account's age, country or ID.", 'A participação mostra o apelido escolhido e os resultados dos jogos, incluindo as melhores pontuações atuais e futuras. Não mostra os dados de contato do responsável nem a idade, o país ou o identificador da conta.')}</p>
+        <p>{tr('Use a nickname you are comfortable making public. You can remove public entries here while keeping the account and its private scores.', 'Use um apelido que você aceite tornar público. Você pode remover os registros públicos aqui e manter a conta e seus resultados privados.')}</p>
+        {status && <p className="score-participation__status">{tr('Current visibility:', 'Visibilidade atual:')} <strong>{status.visibility === 'public' ? tr('public', 'pública') : tr('private', 'privada')}</strong></p>}
         {policy?.enabled && status?.canPublish && <>
-            <PrivacyNoticeLink url={policy.privacyNoticeUrl} />
-            <label className="score-participation__consent"><input type="checkbox" checked={consent} disabled={busy} onChange={event => setConsent(event.target.checked)} /><span>{policy.consentText}</span></label>
+            <PrivacyNoticeLink url={policy.privacyNoticeUrl} portuguese={language === 'pt-BR'} />
+            <label className="score-participation__consent"><input type="checkbox" checked={consent} disabled={busy} onChange={event => setConsent(event.target.checked)} /><span><span lang="en">{policy.consentText}</span>
+                {language === 'pt-BR' && policy.consentText === notice.consent.publicScores.text && policy.consentVersion === notice.consent.publicScores.version
+                    && <><br /><span lang="pt-BR">{notice.signedParentForm.ptBR.publicConsent}</span></>}</span></label>
             {clients.map(client => <button key={client.clientKey} type="button" disabled={busy || !consent}
-                onClick={() => void change(client)}>Join leaderboards with {client.provider === 'google' ? 'Google' : 'Apple'}</button>)}
+                onClick={() => void change(client)}>{tr('Join leaderboards with', 'Participar dos rankings com')} {client.provider === 'google' ? 'Google' : 'Apple'}</button>)}
         </>}
-        {status && !status.canPublish && <p>New public participation is not currently available for this account.</p>}
-        <button type="button" disabled={busy || !status} onClick={() => void change()}>Remove public entries</button>
+        {status && !status.canPublish && <p>{tr('New public participation is not currently available for this account.', 'No momento, esta conta não pode iniciar uma participação pública.')}</p>}
+        <button type="button" disabled={busy || !status} onClick={() => void change()}>{tr('Remove public entries', 'Remover registros públicos')}</button>
         {busy && <button type="button" onClick={() => { cancel(); setBusy(false); setConsent(false);
-            setFeedback('Approval cancelled. Any submitted change may still complete; refresh to check.'); }}>Cancel approval</button>}
-        <button type="button" disabled={busy} onClick={() => setRetry(value => value + 1)}>Refresh leaderboard choice</button>
-        {feedback && <p role="status">{feedback}</p>}
+            setFeedback('Approval cancelled. Any submitted change may still complete; refresh to check.'); }}>{tr('Cancel approval', 'Cancelar aprovação')}</button>}
+        <button type="button" disabled={busy} onClick={() => setRetry(value => value + 1)}>{tr('Refresh leaderboard choice', 'Atualizar opção dos rankings')}</button>
+        {feedback && <p role="status">{language === 'pt-BR' ? portugueseFeedback[feedback] ?? feedback : feedback}</p>}
     </section>;
 }

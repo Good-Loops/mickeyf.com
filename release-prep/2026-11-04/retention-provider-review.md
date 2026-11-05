@@ -32,6 +32,15 @@ binding check passed. This clarification does not adopt the proposed 30/45-day
 schedule below or complete item 1.3. Final deployment must use the matching new
 notice/form versions; older approvals must not be relabeled as the new version.
 
+The owner also approved built-in Portuguese parent controls. The candidate now
+offers English/Português on the existing parent page, including Keep, withdrawal,
+family deletion, leaderboard choices and inactivity guidance. Localized typed
+confirmations map to the unchanged API operations; switching language clears the
+entered confirmation and family acknowledgment. Existing provider/session/target
+checks remain. Server-supplied consent is preserved, with a Portuguese public
+consent translation shown only for the matching known text/version. This closes
+the identified source-language gap, not the signed-device or production checks.
+
 The session cleanup passed backend TypeScript checking, 25 focused unit/router
 checks and 46 SQL integration checks on disposable MySQL 8.0.31. The SQL cases
 cover cross-account expiry, non-UTC connections, live/renewed-session preservation

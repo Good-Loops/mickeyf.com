@@ -60,8 +60,11 @@ anonymous or that the message contains no tracking pixel.
 Later work on 31 October prepared Portuguese translations for all notice
 sections and the Brazilian form and country-selected registration controls;
 bound both language versions to the form policy digest; and corrected the
-expired-request wording. Some account-management screens remain English. These
-source changes do not resolve the operational and regional qualification gaps
+expired-request wording. On 5 November, the owner approved translations of the
+remaining parent controls; the candidate now provides an English/Português choice
+for account management, typed deletion confirmations, leaderboard controls and
+inactivity guidance. This is not an app-wide localization or signed-device result.
+These source changes do not resolve the remaining regional/operating requirements
 below and are not a published notice.
 
 ## Newly published Brazilian guidance

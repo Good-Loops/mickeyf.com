@@ -105,3 +105,44 @@ test('a managed child entering parent accounts cannot discover or start parent i
     assert.deepEqual(view.find(node=>node.type==='ParentRegistration').props.clients,[]);
     assert.equal(view.acquisition.args,undefined);
 });
+
+test('Portuguese withdrawal requires its displayed phrase, clears language-switched confirmation and preserves uncertain-result guidance',async t=>{
+    const view=mount(t);view.render();await view.settle();
+    view.button('Português').props.onClick();view.render();await view.settle();
+    assert.match(view.text(),/Contas de responsáveis e crianças/u);
+    assert.equal(view.find(node=>node.type==='ParentRegistration').props.language,'pt-BR');
+    view.find(node=>node.type==='select').props.onChange({target:{value:view.child.accountId}});view.render();
+    const enter=value=>{view.find(node=>node.props?.name==='withdraw-confirmation').props.onChange({target:{value}});view.render();};
+    enter('WITHDRAW AND DELETE');assert.equal(view.button('Confirmar exclusão').props.disabled,true);
+    enter('RETIRAR E EXCLUIR');assert.equal(view.button('Confirmar exclusão').props.disabled,false);
+    view.button('English').props.onClick();view.render();
+    assert.equal(view.find(node=>node.props?.name==='withdraw-confirmation').props.value,'');
+    assert.equal(view.button('Confirm deletion').props.disabled,true);assert.equal(view.acquisition.args,undefined);
+    view.button('Português').props.onClick();view.render();enter('RETIRAR E EXCLUIR');
+    view.button('Confirmar exclusão').props.onClick();await view.settle();
+    assert.equal(view.button('English').props.disabled,true);
+    view.acquisition.resolve('synthetic-token');await view.settle();
+    const grant=token();view.proofs[0].resolve({grant,purpose:'withdraw-child',expiresInSeconds:250});await view.settle();
+    assert.equal(view.withdrawals[0].args[0],grant);
+    view.withdrawals[0].reject(new Error('response lost'));await view.settle();
+    assert.match(view.text(),/Não foi possível confirmar a exclusão.*ainda pode ser concluída/u);
+    assert.equal(view.auth.isAuthenticated,true);
+});
+
+test('Portuguese family deletion retains list acknowledgment, exact target IDs and fresh provider approval',async t=>{
+    const view=mount(t);const deletion=deferred();let started=0;const calls=[];
+    globalThis[key].api.beginFamilyDeletion=async (_config,_client,ids)=>{started++;assert.deepEqual(ids,[view.child.accountId]);return view.challenge;};
+    view.auth.deleteFamily=(...args)=>{calls.push(args);return deletion.promise;};
+    view.render();await view.settle();view.button('Português').props.onClick();view.render();
+    const enter=value=>{view.find(node=>node.props?.name==='family-confirmation').props.onChange({target:{value}});view.render();};
+    enter('EXCLUIR TODAS AS CONTAS');assert.equal(view.button('Excluir família com').props.disabled,true);
+    view.find(node=>node.type==='input'&&node.props.type==='checkbox').props.onChange({target:{checked:true}});view.render();
+    enter('DELETE MY FAMILY');assert.equal(view.button('Excluir família com').props.disabled,true);
+    enter('EXCLUIR TODAS AS CONTAS');view.button('Excluir família com').props.onClick();await view.settle();
+    assert.equal(started,1);assert.equal(calls.length,0);
+    view.acquisition.resolve('synthetic-token');await view.settle();
+    const grant=token();view.proofs[0].resolve({grant,purpose:'delete-family',expiresInSeconds:250});await view.settle();
+    assert.equal(calls[0][0],grant);assert.deepEqual(calls[0][1],[view.child.accountId]);
+    deletion.reject(new Error('unconfirmed'));await view.settle();
+    assert.match(view.text(),/Não foi possível confirmar a exclusão da família.*nova confirmação/u);
+});
