@@ -17,6 +17,7 @@ import type { RetirementWitness } from './retirementWitnessStorage';
 import { verifyRecoveryCheckpointSchema } from './recoveryCheckpointSchema';
 import { applyRecoveryCheckpointSetup, planRecoveryCheckpointSetup } from './recoveryCheckpointSetup';
 import { renderRuntimeGrantStatements } from '../security/runtimeGrantManifest';
+import { assertNoRetentionRuntimeWriters } from './retentionReconciliation';
 
 const database = 'mickeyf_migration_test';
 let lineage: string;
@@ -65,6 +66,38 @@ before(async () => {
 });
 
 after(async () => { if (connection) await connection.end(); });
+
+test('writer fence accepts an enabled PROCESS role and still detects live runtime sessions', async () => {
+    assert.equal(process.env.MIGRATION_TEST_ROOT_PASSWORD, 'migration-test-root-only');
+    const port = Number(process.env.MIGRATION_TEST_PORT);
+    const root = await mysql.createConnection({ host: '127.0.0.1', port, user: 'root',
+        password: 'migration-test-root-only', database, multipleStatements: false });
+    let inspector: Connection | undefined, writer: Connection | undefined;
+    try {
+        await root.query("CREATE ROLE 'process_inspection_test'@'%'");
+        await root.query("GRANT PROCESS ON *.* TO 'process_inspection_test'@'%'");
+        await root.query("CREATE USER 'process_inspector_test'@'%' IDENTIFIED BY 'inspector-test-only'");
+        await root.query("GRANT 'process_inspection_test'@'%' TO 'process_inspector_test'@'%'");
+        await root.query("SET DEFAULT ROLE 'process_inspection_test'@'%' TO 'process_inspector_test'@'%'");
+        await root.query("CREATE USER 'cms_mickeyf'@'%' IDENTIFIED BY 'writer-test-only'");
+        inspector = await mysql.createConnection({ host: '127.0.0.1', port, user: 'process_inspector_test',
+            password: 'inspector-test-only', multipleStatements: false });
+        writer = await mysql.createConnection({ host: '127.0.0.1', port, user: 'cms_mickeyf',
+            password: 'writer-test-only', multipleStatements: false });
+        await assert.rejects(assertNoRetentionRuntimeWriters(inspector as unknown as PoolConnection), /not drained/u);
+        await writer.end(); writer = undefined;
+        await assertNoRetentionRuntimeWriters(inspector as unknown as PoolConnection);
+        await inspector.query('SET ROLE NONE');
+        await assert.rejects(assertNoRetentionRuntimeWriters(inspector as unknown as PoolConnection), /cannot verify/u);
+    } finally {
+        if (writer) await writer.end();
+        if (inspector) await inspector.end();
+        await root.query("DROP USER IF EXISTS 'cms_mickeyf'@'%'");
+        await root.query("DROP USER IF EXISTS 'process_inspector_test'@'%'");
+        await root.query("DROP ROLE IF EXISTS 'process_inspection_test'@'%'");
+        await root.end();
+    }
+});
 
 test('checkpoint runtime grant reads but cannot change the checkpoint', async () => {
     assert.equal(process.env.MIGRATION_TEST_ROOT_PASSWORD, 'migration-test-root-only');

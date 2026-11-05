@@ -187,6 +187,7 @@ jobs:
           npm --prefix backend run test:migrations
           node backend/scripts/run-apple-android-handoff-tests.mjs
           node backend/scripts/run-child-schema-tests.mjs
+          node backend/scripts/run-recovery-checkpoint-rehearsal.mjs
           npm --prefix backend run prod
 
       - name: Build and probe the final unprivileged image

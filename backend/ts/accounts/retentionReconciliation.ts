@@ -52,8 +52,20 @@ export async function assertNoRetentionRuntimeWriters(connection: AdminConnectio
     const [privileges] = await connection.query<RowDataPacket[]>({ sql: `SELECT COUNT(*) AS count
         FROM information_schema.USER_PRIVILEGES WHERE PRIVILEGE_TYPE='PROCESS'
         AND GRANTEE=CONCAT("'",SUBSTRING_INDEX(CURRENT_USER(),'@',1),"'@'",SUBSTRING_INDEX(CURRENT_USER(),'@',-1),"'")`, timeout: 10_000 });
-    if (!Array.isArray(privileges) || privileges.length !== 1 || ![1, '1'].includes(privileges[0].count)) {
+    if (!Array.isArray(privileges) || privileges.length !== 1 || ![0, '0', 1, '1'].includes(privileges[0].count)) {
         throw new Error('The administrator cannot verify writer sessions.');
+    }
+    if ([0, '0'].includes(privileges[0].count)) {
+        // SHOW GRANTS without FOR includes effective enabled-role privileges;
+        // USER_PRIVILEGES can hide the underlying role from a restricted user.
+        const [rows] = await connection.query<RowDataPacket[]>({ sql: 'SHOW GRANTS', timeout: 10_000 });
+        const hasProcess = Array.isArray(rows) && rows.length <= 100 && rows.some(row => {
+            const values = Object.values(row);
+            if (values.length !== 1 || typeof values[0] !== 'string') return false;
+            const match = /^GRANT ([A-Z_, ]+) ON \*\.\* TO /u.exec(values[0]);
+            return !!match && match[1].split(',').map(value => value.trim()).some(value => value === 'PROCESS' || value === 'ALL PRIVILEGES');
+        });
+        if (!hasProcess) throw new Error('The administrator cannot verify writer sessions.');
     }
     const [writers] = await connection.query<RowDataPacket[]>({ sql: `SELECT COUNT(*) AS count
         FROM information_schema.PROCESSLIST WHERE USER='cms_mickeyf' AND ID<>CONNECTION_ID()`, timeout: 10_000 });

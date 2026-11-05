@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { reconcileDeletedRetentionIntent, reconcileKeptRetentionIntent, reconcileRestoredDeletedIntent } from './retentionReconciliation';
+import { assertNoRetentionRuntimeWriters, reconcileDeletedRetentionIntent, reconcileKeptRetentionIntent, reconcileRestoredDeletedIntent } from './retentionReconciliation';
 import type { InactivitySnapshot } from './childInactivityPolicy';
 import type { InactivityStore, LockedInactivityTarget, RetentionIntent } from './childInactivityWorkflow';
 import type { RetentionResolution } from './gcsRetentionJournal';
@@ -13,6 +13,23 @@ const intent: RetentionIntent = { parentId, childId, warningId: '33333333-3333-4
     targetDigest: 'a'.repeat(64), channel: 'in-app', noticeDigest: 'b'.repeat(64), receiptDigest: 'c'.repeat(64) };
 const proof = { accountId: parentId, sessionId: 'A'.repeat(43) };
 const key = Buffer.alloc(32, 4);
+
+test('writer inspection accepts only effective global PROCESS privileges', async () => {
+    const connection = (grant: string) => ({ async query(query: { sql: string }) {
+        if (query.sql.includes('USER_PRIVILEGES')) return [[{ count: 0 }], []];
+        if (query.sql === 'SHOW GRANTS') return [[{ grant }], []];
+        if (query.sql.includes('PROCESSLIST')) return [[{ count: 0 }], []];
+        throw new Error('Unexpected query');
+    } }) as unknown as PoolConnection;
+    for (const grant of ['GRANT SELECT, PROCESS ON *.* TO `operator`@`%`',
+        'GRANT ALL PRIVILEGES ON *.* TO `operator`@`%`']) {
+        await assertNoRetentionRuntimeWriters(connection(grant));
+    }
+    for (const grant of ['GRANT `PROCESS`@`%` TO `operator`@`%`',
+        'GRANT PROCESS ON `cms`.* TO `operator`@`%`', 'GRANT SELECT ON *.* TO `operator`@`%`']) {
+        await assert.rejects(assertNoRetentionRuntimeWriters(connection(grant)), /cannot verify/u);
+    }
+});
 
 function fixture({ active = true, exists = true, newActivity = '2024-01-01T00:00:00.000000Z' } = {}) {
     let resolution: RetentionResolution | undefined;
