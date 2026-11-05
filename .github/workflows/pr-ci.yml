@@ -111,6 +111,7 @@ jobs:
           npm run test:cloudbuild-candidate
           npm run test:frozen-backend
           npm run test:receipt-cleanup
+          node --test scripts/recovery-maintenance-response.test.mjs
 
       - name: Test backend development and migration launchers
         run: |
