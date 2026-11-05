@@ -5,6 +5,46 @@ that a jurisdiction's requirements have been met, an authorization to publish
 the candidate notice, or a change to production. Review the deployed build,
 configuration, and owner-operated process again before release.
 
+## Current checkpoint — 4 November 2026
+
+This checkpoint supersedes older implementation and storage-status statements
+below; the historical review is retained for its unresolved findings.
+
+- Release items 3.4 and 3.5 passed: compatible production backend and fallback,
+  signed-form and four activity/warning schemas, restricted runtime grants,
+  and synthetic production activity/Keep/concurrency/SQL-restoration checks.
+  Child creation and inactivity processing remain off; adult BR/US sign-up is open.
+- The second-computer encrypted-archive recovery and unmatched synthetic email
+  intake/known-copy cleanup passed (2.2). Matched-form owner approval, rejection,
+  expiry and withdrawal still require the separate 2.3 qualification.
+- The implemented policy warns after three calendar years of inactivity and
+  waits at least twelve further calendar months from recorded delivery. Activity
+  and Keep account reset the clock; opens, clicks and free-form replies do not.
+  Uncertain history/contact/delivery holds automatic deletion for review.
+- The unpublished notice candidate is `privacy-2026-11-04.1`; the versioned
+  signed form is `signed-parent-form-2026-11-04.2`. Both languages now describe
+  this behavior, Brevo, anonymous engagement reporting and separate history.
+  Form text remains part of the policy binding. No new notice has been published.
+- The Brevo sender and anonymous reporting were previously qualified (3.2).
+  The failure callback awaits the owner's private token entry. The new
+  twice-daily maintenance job is paused and its two alert policies disabled
+  until activation and live observation. A staged configuration is not an
+  operating cleanup cadence.
+- Still unresolved under 1.3: precise retention/erasure periods for independent
+  activity and warning objects, retention journals, on-demand backups and
+  provider/mailbox copies; treatment and review of persistent holds; provider
+  roles/transfers and remaining Brazil/US safeguards. Current history buckets
+  have no lifecycle expiry and have seven-day soft delete. Do not infer that
+  account SQL deletion removes these copies, or invent a universal deadline.
+- Signed iOS inventory/device flows (1.2/5.3), matched-form operation (2.3),
+  final warning/deletion/recovery qualification (3.6-3.8), and the Europe/UK
+  expansion review remain open. This checkpoint is not privacy sign-off.
+
+Brevo references: [anonymous open/click reporting](https://help.brevo.com/hc/en-us/articles/11643306229906-Can-I-anonymize-the-tracking-of-opens-and-clicks-for-my-emails)
+and [per-recipient pixel behavior](https://developers.brevo.com/changelog/2026/7/21).
+Anonymized engagement reporting does not mean that warning delivery records are
+anonymous or that the message contains no tracking pixel.
+
 Later work on 31 October prepared Portuguese translations for all notice
 sections and the Brazilian form and country-selected registration controls;
 bound both language versions to the form policy digest; and corrected the
