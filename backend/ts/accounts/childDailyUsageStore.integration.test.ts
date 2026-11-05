@@ -13,6 +13,27 @@ let admin: Connection;
 let pool: Pool;
 const child = randomUUID();
 const policy = { timeZone: 'America/Sao_Paulo', dailyLimitMs: 120_000 };
+// The rehearsal executes a fixed statement only after the draft matches it.
+const reviewedDraft = `-- Draft only: do not apply until grants, deletion/recovery and rollout are qualified.
+-- One current-day aggregate per managed child; no individual activity log.
+CREATE TABLE parent_child_daily_usage (
+    child_uuid CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    time_zone VARCHAR(100) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    daily_limit_ms INT UNSIGNED NOT NULL,
+    usage_day CHAR(10) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    used_ms INT UNSIGNED NOT NULL,
+    accounted_at_ms BIGINT UNSIGNED NOT NULL,
+    active_until_ms BIGINT UNSIGNED NULL,
+    PRIMARY KEY (child_uuid),
+    KEY idx_child_daily_usage_accounted_at (accounted_at_ms),
+    CONSTRAINT fk_child_daily_usage_consent FOREIGN KEY (child_uuid)
+        REFERENCES parent_child_consents (child_uuid) ON DELETE CASCADE ON UPDATE RESTRICT,
+    CONSTRAINT chk_child_daily_usage_bounds CHECK (
+        daily_limit_ms BETWEEN 60000 AND 86400000 AND used_ms <= 86400000
+        AND (active_until_ms IS NULL OR (active_until_ms >= accounted_at_ms
+            AND active_until_ms <= accounted_at_ms + 30000))
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;`;
 
 before(async () => {
     assert.equal(process.env.NODE_ENV, 'test');
@@ -41,7 +62,9 @@ before(async () => {
     await admin.query(`CREATE TABLE account_sessions (account_uuid CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
         session_hash BINARY(32) NOT NULL, previous_session_hash BINARY(32) NULL,
         previous_valid_until DATETIME(6) NULL, expires_at DATETIME(6) NOT NULL) ENGINE=InnoDB`);
-    await admin.query(readFileSync(path.join(__dirname, '../../migrations/pending/draft_parent_child_daily_usage.sql'), 'utf8'));
+    const draft = readFileSync(path.join(__dirname, '../../migrations/pending/draft_parent_child_daily_usage.sql'), 'utf8');
+    assert.equal(draft.replace(/\r\n/gu, '\n').trim(), reviewedDraft);
+    await admin.query(reviewedDraft);
     await admin.query('INSERT INTO parent_child_consents (child_uuid) VALUES (?)', [child]);
     await admin.query("GRANT SELECT, INSERT, UPDATE, DELETE ON child_usage_test.parent_child_daily_usage TO 'migration_test'@'%'");
     for (const table of ['users', 'account_sessions', 'parent_child_consents']) {

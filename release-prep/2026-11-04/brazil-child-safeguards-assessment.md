@@ -58,7 +58,36 @@ time-limiting and monitoring functionality as a potential complaint. Apple
 Screen Time and Google Family Link offer some device/app controls, but their
 availability and coverage of web, guest and offline use must be verified; links
 to those products alone are not evidence that Ludolume's obligations are met.
-The owner's preference and a privacy-minimizing design remain to be settled.
+The owner chose to prepare an optional parent-set daily limit and a daily total
+for managed child accounts. The candidate stores one current aggregate and a
+time zone per child, rather than a history of individual actions. A short
+foreground lease can overcount by up to 30 seconds after disconnection.
+Turning the control off removes its setting and current total. An unscheduled
+draft cleanup can clear stale totals while retaining the setting. These pieces
+have local tests but are not integrated or deployed; the retention schedule,
+recovery copies, parent consent/disclosures and device behavior need review.
+The candidate does not cover signed-out guest use, offline use or other apps.
+
+### Draft disclosure for review, not the active notice
+
+**English:** If you set a daily limit for a managed child account, we store the
+limit, its time zone and one daily usage total to show and apply the control.
+Use is estimated while the account is online and may include up to 30 seconds
+after a connection ends. Turning off the control removes its setting and
+current total. It does not limit guest use, offline use or other apps. Recovery
+copies and the actual retention deadline still need to be confirmed.
+
+**Português:** Se você definir um limite diário para uma conta infantil
+supervisionada, armazenaremos o limite, seu fuso horário e um total diário de
+uso para mostrar e aplicar o controle. O uso é estimado enquanto a conta está
+online e pode incluir até 30 segundos após o fim da conexão. Desativar o
+controle remove a configuração e o total atual. Ele não limita o uso como
+visitante, offline ou em outros aplicativos. As cópias de recuperação e o prazo
+real de retenção ainda precisam ser confirmados.
+
+Before using this text, qualify the actual data flow and retention and decide
+whether a new parent permission and signed-form version are required. Do not
+change an existing signed consent silently.
 
 Sources: [Brazilian Senate, Law 15.211/2025, arts. 17–18 and 39](https://legis.senado.leg.br/norma/41465823/publicacao/41471709),
 [ANPD complaint examples](https://www.gov.br/anpd/pt-br/assuntos/eca-digital/denuncias-eca-digital),
