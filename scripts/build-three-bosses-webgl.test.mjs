@@ -85,7 +85,7 @@ const createFixture = async ({ commitSource = false } = {}) => {
   await writeFile(join(projectPath, "Packages", "manifest.json"), "{}\n", "utf8");
   await writeFile(
     join(projectPath, "ProjectSettings", "ProjectVersion.txt"),
-    "m_EditorVersion: 6000.3.8f1\n",
+    "m_EditorVersion: 6000.3.27f2\n",
     "utf8",
   );
   await writeFile(join(repoRoot, ".gitignore"), "unity/three-bosses/Library/\n", "utf8");
@@ -319,7 +319,7 @@ test("release mode writes a provenance-bound completion marker", async () => {
 
   const marker = JSON.parse(await readFile(join(outputPath, BUILD_COMPLETION_MARKER), "utf8"));
   assert.equal(marker.version, 2);
-  assert.equal(marker.provenance.unityEditorVersion, "6000.3.8f1");
+  assert.equal(marker.provenance.unityEditorVersion, "6000.3.27f2");
   assert.match(marker.provenance.sourceCommit, /^[a-f0-9]{40,64}$/u);
   assert.match(marker.provenance.unitySourceDigest, /^[a-f0-9]{64}$/u);
   assert.ok(marker.provenance.unitySourceFileCount > 0);

@@ -24,7 +24,7 @@ const loaderPayload = `${"loader".repeat(20000)}tail`;
 
 const releaseProvenance = Object.freeze({
   sourceCommit: "a".repeat(40),
-  unityEditorVersion: "6000.3.8f1",
+  unityEditorVersion: "6000.3.27f2",
   unitySourceDigest: "c".repeat(64),
   unitySourceFileCount: 5,
 });
