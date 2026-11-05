@@ -53,7 +53,10 @@ jobs:
         run: node --test scripts/typedoc-minimatch-compat.test.mjs scripts/typedoc-audit-visibility.test.mjs scripts/child-release-build.test.mjs
 
       - name: Test iOS privacy manifest inspection
-        run: python3 scripts/ios-privacy-manifests-test.py
+        run: |
+          python3 scripts/ios-privacy-manifests-test.py
+          python3 scripts/ios-upload-privacy-test.py
+          node --test scripts/ios-testflight.test.mjs scripts/ios-age-linkage.test.mjs
 
       - name: Test native notice cache path validation
         run: python3 frontend/scripts/native_notice_paths_test.py

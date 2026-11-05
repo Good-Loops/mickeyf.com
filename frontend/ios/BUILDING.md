@@ -70,6 +70,24 @@ archive and validate provider/SDK behavior before completing privacy labels.
 References: [Apple's privacy report instructions](https://developer.apple.com/documentation/bundleresources/describing-data-use-in-privacy-manifests)
 and [privacy manifests](https://developer.apple.com/documentation/bundleresources/privacy-manifest-files).
 
+### Privacy inventory from the uploaded build
+
+The protected upload job inventories the extracted IPA immediately after its
+signature, identity, entitlements and age-framework linkage pass verification,
+and before sending it to Apple. Its workflow summary records the source commit,
+build number, IPA SHA-256, manifest hashes and recognized collection declarations.
+Paths are hashed; domains and unknown values are counted rather than printed.
+Missing or malformed manifests stop upload, and the existing cleanup still runs.
+No signed app, raw manifest, provisioning profile or key is retained as an artifact.
+
+This is a custom inventory of the verified export, not an Xcode Organizer report
+or a runtime privacy assessment. Unknown counts and skipped symlinks require
+investigation; nested unknown fields and required-reason API details are not
+assessed. A summary produced before an upload failure does not prove Apple
+received the build. Historical builds cannot be reconstructed from this hook.
+The new hook still needs qualification in a future authorized macOS signing run;
+local synthetic tests alone do not inspect the current App Store draft.
+
 First cloud compile verified on 2026-09-10:
 [run 34494943864](https://github.com/Good-Loops/mickeyf.com/actions/runs/34494943864),
 development commit `aa83270262ce579826eab79bc85ee55f85139da9`. TypeScript and all
