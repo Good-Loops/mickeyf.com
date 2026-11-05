@@ -85,7 +85,7 @@ const createFixture = async ({ commitSource = false } = {}) => {
   await writeFile(join(projectPath, "Packages", "manifest.json"), "{}\n", "utf8");
   await writeFile(
     join(projectPath, "ProjectSettings", "ProjectVersion.txt"),
-    "m_EditorVersion: 6000.3.8f1\n",
+    "m_EditorVersion: 6000.3.27f2\n",
     "utf8",
   );
   await writeFile(join(repoRoot, ".gitignore"), "unity/three-bosses/Library/\n", "utf8");
@@ -106,6 +106,7 @@ const createFakeUnity = ({
   buildErrors = [],
   buildResult = "Succeeded",
   buildWarnings = [],
+  activeTarget = "WebGL",
   mutateDuringBuild,
   mutateDuringReimport,
   statusBuildId = "build-test",
@@ -116,6 +117,7 @@ const createFakeUnity = ({
 
   return async (args) => {
     const command = args[1];
+    if (command === "get_build_settings") return envelope({ activeBuildTarget: activeTarget });
     if (command === "editor_status") {
       return envelope({
         compiling: false,
@@ -261,6 +263,21 @@ test("restores arbitrary guarded bytes exactly and does not rewrite unchanged fi
   assert.equal((await stat(unchangedPath)).mtimeMs, unchangedMtime);
 });
 
+test("rejects a non-WebGL active target before submitting a build", async () => {
+  const { outputPath, projectPath, repoRoot } = await createFixture();
+  let submitted = false;
+  const fake = createFakeUnity({ activeTarget: "StandaloneWindows64" });
+  const invokeUnity = async (args) => {
+    if (args[1] === "build") submitted = true;
+    return fake(args);
+  };
+  await assert.rejects(() => runGuardedWebGlBuild({
+    invokeUnity, logger: quietLogger().logger, outputPath, projectPath, repoRoot,
+    sleep: async () => {},
+  }), /active build target to WebGL/u);
+  assert.equal(submitted, false);
+});
+
 test("restores the exact pre-build working bytes after a successful build", async () => {
   const { guardedBytes, outputPath, projectPath, repoRoot } = await createFixture();
   const { logger, messages } = quietLogger();
@@ -319,7 +336,7 @@ test("release mode writes a provenance-bound completion marker", async () => {
 
   const marker = JSON.parse(await readFile(join(outputPath, BUILD_COMPLETION_MARKER), "utf8"));
   assert.equal(marker.version, 2);
-  assert.equal(marker.provenance.unityEditorVersion, "6000.3.8f1");
+  assert.equal(marker.provenance.unityEditorVersion, "6000.3.27f2");
   assert.match(marker.provenance.sourceCommit, /^[a-f0-9]{40,64}$/u);
   assert.match(marker.provenance.unitySourceDigest, /^[a-f0-9]{64}$/u);
   assert.ok(marker.provenance.unitySourceFileCount > 0);
@@ -532,6 +549,7 @@ test("waits for a lost-response build to finish before restoring", async () => {
         status: "completed",
       }));
     }
+    if (command === "get_build_settings") return envelope({ activeBuildTarget: "WebGL" });
     if (command === "editor_status") {
       return envelope({
         compiling: false,
@@ -646,6 +664,7 @@ test("does not restore when a lost submission cannot reach a safe Unity barrier"
       }
       throw new Error("status unavailable");
     }
+    if (command === "get_build_settings") return envelope({ activeBuildTarget: "WebGL" });
     if (command === "editor_status") {
       return envelope({
         compiling: false,

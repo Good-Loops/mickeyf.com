@@ -4,7 +4,7 @@ import { lstat, readFile, realpath } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve, sep } from "node:path";
 import { promisify } from "node:util";
 
-export const REQUIRED_UNITY_EDITOR_VERSION = "6000.3.8f1";
+export const REQUIRED_UNITY_EDITOR_VERSION = "6000.3.27f2";
 export const UNITY_PROVENANCE_KEYS = Object.freeze([
   "sourceCommit",
   "unityEditorVersion",
