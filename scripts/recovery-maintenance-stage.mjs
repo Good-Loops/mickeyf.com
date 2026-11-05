@@ -43,13 +43,55 @@ export function prepareMaintenanceStage(service, source) {
 
 /** Restore the exact prior template under a fresh revision, preserving every traffic target. */
 export function prepareMaintenanceRestore(service, plan) {
-    validateService(service);
-    assert(service.uid === plan.uid && BigInt(service.generation) === BigInt(plan.generation) + 1n, 'Unexpected service generation');
+    assert(service.name === SERVICE && service.uid === plan.uid && !service.reconciling
+        && service.observedGeneration === service.generation && typeof service.etag === 'string' && service.etag
+        && BigInt(service.generation) === BigInt(plan.generation) + 1n, 'Unexpected service generation');
     assert(equal(trafficShape(service.traffic), trafficShape(plan.traffic)), 'Traffic changed during maintenance staging');
+    const observedTraffic = trafficShape(service.trafficStatuses, true);
+    assert(equal(observedTraffic, trafficShape(BASE_TRAFFIC)) || equal(observedTraffic, trafficShape(plan.traffic)),
+        'Resolved traffic changed during maintenance staging');
     assert(equal(service.template, plan.template), 'Maintenance template changed or was normalized unexpectedly');
     const template = structuredClone(plan.baseline);
     template.revision = RESTORE;
     return { name: SERVICE, etag: service.etag, template };
+}
+
+export function verifyMaintenanceRestored(service, plan) {
+    validateService(service);
+    assert(service.uid === plan.uid && BigInt(service.generation) === BigInt(plan.generation) + 2n, 'Unexpected restored generation');
+    assert(equal(trafficShape(service.traffic), trafficShape(plan.traffic)), 'Traffic changed during template restoration');
+    assert(equal(service.template, { ...plan.baseline, revision: RESTORE }), 'The original template was not restored');
+}
+
+/** The provider supplies bounded read/patch/wait and a synthetic-only smoke test. */
+export async function executeMaintenanceStage(provider, source) {
+    const plan = prepareMaintenanceStage(await provider.read(), source);
+    let issuePossible = false, failure, smoke;
+    try {
+        issuePossible = true; // A timeout can hide a successful request; reconcile by reading, never retry it.
+        await provider.stage(plan.patch);
+        const staged = await provider.wait(plan, 'stage');
+        prepareMaintenanceRestore(staged, plan);
+        assert(staged.terminalCondition?.state === 'CONDITION_SUCCEEDED', 'Maintenance revision is not ready');
+        smoke = await provider.smoke(staged, TAG);
+    } catch (error) { failure = error; }
+    if (issuePossible) {
+        try {
+            const settled = await provider.wait(plan, 'stage');
+            if (settled.generation !== plan.generation) {
+                await provider.restore(prepareMaintenanceRestore(settled, plan));
+                verifyMaintenanceRestored(await provider.wait(plan, 'restore'), plan);
+            } else {
+                assert(equal(settled.template, plan.baseline) && equal(trafficShape(settled.traffic), trafficShape(BASE_TRAFFIC)),
+                    'Stage outcome is uncertain; inspect before retrying');
+            }
+        } catch (restoreError) {
+            throw new AggregateError([...(failure ? [failure] : []), restoreError],
+                'Maintenance staging or template restoration requires inspection');
+        }
+    }
+    if (failure) throw failure;
+    return { revision: MAINTENANCE, tag: TAG, restoredRevision: RESTORE, smoke };
 }
 
 export const maintenanceStageIds = Object.freeze({ revision: MAINTENANCE, restoreRevision: RESTORE, tag: TAG });
