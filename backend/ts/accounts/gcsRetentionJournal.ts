@@ -1,10 +1,15 @@
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import { GoogleAuth } from 'google-auth-library';
 import { isAccountId } from './deletionJournal';
-import { DELETION_JOURNAL_BUCKET, type JournalHttpClient, type JournalHttpRequest } from './gcsDeletionJournal';
+import { createGcsDeletionJournal, DELETION_JOURNAL_BUCKET, type JournalHttpClient, type JournalHttpRequest } from './gcsDeletionJournal';
 import { parseInactivityInstant } from './childInactivityPolicy';
 import type { RetentionIntent, RetentionJournal } from './childInactivityWorkflow';
 import type { PoolConnection } from 'mysql2/promise';
+import { advanceRetirementGuard, type RetirementGuardAdvanceOptions } from './retirementGuardAdvance';
+import type { RetirementBatchPermit } from './retirementBatchPermit';
+import { createCloudSqlMetadataClient } from './cloudSqlRecoveryInventory';
+import { verifyRetirementSchemas } from './retirementSourceSchema';
+import { verifyRetiredJournalObjects } from './verifyRetiredJournalObjects';
 
 const API = 'https://storage.googleapis.com';
 const LIMIT = 10_000;
@@ -27,13 +32,22 @@ type Options = Readonly<{
     verifyActivityContinuity: (intent: RetentionIntent, connection?: Pick<PoolConnection, 'query'>) => Promise<boolean>;
     client?: JournalHttpClient;
     timeoutMs?: number;
+    /** Only for held administrative recovery; ordinary per-child reads stay strict. */
+    verifyRetiredObjects?: (objects: readonly RetiredObject[]) => Promise<void>;
 }>;
 type ObjectInfo = Readonly<{ name: string; generation: string; size: number; md5: string }>;
+type RetiredObject = Readonly<{ bucket: string; name: string; generation: string; stamp: unknown }>;
+type RetirementGuardAdvanceRequest = Omit<RetirementGuardAdvanceOptions,
+    'cloud' | 'verifySchema' | 'journal' | 'conditional' | 'project' | 'instance' | 'waitForCoverage'>
+    & Readonly<{ kind?: 'explicit' | 'conditional' }>;
 export type RestoreGuard = Readonly<{ state: 'active' | 'hold'; database: string; serverUuid: string;
-    epoch: string; expiresAt: string }>;
+    epoch: string; expiresAt: string; recoveryCheckpoint?: Readonly<{ lineage: string; minimumEpoch: string; keySha256: string }> }>;
 export type ObservedRestoreGuard = RestoreGuard & Readonly<{ generation: string }>;
 export type RetentionResolution = Readonly<{ outcome: 'kept' | 'deleted'; confirmedAt: string;
     observedActivityAt: string | null; proofDigest: string }>;
+export type ConditionalRetirementPair = Readonly<{ intent: RetentionIntent; resolution: RetentionResolution;
+    intentObject: Readonly<{ name: string; generation: string; contentSha256: string }>;
+    resolutionObject: Readonly<{ name: string; generation: string; contentSha256: string }> }>;
 
 /**
  * Conditional intents have a separate bucket and HMAC key from the unconditional
@@ -43,9 +57,14 @@ export function createGcsRetentionJournal(options: Options): RetentionJournal & 
     readIntents(): Promise<readonly RetentionIntent[]>;
     readIntentsForChild(childId: string): Promise<readonly RetentionIntent[]>;
     readRestoreGuard(): Promise<ObservedRestoreGuard>;
+    assertRestoreGuardHistory(): Promise<void>;
     writeRestoreGuard(guard: RestoreGuard, expectedGeneration: string): Promise<string>;
+    advanceRestoreGuardCheckpoint(options: RetirementGuardAdvanceRequest): Promise<Readonly<{
+        generation: string; lineage: string; epoch: string; committedBefore: string; permit: RetirementBatchPermit;
+    }>>;
     readResolution(intent: RetentionIntent): Promise<RetentionResolution | null>;
     recordResolution(intent: RetentionIntent, resolution: RetentionResolution): Promise<void>;
+    readConditionalRetirementPairs(): Promise<Readonly<{ pairs: readonly ConditionalRetirementPair[]; digest: string }>>;
 } {
     const { bucket, expectedBucket, verifyActivityContinuity } = options;
     if (typeof bucket !== 'string' || bucket !== expectedBucket || bucket === DELETION_JOURNAL_BUCKET
@@ -100,14 +119,15 @@ export function createGcsRetentionJournal(options: Options): RetentionJournal & 
         return { name: original.name.replace('v1/conditional/', 'v1/resolutions/'),
             body: JSON.stringify({ version: 1, intentId: originalId, resolution: normalized, mac }) };
     }
-    function info(input: unknown, expectedName?: string): ObjectInfo {
+    function info(input: unknown, expectedName?: string, allowNoncurrent = false): ObjectInfo {
         if (!input || typeof input !== 'object' || Array.isArray(input)) throw new RetentionJournalUnavailableError();
         const v = input as Record<string, unknown>;
         if (v.bucket !== bucket || typeof v.name !== 'string' || !(expectedName ? v.name === expectedName : NAME.test(v.name))
             || typeof v.generation !== 'string' || !/^[1-9][0-9]*$/u.test(v.generation)
             || typeof v.size !== 'string' || !/^[1-9][0-9]*$/u.test(v.size) || Number(v.size) > MAX_BODY
             || typeof v.md5Hash !== 'string' || !/^[A-Za-z0-9+/]{22}==$/u.test(v.md5Hash)
-            || v.timeDeleted !== undefined || v.softDeleteTime !== undefined) throw new RetentionJournalUnavailableError();
+            || (v.timeDeleted !== undefined && (!allowNoncurrent || typeof v.timeDeleted !== 'string'
+                || !Number.isFinite(Date.parse(v.timeDeleted)))) || v.softDeleteTime !== undefined) throw new RetentionJournalUnavailableError();
         return { name: v.name, generation: v.generation, size: Number(v.size), md5: v.md5Hash };
     }
     const fields = 'bucket,name,generation,size,md5Hash,timeDeleted,softDeleteTime';
@@ -118,9 +138,7 @@ export function createGcsRetentionJournal(options: Options): RetentionJournal & 
         const mac = createHmac('sha256', key).update('ludolume-retention-restore-guard-v1\0').update(payload).digest('hex');
         return JSON.stringify({ version: 1, guard: normalized, mac });
     }
-    async function readRestoreGuard(): Promise<ObservedRestoreGuard> {
-        const object = info(await request({ method: 'GET', url: `${base}/${encodeURIComponent(guardName)}`,
-            params: { fields }, responseType: 'json' }), guardName);
+    async function readSignedGuard(object: ObjectInfo): Promise<ObservedRestoreGuard> {
         const body = await request({ method: 'GET', url: `${base}/${encodeURIComponent(guardName)}`,
             params: { alt: 'media', generation: object.generation, ifGenerationMatch: object.generation }, responseType: 'text' });
         if (typeof body !== 'string' || Buffer.byteLength(body) !== object.size
@@ -134,10 +152,86 @@ export function createGcsRetentionJournal(options: Options): RetentionJournal & 
         if (expected !== body) throw new RetentionJournalUnavailableError();
         return { ...guard, generation: object.generation };
     }
+    async function readRestoreGuard(): Promise<ObservedRestoreGuard> {
+        const object = info(await request({ method: 'GET', url: `${base}/${encodeURIComponent(guardName)}`,
+            params: { fields }, responseType: 'json' }), guardName);
+        return readSignedGuard(object);
+    }
+    async function assertGuardBucketPolicy(): Promise<void> {
+        const value = await request({ method: 'GET', url: `${API}/storage/v1/b/${bucket}`,
+            params: { fields: 'name,versioning(enabled),softDeletePolicy(retentionDurationSeconds),lifecycle(rule)' }, responseType: 'json' });
+        if (!value || typeof value !== 'object' || Array.isArray(value)) throw new RetentionJournalUnavailableError();
+        const config = value as Record<string, unknown>, versioning = config.versioning as Record<string, unknown> | undefined;
+        const softDelete = config.softDeletePolicy as Record<string, unknown> | undefined;
+        const lifecycle = config.lifecycle as Record<string, unknown> | undefined;
+        if (config.name !== bucket || !versioning || typeof versioning !== 'object' || versioning.enabled !== true
+            || !softDelete || typeof softDelete !== 'object' || String(softDelete.retentionDurationSeconds) !== '604800'
+            || (lifecycle !== undefined && (!lifecycle || typeof lifecycle !== 'object' || Array.isArray(lifecycle)
+                || (lifecycle.rule !== undefined && (!Array.isArray(lifecycle.rule) || lifecycle.rule.length !== 0))))) {
+            throw new RetentionJournalUnavailableError();
+        }
+    }
+    /** Retained historical floors detect an accidental restore of an older guard. */
+    async function assertRestoreGuardHistory(): Promise<void> {
+        await assertGuardBucketPolicy();
+        const current = await readRestoreGuard(), versions: ObjectInfo[] = [], seen = new Set<string>(), tokens = new Set<string>();
+        let pageToken: string | undefined;
+        do {
+            const response = await request({ method: 'GET', url: base, responseType: 'json', params: {
+                prefix: guardName, versions: true, maxResults: 100, fields: `kind,nextPageToken,items(${fields})`,
+                ...(pageToken ? { pageToken } : {}) } });
+            if (!response || typeof response !== 'object' || Array.isArray(response)) throw new RetentionJournalUnavailableError();
+            const page = response as Record<string, unknown>;
+            if (page.kind !== 'storage#objects' || page.prefixes !== undefined
+                || (page.items !== undefined && !Array.isArray(page.items))) throw new RetentionJournalUnavailableError();
+            const items = (page.items ?? []) as unknown[];
+            if (items.length > 100 || versions.length + items.length > 10_000) throw new RetentionJournalUnavailableError();
+            for (const item of items) {
+                const value = info(item, guardName, true);
+                if (seen.has(value.generation)) throw new RetentionJournalUnavailableError();
+                seen.add(value.generation); versions.push(value);
+            }
+            if (page.nextPageToken === undefined) pageToken = undefined;
+            else {
+                if (typeof page.nextPageToken !== 'string' || !page.nextPageToken || page.nextPageToken.length > 4096 || tokens.has(page.nextPageToken)
+                    || tokens.size >= 100) throw new RetentionJournalUnavailableError();
+                pageToken = page.nextPageToken; tokens.add(pageToken);
+            }
+        } while (pageToken);
+        if (!seen.has(current.generation)) throw new RetentionJournalUnavailableError();
+        for (const object of versions) {
+            const previous = await readSignedGuard(object), earlier = previous.recoveryCheckpoint, latest = current.recoveryCheckpoint;
+            if ((previous.generation === current.generation && JSON.stringify(previous) !== JSON.stringify(current))
+                || previous.database !== current.database || (earlier && (!latest || earlier.lineage !== latest.lineage
+                || earlier.keySha256 !== latest.keySha256 || BigInt(earlier.minimumEpoch) > BigInt(latest.minimumEpoch)))) {
+                throw new RetentionJournalUnavailableError();
+            }
+        }
+        const deleted = await request({ method: 'GET', url: base, responseType: 'json', params: {
+            prefix: guardName, softDeleted: true, maxResults: 1, fields: 'kind,nextPageToken,items(name)' } });
+        if (!deleted || typeof deleted !== 'object' || Array.isArray(deleted)) throw new RetentionJournalUnavailableError();
+        const page = deleted as Record<string, unknown>;
+        if (page.kind !== 'storage#objects' || page.nextPageToken !== undefined || page.prefixes !== undefined
+            || (page.items !== undefined && (!Array.isArray(page.items) || page.items.length !== 0))
+            || JSON.stringify(await readRestoreGuard()) !== JSON.stringify(current)) throw new RetentionJournalUnavailableError();
+    }
+    async function writeSignedGuard(normalized: RestoreGuard, expectedGeneration: string): Promise<string> {
+        const body = signedGuard(normalized);
+        const object = info(await request({ method: 'POST', url: `${API}/upload/storage/v1/b/${bucket}/o`,
+            params: { uploadType: 'media', name: guardName, ifGenerationMatch: expectedGeneration, fields },
+            headers: { 'Content-Type': 'application/json; charset=utf-8' }, data: body, responseType: 'json' }), guardName);
+        if (object.size !== Buffer.byteLength(body) || object.md5 !== createHash('md5').update(body).digest('base64')) {
+            throw new RetentionJournalUnavailableError();
+        }
+        return object.generation;
+    }
     async function writeRestoreGuard(guard: RestoreGuard, expectedGeneration: string): Promise<string> {
         // A caller must first know the exact current generation, or use zero only for first creation.
         if (!/^(?:0|[1-9][0-9]*)$/u.test(expectedGeneration)) throw new TypeError('Invalid restore guard generation.');
+        const normalized = validateGuard(guard);
         if (expectedGeneration === '0') {
+            await assertGuardBucketPolicy();
+            if (normalized.recoveryCheckpoint !== undefined) throw new RetentionJournalUnavailableError();
             const value = await request({ method: 'GET', url: base, responseType: 'json',
                 params: { prefix: guardName, softDeleted: true, maxResults: 1, fields: 'kind,nextPageToken,items(name)' } });
             if (!value || typeof value !== 'object' || Array.isArray(value)) throw new RetentionJournalUnavailableError();
@@ -146,15 +240,30 @@ export function createGcsRetentionJournal(options: Options): RetentionJournal & 
                 || (page.items !== undefined && (!Array.isArray(page.items) || page.items.length !== 0))) {
                 throw new RetentionJournalUnavailableError();
             }
+        } else {
+            // Routine hold/activation must never drop or change an established
+            // checkpoint. Advancing it requires a separate qualified procedure.
+            await assertRestoreGuardHistory();
+            const current = await readRestoreGuard();
+            if (current.generation !== expectedGeneration
+                || JSON.stringify(current.recoveryCheckpoint) !== JSON.stringify(normalized.recoveryCheckpoint)) {
+                throw new RetentionJournalUnavailableError();
+            }
         }
-        const body = signedGuard(guard);
-        const object = info(await request({ method: 'POST', url: `${API}/upload/storage/v1/b/${bucket}/o`,
-            params: { uploadType: 'media', name: guardName, ifGenerationMatch: expectedGeneration, fields },
-            headers: { 'Content-Type': 'application/json; charset=utf-8' }, data: body, responseType: 'json' }), guardName);
-        if (object.size !== Buffer.byteLength(body) || object.md5 !== createHash('md5').update(body).digest('base64')) {
+        return writeSignedGuard(normalized, expectedGeneration);
+    }
+    async function commitCheckpointGuard(value: RestoreGuard, expectedGeneration: string): Promise<string> {
+        await assertRestoreGuardHistory();
+        const next = validateGuard(value), current = await readRestoreGuard();
+        if (current.generation !== expectedGeneration || current.state !== 'hold' || next.state !== 'hold'
+            || current.database !== next.database || current.serverUuid !== next.serverUuid || current.epoch !== next.epoch
+            || current.expiresAt !== next.expiresAt || !next.recoveryCheckpoint
+            || (current.recoveryCheckpoint && (current.recoveryCheckpoint.lineage !== next.recoveryCheckpoint.lineage
+                || current.recoveryCheckpoint.keySha256 !== next.recoveryCheckpoint.keySha256
+                || BigInt(next.recoveryCheckpoint.minimumEpoch) <= BigInt(current.recoveryCheckpoint.minimumEpoch)))) {
             throw new RetentionJournalUnavailableError();
         }
-        return object.generation;
+        return writeSignedGuard(next, expectedGeneration);
     }
     async function read(object: ObjectInfo, deadline?: number): Promise<RetentionIntent> {
         const body = await request({ method: 'GET', url: `${base}/${encodeURIComponent(object.name)}`,
@@ -224,22 +333,40 @@ export function createGcsRetentionJournal(options: Options): RetentionJournal & 
             .update(signed(intent).name).update('\0').update(confirmedAt).digest('hex');
         await recordResolution(intent, { outcome: 'deleted', confirmedAt, observedActivityAt: null, proofDigest });
     }
-    async function listObjects(prefix: string, softDeleted: boolean, deadline: number): Promise<ObjectInfo[]> {
-        const objects: ObjectInfo[] = []; const names = new Set<string>(); const tokens = new Set<string>();
+    async function listObjects(prefix: string, softDeleted: boolean, deadline: number,
+        allowRetired: boolean): Promise<ObjectInfo[] | RetiredObject[]> {
+        const objects: ObjectInfo[] = []; const retired: RetiredObject[] = []; const names = new Set<string>(); const tokens = new Set<string>();
         let pageToken: string | undefined;
         do {
             const value = await request({ method: 'GET', url: base, responseType: 'json',
                 params: { prefix, ...(softDeleted ? { softDeleted: true } : { versions: true }), maxResults: 100,
-                    fields: `kind,nextPageToken,items(${fields})`, ...(pageToken ? { pageToken } : {}) } }, deadline);
+                    fields: `kind,nextPageToken,items(${fields}${softDeleted && allowRetired ? ',metadata' : ''})`, ...(pageToken ? { pageToken } : {}) } }, deadline);
             if (!value || typeof value !== 'object' || Array.isArray(value)) throw new RetentionJournalUnavailableError();
             const page = value as Record<string, unknown>;
             if (page.kind !== 'storage#objects' || (page.items !== undefined && !Array.isArray(page.items))
                 || page.prefixes !== undefined) throw new RetentionJournalUnavailableError();
             const items = (page.items ?? []) as unknown[];
-            if (items.length > 100 || objects.length + items.length > MAX_OBJECTS) throw new RetentionJournalUnavailableError();
+            if (items.length > 100 || objects.length + retired.length + items.length > MAX_OBJECTS) throw new RetentionJournalUnavailableError();
             // A deleted intent could hide an uncertain deletion; require explicit reconciliation.
-            if (softDeleted && items.length) throw new RetentionJournalUnavailableError();
+            if (softDeleted && items.length && !allowRetired) throw new RetentionJournalUnavailableError();
             for (const item of items) {
+                if (softDeleted) {
+                    if (!item || typeof item !== 'object' || Array.isArray(item)) throw new RetentionJournalUnavailableError();
+                    const raw = item as Record<string, unknown>;
+                    const metadata = raw.metadata;
+                    if (raw.bucket !== bucket || typeof raw.name !== 'string' || !NAME.test(raw.name) || !raw.name.startsWith(prefix)
+                        || typeof raw.generation !== 'string' || !/^[1-9][0-9]*$/u.test(raw.generation)
+                        || typeof raw.softDeleteTime !== 'string' || !Number.isFinite(Date.parse(raw.softDeleteTime))
+                        || !metadata || typeof metadata !== 'object' || Array.isArray(metadata)) throw new RetentionJournalUnavailableError();
+                    const stamp = (metadata as Record<string, unknown>).ludolumeRetirement;
+                    const identity = JSON.stringify([raw.name, raw.generation]);
+                    if (typeof stamp !== 'string' || stamp.length > 4096 || names.has(identity)) throw new RetentionJournalUnavailableError();
+                    names.add(identity);
+                    let parsed: unknown;
+                    try { parsed = JSON.parse(stamp) as unknown; } catch { throw new RetentionJournalUnavailableError(); }
+                    retired.push({ bucket, name: raw.name, generation: raw.generation, stamp: parsed });
+                    continue;
+                }
                 const object = info(item);
                 if (!object.name.startsWith(prefix) || names.has(object.name)) throw new RetentionJournalUnavailableError();
                 names.add(object.name); objects.push(object);
@@ -252,25 +379,72 @@ export function createGcsRetentionJournal(options: Options): RetentionJournal & 
                 if (tokens.size > MAX_OBJECTS) throw new RetentionJournalUnavailableError();
             }
         } while (pageToken);
-        return objects.sort((a, b) => a.name.localeCompare(b.name));
+        return softDeleted ? retired : objects.sort((a, b) => a.name.localeCompare(b.name));
     }
-    async function readInventory(prefix: string): Promise<readonly RetentionIntent[]> {
+    async function readInventory(prefix: string, recovery = false): Promise<readonly RetentionIntent[]> {
         const deadline = Date.now() + READ_LIMIT;
-        await listObjects(prefix, true, deadline);
-        const objects = await listObjects(prefix, false, deadline);
+        const verifier = recovery ? options.verifyRetiredObjects : undefined;
+        const retiredBefore = await listObjects(prefix, true, deadline, !!verifier) as RetiredObject[];
+        if (verifier) await verifier(retiredBefore);
+        const objects = await listObjects(prefix, false, deadline, false) as ObjectInfo[];
         const results: RetentionIntent[] = [];
         for (const object of objects) results.push(await read(object, deadline));
-        await listObjects(prefix, true, deadline);
-        const after = await listObjects(prefix, false, deadline);
+        const retiredAfter = await listObjects(prefix, true, deadline, !!verifier) as RetiredObject[];
+        if (verifier) {
+            await verifier(retiredAfter);
+            const canonical = (values: readonly RetiredObject[]) => values.map(value => JSON.stringify(value)).sort();
+            if (JSON.stringify(canonical(retiredBefore)) !== JSON.stringify(canonical(retiredAfter))) throw new RetentionJournalUnavailableError();
+        }
+        const after = await listObjects(prefix, false, deadline, false) as ObjectInfo[];
         if (JSON.stringify(objects) !== JSON.stringify(after)) throw new RetentionJournalUnavailableError();
         // Even matching inventories are not a persistent fence. Recovery must stop
         // writers and repeat reconciliation before cutover; this is not replay authority.
         return Object.freeze(results);
     }
+    async function readConditionalRetirementPairs(): Promise<Readonly<{ pairs: readonly ConditionalRetirementPair[]; digest: string }>> {
+        const intents = await readInventory('v1/conditional/', true);
+        const pairs: ConditionalRetirementPair[] = [];
+        async function exact(expected: { name: string; body: string }) {
+            const item = info(await request({ method: 'GET', url: `${base}/${encodeURIComponent(expected.name)}`,
+                params: { fields }, responseType: 'json' }), expected.name);
+            const body = await request({ method: 'GET', url: `${base}/${encodeURIComponent(expected.name)}`,
+                params: { alt: 'media', generation: item.generation, ifGenerationMatch: item.generation }, responseType: 'text' });
+            if (typeof body !== 'string' || body !== expected.body || Buffer.byteLength(body) !== item.size
+                || createHash('md5').update(body).digest('base64') !== item.md5) throw new RetentionJournalUnavailableError();
+            return { name: item.name, generation: item.generation, contentSha256: createHash('sha256').update(body).digest('hex') };
+        }
+        for (const intent of intents) {
+            const resolution = await readResolution(intent);
+            if (!resolution) throw new RetentionJournalUnavailableError();
+            if (resolution.outcome !== 'deleted') continue;
+            pairs.push({ intent, resolution, intentObject: await exact(signed(intent)),
+                resolutionObject: await exact(signedResolution(intent, resolution)) });
+        }
+        if (JSON.stringify(await readInventory('v1/conditional/', true)) !== JSON.stringify(intents)) throw new RetentionJournalUnavailableError();
+        const identities = pairs.map(pair => [pair.intentObject, pair.resolutionObject]).sort((a, b) => a[0].name.localeCompare(b[0].name));
+        return { pairs, digest: createHash('sha256').update(JSON.stringify(identities)).digest('hex') };
+    }
     return { recordRetentionIntent, verifyRetentionIntent, recordCommittedDeletion, readResolution, recordResolution,
-        readIntents: () => readInventory('v1/conditional/'),
+        readIntents: () => readInventory('v1/conditional/', true),
         readIntentsForChild: async childId => readInventory(childPrefix(childId)),
-        readRestoreGuard, writeRestoreGuard,
+        readRestoreGuard, assertRestoreGuardHistory, writeRestoreGuard, readConditionalRetirementPairs,
+        advanceRestoreGuardCheckpoint: input => {
+            if (input.kind !== undefined && input.kind !== 'explicit' && input.kind !== 'conditional') throw new RetentionJournalUnavailableError();
+            const verifyRetired = async (objects: readonly RetiredObject[]) => {
+                const current = await readRestoreGuard();
+                if (!current.recoveryCheckpoint) { if (objects.length) throw new RetentionJournalUnavailableError(); return; }
+                await verifyRetiredJournalObjects(input.connection, { readRestoreGuard }, { database: input.pins.database,
+                    currentUser: input.pins.currentUser, targetServerUuid: input.pins.serverUuid,
+                    originalServerUuid: input.pins.serverUuid }, objects, input.publicKey);
+            };
+            const recoveryJournal = input.kind === 'conditional' ? createGcsRetentionJournal({ bucket, expectedBucket, key, client,
+                timeoutMs: timeout, verifyActivityContinuity: async () => false, verifyRetiredObjects: verifyRetired }) : undefined;
+            return advanceRetirementGuard({ ...input,
+            project: 'noted-reef-387021', instance: 'cms-mickeyf', cloud: createCloudSqlMetadataClient(),
+            journal: createGcsDeletionJournal({ verifyRetiredObjects: verifyRetired }),
+            conditional: recoveryJournal ? { bucket, readPairs: recoveryJournal.readConditionalRetirementPairs } : undefined,
+            verifySchema: verifyRetirementSchemas }, { read: readRestoreGuard, commit: commitCheckpointGuard });
+        },
         async verifyActivityContinuity(intent, connection) {
             validateIntent(intent);
             try { return await verifyActivityContinuity(intent, connection) === true; } catch { return false; }
@@ -291,14 +465,26 @@ function validateResolution(input: unknown): RetentionResolution {
 function validateGuard(input: unknown): RestoreGuard {
     if (!input || typeof input !== 'object' || Array.isArray(input)) throw new TypeError('Invalid restore guard.');
     const v = input as Record<string, unknown>;
-    if (Object.keys(v).sort().join(',') !== 'database,epoch,expiresAt,serverUuid,state'
+    const keys = Object.keys(v).sort().join(',');
+    if (!['database,epoch,expiresAt,serverUuid,state', 'database,epoch,expiresAt,recoveryCheckpoint,serverUuid,state'].includes(keys)
         || (v.state !== 'active' && v.state !== 'hold') || typeof v.database !== 'string'
         || !/^[A-Za-z0-9_]{1,64}$/u.test(v.database) || !isAccountId(v.serverUuid) || !isAccountId(v.epoch)
         || typeof v.expiresAt !== 'string' || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/u.test(v.expiresAt)
         || !Number.isFinite(Date.parse(v.expiresAt)) || new Date(v.expiresAt).toISOString() !== v.expiresAt) {
         throw new TypeError('Invalid restore guard.');
     }
-    return { state: v.state, database: v.database, serverUuid: v.serverUuid, epoch: v.epoch, expiresAt: v.expiresAt };
+    let recoveryCheckpoint: RestoreGuard['recoveryCheckpoint'];
+    if (v.recoveryCheckpoint !== undefined) {
+        if (!v.recoveryCheckpoint || typeof v.recoveryCheckpoint !== 'object' || Array.isArray(v.recoveryCheckpoint)) throw new TypeError('Invalid restore guard.');
+        const checkpoint = v.recoveryCheckpoint as Record<string, unknown>;
+        if (Object.keys(checkpoint).sort().join(',') !== 'keySha256,lineage,minimumEpoch' || !isAccountId(checkpoint.lineage)
+            || typeof checkpoint.keySha256 !== 'string' || !HEX.test(checkpoint.keySha256)
+            || typeof checkpoint.minimumEpoch !== 'string' || !/^[1-9][0-9]{0,19}$/u.test(checkpoint.minimumEpoch)
+            || BigInt(checkpoint.minimumEpoch) > BigInt('18446744073709551615')) throw new TypeError('Invalid restore guard.');
+        recoveryCheckpoint = { lineage: checkpoint.lineage, minimumEpoch: checkpoint.minimumEpoch, keySha256: checkpoint.keySha256 };
+    }
+    return { state: v.state, database: v.database, serverUuid: v.serverUuid, epoch: v.epoch, expiresAt: v.expiresAt,
+        ...(recoveryCheckpoint === undefined ? {} : { recoveryCheckpoint }) };
 }
 
 function validateIntent(input: unknown): RetentionIntent {

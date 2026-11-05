@@ -81,6 +81,17 @@ test('detects a durable old intent whose account remains even without a controll
     assert.ok(fake.released());
 });
 
+test('the journal audit receives the same pinned SQL connection for recovery checks', async () => {
+    const fake = fixture();
+    let received: unknown;
+    const reader: DeletionJournalReader = { async readDeletionIntents(connection) {
+        received = connection;
+        return { intents: [], digest: 'a'.repeat(64) };
+    } };
+    await auditPendingDeletions(fake.database, reader, SETTINGS);
+    assert.equal(typeof (received as { query?: unknown })?.query, 'function');
+});
+
 test('old already-deleted accounts do not become a historical false backlog', async () => {
     const fake = fixture({ accounts: [] });
     const result = await auditPendingDeletions(fake.database, fake.reader, SETTINGS);

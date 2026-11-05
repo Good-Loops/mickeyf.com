@@ -1,3 +1,5 @@
+import type { PoolConnection } from 'mysql2/promise';
+
 export interface DeletionIntent {
     version: 1;
     accountId: string;
@@ -16,7 +18,7 @@ export interface DeletionJournalSnapshot {
 }
 
 export interface DeletionJournalReader {
-    readDeletionIntents(): Promise<DeletionJournalSnapshot>;
+    readDeletionIntents(connection?: Pick<PoolConnection, 'query'>): Promise<DeletionJournalSnapshot>;
 }
 
 /** MySQL-generated identities use UUIDv1; UUIDv4 is accepted for future random identities. */

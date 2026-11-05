@@ -133,6 +133,13 @@ test('reader is fresh on every call and generation changes change its digest', a
     assert.notEqual(before.digest, after.digest);
 });
 
+test('administrative inventory binds each parsed intent to its exact generation and SHA-256', async () => {
+    const { client } = fakeClient([page(), page([metadata()]), BODY, page()]);
+    const snapshot = await journal(client).readDeletionEntries();
+    assert.deepEqual(snapshot.entries, [{ name: metadata().name, generation: metadata().generation,
+        contentSha256: createHash('sha256').update(BODY).digest('hex'), intent: INTENT }]);
+});
+
 test('reader accepts a verified empty journal, not an unavailable or malformed listing', async () => {
     const empty = journal(fakeClient([page(), page(), page()]).client);
     assert.deepEqual((await empty.readDeletionIntents()).intents, []);
@@ -149,6 +156,28 @@ test('reader refuses soft-deleted records before or after scanning live objects'
     ]) {
         await assert.rejects(journal(fakeClient(responses).client).readDeletionIntents(), DeletionJournalUnavailableError);
     }
+});
+
+test('recovery reader verifies every retired generation and a stable soft-delete inventory', async () => {
+    const retired = { ...metadata(), softDeleteTime: NOW, metadata: { ludolumeRetirement: JSON.stringify({ synthetic: true }) } };
+    const seen: unknown[] = [];
+    const { client } = fakeClient([page([retired]), page(), page([retired])]);
+    const source = createGcsDeletionJournal({ client, verifyRetiredObjects: async objects => { seen.push(objects); } });
+    assert.deepEqual((await source.readDeletionIntents()).intents, []);
+    assert.equal(seen.length, 2);
+    assert.deepEqual(seen[0], [{ bucket: DELETION_JOURNAL_BUCKET, name: retired.name,
+        generation: retired.generation, stamp: { synthetic: true } }]);
+
+    const changed = { ...retired, generation: '12345678901234568' };
+    const unstable = createGcsDeletionJournal({ client: fakeClient([page([retired]), page(), page([changed])]).client,
+        verifyRetiredObjects: async () => {} });
+    await assert.rejects(unstable.readDeletionIntents(), DeletionJournalUnavailableError);
+    const invalid = createGcsDeletionJournal({ client: fakeClient([page([retired])]).client,
+        verifyRetiredObjects: async () => { throw new Error('unverified'); } });
+    await assert.rejects(invalid.readDeletionIntents(), DeletionJournalUnavailableError);
+    const absent = createGcsDeletionJournal({ client: fakeClient([page(), page(), page()]).client,
+        verifyRetiredObjects: async () => { throw new Error('guard missing'); } });
+    await assert.rejects(absent.readDeletionIntents(), DeletionJournalUnavailableError);
 });
 
 test('reader refuses any unknown object, historical version or invalid metadata', async () => {

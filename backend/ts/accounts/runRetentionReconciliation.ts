@@ -1,4 +1,5 @@
-import { randomUUID, timingSafeEqual } from 'node:crypto';
+import { createPublicKey, randomUUID, timingSafeEqual } from 'node:crypto';
+import { readFileSync } from 'node:fs';
 import mysql, { type Pool, type RowDataPacket } from 'mysql2/promise';
 import { assertMutationAuthorized, loadMigrationAccountConfirmation, loadMigrationConfig } from '../config/migrationConfig';
 import { assertChildSchemaCleanSource } from '../migrations/runChildSignedFormSchema';
@@ -7,6 +8,8 @@ import { createChildInactivitySqlStore } from './childInactivitySqlStore';
 import { createGcsRetentionJournal } from './gcsRetentionJournal';
 import { reconcileDeletedRetentionIntent, reconcileRestoredDeletedIntent } from './retentionReconciliation';
 import { activateRetentionGuard } from './retentionGuardActivation';
+import { readRecoveryCheckpoint } from './accountRecoveryCheckpoint';
+import { verifyRetiredJournalObjects } from './verifyRetiredJournalObjects';
 import type { RetentionIntent } from './childInactivityWorkflow';
 
 const FAILURE = 'Retention reconciliation unavailable or unconfirmed. Keep restoration on hold.';
@@ -63,7 +66,8 @@ export async function executeRetentionReconciliation(command: string, input: Rec
         if (current.database !== pins.database || current.serverUuid !== pins.serverUuid
             || pins.serverUuid !== pins.originalServerUuid) throw new Error(FAILURE);
         const generation = await journal.writeRestoreGuard({ state: 'hold', database: current.database,
-            serverUuid: current.serverUuid, epoch: current.epoch, expiresAt: current.expiresAt }, current.generation);
+            serverUuid: current.serverUuid, epoch: current.epoch, expiresAt: current.expiresAt,
+            ...(current.recoveryCheckpoint === undefined ? {} : { recoveryCheckpoint: current.recoveryCheckpoint }) }, current.generation);
         return { state: 'hold', generation };
     }
     if (command === 'activate' && Object.keys(input).join(',') === 'confirmation'
@@ -78,6 +82,16 @@ export async function executeRetentionReconciliation(command: string, input: Rec
         || Object.keys(input).sort().join(',') !== 'confirmation,intent' || !input.intent
         || typeof input.intent !== 'object' || Array.isArray(input.intent) || typeof input.confirmation !== 'string') throw new Error(FAILURE);
     const intent = input.intent as RetentionIntent;
+    const before = await journal.readRestoreGuard();
+    if (before.recoveryCheckpoint) {
+        if (before.state !== 'hold' || before.database !== pins.database || before.serverUuid !== pins.originalServerUuid) throw new Error(FAILURE);
+        const connection = await database.getConnection();
+        try { await readRecoveryCheckpoint(connection, { database: pins.database, currentUser: pins.currentUser,
+            serverUuid: pins.serverUuid, lineage: before.recoveryCheckpoint.lineage,
+            minimumEpoch: before.recoveryCheckpoint.minimumEpoch }); }
+        finally { connection.release(); }
+        if (JSON.stringify(await journal.readRestoreGuard()) !== JSON.stringify(before)) throw new Error(FAILURE);
+    }
     if (command === 'confirm-deleted') {
         if (pins.serverUuid !== pins.originalServerUuid) throw new Error(FAILURE);
         const connection = await database.getConnection();
@@ -111,13 +125,30 @@ export async function runRetentionReconciliation(args = process.argv.slice(2), e
     assertChildSchemaCleanSource(source, undefined, env);
     const { journalKey: key, auditKey } = parseRetentionKeyBundle(env.CHILD_INACTIVITY_KEYS);
     const bucket = env.RETENTION_JOURNAL_BUCKET ?? '', expectedBucket = env.RETENTION_CONFIRM_BUCKET ?? '';
-    const journal = createGcsRetentionJournal({ bucket, expectedBucket, key, verifyActivityContinuity: async () => false });
     const pool = mysql.createPool({ host: config.host, port: config.port, user: config.user, password: config.password,
         database: config.database, connectTimeout: Math.min(10_000, config.operationTimeoutMs),
         multipleStatements: false, connectionLimit: 4, dateStrings: true, timezone: 'Z' });
     try {
+        const publicKey = env.RETIREMENT_PUBLIC_KEY_FILE ? createPublicKey(readFileSync(env.RETIREMENT_PUBLIC_KEY_FILE)) : undefined;
+        const pins = { database: config.database, serverUuid, originalServerUuid, currentUser };
+        const journal = createGcsRetentionJournal({ bucket, expectedBucket, key, verifyActivityContinuity: async () => false,
+            ...(args[0] === 'initialize-hold' ? {} : { verifyRetiredObjects: async objects => {
+                const guard = await journal.readRestoreGuard();
+                if (guard.database !== pins.database || guard.serverUuid !== pins.originalServerUuid) throw new Error(FAILURE);
+                if (!guard.recoveryCheckpoint) {
+                    if (objects.length || JSON.stringify(await journal.readRestoreGuard()) !== JSON.stringify(guard)) throw new Error(FAILURE);
+                    return;
+                }
+                if (guard.state !== 'hold') throw new Error(FAILURE);
+                if (!publicKey) throw new Error(FAILURE);
+                const connection = await pool.getConnection();
+                try { await verifyRetiredJournalObjects(connection, journal, { database: pins.database, currentUser: pins.currentUser,
+                    targetServerUuid: pins.serverUuid, originalServerUuid: pins.originalServerUuid }, objects, publicKey); }
+                finally { connection.release(); }
+            } }) });
+        if (args[0] !== 'initialize-hold') await journal.assertRestoreGuardHistory();
         const result = await executeRetentionReconciliation(args[0], body,
-            { database: config.database, serverUuid, originalServerUuid, currentUser }, journal, pool, auditKey);
+            pins, journal, pool, auditKey);
         process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     } finally { await pool.end(); }
 }

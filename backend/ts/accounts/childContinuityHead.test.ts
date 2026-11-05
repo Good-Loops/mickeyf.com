@@ -58,6 +58,17 @@ test('bounded head and ledger record each transition and match exact SQL state',
     assert.equal(f.writes, 2);
 });
 
+test('archived event inspection authenticates the child, generation and exact envelope', async () => {
+    const f = fixture(); await f.witness.initializeNew(child, f.issue('a'), now);
+    if (f.current.kind !== 'found') throw new Error();
+    assert.equal(f.raw.inspectArchivedEvent(child, f.current.generation, f.current.body).sequence, 1);
+    assert.throws(() => f.raw.inspectArchivedEvent(other, f.current.kind === 'found' ? f.current.generation : '0',
+        f.current.kind === 'found' ? f.current.body : ''), held);
+    assert.throws(() => f.raw.inspectArchivedEvent(child, '0', f.current.kind === 'found' ? f.current.body : ''), held);
+    assert.throws(() => f.raw.inspectArchivedEvent(child, f.current.kind === 'found' ? f.current.generation : '0',
+        f.current.kind === 'found' ? f.current.body.replace('"sequence":1', '"sequence":2') : ''), held);
+});
+
 test('SQL restore, partial ledger restore, missing head, or recreated old head holds', async () => {
     const f = fixture(); const first = await f.witness.initializeNew(child, f.issue('a'), now); const old = f.current;
     const next = await f.witness.prepareExisting(child, first.head, f.issue('b'), first.ledgerRows, now);

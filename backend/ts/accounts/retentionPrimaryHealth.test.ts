@@ -13,10 +13,11 @@ const now = '2026-01-01T00:00:00.000000Z';
 const base: ObservedRestoreGuard = { state: 'active', database, serverUuid: parent, epoch,
     expiresAt: '2026-01-10T00:00:00.000Z', generation: '12' };
 
-function fixture({ guard = base, secondGuard, server = parent, name = database, readOnly = 0,
+function fixture({ guard = base, secondGuard, server = parent, name = database, readOnly = 0, checkpointEpoch = '3',
     intentChild = '', resolution = null, activityAt = '2025-01-01T00:00:00.000000Z', throwGuard = false, sqlNow = now }:
     { guard?: ObservedRestoreGuard; secondGuard?: ObservedRestoreGuard; server?: string; name?: string; readOnly?: number;
-        intentChild?: string; resolution?: RetentionResolution | null; activityAt?: string; throwGuard?: boolean; sqlNow?: string } = {}) {
+        intentChild?: string; resolution?: RetentionResolution | null; activityAt?: string; throwGuard?: boolean; sqlNow?: string;
+        checkpointEpoch?: string | null } = {}) {
     let calls = 0;
     const journal = {
         async readRestoreGuard() { if (throwGuard) throw new Error('private bucket detail'); return ++calls === 1 ? guard : (secondGuard ?? guard); },
@@ -25,13 +26,24 @@ function fixture({ guard = base, secondGuard, server = parent, name = database, 
         async readResolution() { return resolution; },
     };
     const connection = { async query(query: { sql: string }) { return [query.sql.includes('parent_managed_child_activity')
-        ? [{ activityAt }] : [{ databaseName: name, serverUuid: server, readOnly, superReadOnly: 0, nowUtc: sqlNow }], []]; } } as unknown as PoolConnection;
+        ? [{ activityAt }] : query.sql.includes('account_recovery_checkpoint')
+            ? (checkpointEpoch === null ? [] : [{ databaseName: name, currentUser: 'runtime@localhost', serverUuid: server,
+                lineageId: epoch, checkpointEpoch }])
+            : [{ databaseName: name, currentUser: 'runtime@localhost', serverUuid: server, readOnly, superReadOnly: 0, nowUtc: sqlNow }], []]; } } as unknown as PoolConnection;
     return { check: createPinnedPrimaryHealth({ database, serverUuid: parent, journal }), connection };
 }
 
 test('allows a pinned writable primary only with a stable current active guard and no child intent', async () => {
     const { check, connection } = fixture();
     assert.equal(await check(connection, parent, child), true);
+});
+
+test('an active guard with a recovery checkpoint rejects older or missing restored SQL state', async () => {
+    const guard = { ...base, recoveryCheckpoint: { lineage: epoch, minimumEpoch: '3', keySha256: 'a'.repeat(64) } };
+    for (const [checkpointEpoch, expected] of [['3', true], ['4', true], ['2', false], [null, false]] as const) {
+        const { check, connection } = fixture({ guard, checkpointEpoch });
+        assert.equal(await check(connection, parent, child), expected);
+    }
 });
 
 test('holds on a restore hold, stale or changed guard, wrong primary or unresolved child intent', async () => {

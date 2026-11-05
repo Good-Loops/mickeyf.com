@@ -66,7 +66,7 @@ export async function auditPendingDeletions(
             throw new DeletionAuditError();
         }
         await assertAccountIdentityEpoch(timed, settings.expectedIdentityEpoch);
-        const snapshot = await reader.readDeletionIntents();
+        const snapshot = await reader.readDeletionIntents(acquired);
         remaining();
         if (!snapshot || !/^[a-f0-9]{64}$/u.test(snapshot.digest)
             || !Array.isArray(snapshot.intents) || snapshot.intents.length > settings.maxIntents) {

@@ -63,6 +63,19 @@ test('continuity is an explicit opt-in with no direct witness deletion or identi
         [{ tableName: table, privilegeType: 'SELECT' }]);
 });
 
+test('recovery profile adds only checkpoint read privileges', () => {
+    const profile = parseRuntimeGrantProfile('google-apple-parent-signed-recovery');
+    const prior = 'google-apple-parent-signed-warnings';
+    const table = 'account_recovery_checkpoint';
+    const columns = runtimeColumnPrivilegeInventory(profile);
+    assert.deepEqual(columns.filter(row => row.tableName !== table), runtimeColumnPrivilegeInventory(prior));
+    assert.deepEqual(columns.filter(row => row.tableName === table), ['singleton_id', 'lineage_id', 'epoch']
+        .map(columnName => ({ tableName: table, columnName, privilegeType: 'SELECT' })));
+    assert.deepEqual(runtimeTablePrivilegeInventory(profile), runtimeTablePrivilegeInventory(prior));
+    assert.equal(renderRuntimeGrantStatements('cms', PRODUCTION_RUNTIME_DATABASE_ACCOUNT, profile).slice(-1)[0],
+        "GRANT SELECT (`singleton_id`, `lineage_id`, `epoch`) ON `cms`.`account_recovery_checkpoint` TO 'cms_mickeyf'@'%';");
+});
+
 test('parent grants require explicit selection and cannot reassign consent, identity or policy binding', () => {
     assert.equal(parseRuntimeGrantProfile('google-apple-parent'), 'google-apple-parent');
     const columns = runtimeColumnPrivilegeInventory('google-apple-parent');

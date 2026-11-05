@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
+import { createHash, createHmac } from 'node:crypto';
 import test from 'node:test';
 import { createGcsRetentionJournal, RetentionJournalUnavailableError } from './gcsRetentionJournal';
 import type { RetentionIntent } from './childInactivityWorkflow';
@@ -25,6 +25,8 @@ function transport() {
         md5Hash: createHash('md5').update(body).digest('base64') });
     const client: JournalHttpClient = { async request(request) {
         requests.push(request);
+        if (request.url.endsWith(`/b/${bucket}`)) return { status: 200, data: { name: bucket,
+            versioning: { enabled: true }, softDeletePolicy: { retentionDurationSeconds: '604800' } } };
         if (request.method === 'POST') {
             const name = String(request.params.name);
             if (String(request.params.ifGenerationMatch) !== String(generations.get(name) ?? 0)) return { status: 412, data: {} };
@@ -58,6 +60,25 @@ test('persists an exact authenticated conditional intent and lists it for privat
     assert.deepEqual(await store.readIntents(), [intent]);
     assert.equal(await store.verifyActivityContinuity(intent), true);
     await assert.rejects(store.recordRetentionIntent(intent), RetentionJournalUnavailableError);
+});
+
+test('retirement inventory binds deleted outcomes to both exact signed object generations', async () => {
+    const io = transport(), store = journal(io.client);
+    await store.recordRetentionIntent(intent);
+    await assert.rejects(store.readConditionalRetirementPairs(), RetentionJournalUnavailableError);
+    const resolution = { outcome: 'deleted' as const, confirmedAt: '2026-01-02T00:00:00.000000Z',
+        observedActivityAt: null, proofDigest: 'd'.repeat(64) };
+    await store.recordResolution(intent, resolution);
+    const result = await store.readConditionalRetirementPairs();
+    assert.equal(result.pairs.length, 1); assert.match(result.digest, /^[a-f0-9]{64}$/);
+    const pair = result.pairs[0];
+    assert.deepEqual(pair.intent, intent); assert.deepEqual(pair.resolution, resolution);
+    for (const item of [pair.intentObject, pair.resolutionObject]) {
+        assert.equal(item.generation, '1');
+        assert.equal(item.contentSha256, createHash('sha256').update(io.objects.get(item.name)!).digest('hex'));
+    }
+    assert.match(pair.intentObject.name, /^v1\/conditional\//);
+    assert.match(pair.resolutionObject.name, /^v1\/resolutions\//);
 });
 
 test('changed or absent intents, corrupted bodies, and a different signing key cannot verify', async () => {
@@ -154,12 +175,38 @@ test('initial guard creation refuses evidence of a previously soft-deleted guard
     let writes = 0;
     const client: JournalHttpClient = { async request(request) {
         if (request.method === 'POST') { writes++; throw new Error('unexpected write'); }
+        if (request.url.endsWith(`/b/${bucket}`)) return { status: 200, data: { name: bucket,
+            versioning: { enabled: true }, softDeletePolicy: { retentionDurationSeconds: '604800' } } };
         return { status: 200, data: { kind: 'storage#objects', items: [{ name: 'v1/control/restore-guard.json' }] } };
     } };
     const store = journal(client);
     await assert.rejects(store.writeRestoreGuard({ state: 'hold', database: 'synthetic', serverUuid: intent.parentId,
         epoch: intent.warningId, expiresAt: '2026-02-01T00:00:00.000Z' }, '0'), RetentionJournalUnavailableError);
     assert.equal(writes, 0);
+});
+
+test('routine guard updates preserve an authenticated recovery checkpoint without changing its floor', async () => {
+    const io = transport(); const store = journal(io.client);
+    const guard = { state: 'hold' as const, database: 'synthetic', serverUuid: intent.parentId,
+        epoch: intent.warningId, expiresAt: '2027-02-01T00:00:00.000Z' };
+    const recoveryCheckpoint = { lineage: intent.childId, minimumEpoch: '6', keySha256: 'a'.repeat(64) };
+    await assert.rejects(store.writeRestoreGuard({ ...guard, recoveryCheckpoint }, '0'), RetentionJournalUnavailableError);
+    assert.equal(await store.writeRestoreGuard(guard, '0'), '1');
+    // Model a checkpoint introduced by a separately authorized future procedure.
+    const name = 'v1/control/restore-guard.json';
+    const value = JSON.parse(io.objects.get(name)!) as { version: number; guard: typeof guard & { recoveryCheckpoint: typeof recoveryCheckpoint }; mac: string };
+    value.guard.recoveryCheckpoint = recoveryCheckpoint;
+    value.mac = createHmac('sha256', key).update('ludolume-retention-restore-guard-v1\0')
+        .update(JSON.stringify(value.guard)).digest('hex');
+    io.objects.set(name, JSON.stringify(value));
+    const current = await store.readRestoreGuard();
+    assert.deepEqual(current.recoveryCheckpoint, recoveryCheckpoint);
+    for (const next of [guard, { ...guard, recoveryCheckpoint: { ...recoveryCheckpoint, minimumEpoch: '5' } },
+        { ...guard, recoveryCheckpoint: { ...recoveryCheckpoint, minimumEpoch: '7' } }]) {
+        await assert.rejects(store.writeRestoreGuard(next, current.generation), RetentionJournalUnavailableError);
+    }
+    assert.equal(await store.writeRestoreGuard({ ...guard, state: 'active', recoveryCheckpoint }, current.generation), '2');
+    assert.deepEqual((await store.readRestoreGuard()).recoveryCheckpoint, recoveryCheckpoint);
 });
 
 test('resolution is append-only, authenticated, and bound to the exact conditional intent', async () => {

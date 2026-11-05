@@ -63,3 +63,19 @@ test('operator reads the same three independent key values as the runtime', () =
         assert.throws(() => parseRetentionKeyBundle(bad));
     }
 });
+
+test('restored conditional deletion is blocked before replay when the SQL checkpoint is older', async () => {
+    const restorePins = { ...pins, serverUuid: epoch, originalServerUuid: serverUuid };
+    const guard = { state: 'hold' as const, database: pins.database, serverUuid, epoch,
+        expiresAt: '2026-12-01T00:00:00.000Z', generation: '123',
+        recoveryCheckpoint: { lineage: epoch, minimumEpoch: '3', keySha256: 'a'.repeat(64) } };
+    let released = false;
+    const connection = { async query() { return [[{ databaseName: pins.database, currentUser: pins.currentUser,
+        serverUuid: epoch, lineageId: epoch, checkpointEpoch: '2' }], []]; }, release() { released = true; } };
+    const database = { async query() { return [[{ db: pins.database, user: pins.currentUser, serverUuid: epoch }], []]; },
+        async getConnection() { return connection; } } as unknown as Pick<Pool, 'query' | 'getConnection'>;
+    const journal = { async readRestoreGuard() { return guard; } } as unknown as ReturnType<typeof createGcsRetentionJournal>;
+    await assert.rejects(executeRetentionReconciliation('apply-restored', { confirmation: 'ISOLATED RESTORE FENCED AND DELETION VERIFIED',
+        intent: {} }, restorePins, journal, database, Buffer.alloc(32, 1)));
+    assert.equal(released, true);
+});

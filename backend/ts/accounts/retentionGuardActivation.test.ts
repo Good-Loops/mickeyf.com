@@ -17,15 +17,21 @@ const intent: RetentionIntent = { parentId: original, childId: child, warningId:
 const deleted: RetentionResolution = { outcome: 'deleted', confirmedAt: '2024-01-01T00:00:00.000000Z',
     observedActivityAt: null, proofDigest: 'd'.repeat(64) };
 
-function fixture({ records = [], resolution = null, childPresent = false, writers = 0, secondRecords }:
+function fixture({ records = [], resolution = null, childPresent = false, writers = 0, secondRecords,
+    recoveryCheckpoint, targetCheckpoint = '6' }:
     { records?: RetentionIntent[]; resolution?: RetentionResolution | null; childPresent?: boolean; writers?: number;
-        secondRecords?: RetentionIntent[] } = {}) {
+        secondRecords?: RetentionIntent[]; recoveryCheckpoint?: { lineage: string; minimumEpoch: string; keySha256: string };
+        targetCheckpoint?: string | null } = {}) {
     const guard = { state: 'hold' as const, database: pins.database, serverUuid: original, epoch: warning,
-        expiresAt: '2027-01-01T00:00:00.000Z', generation: '8' };
+        expiresAt: '2027-01-01T00:00:00.000Z', generation: '8',
+        ...(recoveryCheckpoint === undefined ? {} : { recoveryCheckpoint }) };
     let locked = false, destroyed = false, writes = 0, lists = 0;
     const connection = { destroy() { destroyed = true; }, async query(query: { sql: string }) {
         if (query.sql.includes('USER_PRIVILEGES')) return [[{ count: 1 }], []];
         if (query.sql.includes('PROCESSLIST')) return [[{ count: writers }], []];
+        if (query.sql.includes('FROM account_recovery_checkpoint')) return [targetCheckpoint === null ? [] : [{
+            databaseName: pins.database, currentUser: pins.currentUser, serverUuid: target,
+            lineageId: recoveryCheckpoint?.lineage, checkpointEpoch: targetCheckpoint }], []];
         if (query.sql.includes('CURRENT_USER')) return [[{ db: pins.database, user: pins.currentUser, serverUuid: target,
             readOnly: 0, superReadOnly: 0, nowUtc: '2026-01-01T00:00:00.000000Z' }], []];
         if (query.sql === 'FLUSH TABLES WITH READ LOCK') { locked = true; return [[], []]; }
@@ -37,6 +43,7 @@ function fixture({ records = [], resolution = null, childPresent = false, writer
     const journal = { async readRestoreGuard() { return guard; }, async readIntents() { return ++lists === 1 ? records : (secondRecords ?? records); },
         async readResolution() { return resolution; }, async writeRestoreGuard(value: { state: string; serverUuid: string }, generation: string) {
             assert.equal(locked, true); assert.equal(value.state, 'active'); assert.equal(value.serverUuid, target);
+            assert.deepEqual((value as { recoveryCheckpoint?: unknown }).recoveryCheckpoint, recoveryCheckpoint);
             assert.equal(generation, '8'); writes++; return '9';
         } } as unknown as Pick<ReturnType<typeof createGcsRetentionJournal>, 'readRestoreGuard' | 'readIntents' | 'readResolution' | 'writeRestoreGuard'>;
     return { connection, journal, get writes() { return writes; }, get locked() { return locked; }, get destroyed() { return destroyed; } };
@@ -46,6 +53,16 @@ test('activation audits all resolved outcomes under a pinned SQL lock and update
     const f = fixture({ records: [intent], resolution: deleted });
     assert.equal(await activateRetentionGuard(f.connection, f.journal, pins), '9');
     assert.equal(f.writes, 1); assert.equal(f.locked, false);
+});
+test('activation rejects an old or missing SQL checkpoint and preserves the authenticated floor', async () => {
+    const recoveryCheckpoint = { lineage: child, minimumEpoch: '6', keySha256: 'a'.repeat(64) };
+    const good = fixture({ recoveryCheckpoint });
+    assert.equal(await activateRetentionGuard(good.connection, good.journal, pins), '9');
+    for (const targetCheckpoint of ['5', null]) {
+        const f = fixture({ recoveryCheckpoint, targetCheckpoint });
+        await assert.rejects(activateRetentionGuard(f.connection, f.journal, pins), /Keep all writers and traffic stopped/);
+        assert.equal(f.writes, 0);
+    }
 });
 test('activation accepts a kept outcome only when the restored relationship preserves later recorded activity', async () => {
     const resolution: RetentionResolution = { outcome: 'kept', confirmedAt: '2025-01-03T00:00:00.000000Z',

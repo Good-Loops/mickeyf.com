@@ -17,7 +17,7 @@ const OBJECT_FIELDS = 'bucket,name,generation,size,md5Hash,timeDeleted,softDelet
 
 export interface JournalHttpRequest {
     url: string;
-    method: 'GET' | 'POST';
+    method: 'GET' | 'POST' | 'PATCH' | 'DELETE';
     params: Record<string, string | number | boolean>;
     headers?: Record<string, string>;
     data?: string;
@@ -40,7 +40,11 @@ interface JournalOptions {
     requestId?: () => string;
     timeoutMs?: number;
     readTimeoutMs?: number;
+    /** Recovery-only: must authenticate the independent guard and actual SQL target. */
+    verifyRetiredObjects?: (objects: readonly RetiredObject[]) => Promise<void>;
 }
+
+type RetiredObject = Readonly<{ bucket: string; name: string; generation: string; stamp: unknown }>;
 
 interface JournalObject {
     name: string;
@@ -48,6 +52,8 @@ interface JournalObject {
     size: number;
     md5Hash: string;
 }
+
+export type DeletionJournalEntry = Readonly<{ name: string; generation: string; contentSha256: string; intent: DeletionIntent }>;
 
 /** Request creation failures are intentionally indistinguishable from lost acknowledgements. */
 export class DeletionJournalUnavailableError extends Error {
@@ -59,7 +65,9 @@ export class DeletionJournalUnavailableError extends Error {
 
 export function createGcsDeletionJournal(
     options: JournalOptions = {},
-): AccountDeletionJournal & DeletionJournalReader {
+): AccountDeletionJournal & DeletionJournalReader & {
+    readDeletionEntries(): Promise<Readonly<{ entries: readonly DeletionJournalEntry[]; digest: string }>>;
+} {
     if (options.bucket !== undefined && options.bucket !== DELETION_JOURNAL_BUCKET) {
         throw new Error('Unapproved deletion journal bucket');
     }
@@ -128,8 +136,9 @@ export function createGcsDeletionJournal(
         }
     }
 
-    async function listObjects(softDeleted: boolean, readDeadline: number): Promise<JournalObject[]> {
+    async function listObjects(softDeleted: boolean, readDeadline: number): Promise<JournalObject[] | RetiredObject[]> {
         const result: JournalObject[] = [];
+        const retired: RetiredObject[] = [];
         const tokens = new Set<string>();
         const names = new Set<string>();
         let pageToken: string | undefined;
@@ -138,7 +147,7 @@ export function createGcsDeletionJournal(
                 method: 'GET', url: `${STORAGE_API}${OBJECT_PATH}`, responseType: 'json',
                 params: {
                     ...(softDeleted ? { softDeleted: true } : { versions: true }),
-                    maxResults: 100, fields: `kind,nextPageToken,items(${OBJECT_FIELDS})`,
+                    maxResults: 100, fields: `kind,nextPageToken,items(${OBJECT_FIELDS}${softDeleted ? ',metadata' : ''})`,
                     ...(pageToken === undefined ? {} : { pageToken }),
                 },
             }, readDeadline);
@@ -148,11 +157,27 @@ export function createGcsDeletionJournal(
                 throw new DeletionJournalUnavailableError();
             }
             const items = (page.items ?? []) as unknown[];
-            if (items.length > 100 || result.length + items.length > MAX_JOURNAL_OBJECTS) {
+            if (items.length > 100 || result.length + retired.length + items.length > MAX_JOURNAL_OBJECTS) {
                 throw new DeletionJournalUnavailableError();
             }
-            if (softDeleted && items.length !== 0) throw new DeletionJournalUnavailableError();
+            if (softDeleted && items.length !== 0 && !options.verifyRetiredObjects) throw new DeletionJournalUnavailableError();
             for (const item of items) {
+                if (softDeleted) {
+                    const raw = parseObject(item);
+                    const metadata = parseObject(raw.metadata);
+                    if (raw.bucket !== DELETION_JOURNAL_BUCKET || typeof raw.name !== 'string' || !OBJECT_NAME.test(raw.name)
+                        || typeof raw.generation !== 'string' || !/^[1-9][0-9]*$/u.test(raw.generation)
+                        || typeof raw.softDeleteTime !== 'string' || !Number.isFinite(Date.parse(raw.softDeleteTime))
+                        || typeof metadata.ludolumeRetirement !== 'string' || metadata.ludolumeRetirement.length > 4096) {
+                        throw new DeletionJournalUnavailableError();
+                    }
+                    const identity = JSON.stringify([raw.name, raw.generation]);
+                    if (names.has(identity)) throw new DeletionJournalUnavailableError();
+                    names.add(identity);
+                    retired.push({ bucket: DELETION_JOURNAL_BUCKET, name: raw.name, generation: raw.generation,
+                        stamp: JSON.parse(metadata.ludolumeRetirement) as unknown });
+                    continue;
+                }
                 const object = parseJournalObject(item);
                 if (names.has(object.name)) throw new DeletionJournalUnavailableError();
                 names.add(object.name);
@@ -163,15 +188,16 @@ export function createGcsDeletionJournal(
             if (pageToken !== undefined) tokens.add(pageToken);
             if (tokens.size > MAX_JOURNAL_OBJECTS) throw new DeletionJournalUnavailableError();
         } while (pageToken !== undefined);
-        return result;
+        return softDeleted ? retired : result;
     }
 
-    async function readDeletionIntents(): Promise<DeletionJournalSnapshot> {
+    async function readDeletionEntries(): Promise<Readonly<{ entries: readonly DeletionJournalEntry[]; digest: string }>> {
         try {
             const readDeadline = Date.now() + readTimeoutMs;
-            await listObjects(true, readDeadline);
-            const objects = await listObjects(false, readDeadline);
-            const intents: DeletionIntent[] = [];
+            const retiredBefore = await listObjects(true, readDeadline) as RetiredObject[];
+            if (options.verifyRetiredObjects) await options.verifyRetiredObjects(retiredBefore);
+            const objects = await listObjects(false, readDeadline) as JournalObject[];
+            const entries: DeletionJournalEntry[] = [];
             for (const object of objects) {
                 const body = await request({
                     method: 'GET',
@@ -181,21 +207,37 @@ export function createGcsDeletionJournal(
                 }, readDeadline);
                 if (typeof body !== 'string' || Buffer.byteLength(body) !== object.size
                     || checksum(body) !== object.md5Hash) throw new DeletionJournalUnavailableError();
-                intents.push(parseDeletionIntent(JSON.parse(body)));
+                entries.push({ name: object.name, generation: object.generation,
+                    contentSha256: createHash('sha256').update(body, 'utf8').digest('hex'),
+                    intent: parseDeletionIntent(JSON.parse(body)) });
             }
-            await listObjects(true, readDeadline);
+            const retiredAfter = await listObjects(true, readDeadline) as RetiredObject[];
+            if (options.verifyRetiredObjects) {
+                await options.verifyRetiredObjects(retiredAfter);
+                const canonical = (values: readonly RetiredObject[]) => values.map(value => JSON.stringify(value)).sort();
+                if (JSON.stringify(canonical(retiredBefore)) !== JSON.stringify(canonical(retiredAfter))) {
+                    throw new DeletionJournalUnavailableError();
+                }
+            }
             // Listing is not a snapshot: callers must drain source writers and compare fresh
             // digests around replay. Never use this result as a permanent recovery export.
             const inventory = objects.map(({ name, generation }) => [name, generation])
                 .sort(([left], [right]) => left.localeCompare(right));
-            return { intents, digest: createHash('sha256').update(JSON.stringify(inventory)).digest('hex') };
+            const digestInput = options.verifyRetiredObjects
+                ? { inventory, retired: retiredAfter.map(value => JSON.stringify(value)).sort() }
+                : inventory;
+            return { entries, digest: createHash('sha256').update(JSON.stringify(digestInput)).digest('hex') };
         } catch {
             throw new DeletionJournalUnavailableError();
         }
     }
 
     return { recordAccountDeletion: accountId => recordIntent(accountId, 'delete-account'),
-        recordPublicScoreWithdrawal: accountId => recordIntent(accountId, 'withdraw-public-scores'), readDeletionIntents };
+        recordPublicScoreWithdrawal: accountId => recordIntent(accountId, 'withdraw-public-scores'), readDeletionEntries,
+        async readDeletionIntents(): Promise<DeletionJournalSnapshot> {
+            const { entries, digest } = await readDeletionEntries();
+            return { intents: entries.map(entry => entry.intent), digest };
+        } };
 }
 
 function createAuthenticatedClient(): JournalHttpClient {

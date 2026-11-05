@@ -192,6 +192,15 @@ export function createContinuityHead(storage: ContinuityHeadStorage, secret: Buf
             observedAt: parsed.observedAt }, ledgerRows: nextRows };
     }
     return Object.freeze({
+        /** Authenticity and sequence only; this does not prove that the SQL state is current. */
+        inspectArchivedEvent(childId: string, generation: string, body: string): Readonly<{ sequence: number; digest: string }> {
+            try {
+                const name = nameFor(childId);
+                const value = decode(name, { kind: 'found', name, generation, body, live: true });
+                if (!value) throw new Error();
+                return { sequence: value.sequence, digest: value.digest };
+            } catch { throw new ContinuityHeadUnavailableError(); }
+        },
         /** databaseNow must be read from the pinned primary, under the same transaction and lock. */
         issueOperation(childId: string, canonicalRequest: Buffer, databaseNow: number): ContinuityOperation {
             nameFor(childId);

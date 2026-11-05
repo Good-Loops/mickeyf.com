@@ -4,6 +4,7 @@ import { isAccountId } from './deletionJournal';
 import { parseInactivityInstant } from './childInactivityPolicy';
 import type { createGcsRetentionJournal, RestoreGuard } from './gcsRetentionJournal';
 import { assertNoRetentionRuntimeWriters } from './retentionReconciliation';
+import { readRecoveryCheckpoint } from './accountRecoveryCheckpoint';
 
 type Connection = Pick<PoolConnection, 'query' | 'destroy'>;
 type Journal = Pick<ReturnType<typeof createGcsRetentionJournal>, 'readRestoreGuard' | 'readIntents' | 'readResolution' | 'writeRestoreGuard'>;
@@ -38,6 +39,11 @@ export async function activateRetentionGuard(connection: Connection, journal: Jo
         await connection.query({ sql: 'FLUSH TABLES WITH READ LOCK', timeout: 10_000 });
         const nowUtc = await identity();
         await assertNoRetentionRuntimeWriters(connection);
+        if (guard.recoveryCheckpoint !== undefined) {
+            await readRecoveryCheckpoint(connection, { database: pins.database, currentUser: pins.currentUser,
+                serverUuid: pins.serverUuid, lineage: guard.recoveryCheckpoint.lineage,
+                minimumEpoch: guard.recoveryCheckpoint.minimumEpoch });
+        }
         const intents = await journal.readIntents();
         for (const intent of intents) {
             const resolution = await journal.readResolution(intent);
@@ -62,7 +68,8 @@ export async function activateRetentionGuard(connection: Connection, journal: Jo
         if (JSON.stringify(intents) !== JSON.stringify(await journal.readIntents())
             || JSON.stringify(guard) !== JSON.stringify(await journal.readRestoreGuard())) throw new Error('Retention inventory changed.');
         activating = { state: 'active', database: pins.database, serverUuid: pins.serverUuid,
-            epoch: randomUUID(), expiresAt: new Date(Date.parse(nowUtc) + 364 * 24 * 60 * 60_000).toISOString() };
+            epoch: randomUUID(), expiresAt: new Date(Date.parse(nowUtc) + 364 * 24 * 60 * 60_000).toISOString(),
+            ...(guard.recoveryCheckpoint === undefined ? {} : { recoveryCheckpoint: guard.recoveryCheckpoint }) };
         const generation = await journal.writeRestoreGuard(activating, guard.generation);
         await identity();
         await connection.query({ sql: 'UNLOCK TABLES', timeout: 10_000 });

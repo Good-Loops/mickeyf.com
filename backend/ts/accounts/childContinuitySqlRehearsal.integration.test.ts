@@ -37,6 +37,7 @@ import { runChildWarningMaintenance } from './childWarningMaintenance';
 import { verifyChildWarningReadiness } from '../migrations/childWarningReadiness';
 import { createChildWarningWebhookRouter } from '../routers/childWarningWebhookRouter';
 import { createChildWarningParentService } from './childWarningParentService';
+import { verifyRetirementSourceSchema } from './retirementSourceSchema';
 
 // These tests use the same SQL/witness fixture as activity and keep. No second
 // test framework, real email recipient, cloud bucket or production credential.
@@ -804,4 +805,14 @@ test('the parent screen reads the twelve-month notice only with a live owning se
     await w.f.keep();
     assert.deepEqual(await service.read(w.f.parentContext, input), { warning: null });
     assert.deepEqual(await service.pending(w.f.parentContext, {}), { pending: false });
+});
+
+test('retirement source schema verifies reviewed foreign keys and rejects a broken child chain', async () => {
+    const extension = readFileSync(path.resolve(__dirname, '../../migrations/pending/0028_extend_child_signed_parent_forms.sql'), 'utf8');
+    await admin.query(extension);
+    await verifyRetirementSourceSchema(admin as unknown as PoolConnection);
+    await admin.query('ALTER TABLE parent_child_inactivity_warnings DROP FOREIGN KEY fk_inactivity_warning_activity');
+    try { await assert.rejects(verifyRetirementSourceSchema(admin as unknown as PoolConnection)); }
+    finally { await admin.query(`ALTER TABLE parent_child_inactivity_warnings ADD CONSTRAINT fk_inactivity_warning_activity
+        FOREIGN KEY (child_uuid) REFERENCES parent_managed_child_activity(child_uuid) ON DELETE CASCADE ON UPDATE RESTRICT`); }
 });

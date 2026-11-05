@@ -3,6 +3,7 @@ import { isAccountId } from './deletionJournal';
 import type { RetentionIntent } from './childInactivityWorkflow';
 import type { ObservedRestoreGuard, RetentionResolution } from './gcsRetentionJournal';
 import { parseInactivityInstant } from './childInactivityPolicy';
+import { readRecoveryCheckpoint } from './accountRecoveryCheckpoint';
 
 type Journal = Readonly<{
     readRestoreGuard(): Promise<ObservedRestoreGuard>;
@@ -24,29 +25,34 @@ export function createPinnedPrimaryHealth(options: Readonly<{ database: string; 
         || typeof options.journal?.readResolution !== 'function') {
         throw new TypeError('Invalid retention primary pin.');
     }
-    async function identity(connection: Connection): Promise<number | null> {
+    async function identity(connection: Connection): Promise<{ now: number; currentUser: string } | null> {
         const [rows] = await connection.query<RowDataPacket[]>({ sql: `SELECT DATABASE() AS databaseName,
-            @@GLOBAL.server_uuid AS serverUuid, @@GLOBAL.read_only AS readOnly,
+            CURRENT_USER() AS currentUser, @@GLOBAL.server_uuid AS serverUuid, @@GLOBAL.read_only AS readOnly,
             @@GLOBAL.super_read_only AS superReadOnly,
             DATE_FORMAT(UTC_TIMESTAMP(6),'%Y-%m-%dT%H:%i:%s.%fZ') AS nowUtc`, timeout });
         if (!Array.isArray(rows) || rows.length !== 1) return null;
         const row = rows[0], now = typeof row.nowUtc === 'string' ? Date.parse(row.nowUtc) : NaN;
-        if (row.databaseName !== options.database || row.serverUuid !== options.serverUuid
+        if (row.databaseName !== options.database || row.serverUuid !== options.serverUuid || typeof row.currentUser !== 'string'
             || ![0, '0'].includes(row.readOnly) || ![0, '0'].includes(row.superReadOnly)
             || !Number.isFinite(now) || !/^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{6}Z$/u.test(row.nowUtc)
             || new Date(now).toISOString() !== `${row.nowUtc.slice(0, 23)}Z`) return null;
-        return now;
+        return { now, currentUser: row.currentUser };
     }
     return async (connection: Connection, parentId: string, childId: string): Promise<boolean> => {
         if (!isAccountId(parentId) || !isAccountId(childId) || parentId === childId) return false;
         try {
-            const now = await identity(connection);
-            if (now === null) return false;
+            const primary = await identity(connection);
+            if (primary === null) return false;
             const before = await options.journal.readRestoreGuard();
             const expiry = Date.parse(before.expiresAt);
             if (before.state !== 'active' || before.serverUuid !== options.serverUuid || before.database !== options.database
                 || !isAccountId(before.epoch) || !/^[1-9][0-9]*$/u.test(before.generation)
-                || !Number.isFinite(expiry) || expiry <= now || expiry - now > MAX_ATTESTATION_MS) return false;
+                || !Number.isFinite(expiry) || expiry <= primary.now || expiry - primary.now > MAX_ATTESTATION_MS) return false;
+            if (before.recoveryCheckpoint) {
+                await readRecoveryCheckpoint(connection, { database: options.database, serverUuid: options.serverUuid,
+                    currentUser: primary.currentUser, lineage: before.recoveryCheckpoint.lineage,
+                    minimumEpoch: before.recoveryCheckpoint.minimumEpoch });
+            }
             const intents = await options.journal.readIntentsForChild(childId);
             if (!Array.isArray(intents)) return false;
             if (intents.length) {
@@ -66,8 +72,9 @@ export function createPinnedPrimaryHealth(options: Readonly<{ database: string; 
                 }
             }
             const after = await options.journal.readRestoreGuard();
-            const nowAfter = await identity(connection);
-            return nowAfter !== null && nowAfter >= now && nowAfter < expiry && JSON.stringify(before) === JSON.stringify(after);
+            const primaryAfter = await identity(connection);
+            return primaryAfter !== null && primaryAfter.currentUser === primary.currentUser && primaryAfter.now >= primary.now
+                && primaryAfter.now < expiry && JSON.stringify(before) === JSON.stringify(after);
         } catch { return false; }
     };
 }
