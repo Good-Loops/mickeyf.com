@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { APPLE_REVOCATION_INTEGRATION_TEST_COMMAND, REGISTRATION_INTEGRATION_TEST_COMMAND, PARENT_REGISTRATION_INTEGRATION_TEST_COMMAND, selectMigrationTestCommands } from './run-migration-tests.mjs';
+import { APPLE_REVOCATION_INTEGRATION_TEST_COMMAND, REGISTRATION_INTEGRATION_TEST_COMMAND, PARENT_REGISTRATION_INTEGRATION_TEST_COMMAND, CHILD_DAILY_USAGE_INTEGRATION_TEST_COMMAND, selectMigrationTestCommands } from './run-migration-tests.mjs';
 
 test('Apple revocation filter runs only its focused disposable SQL suite', () => {
   assert.deepEqual(selectMigrationTestCommands({ appleRevocationOnly: true }), [APPLE_REVOCATION_INTEGRATION_TEST_COMMAND]);
@@ -8,6 +8,12 @@ test('Apple revocation filter runs only its focused disposable SQL suite', () =>
     '--test', '-r', 'ts-node/register', 'ts/auth/appleSessionRevocation.integration.test.ts',
   ]);
   assert(selectMigrationTestCommands().includes(APPLE_REVOCATION_INTEGRATION_TEST_COMMAND));
+});
+
+test('daily usage selection runs in isolation and is part of the full SQL suite', () => {
+  assert.deepEqual(selectMigrationTestCommands({ childDailyUsageOnly: true }), [CHILD_DAILY_USAGE_INTEGRATION_TEST_COMMAND]);
+  assert(selectMigrationTestCommands().includes(CHILD_DAILY_USAGE_INTEGRATION_TEST_COMMAND));
+  assert.throws(() => selectMigrationTestCommands({ childDailyUsageOnly: true, parentRegistrationOnly: true }), /Select only one/u);
 });
 
 test('existing focused selections remain separate from new Apple SQL checks', () => {
