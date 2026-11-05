@@ -22,6 +22,16 @@ Local evidence is in `C:/Users/User/Ludolume-Release-Evidence-2026-11-01`:
 The later approved backup cleanup receipt is `approved-backup-cleanup-verified.json`.
 No retained account evidence was removed by that three-snapshot cleanup.
 
+The 5 November notice/form candidate now explicitly covers the qualified 14-day
+cleanup of approved-but-unused forms after request expiry/cancellation. Both
+languages distinguish our mailbox/file/recovery copies from provider-internal
+backups; no immediate provider-wide erasure is promised. Notice version is
+`privacy-2026-11-05.1`, form version `signed-parent-form-2026-11-05.1`.
+Twenty-nine notice/form/parent-flow rendering checks and the backend form-digest
+binding check passed. This clarification does not adopt the proposed 30/45-day
+schedule below or complete item 1.3. Final deployment must use the matching new
+notice/form versions; older approvals must not be relabeled as the new version.
+
 The session cleanup passed backend TypeScript checking, 25 focused unit/router
 checks and 46 SQL integration checks on disposable MySQL 8.0.31. The SQL cases
 cover cross-account expiry, non-UTC connections, live/renewed-session preservation
