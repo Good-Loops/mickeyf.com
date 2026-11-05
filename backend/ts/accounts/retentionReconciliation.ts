@@ -47,7 +47,7 @@ type RestoreJournal = AdminJournal & Readonly<{ readResolution(intent: Retention
 type AdminConnection = Pick<PoolConnection, 'query' | 'destroy'>;
 type AdminPins = Readonly<{ database: string; serverUuid: string; currentUser: string; confirmation: string }>;
 
-/** Requires direct PROCESS privilege so a restricted account cannot hide writer sessions. */
+/** PROCESS visibility is required; scheduled receipt cleanup is an independent writer. */
 export async function assertNoRetentionRuntimeWriters(connection: AdminConnection): Promise<void> {
     const [privileges] = await connection.query<RowDataPacket[]>({ sql: `SELECT COUNT(*) AS count
         FROM information_schema.USER_PRIVILEGES WHERE PRIVILEGE_TYPE='PROCESS'
@@ -68,7 +68,7 @@ export async function assertNoRetentionRuntimeWriters(connection: AdminConnectio
         if (!hasProcess) throw new Error('The administrator cannot verify writer sessions.');
     }
     const [writers] = await connection.query<RowDataPacket[]>({ sql: `SELECT COUNT(*) AS count
-        FROM information_schema.PROCESSLIST WHERE USER='cms_mickeyf' AND ID<>CONNECTION_ID()`, timeout: 10_000 });
+        FROM information_schema.PROCESSLIST WHERE USER IN ('cms_mickeyf','receipt_cleanup') AND ID<>CONNECTION_ID()`, timeout: 10_000 });
     if (!Array.isArray(writers) || writers.length !== 1 || ![0, '0'].includes(writers[0].count)) {
         throw new Error('Runtime writers are not drained.');
     }

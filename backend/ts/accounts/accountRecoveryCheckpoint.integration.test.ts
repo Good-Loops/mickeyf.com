@@ -67,7 +67,7 @@ before(async () => {
 
 after(async () => { if (connection) await connection.end(); });
 
-test('writer fence accepts an enabled PROCESS role and still detects live runtime sessions', async () => {
+test('writer fence accepts PROCESS and detects app and scheduled cleanup sessions', async () => {
     assert.equal(process.env.MIGRATION_TEST_ROOT_PASSWORD, 'migration-test-root-only');
     const port = Number(process.env.MIGRATION_TEST_PORT);
     const root = await mysql.createConnection({ host: '127.0.0.1', port, user: 'root',
@@ -80,9 +80,14 @@ test('writer fence accepts an enabled PROCESS role and still detects live runtim
         await root.query("GRANT 'process_inspection_test'@'%' TO 'process_inspector_test'@'%'");
         await root.query("SET DEFAULT ROLE 'process_inspection_test'@'%' TO 'process_inspector_test'@'%'");
         await root.query("CREATE USER 'cms_mickeyf'@'%' IDENTIFIED BY 'writer-test-only'");
+        await root.query("CREATE USER 'receipt_cleanup'@'%' IDENTIFIED BY 'writer-test-only'");
         inspector = await mysql.createConnection({ host: '127.0.0.1', port, user: 'process_inspector_test',
             password: 'inspector-test-only', multipleStatements: false });
         writer = await mysql.createConnection({ host: '127.0.0.1', port, user: 'cms_mickeyf',
+            password: 'writer-test-only', multipleStatements: false });
+        await assert.rejects(assertNoRetentionRuntimeWriters(inspector as unknown as PoolConnection), /not drained/u);
+        await writer.end(); writer = undefined;
+        writer = await mysql.createConnection({ host: '127.0.0.1', port, user: 'receipt_cleanup',
             password: 'writer-test-only', multipleStatements: false });
         await assert.rejects(assertNoRetentionRuntimeWriters(inspector as unknown as PoolConnection), /not drained/u);
         await writer.end(); writer = undefined;
@@ -93,6 +98,7 @@ test('writer fence accepts an enabled PROCESS role and still detects live runtim
         if (writer) await writer.end();
         if (inspector) await inspector.end();
         await root.query("DROP USER IF EXISTS 'cms_mickeyf'@'%'");
+        await root.query("DROP USER IF EXISTS 'receipt_cleanup'@'%'");
         await root.query("DROP USER IF EXISTS 'process_inspector_test'@'%'");
         await root.query("DROP ROLE IF EXISTS 'process_inspection_test'@'%'");
         await root.end();
