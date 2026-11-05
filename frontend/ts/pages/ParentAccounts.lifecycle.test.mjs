@@ -21,6 +21,7 @@ const mocks = {
 };
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const server = await createViteTestServer({ root, configFile: `${root}/vite.config.ts`, appType: 'custom', logLevel: 'silent',
+    define: { 'import.meta.env.VITE_ENABLE_CHILD_INACTIVITY_WARNING': '"0"', 'import.meta.env.VITE_ENABLE_CHILD_ONLINE_ACTIVITY': '"0"' },
     server: {middlewareMode:true}, ssr: {noExternal:[/^react$/]}, plugins:[{name:'parent-management-lifecycle',enforce:'pre',
         resolveId(source) { const name=source.replaceAll('\\','/').split('/').at(-1).replace(/\.tsx?$/,''); if(Object.hasOwn(mocks,name))return `\0parent-page:${name}`; },
         load(id) { if(id.startsWith('\0parent-page:'))return mocks[id.slice('\0parent-page:'.length)]; },
