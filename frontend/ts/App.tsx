@@ -8,6 +8,7 @@ import { useSafariBackgroundEdges } from '@/hooks/useSafariBackgroundEdges';
 import { useNativePresentation } from '@/hooks/useNativePresentation';
 import { Link, Routes, Route, useLocation } from "react-router-dom";
 import RouteContentBoundary from '@/components/RouteContentBoundary';
+import PageMetadata from '@/components/PageMetadata';
 import PrivacyNoticeLink from '@/components/PrivacyNoticeLink';
 import { parsePrivacyNoticeUrl } from '@/config/privacyNoticeUrl';
 import Header from "@/Header";
@@ -52,6 +53,7 @@ const App: React.FC = () => {
 
 	return (
 	<div className="app-shell" ref={shellRef}>
+		<PageMetadata threeBossesAvailable={threeBossesAvailable && isThreeBossesReleaseEnabled} />
 		<div className="space-background" aria-hidden="true">
 			<div className="space-background__stars space-background__stars--far" />
 			<div className="space-background__stars space-background__stars--near" />
