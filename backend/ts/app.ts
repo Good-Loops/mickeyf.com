@@ -39,6 +39,7 @@ import { loadAppleRuntimeLifecycle } from './config/appleRuntimeSecrets';
 import { prepareRuntimeProviderAuth } from './config/providerAuthConfig';
 import { verifyLocalProviderIdentity } from './db/localProviderIdentity';
 import { createLocalProviderMaintenance } from './accounts/localProviderMaintenance';
+import { cleanupExpiredAccountSessions } from './auth/accountSessionRepository';
 
 import { createRegistrationAuthorization, cleanupRegistrationAuthorizations } from './accounts/registrationAuthorization';
 import { verifyRegistrationReadiness } from './migrations/registrationSchema';
@@ -103,9 +104,10 @@ app.use(helmet({
 // Mount before CORS/preflight and body parsers so they cannot bypass its checks.
 async function runConfiguredMaintenance(): Promise<number> {
     // Independent cleanup must still run if Apple's provider request fails.
-    const [apple, registrationCleanup, parentCleanup, formCleanup, relayCleanup, inactivity] = await Promise.allSettled([
+    const [apple, sessionCleanup, registrationCleanup, parentCleanup, formCleanup, relayCleanup, inactivity] = await Promise.allSettled([
         runAppleMaintenance({ database: pool, expectedServerUuid: runtimeConfig.appleMaintenance!.expectedServerUuid,
             loadLifecycle: loadRuntimeAppleLifecycle, appleAndroidEnabled: runtimeConfig.providerAuth.appleAndroidEnabled === true }),
+        cleanupExpiredAccountSessions(pool),
         cleanupRegistrationAuthorizations(pool),
         cleanupParentRegistrationAttempts(pool),
         runtimeConfig.parentRegistrationPolicy?.signedFormsEnabled ? cleanupSignedParentForms(pool) : Promise.resolve({ backlog: false }),
@@ -113,6 +115,7 @@ async function runConfiguredMaintenance(): Promise<number> {
         childInactivityDeployment ? childInactivityDeployment.runMaintenance() : Promise.resolve(0),
     ]);
     return apple.status === 'fulfilled' && apple.value === 0
+        && sessionCleanup.status === 'fulfilled' && !sessionCleanup.value.backlog
         && registrationCleanup.status === 'fulfilled' && !registrationCleanup.value.backlog
         && parentCleanup.status === 'fulfilled' && !parentCleanup.value.backlog
         && formCleanup.status === 'fulfilled' && !formCleanup.value.backlog

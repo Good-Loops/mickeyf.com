@@ -10,9 +10,12 @@ configuration, and owner-operated process again before release.
 This checkpoint supersedes older implementation and storage-status statements
 below; the historical review is retained for its unresolved findings.
 
-- Release items 3.4 and 3.5 passed: compatible production backend and fallback,
+- Release items 3.4 through 3.7 passed: compatible production backend and fallback,
   signed-form and four activity/warning schemas, restricted runtime grants,
-  and synthetic production activity/Keep/concurrency/SQL-restoration checks.
+  synthetic production activity/Keep/concurrency/SQL-restoration checks,
+  authenticated Brevo callback, schedule/alerts and the warning lifecycle.
+  Eight additional isolated SQL/cloud deletion and recovery checks passed under
+  3.8; final production activation and observation remain pending after step 1.
   Child creation and inactivity processing remain off; adult BR/US sign-up is open.
 - The second-computer encrypted-archive recovery and unmatched synthetic email
   intake/known-copy cleanup passed (2.2). Matched-form owner approval, rejection,
@@ -25,11 +28,13 @@ below; the historical review is retained for its unresolved findings.
   signed form is `signed-parent-form-2026-11-04.2`. Both languages now describe
   this behavior, Brevo, anonymous engagement reporting and separate history.
   Form text remains part of the policy binding. No new notice has been published.
-- The Brevo sender and anonymous reporting were previously qualified (3.2).
-  The failure callback awaits the owner's private token entry. The new
+- The Brevo sender and anonymous reporting were qualified (3.2), and the
+  authenticated provider-origin failure callback passed (3.6). The new
   twice-daily maintenance job is paused and its two alert policies disabled
   until activation and live observation. A staged configuration is not an
-  operating cleanup cadence.
+  operating cleanup cadence. The saved Brevo retention screen now shows one
+  month for all senders' logs and no previews for new messages; this readback
+  did not change settings or establish erasure of older previews/provider backups.
 - Still unresolved under 1.3: precise retention/erasure periods for independent
   activity and warning objects, retention journals, on-demand backups and
   provider/mailbox copies; treatment and review of persistent holds; provider
@@ -37,8 +42,15 @@ below; the historical review is retained for its unresolved findings.
   have no lifecycle expiry and have seven-day soft delete. Do not infer that
   account SQL deletion removes these copies, or invent a universal deadline.
 - Signed iOS inventory/device flows (1.2/5.3), matched-form operation (2.3),
-  final warning/deletion/recovery qualification (3.6-3.8), and the Europe/UK
-  expansion review remain open. This checkpoint is not privacy sign-off.
+  final production activation/observation (3.8), and the remaining regional
+  safeguards remain open. This checkpoint is not privacy sign-off.
+- The owner clarified the intended audience as roughly ages 10-30 and selected
+  ads plus a paid ad-free upgrade for a later update. The first release remains
+  free without ads. Google Play's unfinished audience draft selects 9-12,
+  13-15, 16-17 and 18+; its saved Ads answer remains No. Do not describe this as
+  an adult-only product, or introduce an ad SDK into the current candidate.
+- See the current [retention and provider findings](../2026-11-04/retention-provider-review.md)
+  and [monetization/Europe-UK review](../2026-11-04/monetization-eu-uk-review.md).
 
 Brevo references: [anonymous open/click reporting](https://help.brevo.com/hc/en-us/articles/11643306229906-Can-I-anonymize-the-tracking-of-opens-and-clicks-for-my-emails)
 and [per-recipient pixel behavior](https://developers.brevo.com/changelog/2026/7/21).

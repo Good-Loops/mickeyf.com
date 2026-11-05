@@ -9,7 +9,7 @@ import type { MigrationConnection } from '../migrations/leaderboardSchema';
 import { loadMigrationManifest } from '../migrations/migrationManifest';
 import { applyMigrations, planMigrations } from '../migrations/migrationRunner';
 import { verifyAccountSessionSchema, verifyRenewableAccountSessionSchema } from '../migrations/accountSessionSchema';
-import { AccountSessionUnavailableError, createAccountSession, readLiveSession, renewAccountSession, revokeAccountSession } from './accountSessionRepository';
+import { AccountSessionUnavailableError, cleanupExpiredAccountSessions, createAccountSession, readLiveSession, renewAccountSession, revokeAccountSession } from './accountSessionRepository';
 
 const config = loadMigrationConfig();
 const testPort = Number(process.env.MIGRATION_TEST_PORT);
@@ -107,6 +107,49 @@ async function rows() {
     const [result] = await administrator.query<RowDataPacket[]>('SELECT * FROM account_sessions ORDER BY account_uuid, created_at, session_hash');
     return result;
 }
+
+test('maintenance removes expired sessions across accounts without deleting live or renewed devices in a non-UTC session', async () => {
+    const first = await account('cleanup-first'); const second = await account('cleanup-second');
+    const old = newId(); const boundary = newId(); const live = newId(); const remembered = newId();
+    await createAccountSession(database, first, old, expiry());
+    await createAccountSession(database, second, boundary, expiry());
+    await createAccountSession(database, first, live, expiry());
+    await createAccountSession(database, second, remembered, expiry(), undefined, true);
+    await administrator.query(`UPDATE account_sessions SET renewed_at = UTC_TIMESTAMP(6) - INTERVAL 1 DAY
+        WHERE session_hash = ?`, [hash(remembered)]);
+    const renewal = await renewAccountSession(database, second.userId, second.accountId, remembered, replacement);
+    assert.ok(renewal?.renewal);
+    await administrator.query(`UPDATE account_sessions SET expires_at = UTC_TIMESTAMP(6) - INTERVAL 1 DAY
+        WHERE session_hash = ?`, [hash(old)]);
+    await administrator.query('UPDATE account_sessions SET expires_at = UTC_TIMESTAMP(6) WHERE session_hash = ?', [hash(boundary)]);
+    const connection = await database.getConnection();
+    try {
+        await connection.query("SET SESSION time_zone = '-07:00'");
+        assert.deepEqual(await cleanupExpiredAccountSessions(connection), { deleted: 2, backlog: false });
+    } finally {
+        await connection.query("SET SESSION time_zone = '+00:00'");
+        connection.release();
+    }
+    assert.deepEqual((await rows()).map(row => row.session_hash.toString('hex')).sort(),
+        [hash(live).toString('hex'), hash(renewal.renewal.sessionId).toString('hex')].sort());
+    assert.notEqual(await readLiveSession(database, first.userId, first.accountId, live), null);
+    assert.notEqual(await readLiveSession(database, second.userId, second.accountId, renewal.renewal.sessionId), null);
+});
+
+test('maintenance bounds physical cleanup and can drain its reported backlog on a later pass', async () => {
+    const target = await account('cleanup-backlog');
+    const live = newId();
+    await createAccountSession(database, target, live, expiry());
+    const fixtures = Array.from({ length: 1001 }, () => [hash(newId()), target.accountId]);
+    await administrator.query(`INSERT INTO account_sessions (session_hash, account_uuid, created_at, expires_at)
+        VALUES ${fixtures.map(() => '(?, ?, UTC_TIMESTAMP(6) - INTERVAL 2 DAY, UTC_TIMESTAMP(6) - INTERVAL 1 DAY)').join(',')}`,
+    fixtures.flat());
+    assert.deepEqual(await cleanupExpiredAccountSessions(database), { deleted: 1000, backlog: true });
+    assert.equal((await rows()).length, 2);
+    assert.deepEqual(await cleanupExpiredAccountSessions(database), { deleted: 1, backlog: false });
+    assert.equal((await rows()).length, 1);
+    assert.notEqual(await readLiveSession(database, target.userId, target.accountId, live), null);
+});
 
 test('sessions store hashes and UTC expiry across pool time zones; logout revokes only one device and rejects replay', async () => {
     const target = await account('session-fixture');

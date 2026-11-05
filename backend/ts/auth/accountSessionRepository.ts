@@ -24,6 +24,30 @@ export class AccountSessionUnavailableError extends Error {
     }
 }
 
+/** Remove expired devices even when their owner never signs in again. */
+export async function cleanupExpiredAccountSessions(database: Pick<Pool, 'query'>): Promise<{ deleted: number; backlog: boolean }> {
+    let deleted = 0;
+    try {
+        for (let batch = 0; batch < 10; batch++) {
+            const [result] = await database.query<ResultSetHeader>({
+                sql: `DELETE FROM account_sessions WHERE expires_at <= UTC_TIMESTAMP(6)
+                    ORDER BY expires_at LIMIT 100`, timeout: QUERY_TIMEOUT_MS,
+            });
+            if (!Number.isInteger(result.affectedRows) || result.affectedRows < 0 || result.affectedRows > 100) {
+                throw new AccountSessionUnavailableError();
+            }
+            deleted += result.affectedRows;
+            if (result.affectedRows < 100) return { deleted, backlog: false };
+        }
+        const [rows] = await database.query<RowDataPacket[]>({
+            sql: 'SELECT session_hash FROM account_sessions WHERE expires_at <= UTC_TIMESTAMP(6) LIMIT 1',
+            timeout: QUERY_TIMEOUT_MS,
+        });
+        if (!Array.isArray(rows) || rows.length > 1) throw new AccountSessionUnavailableError();
+        return { deleted, backlog: rows.length !== 0 };
+    } catch { throw new AccountSessionUnavailableError(); }
+}
+
 function sessionHash(target: AccountTarget, sessionId: string): Buffer {
     if (!target || !Number.isSafeInteger(target.userId) || target.userId <= 0
         || target.userId > 2_147_483_647 || !isAccountId(target.accountId)

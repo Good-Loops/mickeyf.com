@@ -2,12 +2,43 @@ import assert from 'node:assert/strict';
 import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import test from 'node:test';
 import type { Pool, PoolConnection, QueryOptions } from 'mysql2/promise';
-import { AccountSessionUnavailableError, createAccountSession, readLiveSession, renewAccountSession, revokeAccountSession } from './accountSessionRepository';
+import { AccountSessionUnavailableError, cleanupExpiredAccountSessions, createAccountSession, readLiveSession, renewAccountSession, revokeAccountSession } from './accountSessionRepository';
 import { parentManagedChildActivity } from '../accounts/parentManagedChildActivity';
 
 const target = { userId: 7, accountId: randomUUID() };
 const sessionId = randomBytes(32).toString('base64url');
 const expiresAt = () => Math.floor(Date.now() / 1000) + 3600;
+
+test('expired-session cleanup reports backlog at its bound and stops when drained', async () => {
+    for (const remaining of [[], [{ session_hash: Buffer.alloc(32) }]]) {
+        let queries = 0;
+        const database = { query: async () => [++queries <= 10 ? { affectedRows: 100 } : remaining, []] } as unknown as Pick<Pool, 'query'>;
+        assert.deepEqual(await cleanupExpiredAccountSessions(database), { deleted: 1000, backlog: remaining.length !== 0 });
+        assert.equal(queries, 11);
+    }
+    let queries = 0;
+    const database = { query: async () => [{ affectedRows: ++queries === 1 ? 100 : 7 }, []] } as unknown as Pick<Pool, 'query'>;
+    assert.deepEqual(await cleanupExpiredAccountSessions(database), { deleted: 107, backlog: false });
+    assert.equal(queries, 2);
+});
+
+test('expired-session cleanup cannot report success after uncertain or malformed database results', async () => {
+    for (const result of [undefined, { affectedRows: -1 }, { affectedRows: 101 }, { affectedRows: 0.5 }, new Error('private driver detail')]) {
+        const database = { query: async () => {
+            if (result instanceof Error) throw result;
+            return [result, []];
+        } } as unknown as Pick<Pool, 'query'>;
+        await assert.rejects(cleanupExpiredAccountSessions(database), error => {
+            assert(error instanceof AccountSessionUnavailableError);
+            assert.equal(error.message.includes('private'), false);
+            return true;
+        });
+    }
+    const database = { query: async (query: QueryOptions) => [query.sql.startsWith('DELETE')
+        ? { affectedRows: 100 } : null, []] } as unknown as Pick<Pool, 'query'>;
+    await assert.rejects(cleanupExpiredAccountSessions(database), AccountSessionUnavailableError);
+});
+
 type Call = { sql: string; values: unknown[] };
 function fixture(options: {
     user?: Record<string, unknown> | null; sessions?: Record<string, unknown>[];
