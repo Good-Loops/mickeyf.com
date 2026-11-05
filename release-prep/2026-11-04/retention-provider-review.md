@@ -247,6 +247,11 @@ mechanism. [ANPD transfer guidance](https://www.gov.br/anpd/pt-br/assuntos/assun
 
 ## Close 1.3 only after
 
+The product-specific October ANPD guide assessment is recorded in
+[brazil-child-safeguards-assessment.md](brazil-child-safeguards-assessment.md).
+It identifies the actual evidence and open risks; it is not a legal sign-off
+or proof of final-device and production behavior.
+
 Adopt and enforce the schedule; qualify copy cleanup through 2.3; resolve provider
 coverage/transfers and persistent holds; record the operator's security-program
 responsibility; and bind accurate English/Portuguese retention text to the notice
