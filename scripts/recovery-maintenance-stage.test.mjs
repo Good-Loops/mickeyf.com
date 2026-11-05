@@ -68,3 +68,24 @@ test('template restoration happens even when the staged smoke test fails', async
     assert.equal(state.template.revision, maintenanceStageIds.restoreRevision);
     assert.equal(state.traffic[0].percent, 100);
 });
+
+test('a lost staging response is reconciled without repeating the staging write', async () => {
+    let state = fixture(), stageCalls = 0, restoreCalls = 0;
+    const provider = {
+        async read() { return structuredClone(state); },
+        async stage(patch) {
+            stageCalls++;
+            state = { ...state, generation: '188', observedGeneration: '188', etag: 'e2', template: patch.template,
+                traffic: patch.traffic, trafficStatuses: structuredClone(patch.traffic) };
+            throw new Error('synthetic lost response');
+        },
+        async wait() { return structuredClone(state); },
+        async restore(patch) {
+            restoreCalls++;
+            state = { ...state, generation: '189', observedGeneration: '189', etag: 'e3', template: patch.template };
+        },
+    };
+    await assert.rejects(executeMaintenanceStage(provider, source), /synthetic lost response/u);
+    assert.equal(stageCalls, 1);
+    assert.equal(restoreCalls, 1);
+});
