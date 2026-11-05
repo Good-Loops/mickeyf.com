@@ -1,5 +1,7 @@
 # mickeyf.com — BeatCalc Web App
 
+> **[Changelog — latest updates](CHANGELOG.md)**
+
 mickeyf.com is an interactive music-and-math platform with games, animations,
 educational resources, authentication, and leaderboards.
 
