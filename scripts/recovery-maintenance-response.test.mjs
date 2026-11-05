@@ -5,9 +5,11 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
 const source = 'scripts/recovery-maintenance-response.mjs';
+const sourceText = readFileSync(source, 'utf8');
 for (const [mode, args] of [
     ['file', [source]],
-    ['inline', ['--input-type=module', '--eval', readFileSync(source, 'utf8')]],
+    ['inline', ['--input-type=module', '--eval', sourceText]],
+    ['encoded import', [`--import=data:text/javascript;base64,${Buffer.from(sourceText).toString('base64')}`, '--eval', '0']],
 ]) test(`maintenance ${mode} blocks requests and limits CORS`, async t => {
     const child = spawn(process.execPath, args, {
         env: { ...process.env, PORT: '0' }, stdio: ['ignore', 'pipe', 'pipe'],
