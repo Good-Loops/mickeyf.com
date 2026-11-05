@@ -549,7 +549,7 @@ class SnapshotConnection implements RuntimeGrantConnection {
             return [[{ Select_priv: 'N', Process_priv: 'N' }], []];
         }
         if (sql.includes('runtime-grants:columns')) {
-            return [this.snapshot.availableColumns, []];
+            return [this.snapshot.availableColumns.filter(({ tableName }) => sql.includes(`'${tableName}'`)), []];
         }
         if (sql.includes('runtime-grants:global')) {
             return [[{ privilegeType: 'USAGE', isGrantable: 'NO' }], []];
@@ -717,6 +717,17 @@ test('runtime schema inspection includes both provider tables', async () => {
     assert.match(inspection, /'account_provider_identities'/u);
     assert.match(inspection, /'provider_auth_attempts'/u);
     assert.match(inspection, /'apple_auth_revocations'/u);
+});
+
+test('warning-history grant inspection sees the complete existing schema', async () => {
+    const profile: RuntimeGrantProfile = 'google-apple-parent-signed-warnings';
+    const connection = new SnapshotConnection(exactSnapshot(profile));
+    const plan = await planRuntimeGrants(connection, { ...SETTINGS, profile }, RUNTIME_ACCOUNT);
+    assert.equal(plan.compliant, true);
+    assert.deepEqual(plan.blockers, []);
+    assert.deepEqual([...new Set(plan.observed.availableColumns
+        .filter(({ tableName }) => tableName === 'parent_child_warning_history')
+        .map(({ columnName }) => columnName))].sort(), ['child_uuid', 'head_json', 'ledger_json', 'state_json']);
 });
 
 test('Apple revocation grants fail closed until watermark and both provenance columns exist', () => {
