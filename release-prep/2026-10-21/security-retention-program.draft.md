@@ -6,10 +6,12 @@ It accompanies the [decision package](br-us-policy-decision-package.md).
 
 ## Coordination and operation
 
-Proposed coordinator: the existing owner/operator, subject to explicit acceptance
-of this role. The owner has accepted form review; that alone does not establish
-security-program coordination, storage readiness or a schedule. No employee,
-paid reviewer, service subscription or mailbox invitation is introduced.
+On 5 November 2026, the owner accepted the coordinator role: review the written
+safeguards at least annually and after major changes or incidents, handle privacy
+incidents, and oversee the existing twice-weekly form and deletion checks. The
+owner may ask Codex for assistance; this does not establish autonomous monitoring
+or a scheduled service. Acceptance does not complete the controls below or adopt
+unqualified retention deadlines. No paid reviewer or subscription is introduced.
 
 Proposed recurring manual work: check the protected mailbox, review pending
 requests, reconcile retained forms and complete deletion tasks at least twice
@@ -35,6 +37,10 @@ review date on actual adoption, not on this draft's preparation date.
 [16 CFR 312.8](https://www.ecfr.gov/current/title-16/chapter-I/subchapter-C/part-312/section-312.8).
 
 ## Retention schedule requiring final adoption
+
+The table below records the October draft. For current evidence, qualified
+form-copy deadlines and remaining decisions, use the [November retention and
+provider review](../2026-11-04/retention-provider-review.md).
 
 | Record/purpose | Current evidence | Remaining decision or qualification |
 | --- | --- | --- |
