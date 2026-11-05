@@ -40,10 +40,13 @@ function Read-LiveQueue([string]$After) {
     } finally {
         if ($pointer -ne [IntPtr]::Zero) { [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($pointer) }
         if ($secure) { $secure.Dispose() }; $privateJson=$null; $env:CSQL_PROXY_TOKEN=$null
-        if ($node) { if (-not $node.HasExited) { $node.Kill() }; $node.Dispose() }
-        if ($containerId -match '^[a-f0-9]{64}$') {
-            & $config.dockerPath --host $dockerHost stop --time=5 $containerId | Out-Null
-            if ($LASTEXITCODE -ne 0) { throw 'A conexão temporária precisa ser encerrada; verifique o Docker.' }
+        try {
+            if ($node) { try { if (-not $node.HasExited) { $node.Kill() } } finally { $node.Dispose() } }
+        } finally {
+            if ($containerId -match '^[a-f0-9]{64}$') {
+                & $config.dockerPath --host $dockerHost stop --time=5 $containerId | Out-Null
+                if ($LASTEXITCODE -ne 0) { throw 'A conexão temporária precisa ser encerrada; verifique o Docker.' }
+            }
         }
     }
 }
