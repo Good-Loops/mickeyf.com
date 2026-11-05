@@ -472,9 +472,10 @@ First native-device acceptance limits identified on 2026-09-10:
   No public release, backend deployment or permission changes were performed.
 - Check user-selected audio playback and interruption/resume. No first-party
   microphone capture was found; do not add a microphone permission without a use.
-- If Apple reports Missing Compliance, the owner must confirm the encryption
-  answers before the build becomes available to testers. No exemption declaration
-  has been inferred or inserted into Info.plist by this workflow.
+- If Apple reports Missing Compliance, review the actual build's encryption and
+  third-party dependencies before answering. The owner has authorized Codex to
+  confirm the answers; do not guess when the evidence is insufficient. No
+  exemption declaration is inserted into Info.plist by this workflow.
 
 Standard runner compute is free for public repositories. Private repositories
 use their plan's included allowance, then paid usage; storage has separate
