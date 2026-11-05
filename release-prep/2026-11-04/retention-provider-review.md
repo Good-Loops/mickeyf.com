@@ -9,17 +9,18 @@ published promises. Reuse the completed 2.2 and 3.2-3.7 evidence.
 | Store / purpose | Evidence and limitation |
 | --- | --- |
 | Brevo warning delivery | Saved retention UI: all senders, one month, never store previews for new messages. Anonymous engagement reporting and actual bilingual delivery were already qualified. Saved delivery evidence in our own database survives provider-log expiry. |
-| Production recovery copies | Eight successful automated backups and four on-demand snapshots: 12 September, 2 October, 6 October and 4 November. Seven-day PITR was verified in 3.4. Count-based backup rotation does not establish a universal eight-day maximum. |
+| Production recovery copies | After the owner's specific approval, the 12 September, 2 October and 6 October manual snapshots were removed. The 4 November checkpoint, all eight automatic backups and seven-day PITR were verified preserved. Count-based rotation does not establish a universal eight-day maximum or complete the continuing retention policy. |
 | Independent activity/warning evidence | Private versioned bucket, seven-day soft delete, no expiry rule. Events are signed state/ledger digests, not a copy of every game interaction or an anonymous record. SQL stores account-linked activity and warning state. |
 | Conditional deletion evidence | Separate private bucket and key; signed child/parent identifiers, dates, intent and outcome. Existing guard is held. All eight deletion/recovery checks passed on isolated SQL and real private cloud storage; fixture cleanup passed. |
-| Parent-form copies | Encrypted archive/recovery and unmatched-message intake/cleanup passed 2.2. Matched approval/rejection/expiry/withdrawal and backup cleanup still need 2.3. |
+| Parent-form copies | Items 2.2 and 2.3 passed: encrypted recovery/mailbox intake, owner queue/review, four matched lifecycle cases and known-copy/temporary-backup cleanup. See [the 2.3 qualification](../2026-11-05/matched-parent-form-qualification.md). Production integration remains 2.4; this does not establish legal sufficiency or complete the continuing retention policy. |
 | Account sessions | Four-hour/remembered 30-day access expiry is enforced. The serving revision cleans expired rows only on later session creation/account deletion. The candidate now adds bounded global cleanup to authenticated maintenance; it is tested but not deployed. Logical expiry is not physical erasure. |
 
 Local evidence is in `C:/Users/User/Ludolume-Release-Evidence-2026-11-01`:
 `brevo-retention-observed-2026-11-04.txt`,
 `privacy-backup-inventory-2026-11-04.json`,
 `deletion-recovery-17d4b341.json`, and the earlier warning/parent-form receipts.
-No production backup or retained account evidence was deleted in this review.
+The later approved backup cleanup receipt is `approved-backup-cleanup-verified.json`.
+No retained account evidence was removed by that three-snapshot cleanup.
 
 The session cleanup passed backend TypeScript checking, 25 focused unit/router
 checks and 46 SQL integration checks on disposable MySQL 8.0.31. The SQL cases

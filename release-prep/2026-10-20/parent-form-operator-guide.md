@@ -1,5 +1,10 @@
 # Parent form review: owner operation
 
+Current checkpoint, 5 November: [item 2.3 qualification](../2026-11-05/matched-parent-form-qualification.md)
+records the accepted queue viewer, synthetic matched-form lifecycle and known-copy
+cleanup. Earlier pending storage checks below are historical; production integration
+and the remaining privacy requirements still gate activation.
+
 Preparation checked 2026-10-20 (2026-10-21 UTC). The owner has confirmed that he will review the returned parent forms himself. Hiring another reviewer is not part of this release. Parent-led child registration stays in the candidate source.
 
 This guide does not activate registration, approve a real request, send email, certify guardianship or establish regional compliance. Operational storage/retention, regional policy and age assurance still require qualification before launch. See [policy review](child-policy-review.md), [synthetic rehearsal](synthetic-parent-consent-rehearsal.md) and [production cutover plan](production-cutover-plan.md).
@@ -12,6 +17,28 @@ VeraCrypt container were verified on 31 October; see the later
 [privacy review](../2026-10-31/child-privacy-review.md) for their limits.
 
 ## Twice-weekly routine at a glance
+
+### Where the pending requests appear
+
+On the owner's Windows desktop, open **Ludolume - Solicitações pendentes** and
+choose **Atualizar fila real**. The private, read-only viewer lists the full
+request reference, verified parent contact, country and expiry; select a row to
+see the policy/form versions. **Ver exemplos fictícios** is a clearly separate
+training view, not the production queue. A failed lookup is shown as unavailable,
+not as an empty queue. Use **Próxima página** when offered.
+
+The viewer does not send an email, approve/reject a form or create an account.
+After comparing the actual returned signed attachment with the request, apply
+the decision using the existing private review command described below. An
+assistant may operate that command only with the owner's actual review decision;
+the viewer and a matching email address cannot supply that decision themselves.
+
+The local launcher reuses the saved Windows-encrypted operator password and a
+temporary loopback-only, pinned Cloud SQL Proxy container. Docker Desktop and
+the owner's existing Google Cloud login must be available. It closes the
+connection/container after each lookup and does not save queue results to disk.
+The installed shortcut takes a private machine configuration; no credentials
+are included in the repository.
 
 1. Open the encrypted archive using the desktop shortcut and check the form
    mailbox, including Spam. Review each returned form against its exact pending
