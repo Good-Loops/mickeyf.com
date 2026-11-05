@@ -36,11 +36,11 @@ class UploadPrivacyTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             _, _, env = fixture(temp)
             for ref in ('refs/heads/main', 'refs/heads/feature/auth-family-leaderboards',
-                        'refs/heads/feat/ludolume-release'):
+                        'refs/heads/feat/privacy-data-review'):
                 with self.subTest(ref=ref):
                     self.assertEqual(inventory.inspect_export({**env, 'GITHUB_REF': ref})['build'], '61.1.0')
             with self.assertRaisesRegex(ValueError, 'Protected manual signing job'):
-                inventory.inspect_export({**env, 'GITHUB_REF': 'refs/heads/feat/ludolume-release-extra'})
+                inventory.inspect_export({**env, 'GITHUB_REF': 'refs/heads/feat/privacy-data-review-extra'})
 
     def test_receipt_identifies_the_actual_export_and_build(self):
         with tempfile.TemporaryDirectory() as temp:

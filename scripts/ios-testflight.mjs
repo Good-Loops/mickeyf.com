@@ -8,7 +8,7 @@ import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { verifyAgeFrameworkLinkage } from './ios-age-linkage.mjs';
 
-const SIGNING_BRANCHES = new Set(['refs/heads/main', 'refs/heads/feature/auth-family-leaderboards', 'refs/heads/feat/ludolume-release']);
+const SIGNING_BRANCHES = new Set(['refs/heads/main', 'refs/heads/feature/auth-family-leaderboards', 'refs/heads/feat/privacy-data-review']);
 const TEAM = 'AX4Z7T24C9';
 const BUNDLE = 'com.mickeyf.app';
 const APP = '6810735137';
