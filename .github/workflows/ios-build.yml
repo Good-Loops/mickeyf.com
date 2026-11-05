@@ -228,7 +228,7 @@ jobs:
 
   testflight:
     # Also restrict the protected environment to this exact branch in GitHub.
-    if: ${{ !inputs.compile_only && inputs.upload_testflight && !inputs.audit_privacy_manifests && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/auth-family-leaderboards') }}
+    if: ${{ !inputs.compile_only && inputs.upload_testflight && !inputs.audit_privacy_manifests && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/auth-family-leaderboards' || github.ref == 'refs/heads/codex/ludolume-final-candidate') }}
     name: Sign and upload (${{ inputs.upload_distribution || 'internal-only' }})
     environment: ios-testflight
     runs-on: macos-26
