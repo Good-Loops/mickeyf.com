@@ -128,7 +128,7 @@ function validateBackendPins(value, sessionCutover) {
         || !/^[0-9a-f]{40}$/u.test(value.sourceCommit) || !/^sha256:[0-9a-f]{64}$/u.test(value.imageDigest)
         || !/^[a-z][a-z0-9-]{0,62}$/u.test(value.sourceTriggerName)
         || !(sessionCutover ? /^session-backend-[a-z0-9-]{1,46}$/u : /^frozen-backend-[a-z0-9-]{1,47}$/u).test(value.deploymentTriggerName)
-        || !/^refs\/heads\/(?:feature|improvement|fix|codex)\/[a-z0-9][a-z0-9/_-]{0,100}$/u.test(value.sourceRef)
+        || !/^refs\/heads\/(?:feat|bugfix|feature|improvement|fix|codex)\/[a-z0-9][a-z0-9/_-]{0,100}$/u.test(value.sourceRef)
         || value.sourceRef.includes('..') || value.sourceRef.endsWith('/')) {
         throw new Error('Malformed exact candidate pins; placeholders are not deployable.');
     }
