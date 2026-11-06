@@ -47,6 +47,16 @@ type RestoreJournal = AdminJournal & Readonly<{ readResolution(intent: Retention
 type AdminConnection = Pick<PoolConnection, 'query' | 'destroy'>;
 type AdminPins = Readonly<{ database: string; serverUuid: string; currentUser: string; confirmation: string }>;
 
+/** A drained session list alone cannot prevent a known writer from reconnecting. */
+export async function assertKnownRecoveryWritersLocked(connection: Pick<PoolConnection, 'query'>): Promise<void> {
+    const [rows] = await connection.query<RowDataPacket[]>({ sql: `SELECT USER AS user,HOST AS host,ACCOUNT_LOCKED AS locked
+        FROM mysql.user WHERE USER IN ('cms_mickeyf','receipt_cleanup','michel_operator')`, timeout: 10_000 });
+    const expected = new Set(['cms_mickeyf@%', 'receipt_cleanup@cloudsqlproxy~%', 'michel_operator@cloudsqlproxy~%']);
+    if (!Array.isArray(rows) || rows.length !== expected.size || rows.some(row => row.locked !== 'Y'
+        || typeof row.user !== 'string' || typeof row.host !== 'string' || !expected.delete(`${row.user}@${row.host}`))
+        || expected.size !== 0) throw new Error('Known recovery writers are not locked.');
+}
+
 /** PROCESS visibility is required; scheduled receipt cleanup is an independent writer. */
 export async function assertNoRetentionRuntimeWriters(connection: AdminConnection): Promise<void> {
     const [privileges] = await connection.query<RowDataPacket[]>({ sql: `SELECT COUNT(*) AS count

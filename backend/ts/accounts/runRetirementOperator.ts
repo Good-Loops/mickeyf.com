@@ -8,6 +8,7 @@ import { advanceRetirementGuardForOperator, inspectExplicitRetirementForOperator
     resumeConditionalRetirementForOperator, retireJournalRecordForOperator } from './retirementOperator';
 import type { RetirementBatchPermit } from './retirementBatchPermit';
 import { createProductionRecoveryCheckpointSetup } from './productionRecoveryCheckpointSetup';
+import { assertKnownRecoveryWritersLocked } from './retentionReconciliation';
 import { applyRecoveryCheckpointSetup, planRecoveryCheckpointSetup, type RecoveryCheckpointSetupPlan } from './recoveryCheckpointSetup';
 
 type Env = Readonly<Record<string, string | undefined>>;
@@ -75,6 +76,8 @@ export async function runRetirementOperator(args = process.argv.slice(2), env: E
         connectTimeout: Math.min(10_000, target.config.operationTimeoutMs), multipleStatements: false,
         supportBigNumbers: true, dateStrings: true, timezone: 'Z' });
     try {
+        // All commands except read-only inspection require a writer fence.
+        if (command !== 'inspect') await assertKnownRecoveryWritersLocked(connection);
         const context = { connection, pins: target.pins, bucket: CHILD_RETENTION_BUCKET, expectedBucket: CHILD_RETENTION_BUCKET,
             ...secrets }, confirmation = env.RETIREMENT_WRITERS_CONFIRMATION ?? '', externalCopiesConfirmation = env.RETIREMENT_COPIES_CONFIRMATION ?? '';
         let result: unknown;

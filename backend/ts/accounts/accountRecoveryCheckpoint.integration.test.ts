@@ -17,7 +17,7 @@ import type { RetirementWitness } from './retirementWitnessStorage';
 import { verifyRecoveryCheckpointSchema } from './recoveryCheckpointSchema';
 import { applyRecoveryCheckpointSetup, planRecoveryCheckpointSetup } from './recoveryCheckpointSetup';
 import { renderRuntimeGrantStatements } from '../security/runtimeGrantManifest';
-import { assertNoRetentionRuntimeWriters } from './retentionReconciliation';
+import { assertKnownRecoveryWritersLocked, assertNoRetentionRuntimeWriters } from './retentionReconciliation';
 
 const database = 'mickeyf_migration_test';
 let lineage: string;
@@ -108,6 +108,30 @@ test('writer fence detects app, cleanup, operator and nonlocal root sessions', a
         await root.query("DROP USER IF EXISTS 'ludolume_release_ops'@'%'");
         await root.query("DROP USER IF EXISTS 'process_inspector_test'@'%'");
         await root.query("DROP ROLE IF EXISTS 'process_inspection_test'@'%'");
+        await root.end();
+    }
+});
+
+test('production writer-lock check rejects unlocked or additional account hosts', async () => {
+    const port = Number(process.env.MIGRATION_TEST_PORT);
+    const root = await mysql.createConnection({ host: '127.0.0.1', port, user: 'root',
+        password: 'migration-test-root-only', database, multipleStatements: false });
+    try {
+        await root.query("CREATE USER 'cms_mickeyf'@'%' IDENTIFIED BY 'writer-test-only'");
+        await root.query("CREATE USER 'receipt_cleanup'@'cloudsqlproxy~%' IDENTIFIED BY 'writer-test-only'");
+        await root.query("CREATE USER 'michel_operator'@'cloudsqlproxy~%' IDENTIFIED BY 'writer-test-only'");
+        await assert.rejects(assertKnownRecoveryWritersLocked(root as unknown as PoolConnection), /not locked/u);
+        await root.query("ALTER USER 'cms_mickeyf'@'%' ACCOUNT LOCK");
+        await root.query("ALTER USER 'receipt_cleanup'@'cloudsqlproxy~%' ACCOUNT LOCK");
+        await root.query("ALTER USER 'michel_operator'@'cloudsqlproxy~%' ACCOUNT LOCK");
+        await assertKnownRecoveryWritersLocked(root as unknown as PoolConnection);
+        await root.query("CREATE USER 'michel_operator'@'other-host' IDENTIFIED BY 'writer-test-only' ACCOUNT LOCK");
+        await assert.rejects(assertKnownRecoveryWritersLocked(root as unknown as PoolConnection), /not locked/u);
+    } finally {
+        await root.query("DROP USER IF EXISTS 'cms_mickeyf'@'%'");
+        await root.query("DROP USER IF EXISTS 'receipt_cleanup'@'cloudsqlproxy~%'");
+        await root.query("DROP USER IF EXISTS 'michel_operator'@'cloudsqlproxy~%'");
+        await root.query("DROP USER IF EXISTS 'michel_operator'@'other-host'");
         await root.end();
     }
 });
