@@ -281,6 +281,35 @@ test('verified deleted outcome applies only to pinned isolated SQL restore witho
     assert.deepEqual(users.map(row => row.account_uuid).sort(), [parentId, unrelatedId].sort());
 });
 
+test('conditional recovery holds an older checkpoint before reconciling the synthetic restored child', async () => {
+    const { parentId, childId, unrelatedId } = await managedFixture();
+    const [[identity]] = await admin.query<RowDataPacket[]>('SELECT DATABASE() AS db,CURRENT_USER() AS user,@@GLOBAL.server_uuid AS id');
+    const originalServerUuid = randomUUID(), lineage = randomUUID();
+    const intent: RetentionIntent = { parentId, childId, warningId: randomUUID(),
+        activityAt: '2020-01-01T00:00:00.000000Z', deliveredAt: '2023-01-01T00:00:00.000000Z', channel: 'in-app',
+        targetDigest: 'a'.repeat(64), noticeDigest: 'b'.repeat(64), receiptDigest: 'c'.repeat(64) };
+    const guard = { state: 'hold' as const, database: identity.db as string, serverUuid: originalServerUuid,
+        epoch: randomUUID(), expiresAt: '2099-01-01T00:00:00.000Z', generation: '1',
+        recoveryCheckpoint: { lineage, minimumEpoch: '1', keySha256: 'a'.repeat(64) } };
+    const journal = { async readRestoreGuard() { return guard; }, async verifyRetentionIntent() { return true; },
+        async readResolution() { return { outcome: 'deleted' as const, confirmedAt: '2024-01-01T00:00:00.000000Z',
+            observedActivityAt: null, proofDigest: 'd'.repeat(64) }; } };
+    const pins = { database: identity.db as string, serverUuid: identity.id as string, originalServerUuid, currentUser: identity.user as string };
+    const input = { confirmation: 'ISOLATED RESTORE FENCED AND DELETION VERIFIED', intent };
+    await admin.query(`CREATE TABLE account_recovery_checkpoint (singleton_id TINYINT UNSIGNED PRIMARY KEY,
+        lineage_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,epoch BIGINT UNSIGNED NOT NULL) ENGINE=InnoDB`);
+    try {
+        await admin.query('INSERT INTO account_recovery_checkpoint VALUES (1,?,0)', [lineage]);
+        await assert.rejects(executeRetentionReconciliation('apply-restored', input, pins, journal as never, database, Buffer.alloc(32, 8)));
+        assert.equal((await admin.query<RowDataPacket[]>('SELECT user_id FROM users WHERE account_uuid=?', [childId]))[0].length, 1);
+        await admin.query('UPDATE account_recovery_checkpoint SET epoch=1');
+        assert.deepEqual(await executeRetentionReconciliation('apply-restored', input, pins, journal as never, database, Buffer.alloc(32, 8)),
+            { operation: 'apply-restored', confirmed: true });
+        const [remaining] = await admin.query<RowDataPacket[]>('SELECT account_uuid FROM users WHERE account_uuid IN (?,?,?)', [parentId, childId, unrelatedId]);
+        assert.deepEqual(remaining.map(row => row.account_uuid).sort(), [parentId, unrelatedId].sort());
+    } finally { await admin.query('DROP TABLE account_recovery_checkpoint'); }
+});
+
 test('read-only operator report scans real SQL and withholds recent activity without disclosing contact', async () => {
     const due = await managedFixture(), recent = await managedFixture(), missing = await managedFixture();
     await admin.query('UPDATE parent_managed_child_activity SET retention_activity_at=UTC_TIMESTAMP(6) WHERE child_uuid=?', [recent.childId]);
