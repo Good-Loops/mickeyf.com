@@ -7,17 +7,18 @@ import cookieParser from 'cookie-parser';
 import express from 'express';
 import mysql, { type Connection, type Pool, type RowDataPacket } from 'mysql2/promise';
 import { guardConnectionQueries } from '../db/queryTimeoutConnection';
-import { cleanupChildDailyUsage, configureChildDailyUsage, readChildDailyUsage } from './childDailyUsageStore';
+import { cleanupChildDailyUsage, cleanupChildDailyUsageReceipts, clearChildDailyUsage, configureChildDailyUsage, readChildDailyUsage } from './childDailyUsageStore';
 import { clearChildDailyUsageLimit, getChildDailyUsageLimit, heartbeatChildDailyUsage, setChildDailyUsageLimit } from './childDailyUsageService';
 import { createProviderAuthContextReader, type ProviderAuthContext } from '../auth/providerAuthContext';
 import type { MigrationConnection } from '../migrations/leaderboardSchema';
-import { verifyChildDailyUsageSchema } from '../migrations/childDailyUsageSchema';
+import { verifyChildDailyUsageReceiptSchema, verifyChildDailyUsageSchema } from '../migrations/childDailyUsageSchema';
 import { issueSessionToken } from '../security/sessionPolicy';
 import { createGeneralApiRateLimiter } from '../security/requestRateLimits';
 import { renderRuntimeGrantStatements } from '../security/runtimeGrantManifest';
 import { mountChildDailyUsageHeartbeat, mountChildDailyUsageEndpoints } from '../routers/childDailyUsageRouter';
 import { CHILD_DAILY_USAGE_NOTICE_VERSION } from './childDailyUsageNotice';
 import { CHILD_DAILY_USAGE_DRAFT_SQL as reviewedDraft } from './childDailyUsageSchema.testFixture';
+import { CHILD_DAILY_USAGE_RECEIPTS_DRAFT_SQL } from './childDailyUsageReceipts.testFixture';
 
 let admin: Connection;
 let pool: Pool;
@@ -57,12 +58,19 @@ before(async () => {
     const draft = readFileSync(path.join(__dirname, '../../migrations/pending/draft_parent_child_daily_usage.sql'), 'utf8');
     assert.equal(draft.replace(/\r\n/gu, '\n').trim(), reviewedDraft);
     await admin.query(reviewedDraft);
+    const receiptDraft = readFileSync(path.join(__dirname, '../../migrations/pending/draft_child_daily_usage_withdrawal_receipts.sql'), 'utf8');
+    assert.equal(receiptDraft.replace(/\r\n/gu, '\n').trim(), CHILD_DAILY_USAGE_RECEIPTS_DRAFT_SQL);
+    await admin.query(CHILD_DAILY_USAGE_RECEIPTS_DRAFT_SQL);
     await verifyChildDailyUsageSchema(admin as unknown as MigrationConnection);
+    await verifyChildDailyUsageReceiptSchema(admin as unknown as MigrationConnection);
     await admin.query('INSERT INTO parent_child_consents (child_uuid) VALUES (?)', [child]);
     const usageGrant = "GRANT SELECT (`child_uuid`, `time_zone`, `daily_limit_ms`, `usage_day`, `used_ms`, `accounted_at_ms`, `active_until_ms`, `notice_version`, `consented_at`), INSERT (`child_uuid`, `time_zone`, `daily_limit_ms`, `usage_day`, `used_ms`, `accounted_at_ms`, `active_until_ms`, `notice_version`, `consented_at`), UPDATE (`time_zone`, `daily_limit_ms`, `usage_day`, `used_ms`, `accounted_at_ms`, `active_until_ms`, `notice_version`, `consented_at`), DELETE ON `child_usage_test`.`parent_child_daily_usage` TO 'migration_test'@'%';";
-    assert.equal(renderRuntimeGrantStatements('child_usage_test', { user: 'migration_test', host: '%' },
-        'google-apple-parent-signed-recovery-usage').slice(-1)[0], usageGrant);
+    const statements = renderRuntimeGrantStatements('child_usage_test', { user: 'migration_test', host: '%' },
+        'google-apple-parent-signed-recovery-usage');
+    assert.equal(statements.find(statement => statement.includes('`parent_child_daily_usage`')), usageGrant);
     await admin.query(usageGrant);
+    const receiptGrant = statements.find(statement => statement.includes('`child_daily_usage_withdrawal_receipts`'));
+    assert.ok(receiptGrant); await admin.query(receiptGrant);
     for (const table of ['users', 'account_sessions', 'parent_child_consents', 'parent_signed_forms']) {
         await admin.query(`GRANT SELECT ON child_usage_test.${table} TO 'migration_test'@'%'`);
     }
@@ -97,6 +105,10 @@ test('only the linked parent and a live managed child session can access usage',
     await setChildDailyUsageLimit(pool, owner, managed, policy, consent);
     const [[proof]] = await admin.query<RowDataPacket[]>('SELECT notice_version,consented_at FROM parent_child_daily_usage WHERE child_uuid=?', [managed]);
     assert.equal(proof.notice_version, CHILD_DAILY_USAGE_NOTICE_VERSION); assert.ok(proof.consented_at);
+    const [[originalConsent]] = await admin.query<RowDataPacket[]>("SELECT DATE_FORMAT(consented_at,'%Y-%m-%dT%H:%i:%s.%fZ') AS at FROM parent_child_daily_usage WHERE child_uuid=?", [managed]);
+    await setChildDailyUsageLimit(pool, owner, managed, policy, consent);
+    const [[updatedConsent]] = await admin.query<RowDataPacket[]>("SELECT DATE_FORMAT(consented_at,'%Y-%m-%dT%H:%i:%s.%fZ') AS at FROM parent_child_daily_usage WHERE child_uuid=?", [managed]);
+    assert.equal(updatedConsent.at, originalConsent.at, 'changing the setting must preserve its original consent time');
     await assert.rejects(pool.query('UPDATE parent_child_daily_usage SET child_uuid=? WHERE child_uuid=?', [randomUUID(), managed]));
     await assert.rejects(pool.query('DELETE FROM parent_child_consents WHERE child_uuid=?', [managed]));
     const heartbeat = await heartbeatChildDailyUsage(pool, childContext);
@@ -113,10 +125,23 @@ test('only the linked parent and a live managed child session can access usage',
     await assert.rejects(clearChildDailyUsageLimit(pool, stranger, managed), /Child unavailable/u);
     await clearChildDailyUsageLimit(pool, owner, managed);
     assert.equal((await heartbeatChildDailyUsage(pool, childContext)).status, 'not-configured');
+    const [cleared] = await admin.query<RowDataPacket[]>('SELECT child_uuid FROM parent_child_daily_usage WHERE child_uuid=?', [managed]);
+    assert.equal(cleared.length, 0);
+    const [receipts] = await admin.query<RowDataPacket[]>(`SELECT notice_version,consented_at,withdrawn_at
+        FROM child_daily_usage_withdrawal_receipts WHERE child_uuid=?`, [managed]);
+    assert.equal(receipts.length, 1); assert.equal(receipts[0].notice_version, CHILD_DAILY_USAGE_NOTICE_VERSION);
+    assert.ok(receipts[0].consented_at); assert.ok(receipts[0].withdrawn_at);
+    await assert.rejects(pool.query('SELECT child_uuid,notice_version,consented_at FROM child_daily_usage_withdrawal_receipts'));
+    await clearChildDailyUsageLimit(pool, owner, managed);
+    assert.equal((await admin.query<RowDataPacket[]>('SELECT receipt_uuid FROM child_daily_usage_withdrawal_receipts WHERE child_uuid=?', [managed]))[0].length, 1);
+    await setChildDailyUsageLimit(pool, owner, managed, policy, consent);
+    await clearChildDailyUsageLimit(pool, owner, managed);
+    assert.equal((await admin.query<RowDataPacket[]>('SELECT receipt_uuid FROM child_daily_usage_withdrawal_receipts WHERE child_uuid=?', [managed]))[0].length, 2);
     await setChildDailyUsageLimit(pool, owner, managed, policy, consent);
     await admin.query('DELETE FROM account_sessions WHERE account_uuid=?', [parent]);
     await assert.rejects(getChildDailyUsageLimit(pool, owner, managed), /Session unavailable/u);
     await admin.query('DELETE FROM parent_child_consents WHERE child_uuid=?', [managed]);
+    assert.equal((await admin.query<RowDataPacket[]>('SELECT receipt_uuid FROM child_daily_usage_withdrawal_receipts WHERE child_uuid=?', [managed]))[0].length, 0);
     assert.equal((await heartbeatChildDailyUsage(pool, childContext)).status, 'not-managed');
 });
 
@@ -219,7 +244,44 @@ test('retention removes stale totals without removing the parent setting or rece
     } finally { connection.release(); }
 });
 
+test('withdrawal receipts expire after 14 days without storing usage data', async () => {
+    const account = randomUUID(), old = randomUUID(), recent = randomUUID();
+    await admin.query('INSERT INTO parent_child_consents (child_uuid) VALUES (?)', [account]);
+    await admin.query(`INSERT INTO child_daily_usage_withdrawal_receipts
+        (receipt_uuid,child_uuid,notice_version,consented_at,withdrawn_at) VALUES
+        (?,?,'old',UTC_TIMESTAMP(6) - INTERVAL 20 DAY,UTC_TIMESTAMP(6) - INTERVAL 15 DAY),
+        (?,?,'recent',UTC_TIMESTAMP(6) - INTERVAL 20 DAY,UTC_TIMESTAMP(6) - INTERVAL 13 DAY)`, [old, account, recent, account]);
+    assert.deepEqual(await cleanupChildDailyUsageReceipts(pool), { deleted: 1, mayHaveMore: false });
+    const [rows] = await admin.query<RowDataPacket[]>('SELECT receipt_uuid FROM child_daily_usage_withdrawal_receipts WHERE child_uuid=?', [account]);
+    assert.deepEqual(rows.map(row => row.receipt_uuid), [recent]);
+    await admin.query('DELETE FROM parent_child_consents WHERE child_uuid=?', [account]);
+});
+
+test('a rolled-back withdrawal neither removes the limit nor leaves a receipt', async () => {
+    const account = randomUUID();
+    await admin.query('INSERT INTO parent_child_consents (child_uuid) VALUES (?)', [account]);
+    const connection = guardConnectionQueries(await pool.getConnection());
+    try {
+        await connection.query('START TRANSACTION');
+        await configureChildDailyUsage(connection, account, policy);
+        await connection.query('COMMIT');
+        await connection.query('START TRANSACTION');
+        await clearChildDailyUsage(connection, account);
+        await connection.query('ROLLBACK');
+        assert.equal((await admin.query<RowDataPacket[]>('SELECT child_uuid FROM parent_child_daily_usage WHERE child_uuid=?', [account]))[0].length, 1);
+        assert.equal((await admin.query<RowDataPacket[]>('SELECT receipt_uuid FROM child_daily_usage_withdrawal_receipts WHERE child_uuid=?', [account]))[0].length, 0);
+    } finally { connection.release(); await admin.query('DELETE FROM parent_child_consents WHERE child_uuid=?', [account]); }
+});
+
 test('schema verification rejects a weakened retention relationship or bounds', async () => {
+    await admin.query('ALTER TABLE child_daily_usage_withdrawal_receipts DROP FOREIGN KEY fk_child_daily_usage_receipt_consent');
+    try {
+        await assert.rejects(verifyChildDailyUsageReceiptSchema(admin as unknown as MigrationConnection), /schema differs/u);
+    } finally {
+        await admin.query(`ALTER TABLE child_daily_usage_withdrawal_receipts ADD CONSTRAINT fk_child_daily_usage_receipt_consent FOREIGN KEY (child_uuid)
+            REFERENCES parent_child_consents (child_uuid) ON DELETE CASCADE ON UPDATE RESTRICT`);
+    }
+    await verifyChildDailyUsageReceiptSchema(admin as unknown as MigrationConnection);
     await admin.query('ALTER TABLE parent_child_daily_usage DROP FOREIGN KEY fk_child_daily_usage_consent');
     try {
         await assert.rejects(verifyChildDailyUsageSchema(admin as unknown as MigrationConnection), /schema differs/u);

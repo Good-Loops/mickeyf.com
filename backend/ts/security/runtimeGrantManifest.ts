@@ -23,7 +23,7 @@ export type RuntimeTableGrant = Readonly<{
     table: 'users' | 'game_submission_receipts' | 'game_personal_bests' | 'schema_migrations' | 'account_sessions'
         | 'account_provider_identities' | 'provider_auth_attempts' | 'apple_provider_tokens' | 'apple_auth_revocations'
         | 'registration_authorizations' | 'account_registration_profiles' | 'parent_registration_attempts' | 'parent_child_consents' | 'account_score_permissions' | 'parent_signed_forms'
-        | 'parent_managed_child_activity' | 'parent_child_inactivity_warnings' | 'parent_child_activity_continuity' | 'parent_child_warning_history' | 'account_recovery_checkpoint' | 'parent_child_daily_usage';
+        | 'parent_managed_child_activity' | 'parent_child_inactivity_warnings' | 'parent_child_activity_continuity' | 'parent_child_warning_history' | 'account_recovery_checkpoint' | 'parent_child_daily_usage' | 'child_daily_usage_withdrawal_receipts';
     grants: readonly RuntimeColumnGrant[];
     tablePrivileges: readonly ('DELETE' | 'SELECT')[];
 }>;
@@ -346,6 +346,10 @@ export const DAILY_USAGE_RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = 
         Object.freeze({ privilege: 'SELECT' as const, columns: Object.freeze(['child_uuid', 'time_zone', 'daily_limit_ms', 'usage_day', 'used_ms', 'accounted_at_ms', 'active_until_ms', 'notice_version', 'consented_at']) }),
         Object.freeze({ privilege: 'INSERT' as const, columns: Object.freeze(['child_uuid', 'time_zone', 'daily_limit_ms', 'usage_day', 'used_ms', 'accounted_at_ms', 'active_until_ms', 'notice_version', 'consented_at']) }),
         Object.freeze({ privilege: 'UPDATE' as const, columns: Object.freeze(['time_zone', 'daily_limit_ms', 'usage_day', 'used_ms', 'accounted_at_ms', 'active_until_ms', 'notice_version', 'consented_at']) }),
+    ]) }),
+    Object.freeze({ table: 'child_daily_usage_withdrawal_receipts' as const, tablePrivileges: Object.freeze(['DELETE' as const]), grants: Object.freeze([
+        Object.freeze({ privilege: 'SELECT' as const, columns: Object.freeze(['receipt_uuid', 'withdrawn_at']) }),
+        Object.freeze({ privilege: 'INSERT' as const, columns: Object.freeze(['receipt_uuid', 'child_uuid', 'notice_version', 'consented_at', 'withdrawn_at']) }),
     ]) }),
 ]);
 

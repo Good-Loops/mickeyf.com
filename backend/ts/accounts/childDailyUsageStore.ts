@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import type { Pool, PoolConnection, ResultSetHeader, RowDataPacket } from 'mysql2/promise';
 import { assertActiveGuardedTransaction } from '../db/queryTimeoutConnection';
 import { isAccountId } from './deletionJournal';
@@ -82,7 +83,7 @@ export async function configureChildDailyUsage(connection: Connection, childId: 
         result = advanceChildDailyUsage(preserved, policy, now, false);
     }
     await save(connection, childId, policy, result.state, !saved);
-    if (saved) {
+    if (saved && saved.noticeVersion !== CHILD_DAILY_USAGE_NOTICE_VERSION) {
         const [updated] = await connection.query<ResultSetHeader>({ sql: `UPDATE parent_child_daily_usage
             SET notice_version=?,consented_at=UTC_TIMESTAMP(6) WHERE child_uuid=?`, timeout },
         [CHILD_DAILY_USAGE_NOTICE_VERSION, childId]);
@@ -91,11 +92,29 @@ export async function configureChildDailyUsage(connection: Connection, childId: 
     return result;
 }
 
-/** Turning the control off removes both its setting and its current total. */
+/** The receipt and deletion commit together under the parent's child lock. */
 export async function clearChildDailyUsage(connection: Connection, childId: string): Promise<void> {
     assertActiveGuardedTransaction(connection);
     if (!isAccountId(childId)) throw new TypeError('Invalid child.');
-    await connection.query<ResultSetHeader>({ sql: 'DELETE FROM parent_child_daily_usage WHERE child_uuid=?', timeout }, [childId]);
+    const [receipt] = await connection.query<ResultSetHeader>({ sql: `INSERT INTO child_daily_usage_withdrawal_receipts
+        (receipt_uuid,child_uuid,notice_version,consented_at,withdrawn_at)
+        SELECT ?,child_uuid,notice_version,consented_at,UTC_TIMESTAMP(6)
+        FROM parent_child_daily_usage WHERE child_uuid=?`, timeout }, [randomUUID(), childId]);
+    const [deleted] = await connection.query<ResultSetHeader>({ sql: 'DELETE FROM parent_child_daily_usage WHERE child_uuid=?', timeout }, [childId]);
+    if (![0, 1].includes(receipt.affectedRows) || deleted.affectedRows !== receipt.affectedRows) {
+        throw new Error('Usage withdrawal was not confirmed.');
+    }
+}
+
+/** Run even if collection has since been disabled; a full batch signals backlog. */
+export async function cleanupChildDailyUsageReceipts(database: Pick<Pool, 'query'>): Promise<{ deleted: number; mayHaveMore: boolean }> {
+    const [result] = await database.query<ResultSetHeader>({ sql: `DELETE FROM child_daily_usage_withdrawal_receipts
+        WHERE withdrawn_at <= UTC_TIMESTAMP(6) - INTERVAL 14 DAY
+        ORDER BY withdrawn_at,receipt_uuid LIMIT 500`, timeout });
+    if (!Number.isInteger(result.affectedRows) || result.affectedRows < 0 || result.affectedRows > 500) {
+        throw new Error('Usage consent cleanup was not confirmed.');
+    }
+    return { deleted: result.affectedRows, mayHaveMore: result.affectedRows === 500 };
 }
 
 /** Draft maintenance: discard stale totals, preserving the parent's setting. Not scheduled by default. */

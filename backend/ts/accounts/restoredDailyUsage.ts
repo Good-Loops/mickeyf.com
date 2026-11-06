@@ -1,5 +1,5 @@
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
-import { verifyChildDailyUsageSchema } from '../migrations/childDailyUsageSchema';
+import { verifyChildDailyUsageReceiptSchema, verifyChildDailyUsageSchema } from '../migrations/childDailyUsageSchema';
 import { readRecoveryCheckpoint } from './accountRecoveryCheckpoint';
 import { assertNoRetentionRuntimeWriters, isProductionRecoveryOperator } from './retentionReconciliation';
 import type { createGcsRetentionJournal } from './gcsRetentionJournal';
@@ -14,6 +14,19 @@ export async function restoredDailyUsageState(connection: Connection): Promise<'
         const [rows] = await connection.query<RowDataPacket[]>({ sql: 'SELECT child_uuid FROM parent_child_daily_usage LIMIT 1', timeout: 10_000 });
         if (!Array.isArray(rows) || rows.length > 1) throw new Error('Usage state unavailable.');
         return rows.length ? 'present' : 'empty';
+    } catch (error) {
+        if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ER_NO_SUCH_TABLE') return 'absent';
+        throw error;
+    }
+}
+
+/** An old backup must not revive receipts whose retention period has elapsed. */
+export async function expiredDailyUsageReceiptState(connection: Connection): Promise<'absent' | 'clear' | 'expired'> {
+    try {
+        const [rows] = await connection.query<RowDataPacket[]>({ sql: `SELECT receipt_uuid FROM child_daily_usage_withdrawal_receipts
+            WHERE withdrawn_at <= UTC_TIMESTAMP(6) - INTERVAL 14 DAY LIMIT 1`, timeout: 10_000 });
+        if (!Array.isArray(rows) || rows.length > 1) throw new Error('Usage receipt state unavailable.');
+        return rows.length ? 'expired' : 'clear';
     } catch (error) {
         if (typeof error === 'object' && error !== null && 'code' in error && error.code === 'ER_NO_SUCH_TABLE') return 'absent';
         throw error;
@@ -40,6 +53,14 @@ export async function resetRestoredDailyUsage(connection: Connection, journal: J
         if (JSON.stringify(await journal.readRestoreGuard()) !== JSON.stringify(guard)) throw new Error('Restore guard changed.');
         await connection.query({ sql: 'DELETE FROM parent_child_daily_usage', timeout: 30_000 });
         if (await restoredDailyUsageState(connection) !== 'empty') throw new Error('Usage reset incomplete.');
+    }
+    const receipts = await expiredDailyUsageReceiptState(connection);
+    if (receipts !== 'absent') {
+        await verifyChildDailyUsageReceiptSchema(connection);
+        if (JSON.stringify(await journal.readRestoreGuard()) !== JSON.stringify(guard)) throw new Error('Restore guard changed.');
+        await connection.query({ sql: `DELETE FROM child_daily_usage_withdrawal_receipts
+            WHERE withdrawn_at <= UTC_TIMESTAMP(6) - INTERVAL 14 DAY`, timeout: 30_000 });
+        if (await expiredDailyUsageReceiptState(connection) !== 'clear') throw new Error('Usage receipt cleanup incomplete.');
     }
     if (JSON.stringify(await journal.readRestoreGuard()) !== JSON.stringify(guard)) throw new Error('Restore guard changed.');
 }

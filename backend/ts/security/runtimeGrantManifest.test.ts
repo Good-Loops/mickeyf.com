@@ -78,15 +78,19 @@ test('recovery profile adds only checkpoint read privileges', () => {
 
 test('daily usage access is an explicit opt-in and cannot reassign the child key', () => {
     const profile = parseRuntimeGrantProfile('google-apple-parent-signed-recovery-usage');
-    const prior = 'google-apple-parent-signed-recovery', table = 'parent_child_daily_usage';
+    const prior = 'google-apple-parent-signed-recovery', table = 'parent_child_daily_usage', receipts = 'child_daily_usage_withdrawal_receipts';
     const columns = runtimeColumnPrivilegeInventory(profile);
-    assert.deepEqual(columns.filter(row => row.tableName !== table), runtimeColumnPrivilegeInventory(prior));
+    assert.deepEqual(columns.filter(row => row.tableName !== table && row.tableName !== receipts), runtimeColumnPrivilegeInventory(prior));
     assert.deepEqual(runtimeTablePrivilegeInventory(profile).filter(row => row.tableName === table),
         [{ tableName: table, privilegeType: 'DELETE' }]);
     assert.equal(columns.some(row => row.tableName === table && row.columnName === 'child_uuid' && row.privilegeType === 'UPDATE'), false);
     assert.equal(runtimeColumnPrivilegeInventory(prior).some(row => row.tableName === table), false);
-    assert.equal(renderRuntimeGrantStatements('cms', PRODUCTION_RUNTIME_DATABASE_ACCOUNT, profile).slice(-1)[0],
+    const statements = renderRuntimeGrantStatements('cms', PRODUCTION_RUNTIME_DATABASE_ACCOUNT, profile);
+    assert.equal(statements.find(statement => statement.includes('`parent_child_daily_usage`')),
         "GRANT SELECT (`child_uuid`, `time_zone`, `daily_limit_ms`, `usage_day`, `used_ms`, `accounted_at_ms`, `active_until_ms`, `notice_version`, `consented_at`), INSERT (`child_uuid`, `time_zone`, `daily_limit_ms`, `usage_day`, `used_ms`, `accounted_at_ms`, `active_until_ms`, `notice_version`, `consented_at`), UPDATE (`time_zone`, `daily_limit_ms`, `usage_day`, `used_ms`, `accounted_at_ms`, `active_until_ms`, `notice_version`, `consented_at`), DELETE ON `cms`.`parent_child_daily_usage` TO 'cms_mickeyf'@'%';");
+    assert.equal(statements.find(statement => statement.includes('`child_daily_usage_withdrawal_receipts`')),
+        "GRANT SELECT (`receipt_uuid`, `withdrawn_at`), INSERT (`receipt_uuid`, `child_uuid`, `notice_version`, `consented_at`, `withdrawn_at`), DELETE ON `cms`.`child_daily_usage_withdrawal_receipts` TO 'cms_mickeyf'@'%';");
+    assert.equal(columns.some(row => row.tableName === receipts && row.columnName === 'notice_version' && row.privilegeType === 'SELECT'), false);
 });
 
 test('parent grants require explicit selection and cannot reassign consent, identity or policy binding', () => {

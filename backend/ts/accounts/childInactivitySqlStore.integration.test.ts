@@ -16,6 +16,7 @@ import { applyMigrations } from '../migrations/migrationRunner';
 import { createChildInactivitySqlStore } from './childInactivitySqlStore';
 import { ACTIVITY_DRAFT_SQL, WARNING_DRAFT_SQL, assertActivityDraft, assertWarningDraft } from './inactivitySchema.testFixture';
 import { CHILD_DAILY_USAGE_DRAFT_SQL } from './childDailyUsageSchema.testFixture';
+import { CHILD_DAILY_USAGE_RECEIPTS_DRAFT_SQL } from './childDailyUsageReceipts.testFixture';
 import { createInAppInactivityQualityResolver } from './childInactivityInAppTarget';
 import { createPinnedPrimaryHealth } from './retentionPrimaryHealth';
 import { reconcileDeletedRetentionIntent, reconcileKeptRetentionIntent, reconcileRestoredDeletedIntent } from './retentionReconciliation';
@@ -403,10 +404,19 @@ test('isolated restore resets usage settings before activation without deleting 
     const draft = readFileSync(path.resolve(__dirname, '../../migrations/pending/draft_parent_child_daily_usage.sql'), 'utf8');
     assert.equal(draft.replace(/\r\n/gu, '\n').trim(), CHILD_DAILY_USAGE_DRAFT_SQL);
     await admin.query(CHILD_DAILY_USAGE_DRAFT_SQL);
+    const receiptsDraft = readFileSync(path.resolve(__dirname, '../../migrations/pending/draft_child_daily_usage_withdrawal_receipts.sql'), 'utf8');
+    assert.equal(receiptsDraft.replace(/\r\n/gu, '\n').trim(), CHILD_DAILY_USAGE_RECEIPTS_DRAFT_SQL);
+    await admin.query(CHILD_DAILY_USAGE_RECEIPTS_DRAFT_SQL);
     try {
         await admin.query(`INSERT INTO parent_child_daily_usage
             (child_uuid,time_zone,daily_limit_ms,usage_day,used_ms,accounted_at_ms,active_until_ms,notice_version,consented_at)
             VALUES (?,'UTC',60000,'2026-11-06',0,0,NULL,'synthetic',UTC_TIMESTAMP(6))`, [childId]);
+        const expiredReceipt = randomUUID(), currentReceipt = randomUUID();
+        await admin.query(`INSERT INTO child_daily_usage_withdrawal_receipts
+            (receipt_uuid,child_uuid,notice_version,consented_at,withdrawn_at) VALUES
+            (?,?,'synthetic',UTC_TIMESTAMP(6) - INTERVAL 20 DAY,UTC_TIMESTAMP(6) - INTERVAL 15 DAY),
+            (?,?,'synthetic',UTC_TIMESTAMP(6) - INTERVAL 10 DAY,UTC_TIMESTAMP(6) - INTERVAL 2 DAY)`,
+        [expiredReceipt, childId, currentReceipt, childId]);
         const activate = async () => {
             const connection = await database.getConnection();
             try { return await activateRetentionGuard(connection, journal,
@@ -418,12 +428,18 @@ test('isolated restore resets usage settings before activation without deleting 
         await assert.rejects(activate());
         await assert.rejects(reset({ ...pins, originalServerUuid: pins.serverUuid }));
         assert.equal((await admin.query<RowDataPacket[]>('SELECT child_uuid FROM parent_child_daily_usage'))[0].length, 1);
+        await admin.query('DELETE FROM parent_child_daily_usage');
+        await assert.rejects(activate(), /Keep all writers and traffic stopped/u, 'expired restored receipts must block activation');
+        await admin.query(`INSERT INTO parent_child_daily_usage
+            (child_uuid,time_zone,daily_limit_ms,usage_day,used_ms,accounted_at_ms,active_until_ms,notice_version,consented_at)
+            VALUES (?,'UTC',60000,'2026-11-06',0,0,NULL,'synthetic',UTC_TIMESTAMP(6))`, [childId]);
         assert.deepEqual(await reset(), { operation: 'reset-restored-usage', confirmed: true });
         assert.equal((await admin.query<RowDataPacket[]>('SELECT child_uuid FROM parent_child_daily_usage'))[0].length, 0);
+        assert.deepEqual((await admin.query<RowDataPacket[]>('SELECT receipt_uuid FROM child_daily_usage_withdrawal_receipts'))[0].map(row => row.receipt_uuid), [currentReceipt]);
         assert.equal((await admin.query<RowDataPacket[]>('SELECT account_uuid FROM users WHERE account_uuid IN (?,?)', [parentId, childId]))[0].length, 2);
         assert.equal(await activate(), '2');
         assert.equal(writes, 1);
-    } finally { await admin.query('DROP TABLE parent_child_daily_usage'); }
+    } finally { await admin.query('DROP TABLE child_daily_usage_withdrawal_receipts, parent_child_daily_usage'); }
 });
 
 test('verified deleted outcome applies only to pinned isolated SQL restore without later activity', async () => {

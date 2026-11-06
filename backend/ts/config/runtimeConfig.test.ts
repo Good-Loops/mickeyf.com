@@ -245,6 +245,11 @@ test('HTTP Apple maintenance requires deferred secrets, not container-injected A
     assert.throws(() => loadRuntimeConfig(env), /runtime secret access/);
     const runtimeEnv = { ...env, APPLE_TOKEN_RUNTIME_SECRETS_ENABLED: 'true' };
     assert.ok(loadRuntimeConfig(runtimeEnv).appleMaintenance);
+    assert.equal(loadRuntimeConfig(runtimeEnv).childDailyUsageReceiptRetentionEnabled, false);
+    const retentionOnly = loadRuntimeConfig({ ...runtimeEnv, CHILD_DAILY_USAGE_RECEIPT_RETENTION_ENABLED: 'true' });
+    assert.equal(retentionOnly.childDailyUsageReceiptRetentionEnabled, true);
+    assert.equal(retentionOnly.childDailyUsageEnabled, false);
+    assert.throws(() => loadRuntimeConfig({ ...productionEnvironment, CHILD_DAILY_USAGE_RECEIPT_RETENTION_ENABLED: 'true' }), /requires maintenance/u);
     // Missing key references are handled after DB cleanup, not as a startup requirement.
     assert.equal(loadRuntimeConfig(runtimeEnv).providerAuth.enabled, false);
     for (const name of ['APPLE_SIGN_IN_PRIVATE_KEY', 'APPLE_TOKEN_ENCRYPTION_KEYS']) {

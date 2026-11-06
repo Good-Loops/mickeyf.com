@@ -61,7 +61,7 @@ import { prepareChildInactivityDeployment } from './accounts/childInactivityDepl
 import { CHILD_WARNING_WEBHOOK_PATH } from './routers/childWarningWebhookRouter';
 import { mountChildDailyUsageHeartbeat, mountChildDailyUsageEndpoints } from './routers/childDailyUsageRouter';
 import { createProviderAuthContextReader } from './auth/providerAuthContext';
-import { cleanupChildDailyUsage } from './accounts/childDailyUsageStore';
+import { cleanupChildDailyUsage, cleanupChildDailyUsageReceipts } from './accounts/childDailyUsageStore';
 
 const runtimeConfig = loadRuntimeConfig();
 const childInactivityConfig = loadChildInactivityDeployment(process.env);
@@ -107,7 +107,7 @@ app.use(helmet({
 // Mount before CORS/preflight and body parsers so they cannot bypass its checks.
 async function runConfiguredMaintenance(): Promise<number> {
     // Independent cleanup must still run if Apple's provider request fails.
-    const [apple, sessionCleanup, registrationCleanup, parentCleanup, formCleanup, relayCleanup, inactivity, dailyUsage] = await Promise.allSettled([
+    const [apple, sessionCleanup, registrationCleanup, parentCleanup, formCleanup, relayCleanup, inactivity, dailyUsage, dailyReceipts] = await Promise.allSettled([
         runAppleMaintenance({ database: pool, expectedServerUuid: runtimeConfig.appleMaintenance!.expectedServerUuid,
             loadLifecycle: loadRuntimeAppleLifecycle, appleAndroidEnabled: runtimeConfig.providerAuth.appleAndroidEnabled === true }),
         cleanupExpiredAccountSessions(pool),
@@ -117,6 +117,7 @@ async function runConfiguredMaintenance(): Promise<number> {
         runtimeConfig.parentFormRelayEnabled ? cleanupParentFormAppleRelayState(pool) : Promise.resolve({ backlog: false }),
         childInactivityDeployment ? childInactivityDeployment.runMaintenance() : Promise.resolve(0),
         runtimeConfig.childDailyUsageEnabled ? cleanupChildDailyUsage(pool) : Promise.resolve({ mayHaveMore: false }),
+        runtimeConfig.childDailyUsageReceiptRetentionEnabled ? cleanupChildDailyUsageReceipts(pool) : Promise.resolve({ mayHaveMore: false }),
     ]);
     return apple.status === 'fulfilled' && apple.value === 0
         && sessionCleanup.status === 'fulfilled' && !sessionCleanup.value.backlog
@@ -125,7 +126,8 @@ async function runConfiguredMaintenance(): Promise<number> {
         && formCleanup.status === 'fulfilled' && !formCleanup.value.backlog
         && relayCleanup.status === 'fulfilled' && !relayCleanup.value.backlog
         && inactivity.status === 'fulfilled' && inactivity.value === 0
-        && dailyUsage.status === 'fulfilled' && !dailyUsage.value.mayHaveMore ? 0 : 1;
+        && dailyUsage.status === 'fulfilled' && !dailyUsage.value.mayHaveMore
+        && dailyReceipts.status === 'fulfilled' && !dailyReceipts.value.mayHaveMore ? 0 : 1;
 }
 app.use(APPLE_MAINTENANCE_PATH, createAppleMaintenanceRouter(runtimeConfig.appleMaintenance, runConfiguredMaintenance));
 // Authenticate provider callbacks before the general body parsers; no browser session is accepted.
@@ -190,6 +192,8 @@ async function startServer(): Promise<void> {
             // Runtime startup also requires the reviewed columns to be readable by this account.
             if (runtimeConfig.childDailyUsageEnabled) await pool.query(`SELECT child_uuid,time_zone,daily_limit_ms,
                 usage_day,used_ms,accounted_at_ms,active_until_ms,notice_version,consented_at FROM parent_child_daily_usage LIMIT 0`);
+            if (runtimeConfig.childDailyUsageReceiptRetentionEnabled) await pool.query(`SELECT receipt_uuid,withdrawn_at
+                FROM child_daily_usage_withdrawal_receipts LIMIT 0`);
             if (childActivity) {
                 await verifyParentManagedChildActivityReadiness(pool);
                 await verifyChildActivityContinuityReadiness(pool, childContinuityConfig!);

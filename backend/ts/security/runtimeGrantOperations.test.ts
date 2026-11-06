@@ -746,10 +746,14 @@ test('daily usage grant inspection requires its complete schema', async () => {
     const plan = await planRuntimeGrants(connection, { ...SETTINGS, profile }, RUNTIME_ACCOUNT);
     assert.equal(plan.compliant, true);
     assert.match(connection.calls.find(sql => sql.includes('runtime-grants:columns'))!, /'parent_child_daily_usage'/u);
+    assert.match(connection.calls.find(sql => sql.includes('runtime-grants:columns'))!, /'child_daily_usage_withdrawal_receipts'/u);
     const incomplete = createRuntimeGrantPlan({ ...snapshot, availableColumns: snapshot.availableColumns.filter(row =>
         row.tableName !== 'parent_child_daily_usage' || row.columnName !== 'active_until_ms') }, { ...SETTINGS, profile }, RUNTIME_ACCOUNT);
     assert.equal(incomplete.state, 'blocked');
     assert.deepEqual(incomplete.operations.ensureRequiredPrivileges, []);
+    const missingReceipts = createRuntimeGrantPlan({ ...snapshot, availableColumns: snapshot.availableColumns.filter(row =>
+        row.tableName !== 'child_daily_usage_withdrawal_receipts' || row.columnName !== 'notice_version') }, { ...SETTINGS, profile }, RUNTIME_ACCOUNT);
+    assert.equal(missingReceipts.state, 'blocked');
 });
 
 test('Apple revocation grants fail closed until watermark and both provenance columns exist', () => {
