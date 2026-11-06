@@ -15,6 +15,7 @@ import { loadMigrationManifest } from '../migrations/migrationManifest';
 import { applyMigrations } from '../migrations/migrationRunner';
 import { createChildInactivitySqlStore } from './childInactivitySqlStore';
 import { ACTIVITY_DRAFT_SQL, WARNING_DRAFT_SQL, assertActivityDraft, assertWarningDraft } from './inactivitySchema.testFixture';
+import { CHILD_DAILY_USAGE_DRAFT_SQL } from './childDailyUsageSchema.testFixture';
 import { createInAppInactivityQualityResolver } from './childInactivityInAppTarget';
 import { createPinnedPrimaryHealth } from './retentionPrimaryHealth';
 import { reconcileDeletedRetentionIntent, reconcileKeptRetentionIntent, reconcileRestoredDeletedIntent } from './retentionReconciliation';
@@ -399,9 +400,9 @@ test('isolated restore resets usage settings before activation without deleting 
     const journal = { async readRestoreGuard() { return guard; }, async readIntents() { return []; },
         async readResolution() { return null; }, async writeRestoreGuard() { writes++; return '2'; } };
     const deletionJournal = { async readDeletionIntents() { return { digest: 'a'.repeat(64), intents: [] }; } };
-    const draft = readFileSync(path.resolve(__dirname, '../../migrations/pending/draft_parent_child_daily_usage.sql'));
-    assert.equal(createHash('sha256').update(draft).digest('hex'), '18381cbeb4db9206949a73d9f167c57e6a865679f9ef83dfb8a05c830e7c0f2f');
-    await admin.query(draft.toString('utf8'));
+    const draft = readFileSync(path.resolve(__dirname, '../../migrations/pending/draft_parent_child_daily_usage.sql'), 'utf8');
+    assert.equal(draft.replace(/\r\n/gu, '\n').trim(), CHILD_DAILY_USAGE_DRAFT_SQL);
+    await admin.query(CHILD_DAILY_USAGE_DRAFT_SQL);
     try {
         await admin.query(`INSERT INTO parent_child_daily_usage
             (child_uuid,time_zone,daily_limit_ms,usage_day,used_ms,accounted_at_ms,active_until_ms,notice_version,consented_at)
