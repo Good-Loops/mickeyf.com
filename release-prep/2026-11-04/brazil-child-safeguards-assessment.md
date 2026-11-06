@@ -68,22 +68,25 @@ separate switches that default to off. Focused local UI and isolated-database
 tests passed; no control or cleanup has been enabled in production. The actual
 schedule, recovery copies, parent consent/disclosures and device behavior need
 review before activation.
-The candidate does not cover signed-out guest use, offline use or other apps.
+Account, privacy and license pages remain accessible and are not counted. The
+candidate does not cover signed-out guest use, offline use or other apps.
 
 ### Draft disclosure for review, not the active notice
 
 **English:** If you set a daily limit for a managed child account, we store the
 limit, its time zone and one daily usage total to show and apply the control.
 Use is estimated while the account is online and may include up to 30 seconds
-after a connection ends. Turning off the control removes its setting and
-current total. It does not limit guest use, offline use or other apps. Recovery
+after a connection ends. Account, privacy and license pages stay available and
+are not counted. Turning off the control removes its setting and current total.
+It does not limit guest use, offline use or other apps. Recovery
 copies and the actual retention deadline still need to be confirmed.
 
 **Português:** Se você definir um limite diário para uma conta infantil
 supervisionada, armazenaremos o limite, seu fuso horário e um total diário de
 uso para mostrar e aplicar o controle. O uso é estimado enquanto a conta está
-online e pode incluir até 30 segundos após o fim da conexão. Desativar o
-controle remove a configuração e o total atual. Ele não limita o uso como
+online e pode incluir até 30 segundos após o fim da conexão. As páginas de
+conta, privacidade e licenças continuam disponíveis e não são contabilizadas.
+Desativar o controle remove a configuração e o total atual. Ele não limita o uso como
 visitante, offline ou em outros aplicativos. As cópias de recuperação e o prazo
 real de retenção ainda precisam ser confirmados.
 

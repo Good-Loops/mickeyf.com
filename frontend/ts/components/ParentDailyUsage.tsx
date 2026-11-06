@@ -86,8 +86,8 @@ export default function ParentDailyUsage({ language, childAccountId, sessionGene
             : tr('No daily limit is set.', 'Nenhum limite diário definido.')}</p>
         <p>{tr('The child will see the limit. Totals are approximate and may include up to 30 seconds after a connection ends.',
             'A criança verá o limite. Os totais são aproximados e podem incluir até 30 segundos após o fim da conexão.')}</p>
-        <p>{tr('This applies to the managed account while online. It does not limit guest or offline use, or other apps on the device.',
-            'Isso se aplica à conta supervisionada enquanto estiver online. Não limita o uso como visitante, offline ou em outros aplicativos do dispositivo.')}</p>
+        <p>{tr('This applies to the managed account while online. Account, privacy and license pages remain available and are not counted. It does not limit guest or offline use, or other apps on the device.',
+            'Isso se aplica à conta supervisionada enquanto estiver online. As páginas de conta, privacidade e licenças continuam disponíveis e não são contabilizadas. Não limita o uso como visitante, offline ou em outros aplicativos do dispositivo.')}</p>
         <label>{tr('Daily limit in minutes (1–1440)', 'Limite diário em minutos (1–1440)')}{' '}
             <input type="number" min="1" max="1440" step="1" value={minutes} disabled={busy} onChange={event => setMinutes(event.target.value)} /></label>
         <label>{tr('Time zone for the daily reset', 'Fuso horário para o reinício diário')}{' '}
