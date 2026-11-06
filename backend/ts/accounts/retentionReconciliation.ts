@@ -57,8 +57,11 @@ export async function assertKnownRecoveryWritersLocked(connection: Pick<PoolConn
         || expected.size !== 0) throw new Error('Known recovery writers are not locked.');
 }
 
+export const isProductionRecoveryOperator = (pins: Readonly<{ currentUser: string }>): boolean =>
+    pins.currentUser === 'ludolume_release_ops@cloudsqlproxy~%';
+
 /** PROCESS visibility is required; scheduled receipt cleanup is an independent writer. */
-export async function assertNoRetentionRuntimeWriters(connection: AdminConnection): Promise<void> {
+export async function assertNoRetentionRuntimeWriters(connection: AdminConnection, includeRoot = false): Promise<void> {
     const [privileges] = await connection.query<RowDataPacket[]>({ sql: `SELECT COUNT(*) AS count
         FROM information_schema.USER_PRIVILEGES WHERE PRIVILEGE_TYPE='PROCESS'
         AND GRANTEE=CONCAT("'",SUBSTRING_INDEX(CURRENT_USER(),'@',1),"'@'",SUBSTRING_INDEX(CURRENT_USER(),'@',-1),"'")`, timeout: 10_000 });
@@ -77,13 +80,14 @@ export async function assertNoRetentionRuntimeWriters(connection: AdminConnectio
         });
         if (!hasProcess) throw new Error('The administrator cannot verify writer sessions.');
     }
-    // Allow only idle, unbound local root sessions; Cloud SQL uses local system users.
+    // In production, allow only idle, unbound local root sessions; Cloud SQL uses local system users.
     const [writers] = await connection.query<RowDataPacket[]>({ sql: `SELECT COUNT(*) AS count
         FROM information_schema.PROCESSLIST WHERE ID<>CONNECTION_ID() AND (
             USER IN ('cms_mickeyf','receipt_cleanup','michel_operator','ludolume_release_ops') OR
-            (USER='root' AND (DB IS NOT NULL OR COMMAND<>'Sleep' OR (
+            (?=1 AND USER='root' AND (DB IS NOT NULL OR COMMAND<>'Sleep' OR (
                 HOST NOT IN ('localhost','127.0.0.1','::1') AND HOST NOT LIKE 'localhost:%'
-                AND HOST NOT LIKE '127.0.0.1:%' AND HOST NOT LIKE '::1:%' AND HOST NOT LIKE '[::1]:%'))))`, timeout: 10_000 });
+                AND HOST NOT LIKE '127.0.0.1:%' AND HOST NOT LIKE '::1:%' AND HOST NOT LIKE '[::1]:%'))))`, timeout: 10_000 },
+    [includeRoot ? 1 : 0]);
     if (!Array.isArray(writers) || writers.length !== 1 || ![0, '0'].includes(writers[0].count)) {
         throw new Error('Runtime writers are not drained.');
     }
@@ -117,7 +121,7 @@ export async function reconcileDeletedRetentionIntent(connection: AdminConnectio
         await identity(); // Never acquire the global lock on an unverified target.
         await connection.query({ sql: 'FLUSH TABLES WITH READ LOCK', timeout: 10_000 });
         const current = await identity();
-        await assertNoRetentionRuntimeWriters(connection);
+        await assertNoRetentionRuntimeWriters(connection, isProductionRecoveryOperator(pins));
         const [rows] = await connection.query<RowDataPacket[]>({ sql: `SELECT account_uuid FROM users
             WHERE account_uuid=? LIMIT 2`, timeout: 10_000 }, [intent.childId]);
         if (!Array.isArray(rows) || rows.length !== 0 || !await journal.verifyRetentionIntent(intent)) {

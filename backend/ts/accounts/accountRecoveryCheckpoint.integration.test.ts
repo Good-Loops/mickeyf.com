@@ -86,7 +86,7 @@ test('writer fence detects app, cleanup, operator and nonlocal root sessions', a
         inspector = await mysql.createConnection({ host: '127.0.0.1', port, user: 'process_inspector_test',
             password: 'inspector-test-only', multipleStatements: false });
         // The container sees this host connection as nonlocal, unlike provider-local root sessions.
-        await assert.rejects(assertNoRetentionRuntimeWriters(inspector as unknown as PoolConnection), /not drained/u);
+        await assert.rejects(assertNoRetentionRuntimeWriters(inspector as unknown as PoolConnection, true), /not drained/u);
         await root.end(); root = undefined;
         for (const user of ['cms_mickeyf', 'receipt_cleanup', 'michel_operator', 'ludolume_release_ops']) {
             writer = await mysql.createConnection({ host: '127.0.0.1', port, user,

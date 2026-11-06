@@ -5,7 +5,7 @@ import { parseInactivityInstant } from './childInactivityPolicy';
 import { establishRecoveryCheckpoint, verifyCheckpointRecoveryCoverage } from './accountRecoveryCheckpoint';
 import { collectCloudSqlRecoveryInventory, readCloudSqlRecoveryWindow, type CloudSqlMetadataClient } from './cloudSqlRecoveryInventory';
 import { verifyDeletedAccountEffects } from './verifiedDeletionEffects';
-import { assertNoRetentionRuntimeWriters } from './retentionReconciliation';
+import { assertNoRetentionRuntimeWriters, isProductionRecoveryOperator } from './retentionReconciliation';
 import type { DeletionJournalEntry } from './gcsDeletionJournal';
 import type { ConditionalRetirementPair, ObservedRestoreGuard, RestoreGuard } from './gcsRetentionJournal';
 import { signRetirementBatch, type RetirementBatchPermit } from './retirementBatchPermit';
@@ -64,7 +64,7 @@ export async function advanceRetirementGuard(options: RetirementGuardAdvanceOpti
         if (!Array.isArray(identity) || identity.length !== 1 || identity[0].databaseName !== pins.database
             || identity[0].currentUser !== pins.currentUser || identity[0].serverUuid !== pins.serverUuid) throw new Error();
         await options.verifySchema(connection);
-        await assertNoRetentionRuntimeWriters(connection);
+        await assertNoRetentionRuntimeWriters(connection, isProductionRecoveryOperator(pins));
         const id = (value: EntryId) => JSON.stringify([value.name, value.generation, value.contentSha256]);
         const now = async (): Promise<string> => {
             const [rows] = await connection.query<RowDataPacket[]>({ sql: `SELECT DATABASE() AS databaseName,
@@ -110,7 +110,7 @@ export async function advanceRetirementGuard(options: RetirementGuardAdvanceOpti
             if (index + 1 < polls) await wait();
         }
         if (!covered || JSON.stringify(await guard.read()) !== initialText) throw new Error();
-        await assertNoRetentionRuntimeWriters(connection);
+        await assertNoRetentionRuntimeWriters(connection, isProductionRecoveryOperator(pins));
         const final = await resolveBatch();
         const recovery = await collectCloudSqlRecoveryInventory({ project: options.project, instance: options.instance,
             observedAt: await now(), client: options.cloud });
@@ -118,7 +118,7 @@ export async function advanceRetirementGuard(options: RetirementGuardAdvanceOpti
             { project: options.project, instance: options.instance });
         if (final.digest !== current.digest || JSON.stringify(final.accountIds) !== JSON.stringify(accountIds)
             || JSON.stringify(await guard.read()) !== initialText) throw new Error();
-        await assertNoRetentionRuntimeWriters(connection);
+        await assertNoRetentionRuntimeWriters(connection, isProductionRecoveryOperator(pins));
         const next: RestoreGuard = { state: 'hold', database: initial.database, serverUuid: initial.serverUuid,
             epoch: initial.epoch, expiresAt: initial.expiresAt,
             recoveryCheckpoint: { lineage: checkpoint.lineage, minimumEpoch: checkpoint.epoch, keySha256: fingerprint } };

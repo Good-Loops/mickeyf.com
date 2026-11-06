@@ -3,7 +3,7 @@ import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import { isAccountId } from './deletionJournal';
 import { parseInactivityInstant } from './childInactivityPolicy';
 import type { createGcsRetentionJournal, RestoreGuard } from './gcsRetentionJournal';
-import { assertNoRetentionRuntimeWriters } from './retentionReconciliation';
+import { assertNoRetentionRuntimeWriters, isProductionRecoveryOperator } from './retentionReconciliation';
 import { readRecoveryCheckpoint } from './accountRecoveryCheckpoint';
 
 type Connection = Pick<PoolConnection, 'query' | 'destroy'>;
@@ -38,7 +38,7 @@ export async function activateRetentionGuard(connection: Connection, journal: Jo
         await identity();
         await connection.query({ sql: 'FLUSH TABLES WITH READ LOCK', timeout: 10_000 });
         const nowUtc = await identity();
-        await assertNoRetentionRuntimeWriters(connection);
+        await assertNoRetentionRuntimeWriters(connection, isProductionRecoveryOperator(pins));
         if (guard.recoveryCheckpoint !== undefined) {
             await readRecoveryCheckpoint(connection, { database: pins.database, currentUser: pins.currentUser,
                 serverUuid: pins.serverUuid, lineage: guard.recoveryCheckpoint.lineage,

@@ -18,7 +18,7 @@ export function createProductionRecoveryCheckpointSetup(options: Readonly<{
     const cloud = createCloudSqlMetadataClient();
     return { connection: options.connection, pins: options.pins, sourceCommit: options.sourceCommit,
         guard, verifySource: options.verifySource, verifyAccountSchema: verifyRetirementSourceSchema,
-        verifyWritersFenced: assertNoRetentionRuntimeWriters, async verifyRecoveryAvailable() {
+        verifyWritersFenced: (connection: Pick<PoolConnection, 'query' | 'destroy'>) => assertNoRetentionRuntimeWriters(connection, true), async verifyRecoveryAvailable() {
             const [rows] = await options.connection.query<RowDataPacket[]>({ sql: `SELECT DATABASE() AS db,CURRENT_USER() AS user,
                 @@GLOBAL.server_uuid AS uuid,DATE_FORMAT(UTC_TIMESTAMP(6),'%Y-%m-%dT%H:%i:%s.%fZ') AS nowUtc`, timeout: 10_000 });
             if (!Array.isArray(rows) || rows.length !== 1 || rows[0].db !== options.pins.database

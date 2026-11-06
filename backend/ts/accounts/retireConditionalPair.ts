@@ -9,7 +9,7 @@ import { createGcsRetentionJournal, type ConditionalRetirementPair, type Observe
 import { signJournalRetirementClaim, verifyJournalRetirementStamp, type JournalRetirementStamp } from './journalRetirementStamp';
 import { verifyRetirementBatch, type RetirementBatchPermit } from './retirementBatchPermit';
 import { verifyDeletedAccountEffects } from './verifiedDeletionEffects';
-import { assertNoRetentionRuntimeWriters } from './retentionReconciliation';
+import { assertNoRetentionRuntimeWriters, isProductionRecoveryOperator } from './retentionReconciliation';
 import { verifyRetiredJournalObjects } from './verifyRetiredJournalObjects';
 import { verifyRetirementSchemas } from './retirementSourceSchema';
 import { CHILD_RETENTION_BUCKET } from '../config/childInactivityDeployment';
@@ -84,7 +84,7 @@ async function validatedBase(options: Base, intent: Entry, resolution: Entry) {
         || BigInt(guard.recoveryCheckpoint.minimumEpoch) < BigInt(permit.epoch) || guard.recoveryCheckpoint.keySha256 !== fingerprint) throw new Error();
     await readRecoveryCheckpoint(options.connection, { ...pins, lineage: permit.lineage, minimumEpoch: guard.recoveryCheckpoint.minimumEpoch });
     await options.verifySchema(options.connection);
-    await assertNoRetentionRuntimeWriters(options.connection);
+    await assertNoRetentionRuntimeWriters(options.connection, isProductionRecoveryOperator(pins));
     const client = options.client ?? createRetirementStorageClient();
     return { permit, pins, guardText, minimumEpoch: guard.recoveryCheckpoint.minimumEpoch, client };
 }
@@ -163,7 +163,7 @@ export async function retireConditionalPair(options: PairOptions): Promise<Reado
         await readRecoveryCheckpoint(connection, { ...guarded.pins, lineage: guarded.permit.lineage, minimumEpoch: guarded.minimumEpoch });
         const check = async () => {
             if (JSON.stringify(await options.guard.readRestoreGuard()) !== guarded.guardText) throw new Error();
-            await assertNoRetentionRuntimeWriters(connection);
+            await assertNoRetentionRuntimeWriters(connection, isProductionRecoveryOperator(guarded.pins));
         };
         await check();
         await options.retireWitnesses(target.intent.childId, check);
@@ -235,7 +235,7 @@ Promise<Readonly<{ status: 'retired' | 'already-retired' }>> {
                 committedBefore: guarded.permit.committedBefore }, inventory, { project: options.project, instance: options.instance });
             if (stamp.claim.effectConfirmedAt >= inventory.cloudSqlFloor || guarded.permit.committedBefore >= inventory.cloudSqlFloor
                 || JSON.stringify(await options.guard.readRestoreGuard()) !== guarded.guardText) throw new Error();
-            await assertNoRetentionRuntimeWriters(connection);
+            await assertNoRetentionRuntimeWriters(connection, isProductionRecoveryOperator(guarded.pins));
             await verifyRetirementBucketPolicy(guarded.client, options.bucket);
         };
         await stampAndDelete(options, options.resolutionObject, resolution.item, resolution.url,

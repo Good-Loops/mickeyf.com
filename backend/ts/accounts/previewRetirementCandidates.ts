@@ -2,7 +2,7 @@ import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import type { DeletionJournalEntry } from './gcsDeletionJournal';
 import type { ObservedRestoreGuard } from './gcsRetentionJournal';
 import { verifyDeletedAccountEffects } from './verifiedDeletionEffects';
-import { assertNoRetentionRuntimeWriters } from './retentionReconciliation';
+import { assertNoRetentionRuntimeWriters, isProductionRecoveryOperator } from './retentionReconciliation';
 import { readRecoveryCheckpoint } from './accountRecoveryCheckpoint';
 
 type Connection = Pick<PoolConnection, 'query' | 'beginTransaction' | 'rollback' | 'destroy'>;
@@ -27,7 +27,7 @@ export async function previewRetirementCandidates(options: Readonly<{
         if (guard.state !== 'hold' || guard.database !== options.pins.database || guard.serverUuid !== options.pins.serverUuid) throw new Error();
         if (guard.recoveryCheckpoint) await readRecoveryCheckpoint(options.connection, { ...options.pins,
             lineage: guard.recoveryCheckpoint.lineage, minimumEpoch: guard.recoveryCheckpoint.minimumEpoch });
-        await assertNoRetentionRuntimeWriters(options.connection);
+        await assertNoRetentionRuntimeWriters(options.connection, isProductionRecoveryOperator(options.pins));
         const snapshot = await options.journal.readDeletionEntries(), offset = options.offset ?? 0;
         if (!Array.isArray(snapshot.entries) || snapshot.entries.length > 10_000 || !/^[a-f0-9]{64}$/u.test(snapshot.digest)
             || !Number.isSafeInteger(offset) || offset < 0 || offset > snapshot.entries.length) throw new Error();
@@ -39,7 +39,7 @@ export async function previewRetirementCandidates(options: Readonly<{
             if (absent) candidates.push({ name: entry.name, generation: entry.generation, contentSha256: entry.contentSha256 });
             else held++;
         }
-        await assertNoRetentionRuntimeWriters(options.connection);
+        await assertNoRetentionRuntimeWriters(options.connection, isProductionRecoveryOperator(options.pins));
         if (JSON.stringify(await options.guard.readRestoreGuard()) !== guardText
             || (await options.journal.readDeletionEntries()).digest !== snapshot.digest) throw new Error();
         return { candidates, held, total: snapshot.entries.length, nextOffset: end < snapshot.entries.length ? end : null };

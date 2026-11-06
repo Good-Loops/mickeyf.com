@@ -8,7 +8,7 @@ import { collectCloudSqlRecoveryInventory, createCloudSqlMetadataClient, type Cl
 import { signJournalRetirementClaim, verifyJournalRetirementStamp, type JournalRetirementStamp } from './journalRetirementStamp';
 import { verifyRetirementBatch, type RetirementBatchPermit } from './retirementBatchPermit';
 import { verifyDeletedAccountEffects } from './verifiedDeletionEffects';
-import { assertNoRetentionRuntimeWriters } from './retentionReconciliation';
+import { assertNoRetentionRuntimeWriters, isProductionRecoveryOperator } from './retentionReconciliation';
 import { createGcsRetentionJournal, type ObservedRestoreGuard } from './gcsRetentionJournal';
 import { verifyRetiredJournalObjects } from './verifyRetiredJournalObjects';
 import { verifyRetirementSchemas } from './retirementSourceSchema';
@@ -84,7 +84,7 @@ export async function retireExplicitDeletionEntry(options: Readonly<{
             || guard.recoveryCheckpoint.keySha256 !== fingerprint) throw new Error();
         await readRecoveryCheckpoint(connection, { ...pins, lineage: permit.lineage, minimumEpoch: guard.recoveryCheckpoint.minimumEpoch });
         await options.verifySchema(connection);
-        await assertNoRetentionRuntimeWriters(connection);
+        await assertNoRetentionRuntimeWriters(connection, isProductionRecoveryOperator(pins));
         const now = async (): Promise<string> => {
             const [clock] = await connection.query<RowDataPacket[]>({ sql: `SELECT DATABASE() AS databaseName,
                 CURRENT_USER() AS currentUser, @@GLOBAL.server_uuid AS serverUuid,
@@ -121,7 +121,7 @@ export async function retireExplicitDeletionEntry(options: Readonly<{
         await readRecoveryCheckpoint(connection, { ...pins, lineage: permit.lineage, minimumEpoch: guard.recoveryCheckpoint.minimumEpoch });
         const verifyFence = async () => {
             if (JSON.stringify(await options.guard.readRestoreGuard()) !== guardText) throw new Error();
-            await assertNoRetentionRuntimeWriters(connection);
+            await assertNoRetentionRuntimeWriters(connection, isProductionRecoveryOperator(pins));
         };
         await verifyFence();
         await options.retireWitnesses(entry.intent.accountId, verifyFence);
@@ -155,7 +155,7 @@ export async function retireExplicitDeletionEntry(options: Readonly<{
         verifyCheckpointRecoveryCoverage({ lineage: permit.lineage, epoch: permit.epoch, committedBefore: permit.committedBefore },
             current, { project: options.project, instance: options.instance });
         if (permit.committedBefore >= current.cloudSqlFloor || JSON.stringify(await options.guard.readRestoreGuard()) !== guardText) throw new Error();
-        await assertNoRetentionRuntimeWriters(connection);
+        await assertNoRetentionRuntimeWriters(connection, isProductionRecoveryOperator(pins));
         await bucketCheck();
         await options.verifyWitnessesAbsent(entry.intent.accountId);
         await request(client, { method: 'DELETE', url: objectUrl, params: { generation: entry.generation,

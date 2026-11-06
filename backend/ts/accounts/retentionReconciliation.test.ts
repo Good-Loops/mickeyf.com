@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
-import { assertNoRetentionRuntimeWriters, reconcileDeletedRetentionIntent, reconcileKeptRetentionIntent, reconcileRestoredDeletedIntent } from './retentionReconciliation';
+import { assertNoRetentionRuntimeWriters, isProductionRecoveryOperator, reconcileDeletedRetentionIntent, reconcileKeptRetentionIntent, reconcileRestoredDeletedIntent } from './retentionReconciliation';
 import type { InactivitySnapshot } from './childInactivityPolicy';
 import type { InactivityStore, LockedInactivityTarget, RetentionIntent } from './childInactivityWorkflow';
 import type { RetentionResolution } from './gcsRetentionJournal';
@@ -29,6 +29,21 @@ test('writer inspection accepts only effective global PROCESS privileges', async
         'GRANT PROCESS ON `cms`.* TO `operator`@`%`', 'GRANT SELECT ON *.* TO `operator`@`%`']) {
         await assert.rejects(assertNoRetentionRuntimeWriters(connection(grant)), /cannot verify/u);
     }
+});
+
+test('production recovery checks root sessions while generic isolated rehearsals do not', async () => {
+    const seen: number[] = [];
+    const connection = { async query(query: { sql: string }, values?: number[]) {
+        if (query.sql.includes('USER_PRIVILEGES')) return [[{ count: 1 }], []];
+        if (query.sql.includes('PROCESSLIST')) { seen.push(values?.[0] ?? -1); return [[{ count: 0 }], []]; }
+        throw new Error('Unexpected query');
+    } } as unknown as PoolConnection;
+    const production = { currentUser: 'ludolume_release_ops@cloudsqlproxy~%' };
+    assert.equal(isProductionRecoveryOperator(production), true);
+    assert.equal(isProductionRecoveryOperator({ currentUser: 'root@%' }), false);
+    await assertNoRetentionRuntimeWriters(connection, isProductionRecoveryOperator(production));
+    await assertNoRetentionRuntimeWriters(connection);
+    assert.deepEqual(seen, [1, 0]);
 });
 
 function fixture({ active = true, exists = true, newActivity = '2024-01-01T00:00:00.000000Z' } = {}) {
