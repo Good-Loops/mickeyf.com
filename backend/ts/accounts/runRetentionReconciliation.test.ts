@@ -87,3 +87,25 @@ test('restored conditional deletion is blocked before replay when the SQL checkp
         intent: {} }, restorePins, journal, database, Buffer.alloc(32, 1)));
     assert.equal(released, true);
 });
+
+test('restored usage reset refuses an older checkpoint before touching the usage table', async () => {
+    const restorePins = { ...pins, serverUuid: epoch, originalServerUuid: serverUuid };
+    const guard = { state: 'hold' as const, database: pins.database, serverUuid, epoch,
+        expiresAt: '2026-12-01T00:00:00.000Z', generation: '123',
+        recoveryCheckpoint: { lineage: epoch, minimumEpoch: '3', keySha256: 'a'.repeat(64) } };
+    let destroyed = false, touchedUsage = false;
+    const connection = { destroy() { destroyed = true; }, release() {}, async query(query: { sql: string }) {
+        if (query.sql.includes('parent_child_daily_usage')) touchedUsage = true;
+        if (query.sql.includes('USER_PRIVILEGES')) return [[{ count: 1 }], []];
+        if (query.sql.includes('PROCESSLIST')) return [[{ count: 0 }], []];
+        if (query.sql.includes('FROM account_recovery_checkpoint')) return [[{ databaseName: pins.database,
+            currentUser: pins.currentUser, serverUuid: epoch, lineageId: epoch, checkpointEpoch: '2' }], []];
+        return [[{ db: pins.database, user: pins.currentUser, serverUuid: epoch }], []];
+    } };
+    const database = { async query() { return [[{ db: pins.database, user: pins.currentUser, serverUuid: epoch }], []]; },
+        async getConnection() { return connection; } } as unknown as Pick<Pool, 'query' | 'getConnection'>;
+    const journal = { async readRestoreGuard() { return guard; } } as unknown as ReturnType<typeof createGcsRetentionJournal>;
+    await assert.rejects(executeRetentionReconciliation('reset-restored-usage',
+        { confirmation: 'ISOLATED RESTORE AND ALL WRITERS FENCED' }, restorePins, journal, database, Buffer.alloc(32, 1)));
+    assert.equal(touchedUsage, false); assert.equal(destroyed, true);
+});
