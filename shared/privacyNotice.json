@@ -1,12 +1,12 @@
 {
-  "version": "privacy-2026-11-06.1",
+  "version": "privacy-2026-11-06.2",
   "noticeUrl": "https://mickeyf.com/privacy",
   "operatorName": "Michel Silveira Dias Fingergut",
   "contactEmail": "mickeyf.plays@gmail.com",
   "operatorAddress": "Avenida Santa Luzia, 379, Horto Florestal, Salvador, Bahia, CEP 40295-050, Brazil",
   "operatorTelephone": "+55 71 99910 2221",
   "signedParentForm": {
-    "version": "signed-parent-form-2026-11-06.1",
+    "version": "signed-parent-form-2026-11-06.2",
     "requestLifetimeDays": 14,
     "notice": "Your permission is required before the child account is created. Before approval, we ask you, the parent, for your own verified account contact information and the child's country, and assign a form request reference. Do not include the child's name, nickname, email, birth date, identity document or password in the form or message. After the signed permission has been reviewed and approved, you choose the child's nickname and password. The child account then stores the nickname, password hash, account identifier and private game results. Connection and session information protects sign-ins and prevents abuse. Google Cloud and Firebase process hosting and account/result data; Google or Apple establishes control of your linked parent account; Gmail processes the signed form you return. These service providers support the account and verification process. We do not sell personal information or use it for targeted advertising. Public disclosure of the nickname and qualifying results is optional and requires the separate signed choice below; declining it does not prevent a private account. Print this form and sign it by hand. We will send a message to the verified parent email shown on the form. Check your inbox and Spam, then reply to that message with a scan or photograph of the signed form. If you use Apple Hide My Email, replying keeps your private address. If the message does not arrive, contact us at mickeyf.plays@gmail.com for help. Do not include passwords or identity documents. We review the signature, parent declaration, sender and exact request before approving it. No child account is created if approval is missing. Unused requests expire after 14 days; expired request records are removed during maintenance. Incomplete or rejected form messages are deleted within 14 days. Approved signed forms are retained privately while the managed child account remains active, then deleted within 14 days after account-consent withdrawal or child-account deletion. Parents can review the child's information, withdraw public display alone, or withdraw account permission and delete the child through parent account controls or by contacting us. See the linked privacy notice for account and service information. Where native age-range sharing is available, Apple or Google Play may provide a coarse range for the person using that device; this does not establish guardianship or replace your separate signed permission. A parent-required result is retained as a temporary registration restriction for up to 24 hours; parents can use their own device/account or contact us about an incorrect result. Where inactivity handling is enabled, we record the child account’s online activity and your Keep account action. After at least three years without recorded activity, Brevo sends a warning to your verified email; deletion is considered only after at least twelve further months from recorded delivery. Offline play, email opens, clicks and replies alone do not reset that timer. Brevo’s open/click reporting is configured to be anonymous. The linked notice explains the activity history, delivery records and review holds. Approved forms that have not been used to create an account are deleted within 14 days after the request expires or is cancelled. These deadlines cover the form copies we control; the linked privacy notice explains service-provider recovery copies.",
     "ptBR": {
@@ -122,7 +122,7 @@
       {
         "id": "operations",
         "title": "Comprovantes de jogo, hospedagem e suporte",
-        "text": "Tratamos comprovantes temporários de envio de jogos para reconhecer novas tentativas e evitar envios duplicados ou abusivos. Os serviços de hospedagem também tratam informações de conexão, incluindo endereços IP e informações das solicitações, para fornecer e proteger o serviço. Se você nos enviar um e-mail, receberemos sua mensagem e os anexos que escolher enviar. Não envie senhas ou códigos de acesso."
+        "text": "Tratamos comprovantes temporários de envio de jogos para reconhecer novas tentativas e evitar envios duplicados ou abusivos. Os serviços de hospedagem também tratam informações de conexão, incluindo endereços IP e informações das solicitações, para fornecer e proteger o serviço. Segundo o Google, o Firebase Hosting mantém dados de endereços IP por alguns meses. Se você nos enviar um e-mail, receberemos sua mensagem e os anexos que escolher enviar. Não envie senhas ou códigos de acesso."
       },
       {
         "id": "services",
@@ -190,7 +190,7 @@
     {
       "id": "operations",
       "title": "Game receipts, hosting and support",
-      "text": "We process temporary game-submission receipts to recognize retries and prevent duplicate or abusive submissions. Hosting services also process connection information, including IP addresses and request information, to deliver and secure the service. If you email us, we receive your message and any attachments you choose to send. Do not send passwords or sign-in codes."
+      "text": "We process temporary game-submission receipts to recognize retries and prevent duplicate or abusive submissions. Hosting services also process connection information, including IP addresses and request information, to deliver and secure the service. Google says Firebase Hosting retains IP address data for a few months. If you email us, we receive your message and any attachments you choose to send. Do not send passwords or sign-in codes."
     },
     {
       "id": "services",
