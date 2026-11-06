@@ -12,6 +12,15 @@ on:
           - follow-repository
           - "on"
           - "off"
+      child_daily_usage:
+        description: Enable parent daily-use controls only for a qualified backend
+        type: choice
+        required: false
+        default: follow-repository
+        options:
+          - follow-repository
+          - "on"
+          - "off"
   push:
     branches:
       - fix/public-release-registration-pause
@@ -59,6 +68,7 @@ jobs:
           VITE_ENABLE_THREE_BOSSES_RELEASE: "1"
           VITE_ENABLE_CHILD_ONLINE_ACTIVITY: ${{ (inputs.child_lifecycle == 'on' || (inputs.child_lifecycle != 'off' && vars.LUDOLUME_CHILD_LIFECYCLE_RELEASE == '1')) && '1' || '0' }}
           VITE_ENABLE_CHILD_INACTIVITY_WARNING: ${{ (inputs.child_lifecycle == 'on' || (inputs.child_lifecycle != 'off' && vars.LUDOLUME_CHILD_LIFECYCLE_RELEASE == '1')) && '1' || '0' }}
+          VITE_ENABLE_CHILD_DAILY_USAGE: ${{ (inputs.child_daily_usage == 'on' || (inputs.child_daily_usage != 'off' && vars.LUDOLUME_CHILD_DAILY_USAGE_RELEASE == '1')) && '1' || '0' }}
           VITE_PROD_API_URL: https://mickeyf-org-j7yuum4tiq-uc.a.run.app
         run: |
           npm run three-bosses:webgl:release:validate

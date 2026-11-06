@@ -11,15 +11,17 @@ const requiredSettings = {
 };
 
 export function androidReleaseEnvironment(args, environment) {
-    if (args.length !== 1 || args[0] !== '--qualified-android') {
-        throw new Error('Use --qualified-android only after qualifying the production backend and release.');
+    if (!args.includes('--qualified-android') || args.length > 2 || new Set(args).size !== args.length
+        || args.some(arg => !['--qualified-android', '--qualified-daily-usage'].includes(arg))) {
+        throw new Error('Use --qualified-android, and --qualified-daily-usage only after its backend and release are qualified.');
     }
-    for (const [name, value] of Object.entries(requiredSettings)) {
+    const settings = { ...requiredSettings, VITE_ENABLE_CHILD_DAILY_USAGE: args.includes('--qualified-daily-usage') ? '1' : '0' };
+    for (const [name, value] of Object.entries(settings)) {
         if (environment[name] && environment[name] !== value) {
             throw new Error(`${name} conflicts with the qualified release configuration.`);
         }
     }
-    return { ...environment, ...requiredSettings };
+    return { ...environment, ...settings };
 }
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

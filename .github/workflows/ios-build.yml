@@ -14,6 +14,15 @@ on:
           - follow-repository
           - "on"
           - "off"
+      child_daily_usage:
+        description: Enable parent daily-use controls only for a qualified backend
+        type: choice
+        required: false
+        default: follow-repository
+        options:
+          - follow-repository
+          - "on"
+          - "off"
       compile_only:
         description: Validate both native targets without signing, deployment, caches or app artifacts
         type: boolean
@@ -83,6 +92,7 @@ jobs:
       VITE_ENABLE_THREE_BOSSES_RELEASE: "1"
       VITE_ENABLE_CHILD_ONLINE_ACTIVITY: ${{ (inputs.child_lifecycle == 'on' || (inputs.child_lifecycle != 'off' && vars.LUDOLUME_CHILD_LIFECYCLE_RELEASE == '1')) && '1' || '0' }}
       VITE_ENABLE_CHILD_INACTIVITY_WARNING: ${{ (inputs.child_lifecycle == 'on' || (inputs.child_lifecycle != 'off' && vars.LUDOLUME_CHILD_LIFECYCLE_RELEASE == '1')) && '1' || '0' }}
+      VITE_ENABLE_CHILD_DAILY_USAGE: ${{ (inputs.child_daily_usage == 'on' || (inputs.child_daily_usage != 'off' && vars.LUDOLUME_CHILD_DAILY_USAGE_RELEASE == '1')) && '1' || '0' }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -246,6 +256,7 @@ jobs:
       VITE_ENABLE_THREE_BOSSES_RELEASE: "1"
       VITE_ENABLE_CHILD_ONLINE_ACTIVITY: ${{ (inputs.child_lifecycle == 'on' || (inputs.child_lifecycle != 'off' && vars.LUDOLUME_CHILD_LIFECYCLE_RELEASE == '1')) && '1' || '0' }}
       VITE_ENABLE_CHILD_INACTIVITY_WARNING: ${{ (inputs.child_lifecycle == 'on' || (inputs.child_lifecycle != 'off' && vars.LUDOLUME_CHILD_LIFECYCLE_RELEASE == '1')) && '1' || '0' }}
+      VITE_ENABLE_CHILD_DAILY_USAGE: ${{ (inputs.child_daily_usage == 'on' || (inputs.child_daily_usage != 'off' && vars.LUDOLUME_CHILD_DAILY_USAGE_RELEASE == '1')) && '1' || '0' }}
       ASC_KEY_ID: ${{ vars.ASC_KEY_ID }}
       ASC_ISSUER_ID: ${{ vars.ASC_ISSUER_ID }}
       ASC_APP_ID: ${{ vars.ASC_APP_ID }}
@@ -309,6 +320,7 @@ jobs:
       VITE_ENABLE_THREE_BOSSES_RELEASE: "1"
       VITE_ENABLE_CHILD_ONLINE_ACTIVITY: ${{ (inputs.child_lifecycle == 'on' || (inputs.child_lifecycle != 'off' && vars.LUDOLUME_CHILD_LIFECYCLE_RELEASE == '1')) && '1' || '0' }}
       VITE_ENABLE_CHILD_INACTIVITY_WARNING: ${{ (inputs.child_lifecycle == 'on' || (inputs.child_lifecycle != 'off' && vars.LUDOLUME_CHILD_LIFECYCLE_RELEASE == '1')) && '1' || '0' }}
+      VITE_ENABLE_CHILD_DAILY_USAGE: ${{ (inputs.child_daily_usage == 'on' || (inputs.child_daily_usage != 'off' && vars.LUDOLUME_CHILD_DAILY_USAGE_RELEASE == '1')) && '1' || '0' }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
