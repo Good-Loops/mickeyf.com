@@ -10,5 +10,7 @@ export function childDailyUsageEnabled(env: Environment, dependencies: {
     if (!dependencies.childAudience || !dependencies.signedForms || !dependencies.accountDeletion || !dependencies.maintenance) {
         throw new Error('Daily usage requires the reviewed child, deletion and maintenance configuration.');
     }
-    return true;
+    // The current signed parent consent predates usage totals. Do not expose the
+    // collection endpoints until the updated notice and consent are bound.
+    throw new Error('Daily usage cannot be enabled until the updated parent notice and consent are qualified.');
 }

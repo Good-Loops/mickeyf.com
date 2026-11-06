@@ -90,9 +90,21 @@ Desativar o controle remove a configuração e o total atual. Ele não limita o 
 visitante, offline ou em outros aplicativos. As cópias de recuperação e o prazo
 real de retenção ainda precisam ser confirmados.
 
-Before using this text, qualify the actual data flow and retention and decide
-whether a new parent permission and signed-form version are required. Do not
-change an existing signed consent silently.
+Before using this text, qualify the actual data flow and retention. Treat the
+introduction of account-linked usage totals as a material change to the existing
+parent permission: provide an updated direct notice and obtain verifiable parent
+consent before collecting the totals for a child covered by COPPA. The FTC's
+[COPPA guidance](https://www.ftc.gov/business-guidance/resources/complying-coppa-frequently-asked-questions)
+requires a new notice and consent for material changes; the classification of
+this particular change is our conservative release decision. For Brazil,
+identify the appropriate legal basis and honor the specific, prominent parent
+consent requirements when consent is the basis, together with the child's best
+interests. [ANPD's statement](https://www.gov.br/anpd/pt-br/assuntos/noticias/anpd-divulga-enunciado-sobre-o-tratamento-de-dados-pessoais-de-criancas-e-adolescentes)
+recognizes multiple potential legal bases. The current setting button does not
+by itself prove that the necessary notice and consent have been obtained. Bind
+the chosen notice and consent version to the parent action and retain only the
+necessary proof; handle existing approvals separately. Do not change or relabel
+an existing signed consent silently.
 
 Sources: [Brazilian Senate, Law 15.211/2025, arts. 17–18 and 39](https://legis.senado.leg.br/norma/41465823/publicacao/41471709),
 [ANPD complaint examples](https://www.gov.br/anpd/pt-br/assuntos/eca-digital/denuncias-eca-digital),

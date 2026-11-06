@@ -6,7 +6,7 @@ test('daily usage is off by default and requires each dependency when enabled', 
     const ready = { childAudience: true, signedForms: true, accountDeletion: true, maintenance: true };
     assert.equal(childDailyUsageEnabled({}, ready), false);
     assert.equal(childDailyUsageEnabled({ CHILD_DAILY_USAGE_ENABLED: 'false' }, ready), false);
-    assert.equal(childDailyUsageEnabled({ CHILD_DAILY_USAGE_ENABLED: 'true' }, ready), true);
+    assert.throws(() => childDailyUsageEnabled({ CHILD_DAILY_USAGE_ENABLED: 'true' }, ready), /parent notice and consent/);
     assert.throws(() => childDailyUsageEnabled({ CHILD_DAILY_USAGE_ENABLED: 'yes' }, ready));
     for (const key of Object.keys(ready) as Array<keyof typeof ready>) {
         assert.throws(() => childDailyUsageEnabled({ CHILD_DAILY_USAGE_ENABLED: 'true' }, { ...ready, [key]: false }));
