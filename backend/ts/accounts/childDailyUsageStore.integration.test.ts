@@ -16,11 +16,13 @@ import { issueSessionToken } from '../security/sessionPolicy';
 import { createGeneralApiRateLimiter } from '../security/requestRateLimits';
 import { renderRuntimeGrantStatements } from '../security/runtimeGrantManifest';
 import { mountChildDailyUsageHeartbeat, mountChildDailyUsageEndpoints } from '../routers/childDailyUsageRouter';
+import { CHILD_DAILY_USAGE_NOTICE_VERSION } from './childDailyUsageNotice';
 
 let admin: Connection;
 let pool: Pool;
 const child = randomUUID();
 const policy = { timeZone: 'America/Sao_Paulo', dailyLimitMs: 120_000 };
+const consent = { accepted: true, noticeVersion: CHILD_DAILY_USAGE_NOTICE_VERSION };
 // The rehearsal executes a fixed statement only after the draft matches it.
 const reviewedDraft = `-- Draft only: do not apply until grants, deletion/recovery and rollout are qualified.
 -- One current-day aggregate per managed child; no individual activity log.
@@ -32,6 +34,8 @@ CREATE TABLE parent_child_daily_usage (
     used_ms INT UNSIGNED NOT NULL,
     accounted_at_ms BIGINT UNSIGNED NOT NULL,
     active_until_ms BIGINT UNSIGNED NULL,
+    notice_version VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    consented_at DATETIME(6) NOT NULL COMMENT 'UTC',
     PRIMARY KEY (child_uuid),
     KEY idx_child_daily_usage_accounted_at (accounted_at_ms),
     CONSTRAINT fk_child_daily_usage_consent FOREIGN KEY (child_uuid)
@@ -70,21 +74,23 @@ before(async () => {
     await admin.query(`CREATE TABLE account_sessions (account_uuid CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
         session_hash BINARY(32) NOT NULL, previous_session_hash BINARY(32) NULL,
         previous_valid_until DATETIME(6) NULL, expires_at DATETIME(6) NOT NULL) ENGINE=InnoDB`);
+    await admin.query(`CREATE TABLE parent_signed_forms (reference CHAR(36) PRIMARY KEY, parent_uuid CHAR(36) NOT NULL,
+        child_uuid CHAR(36) NOT NULL, status VARCHAR(16) NOT NULL) ENGINE=InnoDB`);
     const draft = readFileSync(path.join(__dirname, '../../migrations/pending/draft_parent_child_daily_usage.sql'), 'utf8');
     assert.equal(draft.replace(/\r\n/gu, '\n').trim(), reviewedDraft);
     await admin.query(reviewedDraft);
     await verifyChildDailyUsageSchema(admin as unknown as MigrationConnection);
     await admin.query('INSERT INTO parent_child_consents (child_uuid) VALUES (?)', [child]);
-    const usageGrant = "GRANT SELECT (`child_uuid`, `time_zone`, `daily_limit_ms`, `usage_day`, `used_ms`, `accounted_at_ms`, `active_until_ms`), INSERT (`child_uuid`, `time_zone`, `daily_limit_ms`, `usage_day`, `used_ms`, `accounted_at_ms`, `active_until_ms`), UPDATE (`time_zone`, `daily_limit_ms`, `usage_day`, `used_ms`, `accounted_at_ms`, `active_until_ms`), DELETE ON `child_usage_test`.`parent_child_daily_usage` TO 'migration_test'@'%';";
+    const usageGrant = "GRANT SELECT (`child_uuid`, `time_zone`, `daily_limit_ms`, `usage_day`, `used_ms`, `accounted_at_ms`, `active_until_ms`, `notice_version`, `consented_at`), INSERT (`child_uuid`, `time_zone`, `daily_limit_ms`, `usage_day`, `used_ms`, `accounted_at_ms`, `active_until_ms`, `notice_version`, `consented_at`), UPDATE (`time_zone`, `daily_limit_ms`, `usage_day`, `used_ms`, `accounted_at_ms`, `active_until_ms`, `notice_version`, `consented_at`), DELETE ON `child_usage_test`.`parent_child_daily_usage` TO 'migration_test'@'%';";
     assert.equal(renderRuntimeGrantStatements('child_usage_test', { user: 'migration_test', host: '%' },
         'google-apple-parent-signed-recovery-usage').slice(-1)[0], usageGrant);
     await admin.query(usageGrant);
-    for (const table of ['users', 'account_sessions', 'parent_child_consents']) {
+    for (const table of ['users', 'account_sessions', 'parent_child_consents', 'parent_signed_forms']) {
         await admin.query(`GRANT SELECT ON child_usage_test.${table} TO 'migration_test'@'%'`);
     }
     pool = mysql.createPool({ host: '127.0.0.1', port, user: 'migration_test', password: 'migration-test-only',
         database: 'child_usage_test', timezone: 'Z', dateStrings: true });
-    await pool.query(`SELECT child_uuid,time_zone,daily_limit_ms,usage_day,used_ms,accounted_at_ms,active_until_ms
+    await pool.query(`SELECT child_uuid,time_zone,daily_limit_ms,usage_day,used_ms,accounted_at_ms,active_until_ms,notice_version,consented_at
         FROM parent_child_daily_usage LIMIT 0`);
 });
 
@@ -101,17 +107,35 @@ test('only the linked parent and a live managed child session can access usage',
     const owner = await makeContext(1, parent), stranger = await makeContext(2, other), childContext = await makeContext(3, managed);
     await admin.query('INSERT INTO parent_child_consents (child_uuid, parent_uuid) VALUES (?, ?)', [managed, parent]);
     assert.equal(await getChildDailyUsageLimit(pool, owner, managed), null);
-    await assert.rejects(setChildDailyUsageLimit(pool, stranger, managed, policy), /Child unavailable/u);
-    await setChildDailyUsageLimit(pool, owner, managed, policy);
+    await assert.rejects(setChildDailyUsageLimit(pool, stranger, managed, policy, consent), /Child unavailable/u);
+    await assert.rejects(setChildDailyUsageLimit(pool, owner, managed, policy, { ...consent, accepted: false }), /consent unavailable/u);
+    await assert.rejects(setChildDailyUsageLimit(pool, owner, managed, policy, { ...consent, noticeVersion: 'stale' }), /consent unavailable/u);
+    await assert.rejects(setChildDailyUsageLimit(pool, owner, managed, policy, consent), /Parent proof unavailable/u);
+    const wrongForm = randomUUID();
+    await admin.query("INSERT INTO parent_signed_forms VALUES (?,?,?,'used')", [wrongForm, other, managed]);
+    await assert.rejects(setChildDailyUsageLimit(pool, owner, managed, policy, consent), /Parent proof unavailable/u);
+    await admin.query('DELETE FROM parent_signed_forms WHERE reference=?', [wrongForm]);
+    await admin.query("INSERT INTO parent_signed_forms VALUES (?,?,?,'used')", [randomUUID(), parent, managed]);
+    await setChildDailyUsageLimit(pool, owner, managed, policy, consent);
+    const [[proof]] = await admin.query<RowDataPacket[]>('SELECT notice_version,consented_at FROM parent_child_daily_usage WHERE child_uuid=?', [managed]);
+    assert.equal(proof.notice_version, CHILD_DAILY_USAGE_NOTICE_VERSION); assert.ok(proof.consented_at);
     await assert.rejects(pool.query('UPDATE parent_child_daily_usage SET child_uuid=? WHERE child_uuid=?', [randomUUID(), managed]));
     await assert.rejects(pool.query('DELETE FROM parent_child_consents WHERE child_uuid=?', [managed]));
     const heartbeat = await heartbeatChildDailyUsage(pool, childContext);
     assert.equal(heartbeat.status, 'configured');
     assert.equal((await getChildDailyUsageLimit(pool, owner, managed))?.dailyLimitMs, policy.dailyLimitMs);
+    await admin.query("UPDATE parent_child_daily_usage SET notice_version='older-version' WHERE child_uuid=?", [managed]);
+    const [[beforeStale]] = await admin.query<RowDataPacket[]>('SELECT used_ms,accounted_at_ms FROM parent_child_daily_usage WHERE child_uuid=?', [managed]);
+    assert.equal((await heartbeatChildDailyUsage(pool, childContext)).status, 'not-configured');
+    assert.equal(await getChildDailyUsageLimit(pool, owner, managed), null);
+    const [[afterStale]] = await admin.query<RowDataPacket[]>('SELECT used_ms,accounted_at_ms FROM parent_child_daily_usage WHERE child_uuid=?', [managed]);
+    assert.deepEqual(afterStale, beforeStale, 'a stale notice must not collect more usage');
+    await setChildDailyUsageLimit(pool, owner, managed, policy, consent);
+    assert.equal((await heartbeatChildDailyUsage(pool, childContext)).status, 'configured');
     await assert.rejects(clearChildDailyUsageLimit(pool, stranger, managed), /Child unavailable/u);
     await clearChildDailyUsageLimit(pool, owner, managed);
     assert.equal((await heartbeatChildDailyUsage(pool, childContext)).status, 'not-configured');
-    await setChildDailyUsageLimit(pool, owner, managed, policy);
+    await setChildDailyUsageLimit(pool, owner, managed, policy, consent);
     await admin.query('DELETE FROM account_sessions WHERE account_uuid=?', [parent]);
     await assert.rejects(getChildDailyUsageLimit(pool, owner, managed), /Session unavailable/u);
     await admin.query('DELETE FROM parent_child_consents WHERE child_uuid=?', [managed]);
@@ -132,6 +156,7 @@ test('signed parent and child sessions can set and use a limit through the candi
     };
     const parentToken = await fixture(10, parentId), childToken = await fixture(11, childId);
     await admin.query('INSERT INTO parent_child_consents (child_uuid, parent_uuid) VALUES (?, ?)', [childId, parentId]);
+    await admin.query("INSERT INTO parent_signed_forms VALUES (?,?,?,'used')", [randomUUID(), parentId, childId]);
     const app = express(); app.use(cookieParser(secret));
     const readContext = createProviderAuthContextReader({ database: pool, sessionSecret: secret, allowedOrigins: [origin] });
     mountChildDailyUsageHeartbeat(app, pool, readContext);
@@ -153,13 +178,14 @@ test('signed parent and child sessions can set and use a limit through the candi
         assert.equal((await post('heartbeat', childCookie, {}, 'https://other.example.test')).status, 403);
         const before = await post('heartbeat', childCookie, {});
         assert.equal((await before.json()).status, 'not-configured');
-        const configured = await post('set', parentCookie, { childAccountId: childId, ...policy });
+        assert.equal((await post('set', parentCookie, { childAccountId: childId, ...policy })).status, 400);
+        const configured = await post('set', parentCookie, { childAccountId: childId, ...policy, consent: true, noticeVersion: CHILD_DAILY_USAGE_NOTICE_VERSION });
         assert.equal(configured.status, 200);
         assert.equal((await configured.json()).usage.dailyLimitMs, policy.dailyLimitMs);
         const heartbeat = await post('heartbeat', childCookie, {});
         const result = await heartbeat.json();
         assert.equal(result.status, 'configured'); assert.ok(result.allowedForMs > 0 && result.allowedForMs <= 30_000);
-        assert.notEqual((await post('set', childCookie, { childAccountId: childId, ...policy })).status, 200);
+        assert.notEqual((await post('set', childCookie, { childAccountId: childId, ...policy, consent: true, noticeVersion: CHILD_DAILY_USAGE_NOTICE_VERSION })).status, 200);
         assert.equal((await post('clear', parentCookie, { childAccountId: childId })).status, 204);
         assert.equal((await (await post('heartbeat', childCookie, {})).json()).status, 'not-configured');
     } finally { await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); }

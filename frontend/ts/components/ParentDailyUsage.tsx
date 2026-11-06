@@ -4,6 +4,8 @@ import { apiFetch } from '@/services/apiFetch';
 import { capturePageOwnership } from '@/services/pageOwnership';
 import type { PageRequestInit } from '@/services/pageOwnership';
 import type { ParentLanguage } from './parentAccountText';
+import PrivacyNoticeLink from './PrivacyNoticeLink';
+import notice from '../../../shared/childDailyUsageNotice.json' with { type: 'json' };
 
 type Usage = { day: string; timeZone: string; dailyLimitMs: number; usedMs: number; remainingMs: number };
 type Props = { language: ParentLanguage; childAccountId: string; sessionGeneration: number;
@@ -33,6 +35,7 @@ export default function ParentDailyUsage({ language, childAccountId, sessionGene
     const [minutes, setMinutes] = useState('');
     const [timeZone, setTimeZone] = useState('');
     const [busy, setBusy] = useState(false);
+    const [consent, setConsent] = useState(false);
     const [feedback, setFeedback] = useState('');
     const [retry, setRetry] = useState(0);
     const active = useRef<AbortController | null>(null);
@@ -41,7 +44,7 @@ export default function ParentDailyUsage({ language, childAccountId, sessionGene
         const controller = new AbortController(), ownsPage = capturePageOwnership(), action = captureAccountAction();
         const isCurrent = () => !controller.signal.aborted && ownsPage() && selectionIsCurrent()
             && captureSessionGeneration() === sessionGeneration && captureAccountAction() === action;
-        current.current = isCurrent; setStatus('loading'); setFeedback(''); setBusy(false);
+        current.current = isCurrent; setStatus('loading'); setFeedback(''); setBusy(false); setConsent(false);
         const init: PageRequestInit = { method: 'POST', credentials: 'include', signal: controller.signal, isCurrent,
             headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ childAccountId }) };
         void (async () => {
@@ -62,18 +65,18 @@ export default function ParentDailyUsage({ language, childAccountId, sessionGene
 
     async function update(clear: boolean) {
         const limitMinutes = Number(minutes);
-        if (active.current || !current.current() || (!clear && (!Number.isInteger(limitMinutes) || limitMinutes < 1 || limitMinutes > 1440 || !timeZone.trim()))) return;
+        if (active.current || !current.current() || (!clear && (!consent || !Number.isInteger(limitMinutes) || limitMinutes < 1 || limitMinutes > 1440 || !timeZone.trim()))) return;
         const controller = new AbortController(), isCurrent = () => !controller.signal.aborted && current.current();
         active.current = controller; setBusy(true); setFeedback('');
         try {
             const init: PageRequestInit = { method: 'POST', credentials: 'include', signal: controller.signal, isCurrent,
                 headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(clear ? { childAccountId }
-                    : { childAccountId, timeZone: timeZone.trim(), dailyLimitMs: limitMinutes * 60_000 }) };
+                    : { childAccountId, timeZone: timeZone.trim(), dailyLimitMs: limitMinutes * 60_000, consent: true, noticeVersion: notice.version }) };
             const response = await apiFetch(`${API_BASE}/auth/child-daily-usage/${clear ? 'clear' : 'set'}`, init);
             if (!response.ok) throw new Error('Unavailable.');
             const data = clear ? null : readUsage(await response.json());
             if (data === undefined) throw new Error('Invalid response.');
-            if (isCurrent()) { setUsage(data); setFeedback(clear ? 'cleared' : 'saved'); }
+            if (isCurrent()) { setUsage(data); setConsent(false); setFeedback(clear ? 'cleared' : 'saved'); }
         } catch { if (isCurrent()) setFeedback('failed'); }
         finally { if (active.current === controller) { active.current = null; if (isCurrent()) setBusy(false); } }
     }
@@ -84,16 +87,16 @@ export default function ParentDailyUsage({ language, childAccountId, sessionGene
         <h3>{tr('Daily use', 'Uso diário')}</h3>
         <p>{usage ? tr(`Used on ${usage.day}: ${Math.floor(usage.usedMs / 60_000)} min.`, `Uso em ${usage.day}: ${Math.floor(usage.usedMs / 60_000)} min.`)
             : tr('No daily limit is set.', 'Nenhum limite diário definido.')}</p>
-        <p>{tr('The child will see the limit. Totals are approximate and may include up to 30 seconds after a connection ends.',
-            'A criança verá o limite. Os totais são aproximados e podem incluir até 30 segundos após o fim da conexão.')}</p>
-        <p>{tr('This applies to the managed account while online. Account, privacy and license pages remain available and are not counted. It does not limit guest or offline use, or other apps on the device.',
-            'Isso se aplica à conta supervisionada enquanto estiver online. As páginas de conta, privacidade e licenças continuam disponíveis e não são contabilizadas. Não limita o uso como visitante, offline ou em outros aplicativos do dispositivo.')}</p>
+        <p>{language === 'pt-BR' ? notice.ptBR : notice.en}</p>
+        <p><PrivacyNoticeLink url={notice.privacyUrl} portuguese={language === 'pt-BR'} /></p>
         <label>{tr('Daily limit in minutes (1–1440)', 'Limite diário em minutos (1–1440)')}{' '}
             <input type="number" min="1" max="1440" step="1" value={minutes} disabled={busy} onChange={event => setMinutes(event.target.value)} /></label>
         <label>{tr('Time zone for the daily reset', 'Fuso horário para o reinício diário')}{' '}
             <input value={timeZone} maxLength={100} disabled={busy} onChange={event => setTimeZone(event.target.value)} /></label>
-        <button type="button" disabled={busy || !minutes || !timeZone} onClick={() => void update(false)}>{tr('Save limit', 'Salvar limite')}</button>{' '}
-        {usage && <button type="button" disabled={busy} onClick={() => void update(true)}>{tr('Turn off limit', 'Desativar limite')}</button>}
+        <label><input type="checkbox" checked={consent} disabled={busy} onChange={event => setConsent(event.target.checked)} />
+            {tr('I agree to this optional usage collection for this child.', 'Concordo com esta coleta opcional de uso para esta criança.')}</label>{' '}
+        <button type="button" disabled={busy || !minutes || !timeZone || !consent} onClick={() => void update(false)}>{tr('Save limit', 'Salvar limite')}</button>{' '}
+        <button type="button" disabled={busy} onClick={() => void update(true)}>{tr('Turn off limit', 'Desativar limite')}</button>
         {feedback && <p role="status">{feedback === 'saved' ? tr('Limit saved.', 'Limite salvo.') : feedback === 'cleared'
             ? tr('Limit and current total removed.', 'Limite e total atual removidos.') : tr('Could not confirm the change. Refresh and try again.', 'Não foi possível confirmar a alteração. Atualize e tente novamente.')}</p>}
     </section>;

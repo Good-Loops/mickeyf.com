@@ -86,7 +86,7 @@ test('daily usage access is an explicit opt-in and cannot reassign the child key
     assert.equal(columns.some(row => row.tableName === table && row.columnName === 'child_uuid' && row.privilegeType === 'UPDATE'), false);
     assert.equal(runtimeColumnPrivilegeInventory(prior).some(row => row.tableName === table), false);
     assert.equal(renderRuntimeGrantStatements('cms', PRODUCTION_RUNTIME_DATABASE_ACCOUNT, profile).slice(-1)[0],
-        "GRANT SELECT (`child_uuid`, `time_zone`, `daily_limit_ms`, `usage_day`, `used_ms`, `accounted_at_ms`, `active_until_ms`), INSERT (`child_uuid`, `time_zone`, `daily_limit_ms`, `usage_day`, `used_ms`, `accounted_at_ms`, `active_until_ms`), UPDATE (`time_zone`, `daily_limit_ms`, `usage_day`, `used_ms`, `accounted_at_ms`, `active_until_ms`), DELETE ON `cms`.`parent_child_daily_usage` TO 'cms_mickeyf'@'%';");
+        "GRANT SELECT (`child_uuid`, `time_zone`, `daily_limit_ms`, `usage_day`, `used_ms`, `accounted_at_ms`, `active_until_ms`, `notice_version`, `consented_at`), INSERT (`child_uuid`, `time_zone`, `daily_limit_ms`, `usage_day`, `used_ms`, `accounted_at_ms`, `active_until_ms`, `notice_version`, `consented_at`), UPDATE (`time_zone`, `daily_limit_ms`, `usage_day`, `used_ms`, `accounted_at_ms`, `active_until_ms`, `notice_version`, `consented_at`), DELETE ON `cms`.`parent_child_daily_usage` TO 'cms_mickeyf'@'%';");
 });
 
 test('parent grants require explicit selection and cannot reassign consent, identity or policy binding', () => {

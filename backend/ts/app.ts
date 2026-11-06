@@ -189,7 +189,7 @@ async function startServer(): Promise<void> {
             // The deployment operator verifies the full schema with administrative metadata access.
             // Runtime startup also requires the reviewed columns to be readable by this account.
             if (runtimeConfig.childDailyUsageEnabled) await pool.query(`SELECT child_uuid,time_zone,daily_limit_ms,
-                usage_day,used_ms,accounted_at_ms,active_until_ms FROM parent_child_daily_usage LIMIT 0`);
+                usage_day,used_ms,accounted_at_ms,active_until_ms,notice_version,consented_at FROM parent_child_daily_usage LIMIT 0`);
             if (childActivity) {
                 await verifyParentManagedChildActivityReadiness(pool);
                 await verifyChildActivityContinuityReadiness(pool, childContinuityConfig!);

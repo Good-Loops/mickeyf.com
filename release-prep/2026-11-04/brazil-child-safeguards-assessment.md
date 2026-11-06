@@ -103,8 +103,19 @@ interests. [ANPD's statement](https://www.gov.br/anpd/pt-br/assuntos/noticias/an
 recognizes multiple potential legal bases. The current setting button does not
 by itself prove that the necessary notice and consent have been obtained. Bind
 the chosen notice and consent version to the parent action and retain only the
-necessary proof; handle existing approvals separately. Do not change or relabel
-an existing signed consent silently.
+necessary proof; handle existing approvals separately. The current candidate
+requires an explicit choice and a used signed-parent form tied to that parent
+and child, and records the notice version and database time with the setting.
+The parent screen provides the notice and privacy link. Stale notice versions
+do not renew usage; turning the control off removes its setting and local proof.
+The candidate public notice describes this optional collection in both languages;
+its notice and signed-form versions have been advanced, so older pending forms
+must be handled under the existing version-binding rules rather than relabeled.
+The candidate has synthetic tests, but the adequacy of the parent verification,
+publication of the matching public notice, retention of proof after withdrawal, and prevention of
+revived permissions or totals on restore remain unqualified. Keep collection off
+until those points and the final supported-device flow are resolved. Do not
+change or relabel an existing signed consent silently.
 
 Sources: [Brazilian Senate, Law 15.211/2025, arts. 17–18 and 39](https://legis.senado.leg.br/norma/41465823/publicacao/41471709),
 [ANPD complaint examples](https://www.gov.br/anpd/pt-br/assuntos/eca-digital/denuncias-eca-digital),

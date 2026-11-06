@@ -5,6 +5,7 @@ import { withUserSubmissionLock, type UserSubmissionLockContext } from '../leade
 import { isAccountId } from './deletionJournal';
 import { clearChildDailyUsage, configureChildDailyUsage, readChildDailyUsage } from './childDailyUsageStore';
 import type { ChildDailyUsagePolicy, ChildDailyUsageResult } from './childDailyUsage';
+import { CHILD_DAILY_USAGE_NOTICE_VERSION } from './childDailyUsageNotice';
 
 type Database = Pick<Pool, 'getConnection'>;
 const timeout = 10_000;
@@ -54,9 +55,16 @@ async function withParentChild<T>(database: Database, context: ProviderAuthConte
 }
 
 export async function setChildDailyUsageLimit(database: Database, context: ProviderAuthContext | null,
-    childId: string, policy: ChildDailyUsagePolicy) {
-    return withParentChild(database, context, childId, async connection =>
-        display(await configureChildDailyUsage(connection, childId, policy), policy));
+    childId: string, policy: ChildDailyUsagePolicy, consent: { accepted: boolean; noticeVersion: string }) {
+    if (consent?.accepted !== true || consent.noticeVersion !== CHILD_DAILY_USAGE_NOTICE_VERSION) throw new Error('Usage consent unavailable.');
+    const { account } = current(context);
+    return withParentChild(database, context, childId, async connection => {
+        // Reuse the matched, signed parent proof already bound to this child.
+        const [forms] = await connection.query<RowDataPacket[]>({ sql: `SELECT reference FROM parent_signed_forms
+            WHERE parent_uuid=? AND child_uuid=? AND status='used' LIMIT 2 FOR SHARE`, timeout }, [account.accountId, childId]);
+        if (!Array.isArray(forms) || forms.length !== 1) throw new Error('Parent proof unavailable.');
+        return display(await configureChildDailyUsage(connection, childId, policy), policy);
+    });
 }
 
 export async function getChildDailyUsageLimit(database: Database, context: ProviderAuthContext | null, childId: string) {

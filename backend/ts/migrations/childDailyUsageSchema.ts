@@ -28,6 +28,8 @@ export async function verifyChildDailyUsageSchema(connection: MigrationConnectio
         column('used_ms', 'int unsigned', 'NO', null, null),
         column('accounted_at_ms', 'bigint unsigned', 'NO', null, null),
         column('active_until_ms', 'bigint unsigned', 'YES', null, null),
+        column('notice_version', 'varchar(64)', 'NO', 'ascii', 'ascii_bin'),
+        column('consented_at', 'datetime(6)', 'NO', null, null),
     ]);
     await exact(`SELECT INDEX_NAME AS name,COLUMN_NAME AS col,NON_UNIQUE AS nonUnique,SEQ_IN_INDEX AS seq
         FROM information_schema.STATISTICS WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME=? ORDER BY INDEX_NAME,SEQ_IN_INDEX`, [

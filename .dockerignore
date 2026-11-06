@@ -8,6 +8,7 @@
 !backend/**
 !shared/
 !shared/privacyNotice.json
+!shared/childDailyUsageNotice.json
 
 # Backend dependencies, generated output, and local configuration are not
 # image inputs.

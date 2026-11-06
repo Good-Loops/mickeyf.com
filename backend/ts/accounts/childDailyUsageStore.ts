@@ -3,9 +3,10 @@ import { assertActiveGuardedTransaction } from '../db/queryTimeoutConnection';
 import { isAccountId } from './deletionJournal';
 import { advanceChildDailyUsage, type ChildDailyUsagePolicy, type ChildDailyUsageResult,
     type ChildDailyUsageState } from './childDailyUsage';
+import { CHILD_DAILY_USAGE_NOTICE_VERSION } from './childDailyUsageNotice';
 
 type Connection = Pick<PoolConnection, 'query'>;
-type Stored = Readonly<{ policy: ChildDailyUsagePolicy; state: ChildDailyUsageState }>;
+type Stored = Readonly<{ policy: ChildDailyUsagePolicy; state: ChildDailyUsageState; noticeVersion: string }>;
 const timeout = 10_000;
 
 /** Use the database's UTC clock, never a timestamp supplied by a browser. */
@@ -30,15 +31,15 @@ async function lockedState(connection: Connection, childId: string): Promise<Sto
     const [rows] = await connection.query<RowDataPacket[]>({ sql: `SELECT time_zone AS timeZone,
         CAST(daily_limit_ms AS CHAR) AS dailyLimitMs, usage_day AS usageDay,
         CAST(used_ms AS CHAR) AS usedMs, CAST(accounted_at_ms AS CHAR) AS accountedAtMs,
-        CAST(active_until_ms AS CHAR) AS activeUntilMs FROM parent_child_daily_usage
+        CAST(active_until_ms AS CHAR) AS activeUntilMs, notice_version AS noticeVersion FROM parent_child_daily_usage
         WHERE child_uuid=? LIMIT 2 FOR UPDATE`, timeout }, [childId]);
     if (!Array.isArray(rows) || rows.length > 1) throw new Error('Usage state unavailable.');
     if (rows.length === 0) return null;
     const row = rows[0];
-    if (typeof row.timeZone !== 'string' || typeof row.usageDay !== 'string') throw new Error('Usage state unavailable.');
+    if (typeof row.timeZone !== 'string' || typeof row.usageDay !== 'string' || typeof row.noticeVersion !== 'string') throw new Error('Usage state unavailable.');
     return { policy: { timeZone: row.timeZone, dailyLimitMs: integer(row.dailyLimitMs) },
         state: { day: row.usageDay, usedMs: integer(row.usedMs), accountedAtMs: integer(row.accountedAtMs),
-            activeUntilMs: row.activeUntilMs === null ? null : integer(row.activeUntilMs) } };
+            activeUntilMs: row.activeUntilMs === null ? null : integer(row.activeUntilMs) }, noticeVersion: row.noticeVersion };
 }
 
 async function save(connection: Connection, childId: string, policy: ChildDailyUsagePolicy,
@@ -47,10 +48,11 @@ async function save(connection: Connection, childId: string, policy: ChildDailyU
         state.accountedAtMs, state.activeUntilMs, childId];
     const sql = insert
         ? `INSERT INTO parent_child_daily_usage
-            (time_zone,daily_limit_ms,usage_day,used_ms,accounted_at_ms,active_until_ms,child_uuid) VALUES (?,?,?,?,?,?,?)`
+            (time_zone,daily_limit_ms,usage_day,used_ms,accounted_at_ms,active_until_ms,child_uuid,notice_version,consented_at)
+            VALUES (?,?,?,?,?,?,?,?,UTC_TIMESTAMP(6))`
         : `UPDATE parent_child_daily_usage SET time_zone=?,daily_limit_ms=?,usage_day=?,used_ms=?,
             accounted_at_ms=?,active_until_ms=? WHERE child_uuid=?`;
-    const [result] = await connection.query<ResultSetHeader>({ sql, timeout }, values);
+    const [result] = await connection.query<ResultSetHeader>({ sql, timeout }, insert ? [...values, CHILD_DAILY_USAGE_NOTICE_VERSION] : values);
     if (result.affectedRows !== 1) throw new Error('Usage state was not saved.');
 }
 
@@ -60,7 +62,7 @@ export async function readChildDailyUsage(connection: Connection, childId: strin
     assertActiveGuardedTransaction(connection);
     if (!isAccountId(childId) || typeof heartbeat !== 'boolean') throw new TypeError('Invalid usage request.');
     const saved = await lockedState(connection, childId);
-    if (!saved) return null;
+    if (!saved || saved.noticeVersion !== CHILD_DAILY_USAGE_NOTICE_VERSION) return null;
     const result = advanceChildDailyUsage(saved.state, saved.policy, await databaseNow(connection), heartbeat);
     await save(connection, childId, saved.policy, result.state, false);
     return { ...result, policy: saved.policy };
@@ -80,6 +82,12 @@ export async function configureChildDailyUsage(connection: Connection, childId: 
         result = advanceChildDailyUsage(preserved, policy, now, false);
     }
     await save(connection, childId, policy, result.state, !saved);
+    if (saved) {
+        const [updated] = await connection.query<ResultSetHeader>({ sql: `UPDATE parent_child_daily_usage
+            SET notice_version=?,consented_at=UTC_TIMESTAMP(6) WHERE child_uuid=?`, timeout },
+        [CHILD_DAILY_USAGE_NOTICE_VERSION, childId]);
+        if (updated.affectedRows !== 1) throw new Error('Usage consent was not saved.');
+    }
     return result;
 }
 

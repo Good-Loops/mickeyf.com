@@ -8,6 +8,8 @@ CREATE TABLE parent_child_daily_usage (
     used_ms INT UNSIGNED NOT NULL,
     accounted_at_ms BIGINT UNSIGNED NOT NULL,
     active_until_ms BIGINT UNSIGNED NULL,
+    notice_version VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    consented_at DATETIME(6) NOT NULL COMMENT 'UTC',
     PRIMARY KEY (child_uuid),
     KEY idx_child_daily_usage_accounted_at (accounted_at_ms),
     CONSTRAINT fk_child_daily_usage_consent FOREIGN KEY (child_uuid)

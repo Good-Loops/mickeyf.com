@@ -3,6 +3,7 @@ import { randomUUID } from 'node:crypto';
 import test, { after } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { createViteTestServer } from '../testSupport/createViteTestServer.mjs';
+import notice from '../../../shared/childDailyUsageNotice.json' with { type: 'json' };
 
 const key = '__parentDailyUsageTest', scope = `globalThis.${key}`;
 const mocks = {
@@ -46,8 +47,11 @@ test('parent can view and change the selected child limit only after confirmatio
     assert.match(view.text(), /Used on 2026-11-05: 1 min/u);
     const number = view.nodes().find(node => node.type === 'input' && node.props.type === 'number');
     number.props.onChange({ target: { value: '3' } }); view.render();
+    const save = () => view.nodes().find(node => node.type === 'button' && text(node).includes('Save limit'));
+    assert.equal(save().props.disabled, true);
+    view.nodes().find(node => node.type === 'input' && node.props.type === 'checkbox').props.onChange({ target: { checked: true } }); view.render();
     view.nodes().find(node => node.type === 'button' && text(node).includes('Save limit')).props.onClick(); await view.settle();
-    assert.deepEqual(JSON.parse(view.requests[1].args[1].body), { childAccountId: view.childAccountId, timeZone: usage.timeZone, dailyLimitMs: 180_000 });
+    assert.deepEqual(JSON.parse(view.requests[1].args[1].body), { childAccountId: view.childAccountId, timeZone: usage.timeZone, dailyLimitMs: 180_000, consent: true, noticeVersion: notice.version });
     assert.doesNotMatch(view.text(), /Limit saved/u);
     view.requests[1].resolve(reply({ usage: { ...usage, dailyLimitMs: 180_000 } })); await view.settle();
     assert.match(view.text(), /Limit saved/u);
@@ -67,6 +71,8 @@ test('parent controls and the online-only limitation are available in Portuguese
     const view = mount(t, 'pt-BR'); view.render(); await view.settle();
     view.requests[0].resolve(reply({ usage: null })); await view.settle();
     assert.match(view.text(), /Nenhum limite diário definido/u);
-    assert.match(view.text(), /Não limita o uso como visitante, offline/u);
+    assert.match(view.text(), /não limita o uso como visitante, offline/u);
+    assert.match(view.text(), /Google Cloud.*não são exibidos publicamente nem vendidos/u);
+    assert.match(view.text(), /mickeyf\.plays@gmail\.com/u);
     assert.match(view.text(), /Salvar limite/u);
 });

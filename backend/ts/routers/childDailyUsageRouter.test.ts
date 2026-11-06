@@ -7,6 +7,7 @@ import type { Pool } from 'mysql2/promise';
 import type { createProviderAuthContextReader } from '../auth/providerAuthContext';
 import type { ProviderAuthContext } from '../auth/providerAuthContext';
 import { createChildDailyUsageRouter, mountChildDailyUsageHeartbeat, mountChildDailyUsageEndpoints } from './childDailyUsageRouter';
+import { CHILD_DAILY_USAGE_NOTICE_VERSION } from '../accounts/childDailyUsageNotice';
 
 test('draft usage endpoints reject unauthenticated and client-timed requests', async () => {
     const app = express();
@@ -19,7 +20,7 @@ test('draft usage endpoints reject unauthenticated and client-timed requests', a
         const post = (path: string, body: object) => fetch(`http://127.0.0.1:${address.port}${path}`, {
             method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
         });
-        const valid = { childAccountId: randomUUID(), timeZone: 'America/Sao_Paulo', dailyLimitMs: 60_000 };
+        const valid = { childAccountId: randomUUID(), timeZone: 'America/Sao_Paulo', dailyLimitMs: 60_000, consent: true, noticeVersion: CHILD_DAILY_USAGE_NOTICE_VERSION };
         assert.equal((await post('/heartbeat', {})).status, 403);
         assert.equal((await post('/heartbeat', { timestamp: 0 })).status, 400);
         const malformed = await fetch(`http://127.0.0.1:${address.port}/heartbeat`, {
@@ -29,6 +30,8 @@ test('draft usage endpoints reject unauthenticated and client-timed requests', a
         assert.ok(malformed.headers.get('ratelimit'));
         assert.equal((await post('/get', { childAccountId: valid.childAccountId })).status, 403);
         assert.equal((await post('/set', valid)).status, 403);
+        assert.equal((await post('/set', { ...valid, consent: false })).status, 400);
+        assert.equal((await post('/set', { ...valid, noticeVersion: 'stale' })).status, 400);
         assert.equal((await post('/set', { ...valid, dailyLimitMs: 0 })).status, 400);
         assert.equal((await post('/set', { ...valid, timeZone: 'not/a-zone' })).status, 400);
         assert.equal((await post('/set', { ...valid, usedMs: 0 })).status, 400);

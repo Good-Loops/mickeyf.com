@@ -6,6 +6,7 @@ import type { createProviderAuthContextReader } from '../auth/providerAuthContex
 import { clearChildDailyUsageLimit, getChildDailyUsageLimit, heartbeatChildDailyUsage, setChildDailyUsageLimit } from '../accounts/childDailyUsageService';
 import { MAX_CHILD_DAILY_LIMIT_MS } from '../accounts/childDailyUsage';
 import { isAccountId } from '../accounts/deletionJournal';
+import { CHILD_DAILY_USAGE_NOTICE_VERSION } from '../accounts/childDailyUsageNotice';
 
 /** Call on opposite sides of the general authentication rate limiter. */
 export function mountChildDailyUsageHeartbeat(app: Application, database: Pick<Pool, 'getConnection'>,
@@ -75,8 +76,9 @@ export function createChildDailyUsageRouter(database: Pick<Pool, 'getConnection'
         } catch { return res.status(503).json({ error: 'UNAVAILABLE' }); }
     });
     router.post('/set', parentLimit, async (req, res) => {
-        if (!record(req.body) || !exact(req.body, ['childAccountId', 'timeZone', 'dailyLimitMs'])
+        if (!record(req.body) || !exact(req.body, ['childAccountId', 'timeZone', 'dailyLimitMs', 'consent', 'noticeVersion'])
             || !isAccountId(req.body.childAccountId) || !timeZoneValid(req.body.timeZone)
+            || req.body.consent !== true || req.body.noticeVersion !== CHILD_DAILY_USAGE_NOTICE_VERSION
             || !Number.isSafeInteger(req.body.dailyLimitMs) || Number(req.body.dailyLimitMs) < 60_000
             || Number(req.body.dailyLimitMs) > MAX_CHILD_DAILY_LIMIT_MS) {
             return res.status(400).json({ error: 'INVALID_REQUEST' });
@@ -85,7 +87,8 @@ export function createChildDailyUsageRouter(database: Pick<Pool, 'getConnection'
             const context = await readContext(req, 'complete');
             if (!context?.account || !context.session) return res.status(403).json({ error: 'INVALID_CONTEXT' });
             const usage = await setChildDailyUsageLimit(database, context, req.body.childAccountId,
-                { timeZone: req.body.timeZone, dailyLimitMs: Number(req.body.dailyLimitMs) });
+                { timeZone: req.body.timeZone, dailyLimitMs: Number(req.body.dailyLimitMs) },
+                { accepted: true, noticeVersion: req.body.noticeVersion });
             return res.json({ usage });
         } catch { return res.status(503).json({ error: 'UNAVAILABLE' }); }
     });

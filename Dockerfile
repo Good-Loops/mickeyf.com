@@ -39,6 +39,7 @@ RUN npm ci
 # output, so only reviewed backend sources enter this stage.
 COPY backend/ ./
 COPY shared/privacyNotice.json /usr/src/app/shared/privacyNotice.json
+COPY shared/childDailyUsageNotice.json /usr/src/app/shared/childDailyUsageNotice.json
 RUN npm run prod
 
 

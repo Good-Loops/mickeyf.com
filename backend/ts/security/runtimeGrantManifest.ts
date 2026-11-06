@@ -343,9 +343,9 @@ export const RECOVERY_RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Obj
 export const DAILY_USAGE_RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freeze([
     ...RECOVERY_RUNTIME_GRANT_MANIFEST,
     Object.freeze({ table: 'parent_child_daily_usage' as const, tablePrivileges: Object.freeze(['DELETE' as const]), grants: Object.freeze([
-        Object.freeze({ privilege: 'SELECT' as const, columns: Object.freeze(['child_uuid', 'time_zone', 'daily_limit_ms', 'usage_day', 'used_ms', 'accounted_at_ms', 'active_until_ms']) }),
-        Object.freeze({ privilege: 'INSERT' as const, columns: Object.freeze(['child_uuid', 'time_zone', 'daily_limit_ms', 'usage_day', 'used_ms', 'accounted_at_ms', 'active_until_ms']) }),
-        Object.freeze({ privilege: 'UPDATE' as const, columns: Object.freeze(['time_zone', 'daily_limit_ms', 'usage_day', 'used_ms', 'accounted_at_ms', 'active_until_ms']) }),
+        Object.freeze({ privilege: 'SELECT' as const, columns: Object.freeze(['child_uuid', 'time_zone', 'daily_limit_ms', 'usage_day', 'used_ms', 'accounted_at_ms', 'active_until_ms', 'notice_version', 'consented_at']) }),
+        Object.freeze({ privilege: 'INSERT' as const, columns: Object.freeze(['child_uuid', 'time_zone', 'daily_limit_ms', 'usage_day', 'used_ms', 'accounted_at_ms', 'active_until_ms', 'notice_version', 'consented_at']) }),
+        Object.freeze({ privilege: 'UPDATE' as const, columns: Object.freeze(['time_zone', 'daily_limit_ms', 'usage_day', 'used_ms', 'accounted_at_ms', 'active_until_ms', 'notice_version', 'consented_at']) }),
     ]) }),
 ]);
 

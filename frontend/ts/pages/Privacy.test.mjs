@@ -54,6 +54,17 @@ test('Portuguese notice includes every English section and both separate permiss
     assert.match(translated, /Não envie senhas ou códigos de acesso/u);
 });
 
+test('optional child usage and its separate permission are described in both languages', () => {
+    const en = notice.sections.find(section => section.id === 'child-daily-usage')?.text ?? '';
+    const pt = notice.ptBR.sections.find(section => section.id === 'child-daily-usage')?.text ?? '';
+    assert.match(en, /Before enabling it.*ask for permission/u);
+    assert.match(en, /guest or offline use or other apps/u);
+    assert.match(en, /active database.*recovery copies/u);
+    assert.match(pt, /Antes de ativá-lo.*solicitamos sua autorização/u);
+    assert.match(pt, /visitante, offline ou em outros aplicativos/u);
+    assert.match(pt, /banco de dados ativo.*cópias de recuperação/u);
+});
+
 test('both notices describe entered age, server screening and older iOS fallback', () => {
     const section = (sections, id) => sections.find(item => item.id === id)?.text ?? '';
     const englishAge = section(notice.sections, 'children');
