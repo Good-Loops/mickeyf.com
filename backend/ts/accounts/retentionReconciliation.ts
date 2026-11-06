@@ -67,8 +67,13 @@ export async function assertNoRetentionRuntimeWriters(connection: AdminConnectio
         });
         if (!hasProcess) throw new Error('The administrator cannot verify writer sessions.');
     }
+    // Allow only idle, unbound local root sessions; Cloud SQL uses local system users.
     const [writers] = await connection.query<RowDataPacket[]>({ sql: `SELECT COUNT(*) AS count
-        FROM information_schema.PROCESSLIST WHERE USER IN ('cms_mickeyf','receipt_cleanup') AND ID<>CONNECTION_ID()`, timeout: 10_000 });
+        FROM information_schema.PROCESSLIST WHERE ID<>CONNECTION_ID() AND (
+            USER IN ('cms_mickeyf','receipt_cleanup','michel_operator','ludolume_release_ops') OR
+            (USER='root' AND (DB IS NOT NULL OR COMMAND<>'Sleep' OR (
+                HOST NOT IN ('localhost','127.0.0.1','::1') AND HOST NOT LIKE 'localhost:%'
+                AND HOST NOT LIKE '127.0.0.1:%' AND HOST NOT LIKE '::1:%' AND HOST NOT LIKE '[::1]:%'))))`, timeout: 10_000 });
     if (!Array.isArray(writers) || writers.length !== 1 || ![0, '0'].includes(writers[0].count)) {
         throw new Error('Runtime writers are not drained.');
     }
