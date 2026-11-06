@@ -241,8 +241,21 @@ this source review.
   no Hosting `webrequests` name. This does not establish that Hosting export
   is disabled, exclude organization/folder-level routing or non-global buckets,
   reveal Google's internal retention, or settle the Brazilian transfer question.
-  No individual request log was read; confirm the actual Hosting linkage and any
-  remaining routing before treating this as a complete logging inventory.
+  No individual request log was read. On 6 November, the Firebase project's
+  Integrations page showed **Link** for Cloud Logging, rather than an active
+  linkage. Google's Hosting documentation describes linking as the step that
+  enables its web-request export to Cloud Logging. This is evidence that the
+  optional export is not currently linked; it does not establish historical
+  settings, Google's internal retention, or the absence of Cloud Run request logs.
+- **Firebase Analytics:** the same Firebase Integrations page showed Google
+  Analytics enabled at the project level. A bounded review of the current
+  frontend entry point, TypeScript, dependency lockfile, Android Gradle lockfile
+  and iOS Podfile lock found no Firebase Analytics client or Google Analytics
+  tag. An enabled project integration by itself does not establish that this
+  candidate sends Analytics events, nor does the source search establish final
+  signed-artifact or runtime behavior. Google Sign-In's separate iOS privacy
+  manifest lists some analytics purposes and still needs the signed-in device
+  review documented in [native SDK evidence](../2026-10-31/native-sdk-data-disclosure-evidence.md).
 - **Brevo:** the public terms dated 1 October 2025 incorporate a DPA. It describes
   processing on customer instructions, confidentiality/security measures,
   subcontractors and customer-controlled retention. France/Belgium hosting and
