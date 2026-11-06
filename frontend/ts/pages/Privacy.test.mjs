@@ -59,10 +59,12 @@ test('optional child usage and its separate permission are described in both lan
     const pt = notice.ptBR.sections.find(section => section.id === 'child-daily-usage')?.text ?? '';
     assert.match(en, /Before enabling it.*ask for permission/u);
     assert.match(en, /guest or offline use or other apps/u);
-    assert.match(en, /active database.*recovery copies/u);
+    assert.match(en, /setting and current total from the active database; recovery copies may keep them longer/u);
+    assert.match(en, /permission and withdrawal times for 14 days.*next scheduled cleanup/u);
     assert.match(pt, /Antes de ativá-lo.*solicitamos sua autorização/u);
     assert.match(pt, /visitante, offline ou em outros aplicativos/u);
-    assert.match(pt, /banco de dados ativo.*cópias de recuperação/u);
+    assert.match(pt, /configuração e o total atual do banco de dados ativo; cópias de recuperação podem mantê-los por mais tempo/u);
+    assert.match(pt, /horários de autorização e retirada por 14 dias.*próxima manutenção programada/u);
 });
 
 test('both notices describe entered age, server screening and older iOS fallback', () => {
