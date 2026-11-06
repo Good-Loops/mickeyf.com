@@ -59,6 +59,9 @@ import { verifyParentManagedChildActivityReadiness } from './migrations/parentMa
 import { loadChildInactivityDeployment } from './config/childInactivityDeployment';
 import { prepareChildInactivityDeployment } from './accounts/childInactivityDeployment';
 import { CHILD_WARNING_WEBHOOK_PATH } from './routers/childWarningWebhookRouter';
+import { mountChildDailyUsageHeartbeat, mountChildDailyUsageEndpoints } from './routers/childDailyUsageRouter';
+import { createProviderAuthContextReader } from './auth/providerAuthContext';
+import { cleanupChildDailyUsage } from './accounts/childDailyUsageStore';
 
 const runtimeConfig = loadRuntimeConfig();
 const childInactivityConfig = loadChildInactivityDeployment(process.env);
@@ -104,7 +107,7 @@ app.use(helmet({
 // Mount before CORS/preflight and body parsers so they cannot bypass its checks.
 async function runConfiguredMaintenance(): Promise<number> {
     // Independent cleanup must still run if Apple's provider request fails.
-    const [apple, sessionCleanup, registrationCleanup, parentCleanup, formCleanup, relayCleanup, inactivity] = await Promise.allSettled([
+    const [apple, sessionCleanup, registrationCleanup, parentCleanup, formCleanup, relayCleanup, inactivity, dailyUsage] = await Promise.allSettled([
         runAppleMaintenance({ database: pool, expectedServerUuid: runtimeConfig.appleMaintenance!.expectedServerUuid,
             loadLifecycle: loadRuntimeAppleLifecycle, appleAndroidEnabled: runtimeConfig.providerAuth.appleAndroidEnabled === true }),
         cleanupExpiredAccountSessions(pool),
@@ -113,6 +116,7 @@ async function runConfiguredMaintenance(): Promise<number> {
         runtimeConfig.parentRegistrationPolicy?.signedFormsEnabled ? cleanupSignedParentForms(pool) : Promise.resolve({ backlog: false }),
         runtimeConfig.parentFormRelayEnabled ? cleanupParentFormAppleRelayState(pool) : Promise.resolve({ backlog: false }),
         childInactivityDeployment ? childInactivityDeployment.runMaintenance() : Promise.resolve(0),
+        runtimeConfig.childDailyUsageEnabled ? cleanupChildDailyUsage(pool) : Promise.resolve({ mayHaveMore: false }),
     ]);
     return apple.status === 'fulfilled' && apple.value === 0
         && sessionCleanup.status === 'fulfilled' && !sessionCleanup.value.backlog
@@ -120,7 +124,8 @@ async function runConfiguredMaintenance(): Promise<number> {
         && parentCleanup.status === 'fulfilled' && !parentCleanup.value.backlog
         && formCleanup.status === 'fulfilled' && !formCleanup.value.backlog
         && relayCleanup.status === 'fulfilled' && !relayCleanup.value.backlog
-        && inactivity.status === 'fulfilled' && inactivity.value === 0 ? 0 : 1;
+        && inactivity.status === 'fulfilled' && inactivity.value === 0
+        && dailyUsage.status === 'fulfilled' && !dailyUsage.value.mayHaveMore ? 0 : 1;
 }
 app.use(APPLE_MAINTENANCE_PATH, createAppleMaintenanceRouter(runtimeConfig.appleMaintenance, runConfiguredMaintenance));
 // Authenticate provider callbacks before the general body parsers; no browser session is accepted.
@@ -140,8 +145,13 @@ app.use(cors({
 app.use(['/api', '/auth'], preventSensitiveResponseCaching);
 app.use(cookieParser(runtimeConfig.sessionSecret));
 
+const dailyUsageContext = runtimeConfig.childDailyUsageEnabled ? createProviderAuthContextReader({ database: pool,
+    sessionSecret: runtimeConfig.sessionSecret, allowedOrigins: runtimeConfig.corsOrigins }) : undefined;
+// Heartbeats have their own network and session limits; other auth routes keep the general limit.
+if (dailyUsageContext) mountChildDailyUsageHeartbeat(app, pool, dailyUsageContext);
 const generalApiRateLimiter = createGeneralApiRateLimiter();
 app.use(['/api', '/auth'], generalApiRateLimiter);
+if (dailyUsageContext) mountChildDailyUsageEndpoints(app, pool, dailyUsageContext);
 app.use('/api/leaderboards', createLeaderboardRouter(pool, {
     childActivity,
     scorePublicationDigest: runtimeConfig.scoreParticipationPolicy?.digest, scoreParticipationReady: true,
@@ -176,6 +186,10 @@ async function startServer(): Promise<void> {
             await verifyAccountSessionReadiness(pool);
             await verifyRegistrationReadiness(pool);
             await verifyParentRegistrationReadiness(pool);
+            // The deployment operator verifies the full schema with administrative metadata access.
+            // Runtime startup also requires the reviewed columns to be readable by this account.
+            if (runtimeConfig.childDailyUsageEnabled) await pool.query(`SELECT child_uuid,time_zone,daily_limit_ms,
+                usage_day,used_ms,accounted_at_ms,active_until_ms FROM parent_child_daily_usage LIMIT 0`);
             if (childActivity) {
                 await verifyParentManagedChildActivityReadiness(pool);
                 await verifyChildActivityContinuityReadiness(pool, childContinuityConfig!);

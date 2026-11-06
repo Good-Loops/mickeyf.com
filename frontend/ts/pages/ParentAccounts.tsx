@@ -4,6 +4,7 @@ import { useAuth } from '@/context/AuthContext';
 import ScoreParticipation from '@/components/ScoreParticipation';
 import ParentRegistration from '@/components/ParentRegistration';
 import ParentInactivityWarning from '@/components/ParentInactivityWarning';
+import ParentDailyUsage from '@/components/ParentDailyUsage';
 import { createParentRegistrationApi, type ParentConfig } from '@/services/parentRegistrationApi';
 import { acquireProviderCredential, getAvailableProviderClients, type PublicProviderClient } from '@/services/providerClient';
 import { apiFetch } from '@/services/apiFetch';
@@ -175,6 +176,9 @@ export default function ParentAccounts() {
                     <option value="">{text.choose}</option>{children.map(child => <option key={child.accountId} value={child.accountId}>{child.userName}</option>)}
                 </select></label>
                 {selected && <ScoreParticipation language={language} childAccountId={selected} authenticated={isAuthenticated} accountKey={userName ?? ''} sessionGeneration={sessionGeneration}
+                    selectionIsCurrent={() => selectedNow.current === selected} captureAccountAction={captureAccountAction} captureSessionGeneration={captureSessionGeneration} />}
+                {selected && import.meta.env.VITE_ENABLE_CHILD_DAILY_USAGE === '1' && <ParentDailyUsage language={language}
+                    key={`${sessionGeneration}:${selected}`} childAccountId={selected} sessionGeneration={sessionGeneration}
                     selectionIsCurrent={() => selectedNow.current === selected} captureAccountAction={captureAccountAction} captureSessionGeneration={captureSessionGeneration} />}
                 {selected && childLifecycleEnabled && <ParentInactivityWarning language={language}
                     key={`${sessionGeneration}:${selected}`} childAccountId={selected} sessionGeneration={sessionGeneration} refreshKey={warningRevision}

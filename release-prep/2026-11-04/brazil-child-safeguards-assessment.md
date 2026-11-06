@@ -62,10 +62,12 @@ The owner chose to prepare an optional parent-set daily limit and a daily total
 for managed child accounts. The candidate stores one current aggregate and a
 time zone per child, rather than a history of individual actions. A short
 foreground lease can overcount by up to 30 seconds after disconnection.
-Turning the control off removes its setting and current total. An unscheduled
-draft cleanup can clear stale totals while retaining the setting. These pieces
-have local tests but are not integrated or deployed; the retention schedule,
-recovery copies, parent consent/disclosures and device behavior need review.
+Turning the control off removes its setting and current total. Local integration
+now connects the parent view, child guard, API and stale-total cleanup behind
+separate switches that default to off. Focused local UI and isolated-database
+tests passed; no control or cleanup has been enabled in production. The actual
+schedule, recovery copies, parent consent/disclosures and device behavior need
+review before activation.
 The candidate does not cover signed-out guest use, offline use or other apps.
 
 ### Draft disclosure for review, not the active notice

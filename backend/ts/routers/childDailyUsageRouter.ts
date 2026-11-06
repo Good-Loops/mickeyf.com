@@ -1,4 +1,4 @@
-import { json, Router } from 'express';
+import { json, Router, type Application } from 'express';
 import { createHash } from 'node:crypto';
 import { rateLimit } from 'express-rate-limit';
 import type { Pool } from 'mysql2/promise';
@@ -6,6 +6,17 @@ import type { createProviderAuthContextReader } from '../auth/providerAuthContex
 import { clearChildDailyUsageLimit, getChildDailyUsageLimit, heartbeatChildDailyUsage, setChildDailyUsageLimit } from '../accounts/childDailyUsageService';
 import { MAX_CHILD_DAILY_LIMIT_MS } from '../accounts/childDailyUsage';
 import { isAccountId } from '../accounts/deletionJournal';
+
+/** Call on opposite sides of the general authentication rate limiter. */
+export function mountChildDailyUsageHeartbeat(app: Application, database: Pick<Pool, 'getConnection'>,
+    readContext: ReturnType<typeof createProviderAuthContextReader>): void {
+    app.use('/auth/child-daily-usage/heartbeat', createChildDailyUsageHeartbeatRouter(database, readContext));
+}
+
+export function mountChildDailyUsageEndpoints(app: Application, database: Pick<Pool, 'getConnection'>,
+    readContext: ReturnType<typeof createProviderAuthContextReader>): void {
+    app.use('/auth/child-daily-usage', createChildDailyUsageRouter(database, readContext));
+}
 
 /** Separate mounting can keep heartbeat traffic outside the general /auth limit. */
 export function createChildDailyUsageHeartbeatRouter(database: Pick<Pool, 'getConnection'>,
@@ -44,7 +55,7 @@ const timeZoneValid = (value: unknown): value is string => {
     try { new Intl.DateTimeFormat('en', { timeZone: value }); return true; } catch { return false; }
 };
 
-/** Draft only: do not mount until storage, disclosures and enforcement are qualified. */
+/** Available only when the child-usage feature is enabled after qualification. */
 export function createChildDailyUsageRouter(database: Pick<Pool, 'getConnection'>,
     readContext: ReturnType<typeof createProviderAuthContextReader>): Router {
     const router = Router();

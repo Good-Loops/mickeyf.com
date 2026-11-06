@@ -21,7 +21,8 @@ const mocks = {
 };
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const server = await createViteTestServer({ root, configFile: `${root}/vite.config.ts`, appType: 'custom', logLevel: 'silent',
-    define: { 'import.meta.env.VITE_ENABLE_CHILD_INACTIVITY_WARNING': '"0"', 'import.meta.env.VITE_ENABLE_CHILD_ONLINE_ACTIVITY': '"0"' },
+    define: { 'import.meta.env.VITE_ENABLE_CHILD_INACTIVITY_WARNING': '"0"', 'import.meta.env.VITE_ENABLE_CHILD_ONLINE_ACTIVITY': '"0"',
+        'import.meta.env.VITE_ENABLE_CHILD_DAILY_USAGE': '"1"' },
     server: {middlewareMode:true}, ssr: {noExternal:[/^react$/]}, plugins:[{name:'parent-management-lifecycle',enforce:'pre',
         resolveId(source) { const name=source.replaceAll('\\','/').split('/').at(-1).replace(/\.tsx?$/,''); if(Object.hasOwn(mocks,name))return `\0parent-page:${name}`; },
         load(id) { if(id.startsWith('\0parent-page:'))return mocks[id.slice('\0parent-page:'.length)]; },
@@ -63,6 +64,14 @@ test('inactivity warning is absent by default even after selecting a child',asyn
     const view=mount(t);view.render();await view.settle();
     view.find(node=>node.type==='select').props.onChange({target:{value:view.child.accountId}});view.render();await view.settle();
     assert.equal(view.find(node=>typeof node.type==='function'&&node.type.name==='ParentInactivityWarning'),undefined);
+});
+
+test('the selected child receives the enabled parent usage controls',async t=>{
+    const view=mount(t);view.render();await view.settle();
+    view.find(node=>node.type==='select').props.onChange({target:{value:view.child.accountId}});view.render();await view.settle();
+    const control=view.find(node=>typeof node.type==='function'&&node.type.name==='ParentDailyUsage');
+    assert.equal(control?.props.childAccountId,view.child.accountId);
+    assert.equal(control?.props.selectionIsCurrent(),true);
 });
 
 for(const stage of ['provider proof','submitted deletion'])test(`late creation completion refreshes the list without cancelling ${stage}`,async t=>{

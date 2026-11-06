@@ -13,6 +13,7 @@ import PrivacyNoticeLink from '@/components/PrivacyNoticeLink';
 import { parsePrivacyNoticeUrl } from '@/config/privacyNoticeUrl';
 import Header from "@/Header";
 import ParentInactivityBanner from '@/components/ParentInactivityBanner';
+import ChildDailyUsageBoundary from '@/components/ChildDailyUsageBoundary';
 import Home from "@/pages/Home";
 
 import { isThreeBossesAvailableInCurrentBrowser } from '@/games/three-bosses/unityVisibility';
@@ -71,6 +72,7 @@ const App: React.FC = () => {
 		<Header />
 		<ParentInactivityBanner />
 		<main className="main">
+			<ChildDailyUsageBoundary>
 			<RouteContentBoundary key={pathname}>
 				<Routes>
 					<Route path="/" element={<Home />} />
@@ -103,6 +105,7 @@ const App: React.FC = () => {
 					<Route path="*" element={<NotFound />} />
 				</Routes>
 			</RouteContentBoundary>
+			</ChildDailyUsageBoundary>
 		</main>
 		<footer className="footer">
 			<p className="footer__text">

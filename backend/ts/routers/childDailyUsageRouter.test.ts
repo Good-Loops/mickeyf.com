@@ -6,7 +6,7 @@ import { rateLimit } from 'express-rate-limit';
 import type { Pool } from 'mysql2/promise';
 import type { createProviderAuthContextReader } from '../auth/providerAuthContext';
 import type { ProviderAuthContext } from '../auth/providerAuthContext';
-import { createChildDailyUsageHeartbeatRouter, createChildDailyUsageRouter } from './childDailyUsageRouter';
+import { createChildDailyUsageRouter, mountChildDailyUsageHeartbeat, mountChildDailyUsageEndpoints } from './childDailyUsageRouter';
 
 test('draft usage endpoints reject unauthenticated and client-timed requests', async () => {
     const app = express();
@@ -62,8 +62,9 @@ test('heartbeat limits verified sessions independently on the same network', asy
 test('separate heartbeat mounting preserves the general authentication limit', async () => {
     const app = express();
     const readContext = (async () => null) as unknown as ReturnType<typeof createProviderAuthContextReader>;
-    app.use('/auth/child-daily-usage/heartbeat', createChildDailyUsageHeartbeatRouter({} as Pool, readContext));
+    mountChildDailyUsageHeartbeat(app, {} as Pool, readContext);
     app.use('/auth', rateLimit({ windowMs: 60_000, limit: 2, legacyHeaders: false }));
+    mountChildDailyUsageEndpoints(app, {} as Pool, readContext);
     app.post('/auth/login', (_req, res) => res.status(204).end());
     const server = app.listen(0, '127.0.0.1');
     await new Promise<void>(resolve => server.once('listening', resolve));

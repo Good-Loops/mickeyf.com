@@ -7,6 +7,7 @@ import { loadProviderAuthConfig, type ProviderAuthConfig } from './providerAuthC
 import { loadAppleMaintenanceConfig, type AppleMaintenanceConfig } from './appleMaintenanceConfig';
 import { loadLocalProviderRuntime, type LocalProviderRuntime } from './localProviderRuntime';
 import { parentFormRelayEnabled } from './parentFormRelayConfig';
+import { childDailyUsageEnabled } from './childDailyUsageConfig';
 
 export type RuntimeEnvironment = 'development' | 'test' | 'production';
 
@@ -32,6 +33,7 @@ export type RuntimeConfig = {
     appleMaintenance: AppleMaintenanceConfig | undefined;
     localProviderRuntime: LocalProviderRuntime | undefined;
     childOnlineActivityEnabled: boolean;
+    childDailyUsageEnabled: boolean;
     parentFormRelayEnabled: boolean;
 };
 
@@ -150,6 +152,9 @@ export function loadRuntimeConfig(env: Environment = process.env): RuntimeConfig
     if (childOnlineActivityEnabled && (!registrationAudience || !parentRegistrationPolicy?.signedFormsEnabled || !accountDeletionEnabled)) {
         throw new Error('Child activity requires the child audience, signed-parent policy, and deletion journal.');
     }
+    const dailyUsageEnabled = childDailyUsageEnabled(env, { childAudience: !!registrationAudience,
+        signedForms: parentRegistrationPolicy?.signedFormsEnabled === true, accountDeletion: accountDeletionEnabled,
+        maintenance: !!appleMaintenance });
     if (registrationAudience && (registrationPolicy && env.REGISTRATION_CREATION_ENABLED !== 'false'
         || env.PROVIDER_GOOGLE_SIGNUP_ENABLED === 'true' || env.PROVIDER_APPLE_SIGNUP_ENABLED === 'true'
         || env.PARENT_REGISTRATION_CREATION_ENABLED === 'true')
@@ -184,6 +189,7 @@ export function loadRuntimeConfig(env: Environment = process.env): RuntimeConfig
         appleMaintenance,
         localProviderRuntime,
         childOnlineActivityEnabled,
+        childDailyUsageEnabled: dailyUsageEnabled,
         parentFormRelayEnabled: relayEnabled,
     });
 }

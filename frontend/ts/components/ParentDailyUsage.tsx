@@ -24,7 +24,7 @@ function readUsage(value: unknown): Usage | null | undefined {
     return item as Usage;
 }
 
-/** Prepared for the reviewed child-usage feature; not mounted until end-to-end qualification. */
+/** Available only under the child-usage feature switch. */
 export default function ParentDailyUsage({ language, childAccountId, sessionGeneration, selectionIsCurrent,
     captureAccountAction, captureSessionGeneration }: Props) {
     const tr = (en: string, pt: string) => language === 'pt-BR' ? pt : en;

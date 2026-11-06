@@ -9,7 +9,7 @@ type Status = 'checking' | 'unrestricted' | 'active' | 'limit' | 'unavailable';
 type Props = { children: ReactNode; authenticated: boolean; sessionGeneration: number;
     captureSessionGeneration: () => number; language: ParentLanguage };
 
-/** Prepared candidate only. Mounting requires native, offline and account-change qualification. */
+/** Opt-in candidate; native, offline and account-change qualification are required before activation. */
 export default function ChildDailyUsageGuard({ children, authenticated, sessionGeneration, captureSessionGeneration, language }: Props) {
     const [result, setResult] = useState<{ generation: number; authenticated: boolean; status: Status }>({ generation: sessionGeneration, authenticated, status: 'checking' });
     const status = result.generation === sessionGeneration && result.authenticated === authenticated ? result.status : 'checking';

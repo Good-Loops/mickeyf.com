@@ -15,7 +15,7 @@ import { verifyChildDailyUsageSchema } from '../migrations/childDailyUsageSchema
 import { issueSessionToken } from '../security/sessionPolicy';
 import { createGeneralApiRateLimiter } from '../security/requestRateLimits';
 import { renderRuntimeGrantStatements } from '../security/runtimeGrantManifest';
-import { createChildDailyUsageHeartbeatRouter, createChildDailyUsageRouter } from '../routers/childDailyUsageRouter';
+import { mountChildDailyUsageHeartbeat, mountChildDailyUsageEndpoints } from '../routers/childDailyUsageRouter';
 
 let admin: Connection;
 let pool: Pool;
@@ -84,6 +84,8 @@ before(async () => {
     }
     pool = mysql.createPool({ host: '127.0.0.1', port, user: 'migration_test', password: 'migration-test-only',
         database: 'child_usage_test', timezone: 'Z', dateStrings: true });
+    await pool.query(`SELECT child_uuid,time_zone,daily_limit_ms,usage_day,used_ms,accounted_at_ms,active_until_ms
+        FROM parent_child_daily_usage LIMIT 0`);
 });
 
 test('only the linked parent and a live managed child session can access usage', async () => {
@@ -132,9 +134,9 @@ test('signed parent and child sessions can set and use a limit through the candi
     await admin.query('INSERT INTO parent_child_consents (child_uuid, parent_uuid) VALUES (?, ?)', [childId, parentId]);
     const app = express(); app.use(cookieParser(secret));
     const readContext = createProviderAuthContextReader({ database: pool, sessionSecret: secret, allowedOrigins: [origin] });
-    app.use('/auth/child-daily-usage/heartbeat', createChildDailyUsageHeartbeatRouter(pool, readContext));
+    mountChildDailyUsageHeartbeat(app, pool, readContext);
     app.use('/auth', createGeneralApiRateLimiter());
-    app.use('/auth/child-daily-usage', createChildDailyUsageRouter(pool, readContext));
+    mountChildDailyUsageEndpoints(app, pool, readContext);
     const server = app.listen(0, '127.0.0.1');
     await new Promise<void>(resolve => server.once('listening', resolve));
     try {
