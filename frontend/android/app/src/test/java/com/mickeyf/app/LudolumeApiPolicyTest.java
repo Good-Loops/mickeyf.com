@@ -7,6 +7,17 @@ import okhttp3.HttpUrl;
 import okhttp3.Request;
 
 public class LudolumeApiPolicyTest {
+    @Test public void dailyUsageAllowsOnlyExactPrivatePostRoutes() {
+        String base = LudolumeApiPolicy.ORIGIN + "/auth/child-daily-usage/";
+        for (String route : new String[] { "get", "set", "clear", "heartbeat" }) {
+            assertNotNull(LudolumeApiPolicy.request(base + route, "POST", "{}"));
+            assertNull(LudolumeApiPolicy.request(base + route, "GET", null));
+            assertNull(LudolumeApiPolicy.request(base + route + "?extra=1", "POST", "{}"));
+            assertNull(LudolumeApiPolicy.request(base + route + "/", "POST", "{}"));
+        }
+        assertNull(LudolumeApiPolicy.request(base + "delete", "POST", "{}"));
+        assertNull(LudolumeApiPolicy.request("https://attacker.test/auth/child-daily-usage/heartbeat", "POST", "{}"));
+    }
     @Test public void childActivityAllowsOnlyTwoExactPrivatePostRoutes() {
         for (String route : new String[] { "interaction", "keep" }) {
             String url = LudolumeApiPolicy.ORIGIN + "/auth/child-activity/" + route;

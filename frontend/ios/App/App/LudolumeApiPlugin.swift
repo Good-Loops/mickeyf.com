@@ -97,6 +97,8 @@ private enum LudolumeApiPolicy {
         "POST /auth/parent-registration/children/list",
         "POST /auth/parent-registration/family/delete",
         "POST /auth/child-activity/interaction", "POST /auth/child-activity/keep",
+        "POST /auth/child-daily-usage/get", "POST /auth/child-daily-usage/set",
+        "POST /auth/child-daily-usage/clear", "POST /auth/child-daily-usage/heartbeat",
         "POST /auth/child-inactivity/warning", "POST /auth/child-inactivity/acknowledge",
         "POST /auth/child-inactivity/pending",
         "GET /auth/parent-registration/scores/config",
