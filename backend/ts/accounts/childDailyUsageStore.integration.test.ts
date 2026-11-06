@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
@@ -131,8 +131,6 @@ test('signed parent and child sessions can set and use a limit through the candi
     const parentToken = await fixture(10, parentId), childToken = await fixture(11, childId);
     await admin.query('INSERT INTO parent_child_consents (child_uuid, parent_uuid) VALUES (?, ?)', [childId, parentId]);
     const app = express(); app.use(cookieParser(secret));
-    app.get('/fixture/:who', (req, res) => res.cookie('__session', req.params.who === 'parent' ? parentToken : childToken,
-        { signed: true, httpOnly: true }).status(204).end());
     const readContext = createProviderAuthContextReader({ database: pool, sessionSecret: secret, allowedOrigins: [origin] });
     app.use('/auth/child-daily-usage/heartbeat', createChildDailyUsageHeartbeatRouter(pool, readContext));
     app.use('/auth', createGeneralApiRateLimiter());
@@ -142,11 +140,11 @@ test('signed parent and child sessions can set and use a limit through the candi
     try {
         const address = server.address(); assert.ok(address && typeof address !== 'string');
         const base = `http://127.0.0.1:${address.port}`;
-        const getCookie = async (who: string) => {
-            const response = await fetch(`${base}/fixture/${who}`);
-            const cookie = response.headers.get('set-cookie'); assert.ok(cookie); return cookie.split(';')[0];
+        const signedCookie = (token: string) => {
+            const signature = createHmac('sha256', secret).update(token).digest('base64').replace(/=+$/u, '');
+            return `__session=${encodeURIComponent(`s:${token}.${signature}`)}`;
         };
-        const parentCookie = await getCookie('parent'), childCookie = await getCookie('child');
+        const parentCookie = signedCookie(parentToken), childCookie = signedCookie(childToken);
         const post = (route: string, cookie: string, body: object, requestOrigin = origin) => fetch(`${base}/auth/child-daily-usage/${route}`, {
             method: 'POST', headers: { origin: requestOrigin, 'content-type': 'application/json', cookie }, body: JSON.stringify(body),
         });
