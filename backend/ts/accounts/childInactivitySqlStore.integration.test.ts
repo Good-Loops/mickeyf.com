@@ -387,6 +387,44 @@ test('recovery reconciles both journals before activation and leaves an unrelate
     }
 });
 
+test('isolated restore resets usage settings before activation without deleting accounts', async () => {
+    const { parentId, childId } = await managedFixture();
+    const [[identity]] = await admin.query<RowDataPacket[]>('SELECT DATABASE() AS db,CURRENT_USER() AS user,@@GLOBAL.server_uuid AS id');
+    const original: string = randomUUID();
+    const pins = { database: identity.db as string, currentUser: identity.user as string,
+        serverUuid: identity.id as string, originalServerUuid: original };
+    const guard = { state: 'hold' as const, database: pins.database, serverUuid: original,
+        epoch: randomUUID(), expiresAt: '2099-01-01T00:00:00.000Z', generation: '1' };
+    let writes = 0;
+    const journal = { async readRestoreGuard() { return guard; }, async readIntents() { return []; },
+        async readResolution() { return null; }, async writeRestoreGuard() { writes++; return '2'; } };
+    const deletionJournal = { async readDeletionIntents() { return { digest: 'a'.repeat(64), intents: [] }; } };
+    const draft = readFileSync(path.resolve(__dirname, '../../migrations/pending/draft_parent_child_daily_usage.sql'));
+    assert.equal(createHash('sha256').update(draft).digest('hex'), '18381cbeb4db9206949a73d9f167c57e6a865679f9ef83dfb8a05c830e7c0f2f');
+    await admin.query(draft.toString('utf8'));
+    try {
+        await admin.query(`INSERT INTO parent_child_daily_usage
+            (child_uuid,time_zone,daily_limit_ms,usage_day,used_ms,accounted_at_ms,active_until_ms,notice_version,consented_at)
+            VALUES (?,'UTC',60000,'2026-11-06',0,0,NULL,'synthetic',UTC_TIMESTAMP(6))`, [childId]);
+        const activate = async () => {
+            const connection = await database.getConnection();
+            try { return await activateRetentionGuard(connection, journal,
+                { ...pins, confirmation: 'ALL WRITERS FENCED AND INTENTS RECONCILED' }, deletionJournal); }
+            finally { connection.release(); }
+        };
+        const reset = (target = pins) => executeRetentionReconciliation('reset-restored-usage',
+            { confirmation: 'ISOLATED RESTORE AND ALL WRITERS FENCED' }, target, journal as never, database, Buffer.alloc(32, 8));
+        await assert.rejects(activate());
+        await assert.rejects(reset({ ...pins, originalServerUuid: pins.serverUuid }));
+        assert.equal((await admin.query<RowDataPacket[]>('SELECT child_uuid FROM parent_child_daily_usage'))[0].length, 1);
+        assert.deepEqual(await reset(), { operation: 'reset-restored-usage', confirmed: true });
+        assert.equal((await admin.query<RowDataPacket[]>('SELECT child_uuid FROM parent_child_daily_usage'))[0].length, 0);
+        assert.equal((await admin.query<RowDataPacket[]>('SELECT account_uuid FROM users WHERE account_uuid IN (?,?)', [parentId, childId]))[0].length, 2);
+        assert.equal(await activate(), '2');
+        assert.equal(writes, 1);
+    } finally { await admin.query('DROP TABLE parent_child_daily_usage'); }
+});
+
 test('verified deleted outcome applies only to pinned isolated SQL restore without later activity', async () => {
     const { parentId, childId, unrelatedId } = await managedFixture();
     const [[identity]] = await admin.query<RowDataPacket[]>('SELECT DATABASE() AS db, CURRENT_USER() AS user, @@GLOBAL.server_uuid AS id');

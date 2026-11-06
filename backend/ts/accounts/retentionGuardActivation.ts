@@ -5,6 +5,7 @@ import { parseInactivityInstant } from './childInactivityPolicy';
 import type { createGcsRetentionJournal, RestoreGuard } from './gcsRetentionJournal';
 import { assertNoRetentionRuntimeWriters, isProductionRecoveryOperator } from './retentionReconciliation';
 import { readRecoveryCheckpoint } from './accountRecoveryCheckpoint';
+import { restoredDailyUsageState } from './restoredDailyUsage';
 
 type Connection = Pick<PoolConnection, 'query' | 'destroy'>;
 type Journal = Pick<ReturnType<typeof createGcsRetentionJournal>, 'readRestoreGuard' | 'readIntents' | 'readResolution' | 'writeRestoreGuard'>;
@@ -44,6 +45,9 @@ export async function activateRetentionGuard(connection: Connection, journal: Jo
             await readRecoveryCheckpoint(connection, { database: pins.database, currentUser: pins.currentUser,
                 serverUuid: pins.serverUuid, lineage: guard.recoveryCheckpoint.lineage,
                 minimumEpoch: guard.recoveryCheckpoint.minimumEpoch });
+        }
+        if (pins.serverUuid !== pins.originalServerUuid && await restoredDailyUsageState(connection) === 'present') {
+            throw new Error('Restored daily limits have not been reset.');
         }
         // The inactivity journal does not contain explicit account deletions or
         // score withdrawals. Both journals must agree with the restored SQL.

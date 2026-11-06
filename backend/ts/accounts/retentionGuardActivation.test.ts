@@ -21,11 +21,11 @@ const explicitIntent: DeletionIntent = { version: 1, accountId: child, action: '
 const emptyDeletionJournal: DeletionJournalReader = { async readDeletionIntents() { return { digest: 'a'.repeat(64), intents: [] }; } };
 
 function fixture({ records = [], resolution = null, childPresent = false, writers = 0, secondRecords,
-    recoveryCheckpoint, targetCheckpoint = '6', explicitRecords = [], changedExplicit = false, scoreVisibility = 'private', pendingScore = false, activeForm = false }:
+    recoveryCheckpoint, targetCheckpoint = '6', explicitRecords = [], changedExplicit = false, scoreVisibility = 'private', pendingScore = false, activeForm = false, usage = 'empty' }:
     { records?: RetentionIntent[]; resolution?: RetentionResolution | null; childPresent?: boolean; writers?: number;
         secondRecords?: RetentionIntent[]; recoveryCheckpoint?: { lineage: string; minimumEpoch: string; keySha256: string };
         targetCheckpoint?: string | null; explicitRecords?: DeletionIntent[]; changedExplicit?: boolean; scoreVisibility?: string;
-        pendingScore?: boolean; activeForm?: boolean } = {}) {
+        pendingScore?: boolean; activeForm?: boolean; usage?: 'empty' | 'present' | 'absent' | 'denied' } = {}) {
     const guard = { state: 'hold' as const, database: pins.database, serverUuid: original, epoch: warning,
         expiresAt: '2027-01-01T00:00:00.000Z', generation: '8',
         ...(recoveryCheckpoint === undefined ? {} : { recoveryCheckpoint }) };
@@ -42,6 +42,11 @@ function fixture({ records = [], resolution = null, childPresent = false, writer
         if (query.sql === 'UNLOCK TABLES') { locked = false; return [[], []]; }
         if (query.sql.includes('FROM account_score_permissions')) return [[{ visibility: scoreVisibility }], []];
         if (query.sql.includes('FROM parent_registration_attempts')) return [pendingScore ? [{ child_uuid: child }] : [], []];
+        if (query.sql.includes('FROM parent_child_daily_usage')) {
+            if (usage === 'absent') throw Object.assign(new Error('missing'), { code: 'ER_NO_SUCH_TABLE' });
+            if (usage === 'denied') throw Object.assign(new Error('denied'), { code: 'ER_TABLEACCESS_DENIED_ERROR' });
+            return [usage === 'present' ? [{ child_uuid: child }] : [], []];
+        }
         if (query.sql.includes('information_schema.TABLES')) return [[{ count: 1 }], []];
         if (query.sql.includes('FROM parent_signed_forms')) return [activeForm ? [{ child_uuid: child }] : [], []];
         if (query.sql.includes('FROM users')) return [childPresent ? [{ childId: child, parentId: original,
@@ -64,6 +69,17 @@ test('activation audits all resolved outcomes under a pinned SQL lock and update
     const f = fixture({ records: [intent], resolution: deleted });
     assert.equal(await activateRetentionGuard(f.connection, f.journal, pins, f.deletionJournal), '9');
     assert.equal(f.writes, 1); assert.equal(f.locked, false);
+});
+test('restored limits must be reset before activation; missing schema is allowed but inaccessible schema is not', async () => {
+    for (const usage of ['present', 'denied'] as const) {
+        const f = fixture({ usage });
+        await assert.rejects(activateRetentionGuard(f.connection, f.journal, pins, f.deletionJournal));
+        assert.equal(f.writes, 0);
+    }
+    for (const usage of ['empty', 'absent'] as const) {
+        const f = fixture({ usage });
+        assert.equal(await activateRetentionGuard(f.connection, f.journal, pins, f.deletionJournal), '9');
+    }
 });
 test('activation rejects an old or missing SQL checkpoint and preserves the authenticated floor', async () => {
     const recoveryCheckpoint = { lineage: child, minimumEpoch: '6', keySha256: 'a'.repeat(64) };

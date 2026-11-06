@@ -57,13 +57,28 @@ signed outcome, and refuses newer restored activity. Neither command proves
 that Cloud Run or another external writer has been fenced; the operator must
 keep all old writers stopped and restored traffic isolated throughout.
 
+Before activating an isolated restored server, reset any parent daily-usage
+settings and totals on that target:
+
+```powershell
+'{"confirmation":"ISOLATED RESTORE AND ALL WRITERS FENCED"}' | npm --prefix backend run --silent child-inactivity:reconcile -- reset-restored-usage
+```
+
+This checks the held guard, target identity, current writer sessions, any
+recovery checkpoint and the reviewed usage schema. It cannot itself guarantee
+that external writers stay fenced. Parents must set limits again; until then no
+daily limit applies. The command refuses the original server. In-place restore
+is not supported by this procedure: restore to a distinct isolated server and
+keep traffic stopped until all reconciliation and cutover checks pass.
+
 After every intent has a verified outcome and that outcome matches the
 isolated target, an administrator can use `activate` with
 `{"confirmation":"ALL WRITERS FENCED AND INTENTS RECONCILED"}`. It checks the
 held guard, SQL identity, privileges, runtime sessions, every signed intent and
 outcome, and target account state under a short global SQL read lock, then
 updates the guard using its exact generation. It refuses unresolved or changed
-inventory. It cannot itself prove Cloud Run or other external writers are
+inventory. On a restored server it also refuses remaining daily-usage settings.
+It cannot itself prove Cloud Run or other external writers are
 stopped; keep them fenced through traffic cutover. If activation is
 unconfirmed, inspect the guard and keep traffic stopped rather than retrying
 blindly.

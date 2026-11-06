@@ -108,6 +108,14 @@ requires an explicit choice and a used signed-parent form tied to that parent
 and child, and records the notice version and database time with the setting.
 The parent screen provides the notice and privacy link. Stale notice versions
 do not renew usage; turning the control off removes its setting and local proof.
+The FTC's [COPPA FAQ C.10–11](https://www.ftc.gov/business-guidance/resources/complying-coppa-frequently-asked-questions)
+allows a direct notice on a device when notice and consent precede collection
+and the mechanism is reasonably designed to reach the parent. It also requires
+the direct notice itself to contain the applicable information and link to the
+privacy policy. An extra email is therefore not inherently required. The
+candidate screen displays the notice and link, and the API checks a live parent
+session, relationship and used signed form; those source checks alone do not
+establish that the whole verification method is adequate or deployed.
 The candidate public notice describes this optional collection in both languages;
 its notice and signed-form versions have been advanced, so older pending forms
 must be handled under the existing version-binding rules rather than relabeled.

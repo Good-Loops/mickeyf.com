@@ -45,6 +45,7 @@ test('parent can view and change the selected child limit only after confirmatio
     const usage = { day: '2026-11-05', timeZone: 'America/Sao_Paulo', dailyLimitMs: 120_000, usedMs: 60_000, remainingMs: 60_000 };
     view.requests[0].resolve(reply({ usage })); await view.settle();
     assert.match(view.text(), /Used on 2026-11-05: 1 min/u);
+    assert.match(view.text(), /No daily limit applies until you set one again/u);
     const number = view.nodes().find(node => node.type === 'input' && node.props.type === 'number');
     number.props.onChange({ target: { value: '3' } }); view.render();
     const save = () => view.nodes().find(node => node.type === 'button' && text(node).includes('Save limit'));
@@ -71,6 +72,7 @@ test('parent controls and the online-only limitation are available in Portuguese
     const view = mount(t, 'pt-BR'); view.render(); await view.settle();
     view.requests[0].resolve(reply({ usage: null })); await view.settle();
     assert.match(view.text(), /Nenhum limite diário definido/u);
+    assert.match(view.text(), /Nenhum limite diário será aplicado até você definir outro/u);
     assert.match(view.text(), /não limita o uso como visitante, offline/u);
     assert.match(view.text(), /Google Cloud.*não são exibidos publicamente nem vendidos/u);
     assert.match(view.text(), /mickeyf\.plays@gmail\.com/u);
