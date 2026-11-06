@@ -40,7 +40,10 @@ export default function ChildDailyUsageGuard({ children, authenticated, sessionG
                 const lease = interpretChildUsageLease(await response.json(), started, performance.now());
                 if (!isCurrent()) return;
                 clearTimers();
-                if (lease.kind === 'unrestricted') { setStatus('unrestricted'); schedule(30_000); }
+                // Supported account creation never converts an existing account into a managed child.
+                // Recheck on a session change or return to the foreground, not every 30 seconds.
+                if (lease.kind === 'not-managed') setStatus('unrestricted');
+                else if (lease.kind === 'not-configured') { setStatus('unrestricted'); schedule(30_000); }
                 else if (lease.kind === 'blocked') { setStatus(lease.remainingMs === 0 ? 'limit' : 'checking'); schedule(15_000); }
                 else {
                     const left = Math.max(0, lease.deadline - performance.now());

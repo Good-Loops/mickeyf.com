@@ -740,6 +740,18 @@ test('recovery grant inspection includes the checkpoint columns', async () => {
         .map(row => row.columnName).sort(), ['epoch', 'lineage_id', 'singleton_id']);
 });
 
+test('daily usage grant inspection requires its complete schema', async () => {
+    const profile: RuntimeGrantProfile = 'google-apple-parent-signed-recovery-usage';
+    const snapshot = exactSnapshot(profile), connection = new SnapshotConnection(snapshot);
+    const plan = await planRuntimeGrants(connection, { ...SETTINGS, profile }, RUNTIME_ACCOUNT);
+    assert.equal(plan.compliant, true);
+    assert.match(connection.calls.find(sql => sql.includes('runtime-grants:columns'))!, /'parent_child_daily_usage'/u);
+    const incomplete = createRuntimeGrantPlan({ ...snapshot, availableColumns: snapshot.availableColumns.filter(row =>
+        row.tableName !== 'parent_child_daily_usage' || row.columnName !== 'active_until_ms') }, { ...SETTINGS, profile }, RUNTIME_ACCOUNT);
+    assert.equal(incomplete.state, 'blocked');
+    assert.deepEqual(incomplete.operations.ensureRequiredPrivileges, []);
+});
+
 test('Apple revocation grants fail closed until watermark and both provenance columns exist', () => {
     const current = exactSnapshot();
     for (const missing of ['subject_hash', 'apple_subject_hash', 'apple_authenticated_at']) {

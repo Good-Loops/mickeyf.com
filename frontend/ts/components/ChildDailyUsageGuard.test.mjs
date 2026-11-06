@@ -60,3 +60,24 @@ test('hiding the app expires its view and rejects the in-flight response', async
     assert.match(view.text(), /cannot check your daily time limit/u);
     assert.doesNotMatch(view.text(), /GAME CONTENT/u);
 });
+
+test('unmanaged accounts do not poll, but are rechecked when returning to the foreground', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const view = mount(t); view.render(); await view.settle();
+    view.requests[0].resolve({ ok: true, json: async () => ({ status: 'not-managed' }) }); await view.settle();
+    assert.match(view.text(), /GAME CONTENT/u);
+    t.mock.timers.tick(90_000); await view.settle(); assert.equal(view.requests.length, 1);
+    view.document.visibilityState = 'hidden'; view.document.dispatchEvent(new Event('visibilitychange')); await view.settle();
+    view.document.visibilityState = 'visible'; view.document.dispatchEvent(new Event('visibilitychange')); await view.settle();
+    assert.equal(view.requests.length, 2);
+});
+
+test('a managed account without a limit continues checking for a new parent setting', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const view = mount(t); view.render(); await view.settle();
+    view.requests[0].resolve({ ok: true, json: async () => ({ status: 'not-configured' }) }); await view.settle();
+    assert.match(view.text(), /GAME CONTENT/u);
+    t.mock.timers.tick(30_000); await view.settle(); assert.equal(view.requests.length, 2);
+    view.requests[1].resolve({ ok: true, json: async () => ({ status: 'configured', remainingMs: 0, allowedForMs: 0 }) });
+    await view.settle(); assert.match(view.text(), /reached the daily time limit/u);
+});

@@ -10,7 +10,8 @@ test('network latency can only shorten the local lease', () => {
 });
 
 test('unknown, inconsistent or malformed responses fail closed', () => {
-    assert.deepEqual(interpretChildUsageLease({ status: 'not-configured' }, 0, 1), { kind: 'unrestricted' });
+    assert.deepEqual(interpretChildUsageLease({ status: 'not-configured' }, 0, 1), { kind: 'not-configured' });
+    assert.deepEqual(interpretChildUsageLease({ status: 'not-managed' }, 0, 1), { kind: 'not-managed' });
     for (const response of [null, {}, { status: 'configured', remainingMs: 0, allowedForMs: 1 },
         { status: 'configured', remainingMs: 60_000, allowedForMs: 30_001 }, { status: 'unexpected' }]) {
         assert.throws(() => interpretChildUsageLease(response, 0, 1));

@@ -3,13 +3,19 @@ import { createHash, randomBytes, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
+import cookieParser from 'cookie-parser';
+import express from 'express';
 import mysql, { type Connection, type Pool, type RowDataPacket } from 'mysql2/promise';
 import { guardConnectionQueries } from '../db/queryTimeoutConnection';
 import { cleanupChildDailyUsage, configureChildDailyUsage, readChildDailyUsage } from './childDailyUsageStore';
 import { clearChildDailyUsageLimit, getChildDailyUsageLimit, heartbeatChildDailyUsage, setChildDailyUsageLimit } from './childDailyUsageService';
-import type { ProviderAuthContext } from '../auth/providerAuthContext';
+import { createProviderAuthContextReader, type ProviderAuthContext } from '../auth/providerAuthContext';
 import type { MigrationConnection } from '../migrations/leaderboardSchema';
 import { verifyChildDailyUsageSchema } from '../migrations/childDailyUsageSchema';
+import { issueSessionToken } from '../security/sessionPolicy';
+import { createGeneralApiRateLimiter } from '../security/requestRateLimits';
+import { renderRuntimeGrantStatements } from '../security/runtimeGrantManifest';
+import { createChildDailyUsageHeartbeatRouter, createChildDailyUsageRouter } from '../routers/childDailyUsageRouter';
 
 let admin: Connection;
 let pool: Pool;
@@ -69,7 +75,10 @@ before(async () => {
     await admin.query(reviewedDraft);
     await verifyChildDailyUsageSchema(admin as unknown as MigrationConnection);
     await admin.query('INSERT INTO parent_child_consents (child_uuid) VALUES (?)', [child]);
-    await admin.query("GRANT SELECT, INSERT, UPDATE, DELETE ON child_usage_test.parent_child_daily_usage TO 'migration_test'@'%'");
+    const usageGrant = "GRANT SELECT (`child_uuid`, `time_zone`, `daily_limit_ms`, `usage_day`, `used_ms`, `accounted_at_ms`, `active_until_ms`), INSERT (`child_uuid`, `time_zone`, `daily_limit_ms`, `usage_day`, `used_ms`, `accounted_at_ms`, `active_until_ms`), UPDATE (`time_zone`, `daily_limit_ms`, `usage_day`, `used_ms`, `accounted_at_ms`, `active_until_ms`), DELETE ON `child_usage_test`.`parent_child_daily_usage` TO 'migration_test'@'%';";
+    assert.equal(renderRuntimeGrantStatements('child_usage_test', { user: 'migration_test', host: '%' },
+        'google-apple-parent-signed-recovery-usage').slice(-1)[0], usageGrant);
+    await admin.query(usageGrant);
     for (const table of ['users', 'account_sessions', 'parent_child_consents']) {
         await admin.query(`GRANT SELECT ON child_usage_test.${table} TO 'migration_test'@'%'`);
     }
@@ -92,6 +101,8 @@ test('only the linked parent and a live managed child session can access usage',
     assert.equal(await getChildDailyUsageLimit(pool, owner, managed), null);
     await assert.rejects(setChildDailyUsageLimit(pool, stranger, managed, policy), /Child unavailable/u);
     await setChildDailyUsageLimit(pool, owner, managed, policy);
+    await assert.rejects(pool.query('UPDATE parent_child_daily_usage SET child_uuid=? WHERE child_uuid=?', [randomUUID(), managed]));
+    await assert.rejects(pool.query('DELETE FROM parent_child_consents WHERE child_uuid=?', [managed]));
     const heartbeat = await heartbeatChildDailyUsage(pool, childContext);
     assert.equal(heartbeat.status, 'configured');
     assert.equal((await getChildDailyUsageLimit(pool, owner, managed))?.dailyLimitMs, policy.dailyLimitMs);
@@ -103,6 +114,55 @@ test('only the linked parent and a live managed child session can access usage',
     await assert.rejects(getChildDailyUsageLimit(pool, owner, managed), /Session unavailable/u);
     await admin.query('DELETE FROM parent_child_consents WHERE child_uuid=?', [managed]);
     assert.equal((await heartbeatChildDailyUsage(pool, childContext)).status, 'not-managed');
+});
+
+test('signed parent and child sessions can set and use a limit through the candidate HTTP routes', async () => {
+    const secret = 'synthetic-usage-http-session-secret', origin = 'https://example.test';
+    const parentId = randomUUID(), childId = randomUUID();
+    const fixture = async (userId: number, accountId: string) => {
+        const userName = `fictional-${userId}`;
+        await admin.query('INSERT INTO users VALUES (?, ?, ?)', [userId, userName, accountId]);
+        const issued = issueSessionToken({ userId, userName, accountId }, secret);
+        await admin.query(`INSERT INTO account_sessions (account_uuid, session_hash, expires_at)
+            VALUES (?, ?, TIMESTAMPADD(SECOND, ?, '1970-01-01 00:00:00'))`,
+        [accountId, createHash('sha256').update(issued.sessionId, 'ascii').digest(), issued.expiresAt]);
+        return issued.token;
+    };
+    const parentToken = await fixture(10, parentId), childToken = await fixture(11, childId);
+    await admin.query('INSERT INTO parent_child_consents (child_uuid, parent_uuid) VALUES (?, ?)', [childId, parentId]);
+    const app = express(); app.use(cookieParser(secret));
+    app.get('/fixture/:who', (req, res) => res.cookie('__session', req.params.who === 'parent' ? parentToken : childToken,
+        { signed: true, httpOnly: true }).status(204).end());
+    const readContext = createProviderAuthContextReader({ database: pool, sessionSecret: secret, allowedOrigins: [origin] });
+    app.use('/auth/child-daily-usage/heartbeat', createChildDailyUsageHeartbeatRouter(pool, readContext));
+    app.use('/auth', createGeneralApiRateLimiter());
+    app.use('/auth/child-daily-usage', createChildDailyUsageRouter(pool, readContext));
+    const server = app.listen(0, '127.0.0.1');
+    await new Promise<void>(resolve => server.once('listening', resolve));
+    try {
+        const address = server.address(); assert.ok(address && typeof address !== 'string');
+        const base = `http://127.0.0.1:${address.port}`;
+        const getCookie = async (who: string) => {
+            const response = await fetch(`${base}/fixture/${who}`);
+            const cookie = response.headers.get('set-cookie'); assert.ok(cookie); return cookie.split(';')[0];
+        };
+        const parentCookie = await getCookie('parent'), childCookie = await getCookie('child');
+        const post = (route: string, cookie: string, body: object, requestOrigin = origin) => fetch(`${base}/auth/child-daily-usage/${route}`, {
+            method: 'POST', headers: { origin: requestOrigin, 'content-type': 'application/json', cookie }, body: JSON.stringify(body),
+        });
+        assert.equal((await post('heartbeat', childCookie, {}, 'https://other.example.test')).status, 403);
+        const before = await post('heartbeat', childCookie, {});
+        assert.equal((await before.json()).status, 'not-configured');
+        const configured = await post('set', parentCookie, { childAccountId: childId, ...policy });
+        assert.equal(configured.status, 200);
+        assert.equal((await configured.json()).usage.dailyLimitMs, policy.dailyLimitMs);
+        const heartbeat = await post('heartbeat', childCookie, {});
+        const result = await heartbeat.json();
+        assert.equal(result.status, 'configured'); assert.ok(result.allowedForMs > 0 && result.allowedForMs <= 30_000);
+        assert.notEqual((await post('set', childCookie, { childAccountId: childId, ...policy })).status, 200);
+        assert.equal((await post('clear', parentCookie, { childAccountId: childId })).status, 204);
+        assert.equal((await (await post('heartbeat', childCookie, {})).json()).status, 'not-configured');
+    } finally { await new Promise<void>((resolve, reject) => server.close(error => error ? reject(error) : resolve())); }
 });
 after(async () => { if (pool) await pool.end(); if (admin) await admin.end(); });
 

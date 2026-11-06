@@ -41,7 +41,7 @@ function parseCommand(args: readonly string[]): Readonly<{
 }> {
     if (args.length < 1 || args.length > 2) {
         throw new Error(
-            'Usage: runRuntimeGrants.ts <plan|verify|apply> [--profile=google|google-apple|google-apple-parent|google-apple-parent-signed|google-apple-parent-signed-inactivity|google-apple-parent-signed-continuity]'
+            'Usage: runRuntimeGrants.ts <plan|verify|apply> [--profile=<reviewed-profile>]'
         );
     }
     const [command, profileArgument] = args;
