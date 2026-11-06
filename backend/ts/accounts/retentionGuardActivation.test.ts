@@ -4,6 +4,7 @@ import type { PoolConnection } from 'mysql2/promise';
 import { activateRetentionGuard } from './retentionGuardActivation';
 import type { createGcsRetentionJournal, RetentionResolution } from './gcsRetentionJournal';
 import type { RetentionIntent } from './childInactivityWorkflow';
+import type { DeletionIntent, DeletionJournalReader } from './deletionJournal';
 
 const original = '11111111-1111-4111-8111-111111111111';
 const target = '22222222-2222-4222-8222-222222222222';
@@ -16,12 +17,15 @@ const intent: RetentionIntent = { parentId: original, childId: child, warningId:
     targetDigest: 'a'.repeat(64), noticeDigest: 'b'.repeat(64), receiptDigest: 'c'.repeat(64), channel: 'in-app' };
 const deleted: RetentionResolution = { outcome: 'deleted', confirmedAt: '2024-01-01T00:00:00.000000Z',
     observedActivityAt: null, proofDigest: 'd'.repeat(64) };
+const explicitIntent: DeletionIntent = { version: 1, accountId: child, action: 'delete-account', requestedAt: '2024-01-01T00:00:00.000Z' };
+const emptyDeletionJournal: DeletionJournalReader = { async readDeletionIntents() { return { digest: 'a'.repeat(64), intents: [] }; } };
 
 function fixture({ records = [], resolution = null, childPresent = false, writers = 0, secondRecords,
-    recoveryCheckpoint, targetCheckpoint = '6' }:
+    recoveryCheckpoint, targetCheckpoint = '6', explicitRecords = [], changedExplicit = false, scoreVisibility = 'private', pendingScore = false, activeForm = false }:
     { records?: RetentionIntent[]; resolution?: RetentionResolution | null; childPresent?: boolean; writers?: number;
         secondRecords?: RetentionIntent[]; recoveryCheckpoint?: { lineage: string; minimumEpoch: string; keySha256: string };
-        targetCheckpoint?: string | null } = {}) {
+        targetCheckpoint?: string | null; explicitRecords?: DeletionIntent[]; changedExplicit?: boolean; scoreVisibility?: string;
+        pendingScore?: boolean; activeForm?: boolean } = {}) {
     const guard = { state: 'hold' as const, database: pins.database, serverUuid: original, epoch: warning,
         expiresAt: '2027-01-01T00:00:00.000Z', generation: '8',
         ...(recoveryCheckpoint === undefined ? {} : { recoveryCheckpoint }) };
@@ -36,6 +40,10 @@ function fixture({ records = [], resolution = null, childPresent = false, writer
             readOnly: 0, superReadOnly: 0, nowUtc: '2026-01-01T00:00:00.000000Z' }], []];
         if (query.sql === 'FLUSH TABLES WITH READ LOCK') { locked = true; return [[], []]; }
         if (query.sql === 'UNLOCK TABLES') { locked = false; return [[], []]; }
+        if (query.sql.includes('FROM account_score_permissions')) return [[{ visibility: scoreVisibility }], []];
+        if (query.sql.includes('FROM parent_registration_attempts')) return [pendingScore ? [{ child_uuid: child }] : [], []];
+        if (query.sql.includes('information_schema.TABLES')) return [[{ count: 1 }], []];
+        if (query.sql.includes('FROM parent_signed_forms')) return [activeForm ? [{ child_uuid: child }] : [], []];
         if (query.sql.includes('FROM users')) return [childPresent ? [{ childId: child, parentId: original,
             activityAt: '2025-01-01T00:00:00.000000Z' }] : [], []];
         throw new Error('unexpected SQL');
@@ -46,21 +54,24 @@ function fixture({ records = [], resolution = null, childPresent = false, writer
             assert.deepEqual((value as { recoveryCheckpoint?: unknown }).recoveryCheckpoint, recoveryCheckpoint);
             assert.equal(generation, '8'); writes++; return '9';
         } } as unknown as Pick<ReturnType<typeof createGcsRetentionJournal>, 'readRestoreGuard' | 'readIntents' | 'readResolution' | 'writeRestoreGuard'>;
-    return { connection, journal, get writes() { return writes; }, get locked() { return locked; }, get destroyed() { return destroyed; } };
+    let explicitReads = 0;
+    const deletionJournal: DeletionJournalReader = { async readDeletionIntents() { return { digest: 'a'.repeat(64),
+        intents: ++explicitReads > 1 && changedExplicit ? [] : explicitRecords }; } };
+    return { connection, journal, deletionJournal, get writes() { return writes; }, get locked() { return locked; }, get destroyed() { return destroyed; } };
 }
 
 test('activation audits all resolved outcomes under a pinned SQL lock and updates guard by generation', async () => {
     const f = fixture({ records: [intent], resolution: deleted });
-    assert.equal(await activateRetentionGuard(f.connection, f.journal, pins), '9');
+    assert.equal(await activateRetentionGuard(f.connection, f.journal, pins, f.deletionJournal), '9');
     assert.equal(f.writes, 1); assert.equal(f.locked, false);
 });
 test('activation rejects an old or missing SQL checkpoint and preserves the authenticated floor', async () => {
     const recoveryCheckpoint = { lineage: child, minimumEpoch: '6', keySha256: 'a'.repeat(64) };
     const good = fixture({ recoveryCheckpoint });
-    assert.equal(await activateRetentionGuard(good.connection, good.journal, pins), '9');
+    assert.equal(await activateRetentionGuard(good.connection, good.journal, pins, good.deletionJournal), '9');
     for (const targetCheckpoint of ['5', null]) {
         const f = fixture({ recoveryCheckpoint, targetCheckpoint });
-        await assert.rejects(activateRetentionGuard(f.connection, f.journal, pins), /Keep all writers and traffic stopped/);
+        await assert.rejects(activateRetentionGuard(f.connection, f.journal, pins, f.deletionJournal), /Keep all writers and traffic stopped/);
         assert.equal(f.writes, 0);
     }
 });
@@ -68,10 +79,10 @@ test('activation accepts a kept outcome only when the restored relationship pres
     const resolution: RetentionResolution = { outcome: 'kept', confirmedAt: '2025-01-03T00:00:00.000000Z',
         observedActivityAt: '2025-01-02T00:00:00.000000Z', proofDigest: 'd'.repeat(64) };
     const f = fixture({ records: [intent], resolution, childPresent: true });
-    await assert.rejects(activateRetentionGuard(f.connection, f.journal, pins), /Keep all writers and traffic stopped/);
+    await assert.rejects(activateRetentionGuard(f.connection, f.journal, pins, f.deletionJournal), /Keep all writers and traffic stopped/);
     const later: RetentionResolution = { ...resolution, observedActivityAt: '2024-01-01T00:00:00.000000Z' };
     const good = fixture({ records: [intent], resolution: later, childPresent: true });
-    assert.equal(await activateRetentionGuard(good.connection, good.journal, pins), '9');
+    assert.equal(await activateRetentionGuard(good.connection, good.journal, pins, good.deletionJournal), '9');
 });
 test('activation holds on unresolved outcomes, restored deleted accounts, writers or changing inventories', async () => {
     for (const options of [
@@ -79,8 +90,27 @@ test('activation holds on unresolved outcomes, restored deleted accounts, writer
         { writers: 1 }, { records: [intent], resolution: deleted, secondRecords: [] },
     ]) {
         const f = fixture(options);
-        await assert.rejects(activateRetentionGuard(f.connection, f.journal, pins), /Keep all writers and traffic stopped/);
+        await assert.rejects(activateRetentionGuard(f.connection, f.journal, pins, f.deletionJournal), /Keep all writers and traffic stopped/);
         assert.equal(f.writes, 0); assert.equal(f.destroyed, true);
+    }
+});
+
+test('activation requires explicit deletions and score withdrawals to be reconciled and inventory to remain stable', async () => {
+    const withdrawal: DeletionIntent = { ...explicitIntent, action: 'withdraw-public-scores' };
+    for (const options of [
+        { explicitRecords: [explicitIntent], childPresent: true },
+        { explicitRecords: [explicitIntent], changedExplicit: true },
+        { explicitRecords: [withdrawal], childPresent: true, scoreVisibility: 'public' },
+        { explicitRecords: [withdrawal], childPresent: true, pendingScore: true },
+        { explicitRecords: [withdrawal], childPresent: true, activeForm: true },
+    ]) {
+        const f = fixture(options);
+        await assert.rejects(activateRetentionGuard(f.connection, f.journal, pins, f.deletionJournal), /Keep all writers and traffic stopped/);
+        assert.equal(f.writes, 0);
+    }
+    for (const options of [{ explicitRecords: [explicitIntent] }, { explicitRecords: [withdrawal], childPresent: true }]) {
+        const f = fixture(options);
+        assert.equal(await activateRetentionGuard(f.connection, f.journal, pins, f.deletionJournal), '9');
     }
 });
 
@@ -101,6 +131,6 @@ test('an unlock failure after activation attempts to restore hold using the new 
             assert.equal(generation, current.generation);
             current = { ...value, generation: String(Number(generation) + 1) }; return current.generation;
         } } as unknown as Pick<ReturnType<typeof createGcsRetentionJournal>, 'readRestoreGuard' | 'readIntents' | 'readResolution' | 'writeRestoreGuard'>;
-    await assert.rejects(activateRetentionGuard(connection, journal, pins), /Keep all writers and traffic stopped/);
+    await assert.rejects(activateRetentionGuard(connection, journal, pins, emptyDeletionJournal), /Keep all writers and traffic stopped/);
     assert.equal(destroyed, true); assert.equal(current.state, 'hold'); assert.equal(current.generation, '10');
 });

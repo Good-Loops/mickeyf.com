@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
-import { isAccountId } from './deletionJournal';
+import { isAccountId, parseDeletionIntent, type DeletionJournalReader } from './deletionJournal';
 import { parseInactivityInstant } from './childInactivityPolicy';
 import type { createGcsRetentionJournal, RestoreGuard } from './gcsRetentionJournal';
 import { assertNoRetentionRuntimeWriters, isProductionRecoveryOperator } from './retentionReconciliation';
@@ -14,7 +14,8 @@ type Pins = Readonly<{ database: string; serverUuid: string; originalServerUuid:
  * A deliberate cutover operation: all writers must already be externally
  * stopped and must remain stopped after the short SQL lock is released.
  */
-export async function activateRetentionGuard(connection: Connection, journal: Journal, pins: Pins): Promise<string> {
+export async function activateRetentionGuard(connection: Connection, journal: Journal, pins: Pins,
+    deletionJournal: DeletionJournalReader): Promise<string> {
     if (!/^[A-Za-z0-9_]{1,64}$/u.test(pins.database) || !isAccountId(pins.serverUuid) || !isAccountId(pins.originalServerUuid)
         || !pins.currentUser || pins.confirmation !== 'ALL WRITERS FENCED AND INTENTS RECONCILED') {
         throw new Error('Retention activation refused.');
@@ -44,6 +45,34 @@ export async function activateRetentionGuard(connection: Connection, journal: Jo
                 serverUuid: pins.serverUuid, lineage: guard.recoveryCheckpoint.lineage,
                 minimumEpoch: guard.recoveryCheckpoint.minimumEpoch });
         }
+        // The inactivity journal does not contain explicit account deletions or
+        // score withdrawals. Both journals must agree with the restored SQL.
+        const explicit = await deletionJournal.readDeletionIntents();
+        if (!explicit || !/^[a-f0-9]{64}$/u.test(explicit.digest) || !Array.isArray(explicit.intents)
+            || explicit.intents.length > 10_000) throw new Error('Explicit deletion inventory unavailable.');
+        for (const value of explicit.intents) {
+            const item = parseDeletionIntent(value);
+            const [accounts] = await connection.query<RowDataPacket[]>({ sql: 'SELECT account_uuid FROM users WHERE account_uuid=? LIMIT 2', timeout: 10_000 }, [item.accountId]);
+            if (!Array.isArray(accounts) || accounts.length > 1) throw new Error('Account lookup ambiguous.');
+            if (item.action === 'delete-account') {
+                if (accounts.length) throw new Error('Explicitly deleted account remains.');
+            } else if (accounts.length) {
+                const [permissions] = await connection.query<RowDataPacket[]>({ sql: 'SELECT visibility FROM account_score_permissions WHERE account_uuid=? LIMIT 2', timeout: 10_000 }, [item.accountId]);
+                if (!Array.isArray(permissions) || permissions.length !== 1 || permissions[0].visibility !== 'private') throw new Error('Score withdrawal is not applied.');
+                const [pending] = await connection.query<RowDataPacket[]>({ sql: `SELECT child_uuid FROM parent_registration_attempts
+                    WHERE child_uuid=? AND purpose='publish-scores' AND phase <> 'used'
+                    AND (phase <> 'cancelled' OR grant_hash IS NOT NULL) LIMIT 1`, timeout: 10_000 }, [item.accountId]);
+                if (!Array.isArray(pending) || pending.length) throw new Error('Score withdrawal request remains.');
+                const [tables] = await connection.query<RowDataPacket[]>({ sql: `SELECT COUNT(*) AS count FROM information_schema.TABLES
+                    WHERE TABLE_SCHEMA=DATABASE() AND TABLE_NAME='parent_signed_forms'`, timeout: 10_000 });
+                if (!Array.isArray(tables) || tables.length !== 1 || ![0, 1].includes(Number(tables[0].count))) throw new Error('Signed form schema unavailable.');
+                if (Number(tables[0].count) === 1) {
+                    const [forms] = await connection.query<RowDataPacket[]>({ sql: `SELECT child_uuid FROM parent_signed_forms
+                        WHERE child_uuid=? AND COALESCE(public_withdrawn,0) <> 1 LIMIT 1`, timeout: 10_000 }, [item.accountId]);
+                    if (!Array.isArray(forms) || forms.length) throw new Error('Signed score permission remains.');
+                }
+            }
+        }
         const intents = await journal.readIntents();
         for (const intent of intents) {
             const resolution = await journal.readResolution(intent);
@@ -65,7 +94,9 @@ export async function activateRetentionGuard(connection: Connection, journal: Jo
                 }
             } else throw new Error('Invalid retention outcome.');
         }
-        if (JSON.stringify(intents) !== JSON.stringify(await journal.readIntents())
+        const finalExplicit = await deletionJournal.readDeletionIntents();
+        if (JSON.stringify(explicit) !== JSON.stringify(finalExplicit)
+            || JSON.stringify(intents) !== JSON.stringify(await journal.readIntents())
             || JSON.stringify(guard) !== JSON.stringify(await journal.readRestoreGuard())) throw new Error('Retention inventory changed.');
         activating = { state: 'active', database: pins.database, serverUuid: pins.serverUuid,
             epoch: randomUUID(), expiresAt: new Date(Date.parse(nowUtc) + 364 * 24 * 60 * 60_000).toISOString(),

@@ -11,6 +11,8 @@ import { activateRetentionGuard } from './retentionGuardActivation';
 import { readRecoveryCheckpoint } from './accountRecoveryCheckpoint';
 import { verifyRetiredJournalObjects } from './verifyRetiredJournalObjects';
 import type { RetentionIntent } from './childInactivityWorkflow';
+import type { DeletionJournalReader } from './deletionJournal';
+import { createGuardedDeletionReplayReader } from './guardedDeletionReplayReader';
 
 const FAILURE = 'Retention reconciliation unavailable or unconfirmed. Keep restoration on hold.';
 type Environment = Readonly<Record<string, string | undefined>>;
@@ -38,7 +40,8 @@ async function readInput(input: AsyncIterable<string | Uint8Array>): Promise<Rec
 
 /** Fixed command grammar; never logs raw connection or authorization failures. */
 export async function executeRetentionReconciliation(command: string, input: Record<string, unknown>,
-    pins: Pins, journal: Journal, database: Pick<Pool, 'query' | 'getConnection'>, auditKey: Buffer): Promise<unknown> {
+    pins: Pins, journal: Journal, database: Pick<Pool, 'query' | 'getConnection'>, auditKey: Buffer,
+    deletionJournal?: DeletionJournalReader): Promise<unknown> {
     if (!/^[A-Za-z0-9_]{1,64}$/u.test(pins.database) || !isAccountId(pins.serverUuid)
         || !isAccountId(pins.originalServerUuid) || !pins.currentUser) throw new Error(FAILURE);
     const [rows] = await database.query<RowDataPacket[]>({ sql: `SELECT DATABASE() AS db,CURRENT_USER() AS user,
@@ -74,7 +77,8 @@ export async function executeRetentionReconciliation(command: string, input: Rec
         && input.confirmation === 'ALL WRITERS FENCED AND INTENTS RECONCILED') {
         const connection = await database.getConnection();
         try {
-            const generation = await activateRetentionGuard(connection, journal, { ...pins, confirmation: input.confirmation });
+            if (!deletionJournal) throw new Error(FAILURE);
+            const generation = await activateRetentionGuard(connection, journal, { ...pins, confirmation: input.confirmation }, deletionJournal);
             return { state: 'active', generation };
         } finally { connection.release(); }
     }
@@ -147,8 +151,11 @@ export async function runRetentionReconciliation(args = process.argv.slice(2), e
                 finally { connection.release(); }
             } }) });
         if (args[0] !== 'initialize-hold') await journal.assertRestoreGuardHistory();
+        const deletionJournal = args[0] === 'activate' ? await createGuardedDeletionReplayReader({ database: pool, guard: journal,
+            pins: { database: pins.database, currentUser: pins.currentUser, targetServerUuid: pins.serverUuid,
+                originalServerUuid: pins.originalServerUuid }, publicKey, readTimeoutMs: 60_000 }) : undefined;
         const result = await executeRetentionReconciliation(args[0], body,
-            pins, journal, pool, auditKey);
+            pins, journal, pool, auditKey, deletionJournal);
         process.stdout.write(`${JSON.stringify(result, null, 2)}\n`);
     } finally { await pool.end(); }
 }

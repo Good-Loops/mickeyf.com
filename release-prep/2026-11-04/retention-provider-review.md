@@ -388,9 +388,15 @@ the disposable MySQL rehearsal passed. It is not connected to a cleanup
 command; the caller still has to authenticate journal identities, verify the
 foreign-key schema, fence writers, retain a dated observation and check the
 complete backup boundary before this could authorize retirement.
-The local observation candidate now binds a database-generated timestamp and
-pseudonymous account digest to an exact journal generation and content hash;
-its private GCS receipt writer is create-only. Focused tests cover tampering,
-remaining tokens and a lost write acknowledgement followed by a read. This has
-not been connected to an operator command or run on real accounts, and neither
-the receipt nor a signed retirement claim independently authorizes cleanup.
+The checkpoint candidate verifies the selected effects in its SQL transaction
+and signs a batch permit after the checkpoint is recoverable. Retirement waits
+until the oldest inventoried Cloud SQL recovery point is newer than that
+checkpoint. Neither the permit nor the signed retirement claim alone authorizes
+cleanup: the caller must also fence writers and account for external copies.
+
+The guard-activation candidate now checks the separate authenticated explicit
+deletion journal under the SQL read lock as well as the inactivity journal.
+It holds if an explicitly deleted account remains, a recorded score withdrawal
+has not been applied, or the explicit inventory changes during the check. The
+operator command requires the guarded journal reader. Synthetic unit and
+disposable-MySQL tests passed; production recovery and cutover remain unqualified.

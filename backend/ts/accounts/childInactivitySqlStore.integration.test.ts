@@ -252,8 +252,39 @@ test('guard activation audits an isolated SQL target while runtime writers are d
     const pins = { database: identity.db as string, serverUuid: identity.id as string, originalServerUuid: original,
         currentUser: identity.user as string, confirmation: 'ALL WRITERS FENCED AND INTENTS RECONCILED' };
     const connection = await database.getConnection();
-    try { assert.equal(await activateRetentionGuard(connection, journal, pins), '2'); }
+    const explicit = { async readDeletionIntents() { return { intents: [], digest: 'a'.repeat(64) }; } };
+    try { assert.equal(await activateRetentionGuard(connection, journal, pins, explicit), '2'); }
     finally { connection.release(); }
+    assert.equal(writes, 1);
+});
+
+test('guard activation rejects unreconciled explicit deletion and withdrawal on isolated SQL', async () => {
+    const { childId, unrelatedId } = await managedFixture();
+    const [[identity]] = await admin.query<RowDataPacket[]>('SELECT DATABASE() AS db,CURRENT_USER() AS user,@@GLOBAL.server_uuid AS id');
+    const original = randomUUID();
+    const guard = { state: 'hold' as const, database: identity.db as string, serverUuid: original,
+        epoch: randomUUID(), expiresAt: '2099-01-01T00:00:00.000Z', generation: '1' };
+    let writes = 0;
+    const journal = { async readRestoreGuard() { return guard; }, async readIntents() { return []; },
+        async readResolution() { return null; }, async writeRestoreGuard() { writes++; return '2'; } };
+    const pins = { database: identity.db as string, serverUuid: identity.id as string, originalServerUuid: original,
+        currentUser: identity.user as string, confirmation: 'ALL WRITERS FENCED AND INTENTS RECONCILED' };
+    const explicit = { async readDeletionIntents() { return { digest: 'a'.repeat(64), intents: [
+        { version: 1 as const, accountId: unrelatedId, action: 'delete-account' as const, requestedAt: '2024-01-01T00:00:00.000Z' },
+        { version: 1 as const, accountId: childId, action: 'withdraw-public-scores' as const, requestedAt: '2024-01-01T00:00:00.000Z' },
+    ] }; } };
+    const activate = async () => {
+        const connection = await database.getConnection();
+        try { return await activateRetentionGuard(connection, journal, pins, explicit); }
+        finally { connection.release(); }
+    };
+    await assert.rejects(activate(), /Keep all writers and traffic stopped/);
+    assert.equal(writes, 0);
+    await admin.query('DELETE FROM users WHERE account_uuid=?', [unrelatedId]);
+    await assert.rejects(activate(), /Keep all writers and traffic stopped/);
+    assert.equal(writes, 0);
+    await admin.query("INSERT INTO account_score_permissions (account_uuid,visibility,confirmed_at) VALUES (?,'private',UTC_TIMESTAMP(6))", [childId]);
+    assert.equal(await activate(), '2');
     assert.equal(writes, 1);
 });
 

@@ -64,6 +64,14 @@ test('operator reads the same three independent key values as the runtime', () =
     }
 });
 
+test('activation cannot proceed without the explicit-deletion journal reader', async () => {
+    const f = fixture(); let released = false;
+    const database = { query: f.database.query, async getConnection() { return { release() { released = true; } }; } } as unknown as Pick<Pool, 'query' | 'getConnection'>;
+    await assert.rejects(executeRetentionReconciliation('activate', { confirmation: 'ALL WRITERS FENCED AND INTENTS RECONCILED' },
+        pins, f.journal, database, Buffer.alloc(32, 1)));
+    assert.equal(released, true); assert.equal(f.writes, 0);
+});
+
 test('restored conditional deletion is blocked before replay when the SQL checkpoint is older', async () => {
     const restorePins = { ...pins, serverUuid: epoch, originalServerUuid: serverUuid };
     const guard = { state: 'hold' as const, database: pins.database, serverUuid, epoch,
