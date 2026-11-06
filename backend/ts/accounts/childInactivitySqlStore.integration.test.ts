@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createHash, createHmac, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, createHmac, generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
 import { once } from 'node:events';
 import type { AddressInfo } from 'node:net';
 import express from 'express';
@@ -42,6 +42,7 @@ import { applyInactivitySchema, planInactivitySchema, verifyInactivitySchema, In
 import { CHILD_SIGNED_FORM_SQL_SHA256, childSignedFormFingerprint } from '../migrations/childSignedFormOperation';
 import type { ChildSignedFormMetadataSettings } from '../migrations/childSignedFormMetadata';
 import { createRetentionKeepReconciler } from './retentionKeepReconciler';
+import { createGuardedDeletionReplayReader } from './guardedDeletionReplayReader';
 
 const config = loadMigrationConfig();
 const rootPassword = 'migration-test-root-only';
@@ -286,6 +287,33 @@ test('guard activation rejects unreconciled explicit deletion and withdrawal on 
     await admin.query("INSERT INTO account_score_permissions (account_uuid,visibility,confirmed_at) VALUES (?,'private',UTC_TIMESTAMP(6))", [childId]);
     assert.equal(await activate(), '2');
     assert.equal(writes, 1);
+});
+
+test('activation reads the guarded explicit journal while the real SQL lock is held', async () => {
+    const [[identity]] = await admin.query<RowDataPacket[]>('SELECT DATABASE() AS db,CURRENT_USER() AS user,@@GLOBAL.server_uuid AS id');
+    const original = randomUUID(), lineage = randomUUID(), keys = generateKeyPairSync('ed25519');
+    const guard = { state: 'hold' as const, database: identity.db as string, serverUuid: original,
+        epoch: randomUUID(), expiresAt: '2099-01-01T00:00:00.000Z', generation: '1',
+        recoveryCheckpoint: { lineage, minimumEpoch: '1', keySha256: createHash('sha256')
+            .update(keys.publicKey.export({ type: 'spki', format: 'der' })).digest('hex') } };
+    let writes = 0, reads = 0;
+    const journal = { async readRestoreGuard() { return guard; }, async readIntents() { return []; },
+        async readResolution() { return null; }, async writeRestoreGuard() { writes++; return '2'; } };
+    const pins = { database: identity.db as string, serverUuid: identity.id as string, originalServerUuid: original,
+        currentUser: identity.user as string, confirmation: 'ALL WRITERS FENCED AND INTENTS RECONCILED' };
+    await admin.query(`CREATE TABLE account_recovery_checkpoint (singleton_id TINYINT UNSIGNED PRIMARY KEY,
+        lineage_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL, epoch BIGINT UNSIGNED NOT NULL) ENGINE=InnoDB`);
+    try {
+        await admin.query('INSERT INTO account_recovery_checkpoint VALUES (1,?,1)', [lineage]);
+        const client: JournalHttpClient = { async request() { reads++; return { status: 200, data: { kind: 'storage#objects', items: [] } }; } };
+        const explicit = await createGuardedDeletionReplayReader({ database, guard: journal,
+            pins: { database: pins.database, currentUser: pins.currentUser, targetServerUuid: pins.serverUuid,
+                originalServerUuid: pins.originalServerUuid }, publicKey: keys.publicKey, client, readTimeoutMs: 10_000 });
+        const connection = await database.getConnection();
+        try { assert.equal(await activateRetentionGuard(connection, journal, pins, explicit), '2'); }
+        finally { connection.release(); }
+        assert.equal(writes, 1); assert.ok(reads >= 2);
+    } finally { await admin.query('DROP TABLE account_recovery_checkpoint'); }
 });
 
 test('verified deleted outcome applies only to pinned isolated SQL restore without later activity', async () => {
