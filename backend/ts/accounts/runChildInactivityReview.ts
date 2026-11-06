@@ -80,7 +80,7 @@ export async function runChildInactivityReview(args = process.argv.slice(2), env
         const hasMore = candidates.length > PAGE_SIZE;
         const page = candidates.slice(0, PAGE_SIZE);
         const report = { operation: 'read-only-inactivity-review', observedAt, draftOnly: true,
-            warning: 'Potential candidates only. Do not contact, warn or delete until the current contact, activity completeness, parent interface and notice have been independently qualified. If the parent does not confirm, keep the account pending.',
+            warning: 'Potential candidates only; this scan does not establish eligibility or authorize contact, warning or deletion. The included notice is an obsolete, unsendable draft. Use the separately qualified warning and nonresponse workflow.',
             draft: { noticeDigest: INACTIVITY_NOTICE_DIGEST, en: INACTIVITY_NOTICE.en, ptBR: INACTIVITY_NOTICE.ptBR },
             candidates: page, nextAfterChildId: hasMore ? page[page.length - 1].childId : null };
         (deps.write ?? (value => { process.stdout.write(value); }))(`${JSON.stringify(report, null, 2)}\n`);

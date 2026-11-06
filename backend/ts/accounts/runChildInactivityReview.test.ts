@@ -37,7 +37,8 @@ test('prints only private review information after pinned source, target, query 
     const report = JSON.parse(f.output);
     assert.equal(report.draftOnly, true); assert.equal(report.nextAfterChildId, null);
     assert.deepEqual(report.candidates.map((row: { review: string }) => row.review), ['potentially-approaching-warning', 'missing-activity']);
-    assert.match(report.warning, /Do not contact, warn or delete/u);
+    assert.match(report.warning, /does not establish eligibility or authorize contact, warning or deletion/u);
+    assert.match(report.warning, /obsolete, unsendable draft/u);
     assert.match(report.draft.en, /If you acknowledge/u);
     assert.equal(f.checks, 2);
     assert.deepEqual(f.statements.map(({ sql }) => sql.trim().split(/\s+/u)[0]), ['START', 'SELECT', 'SELECT', 'SELECT', 'ROLLBACK']);
