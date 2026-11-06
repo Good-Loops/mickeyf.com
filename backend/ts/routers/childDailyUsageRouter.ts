@@ -12,14 +12,13 @@ export function createChildDailyUsageHeartbeatRouter(database: Pick<Pool, 'getCo
     readContext: ReturnType<typeof createProviderAuthContextReader>): Router {
     const router = Router();
     router.use((_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
-    router.use(json({ limit: '1kb', strict: true }));
     // Bound unauthenticated traffic per network, then bound verified sessions separately.
     const heartbeatNetworkLimit = rateLimit({ windowMs: 15 * 60_000, limit: 6000, standardHeaders: 'draft-8', legacyHeaders: false,
         passOnStoreError: false, message: { error: 'RATE_LIMITED' } });
     const heartbeatSessionLimit = rateLimit({ windowMs: 15 * 60_000, limit: 120, standardHeaders: 'draft-8', legacyHeaders: false,
         passOnStoreError: false, message: { error: 'RATE_LIMITED' },
         keyGenerator: (_req, res) => createHash('sha256').update(res.locals.dailyUsageContext.session.sessionId, 'ascii').digest('hex') });
-    router.post('/', heartbeatNetworkLimit, async (req, res, next) => {
+    router.post('/', heartbeatNetworkLimit, json({ limit: '1kb', strict: true }), async (req, res, next) => {
         if (!record(req.body) || !exact(req.body, [])) return res.status(400).json({ error: 'INVALID_REQUEST' });
         try {
             const context = await readContext(req, 'complete');

@@ -22,6 +22,11 @@ test('draft usage endpoints reject unauthenticated and client-timed requests', a
         const valid = { childAccountId: randomUUID(), timeZone: 'America/Sao_Paulo', dailyLimitMs: 60_000 };
         assert.equal((await post('/heartbeat', {})).status, 403);
         assert.equal((await post('/heartbeat', { timestamp: 0 })).status, 400);
+        const malformed = await fetch(`http://127.0.0.1:${address.port}/heartbeat`, {
+            method: 'POST', headers: { 'content-type': 'application/json' }, body: '{',
+        });
+        assert.equal(malformed.status, 400);
+        assert.ok(malformed.headers.get('ratelimit'));
         assert.equal((await post('/get', { childAccountId: valid.childAccountId })).status, 403);
         assert.equal((await post('/set', valid)).status, 403);
         assert.equal((await post('/set', { ...valid, dailyLimitMs: 0 })).status, 400);
