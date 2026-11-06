@@ -43,6 +43,10 @@ import { CHILD_SIGNED_FORM_SQL_SHA256, childSignedFormFingerprint } from '../mig
 import type { ChildSignedFormMetadataSettings } from '../migrations/childSignedFormMetadata';
 import { createRetentionKeepReconciler } from './retentionKeepReconciler';
 import { createGuardedDeletionReplayReader } from './guardedDeletionReplayReader';
+import { planDeletionReplay, applyDeletionReplay } from './deletionReplay';
+import { DELETION_JOURNAL_BUCKET } from './gcsDeletionJournal';
+import { ACCOUNT_IDENTITY_MIGRATION_VERSION } from '../migrations/accountIdentitySchema';
+import { findPasswordLoginAccount } from './passwordAccountRepository';
 
 const config = loadMigrationConfig();
 const rootPassword = 'migration-test-root-only';
@@ -314,6 +318,73 @@ test('activation reads the guarded explicit journal while the real SQL lock is h
         finally { connection.release(); }
         assert.equal(writes, 1); assert.ok(reads >= 2);
     } finally { await admin.query('DROP TABLE account_recovery_checkpoint'); }
+});
+
+test('recovery reconciles both journals before activation and leaves an unrelated account accessible', async () => {
+    const { parentId, childId, unrelatedId } = await managedFixture();
+    const [[identity]] = await admin.query<RowDataPacket[]>('SELECT DATABASE() AS db,CURRENT_USER() AS user,@@GLOBAL.server_uuid AS id');
+    const [[migration]] = await admin.query<RowDataPacket[]>("SELECT DATE_FORMAT(applied_at,'%Y-%m-%d %H:%i:%s.%f') AS epoch FROM schema_migrations WHERE version=?", [ACCOUNT_IDENTITY_MIGRATION_VERSION]);
+    const original = randomUUID(), lineage = randomUUID(), keys = generateKeyPairSync('ed25519');
+    const guard = { state: 'hold' as const, database: identity.db as string, serverUuid: original,
+        epoch: randomUUID(), expiresAt: '2099-01-01T00:00:00.000Z', generation: '1',
+        recoveryCheckpoint: { lineage, minimumEpoch: '1', keySha256: createHash('sha256')
+            .update(keys.publicKey.export({ type: 'spki', format: 'der' })).digest('hex') } };
+    const intent: RetentionIntent = { parentId, childId, warningId: randomUUID(), activityAt: '2020-01-01T00:00:00.000000Z',
+        deliveredAt: '2023-01-01T00:00:00.000000Z', channel: 'in-app', targetDigest: 'a'.repeat(64),
+        noticeDigest: 'b'.repeat(64), receiptDigest: 'c'.repeat(64) };
+    let writes = 0;
+    const journal = { async readRestoreGuard() { return guard; }, async readIntents() { return [intent]; },
+        async verifyRetentionIntent() { return true; }, async readResolution() { return { outcome: 'deleted' as const,
+            confirmedAt: '2024-01-01T00:00:00.000000Z', observedActivityAt: null, proofDigest: 'd'.repeat(64) }; },
+        async writeRestoreGuard() { writes++; return '2'; } };
+    const pins = { database: identity.db as string, serverUuid: identity.id as string, originalServerUuid: original, currentUser: identity.user as string };
+    const settings = { mode: 'recovery' as const, database: pins.database, expectedCurrentUser: pins.currentUser,
+        expectedServerUuid: pins.serverUuid, expectedIdentityEpoch: migration.epoch as string,
+        sourceServerUuid: original, maxIntents: 10, maxDurationMs: 60_000 };
+    const body = JSON.stringify({ version: 1, action: 'delete-account', accountId: unrelatedId, requestedAt: '2024-01-01T00:00:00.000Z' });
+    const object = { bucket: DELETION_JOURNAL_BUCKET, name: `v1/intents/${randomUUID()}.json`, generation: '123',
+        size: String(Buffer.byteLength(body)), md5Hash: createHash('md5').update(body).digest('base64') };
+    const client: JournalHttpClient = { async request(request) {
+        if (request.params?.alt === 'media') return { status: 200, data: body };
+        return { status: 200, data: { kind: 'storage#objects', items: request.params?.softDeleted ? [] : [object] } };
+    } };
+    await admin.query(`CREATE TABLE account_recovery_checkpoint (singleton_id TINYINT UNSIGNED PRIMARY KEY,
+        lineage_id CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL, epoch BIGINT UNSIGNED NOT NULL) ENGINE=InnoDB`);
+    let runtime: Pool | undefined;
+    try {
+        await admin.query('INSERT INTO account_recovery_checkpoint VALUES (1,?,0)', [lineage]);
+        const explicit = await createGuardedDeletionReplayReader({ database, guard: journal,
+            pins: { database: pins.database, currentUser: pins.currentUser, targetServerUuid: pins.serverUuid,
+                originalServerUuid: pins.originalServerUuid }, publicKey: keys.publicKey, client, readTimeoutMs: 10_000 });
+        const activate = async () => {
+            const connection = await database.getConnection();
+            try { return await activateRetentionGuard(connection, journal,
+                { ...pins, confirmation: 'ALL WRITERS FENCED AND INTENTS RECONCILED' }, explicit); }
+            finally { connection.release(); }
+        };
+        const reconcile = () => executeRetentionReconciliation('apply-restored',
+            { confirmation: 'ISOLATED RESTORE FENCED AND DELETION VERIFIED', intent }, pins, journal as never, database, Buffer.alloc(32, 8));
+        await assert.rejects(planDeletionReplay(database, explicit, settings));
+        await assert.rejects(reconcile());
+        assert.equal((await admin.query<RowDataPacket[]>('SELECT user_id FROM users WHERE account_uuid IN (?,?)', [childId, unrelatedId]))[0].length, 2);
+        await admin.query('UPDATE account_recovery_checkpoint SET epoch=1');
+        await assert.rejects(activate());
+        const plan = await planDeletionReplay(database, explicit, settings);
+        assert.equal((await applyDeletionReplay(database, explicit, settings, plan.sha256)).deletedAccounts, 1);
+        await assert.rejects(activate());
+        assert.deepEqual(await reconcile(), { operation: 'apply-restored', confirmed: true });
+        assert.equal(await activate(), '2'); assert.equal(writes, 1);
+        await admin.query("CREATE USER 'restore_runtime_test'@'%' IDENTIFIED BY 'restore-runtime-test-only'");
+        await admin.query('GRANT SELECT ON `mickeyf_migration_test`.`users` TO \'restore_runtime_test\'@\'%\'');
+        runtime = mysql.createPool({ host: config.host, port: config.port, database: config.database,
+            user: 'restore_runtime_test', password: 'restore-runtime-test-only', connectionLimit: 1 });
+        assert.equal((await findPasswordLoginAccount(runtime, `synthetic-${parentId}`))?.accountId, parentId);
+        assert.equal(await findPasswordLoginAccount(runtime, `synthetic-${unrelatedId}`), undefined);
+    } finally {
+        if (runtime) await runtime.end();
+        await admin.query("DROP USER IF EXISTS 'restore_runtime_test'@'%'");
+        await admin.query('DROP TABLE account_recovery_checkpoint');
+    }
 });
 
 test('verified deleted outcome applies only to pinned isolated SQL restore without later activity', async () => {
