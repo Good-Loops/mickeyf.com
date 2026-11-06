@@ -220,6 +220,29 @@ this source review.
   browser-to-Hosting requests, but does not establish the roles, actual routes
   or classification of this project's processing. Do not assume it resolves
   the Hosting transfer question. [ANPD Resolution 19/2024](https://www.gov.br/anpd/pt-br/acesso-a-informacao/institucional/atos-normativos/regulamentacoes_anpd/resolucao-cd-anpd-no-19-de-23-de-agosto-de-2024).
+- **Hosting request paths and logs:** the candidate source uses same-origin
+  `/auth` and `/api` requests for the hosted website, and `firebase.json`
+  rewrites those paths to Cloud Run. Native API calls use the configured Cloud
+  Run origin, with the Android Apple callback separately routed through the
+  Hosting URL. The callback uses a POST body and its return proof is in a URL
+  fragment; neither fact proves that every intermediary's logs omit sensitive
+  data. This is source/configuration evidence, not a capture of every deployed
+  route. Google's [Hosting configuration](https://firebase.google.com/docs/hosting/full-config)
+  describes Cloud Run rewrites. Google states that Hosting uses and retains
+  incoming IP addresses for a few months; it also describes Hosting as globally
+  processed. If Hosting request logging is linked to Cloud Logging, documented
+  fields include the complete request URL, referrer, IP and user agent, with
+  Cloud Logging retention configurable; do not put credentials or personal
+  data in URLs. See [Firebase privacy](https://firebase.google.com/support/privacy/)
+  and [Hosting request logs](https://firebase.google.com/docs/hosting/web-request-logs-and-metrics).
+  A project-level read-only Logging inventory on 6 November listed the default
+  and required sinks only, with global `_Default` and `_Required` bucket
+  retention of 30 and 400 days respectively. Its 13 listed log names contained
+  no Hosting `webrequests` name. This does not establish that Hosting export
+  is disabled, exclude organization/folder-level routing or non-global buckets,
+  reveal Google's internal retention, or settle the Brazilian transfer question.
+  No individual request log was read; confirm the actual Hosting linkage and any
+  remaining routing before treating this as a complete logging inventory.
 - **Brevo:** the public terms dated 1 October 2025 incorporate a DPA. It describes
   processing on customer instructions, confidentiality/security measures,
   subcontractors and customer-controlled retention. France/Belgium hosting and
