@@ -8,6 +8,8 @@ import { guardConnectionQueries } from '../db/queryTimeoutConnection';
 import { cleanupChildDailyUsage, configureChildDailyUsage, readChildDailyUsage } from './childDailyUsageStore';
 import { clearChildDailyUsageLimit, getChildDailyUsageLimit, heartbeatChildDailyUsage, setChildDailyUsageLimit } from './childDailyUsageService';
 import type { ProviderAuthContext } from '../auth/providerAuthContext';
+import type { MigrationConnection } from '../migrations/leaderboardSchema';
+import { verifyChildDailyUsageSchema } from '../migrations/childDailyUsageSchema';
 
 let admin: Connection;
 let pool: Pool;
@@ -65,6 +67,7 @@ before(async () => {
     const draft = readFileSync(path.join(__dirname, '../../migrations/pending/draft_parent_child_daily_usage.sql'), 'utf8');
     assert.equal(draft.replace(/\r\n/gu, '\n').trim(), reviewedDraft);
     await admin.query(reviewedDraft);
+    await verifyChildDailyUsageSchema(admin as unknown as MigrationConnection);
     await admin.query('INSERT INTO parent_child_consents (child_uuid) VALUES (?)', [child]);
     await admin.query("GRANT SELECT, INSERT, UPDATE, DELETE ON child_usage_test.parent_child_daily_usage TO 'migration_test'@'%'");
     for (const table of ['users', 'account_sessions', 'parent_child_consents']) {
@@ -150,4 +153,27 @@ test('retention removes stale totals without removing the parent setting or rece
         assert.equal(byId.get(recent)?.used_ms, 9000);
         assert.deepEqual(await cleanupChildDailyUsage(pool), { cleared: 0, mayHaveMore: false });
     } finally { connection.release(); }
+});
+
+test('schema verification rejects a weakened retention relationship or bounds', async () => {
+    await admin.query('ALTER TABLE parent_child_daily_usage DROP FOREIGN KEY fk_child_daily_usage_consent');
+    try {
+        await assert.rejects(verifyChildDailyUsageSchema(admin as unknown as MigrationConnection), /schema differs/u);
+    } finally {
+        await admin.query(`ALTER TABLE parent_child_daily_usage ADD CONSTRAINT fk_child_daily_usage_consent FOREIGN KEY (child_uuid)
+            REFERENCES parent_child_consents (child_uuid) ON DELETE CASCADE ON UPDATE RESTRICT`);
+    }
+    await verifyChildDailyUsageSchema(admin as unknown as MigrationConnection);
+    await admin.query('ALTER TABLE parent_child_daily_usage DROP CHECK chk_child_daily_usage_bounds');
+    await admin.query('ALTER TABLE parent_child_daily_usage ADD CONSTRAINT chk_child_daily_usage_bounds CHECK (1=1)');
+    try {
+        await assert.rejects(verifyChildDailyUsageSchema(admin as unknown as MigrationConnection), /schema differs/u);
+    } finally {
+        await admin.query('ALTER TABLE parent_child_daily_usage DROP CHECK chk_child_daily_usage_bounds');
+        await admin.query(`ALTER TABLE parent_child_daily_usage ADD CONSTRAINT chk_child_daily_usage_bounds CHECK (
+            daily_limit_ms BETWEEN 60000 AND 86400000 AND used_ms <= 86400000
+            AND (active_until_ms IS NULL OR (active_until_ms >= accounted_at_ms
+                AND active_until_ms <= accounted_at_ms + 30000)))`);
+    }
+    await verifyChildDailyUsageSchema(admin as unknown as MigrationConnection);
 });
