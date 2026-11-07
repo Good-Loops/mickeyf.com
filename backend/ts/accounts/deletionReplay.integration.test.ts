@@ -118,6 +118,7 @@ test('a late deletion intent invalidates a restore plan and is reapplied on the 
         'INSERT INTO users (user_name,email,user_password) VALUES (?,?,?)', [`late-${suffix}`, `${suffix}@example.invalid`, passwordHash]);
     const [other] = await administrator.query<ResultSetHeader>(
         'INSERT INTO users (user_name,email,user_password) VALUES (?,?,?)', [`other-${suffix}`, `other-${suffix}@example.invalid`, passwordHash]);
+    try {
     const [rows] = await administrator.query<RowDataPacket[]>('SELECT account_uuid AS accountId FROM users WHERE user_id=?', [target.insertId]);
     const accountId = String(rows[0].accountId);
     const intents: DeletionIntent[] = [];
@@ -143,6 +144,9 @@ test('a late deletion intent invalidates a restore plan and is reapplied on the 
     assert.equal((await applyDeletionReplay(database, journal, settings, current.sha256)).deletedAccounts, 1);
     const [remaining] = await administrator.query<RowDataPacket[]>('SELECT user_id FROM users WHERE user_id IN (?,?) ORDER BY user_id', [target.insertId, other.insertId]);
     assert.deepEqual(remaining.map(row => row.user_id), [other.insertId]);
+    } finally {
+        await administrator.query('DELETE FROM users WHERE user_id IN (?,?)', [target.insertId, other.insertId]);
+    }
 });
 
 async function insertPendingAttempt(userId: number): Promise<void> {
