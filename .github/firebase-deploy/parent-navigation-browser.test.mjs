@@ -47,7 +47,10 @@ async function fixture(t) {
             clientId:'com.example.web',redirectUri:'https://example.test/login'}]};
         else if (url.pathname === '/auth/parent-registration/config') value = {enabled:true,creationEnabled:false,policyVersion:'synthetic',
             consentVersion:'synthetic',consentText:'Synthetic',privacyNoticeUrl:'https://mickeyf.com/privacy',countries:['US']};
-        else if (url.pathname === '/auth/parent-registration/children/list') value = {children:children.map((accountId, i) => ({accountId,userName:`Synthetic child ${i+1}`,scoreVisibility:'private'}))};
+        else if (url.pathname === '/auth/parent-registration/children/list') {
+            assert.deepEqual(body, { identitiesOnly: true });
+            value = {children:children.map((accountId, i) => ({accountId,userName:`Synthetic child ${i+1}`}))};
+        }
         else if (url.pathname === '/auth/parent-registration/begin') { purpose=body.purpose; value={state,nonce,expiresInSeconds:300}; }
         else if (url.pathname === '/auth/parent-registration/complete') value = {grant,purpose,expiresInSeconds:300};
         else if (url.pathname === '/auth/parent-registration/cancel') { value={cancelled:true}; cancelResolve(); }
