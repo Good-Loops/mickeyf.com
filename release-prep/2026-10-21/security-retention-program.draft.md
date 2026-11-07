@@ -24,10 +24,10 @@ document creates no scheduled automation and sends no messages.
 | --- | --- | --- |
 | Forged, replayed or mismatched consent | Exact request/provider/account/contact/policy binding, one-use grants, private child creation and owner-only review fields. | Synthetic reject/expire/replay tests plus actual owner decision procedure; assess guardian evidence by region. |
 | Provider collection before eligibility | Native/coarse-age gate, protective unknown/conflict handling, retry restriction and child provider restrictions. | Actual supported-device/network behavior; proportionate web assurance and correction handling. |
-| Mailbox or attachment disclosure | Proposed two-step verification, restricted encrypted storage, no real data in Git/CI/shared screenshots, minimal duplicate copies. | Owner confirmation and synthetic access/recovery demonstration; no recovery keys or passwords in chat. |
-| Retention after withdrawal/deletion | SQL cascades/expiry cleanup; read-only all-status report and proposed private reference register. | Demonstrate the actual owner pass, missing/deleted/expired/failed-lookup cases and message/file/trash cleanup. |
+| Mailbox or attachment disclosure | Two-step verification is enabled on the form mailbox. The encrypted archive, synthetic mailbox cleanup and recovery on a second computer were exercised. | Verify the mailbox recovery email and access isolation; keep real forms and recovery material out of shared artifacts. |
+| Retention after withdrawal/deletion | SQL cascades/expiry cleanup; owner review and synthetic form-copy lifecycle passed in 2.2–2.3. | Qualify production integration, continuing retention and provider recovery-copy limits. |
 | Restore revives deleted accounts/permission | Existing independent deletion journal/replay and public-permission invalidation. | Qualified recovery procedure and actual retention/restore evidence; do not expire journal records speculatively. |
-| Public nickname/result disclosure | Private new accounts and separately controlled public permission; draft public participation closed. | Review legacy visibility and exact hosted behavior; no blanket all-accounts-private claim. |
+| Public nickname/result disclosure | Private new accounts and separately controlled public permission; the live public-score configuration is enabled. | Qualify final-device and supported-client behavior; no blanket all-accounts-private claim. |
 | Provider or incident failure | Existing guarded closure/fallback tooling and bounded database operations. | Named incident contact, private factual incident record and applicable notification/escalation assessment. |
 
 Review risks and the program at least annually and after a material incident,
@@ -46,12 +46,12 @@ provider review](../2026-11-04/retention-provider-review.md).
 | --- | --- | --- |
 | Child account/private results | Necessary for the chosen account service; parent/family deletion implemented. | Define continued necessity, inactive-account handling and a review/deletion timeframe. "Active forever" is not a final schedule. |
 | Unused signed-form request | Logical 14-day expiry; bounded maintenance removes expired unused SQL rows. | Qualify maintenance cadence and backlog handling. |
-| Rejected/incomplete messages/files | Candidate notice promises deletion within 14 days. | Demonstrate all operator-controlled copies, including trash; decide precise start event for incomplete messages. |
-| Approved but unused attachment | Request eventually expires/cancels; no explicit attachment deadline in current notice. | Proposed first reconciliation pass after expiry/cancellation; final wording/version and owner acceptance pending. |
-| Used consent attachment | Candidate says retain while child account active; delete within 14 days of withdrawal/deletion. | Qualify the all-status report/register operation; justify necessity and provider/recovery-copy limits. |
+| Rejected/incomplete messages/files | The candidate notice specifies 14 days; synthetic mailbox and known-copy cleanup passed. | Keep the operating pass and provider-copy limitations accurate in the final notice. |
+| Approved but unused attachment | The candidate notice specifies removal within 14 days of request expiry or cancellation; the synthetic lifecycle passed. | Qualify production integration and the continuing operating pass. |
+| Used consent attachment | The candidate retains it while the child account is active, then specifies removal within 14 days of withdrawal/deletion; the synthetic lifecycle passed. | Qualify production integration, continuing review and provider/recovery-copy limits. |
 | Daily-limit withdrawal receipt | The owner chose a minimal permission record for 14 days after the control is switched off; the setting and usage total are removed immediately. Draft cleanup deletes the receipt on the next scheduled pass after 14 days, or the child-account cascade removes it sooner. | Before enabling, apply and verify the reviewed schema and grants, enable and monitor receipt maintenance, and qualify recovery and real-device behavior. Keep `CHILD_DAILY_USAGE_RECEIPT_RETENTION_ENABLED` on even if collection is disabled; disable it only after confirming no receipts remain. A restore can omit newer receipts, and recovery copies can retain data longer. |
 | Private retention register | Proposed minimal reference/digest/locators and completion marker. | Decide justified finite completion-marker period; remove unnecessary locators after all-copy deletion. |
-| Sessions | Access expiry 4 hours or remembered 30 days. Expired SQL rows are not universally deleted at expiry. | Decide physical cleanup schedule; current per-account/session creation/logout/deletion is not a global deadline. |
+| Sessions | Access expiry is 4 hours or remembered 30 days. Bounded global cleanup passed local tests but is not deployed. | Deploy and verify its actual schedule and backlog handling; logical expiry is not physical erasure. |
 | Eligibility/provider/parent attempts | Logical 5-minute validity. Some cleanup is on subsequent begin or maintenance. | Inventory each physical purge path and adopt finite cleanup/backlog handling. |
 | Anonymous registration restriction | At most 24 hours in tab marker/cookie. | Qualify device behavior; no raw age/account data in marker. |
 | Submission retry receipts | Existing cleanup cutoff 24 hours. | Confirm actual configured execution/backlog and recovery-copy handling. |
@@ -64,16 +64,14 @@ accurate recovery/provider limits. No speculative inactive-account/log/journal
 deletion or new TTL has been enabled.
 [16 CFR 312.10](https://www.ecfr.gov/current/title-16/chapter-I/subchapter-C/part-312/section-312.10).
 
-## Secure-storage setup to verify privately
+## Secure storage
 
-Verify two-step protection and recovery access on the actual form mailbox. Choose
-an existing encrypted, owner-restricted storage location outside the repository,
-build artifacts and unreviewed sync/sharing. Verify device encryption/recovery
-privately before storing real forms; do not send recovery material here. Test with
-a synthetic attachment, remove it from mailbox/trash/downloaded/synced copies and
-record what recovery copies remain under provider terms. Confirm that another
-device user cannot casually open the archive. This draft has inspected or changed
-none of those settings.
+The form mailbox has two-step verification enabled; Google reports its recovery
+email is not yet verified. The owner opened the encrypted archive on a second
+computer, and synthetic mailbox, attachment and known-copy cleanup passed. These
+checks used no real family data. Verify mailbox recovery and access isolation,
+and retain no passwords, recovery codes or real forms in shared artifacts.
+Provider-internal recovery copies have separate retention limits.
 
 ## Provider and incident record
 
