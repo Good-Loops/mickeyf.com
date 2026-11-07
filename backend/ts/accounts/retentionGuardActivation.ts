@@ -85,15 +85,18 @@ export async function activateRetentionGuard(connection: Connection, journal: Jo
         }
         const intents = await journal.readIntents();
         const resolved = [];
-        const conditionalDeletions = new Map<string, string>();
+        const conditionalDeletions = new Map<string, { confirmedAt: string; deliveredAt: string; activityAt: string }>();
         for (const intent of intents) {
             const resolution = await journal.readResolution(intent);
             if (!resolution) throw new Error('Unresolved intent.');
             resolved.push({ intent, resolution });
             if (resolution.outcome === 'deleted' && resolution.observedActivityAt === null
                 && parseInactivityInstant(resolution.confirmedAt) !== null
-                && (!conditionalDeletions.has(intent.childId) || conditionalDeletions.get(intent.childId)! < resolution.confirmedAt)) {
-                conditionalDeletions.set(intent.childId, resolution.confirmedAt);
+                && parseInactivityInstant(intent.deliveredAt) !== null && parseInactivityInstant(intent.activityAt) !== null
+                && intent.deliveredAt <= resolution.confirmedAt
+                && (!conditionalDeletions.has(intent.childId) || conditionalDeletions.get(intent.childId)!.confirmedAt < resolution.confirmedAt)) {
+                conditionalDeletions.set(intent.childId, { confirmedAt: resolution.confirmedAt,
+                    deliveredAt: intent.deliveredAt, activityAt: intent.activityAt });
             }
         }
         for (const { intent, resolution } of resolved) {
@@ -111,9 +114,11 @@ export async function activateRetentionGuard(connection: Connection, journal: Jo
                     || resolution.observedActivityAt > resolution.confirmedAt) throw new Error('Kept outcome is invalid.');
                 if (rows.length === 0) {
                     const explicitAt = explicitDeletions.get(intent.childId);
-                    const conditionalAt = conditionalDeletions.get(intent.childId);
+                    const later = conditionalDeletions.get(intent.childId);
+                    const laterDeletion = later && later.confirmedAt >= resolution.confirmedAt
+                        && later.deliveredAt >= resolution.confirmedAt && later.activityAt >= resolution.observedActivityAt;
                     if ((!explicitAt || explicitAt < resolution.confirmedAt)
-                        && (!conditionalAt || conditionalAt < resolution.confirmedAt)) throw new Error('Kept account is unexpectedly absent.');
+                        && !laterDeletion) throw new Error('Kept account is unexpectedly absent.');
                 } else if (rows[0].parentId !== intent.parentId || rows[0].childId !== intent.childId
                     || parseInactivityInstant(rows[0].activityAt) === null || rows[0].activityAt < resolution.observedActivityAt) {
                     throw new Error('Kept account state differs.');

@@ -128,12 +128,15 @@ test('activation accepts an absent kept child only with a later recorded deletio
         assert.equal(held.writes, 0);
     }
     const otherWarning = '55555555-5555-4555-8555-555555555555';
-    const laterIntent = { ...intent, warningId: otherWarning, deliveredAt: '2025-01-05T00:00:00.000000Z' };
-    const laterDeleted: RetentionResolution = { ...deleted, confirmedAt: '2026-01-01T00:00:00.000000Z' };
+    const laterIntent = { ...intent, warningId: otherWarning, activityAt: kept.observedActivityAt!, deliveredAt: '2025-01-05T00:00:00.000000Z' };
+    const laterDeleted: RetentionResolution = { ...deleted, confirmedAt: '2026-01-10T00:00:00.000000Z' };
     const subsequent = fixture({ records: [intent, laterIntent], resolutions: { [warning]: kept, [otherWarning]: laterDeleted } });
     assert.equal(await activateRetentionGuard(subsequent.connection, subsequent.journal, pins, subsequent.deletionJournal), '9');
     const earlier = fixture({ records: [intent, laterIntent], resolutions: { [warning]: kept, [otherWarning]: deleted } });
     await assert.rejects(activateRetentionGuard(earlier.connection, earlier.journal, pins, earlier.deletionJournal));
+    const staleIntent = { ...laterIntent, activityAt: intent.activityAt };
+    const stale = fixture({ records: [intent, staleIntent], resolutions: { [warning]: kept, [otherWarning]: laterDeleted } });
+    await assert.rejects(activateRetentionGuard(stale.connection, stale.journal, pins, stale.deletionJournal));
 });
 test('activation holds on unresolved outcomes, restored deleted accounts, writers or changing inventories', async () => {
     for (const options of [
