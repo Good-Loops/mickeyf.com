@@ -11,7 +11,7 @@ In Unity Hub, add and open this directory from the repository root:
 unity\three-bosses
 ```
 
-Use Unity 6.3 LTS editor version 6000.3.8f1. Do not upgrade the editor as part
+Use Unity 6.3 LTS editor version 6000.3.27f2. Do not upgrade the editor as part
 of routine repository work. On a fresh checkout, allow the initial import and
 script compilation to finish before entering Play Mode.
 
@@ -87,7 +87,8 @@ player never receives or stores the signed value.
 
 The local website prototype reads generated WebGL output from outside the
 repository. Before building, leave the Editor open on this exact project and
-do not edit or stage Unity settings while the build is running. From the
+switch its active build target to WebGL. Do not edit or stage Unity settings
+while the build is running. From the
 repository root, run:
 
 ```powershell

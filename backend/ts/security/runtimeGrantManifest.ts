@@ -5,14 +5,32 @@ export type RuntimeDatabaseAccount = Readonly<{
 
 export type RuntimeDmlPrivilege = 'SELECT' | 'INSERT' | 'UPDATE';
 
+export type RuntimeGrantProfile = 'google' | 'google-apple' | 'google-apple-parent' | 'google-apple-parent-signed' | 'google-apple-parent-signed-inactivity' | 'google-apple-parent-signed-continuity' | 'google-apple-parent-signed-warnings' | 'google-apple-parent-signed-recovery' | 'google-apple-parent-signed-recovery-usage';
+
+export function parseRuntimeGrantProfile(value: string | undefined): RuntimeGrantProfile {
+    if (value === undefined) return 'google-apple';
+    if (value === 'google-apple-parent-signed-continuity' || value === 'google-apple-parent-signed-warnings' || value === 'google-apple-parent-signed-recovery' || value === 'google-apple-parent-signed-recovery-usage') return value;
+    if (value === 'google' || value === 'google-apple' || value === 'google-apple-parent' || value === 'google-apple-parent-signed' || value === 'google-apple-parent-signed-inactivity') return value;
+    throw new Error('Runtime grant profile is not recognized');
+}
+
 export type RuntimeColumnGrant = Readonly<{
     privilege: RuntimeDmlPrivilege;
     columns: readonly string[];
 }>;
 
 export type RuntimeTableGrant = Readonly<{
-    table: 'users' | 'game_submission_receipts' | 'game_personal_bests';
+    table: 'users' | 'game_submission_receipts' | 'game_personal_bests' | 'schema_migrations' | 'account_sessions'
+        | 'account_provider_identities' | 'provider_auth_attempts' | 'apple_provider_tokens' | 'apple_auth_revocations'
+        | 'registration_authorizations' | 'account_registration_profiles' | 'parent_registration_attempts' | 'parent_child_consents' | 'account_score_permissions' | 'parent_signed_forms'
+        | 'parent_managed_child_activity' | 'parent_child_inactivity_warnings' | 'parent_child_activity_continuity' | 'parent_child_warning_history' | 'account_recovery_checkpoint' | 'parent_child_daily_usage' | 'child_daily_usage_withdrawal_receipts';
     grants: readonly RuntimeColumnGrant[];
+    tablePrivileges: readonly ('DELETE' | 'SELECT')[];
+}>;
+
+export type RuntimeTablePrivilege = Readonly<{
+    tableName: RuntimeTableGrant['table'];
+    privilegeType: 'DELETE' | 'SELECT';
 }>;
 
 export type RuntimeColumnPrivilege = Readonly<{
@@ -33,18 +51,91 @@ export const PRODUCTION_RUNTIME_DATABASE_ROLE: RuntimeDatabaseAccount =
         host: '%',
     });
 
-/**
- * Exact application-runtime DML. Migration history and schema changes belong
- * to a separate maintenance identity and are deliberately absent here.
- */
-export const RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freeze([
+const APPLE_RUNTIME_TABLE_GRANTS: readonly RuntimeTableGrant[] = Object.freeze([
+    Object.freeze({
+        table: 'apple_auth_revocations' as const,
+        tablePrivileges: Object.freeze(['DELETE' as const]),
+        grants: Object.freeze([
+            Object.freeze({ privilege: 'SELECT' as const, columns: Object.freeze(['subject_hash', 'revoked_at', 'expires_at']) }),
+            Object.freeze({ privilege: 'INSERT' as const, columns: Object.freeze(['subject_hash', 'revoked_at', 'expires_at']) }),
+            Object.freeze({ privilege: 'UPDATE' as const, columns: Object.freeze(['revoked_at', 'expires_at']) }),
+        ]),
+    }),
+    Object.freeze({
+        table: 'apple_provider_tokens' as const,
+        tablePrivileges: Object.freeze(['DELETE' as const]),
+        grants: Object.freeze([
+            Object.freeze({ privilege: 'SELECT' as const,
+                columns: Object.freeze(['token_id', 'account_uuid', 'client_id', 'encrypted_token', 'created_at',
+                    'revocation_requested_at', 'next_attempt_at', 'retention_deadline', 'attempt_count']) }),
+            Object.freeze({ privilege: 'INSERT' as const,
+                columns: Object.freeze(['token_id', 'account_uuid', 'client_id', 'encrypted_token', 'created_at']) }),
+            Object.freeze({ privilege: 'UPDATE' as const,
+                columns: Object.freeze(['revocation_requested_at', 'next_attempt_at', 'retention_deadline', 'attempt_count']) }),
+        ]),
+    }),
+]);
+
+/** Password/Google accounts, renewable sessions, scores and self-deletion through schema 0015. */
+export const GOOGLE_RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freeze([
+    Object.freeze({
+        table: 'account_sessions' as const,
+        tablePrivileges: Object.freeze(['DELETE' as const]),
+        grants: Object.freeze([
+            Object.freeze({ privilege: 'SELECT' as const,
+                columns: Object.freeze(['session_hash', 'account_uuid', 'created_at', 'expires_at',
+                    'remembered', 'renewed_at', 'previous_session_hash', 'previous_valid_until']) }),
+            Object.freeze({ privilege: 'INSERT' as const,
+                columns: Object.freeze(['session_hash', 'account_uuid', 'created_at', 'expires_at',
+                    'remembered', 'renewed_at']) }),
+            Object.freeze({ privilege: 'UPDATE' as const,
+                columns: Object.freeze(['session_hash', 'expires_at', 'renewed_at',
+                    'previous_session_hash', 'previous_valid_until']) }),
+        ]),
+    }),
+    Object.freeze({
+        table: 'account_provider_identities' as const,
+        tablePrivileges: Object.freeze([]),
+        grants: Object.freeze([
+            Object.freeze({ privilege: 'SELECT' as const,
+                columns: Object.freeze(['provider', 'subject', 'account_uuid']) }),
+            Object.freeze({ privilege: 'INSERT' as const,
+                columns: Object.freeze(['provider', 'subject', 'account_uuid', 'linked_at']) }),
+            // MySQL 8.0.31 requires a write privilege for SELECT ... FOR UPDATE.
+            // Identity reassignment and direct identity deletion remain forbidden.
+            Object.freeze({ privilege: 'UPDATE' as const,
+                columns: Object.freeze(['linked_at']) }),
+        ]),
+    }),
+    Object.freeze({
+        table: 'provider_auth_attempts' as const,
+        tablePrivileges: Object.freeze(['DELETE' as const]),
+        grants: Object.freeze([
+            Object.freeze({ privilege: 'SELECT' as const,
+                columns: Object.freeze(['state_hash', 'binding_hash', 'nonce', 'client_key',
+                    'action', 'user_id', 'account_uuid', 'expires_at']) }),
+            Object.freeze({ privilege: 'INSERT' as const,
+                columns: Object.freeze(['state_hash', 'binding_hash', 'nonce', 'client_key',
+                    'action', 'user_id', 'account_uuid', 'expires_at']) }),
+        ]),
+    }),
+    Object.freeze({
+        table: 'schema_migrations' as const,
+        tablePrivileges: Object.freeze([]),
+        grants: Object.freeze([
+            Object.freeze({ privilege: 'SELECT' as const,
+                columns: Object.freeze(['version', 'applied_at']) }),
+        ]),
+    }),
     Object.freeze({
         table: 'users' as const,
+        tablePrivileges: Object.freeze(['DELETE' as const]),
         grants: Object.freeze([
             Object.freeze({
                 privilege: 'SELECT' as const,
                 columns: Object.freeze([
                     'user_id',
+                    'account_uuid',
                     'user_name',
                     'email',
                     'user_password',
@@ -62,6 +153,7 @@ export const RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freez
     }),
     Object.freeze({
         table: 'game_submission_receipts' as const,
+        tablePrivileges: Object.freeze(['DELETE' as const]),
         grants: Object.freeze([
             Object.freeze({
                 privilege: 'SELECT' as const,
@@ -95,6 +187,7 @@ export const RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freez
     }),
     Object.freeze({
         table: 'game_personal_bests' as const,
+        tablePrivileges: Object.freeze(['DELETE' as const]),
         grants: Object.freeze([
             Object.freeze({
                 privilege: 'SELECT' as const,
@@ -128,7 +221,150 @@ export const RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freez
             }),
         ]),
     }),
+    Object.freeze({
+        table: 'registration_authorizations' as const, tablePrivileges: Object.freeze(['DELETE' as const]),
+        grants: Object.freeze([
+            Object.freeze({ privilege: 'SELECT' as const, columns: Object.freeze(['binding_hash', 'policy_digest', 'country_code', 'age_band', 'expires_at', 'consumed_at']) }),
+            Object.freeze({ privilege: 'INSERT' as const, columns: Object.freeze(['binding_hash', 'policy_digest', 'country_code', 'age_band', 'expires_at']) }),
+            Object.freeze({ privilege: 'UPDATE' as const, columns: Object.freeze(['consumed_at']) }),
+        ]),
+    }),
+    Object.freeze({
+        table: 'account_registration_profiles' as const, tablePrivileges: Object.freeze([]),
+        grants: Object.freeze([
+            Object.freeze({ privilege: 'SELECT' as const, columns: Object.freeze(['account_uuid', 'score_visibility']) }),
+            Object.freeze({ privilege: 'INSERT' as const, columns: Object.freeze(['account_uuid', 'country_code', 'age_band', 'policy_version', 'score_visibility']) }),
+        ]),
+    }),
+
 ]);
+
+/**
+ * Preserve the existing full profile; Apple adds storage and session provenance,
+ * never migration writes or schema privileges. Shared grants have one definition.
+ */
+export const RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freeze([
+    ...APPLE_RUNTIME_TABLE_GRANTS,
+    ...GOOGLE_RUNTIME_GRANT_MANIFEST.map(tableGrant => {
+        if (tableGrant.table !== 'account_sessions') return tableGrant;
+        return Object.freeze({
+            ...tableGrant,
+            grants: Object.freeze(tableGrant.grants.map(grant =>
+                grant.privilege === 'SELECT' || grant.privilege === 'INSERT'
+                    ? Object.freeze({ ...grant, columns: Object.freeze([
+                        ...grant.columns, 'apple_subject_hash', 'apple_authenticated_at',
+                    ]) })
+                    : grant)),
+        });
+    }),
+]);
+
+const SCORE_PERMISSION_COLUMNS = Object.freeze(['account_uuid', 'visibility', 'policy_digest', 'registration_policy_version',
+    'country_code', 'age_band', 'authorizer_uuid', 'confirmed_at']);
+export const PARENT_RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freeze([
+    Object.freeze({ table: 'account_score_permissions' as const, tablePrivileges: Object.freeze([]), grants: Object.freeze([
+        Object.freeze({ privilege: 'SELECT' as const, columns: SCORE_PERMISSION_COLUMNS }),
+        Object.freeze({ privilege: 'INSERT' as const, columns: SCORE_PERMISSION_COLUMNS }),
+        Object.freeze({ privilege: 'UPDATE' as const, columns: Object.freeze(SCORE_PERMISSION_COLUMNS.filter(column => column !== 'account_uuid')) }),
+    ]) }),
+    ...RUNTIME_GRANT_MANIFEST.map(table => table.table !== 'account_registration_profiles' ? table : Object.freeze({
+        ...table, grants: Object.freeze(table.grants.map(grant => grant.privilege !== 'SELECT' ? grant : Object.freeze({
+            ...grant, columns: Object.freeze([...grant.columns, 'age_band', 'country_code', 'policy_version']),
+        }))),
+    })),
+    Object.freeze({
+        table: 'parent_registration_attempts' as const, tablePrivileges: Object.freeze(['DELETE' as const]),
+        grants: Object.freeze([
+            Object.freeze({ privilege: 'SELECT' as const, columns: Object.freeze(['state_hash', 'binding_hash', 'parent_uuid', 'parent_user_id', 'client_key', 'nonce', 'policy_digest', 'purpose', 'country_code', 'child_uuid', 'family_digest', 'profile_digest', 'expires_at', 'phase', 'grant_hash', 'provider', 'subject', 'consent_version', 'policy_version']) }),
+            Object.freeze({ privilege: 'INSERT' as const, columns: Object.freeze(['state_hash', 'binding_hash', 'parent_uuid', 'parent_user_id', 'client_key', 'nonce', 'policy_digest', 'purpose', 'country_code', 'child_uuid', 'family_digest', 'profile_digest', 'expires_at', 'phase']) }),
+            Object.freeze({ privilege: 'UPDATE' as const, columns: Object.freeze(['phase', 'grant_hash', 'provider', 'subject', 'consent_version', 'policy_version']) }),
+        ]),
+    }),
+    Object.freeze({
+        table: 'parent_child_consents' as const, tablePrivileges: Object.freeze([]),
+        grants: Object.freeze([
+            Object.freeze({ privilege: 'SELECT' as const, columns: Object.freeze(['child_uuid', 'parent_uuid', 'country_code', 'policy_digest', 'consent_version', 'consented_at']) }),
+            Object.freeze({ privilege: 'INSERT' as const, columns: Object.freeze(['child_uuid', 'parent_uuid', 'country_code', 'policy_digest', 'consent_version', 'consented_at']) }),
+        ]),
+    }),
+
+]);
+
+export const SIGNED_PARENT_RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freeze([
+    ...PARENT_RUNTIME_GRANT_MANIFEST,
+    Object.freeze({ table: 'parent_signed_forms' as const, tablePrivileges: Object.freeze(['DELETE' as const]), grants: Object.freeze([
+        Object.freeze({ privilege: 'SELECT' as const, columns: Object.freeze(['reference', 'parent_uuid', 'country_code', 'user_name', 'policy_digest',
+            'consent_version', 'policy_version', 'provider', 'subject', 'verified_contact', 'status', 'submitted_at', 'expires_at', 'public_policy_digest', 'public_approved', 'public_withdrawn', 'child_uuid']) }),
+        Object.freeze({ privilege: 'INSERT' as const, columns: Object.freeze(['reference', 'parent_uuid', 'country_code', 'user_name', 'policy_digest',
+            'consent_version', 'policy_version', 'provider', 'subject', 'verified_contact', 'status', 'submitted_at', 'expires_at', 'public_policy_digest']) }),
+        Object.freeze({ privilege: 'UPDATE' as const, columns: Object.freeze(['status', 'child_uuid', 'public_withdrawn']) }),
+    ]) }),
+]);
+
+/** Explicit opt-in profile: table SELECT exposes all columns to strict schema checks. */
+export const INACTIVITY_RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freeze([
+    ...SIGNED_PARENT_RUNTIME_GRANT_MANIFEST,
+    Object.freeze({ table: 'parent_managed_child_activity' as const, tablePrivileges: Object.freeze(['SELECT' as const]), grants: Object.freeze([
+        Object.freeze({ privilege: 'INSERT' as const, columns: Object.freeze(['child_uuid', 'retention_activity_at']) }),
+        Object.freeze({ privilege: 'UPDATE' as const, columns: Object.freeze(['retention_activity_at']) }),
+    ]) }),
+    Object.freeze({ table: 'parent_child_inactivity_warnings' as const, tablePrivileges: Object.freeze(['SELECT' as const]), grants: Object.freeze([
+        Object.freeze({ privilege: 'INSERT' as const, columns: Object.freeze(['child_uuid', 'parent_uuid', 'warning_uuid', 'activity_at', 'channel', 'target_digest', 'notice_digest', 'prepared_at']) }),
+        Object.freeze({ privilege: 'UPDATE' as const, columns: Object.freeze(['parent_uuid', 'warning_uuid', 'activity_at', 'channel', 'target_digest', 'notice_digest', 'prepared_at', 'delivered_at', 'receipt_digest']) }),
+    ]) }),
+]);
+
+/** Separate opt-in keeps older grant profiles from acquiring continuity-write privileges. */
+export const CONTINUITY_RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freeze([
+    ...INACTIVITY_RUNTIME_GRANT_MANIFEST,
+    Object.freeze({ table: 'parent_child_activity_continuity' as const, tablePrivileges: Object.freeze(['SELECT' as const]), grants: Object.freeze([
+        Object.freeze({ privilege: 'INSERT' as const, columns: Object.freeze(['child_uuid', 'head_json', 'ledger_json']) }),
+        Object.freeze({ privilege: 'UPDATE' as const, columns: Object.freeze(['head_json', 'ledger_json']) }),
+    ]) }),
+]);
+
+export const WARNING_RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freeze([
+    ...CONTINUITY_RUNTIME_GRANT_MANIFEST,
+    Object.freeze({ table: 'parent_child_warning_history' as const, tablePrivileges: Object.freeze(['SELECT' as const]), grants: Object.freeze([
+        Object.freeze({ privilege: 'INSERT' as const, columns: Object.freeze(['child_uuid', 'state_json', 'head_json', 'ledger_json']) }),
+        Object.freeze({ privilege: 'UPDATE' as const, columns: Object.freeze(['state_json', 'head_json', 'ledger_json']) }),
+    ]) }),
+]);
+
+/** The runtime can verify the recovery checkpoint but cannot advance it. */
+export const RECOVERY_RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freeze([
+    ...WARNING_RUNTIME_GRANT_MANIFEST,
+    Object.freeze({ table: 'account_recovery_checkpoint' as const, tablePrivileges: Object.freeze([]), grants: Object.freeze([
+        Object.freeze({ privilege: 'SELECT' as const, columns: Object.freeze(['singleton_id', 'lineage_id', 'epoch']) }),
+    ]) }),
+]);
+
+/** Separate opt-in; the existing recovery profile does not gain usage-data access. */
+export const DAILY_USAGE_RUNTIME_GRANT_MANIFEST: readonly RuntimeTableGrant[] = Object.freeze([
+    ...RECOVERY_RUNTIME_GRANT_MANIFEST,
+    Object.freeze({ table: 'parent_child_daily_usage' as const, tablePrivileges: Object.freeze(['DELETE' as const]), grants: Object.freeze([
+        Object.freeze({ privilege: 'SELECT' as const, columns: Object.freeze(['child_uuid', 'time_zone', 'daily_limit_ms', 'usage_day', 'used_ms', 'accounted_at_ms', 'active_until_ms', 'notice_version', 'consented_at']) }),
+        Object.freeze({ privilege: 'INSERT' as const, columns: Object.freeze(['child_uuid', 'time_zone', 'daily_limit_ms', 'usage_day', 'used_ms', 'accounted_at_ms', 'active_until_ms', 'notice_version', 'consented_at']) }),
+        Object.freeze({ privilege: 'UPDATE' as const, columns: Object.freeze(['time_zone', 'daily_limit_ms', 'usage_day', 'used_ms', 'accounted_at_ms', 'active_until_ms', 'notice_version', 'consented_at']) }),
+    ]) }),
+    Object.freeze({ table: 'child_daily_usage_withdrawal_receipts' as const, tablePrivileges: Object.freeze(['DELETE' as const]), grants: Object.freeze([
+        Object.freeze({ privilege: 'SELECT' as const, columns: Object.freeze(['receipt_uuid', 'withdrawn_at']) }),
+        Object.freeze({ privilege: 'INSERT' as const, columns: Object.freeze(['receipt_uuid', 'child_uuid', 'notice_version', 'consented_at', 'withdrawn_at']) }),
+    ]) }),
+]);
+
+function manifestForProfile(profile: RuntimeGrantProfile | undefined): readonly RuntimeTableGrant[] {
+    if (profile === 'google-apple-parent-signed-recovery-usage') return DAILY_USAGE_RUNTIME_GRANT_MANIFEST;
+    if (profile === 'google-apple-parent-signed-recovery') return RECOVERY_RUNTIME_GRANT_MANIFEST;
+    if (profile === 'google-apple-parent-signed-warnings') return WARNING_RUNTIME_GRANT_MANIFEST;
+    if (profile === 'google-apple-parent-signed-continuity') return CONTINUITY_RUNTIME_GRANT_MANIFEST;
+    if (profile === 'google-apple-parent-signed-inactivity') return INACTIVITY_RUNTIME_GRANT_MANIFEST;
+    if (profile === 'google-apple-parent-signed') return SIGNED_PARENT_RUNTIME_GRANT_MANIFEST;
+    if (profile === 'google-apple-parent') return PARENT_RUNTIME_GRANT_MANIFEST;
+    return parseRuntimeGrantProfile(profile) === 'google'
+        ? GOOGLE_RUNTIME_GRANT_MANIFEST
+        : RUNTIME_GRANT_MANIFEST;
+}
 
 const SAFE_IDENTIFIER = /^[A-Za-z0-9_]{1,64}$/u;
 const SAFE_ACCOUNT_PART = /^[A-Za-z0-9_.%~\-]{1,255}$/u;
@@ -161,8 +397,8 @@ export function runtimeDatabaseAccountName(
     return `${account.user}@${account.host}`;
 }
 
-export function runtimeColumnPrivilegeInventory(): readonly RuntimeColumnPrivilege[] {
-    return Object.freeze(RUNTIME_GRANT_MANIFEST.flatMap(({ table, grants }) =>
+export function runtimeColumnPrivilegeInventory(profile?: RuntimeGrantProfile): readonly RuntimeColumnPrivilege[] {
+    return Object.freeze(manifestForProfile(profile).flatMap(({ table, grants }) =>
         grants.flatMap(({ privilege, columns }) => columns.map((columnName) =>
             Object.freeze({
                 tableName: table,
@@ -173,24 +409,37 @@ export function runtimeColumnPrivilegeInventory(): readonly RuntimeColumnPrivile
     ));
 }
 
+export function runtimeTablePrivilegeInventory(profile?: RuntimeGrantProfile): readonly RuntimeTablePrivilege[] {
+    // MySQL cannot restrict DELETE by column. Attempts need consumption and sessions need revocation;
+    // the account and its dependent data tables need transactional self-deletion.
+    return Object.freeze(manifestForProfile(profile).flatMap(({ table, tablePrivileges }) =>
+        tablePrivileges.map((privilegeType) => Object.freeze({
+            tableName: table,
+            privilegeType,
+        }))
+    ));
+}
+
 /**
  * Renders reviewable statements but never opens a database connection or
  * changes privileges by itself.
  */
 export function renderRuntimeGrantStatements(
     databaseName: string,
-    account: RuntimeDatabaseAccount
+    account: RuntimeDatabaseAccount,
+    profile?: RuntimeGrantProfile
 ): readonly string[] {
     const database = quoteIdentifier(databaseName, 'Database name');
     const principal = renderRuntimeDatabaseAccount(account);
 
-    return Object.freeze(RUNTIME_GRANT_MANIFEST.map(({ table, grants }) => {
-        const privileges = grants.map(({ privilege, columns }) => {
+    return Object.freeze(manifestForProfile(profile).map(({ table, grants, tablePrivileges }) => {
+        const columnPrivileges = grants.map(({ privilege, columns }) => {
             const columnList = columns
                 .map((column) => quoteIdentifier(column, 'Column name'))
                 .join(', ');
             return `${privilege} (${columnList})`;
-        }).join(', ');
+        });
+        const privileges = [...columnPrivileges, ...tablePrivileges].join(', ');
 
         return `GRANT ${privileges} ON ${database}.${quoteIdentifier(
             table,

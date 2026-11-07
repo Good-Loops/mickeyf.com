@@ -5,10 +5,10 @@ import test, { after } from 'node:test';
 import React from 'react';
 import { renderToStaticMarkup } from 'react-dom/server';
 import { MemoryRouter } from 'react-router-dom';
-import { createServer } from 'vite';
+import { createViteTestServer } from '../../testSupport/createViteTestServer.mjs';
 
 const frontendRoot = fileURLToPath(new URL('../../../', import.meta.url));
-const viteServer = await createServer({
+const viteServer = await createViteTestServer({
     root: frontendRoot,
     configFile: `${frontendRoot}/vite.config.ts`,
     appType: 'custom',
@@ -102,7 +102,7 @@ test('the mobile preview query is exact and remains behind the local feature gat
 
 for (const releaseEnabled of [false, true]) {
     test(`the production mobile hub and route ${releaseEnabled ? 'open' : 'stay gated'} with the release flag ${releaseEnabled ? 'enabled' : 'disabled'}`, async (context) => {
-        const releaseServer = await createServer({
+        const releaseServer = await createViteTestServer({
             root: frontendRoot,
             configFile: `${frontendRoot}/vite.config.ts`,
             appType: 'custom',
@@ -269,7 +269,7 @@ test('the desktop keyboard guide stays aligned with the live Unity bindings', as
     assert.match(pauseController, /Keyboard\.current\?\.escapeKey\.wasPressedThisFrame/);
 });
 
-test('signed-out players are told to authenticate before starting a ranked run', () => {
+test('players are told how to save scores and choose public leaderboard participation', () => {
     const signedOutHtml = renderToStaticMarkup(
         React.createElement(
             MemoryRouter,
@@ -277,6 +277,7 @@ test('signed-out players are told to authenticate before starting a ranked run',
             React.createElement(ScoreSubmissionNotice, {
                 isAuthenticated: false,
                 loading: false,
+                show: true,
             }),
         ),
     );
@@ -287,6 +288,7 @@ test('signed-out players are told to authenticate before starting a ranked run',
             React.createElement(ScoreSubmissionNotice, {
                 isAuthenticated: true,
                 loading: false,
+                show: true,
             }),
         ),
     );
@@ -297,6 +299,7 @@ test('signed-out players are told to authenticate before starting a ranked run',
             React.createElement(ScoreSubmissionNotice, {
                 isAuthenticated: false,
                 loading: true,
+                show: false,
             }),
         ),
     );
@@ -307,7 +310,8 @@ test('signed-out players are told to authenticate before starting a ranked run',
     assert.match(signedOutHtml, /href="\/login"/);
     assert.match(signedOutHtml, /href="\/signup"/);
     assert.match(signedOutHtml, /role="status"/);
-    assert.equal(signedInHtml, '');
+    assert.match(signedInHtml, /Public leaderboard participation is optional/);
+    assert.match(signedInHtml, /href="\/account"/);
     assert.equal(loadingHtml, '');
 });
 

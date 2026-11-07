@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Ludolume Play feature graphic</title>
+  <style>
+    @font-face { font-family: SpaceMono; src: url('../../frontend/public/fonts/space-mono-latin-fb4a81a2d0a8.woff2'); }
+    * { box-sizing: border-box; }
+    html, body { margin: 0; width: 1024px; height: 500px; overflow: hidden; }
+    body { position: relative; color: white; background:
+      radial-gradient(ellipse at 77% 42%, rgba(22, 108, 135, .48), transparent 40%),
+      radial-gradient(ellipse at 16% 85%, rgba(31, 78, 126, .34), transparent 43%),
+      linear-gradient(120deg, #081121 0%, #10283c 57%, #092b31 100%); }
+    .stars { position: absolute; inset: 0; opacity: .8; background-image:
+      radial-gradient(circle, #ecfaff 1px, transparent 1.6px), radial-gradient(circle, #87e8ff 1px, transparent 1.7px);
+      background-size: 89px 83px, 151px 131px; background-position: 10px 9px, 43px 37px; }
+    .orbit { position: absolute; left: 516px; top: 20px; width: 430px; height: 430px;
+      border: 1px solid rgba(164, 233, 238, .28); border-radius: 50%; transform: rotate(-22deg) scaleY(.63); }
+    .orbit.two { transform: rotate(48deg) scaleY(.63); border-color: rgba(238, 157, 198, .22); }
+    .glow { position: absolute; width: 320px; height: 320px; left: 562px; top: 91px;
+      background: radial-gradient(circle, rgba(77, 222, 207, .28), rgba(103, 95, 200, .10) 48%, transparent 70%); filter: blur(14px); }
+    .icon { position: absolute; left: 627px; top: 129px; width: 236px; height: 236px; object-fit: cover;
+      border-radius: 50%; box-shadow: 0 20px 70px rgba(0, 0, 0, .35), 0 0 0 7px rgba(227, 253, 255, .18); }
+    .copy { position: absolute; left: 78px; top: 152px; }
+    .eyebrow { color: #99e0e3; font: 700 16px/1 SpaceMono, monospace; letter-spacing: .21em; }
+    h1 { margin: 17px 0 15px; font: 700 67px/1.05 system-ui, sans-serif; letter-spacing: -.045em; }
+    p { margin: 0; color: #d6eaf0; font: 400 23px/1.35 system-ui, sans-serif; }
+    .line { width: 88px; height: 4px; margin-top: 27px; border-radius: 4px;
+      background: linear-gradient(90deg, #82bdff, #7ce9d5); }
+  </style>
+</head>
+<body>
+  <div class="stars"></div><div class="orbit"></div><div class="orbit two"></div><div class="glow"></div>
+  <div class="copy"><div class="eyebrow">GAMES &amp; VISUAL PLAY</div><h1>Ludolume</h1><p>Play. Create. Explore.</p><div class="line"></div></div>
+  <img class="icon" src="../../frontend/resources/icon-only.png" alt="">
+</body>
+</html>

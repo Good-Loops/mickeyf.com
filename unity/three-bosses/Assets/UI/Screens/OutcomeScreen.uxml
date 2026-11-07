@@ -1,0 +1,15 @@
+<ui:UXML xmlns:ui="UnityEngine.UIElements">
+    <ui:VisualElement name="outcome-root" class="outcome-screen" picking-mode="Ignore">
+        <ui:VisualElement name="outcome-artwork" picking-mode="Ignore">
+            <ui:Label name="time-caption" text="TIME SURVIVED" class="outcome-text caption-backing" picking-mode="Ignore" />
+            <ui:Label name="split-caption" text="SPLIT" class="outcome-text" picking-mode="Ignore" />
+            <ui:Label name="time-value" text="00:00.000" class="outcome-text" picking-mode="Ignore" />
+            <ui:Label name="score-value" text="0" class="outcome-text" picking-mode="Ignore" />
+            <ui:Label name="rank-value" text="UNRANKED" class="outcome-text" picking-mode="Ignore" />
+            <ui:Button name="try-again-button" text="TRY AGAIN" class="outcome-button" />
+            <ui:Button name="back-to-menu-button" text="BACK TO MENU" class="outcome-button" />
+            <ui:Button name="submit-score-button" text="SUBMISSION LOCKED" class="outcome-button" />
+        </ui:VisualElement>
+        <ui:VisualElement name="outcome-fade" />
+    </ui:VisualElement>
+</ui:UXML>

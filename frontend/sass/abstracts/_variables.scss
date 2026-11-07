@@ -5,7 +5,6 @@ $cursor-notallowed: url("@/assets/cursors/notallowed.cur"), auto;
 
 ///////////////////// Z-Index Values //////////////////////
 $front: 10;
-$front-9: 9;
 $front-9: 8;
 $front-7: 7;
 $front-6: 6;
@@ -68,16 +67,4 @@ $bps-nav: (
             ),
         )
     ), 
-);
-
-// Breakpoint Map for Menu
-$bps-menu: (
-    'm': (
-        'width': $bp-m,
-        'selectors': (
-            '.menu-btn': (
-                'display': block,
-            ),
-        )
-    ),
 );

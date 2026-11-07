@@ -12,6 +12,8 @@
  *   and teardown/recreation during restart.
  * - The fixed 60Hz simulation preserves the original movement speeds independently of rendering frequency.
  */
+// Register Pixi's CSP-safe generators before renderer creation in the native app.
+import 'pixi.js/unsafe-eval';
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from '@/utils/constants';
 import { enableCanvasPageGestures } from '@/utils/canvasPageGestures';
 import { getRandomInt } from '@/utils/random';
@@ -20,12 +22,14 @@ import { bindP4Input } from './p4Input';
 import { createP4RunResults, type P4RunResult } from './p4RunResult';
 import { createP4SimulationClock } from './p4SimulationClock';
 import { P4_WIN_SCORE } from './p4Rules';
+import { resolveP4AssetUrl } from './p4AssetUrl';
 import { PickupFeedback } from './classes/PickupFeedback';
 import { createP4PauseController, type P4VegaController, type P4VegaState } from './p4PauseController';
 
 export type { P4VegaController, P4VegaState } from './p4PauseController';
 
 import { API_BASE } from '@/config/apiConfig';
+import { apiFetch } from '@/services/apiFetch';
 
 import { P4 } from './classes/P4';
 import { Water } from './classes/Water';
@@ -61,6 +65,7 @@ export type P4VegaOptions = {
     onStateChange?: (state: P4VegaState) => void;
     onScoreChange?: (score: number) => void;
     onResultChange?: (result: P4RunResult | null) => void;
+    onLoadError?: (error: unknown) => void;
     signal?: AbortSignal;
 };
 
@@ -177,12 +182,13 @@ export async function p4Vega(
 
     const load = async (): Promise<void> => {
         options.onScoreChange?.(0);
+        const loadTexture = (source: string) => Assets.load(resolveP4AssetUrl(source, document.baseURI));
         const [p4Base, waterBase, bhBlueBase, bhRedBase, bhYellowBase] = await Promise.all([
-            Assets.load(p4PngURL),
-            Assets.load(waterPngURL),
-            Assets.load(bhBluePngURL),
-            Assets.load(bhRedPngURL),
-            Assets.load(bhYellowPngURL),
+            loadTexture(p4PngURL),
+            loadTexture(waterPngURL),
+            loadTexture(bhBluePngURL),
+            loadTexture(bhRedPngURL),
+            loadTexture(bhYellowPngURL),
         ]);
         ensureActive();
 
@@ -221,7 +227,7 @@ export async function p4Vega(
     };
 
     const submitScore = async (score: number, signal: AbortSignal): Promise<{ personalBest: boolean }> => {
-        const response = await fetch(API_BASE + '/api/users', {
+        const response = await apiFetch(API_BASE + '/api/users', {
             method: 'POST',
             credentials: 'include',
             signal,
@@ -249,11 +255,11 @@ export async function p4Vega(
     const step = (): boolean => {
         if (!session.canMove || !sky || !p4 || !water) return false;
         sky.update();
-        p4.update(p4.p4Anim);
+        p4.update();
         pickupFeedback?.update();
         const pickupX = water.waterAnim.x + water.waterAnim.width / 2;
         const pickupY = water.waterAnim.y + water.waterAnim.height / 2;
-        if (water.update(water.waterAnim, p4, notesPlayingCheckbox?.checked ?? false, stage)) {
+        if (water.update(p4, notesPlayingCheckbox?.checked ?? false, stage)) {
             options.onScoreChange?.(p4.totalWater);
             pickupFeedback?.show(pickupX, pickupY);
             if (p4.totalWater >= P4_WIN_SCORE) { finishRun(p4, true); return false; }
@@ -277,12 +283,17 @@ export async function p4Vega(
         try {
             await load();
         } catch (error) {
-            if (!session.disposed) console.error('P4-Vega restart failed.', error);
+            if (!session.disposed) {
+                dispose();
+                console.error('P4-Vega restart failed.', error);
+                options.onLoadError?.(error);
+            }
         }
     };
 
     input = bindP4Input({
         keyboardTarget: document,
+        focusTarget: window,
         joysticks: Array.from(root.querySelectorAll<HTMLElement>('[data-p4-joystick]')),
         movement: () => p4,
         canMove: () => session.canMove,

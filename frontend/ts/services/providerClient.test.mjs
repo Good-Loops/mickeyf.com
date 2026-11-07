@@ -1,0 +1,783 @@
+import assert from 'node:assert/strict';
+import test from 'node:test';
+import { createProviderClient, ProviderCredentialError, selectProviderDeletionClient } from './providerClient.ts';
+
+const google = { clientKey: 'google-web', provider: 'google', platform: 'web', clientId: 'synthetic.apps.googleusercontent.com' };
+const apple = { clientKey: 'apple-ios', provider: 'apple', platform: 'ios', clientId: 'com.example.synthetic' };
+const appleWeb = { clientKey: 'apple-web', provider: 'apple', platform: 'web', clientId: 'com.example.synthetic.web',
+    redirectUri: 'https://example.test/auth/apple/return', signup: true };
+const appleAndroid = { clientKey: 'apple-android', provider: 'apple', platform: 'android', clientId: 'com.mickeyf.web',
+    redirectUri: 'https://mickeyf.com/auth/providers/apple-android/callback', signup: true };
+const challenge = { state: Buffer.alloc(32, 1).toString('base64url'),
+    nonce: Buffer.alloc(32, 2).toString('base64url'), expiresInSeconds: 300 };
+const token = 'synthetic.header.signature';
+const authorizationCode = 'synthetic-one-time-code';
+const nativeResult = Object.freeze({ identityToken: token, authorizationCode });
+const appleCredential = { idToken: token, authorizationCode };
+const returnProof = Buffer.alloc(32, 7).toString('base64url');
+const nextTurn = () => new Promise(resolve => setImmediate(resolve));
+const signal = () => new AbortController().signal;
+const rejectsCode = (promise, code) => assert.rejects(promise, error => {
+    assert.ok(error instanceof ProviderCredentialError);
+    assert.equal(error.code, code);
+    assert.doesNotMatch(error.message, /private|synthetic\.header/);
+    assert.equal('cause' in error, false);
+    return true;
+});
+
+function fixture(overrides = {}) {
+    const calls = [];
+    const scripts = [];
+    const controls = { popup: null, alertOptions: null, sdk: undefined, initialization: null,
+        rendered: null, closeCount: 0, nativeCancelCount: 0 };
+    let dismiss;
+    const sdk = {
+        initialize(options) { controls.initialization = options; },
+        renderButton(host, options) { controls.rendered = { host, options }; },
+    };
+    const identity = {
+        async getCapabilities() { calls.push('capabilities'); return { apple: true, google: false }; },
+        async signIn(input) { calls.push(['native', input]); return nativeResult; },
+        async cancel() { controls.nativeCancelCount++; },
+        ...overrides.identity,
+    };
+    const alert = {
+        isVisible() { return controls.popup !== null; },
+        getPopup() { return controls.popup; },
+        fire(options) {
+            controls.alertOptions = options;
+            controls.popup = { own: true };
+            const popup = controls.popup;
+            const result = new Promise(resolve => { dismiss = resolve; });
+            queueMicrotask(() => options.didOpen?.(popup));
+            return result;
+        },
+        close() {
+            controls.closeCount++;
+            const previous = controls.popup;
+            controls.popup = null;
+            controls.alertOptions.willClose?.(previous);
+            controls.alertOptions.didDestroy?.();
+            dismiss({ isDismissed: true });
+        },
+    };
+    const document = {
+        createElement(tag) {
+            return { tag, style: {}, dataset: {}, textContent: '', removed: false,
+                replaceChildren() { this.textContent = ''; }, remove() { this.removed = true; } };
+        },
+        head: { appendChild(script) { scripts.push(script); } },
+    };
+    const client = createProviderClient({
+        apiBase: 'https://api.example.test', platform: 'web', isNative: false, identity, alert, document,
+        google: () => controls.sdk,
+        async fetchRequest(url, init) {
+            calls.push(['fetch', url, init]);
+            return Response.json({ clients: [google, apple] });
+        },
+        ...overrides,
+        identity,
+    });
+    return { client, controls, calls, scripts, sdk, alert, document,
+        loadGoogle() { controls.sdk = sdk; scripts.at(-1).onload(); },
+        completeGoogle(value = { credential: token, state: challenge.state }) { controls.initialization.callback(value); } };
+}
+
+test('discovery selects only server-configured web Google or capability-enabled native iOS Apple without loading SDKs', async () => {
+    for (const [platform, isNative, expected] of [['web', false, [google]], ['ios', true, [apple]],
+        ['android', true, []], ['web', true, []]]) {
+        const f = fixture({ platform, isNative });
+        assert.deepEqual(await f.client.getAvailableProviderClients(), expected);
+        assert.equal(f.scripts.length, 0);
+        assert.equal(f.controls.popup, null);
+        const request = f.calls.find(call => Array.isArray(call));
+        if (platform !== 'web' || !isNative) {
+            assert.equal(request[1], 'https://api.example.test/auth/providers/config');
+            assert.equal(request[2].method, 'GET');
+            assert.equal(request[2].credentials, 'include');
+            assert.equal(request[2].body, undefined);
+        } else assert.deepEqual(f.calls, []);
+        assert.equal(f.calls.includes('capabilities'), platform === 'ios' || platform === 'android');
+    }
+});
+
+test('discovery distinguishes trusted empty configuration from retryable outage without inventing clients', async () => {
+    for (const fetchRequest of [async () => { throw new Error('private transport detail'); },
+        async () => Response.json({ error: 'UNAVAILABLE' }, { status: 503 }), async () => Response.json({}),
+        async () => Response.json({ clients: [google, google] }), async () => Response.json({ clients: [{ ...google, clientKey: 'foreign' }] })]) {
+        let unavailable = 0;
+        const f = fixture({ fetchRequest });
+        assert.deepEqual(await f.client.getAvailableProviderClients(undefined, () => { unavailable++; }), []);
+        assert.equal(unavailable, 1);
+        assert.deepEqual(f.scripts, []);
+    }
+    for (const clients of [[], [google]]) {
+        let unavailable = 0;
+        const f = fixture({ fetchRequest: async () => Response.json({ clients }) });
+        assert.deepEqual(await f.client.getAvailableProviderClients(undefined, () => { unavailable++; }), clients);
+        assert.equal(unavailable, 0);
+    }
+    for (const capabilities of [null, { apple: 'true' }, { google: 1 }, { apple: null }, { apple: false }]) {
+        let unavailable = 0;
+        const native = fixture({ platform: 'android', isNative: true, identity: { getCapabilities: async () => capabilities } });
+        assert.deepEqual(await native.client.getAvailableProviderClients(undefined, () => { unavailable++; }), []);
+        assert.equal(unavailable, capabilities?.apple === false ? 0 : 1);
+    }
+});
+
+test('six-client discovery includes Android Apple only with exact pins and a native capability', async () => {
+    const googleIos = { ...google, clientKey: 'google-ios', platform: 'ios' };
+    const googleAndroid = { ...google, clientKey: 'google-android', platform: 'android' };
+    const all = [google, googleIos, googleAndroid, apple, appleWeb, appleAndroid];
+    const f = fixture({ platform: 'android', isNative: true, identity: { getCapabilities: async () => ({ apple: true, google: true }) },
+        fetchRequest: async () => Response.json({ clients: all }) });
+    assert.deepEqual(await f.client.getAvailableProviderClients(), [googleAndroid, appleAndroid]);
+    assert.deepEqual(f.scripts, []);
+    for (const change of [{ clientId: 'com.other.web' }, { redirectUri: 'https://attacker.test/callback' },
+        { redirectUri: appleAndroid.redirectUri + '?extra=1' }, { platform: 'web' }, { extra: true }]) {
+        const invalid = fixture({ platform: 'android', isNative: true,
+            fetchRequest: async () => Response.json({ clients: [...all.slice(0, -1), { ...appleAndroid, ...change }] }) });
+        assert.deepEqual(await invalid.client.getAvailableProviderClients(), []);
+    }
+    const unsupported = fixture({ platform: 'android', isNative: true, identity: { getCapabilities: async () => ({ apple: false }) },
+        fetchRequest: async () => Response.json({ clients: all }) });
+    assert.deepEqual(await unsupported.client.getAvailableProviderClients(), []);
+    const excess = fixture({ platform: 'android', isNative: true, fetchRequest: async () => Response.json({ clients: [...all, google] }) });
+    assert.deepEqual(await excess.client.getAvailableProviderClients(), []);
+});
+
+test('Android Apple redeems only a matching safe handoff through the private API transport', async () => {
+    const requests = [];
+    const f = fixture({ platform: 'android', isNative: true,
+        identity: { async signIn(input) { requests.push(input); return { state: challenge.state, result: 'ready', proof: returnProof }; } },
+        async fetchRequest(url, init) { requests.push({ url, init }); return Response.json(appleCredential); } });
+    assert.deepEqual(await f.client.acquireProviderCredential(appleAndroid, challenge, signal()), appleCredential);
+    assert.deepEqual(requests[0], { provider: 'apple', clientId: 'com.mickeyf.web', redirectUri: appleAndroid.redirectUri,
+        nonce: challenge.nonce, state: challenge.state });
+    assert.equal(requests[1].url, 'https://api.example.test/auth/providers/apple-android/credential');
+    assert.equal(requests[1].init.method, 'POST'); assert.equal(requests[1].init.credentials, 'include');
+    assert.deepEqual(requests[1].init.headers, { 'Content-Type': 'application/json' });
+    assert.deepEqual(JSON.parse(requests[1].init.body), { state: challenge.state, proof: returnProof });
+    assert.deepEqual(f.scripts, []);
+});
+
+test('Android Apple rejects forged, cancelled and stale handoffs before any credential redemption', async () => {
+    for (const result of [null, {}, { state: 'wrong', result: 'ready', proof: returnProof }, { state: challenge.state, result: ['ready'] },
+        { state: challenge.state, result: 'ready', proof: returnProof, idToken: token }, { state: challenge.state, result: 'cancelled' },
+        { state: challenge.state, result: 'cancelled', proof: returnProof }, { state: challenge.state, result: 'ready' },
+        ...[null, ['ready'], 'bad', returnProof + '\n', 'A'.repeat(42) + 'B'].map(proof => ({ state: challenge.state, result: 'ready', proof }))]) {
+        let redeemed = false;
+        const f = fixture({ platform: 'android', isNative: true, identity: { signIn: async () => result },
+            fetchRequest: async () => { redeemed = true; return Response.json(appleCredential); } });
+        await rejectsCode(f.client.acquireProviderCredential(appleAndroid, challenge, signal()),
+            result?.result === 'cancelled' && Object.keys(result).length === 2 ? 'CANCELLED' : 'UNAVAILABLE');
+        assert.equal(redeemed, false);
+    }
+    const stale = fixture({ platform: 'android', isNative: true,
+        identity: { signIn: async () => ({ state: challenge.state, result: 'ready', proof: returnProof }) },
+        fetchRequest: async () => { throw new Error('Stale handoff reached redemption'); } });
+    await rejectsCode(stale.client.acquireProviderCredential(appleAndroid, { ...challenge, state: Buffer.alloc(32, 9).toString('base64url') }, signal()), 'UNAVAILABLE');
+});
+
+test('Android Apple private redemption rejects malformed proof and never retries uncertain results', async () => {
+    for (const [status, body] of [[401, { error: 'INVALID_ATTEMPT', detail: 'private' }], [200, null],
+        [200, { ...appleCredential, extra: 'private' }], [200, { ...appleCredential, idToken: 'bad' }],
+        [200, { ...appleCredential, authorizationCode: 'bad\ncode' }]]) {
+        let requests = 0;
+        const f = fixture({ platform: 'android', isNative: true,
+            identity: { signIn: async () => ({ state: challenge.state, result: 'ready', proof: returnProof }) },
+            fetchRequest: async () => { requests++; return Response.json(body, { status }); } });
+        await rejectsCode(f.client.acquireProviderCredential(appleAndroid, challenge, signal()), 'UNAVAILABLE');
+        assert.equal(requests, 1);
+    }
+});
+
+test('Android Apple cancellation discards late private redemption results', async () => {
+    let finish;
+    const controller = new AbortController();
+    const f = fixture({ platform: 'android', isNative: true,
+        identity: { signIn: async () => ({ state: challenge.state, result: 'ready', proof: returnProof }) },
+        fetchRequest: async () => new Promise(resolve => { finish = resolve; }) });
+    const pending = f.client.acquireProviderCredential(appleAndroid, challenge, controller.signal);
+    const cancelled = rejectsCode(pending, 'CANCELLED');
+    await nextTurn(); controller.abort(); await cancelled;
+    finish(Response.json(appleCredential)); await nextTurn();
+    assert.equal(f.controls.nativeCancelCount, 1);
+});
+
+test('account deletion selects each discovered Apple platform only with linked and enabled deletion capabilities', () => {
+    const methods = { hasPassword: false, googleLinked: false, googleDeletionEnabled: false, appleLinked: true, appleDeletionEnabled: true };
+    for (const client of [apple, appleWeb, appleAndroid, { ...appleAndroid, signup: undefined, issuance: false }]) {
+        assert.equal(selectProviderDeletionClient([client], methods), client);
+        assert.equal(selectProviderDeletionClient([client], { ...methods, appleLinked: false }), undefined);
+        assert.equal(selectProviderDeletionClient([client], { ...methods, appleDeletionEnabled: false }), undefined);
+        assert.equal(selectProviderDeletionClient([client], null), undefined);
+    }
+    assert.equal(selectProviderDeletionClient([], methods), undefined);
+    assert.equal(selectProviderDeletionClient([google], methods), undefined);
+    assert.equal(selectProviderDeletionClient([google], { ...methods, googleLinked: true, googleDeletionEnabled: true }), google);
+});
+
+test('auth-route resource warmup starts the public Google script and style cache without configuration or auth requests', async () => {
+    const f = fixture();
+    const warm = f.client.preloadGoogleSignInResources(signal());
+    await nextTurn();
+    const stylesheet = f.scripts.find(element => element.tag === 'link');
+    assert.equal(stylesheet.rel, 'preload');
+    assert.equal(stylesheet.as, 'style');
+    assert.equal(stylesheet.href, 'https://accounts.google.com/gsi/style');
+    assert.equal(f.scripts.find(element => element.tag === 'script').src, 'https://accounts.google.com/gsi/client?hl=en');
+    f.loadGoogle(); await warm;
+    await f.client.preloadGoogleSignInResources(signal());
+    assert.equal(f.scripts.length, 2, 'reuse the already-warmed public resources');
+    assert.deepEqual(f.calls, []);
+    assert.equal(f.controls.initialization, null);
+    assert.equal(f.controls.rendered, null);
+    assert.equal(f.controls.popup, null);
+});
+
+test('route warmup skips native platforms and an aborted web warmup can retry without auth side effects', async () => {
+    const native = fixture({ platform: 'ios', isNative: true });
+    await native.client.preloadGoogleSignInResources(signal());
+    assert.deepEqual(native.scripts, []); assert.deepEqual(native.calls, []);
+    const f = fixture(), cancelled = new AbortController();
+    cancelled.abort(); await rejectsCode(f.client.preloadGoogleSignInResources(cancelled.signal), 'CANCELLED');
+    assert.deepEqual(f.scripts, []);
+    const warm = f.client.preloadGoogleSignInResources(signal());
+    await nextTurn(); f.loadGoogle(); await warm;
+    assert.equal(f.scripts.length, 2); assert.deepEqual(f.calls, []);
+});
+
+test('App warmup adopts the early HTML style hint without injecting a duplicate', async () => {
+    const f = fixture();
+    f.document.head.querySelector = () => ({ rel: 'preload', as: 'style' });
+    const warm = f.client.preloadGoogleSignInResources(signal());
+    await nextTurn(); f.loadGoogle(); await warm;
+    assert.equal(f.scripts.length, 1);
+    assert.equal(f.scripts[0].tag, 'script');
+    assert.deepEqual(f.calls, []);
+});
+
+test('temporarily unavailable issuance retains the exact client for deletion proof without advertising signup', async () => {
+    const configured = { ...apple, issuance: false };
+    const f = fixture({ isNative: true, platform: 'ios', fetchRequest: async () => Response.json({ clients: [configured] }) });
+    assert.deepEqual(await f.client.getAvailableProviderClients(), [configured]);
+    assert.deepEqual(f.scripts, []);
+    assert.deepEqual(await f.client.acquireProviderCredential(configured, challenge, signal()), appleCredential);
+    for (const changed of [{ issuance: true }, { issuance: 'false' }, { issuance: 0 }, { issuance: false, signup: true }]) {
+        const invalid = fixture({ isNative: true, platform: 'ios',
+            fetchRequest: async () => Response.json({ clients: [{ ...apple, ...changed }] }) });
+        assert.deepEqual(await invalid.client.getAvailableProviderClients(), []);
+    }
+});
+
+test('provider discovery is metadata-only and cannot load either external SDK', async () => {
+    const f = fixture({ fetchRequest: async () => Response.json({ clients: [google, appleWeb] }) });
+    assert.deepEqual(await f.client.getAvailableProviderClients(), [google, appleWeb]);
+    assert.deepEqual(f.scripts, []);
+    assert.equal(f.controls.alertOptions, null);
+    assert.equal(f.calls.length, 0);
+});
+
+test('an eligible surface can explicitly preload Apple without initialization or authentication', async () => {
+    let sdk;
+    const f = fixture({ apple: () => sdk });
+    const loading = f.client.preloadProviderCredential(appleWeb, signal());
+    await nextTurn();
+    assert.equal(f.scripts.length, 1);
+    assert.equal(f.scripts[0].src, 'https://appleid.cdn-apple.com/appleauth/static/jsapi/appleid/1/en_US/appleid.auth.js');
+    let init = 0, signIn = 0;
+    sdk = { auth: { init() { init++; }, async signIn() { signIn++; } } };
+    f.scripts[0].onload(); await loading;
+    assert.equal(init, 0); assert.equal(signIn, 0);
+    assert.equal(f.controls.alertOptions, null);
+});
+
+test('explicit Google preload remains independent of a slow explicit Apple preload', async () => {
+    let appleSdk;
+    const f = fixture({ apple: () => appleSdk });
+    const appleReady = f.client.preloadProviderCredential(appleWeb, signal());
+    await nextTurn(); const appleScript = f.scripts[0];
+    const googleReady = f.client.preloadProviderCredential(google, signal());
+    await nextTurn(); assert.equal(f.scripts.length, 2);
+    f.loadGoogle(); await googleReady;
+    assert.equal(f.controls.initialization, null);
+    appleSdk = { auth: { init() {}, signIn() {} } };
+    appleScript.onload(); await appleReady;
+});
+
+test('blocked explicit Apple preload is sanitized and can retry without changing discovery metadata', async () => {
+    const f = fixture({ fetchRequest: async () => Response.json({ clients: [google, appleWeb] }) });
+    const first = f.client.preloadProviderCredential(appleWeb, signal());
+    const rejected = rejectsCode(first, 'UNAVAILABLE');
+    await nextTurn(); f.scripts[0].onerror(); await rejected;
+    assert.deepEqual(await f.client.getAvailableProviderClients(), [google, appleWeb]);
+    const retry = rejectsCode(f.client.preloadProviderCredential(appleWeb, signal()), 'UNAVAILABLE');
+    await nextTurn(); assert.equal(f.scripts.length, 2); f.scripts[1].onerror(); await retry;
+});
+
+test('stalled explicit Apple preload has a deadline and discovery never waits for its SDK', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const f = fixture({ fetchRequest: async () => Response.json({ clients: [google, appleWeb] }) });
+    assert.deepEqual(await f.client.getAvailableProviderClients(), [google, appleWeb]);
+    assert.equal(f.scripts.length, 0);
+    const loading = rejectsCode(f.client.preloadProviderCredential(appleWeb, signal()), 'CANCELLED');
+    await nextTurn(); t.mock.timers.tick(10_000); await loading;
+    assert.equal(f.scripts[0].removed, true);
+});
+
+test('disabled, malformed and duplicate discovery configurations fail closed', async () => {
+    for (const body of [null, [], {}, { clients: [google], enabled: true }, { clients: 'google' },
+        { clients: [google, google] }, { clients: [google, apple, google] }, { clients: [{ ...google, provider: 'apple' }] },
+        { clients: [{ ...google, clientId: '' }] }, { clients: [{ ...google, clientId: 'x'.repeat(256) }] },
+        { clients: [{ ...google, clientId: 'bad client' }] }, { clients: [{ ...google, token: 'private' }] }]) {
+        const f = fixture({ fetchRequest: async () => Response.json(body) });
+        assert.deepEqual(await f.client.getAvailableProviderClients(), []);
+    }
+    for (const status of [404, 429, 500]) {
+        assert.deepEqual(await fixture({ fetchRequest: async () => Response.json({ clients: [google] }, { status }) })
+            .client.getAvailableProviderClients(), []);
+    }
+    assert.deepEqual(await fixture({ fetchRequest: async () => { throw new Error('private connection details'); } })
+        .client.getAvailableProviderClients(), []);
+    for (const capabilities of [{ apple: false }, { apple: 'true' }, null, {}]) {
+        assert.deepEqual(await fixture({ platform: 'ios', isNative: true,
+            identity: { getCapabilities: async () => capabilities } }).client.getAvailableProviderClients(), []);
+    }
+});
+
+test('discovery has a deadline even when the native capabilities promise never settles', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const f = fixture({ platform: 'ios', isNative: true, identity: { getCapabilities: () => new Promise(() => {}) } });
+    const discovery = f.client.getAvailableProviderClients();
+    await nextTurn();
+    t.mock.timers.tick(10_000);
+    assert.deepEqual(await discovery, []);
+});
+
+test('signup is an explicit per-client capability and cannot leak across providers or accept truthy substitutes', async () => {
+    const enabled = { ...google, signup: true };
+    const f = fixture({ fetchRequest: async () => Response.json({ clients: [enabled, apple] }) });
+    const clients = await f.client.getAvailableProviderClients();
+    assert.deepEqual(clients, [enabled]);
+    assert.equal(Object.isFrozen(clients[0]), true);
+    assert.equal(f.scripts.length, 0, 'signup capability discovery does not start provider authentication');
+    assert.deepEqual(await fixture().client.getAvailableProviderClients(), [google], 'old servers do not imply signup support');
+    for (const client of [{ ...google, signup: false }, { ...google, signup: 'true' },
+        { ...google, signup: 1 }, { ...google, signup: null }, { ...apple, signup: 'true' }]) {
+        assert.deepEqual(await fixture({ fetchRequest: async () => Response.json({ clients: [client] }) })
+            .client.getAvailableProviderClients(), []);
+    }
+    assert.deepEqual(await fixture({ platform: 'ios', isNative: true,
+        fetchRequest: async () => Response.json({ clients: [enabled, apple] }) }).client.getAvailableProviderClients(), [apple]);
+    const appleSignup = { ...apple, signup: true };
+    assert.deepEqual(await fixture({ platform: 'ios', isNative: true,
+        fetchRequest: async () => Response.json({ clients: [google, appleSignup] }) }).client.getAvailableProviderClients(), [appleSignup]);
+    assert.deepEqual(await fixture({ fetchRequest: async () => Response.json({ clients: [google, appleSignup] }) })
+        .client.getAvailableProviderClients(), [google]);
+});
+
+test('explicit Google acquisition loads only the official script and renders a nonce-bound official button', async () => {
+    const f = fixture();
+    const credential = f.client.acquireProviderCredential(google, challenge, signal());
+    await nextTurn();
+    assert.equal(f.scripts.length, 1);
+    assert.equal(f.scripts[0].src, 'https://accounts.google.com/gsi/client?hl=en');
+    assert.equal(f.scripts[0].async, true);
+    assert.equal(f.controls.alertOptions.showConfirmButton, false);
+    assert.equal(f.controls.alertOptions.showCancelButton, true);
+    assert.equal(f.controls.initialization, null, 'SDK loading does not start sign-in');
+    f.loadGoogle();
+    await nextTurn();
+    const options = f.controls.initialization;
+    assert.equal(options.client_id, google.clientId);
+    assert.equal(options.nonce, challenge.nonce);
+    assert.equal(options.ux_mode, 'popup');
+    assert.equal(options.auto_select, false);
+    assert.equal(options.button_auto_select, false);
+    assert.deepEqual(f.controls.rendered.options, { type: 'standard', theme: 'outline', size: 'large', shape: 'pill',
+        width: '320', logo_alignment: 'left', text: 'continue_with', locale: 'en', state: challenge.state });
+    assert.equal(f.controls.closeCount, 0);
+    f.completeGoogle();
+    assert.equal(await credential, token);
+    assert.equal(f.controls.closeCount, 1);
+    assert.equal(f.scripts[0].removed, false, 'a loaded SDK can be reused without another request');
+});
+
+function inlineHost() {
+    return { clears: 0, replaceChildren() { this.clears++; } };
+}
+
+test('inline Google renders the official button directly, with no selector dialog or automatic login', async () => {
+    const f = fixture();
+    const host = inlineHost();
+    let ready = 0;
+    let received = false;
+    const credential = f.client.acquireGoogleCredentialInline(google, challenge, host, signal(), () => { ready++; });
+    void credential.then(() => { received = true; });
+    await nextTurn();
+    assert.equal(f.controls.popup, null);
+    assert.equal(f.controls.alertOptions, null);
+    assert.equal(f.scripts[0].src, 'https://accounts.google.com/gsi/client?hl=en');
+    f.loadGoogle();
+    await nextTurn();
+    assert.equal(ready, 1);
+    assert.equal(received, false, 'rendering must not authenticate');
+    assert.equal(f.controls.initialization.nonce, challenge.nonce);
+    assert.equal(f.controls.initialization.auto_select, false);
+    assert.equal(f.controls.rendered.host, host);
+    assert.deepEqual(f.controls.rendered.options, { type: 'standard', theme: 'outline', size: 'large', shape: 'pill',
+        width: '320', logo_alignment: 'left', text: 'continue_with', locale: 'en', state: challenge.state });
+    f.completeGoogle();
+    assert.equal(await credential, token);
+    assert.equal(host.clears, 2, 'remove the used button as soon as its credential is delivered');
+    assert.equal(f.controls.closeCount, 0);
+});
+
+test('official Google readiness waits for its injected stylesheet so an unstyled control cannot flash', async () => {
+    const f = fixture();
+    f.controls.sdk = f.sdk;
+    const stylesheet = Object.assign(new EventTarget(), { href: 'https://accounts.google.com/gsi/style', sheet: null });
+    f.document.head.querySelectorAll = () => [stylesheet];
+    let ready = 0;
+    const credential = f.client.acquireGoogleCredentialInline(google, challenge, inlineHost(), signal(), () => ready++);
+    await nextTurn();
+    assert(f.controls.rendered);
+    assert.equal(ready, 0);
+    stylesheet.sheet = {};
+    stylesheet.dispatchEvent(new Event('load'));
+    await nextTurn();
+    assert.equal(ready, 1);
+    f.completeGoogle();
+    assert.equal(await credential, token);
+});
+
+test('a failed Google stylesheet leaves the widget unavailable instead of advertising a ready control', async () => {
+    const f = fixture();
+    f.controls.sdk = f.sdk;
+    const stylesheet = Object.assign(new EventTarget(), { href: 'https://accounts.google.com/gsi/style', sheet: null });
+    f.document.head.querySelectorAll = () => [stylesheet];
+    let ready = 0;
+    const credential = f.client.acquireGoogleCredentialInline(google, challenge, inlineHost(), signal(), () => ready++);
+    await nextTurn();
+    stylesheet.dispatchEvent(new Event('error'));
+    await rejectsCode(credential, 'UNAVAILABLE');
+    assert.equal(ready, 0);
+});
+
+test('inline cleanup ignores late Google callbacks and permits a fresh nonce-bound render', async () => {
+    const f = fixture();
+    f.controls.sdk = f.sdk;
+    const host = inlineHost();
+    const controller = new AbortController();
+    const credential = f.client.acquireGoogleCredentialInline(google, challenge, host, controller.signal);
+    const rejected = rejectsCode(credential, 'CANCELLED');
+    await nextTurn();
+    const lateCallback = f.controls.initialization.callback;
+    await rejectsCode(f.client.acquireProviderCredential(google, challenge, signal()), 'UNAVAILABLE');
+    controller.abort();
+    await rejected;
+    assert.equal(host.clears, 2);
+    lateCallback({ credential: token, state: challenge.state });
+    const next = { ...challenge, state: Buffer.alloc(32, 3).toString('base64url'), nonce: Buffer.alloc(32, 4).toString('base64url') };
+    const fresh = f.client.acquireGoogleCredentialInline(google, next, host, signal());
+    await nextTurn();
+    assert.equal(f.controls.initialization.nonce, next.nonce);
+    lateCallback({ credential: token, state: challenge.state });
+    f.completeGoogle({ credential: token, state: next.state });
+    assert.equal(await fresh, token);
+});
+
+test('inline Google rejects a mismatched response without exposing a token or opening an alert', async () => {
+    const f = fixture();
+    f.controls.sdk = f.sdk;
+    const host = inlineHost();
+    const credential = f.client.acquireGoogleCredentialInline(google, challenge, host, signal());
+    const rejected = rejectsCode(credential, 'UNAVAILABLE');
+    await nextTurn();
+    f.completeGoogle({ credential: token, state: 'wrong' });
+    await rejected;
+    assert.equal(host.clears, 2);
+    assert.equal(f.controls.popup, null);
+});
+
+test('inline Google expires without leaving an actionable stale button', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const f = fixture();
+    f.controls.sdk = f.sdk;
+    const host = inlineHost();
+    const credential = f.client.acquireGoogleCredentialInline(google, { ...challenge, expiresInSeconds: 1 }, host, signal());
+    const rejected = rejectsCode(credential, 'CANCELLED');
+    await nextTurn();
+    t.mock.timers.tick(1000);
+    await rejected;
+    assert.equal(host.clears, 2);
+    assert.equal(f.controls.closeCount, 0);
+});
+
+test('Google cancellation during loading removes its script, settles promptly and permits a fresh attempt', async () => {
+    const f = fixture();
+    const credential = f.client.acquireProviderCredential(google, challenge, signal());
+    const rejected = rejectsCode(credential, 'CANCELLED');
+    await nextTurn();
+    f.alert.close();
+    await rejected;
+    await nextTurn();
+    assert.equal(f.scripts[0].removed, true);
+    assert.equal(f.scripts[0].onload, null);
+    const retry = f.client.acquireProviderCredential(google, challenge, signal());
+    await nextTurn();
+    assert.equal(f.scripts.length, 2);
+    f.loadGoogle();
+    await nextTurn();
+    f.completeGoogle();
+    assert.equal(await retry, token);
+});
+
+test('aborting Google ignores late credentials and never closes a replacement alert', async () => {
+    const controller = new AbortController();
+    const f = fixture();
+    f.controls.sdk = f.sdk;
+    const credential = f.client.acquireProviderCredential(google, challenge, controller.signal);
+    const rejected = rejectsCode(credential, 'CANCELLED');
+    await nextTurn();
+    const unrelated = { unrelated: true };
+    f.controls.popup = unrelated;
+    controller.abort('private reason');
+    await rejected;
+    f.completeGoogle();
+    assert.equal(f.controls.popup, unrelated);
+    assert.equal(f.controls.closeCount, 0);
+});
+
+test('an existing alert or another active acquisition is never overwritten', async () => {
+    const f = fixture();
+    f.controls.popup = { unrelated: true };
+    await rejectsCode(f.client.acquireProviderCredential(google, challenge, signal()), 'UNAVAILABLE');
+    assert.equal(f.scripts.length, 0);
+    f.controls.popup = null;
+    f.controls.sdk = f.sdk;
+    const controller = new AbortController();
+    const first = f.client.acquireProviderCredential(google, challenge, controller.signal);
+    const rejected = rejectsCode(first, 'CANCELLED');
+    await nextTurn();
+    await rejectsCode(f.client.acquireProviderCredential(google, challenge, signal()), 'UNAVAILABLE');
+    controller.abort();
+    await rejected;
+});
+
+test('Google script and credential failures are sanitized and bounded', async t => {
+    for (const response of [null, {}, { credential: token, state: 'wrong' },
+        { credential: '', state: challenge.state }, { credential: 'x'.repeat(16_385), state: challenge.state }]) {
+        const f = fixture();
+        f.controls.sdk = f.sdk;
+        const credential = f.client.acquireProviderCredential(google, challenge, signal());
+        const rejected = rejectsCode(credential, 'UNAVAILABLE');
+        await nextTurn();
+        f.completeGoogle(response);
+        await rejected;
+        assert.equal(f.controls.closeCount, 1);
+    }
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const f = fixture();
+    const loading = f.client.acquireProviderCredential(google, challenge, signal());
+    const rejected = rejectsCode(loading, 'UNAVAILABLE');
+    await nextTurn();
+    t.mock.timers.tick(10_000);
+    await rejected;
+    assert.equal(f.scripts[0].removed, true);
+    assert.equal(f.controls.closeCount, 1);
+});
+
+test('the challenge deadline closes only the owned Google popup and clears pending work', async t => {
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const f = fixture();
+    f.controls.sdk = f.sdk;
+    const credential = f.client.acquireProviderCredential(google, { ...challenge, expiresInSeconds: 1 }, signal());
+    const rejected = rejectsCode(credential, 'CANCELLED');
+    await nextTurn();
+    t.mock.timers.tick(1000);
+    await rejected;
+    assert.equal(f.controls.closeCount, 1);
+    assert.equal(f.controls.popup, null);
+});
+
+test('native Apple requests only the configured audience and challenge, returning only token and code', async () => {
+    const f = fixture({ platform: 'ios', isNative: true });
+    const credential = await f.client.acquireProviderCredential(apple, challenge, signal());
+    assert.deepEqual(credential, appleCredential);
+    assert.equal(Object.isFrozen(credential), true);
+    assert.deepEqual(f.calls, ['capabilities', ['native', { provider: 'apple', clientId: apple.clientId,
+        nonce: challenge.nonce, state: challenge.state }]]);
+    assert.equal(f.scripts.length, 0);
+    assert.equal(f.controls.popup, null);
+    assert.equal(f.controls.nativeCancelCount, 0);
+});
+
+test('native abort calls cancel and discards late native success', async () => {
+    let finish;
+    const f = fixture({ platform: 'ios', isNative: true,
+        identity: { signIn: () => new Promise(resolve => { finish = resolve; }) } });
+    const controller = new AbortController();
+    const credential = f.client.acquireProviderCredential(apple, challenge, controller.signal);
+    const rejected = rejectsCode(credential, 'CANCELLED');
+    await nextTurn();
+    controller.abort();
+    await rejected;
+    assert.equal(f.controls.nativeCancelCount, 1);
+    finish(nativeResult);
+    await nextTurn();
+    assert.equal(f.controls.nativeCancelCount, 1);
+});
+
+for (const cancellation of ['abort', 'challenge timeout']) {
+    test(`native ${cancellation} keeps retries blocked until cancellation is acknowledged`, async t => {
+        if (cancellation === 'challenge timeout') t.mock.timers.enable({ apis: ['setTimeout'] });
+        let finishInitial;
+        let acknowledgeCancel;
+        let nativeStarts = 0;
+        let nativeCancels = 0;
+        const f = fixture({ platform: 'ios', isNative: true, identity: {
+            signIn: () => ++nativeStarts === 1
+                ? new Promise(resolve => { finishInitial = resolve; })
+                : Promise.resolve(nativeResult),
+            cancel: () => {
+                nativeCancels++;
+                return new Promise(resolve => { acknowledgeCancel = resolve; });
+            },
+        } });
+        const controller = new AbortController();
+        const credential = f.client.acquireProviderCredential(apple,
+            { ...challenge, expiresInSeconds: 1 }, controller.signal);
+        const rejected = rejectsCode(credential, 'CANCELLED');
+        try {
+            await nextTurn();
+            if (cancellation === 'abort') controller.abort();
+            else t.mock.timers.tick(1000);
+            await rejected;
+            assert.equal(nativeCancels, 1);
+            finishInitial(nativeResult);
+            await nextTurn();
+            await rejectsCode(f.client.acquireProviderCredential(apple, challenge, signal()), 'UNAVAILABLE');
+            assert.equal(nativeStarts, 1, 'late native success must not release the cancellation gate');
+            acknowledgeCancel();
+            await nextTurn();
+            assert.deepEqual(await f.client.acquireProviderCredential(apple, challenge, signal()), appleCredential);
+            assert.equal(nativeStarts, 2);
+            assert.equal(nativeCancels, 1);
+        } finally {
+            finishInitial?.(nativeResult);
+            acknowledgeCancel?.();
+        }
+    });
+}
+
+test('native cancellation rejection is handled and keeps retries fail-closed after late success', async () => {
+    let finishInitial;
+    let rejectCancel;
+    let nativeStarts = 0;
+    const f = fixture({ platform: 'ios', isNative: true, identity: {
+        signIn: () => ++nativeStarts === 1
+            ? new Promise(resolve => { finishInitial = resolve; })
+            : Promise.resolve(nativeResult),
+        cancel: () => new Promise((_resolve, reject) => { rejectCancel = reject; }),
+    } });
+    const controller = new AbortController();
+    const credential = f.client.acquireProviderCredential(apple, challenge, controller.signal);
+    const rejected = rejectsCode(credential, 'CANCELLED');
+    try {
+        await nextTurn();
+        controller.abort();
+        await rejected;
+        rejectCancel(new Error('private cancellation details'));
+        await nextTurn();
+        finishInitial(nativeResult);
+        await nextTurn();
+        await rejectsCode(f.client.acquireProviderCredential(apple, challenge, signal()), 'UNAVAILABLE');
+        assert.equal(nativeStarts, 1);
+    } finally {
+        finishInitial?.(nativeResult);
+    }
+});
+
+test('unavailable native capability, malformed results and native errors never expose raw details', async () => {
+    for (const identity of [
+        { getCapabilities: async () => ({ apple: false }) },
+        ...[null, token, { identityToken: token }, { ...nativeResult, private: 'unwanted' },
+            { ...nativeResult, identityToken: 'invalid' },
+            ...[undefined, null, '', ' ', 'code with space', 'code\n', '\u007f', 'é', 'x'.repeat(4097)]
+                .map(authorizationCode => ({ identityToken: token, authorizationCode }))]
+            .map(result => ({ signIn: async () => result })),
+        { signIn: async () => { throw new Error('private identity token'); } },
+    ]) {
+        await rejectsCode(fixture({ platform: 'ios', isNative: true, identity }).client
+            .acquireProviderCredential(apple, challenge, signal()), 'UNAVAILABLE');
+    }
+    await rejectsCode(fixture({ platform: 'ios', isNative: true,
+        identity: { signIn: async () => { throw { code: 'CANCELLED', message: 'private' }; } } }).client
+        .acquireProviderCredential(apple, challenge, signal()), 'CANCELLED');
+});
+
+test('unsupported platform, malformed client/challenge and pre-abort never start native or web sign-in', async () => {
+    for (const [client, request, overrides] of [
+        [google, challenge, { platform: 'android', isNative: true }],
+        [google, challenge, { platform: 'ios', isNative: true }], [apple, challenge, {}],
+        [{ ...google, clientId: '' }, challenge, {}], [google, { ...challenge, nonce: 'wrong' }, {}],
+        [google, { ...challenge, expiresInSeconds: 301 }, {}],
+    ]) {
+        const f = fixture(overrides);
+        await rejectsCode(f.client.acquireProviderCredential(client, request, signal()), 'UNAVAILABLE');
+        assert.deepEqual(f.calls, []);
+        assert.equal(f.scripts.length, 0);
+    }
+    const f = fixture();
+    const controller = new AbortController();
+    controller.abort();
+    await rejectsCode(f.client.acquireProviderCredential(google, challenge, controller.signal), 'CANCELLED');
+    assert.equal(f.scripts.length, 0);
+    assert.equal(f.controls.popup, null);
+});
+
+
+for (const platform of ['ios', 'android']) {
+    const nativeGoogle = { ...google, clientKey: `google-${platform}`, platform };
+    const nativeFixture = (identity = {}) => fixture({ platform, isNative: true,
+        fetchRequest: async () => Response.json({ clients: [google, apple,
+            { ...google, clientKey: 'google-ios', platform: 'ios' },
+            { ...google, clientKey: 'google-android', platform: 'android' }] }),
+        identity: { getCapabilities: async () => ({ google: true, apple: false }),
+            signIn: async () => ({ identityToken: token }), ...identity } });
+    test(`${platform} Google discovery and acquisition use only the matching native capability`, async () => {
+        let received;
+        const f = nativeFixture({ signIn: async input => { received = input; return { identityToken: token }; } });
+        assert.deepEqual(await f.client.getAvailableProviderClients(), [nativeGoogle]);
+        assert.equal(await f.client.acquireProviderCredential(nativeGoogle, challenge, signal()), token);
+        assert.deepEqual(received, { provider: 'google', clientId: google.clientId, nonce: challenge.nonce, state: challenge.state });
+        assert.deepEqual(f.scripts, []);
+        await rejectsCode(f.client.acquireProviderCredential({ ...nativeGoogle, platform: platform === 'ios' ? 'android' : 'ios' }, challenge, signal()), 'UNAVAILABLE');
+    });
+    test(`${platform} Google rejects capability loss and malformed or over-disclosing bridge responses`, async () => {
+        for (const result of [null, {}, { identityToken: '' }, { identityToken: token, authorizationCode },
+            { identityToken: token, email: 'private@example.test' }]) {
+            await rejectsCode(nativeFixture({ signIn: async () => result }).client.acquireProviderCredential(nativeGoogle, challenge, signal()), 'UNAVAILABLE');
+        }
+        await rejectsCode(nativeFixture({ getCapabilities: async () => ({ google: false }) })
+            .client.acquireProviderCredential(nativeGoogle, challenge, signal()), 'UNAVAILABLE');
+    });
+    test(`${platform} Google blocks retry until cancellation acknowledgement and discards late credentials`, async () => {
+        let finish, acknowledge;
+        const f = nativeFixture({ signIn: () => new Promise(resolve => { finish = resolve; }),
+            cancel: () => new Promise(resolve => { acknowledge = resolve; }) });
+        const controller = new AbortController();
+        const pending = f.client.acquireProviderCredential(nativeGoogle, challenge, controller.signal);
+        await nextTurn(); controller.abort();
+        await rejectsCode(pending, 'CANCELLED');
+        await rejectsCode(f.client.acquireProviderCredential(nativeGoogle, challenge, signal()), 'UNAVAILABLE');
+        finish({ identityToken: token }); await nextTurn();
+        await rejectsCode(f.client.acquireProviderCredential(nativeGoogle, challenge, signal()), 'UNAVAILABLE');
+        acknowledge(); await nextTurn();
+        const retry = f.client.acquireProviderCredential(nativeGoogle, challenge, signal());
+        await nextTurn(); finish({ identityToken: token });
+        assert.equal(await retry, token);
+    });
+}

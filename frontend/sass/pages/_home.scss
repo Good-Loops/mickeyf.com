@@ -135,13 +135,87 @@
 }
 
 .quote {
-    position: relative;
+    position: absolute;
 
     width: fit-content;
+    max-width: min(60ch, calc(100% - 4rem));
 
     color: $white;
     font-size: $font-size-xs;
-    white-space: nowrap;
+    line-height: 1.5;
+    overflow-wrap: anywhere;
+    text-wrap: balance;
 
     text-shadow: 2px 2px 5px rgba(0, 0, 0, 0.3);
+
+    &__author {
+        display: block;
+        margin-top: .6em;
+        color: rgba($primary-light, .76);
+        font-size: .8em;
+        font-style: normal;
+    }
+}
+
+@include compact-viewport {
+    .home {
+        display: grid;
+        justify-items: center;
+        gap: clamp(2.4rem, 6svh, 4.8rem);
+        width: min(calc(100% - 3.2rem), 42rem);
+        padding-block: 1.6rem;
+
+        &__welcome-message {
+            max-width: 100%;
+            padding: 1.2rem 1.8rem;
+
+            &::before,
+            &::after {
+                width: 1.6rem;
+                height: 1.6rem;
+            }
+        }
+
+        &__welcome-line--blue {
+            font-size: clamp(3rem, 8vw, 3.8rem);
+        }
+
+        &__welcome-line--green {
+            gap: .7rem;
+            margin-top: .9rem;
+            font-size: 1rem;
+            letter-spacing: .18em;
+        }
+    }
+
+    // Compact quotes participate in layout, even when Safari's edge shell is
+    // active. They must not inherit its absolute, clipped ambient-text layer.
+    .home .home__quotes-container,
+    html[data-safari-edges] .home .home__quotes-container {
+        position: static;
+        width: 100%;
+        max-width: none;
+        max-height: none;
+        overflow: visible;
+        pointer-events: auto;
+        font-size: clamp(1.4rem, 3.6vw, 1.6rem);
+        // Reserve room for longer quotes so the welcome title does not jump.
+        min-height: 8.5em;
+    }
+
+    .home .quote {
+        position: static;
+        width: 100%;
+        max-width: none;
+        font-size: inherit;
+        line-height: 1.6;
+        text-align: center;
+        user-select: text;
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .home .quote {
+        transition: none;
+    }
 }

@@ -30,8 +30,6 @@ import {
     submitThreeBossesRun,
 } from '../leaderboards/threeBossesRunRepository';
 import {
-    hasAllowedThreeBossesMutationOrigin,
-    isJsonSubmissionRequest,
     validateThreeBossesRunSubmission,
     validateThreeBossesRunTicketRequest,
 } from '../leaderboards/threeBossesRunRequest';
@@ -39,13 +37,18 @@ import {
     issueThreeBossesRunTicket,
     verifyThreeBossesRunTicket,
 } from '../leaderboards/threeBossesRunTicket';
-import { authenticateRequest } from '../security/requestAuthentication';
+import { authorizeThreeBossesMutation } from '../security/threeBossesMutationAuthorization';
+import { readActiveAccount } from '../security/activeAccount';
+import type { ParentManagedChildActivity } from '../accounts/parentManagedChildActivity';
 
 type LeaderboardControllerDependencies = {
     database: Pick<Pool, 'getConnection' | 'query'>;
+    scorePublicationDigest?: Buffer;
+    scoreParticipationReady?: boolean;
     sessionSecret: string;
     allowedMutationOrigins: readonly string[];
     threeBossesRunSubmissionsEnabled: boolean;
+    childActivity?: ParentManagedChildActivity;
 };
 type GameLeaderboardResponseBody = GameLeaderboardResponse
     | LeaderboardApiError<'UNKNOWN_GAME' | 'SERVER_ERROR'>;
@@ -108,11 +111,18 @@ export function leaderboardCatalogResponse(
 }
 
 export function createLeaderboardController({
-    database,
+    database, scorePublicationDigest, scoreParticipationReady = false,
     sessionSecret,
     allowedMutationOrigins,
     threeBossesRunSubmissionsEnabled,
+    childActivity,
 }: LeaderboardControllerDependencies) {
+    const mutationPolicy = {
+        submissionsEnabled: threeBossesRunSubmissionsEnabled,
+        sessionSecret,
+        allowedMutationOrigins,
+    };
+
     function getCatalog(_req: Request, res: Response<LeaderboardCatalogResponse>) {
         return res.json(leaderboardCatalogResponse(
             threeBossesRunSubmissionsEnabled
@@ -133,7 +143,7 @@ export function createLeaderboardController({
         }
 
         if (gameId === 'three-bosses') {
-            const rows = await readThreeBossesLeaderboard(database);
+            const rows = await readThreeBossesLeaderboard(database, scorePublicationDigest, scoreParticipationReady);
             return res.json({
                 success: true,
                 contractVersion: LEADERBOARD_CONTRACT_VERSION,
@@ -152,7 +162,7 @@ export function createLeaderboardController({
             });
         }
 
-        const rows = await readP4VegaLeaderboard(database);
+        const rows = await readP4VegaLeaderboard(database, scorePublicationDigest, scoreParticipationReady);
         return res.json({
             success: true,
             contractVersion: LEADERBOARD_CONTRACT_VERSION,
@@ -170,36 +180,12 @@ export function createLeaderboardController({
         req: Request,
         res: Response<ThreeBossesRunSubmissionResponseBody>
     ) {
-        if (!threeBossesRunSubmissionsEnabled) {
-            return res.status(403).json({
+        const authorization = authorizeThreeBossesMutation(req, mutationPolicy);
+        if (!authorization.authorized) {
+            return res.status(authorization.status).json({
                 success: false,
                 contractVersion: LEADERBOARD_CONTRACT_VERSION,
-                error: 'SUBMISSION_DISABLED',
-            });
-        }
-
-        const authentication = authenticateRequest(req, sessionSecret);
-        if (!authentication.authenticated) {
-            return res.status(401).json({
-                success: false,
-                contractVersion: LEADERBOARD_CONTRACT_VERSION,
-                error: 'UNAUTHORIZED',
-            });
-        }
-
-        if (!hasAllowedThreeBossesMutationOrigin(req, allowedMutationOrigins)) {
-            return res.status(401).json({
-                success: false,
-                contractVersion: LEADERBOARD_CONTRACT_VERSION,
-                error: 'UNAUTHORIZED',
-            });
-        }
-
-        if (!isJsonSubmissionRequest(req)) {
-            return res.status(400).json({
-                success: false,
-                contractVersion: LEADERBOARD_CONTRACT_VERSION,
-                error: 'INVALID_RUN',
+                error: authorization.error,
             });
         }
 
@@ -214,7 +200,7 @@ export function createLeaderboardController({
 
         if (!verifyThreeBossesRunTicket(
             sessionSecret,
-            authentication.identity.userId,
+            authorization.identity,
             validation.input
         )) {
             return res.status(400).json({
@@ -226,9 +212,11 @@ export function createLeaderboardController({
 
         const result = await submitThreeBossesRun(
             database,
-            authentication.identity.userId,
+            authorization.identity.userId,
             validation.input.runId,
-            validation.input.completionTimeMs
+            validation.input.completionTimeMs,
+            authorization.identity,
+            childActivity
         );
         if (result.kind === 'user-not-found') {
             return res.status(401).json({
@@ -272,36 +260,12 @@ export function createLeaderboardController({
         req: Request,
         res: Response<ThreeBossesRunTicketResponseBody>
     ) {
-        if (!threeBossesRunSubmissionsEnabled) {
-            return res.status(403).json({
+        const authorization = authorizeThreeBossesMutation(req, mutationPolicy);
+        if (!authorization.authorized) {
+            return res.status(authorization.status).json({
                 success: false,
                 contractVersion: LEADERBOARD_CONTRACT_VERSION,
-                error: 'SUBMISSION_DISABLED',
-            });
-        }
-
-        const authentication = authenticateRequest(req, sessionSecret);
-        if (!authentication.authenticated) {
-            return res.status(401).json({
-                success: false,
-                contractVersion: LEADERBOARD_CONTRACT_VERSION,
-                error: 'UNAUTHORIZED',
-            });
-        }
-
-        if (!hasAllowedThreeBossesMutationOrigin(req, allowedMutationOrigins)) {
-            return res.status(401).json({
-                success: false,
-                contractVersion: LEADERBOARD_CONTRACT_VERSION,
-                error: 'UNAUTHORIZED',
-            });
-        }
-
-        if (!isJsonSubmissionRequest(req)) {
-            return res.status(400).json({
-                success: false,
-                contractVersion: LEADERBOARD_CONTRACT_VERSION,
-                error: 'INVALID_RUN',
+                error: authorization.error,
             });
         }
 
@@ -314,9 +278,16 @@ export function createLeaderboardController({
             });
         }
 
+        if (!await readActiveAccount(database, authorization.identity)) {
+            return res.status(401).json({
+                success: false,
+                contractVersion: LEADERBOARD_CONTRACT_VERSION,
+                error: 'UNAUTHORIZED',
+            });
+        }
         const ticket = issueThreeBossesRunTicket(
             sessionSecret,
-            authentication.identity.userId,
+            authorization.identity,
             validation.input
         );
         return res.status(201).json({

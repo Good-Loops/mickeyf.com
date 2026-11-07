@@ -1,39 +1,39 @@
 {
   "version": 2,
-  "buildId": "97daf31ca0b4e854ef5e327ae68db24abe0d9f66d7259ae56df538a40ed8c098",
-  "certifiedBuildId": "5473694d7730f316a5e72cd67fe30d49ecc05f61f8c809c4ffd02b1b7fb14ba7",
-  "sourceCommit": "346491b4f07d3d7325813a2470ebd0819bbee6a5",
-  "unitySourceDigest": "83c9a133ca8024737af2b4e58ed52bf24fc902e65b5778dea229cb262c7c52fe",
-  "unitySourceFileCount": 1004,
-  "unityEditorVersion": "6000.3.8f1",
-  "loaderUrl": "releases/97daf31ca0b4e854ef5e327ae68db24abe0d9f66d7259ae56df538a40ed8c098/Build/three-bosses-webgl-release-20260910.loader.js",
-  "dataUrl": "releases/97daf31ca0b4e854ef5e327ae68db24abe0d9f66d7259ae56df538a40ed8c098/Build/three-bosses-webgl-release-20260910.data",
-  "frameworkUrl": "releases/97daf31ca0b4e854ef5e327ae68db24abe0d9f66d7259ae56df538a40ed8c098/Build/three-bosses-webgl-release-20260910.framework.js",
-  "codeUrl": "releases/97daf31ca0b4e854ef5e327ae68db24abe0d9f66d7259ae56df538a40ed8c098/Build/three-bosses-webgl-release-20260910.wasm",
-  "streamingAssetsUrl": "releases/97daf31ca0b4e854ef5e327ae68db24abe0d9f66d7259ae56df538a40ed8c098/StreamingAssets",
+  "buildId": "75124b8127d66de8d1e92ae776585b907061d9428eaa2208853018e817969ca0",
+  "certifiedBuildId": "920a3d13e8c0b9348afb63501833ffdaa6cbb879c5738344042c04a0aa8e064c",
+  "sourceCommit": "b41fc6b79b06d6072c9973cb34bce6cfd9bf25a1",
+  "unitySourceDigest": "b843f34607243d6e35bb55b8b0312cd2b96c016ae7063add15d3e1ad63c14f79",
+  "unitySourceFileCount": 1046,
+  "unityEditorVersion": "6000.3.27f2",
+  "loaderUrl": "releases/75124b8127d66de8d1e92ae776585b907061d9428eaa2208853018e817969ca0/Build/unity-security-webgl-retry-2026-11-05.loader.js",
+  "dataUrl": "releases/75124b8127d66de8d1e92ae776585b907061d9428eaa2208853018e817969ca0/Build/unity-security-webgl-retry-2026-11-05.data",
+  "frameworkUrl": "releases/75124b8127d66de8d1e92ae776585b907061d9428eaa2208853018e817969ca0/Build/unity-security-webgl-retry-2026-11-05.framework.js",
+  "codeUrl": "releases/75124b8127d66de8d1e92ae776585b907061d9428eaa2208853018e817969ca0/Build/unity-security-webgl-retry-2026-11-05.wasm",
+  "streamingAssetsUrl": "releases/75124b8127d66de8d1e92ae776585b907061d9428eaa2208853018e817969ca0/StreamingAssets",
   "companyName": "DefaultCompany",
   "productName": "Three Bosses",
   "productVersion": "1.0",
   "assets": [
     {
-      "path": "releases/97daf31ca0b4e854ef5e327ae68db24abe0d9f66d7259ae56df538a40ed8c098/Build/three-bosses-webgl-release-20260910.data",
-      "sha256": "9aea78a8348495ab2f2d5dd0a08e2780db17b4e3748eeb5ea89979835de51943",
-      "size": 41818046
+      "path": "releases/75124b8127d66de8d1e92ae776585b907061d9428eaa2208853018e817969ca0/Build/unity-security-webgl-retry-2026-11-05.data",
+      "sha256": "b923cf6ff8f51605b0c024e075c380e47dc73852c481f9d53c00a1bde81e4ebb",
+      "size": 41843269
     },
     {
-      "path": "releases/97daf31ca0b4e854ef5e327ae68db24abe0d9f66d7259ae56df538a40ed8c098/Build/three-bosses-webgl-release-20260910.framework.js",
-      "sha256": "6db9c229fa7d921b9f0528ce5e821fbbbe0749f7ab0a68f6521f073ff287c4f7",
-      "size": 464049
+      "path": "releases/75124b8127d66de8d1e92ae776585b907061d9428eaa2208853018e817969ca0/Build/unity-security-webgl-retry-2026-11-05.framework.js",
+      "sha256": "0978fa19f6891bfa133c5fbf392d67057dde550de2101e1ca8f5564289db3458",
+      "size": 465633
     },
     {
-      "path": "releases/97daf31ca0b4e854ef5e327ae68db24abe0d9f66d7259ae56df538a40ed8c098/Build/three-bosses-webgl-release-20260910.loader.js",
-      "sha256": "f724c35fdb96c400fc6cd0e790bf12b825a357b62cf0515db7bdfa52c99d3e65",
-      "size": 26982
+      "path": "releases/75124b8127d66de8d1e92ae776585b907061d9428eaa2208853018e817969ca0/Build/unity-security-webgl-retry-2026-11-05.loader.js",
+      "sha256": "7c486cdd74b6465dd595931431f858722c1c6610abd0df377d0893a80d71c65b",
+      "size": 26983
     },
     {
-      "path": "releases/97daf31ca0b4e854ef5e327ae68db24abe0d9f66d7259ae56df538a40ed8c098/Build/three-bosses-webgl-release-20260910.wasm",
-      "sha256": "e3c6aef2b7151043c94767f2eddad34833c7b56bc529f7e03611ada6b8adfff2",
-      "size": 52031665
+      "path": "releases/75124b8127d66de8d1e92ae776585b907061d9428eaa2208853018e817969ca0/Build/unity-security-webgl-retry-2026-11-05.wasm",
+      "sha256": "e853b2bdc545ea01205dd43fbee632f5325d0a639bbf1c12ff1f19313791e56e",
+      "size": 51877506
     }
   ]
 }

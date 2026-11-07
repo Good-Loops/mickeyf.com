@@ -2,12 +2,8 @@
  * Not-found route (catch-all).
  * Rendered when no client-side route matches.
  */
-import React from "react";
+import PageStatus from '@/components/PageStatus';
 
-const NotFound: React.FC = () => {
-    return (
-        <h1>Error 404: Page not found</h1>   
-    );
+export default function NotFound() {
+    return <PageStatus variant="not-found" />;
 }
-
-export default NotFound;

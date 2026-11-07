@@ -218,3 +218,29 @@ test('rejects invalid user IDs before acquiring a connection', async () => {
     );
     assert.equal(fake.acquisitions(), 0);
 });
+
+test('dependent locks share one connection and release child before parent', async () => {
+    const fake = createFakeDatabase();
+    await withUserSubmissionLock(fake.database, 42, parent => parent.withAdditionalLock(99, async child => {
+        assert.equal(parent.connection, child.connection);
+        assert.equal(fake.acquisitions(), 1);
+        fake.events.push('operation');
+    }));
+    assert.deepEqual(fake.queries.map(query => query.values), [[42, 5], [99, 5], [99], [42]]);
+    assert.deepEqual(fake.events, ['acquire', 'acquire', 'operation', 'release-lock', 'release-lock', 'release-connection']);
+});
+
+test('an invalidated dependent lock destroys the shared session once without returning either lock to the pool', async () => {
+    const fake = createFakeDatabase();
+    await assert.rejects(withUserSubmissionLock(fake.database, 42, parent => parent.withAdditionalLock(99, async child => {
+        child.invalidateConnection(); throw new Error('uncertain commit');
+    })), /uncertain commit/);
+    assert.deepEqual(fake.events, ['acquire', 'acquire', 'destroy-connection']);
+    assert.equal(fake.acquisitions(), 1);
+});
+
+test('duplicate dependent locks are rejected while the original lock is cleaned up', async () => {
+    const fake = createFakeDatabase();
+    await assert.rejects(withUserSubmissionLock(fake.database, 42, parent => parent.withAdditionalLock(42, async () => undefined)), TypeError);
+    assert.deepEqual(fake.events, ['acquire', 'release-lock', 'release-connection']);
+});

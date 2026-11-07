@@ -1,7 +1,7 @@
 version: 2
 
-# Keep routine version PRs to patch/minor releases. Dependabot security updates
-# are unaffected by allow.update-types and may still cross a major boundary.
+# Pause routine version PRs; handle version updates on the active branch. Dependabot security updates
+# remain enabled and may still cross a major boundary.
 
 updates:
   - package-ecosystem: npm
@@ -11,7 +11,7 @@ updates:
       day: monday
       time: "09:00"
       timezone: America/Sao_Paulo
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
     versioning-strategy: increase-if-necessary
     allow:
       - dependency-name: "*"
@@ -33,7 +33,7 @@ updates:
       day: monday
       time: "09:10"
       timezone: America/Sao_Paulo
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
     versioning-strategy: increase-if-necessary
     allow:
       - dependency-name: "*"
@@ -55,7 +55,7 @@ updates:
       day: monday
       time: "09:20"
       timezone: America/Sao_Paulo
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
     versioning-strategy: increase-if-necessary
     allow:
       - dependency-name: "*"
@@ -77,7 +77,7 @@ updates:
       day: monday
       time: "09:25"
       timezone: America/Sao_Paulo
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
     versioning-strategy: increase-if-necessary
     allow:
       - dependency-name: "*"
@@ -99,7 +99,7 @@ updates:
       day: monday
       time: "09:30"
       timezone: America/Sao_Paulo
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
     allow:
       - dependency-name: "*"
         update-types:
@@ -117,7 +117,7 @@ updates:
       day: monday
       time: "09:40"
       timezone: America/Sao_Paulo
-    open-pull-requests-limit: 5
+    open-pull-requests-limit: 0
     allow:
       - dependency-name: "*"
         update-types:

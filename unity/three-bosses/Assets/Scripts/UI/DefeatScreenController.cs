@@ -1,43 +1,44 @@
 using System.Collections;
-using TMPro;
 using ThreeBosses.Run;
 using UnityEngine;
-using UnityEngine.EventSystems;
 using UnityEngine.SceneManagement;
-using UnityEngine.UI;
 
 /// <summary>
 /// Shared behavior for the three lightweight boss-specific defeat scenes.
 /// </summary>
+[RequireComponent(typeof(OutcomeScreenView))]
+[DefaultExecutionOrder(100)]
 public sealed class DefeatScreenController : MonoBehaviour
 {
     [SerializeField] private BossId expectedBoss = BossId.Bee;
-    [SerializeField] private TMP_Text timeSurvivedLabel;
-    [SerializeField] private Button tryAgainButton;
-    [SerializeField] private Button backToMenuButton;
-    [SerializeField] private ScreenFade screenFade;
+    [SerializeField] private OutcomeScreenView view;
     [SerializeField] private string firstLevelSceneName = "Level1_BeeBoss";
     [SerializeField] private string menuSceneName = "MainMenu";
     [SerializeField, Min(0f)] private float fadeDurationSeconds = 0.35f;
 
     private bool isNavigating;
 
-    private void Awake()
-    {
-        UiButtonStyle.Apply(tryAgainButton);
-        UiButtonStyle.Apply(backToMenuButton);
-    }
-
     private void OnEnable()
     {
-        tryAgainButton.onClick.AddListener(TryAgain);
-        backToMenuButton.onClick.AddListener(BackToMenu);
+        view ??= GetComponent<OutcomeScreenView>();
+        if (view == null || !view.IsReady)
+        {
+            Debug.LogError("Defeat screen UI is not configured.", this);
+            enabled = false;
+            return;
+        }
+        view.TryAgainButton.clicked += TryAgain;
+        view.BackToMenuButton.clicked += BackToMenu;
     }
 
     private void OnDisable()
     {
-        tryAgainButton.onClick.RemoveListener(TryAgain);
-        backToMenuButton.onClick.RemoveListener(BackToMenu);
+        if (view == null)
+            return;
+        if (view.TryAgainButton != null)
+            view.TryAgainButton.clicked -= TryAgain;
+        if (view.BackToMenuButton != null)
+            view.BackToMenuButton.clicked -= BackToMenu;
     }
 
     private void Start()
@@ -53,9 +54,9 @@ public sealed class DefeatScreenController : MonoBehaviour
             return;
         }
 
-        timeSurvivedLabel.text = RunUiFormatter.FormatTime(session.ElapsedSeconds);
-        screenFade?.FadeOut(fadeDurationSeconds);
-        EventSystem.current?.SetSelectedGameObject(tryAgainButton.gameObject);
+        view.SetValues(RunUiFormatter.FormatTime(session.ElapsedSeconds));
+        view.FadeOut(fadeDurationSeconds);
+        view.FocusFirstAction();
     }
 
     private void TryAgain()
@@ -78,9 +79,8 @@ public sealed class DefeatScreenController : MonoBehaviour
     private IEnumerator Navigate(string sceneName)
     {
         isNavigating = true;
-        tryAgainButton.interactable = false;
-        backToMenuButton.interactable = false;
-        screenFade?.FadeIn(fadeDurationSeconds);
+        view.SetNavigationEnabled(false);
+        view.FadeIn(fadeDurationSeconds);
 
         if (fadeDurationSeconds > 0f)
             yield return new WaitForSecondsRealtime(fadeDurationSeconds);

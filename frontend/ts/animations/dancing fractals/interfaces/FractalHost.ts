@@ -57,6 +57,7 @@ export interface FractalHost {
      * Configures automatic disposal timing.
      *
      * When an animation is active, setting a lifetime re-arms its disposal countdown.
+     * Disabling cancels the pending countdown; a fade already started continues.
      *
      * @param seconds - Lifetime in **seconds**. Use `null` to disable auto-disposal.
      */

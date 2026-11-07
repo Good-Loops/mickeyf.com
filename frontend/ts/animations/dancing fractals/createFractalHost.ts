@@ -8,6 +8,8 @@
  * - Keep the per-frame ticker path allocation-light.
  * - Ensure disposal is deterministic: detach ticker, remove canvas, and destroy PIXI resources.
  */
+// Required by CSP-restricted native renderers; loaded with this experience, not Home.
+import 'pixi.js/unsafe-eval';
 import { Application, Ticker } from "pixi.js";
 import { enableCanvasPageGestures } from '@/utils/canvasPageGestures';
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from "@/utils/constants";
@@ -107,13 +109,13 @@ export async function createFractalHost(container: HTMLElement): Promise<Fractal
     app.ticker.add(onTick);
 
     const applyLifetime = () => {
+        remainingLifetime = lifetimeSeconds;
         if (!currentFractal) return;
         if (lifetimeSeconds == null) {
-            remainingLifetime = null;
+            currentFractal.cancelScheduledDisposal();
             return;
         }
 
-        remainingLifetime = lifetimeSeconds;
         // `scheduleDisposal` delay is expressed in seconds.
         currentFractal.scheduleDisposal(lifetimeSeconds);
     };
@@ -169,18 +171,7 @@ export async function createFractalHost(container: HTMLElement): Promise<Fractal
 
     const setLifetime = (seconds: number | null) => {
         lifetimeSeconds = seconds;
-         if (!currentFractal) {
-            remainingLifetime = seconds;
-            return;
-        }
-
-        if (lifetimeSeconds == null) {
-            remainingLifetime = null;
-            return;
-        }
-
-        remainingLifetime = lifetimeSeconds;
-        currentFractal.scheduleDisposal(lifetimeSeconds);
+        applyLifetime();
     };
 
     const getStats = () => ({

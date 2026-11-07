@@ -7,6 +7,8 @@ import mysql, {
     type RowDataPacket,
 } from 'mysql2/promise';
 import { loadMigrationConfig } from '../config/migrationConfig';
+import { verifyAccountIdentitySchema } from './accountIdentitySchema';
+import { applyAccountIdentityMigration, planAccountIdentityMigration } from './accountIdentityMigration';
 import type { MigrationConnection } from './leaderboardSchema';
 import { loadMigrationManifest, type MigrationDefinition } from './migrationManifest';
 import {
@@ -29,7 +31,9 @@ const EXPECTED_TEST_TARGET = Object.freeze({
 });
 
 const config = loadMigrationConfig();
-const allMigrations = loadMigrationManifest();
+// This suite exercises the historical 0001–0008 transitions. Provider identities
+// have their own full-manifest integration fixture after the UUID epoch exists.
+const allMigrations = loadMigrationManifest().filter(({ version }) => version < '0009_');
 // These original tests deliberately preserve the historical recovery contract.
 const migrations = allMigrations.filter(({ effect }) =>
     effect === 'create-table' || effect === 'drop-column'
@@ -650,6 +654,104 @@ async function receiptIdentity(value: Connection = connection): Promise<ReceiptM
     return identityRows[0] as ReceiptMigrationIdentity;
 }
 
+async function prepareAccountIdentity(): Promise<void> {
+    await prepareReceiptTransition();
+    await applyMigrations(asMigrationConnection(connection), allMigrations, config, {
+        allowedEffectKinds: ['detach-best-source', 'retain-receipts'],
+    });
+}
+
+test('account identity requires separate approval, preserves old data, and defaults old signup inserts', async () => {
+    await prepareAccountIdentity();
+    const migrationConnection = asMigrationConnection(connection);
+    const before = (await connection.query<RowDataPacket[]>('SELECT * FROM users ORDER BY user_id'))[0];
+    const identity = await receiptIdentity();
+    const plan = await planAccountIdentityMigration(migrationConnection, allMigrations, config, identity);
+    assert.equal(plan.state, 'ready');
+    assert.equal(await columnCount('users', 'account_uuid'), 0);
+    await assert.rejects(() => applyAccountIdentityMigration(migrationConnection, allMigrations, config, identity, {
+        approvedPlanSha256: '0'.repeat(64), confirmedServerUuid: identity.serverUuid,
+    }), /approved plan digest/);
+    assert.equal(await columnCount('users', 'account_uuid'), 0);
+    const applied = await applyAccountIdentityMigration(migrationConnection, allMigrations, config, identity, {
+        approvedPlanSha256: plan.sha256, confirmedServerUuid: identity.serverUuid,
+    });
+    assert.equal(applied.state, 'applied');
+    assert.deepEqual(applied.schema.pending, []);
+    await verifyAccountIdentitySchema(migrationConnection);
+    const after = (await connection.query<RowDataPacket[]>('SELECT * FROM users ORDER BY user_id'))[0];
+    assert.deepEqual(after.map(({ account_uuid, ...oldColumns }) => oldColumns), before);
+    assert.equal(new Set(after.map(row => row.account_uuid)).size, before.length);
+    for (const row of after) assert.match(row.account_uuid, /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/);
+    await connection.query(`INSERT INTO users (user_name, email, user_password)
+        VALUES ('new-signup', 'new@example.test', 'test-only-hash')`);
+    const users = (await connection.query<RowDataPacket[]>('SELECT account_uuid FROM users'))[0];
+    assert.equal(new Set(users.map(row => row.account_uuid)).size, before.length + 1);
+    await assert.rejects(() => connection.query(`INSERT INTO users (user_name, email, user_password, account_uuid)
+        VALUES ('duplicate', 'duplicate@example.test', 'test-only-hash', ?)`, [after[0].account_uuid]),
+    /Duplicate entry/);
+    await connection.query('UPDATE users SET user_name = ? WHERE user_id = 1', ['renamed']);
+    assert.equal((await connection.query<RowDataPacket[]>('SELECT account_uuid FROM users WHERE user_id = 1'))[0][0].account_uuid,
+        after[0].account_uuid);
+});
+
+for (const interruptedVersion of ['0006_add_account_identity', '0007_backfill_account_identity', '0008_finalize_account_identity']) {
+test(`account identity recovers after ${interruptedVersion} without regenerating UUIDs`, async () => {
+    await prepareAccountIdentity();
+    const failing: MigrationConnection = {
+        query: async (sql, values = []) => {
+            if (sql.includes('INSERT INTO schema_migrations') && values[0] === interruptedVersion) {
+                throw new Error('synthetic identity history interruption');
+            }
+            return connection.query(sql, values) as Promise<[unknown, unknown]>;
+        },
+    };
+    await assert.rejects(() => applyMigrations(failing, allMigrations, config, {
+        allowedEffectKinds: ['add-account-identity'],
+    }), /identity history interruption/);
+    const users = (await connection.query<RowDataPacket[]>('SELECT * FROM users ORDER BY user_id'))[0];
+    const migrationConnection = asMigrationConnection(connection);
+    const recovery = await planMigrations(migrationConnection, allMigrations, config);
+    assert.deepEqual(recovery.recoverable, [interruptedVersion]);
+    await applyMigrations(migrationConnection, allMigrations, config, { allowedEffectKinds: ['add-account-identity'] });
+    const recoveredUsers = (await connection.query<RowDataPacket[]>('SELECT * FROM users ORDER BY user_id'))[0];
+    if (interruptedVersion !== '0006_add_account_identity') assert.deepEqual(recoveredUsers, users);
+    else assert.deepEqual(recoveredUsers.map(({ account_uuid, ...oldColumns }) => oldColumns),
+        users.map(({ account_uuid, ...oldColumns }) => oldColumns));
+});
+}
+
+test('reused numeric IDs receive different identities while explicit restore preserves the saved UUID', async () => {
+    await prepareAccountIdentity();
+    await applyMigrations(asMigrationConnection(connection), allMigrations, config, {
+        allowedEffectKinds: ['add-account-identity'],
+    });
+    const insert = `INSERT INTO users (user_id, user_name, email, user_password)
+        VALUES (50, 'reused', 'reuse@example.test', 'test-only-hash')`;
+    await connection.query(insert);
+    const read = async () => (await connection.query<RowDataPacket[]>('SELECT * FROM users WHERE user_id = 50'))[0][0];
+    const original = await read();
+    await connection.query('DELETE FROM users WHERE user_id = 50');
+    await connection.query(insert);
+    assert.notEqual((await read()).account_uuid, original.account_uuid);
+    await connection.query('DELETE FROM users WHERE user_id = 50');
+    await connection.query(`INSERT INTO users (user_id, user_name, email, user_password, account_uuid)
+        VALUES (?, ?, ?, ?, ?)`, [original.user_id, original.user_name, original.email, original.user_password, original.account_uuid]);
+    assert.deepEqual(await read(), original);
+});
+
+test('account identity inspection refuses missing, nullable and nonunique restored schemas', async () => {
+    await prepareAccountIdentity();
+    const migrationConnection = asMigrationConnection(connection);
+    await assert.rejects(() => verifyAccountIdentitySchema(migrationConnection), /reviewed schema/);
+    await applyMigrations(migrationConnection, allMigrations, config, { allowedEffectKinds: ['add-account-identity'] });
+    await connection.query('ALTER TABLE users DROP INDEX uq_users_account_uuid');
+    await assert.rejects(() => verifyAccountIdentitySchema(migrationConnection), /unique index/);
+    await connection.query('ALTER TABLE users ADD UNIQUE KEY uq_users_account_uuid (account_uuid)');
+    await connection.query('ALTER TABLE users MODIFY COLUMN account_uuid CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL DEFAULT (UUID())');
+    await assert.rejects(() => verifyAccountIdentitySchema(migrationConnection), /reviewed schema/);
+});
+
 test('receipt transition preserves exact best metrics and receipts, then receipts can expire independently', async () => {
     await prepareReceiptTransition();
     const beforeBests = await preservedBestRows();
@@ -668,7 +770,7 @@ test('receipt transition preserves exact best metrics and receipts, then receipt
     const applied = await applyMigrations(migrationConnection, allMigrations, config, {
         allowedEffectKinds: ['detach-best-source', 'retain-receipts'],
     });
-    assert.deepEqual(applied.pending, []);
+    assert.deepEqual(applied.pending, allMigrations.slice(5).map(({ version }) => version));
     assert.equal(await tableCount('game_runs'), 0);
     assert.equal(await tableCount('game_submission_receipts'), 1);
     assert.equal(await columnCount('game_personal_bests', 'source_game_run_id'), 0);
@@ -686,7 +788,7 @@ test('receipt transition preserves exact best metrics and receipts, then receipt
     const [history] = await connection.query<RowDataPacket[]>(
         'SELECT version, checksum FROM schema_migrations ORDER BY version'
     );
-    assert.deepEqual(history, allMigrations.map(({ version, checksum }) => ({ version, checksum })));
+    assert.deepEqual(history, allMigrations.slice(0, 5).map(({ version, checksum }) => ({ version, checksum })));
     await connection.query('DELETE FROM game_submission_receipts');
     assert.deepEqual(await preservedBestRows(), beforeBests);
 });
@@ -721,7 +823,7 @@ for (const failedVersion of [3, 4]) {
         const recovered = await applyMigrations(asMigrationConnection(connection), allMigrations, config, {
             allowedEffectKinds: ['detach-best-source', 'retain-receipts'],
         });
-        assert.deepEqual(recovered.pending, []);
+        assert.deepEqual(recovered.pending, allMigrations.slice(5).map(({ version }) => version));
         assert.deepEqual(await preservedBestRows(), beforeBests);
     });
 }

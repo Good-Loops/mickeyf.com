@@ -5,13 +5,17 @@ import { createLeaderboardController } from '../controllers/leaderboardControlle
 import { asyncHandler } from '../middleware/errorHandling';
 import { leaderboardRequestErrorHandler } from './leaderboardRouter.handlers';
 import { createThreeBossesSubmissionIpRateLimiter } from '../security/requestRateLimits';
+import type { ParentManagedChildActivity } from '../accounts/parentManagedChildActivity';
 
 export { leaderboardRoutesContract } from './leaderboardRouter.contract';
 
 export type LeaderboardRouterOptions = Readonly<{
     sessionSecret: string;
+    scorePublicationDigest?: Buffer;
+    scoreParticipationReady?: boolean;
     allowedMutationOrigins: readonly string[];
     threeBossesRunSubmissionsEnabled: boolean;
+    childActivity?: ParentManagedChildActivity;
 }>;
 
 export function createLeaderboardRouter(
@@ -19,6 +23,7 @@ export function createLeaderboardRouter(
     options: LeaderboardRouterOptions
 ): Router {
     const router = Router();
+    router.use((_req, res, next) => { res.setHeader('Cache-Control', 'no-store'); next(); });
     const controller = createLeaderboardController({ database, ...options });
 
     router.get('/', controller.getCatalog);

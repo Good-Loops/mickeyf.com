@@ -9,7 +9,7 @@
     "scripts": {
         "dev": "npm --prefix .. run frontend:dev:local --",
         "dev:vite": "vite",
-        "test": "tsc -p tsconfig.json --noEmit && node --experimental-strip-types --test ts/components/canvasFullscreenStyles.test.mjs ts/components/fullscreenMode.test.mjs ts/games/helpers/gameplayNotePlayback.test.mjs ts/games/p4-Vega/p4RestartTap.test.mjs ts/games/p4-Vega/p4PauseController.test.mjs ts/games/p4-Vega/p4Input.test.mjs ts/games/p4-Vega/p4Rules.test.mjs ts/games/p4-Vega/p4RunResult.test.mjs ts/games/p4-Vega/p4SimulationClock.test.mjs ts/games/three-bosses/unityGameReady.test.mjs ts/games/three-bosses/unityPageScroll.test.mjs ts/games/three-bosses/unitySubmissionBridge.test.mjs ts/games/three-bosses/unityVisibility.test.mjs ts/layout/safariBackgroundEdges.test.mjs ts/pages/games/threeBossesAvailability.test.mjs ts/pages/leaderboards/leaderboardRoutes.test.mjs ts/services/leaderboardApi.test.mjs ts/utils/canvasPageGestures.test.mjs",
+        "test": "tsc -p tsconfig.json --noEmit && node --experimental-strip-types --test \"ts/**/*.test.mjs\"",
         "build": "vite build",
         "preview": "vite preview"
     },

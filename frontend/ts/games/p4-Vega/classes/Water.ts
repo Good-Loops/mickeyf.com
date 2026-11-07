@@ -66,11 +66,11 @@ export class Water extends Entity<AnimatedSprite> {
      *   - increment `p4.totalWater`.
      */
     update(
-        waterAnim: AnimatedSprite,
         p4: P4,
         notesPlaying: boolean,
         stage: Container<ContainerChild>
     ): boolean {
+        const { waterAnim } = this;
         if (!this.collectibleEnabled || !areP4BoundsColliding(p4.p4Anim.getBounds(), waterAnim.getBounds())) return false;
         const pickup = getP4PickupResult(p4.totalWater);
         if (!pickup) return false;

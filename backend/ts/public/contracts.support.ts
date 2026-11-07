@@ -4,9 +4,11 @@
  * Export only request/response shapes and other signature-adjacent contract types.
  */
 export type { VerifyTokenRequest } from '../routers/authRouter.contract';
+export type { RenewSessionRequest, RenewSessionResponse } from '../routers/authRouter.contract';
 export type { VerifyTokenResponse } from '../routers/authRouter.contract';
 export type { LogoutRequest } from '../routers/authRouter.contract';
 export type { LogoutResponse } from '../routers/authRouter.contract';
+export type { DeleteAccountRequest, DeleteAccountResponse } from '../routers/authRouter.contract';
 export type { ApiErrorCode } from '../routers/mainRouter.contract';
 export type { ApiError } from '../routers/mainRouter.contract';
 export type { PostUsersRequest } from '../routers/mainRouter.contract';
