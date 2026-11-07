@@ -116,17 +116,30 @@ test('cancellation is scoped by challenge; failed cancellation remains unconfirm
     await assert.rejects(createParentRegistrationApi('', async () => response({ cancelled: false })).cancel(challenge.state), { code: 'UNAVAILABLE' });
 });
 
-test('child listing requires authenticated POST and rejects public, oversized or identifying response fields', async () => {
-    const child = { accountId: randomUUID(), userName: 'nickname', scoreVisibility: 'private' };
+test('child listing requests identity-only data and rejects unexpected or oversized fields', async () => {
+    const child = { accountId: randomUUID(), userName: 'nickname' };
     const api = createParentRegistrationApi('', async (url, options) => {
         assert.equal(url, '/auth/parent-registration/children/list');
-        assert.equal(options.method, 'POST'); assert.equal(options.credentials, 'include'); assert.equal(options.body, '{}');
+        assert.equal(options.method, 'POST'); assert.equal(options.credentials, 'include'); assert.equal(options.body, '{"identitiesOnly":true}');
         return response({ children: [child] });
     });
     assert.deepEqual(await api.listChildren(), [{ accountId: child.accountId, userName: child.userName }]);
-    for (const children of [[{ ...child, email: 'unexpected' }], [{ ...child, scoreVisibility: 'public' }], Array(51).fill(child)]) {
+    for (const children of [[{ ...child, email: 'unexpected' }], [{ ...child, scoreVisibility: 'private' }], Array(51).fill(child)]) {
         await assert.rejects(createParentRegistrationApi('', async () => response({ children })).listChildren(), { code: 'UNAVAILABLE' });
     }
+});
+
+test('child listing falls back only when an older backend rejects the projection', async () => {
+    const child = { accountId: randomUUID(), userName: 'nickname', scoreVisibility: 'private' }; const requests = [];
+    const api = createParentRegistrationApi('', async (_url, options) => {
+        requests.push(JSON.parse(options.body));
+        return requests.length === 1 ? response({ error: 'INVALID_REQUEST' }, 400) : response({ children: [child] });
+    });
+    assert.deepEqual(await api.listChildren(), [{ accountId: child.accountId, userName: child.userName }]);
+    assert.deepEqual(requests, [{ identitiesOnly: true }, {}]);
+    let calls = 0;
+    await assert.rejects(createParentRegistrationApi('', async () => { calls++; return response({ error: 'UNAVAILABLE' }, 503); }).listChildren(), { code: 'UNAVAILABLE' });
+    assert.equal(calls, 1);
 });
 
 test('withdrawal binds the exact child and explicit destructive confirmation without sending creation consent', async () => {

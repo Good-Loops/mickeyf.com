@@ -142,10 +142,18 @@ export function createParentRegistrationApi(apiBase: string, fetchRequest: typeo
             if (!keys(value, 'cancelled') || value.cancelled !== true) throw new ParentRegistrationError('UNAVAILABLE');
         },
         async listChildren(signal?: AbortSignal) {
-            const value = await request('/children/list', {}, signal);
+            let value: Record<string, unknown>; let legacy = false;
+            try { value = await request('/children/list', { identitiesOnly: true }, signal); }
+            catch (error) {
+                // A previous backend does not recognize the projection; preserve rollback compatibility.
+                if (!(error instanceof ParentRegistrationError) || error.code !== 'INVALID_REQUEST') throw error;
+                value = await request('/children/list', {}, signal);
+                legacy = true;
+            }
             if (!keys(value, 'children') || !Array.isArray(value.children) || value.children.length > 50) throw new ParentRegistrationError('UNAVAILABLE');
             return value.children.map(child => {
-                if (!record(child) || !keys(child, 'accountId,scoreVisibility,userName') || child.scoreVisibility !== 'private'
+                if (!record(child) || !(legacy ? keys(child, 'accountId,scoreVisibility,userName') && child.scoreVisibility === 'private'
+                    : keys(child, 'accountId,userName'))
                     || typeof child.accountId !== 'string' || !/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/u.test(child.accountId)
                     || typeof child.userName !== 'string' || !child.userName || child.userName.length > 64) throw new ParentRegistrationError('UNAVAILABLE');
                 return { accountId: child.accountId, userName: child.userName };

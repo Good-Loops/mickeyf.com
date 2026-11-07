@@ -51,7 +51,10 @@ for (const [platform, source] of [
         else if (path === 'begin') { purpose = JSON.parse(request.body).purpose; value = { state: random(), nonce: random(), expiresInSeconds: 300 }; }
         else if (path === 'complete') value = { grant: random(), purpose, expiresInSeconds: 250 };
         else if (path === 'children') value = { created: true, child };
-        else if (path === 'children/list') value = { children: [child] };
+        else if (path === 'children/list') {
+            assert.deepEqual(JSON.parse(request.body), { identitiesOnly: true });
+            value = { children: [{ accountId: child.accountId, userName: child.userName }] };
+        }
         else if (path === 'withdraw') value = { deleted: true };
         else value = { cancelled: true };
         return { status: 200, body: JSON.stringify(value) };

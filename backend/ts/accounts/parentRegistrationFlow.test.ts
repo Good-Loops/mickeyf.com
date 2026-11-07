@@ -28,7 +28,7 @@ function fixture(selectedPolicy: ParentRegistrationPolicy | undefined = policy) 
     let pause: Promise<void> | undefined;
     // This model exercises the service's protocol. It is deliberately test-only,
     // and is not evidence that a production SQL transaction implements the store contract.
-    const store: ParentRegistrationStore = { async listChildren() { return []; },
+    const store: ParentRegistrationStore = { async listChildren() { return [...children.values()]; },
         async begin(value) { calls.push('begin'); attempts.set(value.stateHash.toString('hex'), { value, phase: 'pending' }); return true; },
         async consumeChallenge(state, current) {
             calls.push('consume'); const item = attempts.get(state.toString('hex'));
@@ -81,6 +81,19 @@ test('closed by default; a reviewed policy is copied rather than mutable through
     assert.deepEqual(await closed.begin(f.context, beginInput), { error: 'CLOSED' });
     const countries = ['ZZ']; const flow = createParentRegistrationFlow({ policy: { ...policy, countries }, clients: f.clients, store: f.store });
     countries.push('US'); const config = flow.config(); assert.ok(config.enabled); assert.deepEqual(config.countries, ['ZZ']);
+});
+
+test('child list has an identity-only projection while preserving the legacy response', async () => {
+    const f = fixture();
+    const child = { accountId: randomUUID(), userName: 'synthetic-nickname', scoreVisibility: 'private' as const };
+    f.children.set(child.accountId, child);
+    assert.deepEqual(await f.flow.listChildren(f.context, {}), { children: [child] });
+    assert.deepEqual(await f.flow.listChildren(f.context, { identitiesOnly: true }),
+        { children: [{ accountId: child.accountId, userName: child.userName }] });
+    for (const input of [{ identitiesOnly: false }, { identitiesOnly: true, extra: true }, { identitiesOnly: 'true' }]) {
+        assert.deepEqual(await f.flow.listChildren(f.context, input), { error: 'INVALID_REQUEST' });
+    }
+    assert.deepEqual(await f.flow.listChildren(null, { identitiesOnly: true }), { error: 'INVALID_CONTEXT' });
 });
 
 test('strict child flow binds only a valid form reference to a proof challenge', async () => {

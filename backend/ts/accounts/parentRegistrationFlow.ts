@@ -323,8 +323,14 @@ export function createParentRegistrationFlow({ policy: inputPolicy, publicationP
         async listChildren(context: ProviderAuthContext | null, input: unknown) {
             if (!policy) return failure('CLOSED');
             if (!authenticated(context)) return failure('INVALID_CONTEXT');
-            if (!isRecord(input) || Object.keys(input).length) return failure('INVALID_REQUEST');
-            try { return { children: await store.listChildren(context) }; } catch { return failure('UNAVAILABLE'); }
+            if (!isRecord(input) || !(Object.keys(input).length === 0
+                || Object.keys(input).length === 1 && input.identitiesOnly === true)) return failure('INVALID_REQUEST');
+            try {
+                const children = await store.listChildren(context);
+                // Older clients require the legacy field; newer clients ask the score-status endpoint instead.
+                return { children: input.identitiesOnly === true
+                    ? children.map(({ accountId, userName }) => ({ accountId, userName })) : children };
+            } catch { return failure('UNAVAILABLE'); }
         },
     };
 }

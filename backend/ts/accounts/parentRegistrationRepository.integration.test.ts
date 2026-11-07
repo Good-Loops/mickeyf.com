@@ -718,6 +718,9 @@ test('children publish only after a separate fresh choice, APIs expose only game
     const childId = users[0].user_id;
     assert.equal(await submitP4VegaScore(database, childId, 40), true);
     const listed = async () => (await readP4VegaLeaderboard(database, publicPolicy.digest, true)).find(row => row.userName === c.child.userName);
+    const identityOnly = { children: [{ accountId: id, userName: c.child.userName }] };
+    assert.deepEqual(await p.flow.listChildren(p.context, { identitiesOnly: true }), identityOnly);
+    assert.deepEqual(await p.flow.scoreStatus(p.context, { childAccountId: id }), { visibility: 'private', canPublish: true });
     assert.equal(await listed(), undefined);
     const pending = await p.flow.begin(p.context, participation(id)); assert.ok('state' in pending);
     assert.equal(await listed(), undefined);
@@ -726,6 +729,8 @@ test('children publish only after a separate fresh choice, APIs expose only game
     const approval = await approve(p, participation(id));
     assert.deepEqual(await p.flow.publishScores(p.context, { grant: approval.proof.grant }), { visibility: 'public' });
     assert.deepEqual(await listed(), { userName: c.child.userName, score: 40 });
+    assert.deepEqual(await p.flow.listChildren(p.context, { identitiesOnly: true }), identityOnly);
+    assert.deepEqual(await p.flow.scoreStatus(p.context, { childAccountId: id }), { visibility: 'public', canPublish: true });
     assert.equal((await readP4VegaLeaderboard(database, undefined, true)).some(row => row.userName === c.child.userName), false, 'closed publication policy suppresses grants');
     assert.equal((await readP4VegaLeaderboard(database, Buffer.alloc(32, 9), true)).some(row => row.userName === c.child.userName), false, 'changed policy does not republish prior scores');
     await admin.query(`INSERT INTO game_personal_bests (game_id, user_id, rules_version, score, completion_time_ms, recorded_at)
@@ -733,6 +738,8 @@ test('children publish only after a separate fresh choice, APIs expose only game
     const boss = (await readThreeBossesLeaderboard(database, publicPolicy.digest, true)).find(row => row.userName === c.child.userName);
     assert.deepEqual(boss && Object.keys(boss).sort(), ['completionTimeMs', 'score', 'userName']);
     assert.deepEqual(await p.flow.withdrawScores(p.context, { childAccountId: id }), { visibility: 'private' });
+    assert.deepEqual(await p.flow.listChildren(p.context, { identitiesOnly: true }), identityOnly);
+    assert.deepEqual(await p.flow.scoreStatus(p.context, { childAccountId: id }), { visibility: 'private', canPublish: true });
     assert.ok(withdrawals.includes(id)); assert.equal(await listed(), undefined);
     assert.equal((await readThreeBossesLeaderboard(database, publicPolicy.digest, true)).some(row => row.userName === c.child.userName), false);
     assert.equal((await p.store.listChildren(p.context)).length, 1);
