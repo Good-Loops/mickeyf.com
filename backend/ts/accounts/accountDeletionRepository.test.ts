@@ -326,11 +326,23 @@ test('rejects invalid user IDs and non-string passwords without acquiring a conn
 test('journal failure or an invalid identity cannot reach a SQL deletion', async () => {
     for (const options of [{ failAt: 'journal' }, { accountId: '42' }]) {
         const fake = fakeDatabase(options);
-        await assert.rejects(deleteAccount(fake.database, 42, PASSWORD, fake.journal));
+        await assert.rejects(deleteAccount(fake.database, 42, PASSWORD, fake.journal), error => {
+            assert.equal(error instanceof AccountDeletionPendingError, options.failAt === 'journal');
+            return true;
+        });
         assert.equal(fake.queries.some(({ sql }) => sql.startsWith('DELETE')), false);
         assert.equal(fake.events.includes('commit'), false);
         assert.ok(fake.events.includes('rollback'));
     }
+});
+
+test('lost journal acknowledgement is pending even when the intent was stored', async () => {
+    let stored = false;
+    const fake = fakeDatabase({ journal: async () => { stored = true; throw new Error('synthetic lost acknowledgement'); } });
+    await assert.rejects(deleteAccount(fake.database, 42, PASSWORD, fake.journal), AccountDeletionPendingError);
+    assert.equal(stored, true);
+    assert.equal(fake.queries.some(({ sql }) => sql.startsWith('DELETE')), false);
+    assert.ok(fake.events.includes('rollback'));
 });
 
 test('SQL deletion waits for durable journal acknowledgement', async () => {

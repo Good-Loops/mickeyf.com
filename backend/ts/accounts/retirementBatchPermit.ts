@@ -8,6 +8,7 @@ type Claim = Readonly<{ version: 1; bucket: string; database: string; serverUuid
     lineage: string; epoch: string; committedBefore: string; entries: readonly Entry[] }>;
 export type RetirementBatchPermit = Readonly<{ claim: Claim; signature: string }>;
 const DOMAIN = 'ludolume-retirement-batch-v1\0';
+const PREPARED_DOMAIN = 'ludolume-retirement-prepared-v1\0';
 const NAME = /^v1\/intents\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.json$/u;
 const CONDITIONAL_NAME = /^v1\/(?:conditional|resolutions)\/[a-f0-9]{64}\/[a-f0-9]{64}\.json$/u;
 const NUM = /^[1-9][0-9]{0,19}$/u;
@@ -39,6 +40,30 @@ function normalize(value: unknown): Claim {
         committedBefore: item.committedBefore as string, entries };
 }
 function payload(claim: Claim): Buffer { return Buffer.from(DOMAIN + JSON.stringify(claim)); }
+
+/** A prepared checkpoint is not authority to retire an object. */
+export type PreparedRetirementCheckpoint = Readonly<{ claim: Claim; signature: string }>;
+
+export function signPreparedRetirementCheckpoint(value: unknown, privateKey: KeyObject): PreparedRetirementCheckpoint {
+    try {
+        if (privateKey.type !== 'private' || privateKey.asymmetricKeyType !== 'ed25519') throw new Error();
+        const claim = normalize(value);
+        return { claim, signature: sign(null, Buffer.from(PREPARED_DOMAIN + JSON.stringify(claim)), privateKey).toString('base64url') };
+    } catch { throw new Error('Prepared retirement checkpoint is invalid.'); }
+}
+
+export function verifyPreparedRetirementCheckpoint(value: unknown, publicKey: KeyObject): Claim {
+    try {
+        if (publicKey.type !== 'public' || publicKey.asymmetricKeyType !== 'ed25519' || !value
+            || typeof value !== 'object' || Array.isArray(value) || Object.keys(value).sort().join(',') !== 'claim,signature') throw new Error();
+        const prepared = value as Record<string, unknown>, claim = normalize(prepared.claim);
+        if (typeof prepared.signature !== 'string' || !/^[A-Za-z0-9_-]{86}$/u.test(prepared.signature)) throw new Error();
+        const signature = Buffer.from(prepared.signature, 'base64url');
+        if (signature.length !== 64 || signature.toString('base64url') !== prepared.signature
+            || !verify(null, Buffer.from(PREPARED_DOMAIN + JSON.stringify(claim)), publicKey, signature)) throw new Error();
+        return claim;
+    } catch { throw new Error('Prepared retirement checkpoint is invalid.'); }
+}
 
 /** Only the guarded advancement path may issue a permit after confirming recovery coverage. */
 export function signRetirementBatch(value: unknown, privateKey: KeyObject): RetirementBatchPermit {

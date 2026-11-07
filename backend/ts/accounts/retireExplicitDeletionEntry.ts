@@ -8,6 +8,7 @@ import { collectCloudSqlRecoveryInventory, createCloudSqlMetadataClient, type Cl
 import { signJournalRetirementClaim, verifyJournalRetirementStamp, type JournalRetirementStamp } from './journalRetirementStamp';
 import { verifyRetirementBatch, type RetirementBatchPermit } from './retirementBatchPermit';
 import { verifyDeletedAccountEffects } from './verifiedDeletionEffects';
+import { verifyScoreWithdrawal } from './verifiedScoreWithdrawal';
 import { assertNoRetentionRuntimeWriters, isProductionRecoveryOperator } from './retentionReconciliation';
 import { createGcsRetentionJournal, type ObservedRestoreGuard } from './gcsRetentionJournal';
 import { verifyRetiredJournalObjects } from './verifyRetiredJournalObjects';
@@ -117,16 +118,21 @@ export async function retireExplicitDeletionEntry(options: Readonly<{
             || createHash('sha256').update(body).digest('hex') !== entry.contentSha256
             || JSON.stringify(parseDeletionIntent(JSON.parse(body))) !== JSON.stringify(entry.intent)) throw new Error();
         beginning = true; await connection.beginTransaction(); beginning = false; begun = true;
-        if (!await verifyDeletedAccountEffects(connection, [entry.intent.accountId])) throw new Error();
+        const accountDeleted = await verifyDeletedAccountEffects(connection, [entry.intent.accountId]);
+        if (!accountDeleted && (entry.intent.action !== 'withdraw-public-scores'
+            || !await verifyScoreWithdrawal(connection, entry.intent.accountId))) throw new Error();
         await readRecoveryCheckpoint(connection, { ...pins, lineage: permit.lineage, minimumEpoch: guard.recoveryCheckpoint.minimumEpoch });
         const verifyFence = async () => {
             if (JSON.stringify(await options.guard.readRestoreGuard()) !== guardText) throw new Error();
             await assertNoRetentionRuntimeWriters(connection, isProductionRecoveryOperator(pins));
         };
         await verifyFence();
-        await options.retireWitnesses(entry.intent.accountId, verifyFence);
-        await verifyFence();
-        await options.verifyWitnessesAbsent(entry.intent.accountId);
+        // An active account still needs its own inactivity and warning witnesses.
+        if (accountDeleted) {
+            await options.retireWitnesses(entry.intent.accountId, verifyFence);
+            await verifyFence();
+            await options.verifyWitnessesAbsent(entry.intent.accountId);
+        }
         const signedAt = await now();
         let stamp: JournalRetirementStamp;
         const existing = meta.metadata.ludolumeRetirement;
@@ -157,7 +163,7 @@ export async function retireExplicitDeletionEntry(options: Readonly<{
         if (permit.committedBefore >= current.cloudSqlFloor || JSON.stringify(await options.guard.readRestoreGuard()) !== guardText) throw new Error();
         await assertNoRetentionRuntimeWriters(connection, isProductionRecoveryOperator(pins));
         await bucketCheck();
-        await options.verifyWitnessesAbsent(entry.intent.accountId);
+        if (accountDeleted) await options.verifyWitnessesAbsent(entry.intent.accountId);
         await request(client, { method: 'DELETE', url: objectUrl, params: { generation: entry.generation,
             ifGenerationMatch: entry.generation, ifMetagenerationMatch: ready.metageneration }, responseType: 'json' });
         await connection.rollback(); begun = false;

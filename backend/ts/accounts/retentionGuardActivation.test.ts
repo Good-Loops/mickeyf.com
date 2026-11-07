@@ -20,9 +20,9 @@ const deleted: RetentionResolution = { outcome: 'deleted', confirmedAt: '2024-01
 const explicitIntent: DeletionIntent = { version: 1, accountId: child, action: 'delete-account', requestedAt: '2024-01-01T00:00:00.000Z' };
 const emptyDeletionJournal: DeletionJournalReader = { async readDeletionIntents() { return { digest: 'a'.repeat(64), intents: [] }; } };
 
-function fixture({ records = [], resolution = null, childPresent = false, writers = 0, secondRecords,
+function fixture({ records = [], resolution = null, resolutions = {}, childPresent = false, writers = 0, secondRecords,
     recoveryCheckpoint, targetCheckpoint = '6', explicitRecords = [], changedExplicit = false, scoreVisibility = 'private', pendingScore = false, activeForm = false, usage = 'empty', receipts = 'clear' }:
-    { records?: RetentionIntent[]; resolution?: RetentionResolution | null; childPresent?: boolean; writers?: number;
+    { records?: RetentionIntent[]; resolution?: RetentionResolution | null; resolutions?: Record<string, RetentionResolution>; childPresent?: boolean; writers?: number;
         secondRecords?: RetentionIntent[]; recoveryCheckpoint?: { lineage: string; minimumEpoch: string; keySha256: string };
         targetCheckpoint?: string | null; explicitRecords?: DeletionIntent[]; changedExplicit?: boolean; scoreVisibility?: string;
         pendingScore?: boolean; activeForm?: boolean; usage?: 'empty' | 'present' | 'absent' | 'denied'; receipts?: 'clear' | 'expired' | 'absent' | 'denied' } = {}) {
@@ -59,7 +59,7 @@ function fixture({ records = [], resolution = null, childPresent = false, writer
         throw new Error('unexpected SQL');
     } } as unknown as PoolConnection;
     const journal = { async readRestoreGuard() { return guard; }, async readIntents() { return ++lists === 1 ? records : (secondRecords ?? records); },
-        async readResolution() { return resolution; }, async writeRestoreGuard(value: { state: string; serverUuid: string }, generation: string) {
+        async readResolution(item: RetentionIntent) { return resolutions[item.warningId] ?? resolution; }, async writeRestoreGuard(value: { state: string; serverUuid: string }, generation: string) {
             assert.equal(locked, true); assert.equal(value.state, 'active'); assert.equal(value.serverUuid, target);
             assert.deepEqual((value as { recoveryCheckpoint?: unknown }).recoveryCheckpoint, recoveryCheckpoint);
             assert.equal(generation, '8'); writes++; return '9';
@@ -115,6 +115,25 @@ test('activation accepts a kept outcome only when the restored relationship pres
     const later: RetentionResolution = { ...resolution, observedActivityAt: '2024-01-01T00:00:00.000000Z' };
     const good = fixture({ records: [intent], resolution: later, childPresent: true });
     assert.equal(await activateRetentionGuard(good.connection, good.journal, pins, good.deletionJournal), '9');
+});
+test('activation accepts an absent kept child only with a later recorded deletion', async () => {
+    const kept: RetentionResolution = { outcome: 'kept', confirmedAt: '2025-01-03T00:00:00.000000Z',
+        observedActivityAt: '2025-01-02T00:00:00.000000Z', proofDigest: 'd'.repeat(64) };
+    const laterExplicit = { ...explicitIntent, requestedAt: '2025-01-04T00:00:00.000Z' };
+    const good = fixture({ records: [intent], resolution: kept, explicitRecords: [laterExplicit] });
+    assert.equal(await activateRetentionGuard(good.connection, good.journal, pins, good.deletionJournal), '9');
+    for (const explicitRecords of [[], [explicitIntent]]) {
+        const held = fixture({ records: [intent], resolution: kept, explicitRecords });
+        await assert.rejects(activateRetentionGuard(held.connection, held.journal, pins, held.deletionJournal));
+        assert.equal(held.writes, 0);
+    }
+    const otherWarning = '55555555-5555-4555-8555-555555555555';
+    const laterIntent = { ...intent, warningId: otherWarning, deliveredAt: '2025-01-05T00:00:00.000000Z' };
+    const laterDeleted: RetentionResolution = { ...deleted, confirmedAt: '2026-01-01T00:00:00.000000Z' };
+    const subsequent = fixture({ records: [intent, laterIntent], resolutions: { [warning]: kept, [otherWarning]: laterDeleted } });
+    assert.equal(await activateRetentionGuard(subsequent.connection, subsequent.journal, pins, subsequent.deletionJournal), '9');
+    const earlier = fixture({ records: [intent, laterIntent], resolutions: { [warning]: kept, [otherWarning]: deleted } });
+    await assert.rejects(activateRetentionGuard(earlier.connection, earlier.journal, pins, earlier.deletionJournal));
 });
 test('activation holds on unresolved outcomes, restored deleted accounts, writers or changing inventories', async () => {
     for (const options of [

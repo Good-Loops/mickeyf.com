@@ -801,8 +801,7 @@ test('journal uncertainty prevents SQL deletion; recorded intent with uncertain 
             state[failure] = true;
             const response = await post(base, deletion);
             assert.equal(response.status, 503);
-            assert.deepEqual(await response.json(), { error: failure === 'journalUnavailable'
-                ? 'ACCOUNT_DELETION_UNAVAILABLE' : 'ACCOUNT_DELETION_PENDING' });
+            assert.deepEqual(await response.json(), { error: 'ACCOUNT_DELETION_PENDING' });
             assert.equal(response.headers.get('set-cookie'), null);
             assert.equal(state.journalCalls, 1);
             assert.equal(state.revocationQueries, 0, 'unconfirmed commit must not start immediate revocation');

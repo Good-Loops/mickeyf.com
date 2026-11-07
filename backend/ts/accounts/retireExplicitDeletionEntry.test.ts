@@ -34,31 +34,32 @@ function sql() {
     } } as unknown as PoolConnection;
     return { connection, setNow(value: string) { now = value; }, setWriters(value: boolean) { writers = value; }, setEpoch(value: string) { epoch = value; } };
 }
-function storage() {
+function storage(target = entry) {
+    const targetBody = JSON.stringify(target.intent);
     let soft = false, generation = '1', custom: Record<string, string> = {}, patches = 0, deletes = 0, failPatch = false, failDelete = false;
-    const item = () => ({ bucket: DELETION_JOURNAL_BUCKET, name: entry.name, generation: entry.generation,
-        metageneration: generation, size: String(Buffer.byteLength(body)), md5Hash: createHash('md5').update(body).digest('base64'),
+    const item = () => ({ bucket: DELETION_JOURNAL_BUCKET, name: target.name, generation: target.generation,
+        metageneration: generation, size: String(Buffer.byteLength(targetBody)), md5Hash: createHash('md5').update(targetBody).digest('base64'),
         metadata: custom, ...(soft ? { softDeleteTime: '2026-11-05T00:00:00.000Z' } : {}) });
     const client: JournalHttpClient = { async request(request) {
         if (request.url.endsWith(`/b/${DELETION_JOURNAL_BUCKET}`)) return { status: 200, data: { name: DELETION_JOURNAL_BUCKET,
             versioning: { enabled: true }, softDeletePolicy: { retentionDurationSeconds: '604800' } } };
         if (request.method === 'PATCH') {
             patches++;
-            assert.equal(request.params.ifGenerationMatch, entry.generation); assert.equal(request.params.ifMetagenerationMatch, generation);
+            assert.equal(request.params.ifGenerationMatch, target.generation); assert.equal(request.params.ifMetagenerationMatch, generation);
             custom = JSON.parse(request.data!).metadata; generation = String(Number(generation) + 1);
             if (failPatch) throw new Error('lost acknowledgement');
             return { status: 200, data: item() };
         }
         if (request.method === 'DELETE') {
             deletes++;
-            assert.equal(request.params.ifGenerationMatch, entry.generation); assert.equal(request.params.ifMetagenerationMatch, generation);
+            assert.equal(request.params.ifGenerationMatch, target.generation); assert.equal(request.params.ifMetagenerationMatch, generation);
             soft = true;
             if (failDelete) throw new Error('lost acknowledgement');
             return { status: 204, data: undefined };
         }
         if (request.params.softDeleted) return { status: soft ? 200 : 404, data: soft ? item() : {} };
         if (soft) return { status: 404, data: {} };
-        return { status: 200, data: request.params.alt === 'media' ? body : item() };
+        return { status: 200, data: request.params.alt === 'media' ? targetBody : item() };
     } };
     return { client, get soft() { return soft; }, get patches() { return patches; }, get deletes() { return deletes; },
         get metadata() { return custom; }, losePatch() { failPatch = true; }, restorePatchAck() { failPatch = false; }, loseDelete() { failDelete = true; } };
@@ -69,8 +70,8 @@ const cloud: CloudSqlMetadataClient = {
     async getRecoveryWindow() { return { kind: 'sql#getLatestRecoveryTime', earliestRecoveryTime: '2026-11-04T12:00:00Z',
         latestRecoveryTime: '2026-11-05T00:00:00Z' }; },
 };
-async function fixture() {
-    const db = sql(), io = storage();
+async function fixture(target = entry) {
+    const db = sql(), io = storage(target);
     db.setNow('2026-11-05T00:00:00.000000Z');
     const guardValue = { state: 'hold' as const, database: pins.database, serverUuid, epoch: accountId,
         expiresAt: '2027-01-01T00:00:00.000Z', generation: '77',
@@ -78,10 +79,10 @@ async function fixture() {
     const guard = { async readRestoreGuard() { return guardValue; } };
     const permit = signRetirementBatch({ version: 1, bucket: DELETION_JOURNAL_BUCKET, database: pins.database, serverUuid,
         guardGeneration: '77', lineage, epoch: '1', committedBefore: '2026-11-04T00:00:00.000000Z',
-        entries: [{ name: entry.name, generation: entry.generation, contentSha256: entry.contentSha256 }] }, privateKey);
-    const options = { connection: db.connection, pins, entry, permit, publicKey, privateKey,
+        entries: [{ name: target.name, generation: target.generation, contentSha256: target.contentSha256 }] }, privateKey);
+    const options = { connection: db.connection, pins, entry: target, permit, publicKey, privateKey,
         project: 'noted-reef-387021', instance: 'cms-mickeyf', guard,
-        journal: { async readDeletionEntries() { return { entries: [entry], digest: 'b'.repeat(64) }; } },
+        journal: { async readDeletionEntries() { return { entries: [target], digest: 'b'.repeat(64) }; } },
         cloud, client: io.client, verifySchema: async () => {},
         retireWitnesses: async () => {}, verifyWitnessesAbsent: async () => {},
         confirmation: 'ORIGINAL PRIMARY AND ALL WRITERS FENCED', externalCopiesConfirmation: 'ALL PERMITTED RECOVERY COPIES ACCOUNTED FOR' };
@@ -94,6 +95,31 @@ test('keeps the journal if account-linked witnesses remain', async () => {
         assert.equal(id, accountId); throw new Error('witness remains');
     } }));
     assert.equal(f.io.patches, 0); assert.equal(f.io.deletes, 0);
+});
+
+test('a private score withdrawal can retire without deleting an active account’s witnesses', async () => {
+    const withdrawal = { ...intent, action: 'withdraw-public-scores' as const };
+    const target: DeletionJournalEntry = { ...entry, intent: withdrawal,
+        contentSha256: createHash('sha256').update(JSON.stringify(withdrawal)).digest('hex') };
+    for (const visibility of ['public', 'private'] as const) {
+        const f = await fixture(target);
+        const connection = { ...f.db.connection, async query(input: { sql: string }, values?: unknown[]) {
+            if (input.sql.includes('FROM users')) return [[{ account_uuid: accountId }], []];
+            if (input.sql.includes('FROM account_score_permissions')) return [[{ visibility, policy_digest: null,
+                registration_policy_version: null, country_code: null, age_band: null, authorizer_uuid: null }], []];
+            return f.db.connection.query(input, values);
+        } } as unknown as PoolConnection;
+        const options = { ...f.options, connection,
+            async retireWitnesses() { assert.fail('active account witnesses must be kept'); },
+            async verifyWitnessesAbsent() { assert.fail('active account witnesses must be kept'); } };
+        if (visibility === 'public') {
+            await assert.rejects(retireExplicitDeletionEntry(options));
+            assert.equal(f.io.deletes, 0);
+        } else {
+            assert.equal((await retireExplicitDeletionEntry(options)).status, 'retired');
+            assert.equal(f.io.deletes, 1);
+        }
+    }
 });
 
 test('cleans both witness streams under the held fence before retiring the journal', async () => {

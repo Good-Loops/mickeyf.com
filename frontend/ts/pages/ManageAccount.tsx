@@ -119,7 +119,7 @@ export default function ManageAccount() {
                     : result.error === 'RATE_LIMITED'
                         ? 'Too many attempts. Please wait 15 minutes before trying again.'
                     : result.error === 'ACCOUNT_DELETION_PENDING'
-                        ? 'Your deletion request was recorded, but completion has not been confirmed. Retrying will not cancel the request. If it remains pending, contact mickeyf.plays@gmail.com.'
+                        ? 'Your deletion request may have been recorded, but completion has not been confirmed. Retrying will not cancel the request. Contact mickeyf.plays@gmail.com if you need help.'
                     : 'We could not confirm account deletion. A request may already be recorded; retrying later will not cancel it.');
         } catch {
             // A lost response could follow a successful deletion. Do not claim

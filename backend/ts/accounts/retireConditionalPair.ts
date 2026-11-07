@@ -9,6 +9,7 @@ import { createGcsRetentionJournal, type ConditionalRetirementPair, type Observe
 import { signJournalRetirementClaim, verifyJournalRetirementStamp, type JournalRetirementStamp } from './journalRetirementStamp';
 import { verifyRetirementBatch, type RetirementBatchPermit } from './retirementBatchPermit';
 import { verifyDeletedAccountEffects } from './verifiedDeletionEffects';
+import { verifyKeptActivity } from './verifiedKeptActivity';
 import { assertNoRetentionRuntimeWriters, isProductionRecoveryOperator } from './retentionReconciliation';
 import { verifyRetiredJournalObjects } from './verifyRetiredJournalObjects';
 import { verifyRetirementSchemas } from './retirementSourceSchema';
@@ -159,16 +160,19 @@ export async function retireConditionalPair(options: PairOptions): Promise<Reado
         const intent = await readLive(guarded.client, options.bucket, target.intentObject);
         const resolution = await readLive(guarded.client, options.bucket, target.resolutionObject);
         beginning = true; await connection.beginTransaction(); beginning = false; begun = true;
-        if (!await verifyDeletedAccountEffects(connection, [target.intent.childId])) throw new Error();
+        const accountDeleted = await verifyDeletedAccountEffects(connection, [target.intent.childId]);
+        if (!accountDeleted && (target.resolution.outcome !== 'kept' || !await verifyKeptActivity(connection, target))) throw new Error();
         await readRecoveryCheckpoint(connection, { ...guarded.pins, lineage: guarded.permit.lineage, minimumEpoch: guarded.minimumEpoch });
         const check = async () => {
             if (JSON.stringify(await options.guard.readRestoreGuard()) !== guarded.guardText) throw new Error();
             await assertNoRetentionRuntimeWriters(connection, isProductionRecoveryOperator(guarded.pins));
         };
         await check();
-        await options.retireWitnesses(target.intent.childId, check);
-        await check();
-        await options.verifyWitnessesAbsent(target.intent.childId);
+        if (accountDeleted) {
+            await options.retireWitnesses(target.intent.childId, check);
+            await check();
+            await options.verifyWitnessesAbsent(target.intent.childId);
+        }
         const beforeIntent = async () => {
             const inventory = await collectCloudSqlRecoveryInventory({ project: options.project, instance: options.instance,
                 observedAt: await sqlNow(connection, guarded.pins), client: options.cloud });
@@ -176,7 +180,7 @@ export async function retireConditionalPair(options: PairOptions): Promise<Reado
                 inventory, { project: options.project, instance: options.instance });
             if (guarded.permit.committedBefore >= inventory.cloudSqlFloor) throw new Error();
             await check(); await verifyRetirementBucketPolicy(guarded.client, options.bucket);
-            await options.verifyWitnessesAbsent(target.intent.childId);
+            if (accountDeleted) await options.verifyWitnessesAbsent(target.intent.childId);
         };
         await stampAndDelete(options, target.intentObject, intent.item, intent.url, observedAt, recovery.cloudSqlFloor, guarded, beforeIntent);
         await stampAndDelete(options, target.resolutionObject, resolution.item, resolution.url, observedAt, recovery.cloudSqlFloor, guarded,

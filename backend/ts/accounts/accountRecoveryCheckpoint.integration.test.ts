@@ -7,9 +7,12 @@ import { signJournalRetirementClaim, verifyJournalRetirementStamp } from './jour
 import { DELETION_JOURNAL_BUCKET, type JournalHttpClient } from './gcsDeletionJournal';
 import { createGuardedDeletionReplayReader } from './guardedDeletionReplayReader';
 import { verifyDeletedAccountEffects } from './verifiedDeletionEffects';
-import { advanceRetirementGuard } from './retirementGuardAdvance';
+import { verifyScoreWithdrawal } from './verifiedScoreWithdrawal';
+import { verifyKeptActivity } from './verifiedKeptActivity';
+import { activateRetentionGuard } from './retentionGuardActivation';
+import { prepareRecoverySafeRetirement, finishRecoverySafeRetirement } from './recoverySafeRetirement';
 import { inspectExplicitRetirement, retireExplicitDeletionEntry } from './retireExplicitDeletionEntry';
-import type { ObservedRestoreGuard } from './gcsRetentionJournal';
+import type { ConditionalRetirementPair, ObservedRestoreGuard } from './gcsRetentionJournal';
 import type { CloudSqlMetadataClient } from './cloudSqlRecoveryInventory';
 import { createCoveredWitnessRetirement } from './coveredWitnessRetirement';
 import { readRetirementKnownAccounts } from './retirementKnownAccounts';
@@ -66,6 +69,114 @@ before(async () => {
 });
 
 after(async () => { if (connection) await connection.end(); });
+
+test('recovery accepts a later recorded deletion of a previously kept account', async () => {
+    const childId = randomUUID(), parentId = randomUUID(), originalServerUuid = randomUUID();
+    const pair: ConditionalRetirementPair = { intent: { parentId, childId, warningId: randomUUID(),
+        activityAt: '2023-01-01T00:00:00.000000Z', deliveredAt: '2026-10-01T00:00:00.000000Z', channel: 'in-app',
+        targetDigest: 'a'.repeat(64), noticeDigest: 'b'.repeat(64), receiptDigest: 'c'.repeat(64) },
+        resolution: { outcome: 'kept', confirmedAt: '2026-10-02T00:00:00.000000Z',
+            observedActivityAt: '2026-10-01T12:00:00.000000Z', proofDigest: 'd'.repeat(64) },
+        intentObject: { name: 'synthetic-intent', generation: '1', contentSha256: 'e'.repeat(64) },
+        resolutionObject: { name: 'synthetic-resolution', generation: '2', contentSha256: 'f'.repeat(64) } };
+    await connection.query('CREATE TABLE parent_child_consents (child_uuid CHAR(36) PRIMARY KEY, parent_uuid CHAR(36)) ENGINE=InnoDB');
+    await connection.query('ALTER TABLE parent_managed_child_activity ADD COLUMN retention_activity_at DATETIME(6)');
+    try {
+        let activated = false;
+        const journal = { async readRestoreGuard() { return { state: 'hold' as const, database, serverUuid: originalServerUuid,
+            epoch: randomUUID(), expiresAt: '2027-12-31T00:00:00.000Z', generation: '1' }; },
+        async readIntents() { return [pair.intent]; }, async readResolution() { return pair.resolution; },
+        async writeRestoreGuard() { activated = true; return '2'; } };
+        // Keep the synthetic guard stable between reads.
+        const held = await journal.readRestoreGuard(); journal.readRestoreGuard = async () => held;
+        const deletionJournal = { async readDeletionIntents() { return { digest: 'a'.repeat(64), intents: [{ version: 1 as const,
+            action: 'delete-account' as const, accountId: childId, requestedAt: '2026-10-03T00:00:00.000Z' }] }; } };
+        const wrapped = { destroy() { connection.destroy(); }, async query(input: { sql: string }, values?: unknown[]) {
+            if (input.sql === 'FLUSH TABLES WITH READ LOCK' || input.sql === 'UNLOCK TABLES') return [[], []];
+            if (input.sql.includes('USER_PRIVILEGES')) return [[{ count: 1 }], []];
+            if (input.sql.includes('PROCESSLIST')) return [[{ count: 0 }], []];
+            return connection.query(input, values);
+        } } as unknown as PoolConnection;
+        assert.equal(await activateRetentionGuard(wrapped, journal, { database, serverUuid, originalServerUuid,
+            currentUser: 'migration_test@%', confirmation: 'ALL WRITERS FENCED AND INTENTS RECONCILED' }, deletionJournal), '2');
+        assert.equal(activated, true);
+    } finally {
+        await connection.query('DROP TABLE parent_child_consents');
+        await connection.query('ALTER TABLE parent_managed_child_activity DROP COLUMN retention_activity_at');
+    }
+});
+
+test('kept activity verifies the parent and protected time on an active account', async () => {
+    const childId = randomUUID(), parentId = randomUUID();
+    const pair: ConditionalRetirementPair = { intent: { parentId, childId, warningId: randomUUID(),
+        activityAt: '2023-01-01T00:00:00.000000Z', deliveredAt: '2026-10-01T00:00:00.000000Z', channel: 'in-app',
+        targetDigest: 'a'.repeat(64), noticeDigest: 'b'.repeat(64), receiptDigest: 'c'.repeat(64) },
+        resolution: { outcome: 'kept', confirmedAt: '2026-10-02T00:00:00.000000Z',
+            observedActivityAt: '2026-10-01T12:00:00.000000Z', proofDigest: 'd'.repeat(64) },
+        intentObject: { name: 'synthetic-intent', generation: '1', contentSha256: 'e'.repeat(64) },
+        resolutionObject: { name: 'synthetic-resolution', generation: '2', contentSha256: 'f'.repeat(64) } };
+    await connection.query('CREATE TABLE parent_child_consents (child_uuid CHAR(36) PRIMARY KEY, parent_uuid CHAR(36)) ENGINE=InnoDB');
+    await connection.query('ALTER TABLE parent_managed_child_activity ADD COLUMN retention_activity_at DATETIME(6)');
+    try {
+        await connection.query('INSERT INTO users (account_uuid) VALUES (?)', [childId]);
+        await connection.query('INSERT INTO parent_child_consents (child_uuid,parent_uuid) VALUES (?,?)', [childId, parentId]);
+        await connection.query("INSERT INTO parent_managed_child_activity (child_uuid,retention_activity_at) VALUES (?, '2026-10-01 12:00:00.000000')", [childId]);
+        const check = async () => {
+            await connection.beginTransaction();
+            try { return await verifyKeptActivity(connection as unknown as PoolConnection, pair); }
+            finally { await connection.rollback(); }
+        };
+        assert.equal(await check(), true);
+        await connection.query("UPDATE parent_managed_child_activity SET retention_activity_at='2026-09-30 00:00:00.000000' WHERE child_uuid=?", [childId]);
+        assert.equal(await check(), false);
+        await connection.query("UPDATE parent_managed_child_activity SET retention_activity_at='2026-10-03 00:00:00.000000' WHERE child_uuid=?", [childId]);
+        await connection.query('UPDATE parent_child_consents SET parent_uuid=? WHERE child_uuid=?', [randomUUID(), childId]);
+        assert.equal(await check(), false);
+        assert.equal((await connection.query<RowDataPacket[]>('SELECT account_uuid FROM users WHERE account_uuid=?', [childId]))[0].length, 1);
+    } finally {
+        await connection.query('DELETE FROM parent_managed_child_activity WHERE child_uuid=?', [childId]);
+        await connection.query('DELETE FROM users WHERE account_uuid=?', [childId]);
+        await connection.query('DROP TABLE parent_child_consents');
+        await connection.query('ALTER TABLE parent_managed_child_activity DROP COLUMN retention_activity_at');
+    }
+});
+
+test('score withdrawal effects remain private and do not require deleting the account', async () => {
+    const account = randomUUID();
+    await connection.query(`CREATE TABLE account_score_permissions (account_uuid CHAR(36) PRIMARY KEY,
+        visibility VARCHAR(10), policy_digest BINARY(32), registration_policy_version VARCHAR(64),
+        country_code CHAR(2), age_band VARCHAR(16), authorizer_uuid CHAR(36)) ENGINE=InnoDB`);
+    await connection.query(`CREATE TABLE parent_signed_forms (reference CHAR(36) PRIMARY KEY, child_uuid CHAR(36),
+        public_approved TINYINT, public_withdrawn TINYINT) ENGINE=InnoDB`);
+    await connection.query(`ALTER TABLE parent_registration_attempts ADD COLUMN purpose VARCHAR(32),
+        ADD COLUMN phase VARCHAR(16), ADD COLUMN grant_hash BINARY(32), ADD COLUMN state_hash BINARY(32)`);
+    try {
+    await connection.query('INSERT INTO users (account_uuid) VALUES (?)', [account]);
+    await connection.query("INSERT INTO account_score_permissions (account_uuid,visibility) VALUES (?, 'private')", [account]);
+    await connection.query('INSERT INTO parent_signed_forms (reference,child_uuid,public_approved,public_withdrawn) VALUES (?,?,1,1)', [randomUUID(), account]);
+    await connection.query("INSERT INTO parent_registration_attempts (child_uuid,purpose,phase) VALUES (?, 'publish-scores', 'cancelled')", [account]);
+    const check = async () => {
+        await connection.beginTransaction();
+        try { return await verifyScoreWithdrawal(connection as unknown as PoolConnection, account); }
+        finally { await connection.rollback(); }
+    };
+    assert.equal(await check(), true);
+    await connection.query("UPDATE account_score_permissions SET visibility='public' WHERE account_uuid=?", [account]);
+    assert.equal(await check(), false);
+    await connection.query("UPDATE account_score_permissions SET visibility='private' WHERE account_uuid=?", [account]);
+    await connection.query('UPDATE parent_signed_forms SET public_withdrawn=0 WHERE child_uuid=?', [account]);
+    assert.equal(await check(), false);
+    await connection.query('UPDATE parent_signed_forms SET public_withdrawn=1 WHERE child_uuid=?', [account]);
+    await connection.query("UPDATE parent_registration_attempts SET phase='approved' WHERE child_uuid=?", [account]);
+    assert.equal(await check(), false);
+    assert.equal((await connection.query<RowDataPacket[]>('SELECT account_uuid FROM users WHERE account_uuid=?', [account]))[0].length, 1);
+    } finally {
+        await connection.query('DELETE FROM parent_registration_attempts WHERE child_uuid=?', [account]);
+        await connection.query('DELETE FROM users WHERE account_uuid=?', [account]);
+        await connection.query('DROP TABLE parent_signed_forms, account_score_permissions');
+        await connection.query('ALTER TABLE parent_registration_attempts DROP COLUMN purpose, DROP COLUMN phase, DROP COLUMN grant_hash, DROP COLUMN state_hash');
+    }
+});
 
 test('writer fence detects app, cleanup, operator and nonlocal root sessions', async () => {
     assert.equal(process.env.MIGRATION_TEST_ROOT_PASSWORD, 'migration-test-root-only');
@@ -259,8 +370,10 @@ test('guarded cleanup rejects a simulated older restore after a signed exact-gen
         } } as unknown as PoolConnection;
     let guardValue: ObservedRestoreGuard = { state: 'hold', database, serverUuid, epoch: randomUUID(),
         expiresAt: '2027-12-31T00:00:00.000Z', generation: '1' };
+    let guardWrites = 0;
     const guard = { async read() { return guardValue; }, async commit(next: Omit<ObservedRestoreGuard, 'generation'>, expected: string) {
-        assert.equal(expected, guardValue.generation); guardValue = { ...next, generation: '2' }; return '2'; } };
+        assert.equal(expected, guardValue.generation); guardValue = { ...next, generation: '2' }; guardWrites++;
+        throw new Error('synthetic guard acknowledgement lost'); } };
     let soft = false, metageneration = '1', custom: Record<string, string> = {};
     const metadata = () => ({ bucket: DELETION_JOURNAL_BUCKET, name: entry.name, generation: entry.generation, metageneration,
         size: String(Buffer.byteLength(body)), md5Hash: createHash('md5').update(body).digest('base64'), metadata: custom,
@@ -282,11 +395,19 @@ test('guarded cleanup rejects a simulated older restore after a signed exact-gen
     const common = { connection: wrapped, pins, project: 'noted-reef-387021', instance: 'cms-mickeyf', cloud, journal,
         verifySchema: async () => {}, confirmation: 'ORIGINAL PRIMARY AND ALL WRITERS FENCED',
         externalCopiesConfirmation: 'ALL PERMITTED RECOVERY COPIES ACCOUNTED FOR' };
-    const advanced = await advanceRetirementGuard({ ...common, lineage, publicKey: keys.publicKey, privateKey: keys.privateKey,
-        selected: [{ name: entry.name, generation: entry.generation, contentSha256: entry.contentSha256 }], coveragePolls: 1 }, guard);
-    assert.equal(advanced.epoch, '1');
+    const options = { ...common, lineage, publicKey: keys.publicKey, privateKey: keys.privateKey,
+        selected: [{ name: entry.name, generation: entry.generation, contentSha256: entry.contentSha256 }] };
+    const prepared = await prepareRecoverySafeRetirement(options, guard);
+    assert.deepEqual(await finishRecoverySafeRetirement(options, guard, prepared), { status: 'waiting' });
+    assert.equal(guardValue.generation, '1');
     floorMs = nowMs + 24 * 60 * 60_000; nowMs = floorMs + 24 * 60 * 60_000;
     floor = new Date(floorMs).toISOString(); future = new Date(nowMs).toISOString(); nowUtc = future.replace('Z', '000Z');
+    await assert.rejects(finishRecoverySafeRetirement(options, guard, prepared));
+    const advanced = await finishRecoverySafeRetirement(options, guard, prepared);
+    assert.equal(advanced.status, 'advanced');
+    if (advanced.status !== 'advanced') assert.fail('expected an advanced guard');
+    assert.equal(guardWrites, 1);
+    assert.equal(advanced.permit.claim.epoch, '1');
     const held = { async readRestoreGuard() { return guardValue; } };
     const activityKey = Buffer.alloc(32, 1), warningKey = Buffer.alloc(32, 2);
     function event(witnessKey: Buffer, generation: string): RetirementWitness {

@@ -13,7 +13,7 @@ import { loadMigrationManifest } from '../migrations/migrationManifest';
 import { applyMigrations } from '../migrations/migrationRunner';
 import { verifyAppleTokenReadiness } from '../migrations/appleTokenSchema';
 import { createAppleTokenRepository, type StoredAppleToken } from './appleTokenRepository';
-import { deleteAccount } from './accountDeletionRepository';
+import { AccountDeletionPendingError, deleteAccount } from './accountDeletionRepository';
 import type { AccountDeletionJournal, DeletionIntent, DeletionJournalReader } from './deletionJournal';
 import { applyDeletionReplay, planDeletionReplay } from './deletionReplay';
 
@@ -110,6 +110,40 @@ async function insertProviderLink(userId: number, provider: 'google' | 'apple', 
         SELECT account_uuid, ?, ?, UTC_TIMESTAMP(6) FROM users WHERE user_id = ?`,
     [provider, Buffer.from(subject, 'utf8'), userId]);
 }
+
+test('a late deletion intent invalidates a restore plan and is reapplied on the isolated database', async () => {
+    const suffix = randomUUID();
+    const passwordHash = await bcrypt.hash(TEST_PASSWORD, 4);
+    const [target] = await administrator.query<ResultSetHeader>(
+        'INSERT INTO users (user_name,email,user_password) VALUES (?,?,?)', [`late-${suffix}`, `${suffix}@example.invalid`, passwordHash]);
+    const [other] = await administrator.query<ResultSetHeader>(
+        'INSERT INTO users (user_name,email,user_password) VALUES (?,?,?)', [`other-${suffix}`, `other-${suffix}@example.invalid`, passwordHash]);
+    const [rows] = await administrator.query<RowDataPacket[]>('SELECT account_uuid AS accountId FROM users WHERE user_id=?', [target.insertId]);
+    const accountId = String(rows[0].accountId);
+    const intents: DeletionIntent[] = [];
+    let arrive!: () => void;
+    const journal: AccountDeletionJournal & DeletionJournalReader = {
+        async recordAccountDeletion(id) {
+            assert.equal(id, accountId);
+            const intent: DeletionIntent = { version: 1, action: 'delete-account', accountId: id, requestedAt: new Date().toISOString() };
+            arrive = () => intents.push(intent);
+            throw new Error('synthetic acknowledgement lost');
+        },
+        async readDeletionIntents() {
+            return { intents: [...intents], digest: createHash('sha256').update(JSON.stringify(intents)).digest('hex') };
+        },
+    };
+    await assert.rejects(deleteAccount(database, target.insertId, TEST_PASSWORD, journal), AccountDeletionPendingError);
+    const [before] = await administrator.query<RowDataPacket[]>('SELECT account_uuid FROM users WHERE user_id=?', [target.insertId]);
+    assert.equal(before.length, 1, 'uncertain journal write cannot delete in the live transaction');
+    const stale = await planDeletionReplay(database, journal, settings);
+    arrive();
+    await assert.rejects(applyDeletionReplay(database, journal, settings, stale.sha256), /plan changed/u);
+    const current = await planDeletionReplay(database, journal, settings);
+    assert.equal((await applyDeletionReplay(database, journal, settings, current.sha256)).deletedAccounts, 1);
+    const [remaining] = await administrator.query<RowDataPacket[]>('SELECT user_id FROM users WHERE user_id IN (?,?) ORDER BY user_id', [target.insertId, other.insertId]);
+    assert.deepEqual(remaining.map(row => row.user_id), [other.insertId]);
+});
 
 async function insertPendingAttempt(userId: number): Promise<void> {
     await administrator.query(`INSERT INTO provider_auth_attempts

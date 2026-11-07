@@ -97,6 +97,33 @@ test('retires conditional intent before its outcome and keeps the intent verifia
         generation: pair.intentObject.generation, stamp: JSON.parse(f.io.metadata(pair.intentObject.name).ludolumeRetirement) }], publicKey);
 });
 
+test('a kept outcome needs matching later activity and never removes an active account’s witnesses', async () => {
+    const kept: ConditionalRetirementPair = { ...pair, resolution: { outcome: 'kept',
+        confirmedAt: '2026-10-02T00:00:00.000000Z', observedActivityAt: '2026-10-01T12:00:00.000000Z', proofDigest: 'f'.repeat(64) } };
+    const journal = { async readConditionalRetirementPairs() { return { pairs: [kept], digest: 'b'.repeat(64) }; } };
+    for (const activityAt of ['2026-09-30T00:00:00.000000Z', '2026-10-01T12:00:00.000000Z']) {
+        const active = await fixture();
+        const connection = { ...active.db.connection, async query(input: { sql: string }, values?: unknown[]) {
+            if (input.sql.includes('LEFT JOIN parent_child_consents')) return [[{ childId: pair.intent.childId,
+                parentId: pair.intent.parentId, activityAt }], []];
+            if (input.sql.includes('FROM users')) return [[{ account_uuid: pair.intent.childId }], []];
+            return active.db.connection.query(input, values);
+        } } as unknown as PoolConnection;
+        const options = { ...active.options, connection, pair: kept, journal,
+            async retireWitnesses() { assert.fail('active account witnesses must be kept'); },
+            async verifyWitnessesAbsent() { assert.fail('active account witnesses must be kept'); } };
+        if (activityAt < kept.resolution.observedActivityAt!) {
+            await assert.rejects(retireConditionalPair(options)); assert.deepEqual(active.io.deletes, []);
+        } else {
+            assert.equal((await retireConditionalPair(options)).status, 'retired');
+            assert.deepEqual(active.io.deletes, [pair.intentObject.name, pair.resolutionObject.name]);
+        }
+    }
+    const deleted = await fixture();
+    assert.deepEqual(await retireConditionalPair({ ...deleted.options, pair: kept, journal }), { status: 'retired' });
+    assert.deepEqual(deleted.io.deletes, [pair.intentObject.name, pair.resolutionObject.name]);
+});
+
 test('keeps both conditional objects if account-linked witnesses remain', async () => {
     const f = await fixture();
     await assert.rejects(retireConditionalPair({ ...f.options, verifyWitnessesAbsent: async id => {

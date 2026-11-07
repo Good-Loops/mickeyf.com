@@ -36,7 +36,7 @@ export function providerSignInErrorMessage(error: string, action: ProviderAction
             ? 'Apple did not provide a verified email for this signup. Try again, or sign up with a password.'
             : 'Google could not verify current ownership of this email. Use a Gmail or Google Workspace account, or sign up with a password.';
         case 'ACCOUNT_DELETION_UNAVAILABLE': return `${providerName} account deletion is not available on this server yet.`;
-        case 'ACCOUNT_DELETION_PENDING': return 'Your deletion request was recorded, but completion has not been confirmed. Retrying will not cancel it. Contact mickeyf.plays@gmail.com if it remains pending.';
+        case 'ACCOUNT_DELETION_PENDING': return 'Your deletion request may have been recorded, but completion has not been confirmed. Retrying will not cancel it. Contact mickeyf.plays@gmail.com if you need help.';
         case 'INVALID_PASSWORD': return 'That password did not match. Enter your current password and try again.';
         case 'LINK_CONFLICT': return 'This provider account cannot be linked here. It may already be linked to another account.';
         case 'INVALID_CONTEXT': case 'ACCOUNT_GONE': return 'Your session has changed. Log in again, then try again.';

@@ -6,6 +6,7 @@ import type { RetentionIntent } from './childInactivityWorkflow';
 import { deleteInactiveChild, InactivityDeletionUncertainError, type InactivityStore, type LockedInactivityTarget } from './childInactivityWorkflow';
 import { INACTIVITY_NOTICE_DIGEST, type InactivitySnapshot } from './childInactivityPolicy';
 import type { JournalHttpClient, JournalHttpRequest } from './gcsDeletionJournal';
+import { conditionalRetirementEntry } from './conditionalRetirementEntry';
 
 const bucket = 'ludolume-test-conditional-intents';
 const key = Buffer.alloc(32, 7);
@@ -79,6 +80,18 @@ test('retirement inventory binds deleted outcomes to both exact signed object ge
     }
     assert.match(pair.intentObject.name, /^v1\/conditional\//);
     assert.match(pair.resolutionObject.name, /^v1\/resolutions\//);
+});
+
+test('retirement inventory includes an authenticated kept outcome for later absence checking', async () => {
+    const io = transport(), store = journal(io.client);
+    await store.recordRetentionIntent(intent);
+    const resolution = { outcome: 'kept' as const, confirmedAt: '2026-01-03T00:00:00.000000Z',
+        observedActivityAt: '2026-01-02T00:00:00.000000Z', proofDigest: 'e'.repeat(64) };
+    await store.recordResolution(intent, resolution);
+    const result = await store.readConditionalRetirementPairs();
+    assert.equal(result.pairs.length, 1);
+    assert.deepEqual(result.pairs[0].resolution, resolution);
+    assert.equal(conditionalRetirementEntry(result.pairs[0]).intent.accountId, intent.childId);
 });
 
 test('changed or absent intents, corrupted bodies, and a different signing key cannot verify', async () => {

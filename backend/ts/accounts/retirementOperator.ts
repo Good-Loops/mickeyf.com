@@ -5,17 +5,20 @@ import { createGcsDeletionJournal } from './gcsDeletionJournal';
 import { verifyRetiredJournalObjects } from './verifyRetiredJournalObjects';
 import { verifyRetirementSourceSchema } from './retirementSourceSchema';
 import { conditionalRetirementEntry } from './conditionalRetirementEntry';
+import { verifyKeptActivity } from './verifiedKeptActivity';
+import { verifyDeletedAccountEffects } from './verifiedDeletionEffects';
 import { previewRetirementCandidates } from './previewRetirementCandidates';
 import { CHILD_RETENTION_BUCKET } from '../config/childInactivityDeployment';
 import { PRODUCTION_CLOUD_SQL_TARGET } from '../security/cloudSqlRuntimeRoleRemover';
 import { DELETION_JOURNAL_BUCKET } from './gcsDeletionJournal';
-import { verifyRetirementBatch, type RetirementBatchPermit } from './retirementBatchPermit';
+import { verifyRetirementBatch, type PreparedRetirementCheckpoint, type RetirementBatchPermit } from './retirementBatchPermit';
 import { retireExplicitDeletionEntryForOperator, inspectExplicitRetirement } from './retireExplicitDeletionEntry';
 import { retireConditionalPairForOperator, resumeConditionalResolutionForOperator } from './retireConditionalPair';
 
 type Connection = Pick<PoolConnection, 'query' | 'beginTransaction' | 'commit' | 'rollback' | 'destroy'>;
 type Pins = Readonly<{ database: string; currentUser: string; serverUuid: string }>;
 type Identity = Readonly<{ name: string; generation: string; contentSha256: string }>;
+type ConditionalPair = Awaited<ReturnType<ReturnType<typeof createGcsRetentionJournal>['readConditionalRetirementPairs']>>['pairs'][number];
 export type RetirementOperatorContext = Readonly<{ connection: Connection; pins: Pins; bucket: string; expectedBucket: string;
     guardKey: Buffer; publicKey?: KeyObject }>;
 
@@ -45,13 +48,27 @@ export async function previewRetirementsForOperator(context: RetirementOperatorC
     confirmation: string, offset = 0) {
     const { guard, journal } = resources(context);
     await guard.assertRestoreGuardHistory();
+    let pairs: readonly ConditionalPair[] = [];
     const conditional = { async readDeletionEntries() {
         const snapshot = await guard.readConditionalRetirementPairs();
+        pairs = snapshot.pairs;
         return { entries: snapshot.pairs.map(conditionalRetirementEntry), digest: snapshot.digest };
     } };
     if (kind !== 'explicit' && kind !== 'conditional') throw new Error('Invalid retirement journal.');
     return previewRetirementCandidates({ connection: context.connection, pins: context.pins, guard,
-        journal: kind === 'conditional' ? conditional : journal, verifySchema: verifyRetirementSourceSchema, confirmation, offset });
+        journal: kind === 'conditional' ? conditional : journal, verifySchema: verifyRetirementSourceSchema, confirmation, offset,
+        ...(kind === 'conditional' ? { async verifyCandidate(connection: Pick<PoolConnection, 'query'>, entry: ReturnType<typeof conditionalRetirementEntry>) {
+            return verifyConditionalRetirementCandidate(connection, pairs, entry);
+        } } : {}) });
+}
+
+export async function verifyConditionalRetirementCandidate(connection: Pick<PoolConnection, 'query'>,
+    pairs: readonly ConditionalPair[], entry: Identity): Promise<boolean> {
+    const found = pairs.filter(pair => pair.intentObject.name === entry.name && pair.intentObject.generation === entry.generation
+        && pair.intentObject.contentSha256 === entry.contentSha256);
+    if (found.length !== 1) throw new Error('Conditional retirement candidate changed.');
+    return found[0].resolution.outcome === 'kept' ? verifyKeptActivity(connection, found[0])
+        : verifyDeletedAccountEffects(connection, [found[0].intent.childId]);
 }
 
 /** Expand a selected conditional intent to its authenticated intent/outcome pair. */
@@ -67,7 +84,7 @@ export function expandConditionalRetirementSelection(selected: readonly Identity
 }
 
 /** Uses the actual pinned provider and reviewed schema through the guard adapter. */
-export async function advanceRetirementGuardForOperator(context: RetirementOperatorContext & Readonly<{
+export async function prepareRetirementGuardForOperator(context: RetirementOperatorContext & Readonly<{
     publicKey: KeyObject; privateKey: KeyObject;
 }>, options: Readonly<{ kind: 'explicit' | 'conditional'; lineage: string; selected: readonly Identity[];
     confirmation: string; externalCopiesConfirmation: string }>) {
@@ -77,9 +94,24 @@ export async function advanceRetirementGuardForOperator(context: RetirementOpera
     const selected = options.kind === 'conditional'
         ? expandConditionalRetirementSelection(options.selected, (await guard.readConditionalRetirementPairs()).pairs)
         : options.selected;
-    return guard.advanceRestoreGuardCheckpoint({ kind: options.kind, connection: context.connection, pins: context.pins,
+    return guard.prepareRetirementCheckpoint({ kind: options.kind, connection: context.connection, pins: context.pins,
         lineage: options.lineage, publicKey: context.publicKey, privateKey: context.privateKey,
         selected, confirmation: options.confirmation, externalCopiesConfirmation: options.externalCopiesConfirmation });
+}
+
+export async function advanceRetirementGuardForOperator(context: RetirementOperatorContext & Readonly<{
+    publicKey: KeyObject; privateKey: KeyObject;
+}>, options: Readonly<{ kind: 'explicit' | 'conditional'; lineage: string; selected: readonly Identity[];
+    prepared: PreparedRetirementCheckpoint; confirmation: string; externalCopiesConfirmation: string }>) {
+    const { guard } = resources(context);
+    if (options.kind !== 'explicit' && options.kind !== 'conditional') throw new Error('Invalid retirement journal.');
+    await guard.assertRestoreGuardHistory();
+    const selected = options.kind === 'conditional'
+        ? expandConditionalRetirementSelection(options.selected, (await guard.readConditionalRetirementPairs()).pairs)
+        : options.selected;
+    return guard.finishRetirementCheckpoint({ kind: options.kind, connection: context.connection, pins: context.pins,
+        lineage: options.lineage, publicKey: context.publicKey, privateKey: context.privateKey,
+        selected, confirmation: options.confirmation, externalCopiesConfirmation: options.externalCopiesConfirmation }, options.prepared);
 }
 
 /** Resolve the account internally from the current authenticated journal; do not log it. */

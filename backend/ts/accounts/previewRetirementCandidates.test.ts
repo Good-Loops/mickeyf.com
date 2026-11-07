@@ -34,3 +34,18 @@ test('preview holds an active account and selects a deleted account without pers
 test('preview rejects a changed journal inventory', async () => {
     await assert.rejects(previewRetirementCandidates(fixture(true).options));
 });
+
+test('preview selects a verified private score withdrawal without selecting a live deletion', async () => {
+    const f = fixture();
+    const withdrawal: DeletionJournalEntry = { ...entry(live, '3'), intent: { ...entry(live, '3').intent, action: 'withdraw-public-scores' } };
+    const connection = { ...f.options.connection, async query(input: { sql: string }, values?: unknown[]) {
+        if (input.sql.includes('FROM users')) return [[{ account_uuid: live }], []];
+        if (input.sql.includes('FROM account_score_permissions')) return [[{ visibility: 'private', policy_digest: null,
+            registration_policy_version: null, country_code: null, age_band: null, authorizer_uuid: null }], []];
+        return f.options.connection.query(input, values);
+    } } as unknown as PoolConnection;
+    const journal = { async readDeletionEntries() { return { entries: [entry(live, '1'), withdrawal], digest: 'a'.repeat(64) }; } };
+    const result = await previewRetirementCandidates({ ...f.options, connection, journal });
+    assert.deepEqual(result, { candidates: [{ name: 'synthetic-3', generation: '3', contentSha256: 'a'.repeat(64) }],
+        held: 1, total: 2, nextOffset: null });
+});

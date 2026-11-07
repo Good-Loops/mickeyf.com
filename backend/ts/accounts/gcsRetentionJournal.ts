@@ -6,7 +6,8 @@ import { parseInactivityInstant } from './childInactivityPolicy';
 import type { RetentionIntent, RetentionJournal } from './childInactivityWorkflow';
 import type { PoolConnection } from 'mysql2/promise';
 import { advanceRetirementGuard, type RetirementGuardAdvanceOptions } from './retirementGuardAdvance';
-import type { RetirementBatchPermit } from './retirementBatchPermit';
+import type { PreparedRetirementCheckpoint, RetirementBatchPermit } from './retirementBatchPermit';
+import { prepareRecoverySafeRetirement, finishRecoverySafeRetirement } from './recoverySafeRetirement';
 import { createCloudSqlMetadataClient } from './cloudSqlRecoveryInventory';
 import { verifyRetirementSchemas } from './retirementSourceSchema';
 import { verifyRetiredJournalObjects } from './verifyRetiredJournalObjects';
@@ -41,7 +42,8 @@ type RetirementGuardAdvanceRequest = Omit<RetirementGuardAdvanceOptions,
     'cloud' | 'verifySchema' | 'journal' | 'conditional' | 'project' | 'instance' | 'waitForCoverage'>
     & Readonly<{ kind?: 'explicit' | 'conditional' }>;
 export type RestoreGuard = Readonly<{ state: 'active' | 'hold'; database: string; serverUuid: string;
-    epoch: string; expiresAt: string; recoveryCheckpoint?: Readonly<{ lineage: string; minimumEpoch: string; keySha256: string }> }>;
+    epoch: string; expiresAt: string; recoveryCheckpoint?: Readonly<{ lineage: string; minimumEpoch: string; keySha256: string;
+        preparationSha256?: string }> }>;
 export type ObservedRestoreGuard = RestoreGuard & Readonly<{ generation: string }>;
 export type RetentionResolution = Readonly<{ outcome: 'kept' | 'deleted'; confirmedAt: string;
     observedActivityAt: string | null; proofDigest: string }>;
@@ -62,6 +64,10 @@ export function createGcsRetentionJournal(options: Options): RetentionJournal & 
     advanceRestoreGuardCheckpoint(options: RetirementGuardAdvanceRequest): Promise<Readonly<{
         generation: string; lineage: string; epoch: string; committedBefore: string; permit: RetirementBatchPermit;
     }>>;
+    prepareRetirementCheckpoint(options: RetirementGuardAdvanceRequest): Promise<PreparedRetirementCheckpoint>;
+    finishRetirementCheckpoint(options: RetirementGuardAdvanceRequest, prepared: PreparedRetirementCheckpoint): Promise<Readonly<
+        { status: 'waiting' } | { status: 'advanced'; generation: string; permit: RetirementBatchPermit }
+    >>;
     readResolution(intent: RetentionIntent): Promise<RetentionResolution | null>;
     recordResolution(intent: RetentionIntent, resolution: RetentionResolution): Promise<void>;
     readConditionalRetirementPairs(): Promise<Readonly<{ pairs: readonly ConditionalRetirementPair[]; digest: string }>>;
@@ -203,7 +209,8 @@ export function createGcsRetentionJournal(options: Options): RetentionJournal & 
             const previous = await readSignedGuard(object), earlier = previous.recoveryCheckpoint, latest = current.recoveryCheckpoint;
             if ((previous.generation === current.generation && JSON.stringify(previous) !== JSON.stringify(current))
                 || previous.database !== current.database || (earlier && (!latest || earlier.lineage !== latest.lineage
-                || earlier.keySha256 !== latest.keySha256 || BigInt(earlier.minimumEpoch) > BigInt(latest.minimumEpoch)))) {
+                || earlier.keySha256 !== latest.keySha256 || BigInt(earlier.minimumEpoch) > BigInt(latest.minimumEpoch)
+                || (earlier.minimumEpoch === latest.minimumEpoch && earlier.preparationSha256 !== latest.preparationSha256)))) {
                 throw new RetentionJournalUnavailableError();
             }
         }
@@ -416,7 +423,6 @@ export function createGcsRetentionJournal(options: Options): RetentionJournal & 
         for (const intent of intents) {
             const resolution = await readResolution(intent);
             if (!resolution) throw new RetentionJournalUnavailableError();
-            if (resolution.outcome !== 'deleted') continue;
             pairs.push({ intent, resolution, intentObject: await exact(signed(intent)),
                 resolutionObject: await exact(signedResolution(intent, resolution)) });
         }
@@ -424,11 +430,7 @@ export function createGcsRetentionJournal(options: Options): RetentionJournal & 
         const identities = pairs.map(pair => [pair.intentObject, pair.resolutionObject]).sort((a, b) => a[0].name.localeCompare(b[0].name));
         return { pairs, digest: createHash('sha256').update(JSON.stringify(identities)).digest('hex') };
     }
-    return { recordRetentionIntent, verifyRetentionIntent, recordCommittedDeletion, readResolution, recordResolution,
-        readIntents: () => readInventory('v1/conditional/', true),
-        readIntentsForChild: async childId => readInventory(childPrefix(childId)),
-        readRestoreGuard, assertRestoreGuardHistory, writeRestoreGuard, readConditionalRetirementPairs,
-        advanceRestoreGuardCheckpoint: input => {
+    function retirementOptions(input: RetirementGuardAdvanceRequest): RetirementGuardAdvanceOptions {
             if (input.kind !== undefined && input.kind !== 'explicit' && input.kind !== 'conditional') throw new RetentionJournalUnavailableError();
             const verifyRetired = async (objects: readonly RetiredObject[]) => {
                 const current = await readRestoreGuard();
@@ -439,12 +441,20 @@ export function createGcsRetentionJournal(options: Options): RetentionJournal & 
             };
             const recoveryJournal = input.kind === 'conditional' ? createGcsRetentionJournal({ bucket, expectedBucket, key, client,
                 timeoutMs: timeout, verifyActivityContinuity: async () => false, verifyRetiredObjects: verifyRetired }) : undefined;
-            return advanceRetirementGuard({ ...input,
+            return { ...input,
             project: 'noted-reef-387021', instance: 'cms-mickeyf', cloud: createCloudSqlMetadataClient(),
             journal: createGcsDeletionJournal({ verifyRetiredObjects: verifyRetired }),
             conditional: recoveryJournal ? { bucket, readPairs: recoveryJournal.readConditionalRetirementPairs } : undefined,
-            verifySchema: verifyRetirementSchemas }, { read: readRestoreGuard, commit: commitCheckpointGuard });
-        },
+            verifySchema: verifyRetirementSchemas };
+    }
+    const retirementGuard = { read: readRestoreGuard, commit: commitCheckpointGuard };
+    return { recordRetentionIntent, verifyRetentionIntent, recordCommittedDeletion, readResolution, recordResolution,
+        readIntents: () => readInventory('v1/conditional/', true),
+        readIntentsForChild: async childId => readInventory(childPrefix(childId)),
+        readRestoreGuard, assertRestoreGuardHistory, writeRestoreGuard, readConditionalRetirementPairs,
+        advanceRestoreGuardCheckpoint: input => advanceRetirementGuard(retirementOptions(input), retirementGuard),
+        prepareRetirementCheckpoint: input => prepareRecoverySafeRetirement(retirementOptions(input), retirementGuard),
+        finishRetirementCheckpoint: (input, prepared) => finishRecoverySafeRetirement(retirementOptions(input), retirementGuard, prepared),
         async verifyActivityContinuity(intent, connection) {
             validateIntent(intent);
             try { return await verifyActivityContinuity(intent, connection) === true; } catch { return false; }
@@ -477,11 +487,14 @@ function validateGuard(input: unknown): RestoreGuard {
     if (v.recoveryCheckpoint !== undefined) {
         if (!v.recoveryCheckpoint || typeof v.recoveryCheckpoint !== 'object' || Array.isArray(v.recoveryCheckpoint)) throw new TypeError('Invalid restore guard.');
         const checkpoint = v.recoveryCheckpoint as Record<string, unknown>;
-        if (Object.keys(checkpoint).sort().join(',') !== 'keySha256,lineage,minimumEpoch' || !isAccountId(checkpoint.lineage)
+        const keys = Object.keys(checkpoint).sort().join(',');
+        if ((keys !== 'keySha256,lineage,minimumEpoch' && keys !== 'keySha256,lineage,minimumEpoch,preparationSha256') || !isAccountId(checkpoint.lineage)
             || typeof checkpoint.keySha256 !== 'string' || !HEX.test(checkpoint.keySha256)
+            || (checkpoint.preparationSha256 !== undefined && (typeof checkpoint.preparationSha256 !== 'string' || !HEX.test(checkpoint.preparationSha256)))
             || typeof checkpoint.minimumEpoch !== 'string' || !/^[1-9][0-9]{0,19}$/u.test(checkpoint.minimumEpoch)
             || BigInt(checkpoint.minimumEpoch) > BigInt('18446744073709551615')) throw new TypeError('Invalid restore guard.');
-        recoveryCheckpoint = { lineage: checkpoint.lineage, minimumEpoch: checkpoint.minimumEpoch, keySha256: checkpoint.keySha256 };
+        recoveryCheckpoint = { lineage: checkpoint.lineage, minimumEpoch: checkpoint.minimumEpoch, keySha256: checkpoint.keySha256,
+            ...(checkpoint.preparationSha256 === undefined ? {} : { preparationSha256: checkpoint.preparationSha256 as string }) };
     }
     return { state: v.state, database: v.database, serverUuid: v.serverUuid, epoch: v.epoch, expiresAt: v.expiresAt,
         ...(recoveryCheckpoint === undefined ? {} : { recoveryCheckpoint }) };

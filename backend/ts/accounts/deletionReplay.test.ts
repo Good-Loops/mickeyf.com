@@ -4,6 +4,7 @@ import type { Pool, PoolConnection } from 'mysql2/promise';
 import type { DeletionReplaySettings } from '../config/deletionReplayConfig';
 import type { DeletionIntent, DeletionJournalReader, DeletionJournalSnapshot } from './deletionJournal';
 import { applyDeletionReplay, planDeletionReplay } from './deletionReplay';
+import { createGcsDeletionJournal, DELETION_JOURNAL_BUCKET, type JournalHttpClient } from './gcsDeletionJournal';
 
 const FIRST_ID = '123e4567-e89b-42d3-a456-426614174000';
 const SECOND_ID = '123e4567-e89b-42d3-a456-426614174001';
@@ -140,6 +141,42 @@ function fakeReplay(options: FakeOptions = {}) {
     };
     return { database, reader, accounts, events, queries, failure };
 }
+
+test('a timed-out write arriving after a recovery plan invalidates that plan and is replayed', async () => {
+    const requestId = '42272598-9d28-457d-a63d-e3e3cd0d2a00';
+    let stored: { body: string; metadata: Record<string, string> } | undefined;
+    let finishWrite!: () => void;
+    const client: JournalHttpClient = {
+        async request(request) {
+            if (request.method === 'POST') {
+                const body = request.data!;
+                assert.equal(body, JSON.stringify({ version: 1, accountId: FIRST_ID, action: 'delete-account', requestedAt: INTENT.requestedAt }));
+                const metadata = { bucket: DELETION_JOURNAL_BUCKET, name: String(request.params.name),
+                    generation: '123456789', size: String(Buffer.byteLength(body)),
+                    md5Hash: 'GQLulhHYDqukI4dfZk1UJw==' }; // Cloud Storage checksum for this fixed fictional fixture.
+                return new Promise(resolve => { finishWrite = () => { stored = { body, metadata }; resolve({ status: 200, data: metadata }); }; });
+            }
+            if (request.params.alt === 'media') return { status: 200, data: stored!.body };
+            return { status: 200, data: { kind: 'storage#objects',
+                ...(!request.params.softDeleted && stored ? { items: [stored.metadata] } : {}) } };
+        },
+    };
+    const journal = createGcsDeletionJournal({ client, requestId: () => requestId,
+        now: () => new Date(INTENT.requestedAt), timeoutMs: 10 });
+    await assert.rejects(journal.recordAccountDeletion(FIRST_ID));
+    const fake = fakeReplay();
+    fake.reader.readDeletionIntents = () => journal.readDeletionIntents();
+    const stale = await planDeletionReplay(fake.database, fake.reader, SETTINGS);
+    assert.equal(stale.intentCount, 0);
+    finishWrite();
+    await assert.rejects(applyDeletionReplay(fake.database, fake.reader, SETTINGS, stale.sha256), /plan changed/u);
+    assert.equal(fake.accounts.get(42), FIRST_ID);
+    const current = await planDeletionReplay(fake.database, fake.reader, SETTINGS);
+    assert.equal(current.intentCount, 1);
+    assert.equal((await applyDeletionReplay(fake.database, fake.reader, SETTINGS, current.sha256)).deletedAccounts, 1);
+    assert.equal(fake.accounts.has(42), false);
+    assert.equal(fake.accounts.get(99), SECOND_ID);
+});
 
 test('plan is read-only, binds complete intents and target, and contains no account identifiers', async () => {
     const fake = fakeReplay();

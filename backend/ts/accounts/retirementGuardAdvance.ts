@@ -41,6 +41,8 @@ export async function advanceRetirementGuard(options: RetirementGuardAdvanceOpti
 }>> {
     try {
         const { connection, pins } = options;
+        // Production uses the two-stage path: advancing here can reject still-retained backups.
+        if (isProductionRecoveryOperator(pins)) throw new Error();
         if (options.confirmation !== 'ORIGINAL PRIMARY AND ALL WRITERS FENCED'
             || options.externalCopiesConfirmation !== 'ALL PERMITTED RECOVERY COPIES ACCOUNTED FOR'
             || !isAccountId(options.lineage) || typeof options.verifySchema !== 'function'

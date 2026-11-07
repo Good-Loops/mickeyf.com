@@ -2,6 +2,7 @@ import type { PoolConnection, RowDataPacket } from 'mysql2/promise';
 import type { DeletionJournalEntry } from './gcsDeletionJournal';
 import type { ObservedRestoreGuard } from './gcsRetentionJournal';
 import { verifyDeletedAccountEffects } from './verifiedDeletionEffects';
+import { verifyScoreWithdrawal } from './verifiedScoreWithdrawal';
 import { assertNoRetentionRuntimeWriters, isProductionRecoveryOperator } from './retentionReconciliation';
 import { readRecoveryCheckpoint } from './accountRecoveryCheckpoint';
 
@@ -14,6 +15,7 @@ export async function previewRetirementCandidates(options: Readonly<{
     guard: Readonly<{ readRestoreGuard(): Promise<ObservedRestoreGuard> }>;
     journal: Readonly<{ readDeletionEntries(): Promise<Readonly<{ entries: readonly DeletionJournalEntry[]; digest: string }>> }>;
     verifySchema(connection: Pick<PoolConnection, 'query'>): Promise<void>; confirmation: string; offset?: number;
+    verifyCandidate?(connection: Pick<PoolConnection, 'query'>, entry: DeletionJournalEntry): Promise<boolean>;
 }>): Promise<Readonly<{ candidates: readonly Identity[]; held: number; total: number; nextOffset: number | null }>> {
     let begun = false, beginning = false;
     try {
@@ -34,9 +36,12 @@ export async function previewRetirementCandidates(options: Readonly<{
         const end = Math.min(offset + 100, snapshot.entries.length), candidates: Identity[] = []; let held = 0;
         for (const entry of snapshot.entries.slice(offset, end)) {
             beginning = true; await options.connection.beginTransaction(); beginning = false; begun = true;
-            const absent = await verifyDeletedAccountEffects(options.connection, [entry.intent.accountId]);
+            const eligible = options.verifyCandidate ? await options.verifyCandidate(options.connection, entry)
+                : entry.intent.action === 'withdraw-public-scores'
+                    ? await verifyScoreWithdrawal(options.connection, entry.intent.accountId)
+                    : await verifyDeletedAccountEffects(options.connection, [entry.intent.accountId]);
             await options.connection.rollback(); begun = false;
-            if (absent) candidates.push({ name: entry.name, generation: entry.generation, contentSha256: entry.contentSha256 });
+            if (eligible) candidates.push({ name: entry.name, generation: entry.generation, contentSha256: entry.contentSha256 });
             else held++;
         }
         await assertNoRetentionRuntimeWriters(options.connection, isProductionRecoveryOperator(options.pins));

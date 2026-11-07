@@ -4,9 +4,9 @@ import { loadMigrationConfig, loadMigrationAccountConfirmation, assertDatabaseCo
 import { assertChildSchemaCleanSource } from '../migrations/runChildSignedFormSchema';
 import { PRODUCTION_CLOUD_SQL_TARGET } from '../security/cloudSqlRuntimeRoleRemover';
 import { CHILD_RETENTION_BUCKET } from '../config/childInactivityDeployment';
-import { advanceRetirementGuardForOperator, inspectExplicitRetirementForOperator, previewRetirementsForOperator,
+import { advanceRetirementGuardForOperator, prepareRetirementGuardForOperator, inspectExplicitRetirementForOperator, previewRetirementsForOperator,
     resumeConditionalRetirementForOperator, retireJournalRecordForOperator } from './retirementOperator';
-import type { RetirementBatchPermit } from './retirementBatchPermit';
+import type { PreparedRetirementCheckpoint, RetirementBatchPermit } from './retirementBatchPermit';
 import { createProductionRecoveryCheckpointSetup } from './productionRecoveryCheckpointSetup';
 import { assertKnownRecoveryWritersLocked } from './retentionReconciliation';
 import { applyRecoveryCheckpointSetup, planRecoveryCheckpointSetup, type RecoveryCheckpointSetupPlan } from './recoveryCheckpointSetup';
@@ -14,7 +14,7 @@ import { applyRecoveryCheckpointSetup, planRecoveryCheckpointSetup, type Recover
 type Env = Readonly<Record<string, string | undefined>>;
 type Identity = Readonly<{ name: string; generation: string; contentSha256: string }>;
 type Body = Readonly<{ kind?: 'explicit' | 'conditional'; offset?: number; lineage?: string; selected?: Identity | Identity[];
-    permit?: RetirementBatchPermit; plan?: RecoveryCheckpointSetupPlan }>;
+    permit?: RetirementBatchPermit; prepared?: PreparedRetirementCheckpoint; plan?: RecoveryCheckpointSetupPlan }>;
 const FAILURE = 'Retirement operation unavailable or unconfirmed. Keep recovery held and reconcile before retrying.';
 
 /** Values are consumed privately; callers must never print this result. */
@@ -65,11 +65,11 @@ async function readBody(input: AsyncIterable<string | Uint8Array>): Promise<Body
 export async function runRetirementOperator(args = process.argv.slice(2), env: Env = process.env,
     input: AsyncIterable<string | Uint8Array> = process.stdin): Promise<void> {
     const command = args[0];
-    if (args.length !== 1 || !['setup-plan', 'setup-apply', 'preview', 'advance', 'retire', 'inspect', 'resume'].includes(command)) throw new Error(FAILURE);
+    if (args.length !== 1 || !['setup-plan', 'setup-apply', 'preview', 'prepare', 'advance', 'retire', 'inspect', 'resume'].includes(command)) throw new Error(FAILURE);
     const target = loadRetirementTarget(env), secrets = loadRetirementSecrets(env), body = await readBody(input);
     if (command !== 'setup-plan' && command !== 'setup-apply' && body.kind !== 'explicit' && body.kind !== 'conditional') throw new Error(FAILURE);
     if (command !== 'preview' && command !== 'inspect' && command !== 'setup-plan') assertMutationAuthorized(target.config, env);
-    if ((command === 'advance' || command === 'retire' || command === 'resume') && !secrets.privateKey) throw new Error(FAILURE);
+    if ((command === 'prepare' || command === 'advance' || command === 'retire' || command === 'resume') && !secrets.privateKey) throw new Error(FAILURE);
     assertChildSchemaCleanSource(target.sourceCommit, undefined, env);
     const connection = await mysql.createConnection({ host: target.config.host, port: target.config.port,
         user: target.config.user, password: target.config.password, database: target.config.database,
@@ -91,10 +91,14 @@ export async function runRetirementOperator(args = process.argv.slice(2), env: E
                 result = { status: 'checkpoint-created', lineage: body.plan.lineage };
             }
         } else if (command === 'preview' && body.kind) result = await previewRetirementsForOperator(context, body.kind, confirmation, body.offset ?? 0);
-        else if (command === 'advance') {
+        else if (command === 'prepare' || command === 'advance') {
             if (!body.kind || !body.lineage || !Array.isArray(body.selected) || !secrets.privateKey) throw new Error(FAILURE);
-            result = await advanceRetirementGuardForOperator({ ...context, privateKey: secrets.privateKey }, { kind: body.kind,
-                lineage: body.lineage, selected: body.selected, confirmation, externalCopiesConfirmation });
+            const common = { kind: body.kind, lineage: body.lineage, selected: body.selected, confirmation, externalCopiesConfirmation };
+            if (command === 'prepare') result = await prepareRetirementGuardForOperator({ ...context, privateKey: secrets.privateKey }, common);
+            else {
+                if (!body.prepared) throw new Error(FAILURE);
+                result = await advanceRetirementGuardForOperator({ ...context, privateKey: secrets.privateKey }, { ...common, prepared: body.prepared });
+            }
         } else {
             if (!body.permit || !body.selected || Array.isArray(body.selected)) throw new Error(FAILURE);
             if (command === 'inspect' && body.kind === 'explicit') result = await inspectExplicitRetirementForOperator(context, body.permit, body.selected);

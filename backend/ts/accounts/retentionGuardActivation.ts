@@ -57,12 +57,15 @@ export async function activateRetentionGuard(connection: Connection, journal: Jo
         const explicit = await deletionJournal.readDeletionIntents();
         if (!explicit || !/^[a-f0-9]{64}$/u.test(explicit.digest) || !Array.isArray(explicit.intents)
             || explicit.intents.length > 10_000) throw new Error('Explicit deletion inventory unavailable.');
+        const explicitDeletions = new Map<string, string>();
         for (const value of explicit.intents) {
             const item = parseDeletionIntent(value);
             const [accounts] = await connection.query<RowDataPacket[]>({ sql: 'SELECT account_uuid FROM users WHERE account_uuid=? LIMIT 2', timeout: 10_000 }, [item.accountId]);
             if (!Array.isArray(accounts) || accounts.length > 1) throw new Error('Account lookup ambiguous.');
             if (item.action === 'delete-account') {
                 if (accounts.length) throw new Error('Explicitly deleted account remains.');
+                const time = item.requestedAt.replace(/Z$/u, '000Z');
+                if (!explicitDeletions.has(item.accountId) || explicitDeletions.get(item.accountId)! < time) explicitDeletions.set(item.accountId, time);
             } else if (accounts.length) {
                 const [permissions] = await connection.query<RowDataPacket[]>({ sql: 'SELECT visibility FROM account_score_permissions WHERE account_uuid=? LIMIT 2', timeout: 10_000 }, [item.accountId]);
                 if (!Array.isArray(permissions) || permissions.length !== 1 || permissions[0].visibility !== 'private') throw new Error('Score withdrawal is not applied.');
@@ -81,9 +84,19 @@ export async function activateRetentionGuard(connection: Connection, journal: Jo
             }
         }
         const intents = await journal.readIntents();
+        const resolved = [];
+        const conditionalDeletions = new Map<string, string>();
         for (const intent of intents) {
             const resolution = await journal.readResolution(intent);
             if (!resolution) throw new Error('Unresolved intent.');
+            resolved.push({ intent, resolution });
+            if (resolution.outcome === 'deleted' && resolution.observedActivityAt === null
+                && parseInactivityInstant(resolution.confirmedAt) !== null
+                && (!conditionalDeletions.has(intent.childId) || conditionalDeletions.get(intent.childId)! < resolution.confirmedAt)) {
+                conditionalDeletions.set(intent.childId, resolution.confirmedAt);
+            }
+        }
+        for (const { intent, resolution } of resolved) {
             const [rows] = await connection.query<RowDataPacket[]>({ sql: `SELECT u.account_uuid AS childId,c.parent_uuid AS parentId,
                 DATE_FORMAT(a.retention_activity_at,'%Y-%m-%dT%H:%i:%s.%fZ') AS activityAt FROM users u
                 LEFT JOIN parent_child_consents c ON c.child_uuid=u.account_uuid
@@ -93,10 +106,16 @@ export async function activateRetentionGuard(connection: Connection, journal: Jo
             if (resolution.outcome === 'deleted') {
                 if (rows.length !== 0 || resolution.observedActivityAt !== null) throw new Error('Deleted account remains.');
             } else if (resolution.outcome === 'kept') {
-                if (rows.length !== 1 || rows[0].parentId !== intent.parentId || rows[0].childId !== intent.childId
-                    || parseInactivityInstant(rows[0].activityAt) === null || !resolution.observedActivityAt
-                    || parseInactivityInstant(resolution.observedActivityAt) === null
-                    || resolution.observedActivityAt <= intent.activityAt || rows[0].activityAt < resolution.observedActivityAt) {
+                if (!resolution.observedActivityAt || parseInactivityInstant(resolution.observedActivityAt) === null
+                    || parseInactivityInstant(resolution.confirmedAt) === null || resolution.observedActivityAt <= intent.activityAt
+                    || resolution.observedActivityAt > resolution.confirmedAt) throw new Error('Kept outcome is invalid.');
+                if (rows.length === 0) {
+                    const explicitAt = explicitDeletions.get(intent.childId);
+                    const conditionalAt = conditionalDeletions.get(intent.childId);
+                    if ((!explicitAt || explicitAt < resolution.confirmedAt)
+                        && (!conditionalAt || conditionalAt < resolution.confirmedAt)) throw new Error('Kept account is unexpectedly absent.');
+                } else if (rows[0].parentId !== intent.parentId || rows[0].childId !== intent.childId
+                    || parseInactivityInstant(rows[0].activityAt) === null || rows[0].activityAt < resolution.observedActivityAt) {
                     throw new Error('Kept account state differs.');
                 }
             } else throw new Error('Invalid retention outcome.');

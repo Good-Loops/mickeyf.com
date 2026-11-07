@@ -281,7 +281,8 @@ export function createParentRegistrationRepository(database: Database, journal: 
                             [context.account!.accountId, approval.child_uuid]);
                         if (own.length !== 1 || relation.length !== 1 || own[0].user_id !== target[0].user_id) throw new Error('Child account unavailable.');
                         await consume(connection, approval.state_hash, context);
-                        await journal.recordAccountDeletion(own[0].account_uuid); recorded = true;
+                        // A failed acknowledgement does not prove the independent intent was not stored.
+                        recorded = true; await journal.recordAccountDeletion(own[0].account_uuid);
                         await deleteOwnedAccountRows(connection, own[0].user_id, own[0].account_uuid, new Date().toISOString());
                     }));
                 });

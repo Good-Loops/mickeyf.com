@@ -18,7 +18,7 @@ const DATABASE_QUERY_TIMEOUT_MS = 10_000;
 
 export class AccountDeletionPendingError extends Error {
     constructor(readonly cause: unknown) {
-        super('The deletion request was recorded but database completion is unconfirmed.');
+        super('The deletion request may have been recorded; completion is unconfirmed.');
         this.name = 'AccountDeletionPendingError';
     }
 }
@@ -158,7 +158,7 @@ async function deleteReauthenticatedAccount(
     if (!journal || typeof journal.recordAccountDeletion !== 'function') {
         throw new TypeError('Account deletion requires an independent journal.');
     }
-    let recorded = false;
+    let journalAttempted = false;
     try {
         return await withUserSubmissionLock(
             database,
@@ -178,8 +178,9 @@ async function deleteReauthenticatedAccount(
                     }
 
                     const result = await deleteAuthenticatedAccount(connection, userId, reauthenticate, async accountId => {
+                        // A lost acknowledgement can leave an intent even when the call rejects.
+                        journalAttempted = true;
                         await journal.recordAccountDeletion(accountId);
-                        recorded = true;
                     }, beforeDeletion);
                     phase = 'commit';
                     await connection.query({ sql: 'COMMIT', timeout: DATABASE_QUERY_TIMEOUT_MS });
@@ -203,7 +204,7 @@ async function deleteReauthenticatedAccount(
             }
         );
     } catch (error) {
-        if (recorded) throw new AccountDeletionPendingError(error);
+        if (journalAttempted) throw new AccountDeletionPendingError(error);
         throw error;
     }
 }
