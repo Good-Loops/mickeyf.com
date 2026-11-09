@@ -20,8 +20,12 @@ work or a current deployment inventory.
   policy and finite active-history cleanup still need adoption and qualification.
 - Standard online Firebase Hosting terms establish ordinary contract/security
   documentation. Do not demand a custom agreement or acceptance screenshot.
-  The remaining Brazil transfer assessment concerns the actual data flow and
-  valid mechanism; SCCs are not the only mechanism allowed by the LGPD.
+  The flow-specific Brazil assessment records LGPD 33 IX with 7 V for necessary
+  requested Hosting/account operations and parent verification correspondence.
+  It excludes optional tracking and provider-independent purposes; it does not
+  extend Cloud SCCs to Hosting or claim a consumer-Gmail processor agreement.
+  No extra transfer checkbox or provider letter is a review prerequisite.
+  See the evidence assessment for the product facts and interpretive limits.
 - The notice/form candidate `2026-11-09.1` clarifies restored daily-limit reset,
   unsupported warning contacts, separate form-review metadata and observed
   Brevo retention in both languages. It does not adopt the proposed 30/45-day
@@ -32,7 +36,8 @@ Current receipts and decisions are in
 `recovery-preparation-result-2026-11-09.json`,
 `recovery-2e81-build-scan-verification.json`,
 `child-warning-hold-review-verification-2026-11-09.txt`,
-`provider-processing-record-2026-11-09.txt`, and
+`provider-processing-record-2026-11-09.txt`,
+`essential-service-transfer-assessment-2026-11-09.txt`, and
 `retention-schedule-owner-decision-2026-11-09.txt`.
 The authoritative numbered status remains `C:/Users/User/Ludolume-Release-Plan.txt`.
 Final device checks belong to 1.2/5.3; production registration qualification

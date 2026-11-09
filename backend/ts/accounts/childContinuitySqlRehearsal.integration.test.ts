@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createHash, randomBytes, randomUUID } from 'node:crypto';
+import { createHash, generateKeyPairSync, randomBytes, randomUUID } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import test, { before, after } from 'node:test';
@@ -37,7 +37,16 @@ import { runChildWarningMaintenance } from './childWarningMaintenance';
 import { verifyChildWarningReadiness } from '../migrations/childWarningReadiness';
 import { createChildWarningWebhookRouter } from '../routers/childWarningWebhookRouter';
 import { createChildWarningParentService } from './childWarningParentService';
-import { verifyRetirementSourceSchema } from './retirementSourceSchema';
+import { verifyRetirementSourceSchema, verifyRetirementSchemas } from './retirementSourceSchema';
+import { CHILD_ACTIVITY_CONTINUITY_BUCKET } from '../config/childActivityContinuity';
+import { createActiveWitnessSource, retireActiveWitness } from './activeWitnessRetirement';
+import { createRetirementWitnessStorage } from './retirementWitnessStorage';
+import { verifyRetirementBucketPolicy } from './gcsRetirementTransport';
+import type { JournalHttpClient } from './gcsDeletionJournal';
+import type { ObservedRestoreGuard } from './gcsRetentionJournal';
+import type { CloudSqlMetadataClient } from './cloudSqlRecoveryInventory';
+import { prepareRecoverySafeRetirement, finishRecoverySafeRetirement } from './recoverySafeRetirement';
+import { readRecoveryCheckpoint } from './accountRecoveryCheckpoint';
 
 // These tests use the same SQL/witness fixture as activity and keep. No second
 // test framework, real email recipient, cloud bucket or production credential.
@@ -158,10 +167,10 @@ async function save(connection: Sql, childId: string, value: Witness): Promise<v
     assert.ok(result.affectedRows === 1 || result.affectedRows === 2);
 }
 
-async function fixture(createdAt?: number) {
+async function fixture(createdAt?: number, continuityBucket = bucket) {
     const storage = provider();
     let creating = createdAt !== undefined;
-    const durable = createDurableChildActivity({ bucket, key, database: config.database, serverUuid }, storage.transport,
+    const durable = createDurableChildActivity({ bucket: continuityBucket, key, database: config.database, serverUuid }, storage.transport,
         () => creating ? createdAt! : Date.now());
     const parentId = randomUUID(), childId = randomUUID();
     const addUser = async (connection: Sql, id: string) => {
@@ -227,12 +236,12 @@ async function seedWarningContact(f: Awaited<ReturnType<typeof fixture>>) {
     [randomUUID(), f.parent.accountId, f.child.userName, Buffer.alloc(32, 4), subject, Buffer.alloc(32, 5), f.childId]);
 }
 
-async function warningFixture(realContact = false) {
+async function warningFixture(realContact = false, continuityBucket = bucket) {
     const now = { value: Math.floor(Date.now() / 1000) * 1000 };
     const old = new Date(now.value); old.setUTCFullYear(old.getUTCFullYear() - 4);
-    const f = await fixture(old.getTime()), warningStorage = provider();
+    const f = await fixture(old.getTime(), continuityBucket), warningStorage = provider();
     if (realContact) await seedWarningContact(f);
-    const activity = createDurableChildActivity({ bucket, key, database: config.database, serverUuid }, f.storage.transport, () => now.value);
+    const activity = createDurableChildActivity({ bucket: continuityBucket, key, database: config.database, serverUuid }, f.storage.transport, () => now.value);
     let targetDigest = 'a'.repeat(64), sends = 0, uncertain = false, commitFault: 'before' | 'after' | null = null;
     let observation: MailObservation = { kind: 'delivered', observedAt: new Date(now.value + 1000).toISOString() };
     const timedDatabase = { async getConnection() {
@@ -251,7 +260,7 @@ async function warningFixture(realContact = false) {
         return connection;
     } };
     const store = createDurableChildWarningStore(timedDatabase, { database: config.database, serverUuid,
-        bucket, key: Buffer.alloc(32, 17), transport: warningStorage.transport, clock: () => now.value,
+        bucket: continuityBucket, key: Buffer.alloc(32, 17), transport: warningStorage.transport, clock: () => now.value,
         verifyActivity: activity.verifyActivity,
         async resolveContext(connection, parentId, childId) {
             if (realContact) return resolveChildWarningContact(connection, parentId, childId);
@@ -815,4 +824,164 @@ test('retirement source schema verifies reviewed foreign keys and rejects a brok
     try { await assert.rejects(verifyRetirementSourceSchema(admin as unknown as PoolConnection)); }
     finally { await admin.query(`ALTER TABLE parent_child_inactivity_warnings ADD CONSTRAINT fk_inactivity_warning_activity
         FOREIGN KEY (child_uuid) REFERENCES parent_managed_child_activity(child_uuid) ON DELETE CASCADE ON UPDATE RESTRICT`); }
+});
+
+test('active witness retirement preserves heads and recovery after an uncertain provider delete', async () => {
+    // The bucket is a production pin exercised against this in-memory provider only.
+    const targetBucket = CHILD_ACTIVITY_CONTINUITY_BUCKET;
+    const w = await warningFixture(false, targetBucket), f = w.f;
+    await w.delivered();
+    const oldHead = await f.verify(), oldState = JSON.parse((await state(admin, f.childId)).toString());
+    await f.play();
+    await submitP4VegaScore(database, f.child.userId, 40, f.childContext.session!, f.activity);
+    const protectedHead = await f.verify(), protectedState = JSON.parse((await state(admin, f.childId)).toString());
+    const warningBefore = await w.read();
+    const users = () => admin.query<RowDataPacket[]>('SELECT * FROM users WHERE account_uuid IN (?,?) ORDER BY user_id',
+        [f.parent.accountId, f.childId]).then(([rows]) => rows);
+    const results = () => admin.query<RowDataPacket[]>('SELECT * FROM game_personal_bests WHERE user_id=?',
+        [f.child.userId]).then(([rows]) => rows);
+    const usersBefore = await users(), resultsBefore = await results();
+    assert.equal(usersBefore.length, 2); assert.equal(resultsBefore.length, 1);
+
+    type ObjectRecord = typeof f.storage.objects[number];
+    const collections = [f.storage.objects, w.warningStorage.objects];
+    const live = () => collections.flat();
+    const objectId = (value: { name: string; generation: string }) => `${value.name}\0${value.generation}`;
+    const soft = new Map<string, ObjectRecord>();
+    let deleteCalls = 0, loseDeleteAcknowledgement = true;
+    const metadata = ({ body: _body, ...value }: ObjectRecord, deleted = false) => ({ ...value, metageneration: '1',
+        ...(deleted ? { softDeleteTime: new Date().toISOString() } : {}) });
+    const base = `https://storage.googleapis.com/storage/v1/b/${targetBucket}/o`;
+    const client: JournalHttpClient = { async request(request) {
+        if (request.url === base.slice(0, -2)) return { status: 200, data: { name: targetBucket,
+            versioning: { enabled: true }, softDeletePolicy: { retentionDurationSeconds: '604800' } } };
+        if (request.url === base) {
+            assert.equal(request.method, 'GET'); assert.equal(request.params.versions, true);
+            const prefix = typeof request.params.prefix === 'string' ? request.params.prefix : '';
+            return { status: 200, data: { kind: 'storage#objects', items: live().filter(value => value.name.startsWith(prefix)).map(value => metadata(value)) } };
+        }
+        assert.ok(request.url.startsWith(`${base}/`));
+        const name = decodeURIComponent(request.url.slice(base.length + 1)), generation = String(request.params.generation);
+        const found = live().find(value => value.name === name && value.generation === generation);
+        if (request.method === 'DELETE') {
+            assert.ok(found); assert.equal(request.params.ifGenerationMatch, found.generation);
+            assert.equal(request.params.ifMetagenerationMatch, '1');
+            const collection = collections.find(values => values.includes(found))!;
+            collection.splice(collection.indexOf(found), 1); soft.set(objectId(found), found); deleteCalls++;
+            if (loseDeleteAcknowledgement) { loseDeleteAcknowledgement = false; throw new Error('synthetic delete acknowledgement lost'); }
+            return { status: 204, data: undefined };
+        }
+        assert.equal(request.method, 'GET');
+        if (request.params.softDeleted) {
+            const deleted = soft.get(objectId({ name, generation }));
+            return { status: deleted ? 200 : 404, data: deleted ? metadata(deleted, true) : {} };
+        }
+        if (!found) return { status: 404, data: {} };
+        if (request.params.alt === 'media') {
+            assert.equal(request.params.ifGenerationMatch, found.generation);
+            return { status: 200, data: found.body };
+        }
+        return { status: 200, data: metadata(found) };
+    } };
+    const transport: AppendOnlyObjectTransport = {
+        async list(input) {
+            const found = (input.softDeleted ? [...soft.values()] : live()).filter(value => value.bucket === input.bucket
+                && value.name.startsWith(input.prefix) && value.name >= input.startOffset).sort((a, b) => a.name.localeCompare(b.name));
+            return { kind: 'storage#objects', items: found.slice(0, input.maxResults).map(({ body: _body, ...value }) => ({ ...value,
+                ...(input.softDeleted ? { softDeleteTime: new Date().toISOString() } : {}) })),
+            ...(found.length > input.maxResults ? { nextPageToken: 'more' } : {}) };
+        },
+        async readBody(input) {
+            assert.equal(input.ifGenerationMatch, input.generation);
+            const found = live().find(value => value.bucket === input.bucket && value.name === input.name && value.generation === input.generation);
+            assert.ok(found); return found.body;
+        },
+        async createOnly() { throw new Error('retirement cannot append a witness'); },
+    };
+    const journal = { async readDeletionEntries() { return { entries: [], digest: 'a'.repeat(64) }; } };
+    const source = createActiveWitnessSource({ accountId: f.childId, activityKey: key, warningKey: Buffer.alloc(32, 17),
+        transport, store: createRetirementWitnessStorage(client, targetBucket), explicit: journal,
+        conditional: { async readIntents() { return w.intents; } },
+        verifyPolicy: () => verifyRetirementBucketPolicy(client, targetBucket),
+        async inspect(entry) {
+            const found = live().find(value => objectId(value) === objectId(entry)) ?? soft.get(objectId(entry));
+            assert.ok(found); assert.equal(createHash('sha256').update(found.body).digest('hex'), entry.contentSha256);
+            return soft.has(objectId(entry)) ? 'soft-deleted' : 'live';
+        } });
+    const connection = admin as unknown as PoolConnection;
+    const [[actual]] = await admin.query<RowDataPacket[]>('SELECT CURRENT_USER() AS currentUser');
+    const pins = { database: config.database, currentUser: actual.currentUser as string, serverUuid };
+    const lineage = randomUUID(), signing = generateKeyPairSync('ed25519');
+    let guardValue: ObservedRestoreGuard = { state: 'hold', database: config.database, serverUuid, epoch: randomUUID(),
+        expiresAt: '2030-01-01T00:00:00.000Z', generation: '1' };
+    const guard = { async read() { return guardValue; }, async readRestoreGuard() { return guardValue; },
+        async commit(value: Omit<ObservedRestoreGuard, 'generation'>, expected: string) {
+            assert.equal(expected, guardValue.generation); guardValue = { ...value, generation: '2' }; return '2';
+        } };
+    const day = 24 * 60 * 60_000;
+    let now = Math.floor(Date.now() / 1000) * 1000 + 10 * day;
+    const cloud: CloudSqlMetadataClient = {
+        async listBackups() { return { kind: 'sql#backupRunsList', items: [{ kind: 'sql#backupRun', id: '1', status: 'SUCCESSFUL',
+            enqueuedTime: new Date(now - 2 * day).toISOString(), startTime: new Date(now - 2 * day).toISOString(), instance: 'cms-mickeyf' }] }; },
+        async getRecoveryWindow() { return { kind: 'sql#getLatestRecoveryTime', earliestRecoveryTime: new Date(now - 2 * day).toISOString(),
+            latestRecoveryTime: new Date(now - 1000).toISOString() }; },
+    };
+    await admin.query(readFileSync(path.resolve(__dirname, '../../migrations/pending/0028_extend_child_signed_parent_forms.sql'), 'utf8'));
+    await admin.query(readFileSync(path.resolve(__dirname, '../../migrations/pending/draft_account_recovery_checkpoint.sql'), 'utf8'));
+    try {
+        await admin.query('INSERT INTO account_recovery_checkpoint (singleton_id,lineage_id,epoch) VALUES (1,?,0)', [lineage]);
+        await admin.query('SET timestamp=?', [now / 1000]);
+        const candidates = await source.candidates(connection);
+        const selected = candidates.map(({ name, generation, contentSha256 }) => ({ name, generation, contentSha256 }));
+        assert.ok(selected.length >= 4);
+        assert.equal(live().length - selected.length, 2, 'one current activity and one current warning witness survive');
+        const common = { connection, pins, project: 'noted-reef-387021', instance: 'cms-mickeyf', cloud, journal,
+            verifySchema: verifyRetirementSchemas, confirmation: 'ORIGINAL PRIMARY AND ALL WRITERS FENCED',
+            externalCopiesConfirmation: 'ALL PERMITTED RECOVERY COPIES ACCOUNTED FOR' };
+        const options = { ...common, lineage, ...signing, witness: source, selected };
+        const prepared = await prepareRecoverySafeRetirement(options, guard);
+        assert.deepEqual(await finishRecoverySafeRetirement(options, guard, prepared), { status: 'waiting' });
+        assert.equal(deleteCalls, 0); assert.equal(guardValue.recoveryCheckpoint, undefined);
+        now += 10 * day; await admin.query('SET timestamp=?', [now / 1000]);
+        const advanced = await finishRecoverySafeRetirement(options, guard, prepared);
+        assert.equal(advanced.status, 'advanced');
+        if (advanced.status !== 'advanced') assert.fail('expected covered checkpoint advancement');
+        const retirement = { ...common, source, guard, permit: advanced.permit, publicKey: signing.publicKey, selected: selected[0] };
+        await assert.rejects(retireActiveWitness(retirement));
+        assert.equal(deleteCalls, 1);
+        assert.equal(await retireActiveWitness(retirement, true), 'soft-deleted');
+        assert.equal(deleteCalls, 1, 'readback must not repeat an uncertain deletion');
+        for (const entry of selected.slice(1)) assert.equal(await retireActiveWitness({ ...retirement, selected: entry }), 'retired');
+        assert.equal(deleteCalls, selected.length); assert.equal(soft.size, selected.length);
+        assert.deepEqual(await source.candidates(connection), []);
+        assert.deepEqual(await users(), usersBefore); assert.deepEqual(await results(), resultsBefore);
+        assert.deepEqual(await w.read(), warningBefore);
+        assert.deepEqual(await witness(admin, f.childId), protectedHead, 'current SQL head and replay ledger remain unchanged');
+        assert.deepEqual(await f.verify(), protectedHead);
+
+        // An older SQL recovery point is denied even after the obsolete external objects have been removed.
+        await admin.query('UPDATE account_recovery_checkpoint SET epoch=0');
+        await save(admin, f.childId, oldHead);
+        await admin.query('UPDATE parent_managed_child_activity SET retention_activity_at=? WHERE child_uuid=?',
+            [oldState.activity.replace('T', ' ').replace('Z', ''), f.childId]);
+        const recovery = { ...pins, lineage, minimumEpoch: advanced.permit.claim.epoch };
+        await assert.rejects(readRecoveryCheckpoint(connection, recovery));
+        await assert.rejects(f.verify(), held);
+        await assert.rejects(retireActiveWitness(retirement, true));
+
+        // The permitted checkpoint still contains its current heads, full warning history and account data.
+        await admin.query('UPDATE account_recovery_checkpoint SET epoch=?', [advanced.permit.claim.epoch]);
+        await save(admin, f.childId, protectedHead);
+        await admin.query('UPDATE parent_managed_child_activity SET retention_activity_at=? WHERE child_uuid=?',
+            [protectedState.activity.replace('T', ' ').replace('Z', ''), f.childId]);
+        assert.equal((await readRecoveryCheckpoint(connection, recovery)).epoch, advanced.permit.claim.epoch);
+        assert.deepEqual(await f.verify(), protectedHead); assert.deepEqual(await source.candidates(connection), []);
+        assert.equal(await f.play(), true);
+        assert.equal((await f.verify()).head.sequence, protectedHead.head.sequence + 1);
+        assert.deepEqual(await users(), usersBefore); assert.deepEqual(await results(), resultsBefore);
+        assert.deepEqual(await w.read(), warningBefore);
+    } finally {
+        await admin.query('SET timestamp=0');
+        await admin.query('DROP TABLE account_recovery_checkpoint');
+    }
 });

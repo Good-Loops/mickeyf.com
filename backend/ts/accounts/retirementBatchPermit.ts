@@ -2,6 +2,7 @@ import { sign, verify, type KeyObject } from 'node:crypto';
 import { isAccountId } from './deletionJournal';
 import { parseInactivityInstant } from './childInactivityPolicy';
 import { DELETION_JOURNAL_BUCKET } from './gcsDeletionJournal';
+import { CHILD_ACTIVITY_CONTINUITY_BUCKET } from '../config/childActivityContinuity';
 
 type Entry = Readonly<{ name: string; generation: string; contentSha256: string }>;
 type Claim = Readonly<{ version: 1; bucket: string; database: string; serverUuid: string; guardGeneration: string;
@@ -11,7 +12,15 @@ const DOMAIN = 'ludolume-retirement-batch-v1\0';
 const PREPARED_DOMAIN = 'ludolume-retirement-prepared-v1\0';
 const NAME = /^v1\/intents\/[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}\.json$/u;
 const CONDITIONAL_NAME = /^v1\/(?:conditional|resolutions)\/[a-f0-9]{64}\/[a-f0-9]{64}\.json$/u;
+const WITNESS_NAME = /^v1\/events\/[a-f0-9]{64}\/([0-9]{12})\.json$/u;
 const NUM = /^[1-9][0-9]{0,19}$/u;
+
+function validEntryName(bucket: string, name: string): boolean {
+    if (bucket === DELETION_JOURNAL_BUCKET) return NAME.test(name);
+    if (bucket !== CHILD_ACTIVITY_CONTINUITY_BUCKET) return CONDITIONAL_NAME.test(name);
+    const witness = WITNESS_NAME.exec(name);
+    return witness !== null && Number(witness[1]) > 0;
+}
 
 function normalize(value: unknown): Claim {
     if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error();
@@ -28,7 +37,7 @@ function normalize(value: unknown): Claim {
         if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error();
         const row = value as Record<string, unknown>;
         if (Object.keys(row).sort().join(',') !== 'contentSha256,generation,name' || typeof row.name !== 'string'
-            || !(item.bucket === DELETION_JOURNAL_BUCKET ? NAME.test(row.name) : CONDITIONAL_NAME.test(row.name))
+            || !validEntryName(item.bucket as string, row.name)
             || typeof row.generation !== 'string' || !NUM.test(row.generation) || typeof row.contentSha256 !== 'string'
             || !/^[a-f0-9]{64}$/u.test(row.contentSha256)) throw new Error();
         return { name: row.name, generation: row.generation, contentSha256: row.contentSha256 };

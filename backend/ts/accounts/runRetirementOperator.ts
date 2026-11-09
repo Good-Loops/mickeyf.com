@@ -4,7 +4,7 @@ import { loadMigrationConfig, loadMigrationAccountConfirmation, assertDatabaseCo
 import { assertChildSchemaCleanSource } from '../migrations/runChildSignedFormSchema';
 import { PRODUCTION_CLOUD_SQL_TARGET } from '../security/cloudSqlRuntimeRoleRemover';
 import { CHILD_RETENTION_BUCKET } from '../config/childInactivityDeployment';
-import { advanceRetirementGuardForOperator, prepareRetirementGuardForOperator, inspectExplicitRetirementForOperator, previewRetirementsForOperator,
+import { advanceRetirementGuardForOperator, prepareRetirementGuardForOperator, inspectOrRetireWitnessForOperator, inspectExplicitRetirementForOperator, previewRetirementsForOperator,
     resumeConditionalRetirementForOperator, retireJournalRecordForOperator } from './retirementOperator';
 import type { PreparedRetirementCheckpoint, RetirementBatchPermit } from './retirementBatchPermit';
 import { createProductionRecoveryCheckpointSetup } from './productionRecoveryCheckpointSetup';
@@ -13,7 +13,7 @@ import { applyRecoveryCheckpointSetup, planRecoveryCheckpointSetup, type Recover
 
 type Env = Readonly<Record<string, string | undefined>>;
 type Identity = Readonly<{ name: string; generation: string; contentSha256: string }>;
-type Body = Readonly<{ kind?: 'explicit' | 'conditional'; offset?: number; lineage?: string; selected?: Identity | Identity[];
+type Body = Readonly<{ kind?: 'explicit' | 'conditional' | 'witness'; accountId?: string; offset?: number; lineage?: string; selected?: Identity | Identity[];
     permit?: RetirementBatchPermit; prepared?: PreparedRetirementCheckpoint; plan?: RecoveryCheckpointSetupPlan }>;
 const FAILURE = 'Retirement operation unavailable or unconfirmed. Keep recovery held and reconcile before retrying.';
 
@@ -67,7 +67,7 @@ export async function runRetirementOperator(args = process.argv.slice(2), env: E
     const command = args[0];
     if (args.length !== 1 || !['setup-plan', 'setup-apply', 'preview', 'prepare', 'advance', 'retire', 'inspect', 'resume'].includes(command)) throw new Error(FAILURE);
     const target = loadRetirementTarget(env), secrets = loadRetirementSecrets(env), body = await readBody(input);
-    if (command !== 'setup-plan' && command !== 'setup-apply' && body.kind !== 'explicit' && body.kind !== 'conditional') throw new Error(FAILURE);
+    if (command !== 'setup-plan' && command !== 'setup-apply' && body.kind !== 'explicit' && body.kind !== 'conditional' && body.kind !== 'witness') throw new Error(FAILURE);
     if (command !== 'preview' && command !== 'inspect' && command !== 'setup-plan') assertMutationAuthorized(target.config, env);
     if ((command === 'prepare' || command === 'advance' || command === 'retire' || command === 'resume') && !secrets.privateKey) throw new Error(FAILURE);
     assertChildSchemaCleanSource(target.sourceCommit, undefined, env);
@@ -77,7 +77,7 @@ export async function runRetirementOperator(args = process.argv.slice(2), env: E
         supportBigNumbers: true, dateStrings: true, timezone: 'Z' });
     try {
         // All commands except read-only inspection require a writer fence.
-        if (command !== 'inspect') await assertKnownRecoveryWritersLocked(connection);
+        if (command !== 'inspect' || body.kind === 'witness') await assertKnownRecoveryWritersLocked(connection);
         const context = { connection, pins: target.pins, bucket: CHILD_RETENTION_BUCKET, expectedBucket: CHILD_RETENTION_BUCKET,
             ...secrets }, confirmation = env.RETIREMENT_WRITERS_CONFIRMATION ?? '', externalCopiesConfirmation = env.RETIREMENT_COPIES_CONFIRMATION ?? '';
         let result: unknown;
@@ -90,10 +90,10 @@ export async function runRetirementOperator(args = process.argv.slice(2), env: E
                 await applyRecoveryCheckpointSetup(setup, body.plan, { sha256: env.RETIREMENT_APPROVED_PLAN_SHA256 ?? '', writers: confirmation });
                 result = { status: 'checkpoint-created', lineage: body.plan.lineage };
             }
-        } else if (command === 'preview' && body.kind) result = await previewRetirementsForOperator(context, body.kind, confirmation, body.offset ?? 0);
+        } else if (command === 'preview' && body.kind) result = await previewRetirementsForOperator(context, body.kind, confirmation, body.offset ?? 0, body.accountId);
         else if (command === 'prepare' || command === 'advance') {
             if (!body.kind || !body.lineage || !Array.isArray(body.selected) || !secrets.privateKey) throw new Error(FAILURE);
-            const common = { kind: body.kind, lineage: body.lineage, selected: body.selected, confirmation, externalCopiesConfirmation };
+            const common = { kind: body.kind, accountId: body.accountId, lineage: body.lineage, selected: body.selected, confirmation, externalCopiesConfirmation };
             if (command === 'prepare') result = await prepareRetirementGuardForOperator({ ...context, privateKey: secrets.privateKey }, common);
             else {
                 if (!body.prepared) throw new Error(FAILURE);
@@ -101,11 +101,13 @@ export async function runRetirementOperator(args = process.argv.slice(2), env: E
             }
         } else {
             if (!body.permit || !body.selected || Array.isArray(body.selected)) throw new Error(FAILURE);
-            if (command === 'inspect' && body.kind === 'explicit') result = await inspectExplicitRetirementForOperator(context, body.permit, body.selected);
+            if (command === 'inspect' && body.kind === 'witness') result = await inspectOrRetireWitnessForOperator(context,
+                { accountId: body.accountId!, permit: body.permit, selected: body.selected, confirmation, externalCopiesConfirmation }, true);
+            else if (command === 'inspect' && body.kind === 'explicit') result = await inspectExplicitRetirementForOperator(context, body.permit, body.selected);
             else if (command === 'resume' && body.kind === 'conditional' && secrets.privateKey) result = await resumeConditionalRetirementForOperator(
                 { ...context, privateKey: secrets.privateKey }, { permit: body.permit, selected: body.selected, confirmation, externalCopiesConfirmation });
             else if (command === 'retire' && body.kind && secrets.privateKey) result = await retireJournalRecordForOperator(
-                { ...context, privateKey: secrets.privateKey }, { kind: body.kind, permit: body.permit, selected: body.selected,
+                { ...context, privateKey: secrets.privateKey }, { kind: body.kind, accountId: body.accountId, permit: body.permit, selected: body.selected,
                     confirmation, externalCopiesConfirmation });
             else throw new Error(FAILURE);
         }

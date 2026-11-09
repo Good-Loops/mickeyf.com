@@ -7,7 +7,8 @@ import type { RetentionIntent, RetentionJournal } from './childInactivityWorkflo
 import type { PoolConnection } from 'mysql2/promise';
 import { advanceRetirementGuard, type RetirementGuardAdvanceOptions } from './retirementGuardAdvance';
 import type { PreparedRetirementCheckpoint, RetirementBatchPermit } from './retirementBatchPermit';
-import { prepareRecoverySafeRetirement, finishRecoverySafeRetirement } from './recoverySafeRetirement';
+import { createProductionActiveWitnessSource } from './activeWitnessRetirement';
+import { prepareRecoverySafeRetirement, finishRecoverySafeRetirement, type RecoverySafeRetirementOptions } from './recoverySafeRetirement';
 import { createCloudSqlMetadataClient } from './cloudSqlRecoveryInventory';
 import { verifyRetirementSchemas } from './retirementSourceSchema';
 import { verifyRetiredJournalObjects } from './verifyRetiredJournalObjects';
@@ -40,7 +41,7 @@ type ObjectInfo = Readonly<{ name: string; generation: string; size: number; md5
 type RetiredObject = Readonly<{ bucket: string; name: string; generation: string; stamp: unknown }>;
 type RetirementGuardAdvanceRequest = Omit<RetirementGuardAdvanceOptions,
     'cloud' | 'verifySchema' | 'journal' | 'conditional' | 'project' | 'instance' | 'waitForCoverage'>
-    & Readonly<{ kind?: 'explicit' | 'conditional' }>;
+    & Readonly<{ kind?: 'explicit' | 'conditional' | 'witness'; accountId?: string; activityKey?: Buffer; warningKey?: Buffer }>;
 export type RestoreGuard = Readonly<{ state: 'active' | 'hold'; database: string; serverUuid: string;
     epoch: string; expiresAt: string; recoveryCheckpoint?: Readonly<{ lineage: string; minimumEpoch: string; keySha256: string;
         preparationSha256?: string }> }>;
@@ -430,8 +431,8 @@ export function createGcsRetentionJournal(options: Options): RetentionJournal & 
         const identities = pairs.map(pair => [pair.intentObject, pair.resolutionObject]).sort((a, b) => a[0].name.localeCompare(b[0].name));
         return { pairs, digest: createHash('sha256').update(JSON.stringify(identities)).digest('hex') };
     }
-    function retirementOptions(input: RetirementGuardAdvanceRequest): RetirementGuardAdvanceOptions {
-            if (input.kind !== undefined && input.kind !== 'explicit' && input.kind !== 'conditional') throw new RetentionJournalUnavailableError();
+    function retirementOptions(input: RetirementGuardAdvanceRequest): RecoverySafeRetirementOptions {
+            if (input.kind !== undefined && input.kind !== 'explicit' && input.kind !== 'conditional' && input.kind !== 'witness') throw new RetentionJournalUnavailableError();
             const verifyRetired = async (objects: readonly RetiredObject[]) => {
                 const current = await readRestoreGuard();
                 if (!current.recoveryCheckpoint) { if (objects.length) throw new RetentionJournalUnavailableError(); return; }
@@ -439,12 +440,15 @@ export function createGcsRetentionJournal(options: Options): RetentionJournal & 
                     currentUser: input.pins.currentUser, targetServerUuid: input.pins.serverUuid,
                     originalServerUuid: input.pins.serverUuid }, objects, input.publicKey);
             };
-            const recoveryJournal = input.kind === 'conditional' ? createGcsRetentionJournal({ bucket, expectedBucket, key, client,
+            const recoveryJournal = input.kind === 'conditional' || input.kind === 'witness' ? createGcsRetentionJournal({ bucket, expectedBucket, key, client,
                 timeoutMs: timeout, verifyActivityContinuity: async () => false, verifyRetiredObjects: verifyRetired }) : undefined;
-            return { ...input,
+            const journal = createGcsDeletionJournal({ verifyRetiredObjects: verifyRetired });
+            const witness = input.kind === 'witness' ? createProductionActiveWitnessSource({ accountId: input.accountId!,
+                activityKey: input.activityKey!, warningKey: input.warningKey!, explicit: journal, conditional: recoveryJournal! }) : undefined;
+            return { ...input, witness,
             project: 'noted-reef-387021', instance: 'cms-mickeyf', cloud: createCloudSqlMetadataClient(),
-            journal: createGcsDeletionJournal({ verifyRetiredObjects: verifyRetired }),
-            conditional: recoveryJournal ? { bucket, readPairs: recoveryJournal.readConditionalRetirementPairs } : undefined,
+            journal,
+            conditional: recoveryJournal && input.kind === 'conditional' ? { bucket, readPairs: recoveryJournal.readConditionalRetirementPairs } : undefined,
             verifySchema: verifyRetirementSchemas };
     }
     const retirementGuard = { read: readRestoreGuard, commit: commitCheckpointGuard };
@@ -452,7 +456,10 @@ export function createGcsRetentionJournal(options: Options): RetentionJournal & 
         readIntents: () => readInventory('v1/conditional/', true),
         readIntentsForChild: async childId => readInventory(childPrefix(childId)),
         readRestoreGuard, assertRestoreGuardHistory, writeRestoreGuard, readConditionalRetirementPairs,
-        advanceRestoreGuardCheckpoint: input => advanceRetirementGuard(retirementOptions(input), retirementGuard),
+        advanceRestoreGuardCheckpoint: input => {
+            if (input.kind === 'witness') throw new RetentionJournalUnavailableError();
+            return advanceRetirementGuard(retirementOptions(input), retirementGuard);
+        },
         prepareRetirementCheckpoint: input => prepareRecoverySafeRetirement(retirementOptions(input), retirementGuard),
         finishRetirementCheckpoint: (input, prepared) => finishRecoverySafeRetirement(retirementOptions(input), retirementGuard, prepared),
         async verifyActivityContinuity(intent, connection) {

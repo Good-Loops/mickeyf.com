@@ -12,6 +12,25 @@ const timeout = 10_000;
 const clockSkewMs = 5_000;
 const kinds = new Set<ChildActivityKind>(['online', 'parent-keep', 'password-login', 'score']);
 
+/** Canonical SQL state shared with the fenced retirement operator; does not authorize a write. */
+export async function readChildActivityState(connection: Connection, childId: string, parentId: string): Promise<Buffer | null> {
+    const [found] = await connection.query<RowDataPacket[]>({ sql: `SELECT c.parent_uuid AS parentId, c.country_code AS country,
+        LOWER(HEX(c.policy_digest)) AS policyDigest, c.consent_version AS consentVersion,
+        DATE_FORMAT(a.retention_activity_at,'%Y-%m-%dT%H:%i:%s.%fZ') AS activityAt
+        FROM parent_child_consents c LEFT JOIN parent_managed_child_activity a ON a.child_uuid=c.child_uuid
+        WHERE c.child_uuid=? LIMIT 2 FOR SHARE`, timeout }, [childId]);
+    if (!Array.isArray(found) || found.length !== 1 || found[0].parentId !== parentId) throw new ContinuityHeadUnavailableError();
+    if (found[0].activityAt === null) return null;
+    const row = found[0];
+    if (!['BR', 'US'].includes(row.country) || !/^[a-f0-9]{64}$/u.test(row.policyDigest)
+        || typeof row.consentVersion !== 'string' || row.consentVersion.length < 1 || row.consentVersion.length > 128
+        || typeof row.activityAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/u.test(row.activityAt)) {
+        throw new ContinuityHeadUnavailableError();
+    }
+    return Buffer.from(JSON.stringify({ version: 1, childId, parentId, country: row.country,
+        policyDigest: row.policyDigest, consentVersion: row.consentVersion, activityAt: row.activityAt }));
+}
+
 /**
  * Runs inside the caller's guarded transaction and existing account lock.
  * External evidence precedes SQL COMMIT; an uncertain write is never retried.
@@ -67,23 +86,6 @@ export function createDurableChildActivity(config: ChildActivityContinuityConfig
         if (owner.length !== 1 || owner[0].ownsLock !== 1) throw new ContinuityHeadUnavailableError();
         return found[0].parentId;
     }
-    async function state(connection: Connection, childId: string, parentId: string): Promise<Buffer | null> {
-        const found = await rows(connection, `SELECT c.parent_uuid AS parentId, c.country_code AS country,
-            LOWER(HEX(c.policy_digest)) AS policyDigest, c.consent_version AS consentVersion,
-            DATE_FORMAT(a.retention_activity_at,'%Y-%m-%dT%H:%i:%s.%fZ') AS activityAt
-            FROM parent_child_consents c LEFT JOIN parent_managed_child_activity a ON a.child_uuid=c.child_uuid
-            WHERE c.child_uuid=? LIMIT 2 FOR SHARE`, [childId]);
-        if (found.length !== 1 || found[0].parentId !== parentId) throw new ContinuityHeadUnavailableError();
-        if (found[0].activityAt === null) return null;
-        const row = found[0];
-        if (!['BR', 'US'].includes(row.country) || !/^[a-f0-9]{64}$/u.test(row.policyDigest)
-            || typeof row.consentVersion !== 'string' || row.consentVersion.length < 1 || row.consentVersion.length > 128
-            || typeof row.activityAt !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{6}Z$/u.test(row.activityAt)) {
-            throw new ContinuityHeadUnavailableError();
-        }
-        return Buffer.from(JSON.stringify({ version: 1, childId, parentId, country: row.country,
-            policyDigest: row.policyDigest, consentVersion: row.consentVersion, activityAt: row.activityAt }));
-    }
     async function saved(connection: Connection, childId: string): Promise<SavedWitness | null> {
         const found = await rows(connection, `SELECT CAST(head_json AS CHAR) AS head, CAST(ledger_json AS CHAR) AS ledger
             FROM parent_child_activity_continuity WHERE child_uuid=? LIMIT 2 FOR UPDATE`, [childId]);
@@ -106,7 +108,7 @@ export function createDurableChildActivity(config: ChildActivityContinuityConfig
     }
     async function verify(connection: Connection, childId: string, parentId: string,
         session: ReturnType<typeof open>): Promise<void> {
-        const actual = await saved(connection, childId), actualState = await state(connection, childId, parentId);
+        const actual = await saved(connection, childId), actualState = await readChildActivityState(connection, childId, parentId);
         if (!actual || !actualState) throw new ContinuityHeadUnavailableError();
         await session.verifyExisting(childId, actual.head, actual.ledgerRows, actualState, await databaseClock(connection));
         assertActiveGuardedTransaction(connection);
@@ -118,10 +120,10 @@ export function createDurableChildActivity(config: ChildActivityContinuityConfig
     const activity: ParentManagedChildActivity = {
         initialize: (connection, childId) => guarded(async () => {
             const parentId = await requireLock(connection, childId, true);
-            if (!parentId || await state(connection, childId, parentId) || await saved(connection, childId)) throw new ContinuityHeadUnavailableError();
+            if (!parentId || await readChildActivityState(connection, childId, parentId) || await saved(connection, childId)) throw new ContinuityHeadUnavailableError();
             const instant = await databaseClock(connection), session = open(), request = Buffer.from('child-activity-v1:create');
             await parentManagedChildActivity.initialize(connection, childId);
-            const nextState = await state(connection, childId, parentId);
+            const nextState = await readChildActivityState(connection, childId, parentId);
             if (!nextState) throw new ContinuityHeadUnavailableError();
             const next = await session.initializeNew(childId, session.issueOperation(childId, request, instant), instant, request, nextState);
             await persist(connection, childId, next);
@@ -131,13 +133,13 @@ export function createDurableChildActivity(config: ChildActivityContinuityConfig
             if (!kinds.has(kind)) throw new ContinuityHeadUnavailableError();
             const parentId = await requireLock(connection, childId, false);
             if (!parentId) return false;
-            const previousState = await state(connection, childId, parentId), previous = await saved(connection, childId);
+            const previousState = await readChildActivityState(connection, childId, parentId), previous = await saved(connection, childId);
             if (!previousState && !previous) return false; // Historical untracked accounts stay ineligible for deletion.
             if (!previousState || !previous) throw new ContinuityHeadUnavailableError();
             const instant = await databaseClock(connection), session = open(previous.head);
             await session.verifyExisting(childId, previous.head, previous.ledgerRows, previousState, instant);
             if (!await parentManagedChildActivity.recordInteraction(connection, childId, kind)) throw new ContinuityHeadUnavailableError();
-            const nextState = await state(connection, childId, parentId);
+            const nextState = await readChildActivityState(connection, childId, parentId);
             if (!nextState) throw new ContinuityHeadUnavailableError();
             const request = Buffer.from(`child-activity-v1:${kind}`);
             // A repeated authenticated activity is another conservative timer reset.

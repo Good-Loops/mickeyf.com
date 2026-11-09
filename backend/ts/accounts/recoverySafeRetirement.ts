@@ -12,7 +12,11 @@ import { DELETION_JOURNAL_BUCKET } from './gcsDeletionJournal';
 import type { ConditionalRetirementPair, ObservedRestoreGuard, RestoreGuard } from './gcsRetentionJournal';
 import { signPreparedRetirementCheckpoint, verifyPreparedRetirementCheckpoint, signRetirementBatch,
     type PreparedRetirementCheckpoint, type RetirementBatchPermit } from './retirementBatchPermit';
+import type { ActiveWitnessSource } from './activeWitnessRetirement';
+import { CHILD_ACTIVITY_CONTINUITY_BUCKET } from '../config/childActivityContinuity';
 import type { RetirementGuardAdvanceOptions } from './retirementGuardAdvance';
+
+export type RecoverySafeRetirementOptions = RetirementGuardAdvanceOptions & Readonly<{ witness?: ActiveWitnessSource }>;
 
 type Guard = Readonly<{ read(): Promise<ObservedRestoreGuard>;
     commit(value: RestoreGuard, expectedGeneration: string): Promise<string> }>;
@@ -20,10 +24,15 @@ type Identity = Readonly<{ name: string; generation: string; contentSha256: stri
 const identity = (entry: Identity) => JSON.stringify([entry.name, entry.generation, entry.contentSha256]);
 
 type Effect = Readonly<{ accountId: string; action: 'delete-account' | 'withdraw-public-scores' }>
-    | Readonly<{ accountId: string; action: 'kept'; pair: ConditionalRetirementPair }>;
-async function selectedEffects(options: RetirementGuardAdvanceOptions): Promise<Effect[]> {
+    | Readonly<{ accountId: string; action: 'kept'; pair: ConditionalRetirementPair }>
+    | Readonly<{ accountId: ''; action: 'witness'; source: ActiveWitnessSource; selected: readonly Identity[] }>;
+async function selectedEffects(options: RecoverySafeRetirementOptions): Promise<Effect[]> {
     const wanted = new Set(options.selected.map(identity));
     if (!options.selected.length || options.selected.length > 100 || wanted.size !== options.selected.length) throw new Error();
+    if (options.witness) {
+        if (options.conditional || options.witness.bucket !== CHILD_ACTIVITY_CONTINUITY_BUCKET) throw new Error();
+        return [{ accountId: '', action: 'witness', source: options.witness, selected: options.selected }];
+    }
     if (options.conditional) {
         const current = await options.conditional.readPairs();
         const matching = current.pairs.filter(pair => wanted.has(identity(pair.intentObject)) || wanted.has(identity(pair.resolutionObject)));
@@ -46,6 +55,7 @@ async function selectedEffects(options: RetirementGuardAdvanceOptions): Promise<
 }
 
 async function verifyEffects(connection: Pick<RetirementGuardAdvanceOptions['connection'], 'query'>, effects: readonly Effect[]): Promise<boolean> {
+    for (const effect of effects) if (effect.action === 'witness') await effect.source.verify(connection, effect.selected);
     const deleted = [...new Set(effects.filter(effect => effect.action === 'delete-account').map(effect => effect.accountId))];
     if (deleted.length && !await verifyDeletedAccountEffects(connection, deleted)) return false;
     for (const effect of effects) if (effect.action === 'withdraw-public-scores'
@@ -54,7 +64,7 @@ async function verifyEffects(connection: Pick<RetirementGuardAdvanceOptions['con
     return effects.length > 0;
 }
 
-async function checkContext(options: RetirementGuardAdvanceOptions, guard: Guard) {
+async function checkContext(options: RecoverySafeRetirementOptions, guard: Guard) {
     const { pins, connection, publicKey, privateKey } = options;
     if (options.confirmation !== 'ORIGINAL PRIMARY AND ALL WRITERS FENCED'
         || options.externalCopiesConfirmation !== 'ALL PERMITTED RECOVERY COPIES ACCOUNTED FOR'
@@ -79,7 +89,7 @@ async function checkContext(options: RetirementGuardAdvanceOptions, guard: Guard
 }
 
 /** Make a signed, non-authorizing checkpoint. Release the writer fence while backups age. */
-export async function prepareRecoverySafeRetirement(options: RetirementGuardAdvanceOptions, guard: Guard): Promise<PreparedRetirementCheckpoint> {
+export async function prepareRecoverySafeRetirement(options: RecoverySafeRetirementOptions, guard: Guard): Promise<PreparedRetirementCheckpoint> {
     try {
         const { observed } = await checkContext(options, guard);
         const effects = await selectedEffects(options);
@@ -89,14 +99,14 @@ export async function prepareRecoverySafeRetirement(options: RetirementGuardAdva
         transaction => verifyEffects(transaction, effects));
         if (JSON.stringify(await guard.read()) !== JSON.stringify(observed)) throw new Error();
         await assertNoRetentionRuntimeWriters(options.connection, isProductionRecoveryOperator(options.pins));
-        return signPreparedRetirementCheckpoint({ version: 1, bucket: options.conditional?.bucket ?? DELETION_JOURNAL_BUCKET,
+        return signPreparedRetirementCheckpoint({ version: 1, bucket: options.witness?.bucket ?? options.conditional?.bucket ?? DELETION_JOURNAL_BUCKET,
             database: options.pins.database, serverUuid: options.pins.serverUuid, guardGeneration: observed.generation,
             ...checkpoint, entries: options.selected }, options.privateKey);
     } catch { throw new Error('Retirement checkpoint could not be prepared. The recovery guard was not advanced.'); }
 }
 
 /** Advance only once every eligible provider recovery point is newer than the checkpoint. */
-export async function finishRecoverySafeRetirement(options: RetirementGuardAdvanceOptions, guard: Guard,
+export async function finishRecoverySafeRetirement(options: RecoverySafeRetirementOptions, guard: Guard,
     prepared: PreparedRetirementCheckpoint): Promise<Readonly<{ status: 'waiting' } | {
         status: 'advanced'; generation: string; permit: RetirementBatchPermit }>> {
     let transactionStarted = false, transactionStarting = false;
@@ -110,7 +120,7 @@ export async function finishRecoverySafeRetirement(options: RetirementGuardAdvan
             && observed.recoveryCheckpoint.minimumEpoch === claim.epoch;
         if (claim.database !== options.pins.database || claim.serverUuid !== options.pins.serverUuid
             || claim.lineage !== options.lineage || (claim.guardGeneration !== observed.generation && !resumed)
-            || claim.bucket !== (options.conditional?.bucket ?? DELETION_JOURNAL_BUCKET)
+            || claim.bucket !== (options.witness?.bucket ?? options.conditional?.bucket ?? DELETION_JOURNAL_BUCKET)
             || JSON.stringify(claim.entries.map(identity).sort()) !== JSON.stringify(options.selected.map(identity).sort())) throw new Error();
         const effects = await selectedEffects(options);
         const inventory = await collectCloudSqlRecoveryInventory({ project: options.project, instance: options.instance,

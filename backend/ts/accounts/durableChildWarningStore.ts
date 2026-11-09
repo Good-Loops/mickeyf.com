@@ -179,7 +179,7 @@ export function createDurableChildWarningStore(database: Pick<Pool, 'getConnecti
     });
 }
 
-function normalizeHistory(value: WarningHistory): WarningHistory {
+export function normalizeHistory(value: WarningHistory): WarningHistory {
     if (Object.keys(value).sort().join(',') !== 'childId,events,parentId,version') throw new ContinuityHeadUnavailableError();
     const events = value.events.map(event => {
         if (!event || !['prepared', 'dispatch', 'accepted', 'delivered', 'hold'].includes(event.kind)

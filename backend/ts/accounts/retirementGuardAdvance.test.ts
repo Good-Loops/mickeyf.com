@@ -11,6 +11,9 @@ import * as deletionModule from './gcsDeletionJournal';
 import * as schemaModule from './retirementSourceSchema';
 import { advanceRetirementGuard } from './retirementGuardAdvance';
 import { prepareRecoverySafeRetirement, finishRecoverySafeRetirement } from './recoverySafeRetirement';
+import { CHILD_ACTIVITY_CONTINUITY_BUCKET } from '../config/childActivityContinuity';
+import * as activeWitnessModule from './activeWitnessRetirement';
+import type { ActiveWitnessSource } from './activeWitnessRetirement';
 import type { ConditionalRetirementPair, ObservedRestoreGuard } from './gcsRetentionJournal';
 
 const bucket = 'synthetic-retention-guard', key = Buffer.alloc(32, 8);
@@ -367,4 +370,66 @@ test('a kept account requires preserved activity at both checkpoint and advancem
     assert.equal(state.generation, '1');
     activityAt = '2026-10-01T12:00:00.000000Z';
     assert.equal((await finishRecoverySafeRetirement(options, guard, prepared)).status, 'advanced');
+});
+
+
+test('active witness selection uses the same two-stage floor and rechecks its current proof before advancing', async () => {
+    const f = await fixture(); f.db.setPresent(true);
+    const selected = [{ name: `v1/events/${'a'.repeat(64)}/000000000001.json`, generation: '123', contentSha256: 'b'.repeat(64) }];
+    let valid = true, verifications = 0, writes = 0;
+    const witness: ActiveWitnessSource = { bucket: CHILD_ACTIVITY_CONTINUITY_BUCKET,
+        async candidates() { throw new Error('not called by checkpoint kernel'); },
+        async verify(_connection, exact) { verifications++; assert.deepEqual(exact, selected);
+            if (!valid) throw new Error('current head changed or intent retained'); return []; },
+        async remove() { assert.fail('checkpoint cannot delete'); }, async inspect() { throw new Error(); } };
+    let state: ObservedRestoreGuard = { state: 'hold', database: pins.database, serverUuid, epoch: accountId,
+        expiresAt: '2027-01-01T00:00:00.000Z', generation: '1' };
+    const capability = { async read() { return state; }, async commit(next: Omit<ObservedRestoreGuard, 'generation'>) {
+        writes++; state = { ...next, generation: '2' }; return '2'; } };
+    const options = { ...f.options, selected, witness };
+    await assert.rejects(prepareRecoverySafeRetirement({ ...options, conditional: { bucket, async readPairs() { return { pairs: [], digest: 'a'.repeat(64) }; } } }, capability));
+    assert.equal(f.db.commits, 0);
+    const prepared = await prepareRecoverySafeRetirement(options, capability);
+    assert.equal(verifications, 1); assert.equal(writes, 0);
+    assert.equal(prepared.claim.bucket, CHILD_ACTIVITY_CONTINUITY_BUCKET);
+    assert.deepEqual(await finishRecoverySafeRetirement(options, capability, prepared), { status: 'waiting' });
+    f.db.setNow('2026-11-07T00:00:00.000000Z');
+    const laterCloud: CloudSqlMetadataClient = { async listBackups() { return { kind: 'sql#backupRunsList', items: [{
+        kind: 'sql#backupRun', id: '2', status: 'SUCCESSFUL', enqueuedTime: '2026-11-06T00:00:00Z',
+        startTime: '2026-11-06T00:00:00Z', instance: 'cms-mickeyf' }] }; },
+    async getRecoveryWindow() { return { kind: 'sql#getLatestRecoveryTime', earliestRecoveryTime: '2026-11-06T00:00:00Z',
+        latestRecoveryTime: '2026-11-07T00:00:00Z' }; } };
+    valid = false;
+    await assert.rejects(finishRecoverySafeRetirement({ ...options, cloud: laterCloud }, capability, prepared));
+    assert.equal(writes, 0);
+    valid = true;
+    const result = await finishRecoverySafeRetirement({ ...options, cloud: laterCloud }, capability, prepared);
+    assert.equal(result.status, 'advanced'); assert.equal(verifications, 3); assert.equal(writes, 1);
+    if (result.status !== 'advanced') assert.fail();
+    assert.deepEqual(verifyRetirementBatch(result.permit, publicKey).entries, selected);
+});
+
+
+test('the production guard adapter constructs the witness source and refuses legacy witness advancement', async t => {
+    const f = await fixture(), selected = [{ name: `v1/events/${'a'.repeat(64)}/000000000001.json`, generation: '123', contentSha256: 'b'.repeat(64) }];
+    const activityKey = Buffer.alloc(32, 3), warningKey = Buffer.alloc(32, 4);
+    let constructed = 0;
+    t.mock.method(cloudModule, 'createCloudSqlMetadataClient', () => f.options.cloud);
+    t.mock.method(deletionModule, 'createGcsDeletionJournal', () => f.options.journal as ReturnType<typeof deletionModule.createGcsDeletionJournal>);
+    t.mock.method(schemaModule, 'verifyRetirementSchemas', async () => {});
+    t.mock.method(activeWitnessModule, 'createProductionActiveWitnessSource', (input: Parameters<typeof activeWitnessModule.createProductionActiveWitnessSource>[0]): ActiveWitnessSource => {
+        constructed++; assert.equal(input.accountId, accountId); assert.equal(input.activityKey, activityKey);
+        assert.equal(input.warningKey, warningKey); assert.equal(input.explicit, f.options.journal);
+        assert.equal(typeof input.conditional.readIntents, 'function');
+        return { bucket: CHILD_ACTIVITY_CONTINUITY_BUCKET, async verify(_connection, exact) { assert.deepEqual(exact, selected); return []; },
+            async candidates() { throw new Error(); }, async remove() { assert.fail(); }, async inspect() { throw new Error(); } };
+    });
+    const request = { ...f.options, selected, kind: 'witness' as const, accountId, activityKey, warningKey };
+    await assert.rejects(async () => f.guard.advanceRestoreGuardCheckpoint(request));
+    assert.equal(constructed, 0);
+    const prepared = await f.guard.prepareRetirementCheckpoint(request);
+    assert.equal(prepared.claim.bucket, CHILD_ACTIVITY_CONTINUITY_BUCKET);
+    assert.equal(constructed, 1); assert.equal(f.db.commits, 1);
+    assert.deepEqual(await f.guard.finishRetirementCheckpoint(request, prepared), { status: 'waiting' });
+    assert.equal(constructed, 2); assert.equal(f.io.writes, 1);
 });
