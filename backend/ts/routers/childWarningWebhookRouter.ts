@@ -1,5 +1,6 @@
 import { createHash, timingSafeEqual } from 'node:crypto';
 import { json, Router } from 'express';
+import { rateLimit } from 'express-rate-limit';
 import type { Pool, RowDataPacket } from 'mysql2/promise';
 import { isAccountId } from '../accounts/deletionJournal';
 import type { createChildWarningNonresponse } from '../accounts/childWarningNonresponse';
@@ -19,7 +20,12 @@ export function createChildWarningWebhookRouter(database: Pick<Pool, 'query'>,
         if (!timingSafeEqual(expected, createHash('sha256').update(provided).digest())) return res.status(401).end();
         next();
     });
-    router.post('/', json({ limit: '8kb', strict: true }), async (req, res) => {
+    // One provider credential shares this per-instance allowance across delivery IPs.
+    // Authenticate first so unauthenticated traffic cannot consume the callback budget.
+    router.post('/', rateLimit({ windowMs: 60_000, limit: 120, standardHeaders: 'draft-8',
+        legacyHeaders: false, passOnStoreError: false, keyGenerator: () => 'brevo-warning-callback',
+        handler: (_req, res) => { res.setHeader('Retry-After', '60'); res.status(429).end(); } }),
+    json({ limit: '8kb', strict: true }), async (req, res) => {
         const event = req.body;
         if (!event || Array.isArray(event) || typeof event !== 'object' || typeof event.event !== 'string') return res.status(400).end();
         if (!failures.has(event.event)) return res.status(204).end();
