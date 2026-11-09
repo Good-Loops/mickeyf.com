@@ -2,46 +2,66 @@
 
 ## Current checkpoint — 9 November 2026
 
-Release item **1.3 remains open**. Reuse completed 2.2–2.3 and 3.2–3.7 evidence.
-The older dated findings below are history, not instructions to repeat completed
-work or a current deployment inventory.
+The owner adopted the purpose-specific retention schedule and 30-day warning-hold
+necessity decision on 9 November. Reuse completed 2.2–2.3 and 3.2–3.7 evidence.
+Older findings below are historical, including proposals later adopted and
+prototype gaps subsequently closed; they are not instructions to repeat checks.
 
-- Recovery checkpoint 1 covers five verified journal entries, committed before
+- Production checkpoint 1 covers five verified journal entries committed before
   `2026-11-09T19:10:38.046949Z`. Original service and schedules were restored;
-  eight successful automatic backups remained and PITR later extended past the
-  checkpoint. No account, journal or backup was deleted. Reuse this signed
-  preparation; older recovery points still prevent advancement/retirement.
-- Restored-target configuration and authentication reset passed focused tests,
-  the affected MySQL suite and hosted CI at `2e81af9d`. Its immutable image is
-  built and scanned. The owner approved the final isolated cloud rehearsal,
-  which is running; it is not yet a passing recovery or production-cutover result.
-- A bounded private warning-hold report passed two targeted tests and one live
-  read-only run (zero candidates). It makes holds reviewable; terminal exception
-  policy and finite active-history cleanup still need adoption and qualification.
+  eight successful automatic backups remained and PITR extended past the
+  checkpoint. Reuse the signed preparation. A fresh floor proving all permitted
+  recovery points newer is required before its first advancement/retirement;
+  calendar aging alone is not an unfinished implementation or reason to repeat it.
+- The owner-approved isolated cloud rehearsal at `2e81af9d` passed restored SQL,
+  authentication reset, real journal reconciliation, packaged audit/receipt jobs,
+  running backend and an isolated traffic switch. The source-pinned image is built
+  and scanned. The audit GET adapter and synthetic credentials limit what this
+  test proves; original production permissions/provider-send evidence is reused.
+  All 15 temporary runtime resources/live buckets and both test databases are
+  confirmed removed; storage soft deletion still lasts seven days. This was not
+  a production cutover. Earlier failed receipts remain preserved in the history.
+- The private warning-hold report passed two targeted tests and a live read-only
+  run with zero candidates at that time. The adopted twice-weekly process requires
+  a necessity decision and concrete action within 30 days of the recorded hold;
+  it does not authorize automatic deletion because mail failed or a review is due.
+- Bounded cleanup of superseded external witnesses passed focused tests, disposable
+  MySQL and independent review at `de8fa7d9`. The necessary bounded current SQL
+  record is retained for its account/warning/recovery purpose, with necessity
+  review and account/purpose-end deletion; it is not an indefinite duplicate archive.
 - Standard online Firebase Hosting terms establish ordinary contract/security
-  documentation. Do not demand a custom agreement or acceptance screenshot.
-  The flow-specific Brazil assessment records LGPD 33 IX with 7 V for necessary
+  documentation. The flow-specific LGPD 33 IX/7 V assessment covers necessary
   requested Hosting/account operations and parent verification correspondence.
-  It excludes optional tracking and provider-independent purposes; it does not
+  Optional tracking and provider-independent purposes are excluded. This does not
   extend Cloud SCCs to Hosting or claim a consumer-Gmail processor agreement.
-  No extra transfer checkbox or provider letter is a review prerequisite.
-  See the evidence assessment for the product facts and interpretive limits.
-- The notice/form candidate `2026-11-09.1` clarifies restored daily-limit reset,
-  unsupported warning contacts, separate form-review metadata and observed
-  Brevo retention in both languages. It does not adopt the proposed 30/45-day
-  schedule. Older requests retain their existing policy bindings.
+  No extra transfer checkbox or provider letter is required by that assessment;
+  its product facts and interpretive limits remain recorded.
+- Notice/form candidate `2026-11-09.2` expresses the adopted 30-day restorable-backup
+  limit, 45-day obsolete-history removal targets and restricted recovery exception,
+  plus the 30-day hold decision. It preserves the qualified 14-day form rules,
+  restored daily-limit reset, unsupported warning contacts, form-review metadata,
+  provider-internal-copy limits and observed Brevo retention in both languages.
+  Older requests retain their original policy bindings; existing consent-choice
+  versions do not change. This candidate has not been published.
 
 Current receipts and decisions are in
 `C:/Users/User/Ludolume-Release-Evidence-2026-11-01`:
 `recovery-preparation-result-2026-11-09.json`,
-`recovery-2e81-build-scan-verification.json`,
+`synthetic-restored-smoke-2e81-combined-qualification.json` and its original phase receipts,
+`active-witness-retirement-qualification-2026-11-09.txt`,
 `child-warning-hold-review-verification-2026-11-09.txt`,
 `provider-processing-record-2026-11-09.txt`,
-`essential-service-transfer-assessment-2026-11-09.txt`, and
-`retention-schedule-owner-decision-2026-11-09.txt`.
+`essential-service-transfer-assessment-2026-11-09.txt`,
+`retention-schedule-owner-decision-2026-11-09.txt`, and
+`retention-operating-addendum-2026-11-09.txt`.
 The authoritative numbered status remains `C:/Users/User/Ludolume-Release-Plan.txt`.
-Final device checks belong to 1.2/5.3; production registration qualification
-belongs to 2.4. Neither is established by this document.
+
+The recovery and cleanup qualification is complete; final notice alignment/checks
+are recorded separately before closing 1.3. Production registration configuration and physical-maintenance cadence
+remain 2.4; normal scheduled execution/backlogs and inactivity enablement/observation
+remain 3.8 after step 1. Final supported-device/inventory checks remain 1.2/5.3.
+These are explicit rollout gates, not evidence that qualification or publication
+already occurred. No full numbered step is completed by this document.
 
 ## Historical findings — 4–7 November 2026
 
