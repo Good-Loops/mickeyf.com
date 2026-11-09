@@ -1,10 +1,44 @@
-# Retention and provider review — 4 November 2026
+# Retention and provider review
 
-Release item **1.3 remains open**. This records verified findings and the concrete
-remaining work; proposed deadlines below are not yet operating guarantees or
-published promises. Reuse the completed 2.2 and 3.2-3.7 evidence.
+## Current checkpoint — 9 November 2026
 
-## Verified now
+Release item **1.3 remains open**. Reuse completed 2.2–2.3 and 3.2–3.7 evidence.
+The older dated findings below are history, not instructions to repeat completed
+work or a current deployment inventory.
+
+- Recovery checkpoint 1 covers five verified journal entries, committed before
+  `2026-11-09T19:10:38.046949Z`. Original service and schedules were restored;
+  eight successful automatic backups remained and PITR later extended past the
+  checkpoint. No account, journal or backup was deleted. Reuse this signed
+  preparation; older recovery points still prevent advancement/retirement.
+- Restored-target configuration and authentication reset passed focused tests,
+  the affected MySQL suite and hosted CI at `2e81af9d`. Its immutable image is
+  built and scanned. The owner approved the final isolated cloud rehearsal,
+  which is running; it is not yet a passing recovery or production-cutover result.
+- A bounded private warning-hold report passed two targeted tests and one live
+  read-only run (zero candidates). It makes holds reviewable; terminal exception
+  policy and finite active-history cleanup still need adoption and qualification.
+- Standard online Firebase Hosting terms establish ordinary contract/security
+  documentation. Do not demand a custom agreement or acceptance screenshot.
+  The remaining Brazil transfer assessment concerns the actual data flow and
+  valid mechanism; SCCs are not the only mechanism allowed by the LGPD.
+- The notice/form candidate `2026-11-09.1` clarifies restored daily-limit reset,
+  unsupported warning contacts, separate form-review metadata and observed
+  Brevo retention in both languages. It does not adopt the proposed 30/45-day
+  schedule. Older requests retain their existing policy bindings.
+
+Current receipts and decisions are in
+`C:/Users/User/Ludolume-Release-Evidence-2026-11-01`:
+`recovery-preparation-result-2026-11-09.json`,
+`recovery-2e81-build-scan-verification.json`,
+`child-warning-hold-review-verification-2026-11-09.txt`,
+`provider-processing-record-2026-11-09.txt`, and
+`retention-schedule-owner-decision-2026-11-09.txt`.
+The authoritative numbered status remains `C:/Users/User/Ludolume-Release-Plan.txt`.
+Final device checks belong to 1.2/5.3; production registration qualification
+belongs to 2.4. Neither is established by this document.
+
+## Historical findings — 4–7 November 2026
 
 | Store / purpose | Evidence and limitation |
 | --- | --- |
