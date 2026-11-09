@@ -21,11 +21,11 @@ const explicitIntent: DeletionIntent = { version: 1, accountId: child, action: '
 const emptyDeletionJournal: DeletionJournalReader = { async readDeletionIntents() { return { digest: 'a'.repeat(64), intents: [] }; } };
 
 function fixture({ records = [], resolution = null, resolutions = {}, childPresent = false, writers = 0, secondRecords,
-    recoveryCheckpoint, targetCheckpoint = '6', explicitRecords = [], changedExplicit = false, scoreVisibility = 'private', pendingScore = false, activeForm = false, usage = 'empty', receipts = 'clear' }:
+    recoveryCheckpoint, targetCheckpoint = '6', explicitRecords = [], changedExplicit = false, scoreVisibility = 'private', pendingScore = false, activeForm = false, usage = 'empty', receipts = 'clear', authentication = 'clear' }:
     { records?: RetentionIntent[]; resolution?: RetentionResolution | null; resolutions?: Record<string, RetentionResolution>; childPresent?: boolean; writers?: number;
         secondRecords?: RetentionIntent[]; recoveryCheckpoint?: { lineage: string; minimumEpoch: string; keySha256: string };
         targetCheckpoint?: string | null; explicitRecords?: DeletionIntent[]; changedExplicit?: boolean; scoreVisibility?: string;
-        pendingScore?: boolean; activeForm?: boolean; usage?: 'empty' | 'present' | 'absent' | 'denied'; receipts?: 'clear' | 'expired' | 'absent' | 'denied' } = {}) {
+        pendingScore?: boolean; activeForm?: boolean; usage?: 'empty' | 'present' | 'absent' | 'denied'; receipts?: 'clear' | 'expired' | 'absent' | 'denied'; authentication?: 'clear' | 'present' | 'absent' | 'denied' } = {}) {
     const guard = { state: 'hold' as const, database: pins.database, serverUuid: original, epoch: warning,
         expiresAt: '2027-01-01T00:00:00.000Z', generation: '8',
         ...(recoveryCheckpoint === undefined ? {} : { recoveryCheckpoint }) };
@@ -51,6 +51,11 @@ function fixture({ records = [], resolution = null, resolutions = {}, childPrese
             if (receipts === 'absent') throw Object.assign(new Error('missing'), { code: 'ER_NO_SUCH_TABLE' });
             if (receipts === 'denied') throw Object.assign(new Error('denied'), { code: 'ER_TABLEACCESS_DENIED_ERROR' });
             return [receipts === 'expired' ? [{ receipt_uuid: child }] : [], []];
+        }
+        if (/^SELECT 1 AS present FROM (?:account_sessions|provider_auth_attempts|apple_android_handoffs) LIMIT 1$/u.test(query.sql)) {
+            if (authentication === 'absent') throw Object.assign(new Error('missing'), { code: 'ER_NO_SUCH_TABLE' });
+            if (authentication === 'denied') throw Object.assign(new Error('denied'), { code: 'ER_TABLEACCESS_DENIED_ERROR' });
+            return [authentication === 'present' ? [{ present: 1 }] : [], []];
         }
         if (query.sql.includes('information_schema.TABLES')) return [[{ count: 1 }], []];
         if (query.sql.includes('FROM parent_signed_forms')) return [activeForm ? [{ child_uuid: child }] : [], []];
@@ -94,6 +99,17 @@ test('activation refuses expired or inaccessible restored consent receipts', asy
     }
     for (const receipts of ['clear', 'absent'] as const) {
         const f = fixture({ receipts });
+        assert.equal(await activateRetentionGuard(f.connection, f.journal, pins, f.deletionJournal), '9');
+    }
+});
+test('restored authentication must be empty or absent before activation; inaccessible tables fail closed', async () => {
+    for (const authentication of ['present', 'denied'] as const) {
+        const f = fixture({ authentication });
+        await assert.rejects(activateRetentionGuard(f.connection, f.journal, pins, f.deletionJournal));
+        assert.equal(f.writes, 0);
+    }
+    for (const authentication of ['clear', 'absent'] as const) {
+        const f = fixture({ authentication });
         assert.equal(await activateRetentionGuard(f.connection, f.journal, pins, f.deletionJournal), '9');
     }
 });

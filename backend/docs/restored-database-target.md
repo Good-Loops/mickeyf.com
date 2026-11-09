@@ -34,7 +34,11 @@ do not assume a clone preserves passwords or change the original credentials.
 An older backup can revive sessions that were subsequently logged out and old
 native handoff/provider attempts. Before serving, the reviewed restore procedure
 must invalidate those restored authentication records while preserving accounts
-and game results. This configuration change does not perform that cleanup.
+and game results. Use the existing reconciliation command's
+[`reset-restored-auth` operation](retention-reconciliation-command.md) on the
+isolated restored target while the guard is held and writers remain stopped.
+Restored-target activation rejects remaining sessions and provider returns.
+The target configuration variable does not perform that cleanup itself.
 After the guard is activated for the restored UUID, an old-primary revision is
 not a valid rollback. Keep the maintenance fallback available if a cutover
 outcome is uncertain.

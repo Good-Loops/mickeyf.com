@@ -71,6 +71,25 @@ daily limit applies. The command refuses the original server. In-place restore
 is not supported by this procedure: restore to a distinct isolated server and
 keep traffic stopped until all reconciliation and cutover checks pass.
 
+Before activation, invalidate restored sessions and in-flight provider returns:
+
+    '{"confirmation":"ISOLATED RESTORE AND ALL WRITERS FENCED"}' | npm --prefix backend run --silent child-inactivity:reconcile -- reset-restored-auth
+
+This uses the same isolated-target, held-guard, checkpoint and writer checks,
+verifies the existing authentication schemas, then deletes account_sessions
+and provider_auth_attempts in one transaction. The reviewed foreign key
+removes apple_android_handoffs. Existing users must sign in again; accounts,
+results, provider links/tokens and revocation records are preserved. Activation
+refuses any remaining restored sessions, attempts or handoffs. If the commit
+acknowledgement is lost, keep the guard held and read these exact target tables
+again before deciding whether the reset needs repeating.
+
+This reset preserves registration_authorizations because that table also
+stores age-screening deny markers. It does not reconcile pending registrations
+or parent-form requests. Keep new-account creation disabled until their
+separate recovery review is complete; do not erase deny markers or signed-form
+history as part of session invalidation.
+
 After every intent has a verified outcome and that outcome matches the
 isolated target, an administrator can use `activate` with
 `{"confirmation":"ALL WRITERS FENCED AND INTENTS RECONCILED"}`. It checks the

@@ -9,6 +9,7 @@ import { createGcsRetentionJournal } from './gcsRetentionJournal';
 import { reconcileDeletedRetentionIntent, reconcileRestoredDeletedIntent } from './retentionReconciliation';
 import { activateRetentionGuard } from './retentionGuardActivation';
 import { resetRestoredDailyUsage } from './restoredDailyUsage';
+import { resetRestoredAuthentication } from './restoredAuthentication';
 import { readRecoveryCheckpoint } from './accountRecoveryCheckpoint';
 import { verifyRetiredJournalObjects } from './verifyRetiredJournalObjects';
 import type { RetentionIntent } from './childInactivityWorkflow';
@@ -74,11 +75,12 @@ export async function executeRetentionReconciliation(command: string, input: Rec
             ...(current.recoveryCheckpoint === undefined ? {} : { recoveryCheckpoint: current.recoveryCheckpoint }) }, current.generation);
         return { state: 'hold', generation };
     }
-    if (command === 'reset-restored-usage' && Object.keys(input).join(',') === 'confirmation'
+    if (['reset-restored-usage', 'reset-restored-auth'].includes(command) && Object.keys(input).join(',') === 'confirmation'
         && input.confirmation === 'ISOLATED RESTORE AND ALL WRITERS FENCED') {
         const connection = await database.getConnection();
         try {
-            await resetRestoredDailyUsage(connection, journal, pins);
+            if (command === 'reset-restored-auth') await resetRestoredAuthentication(connection, journal, pins);
+            else await resetRestoredDailyUsage(connection, journal, pins);
             return { operation: command, confirmed: true };
         } catch (error) {
             connection.destroy();
@@ -130,7 +132,7 @@ export async function executeRetentionReconciliation(command: string, input: Rec
 
 export async function runRetentionReconciliation(args = process.argv.slice(2), env: Environment = process.env,
     input: AsyncIterable<string | Uint8Array> = process.stdin): Promise<void> {
-    if (args.length !== 1 || !['inventory', 'initialize-hold', 'hold', 'activate', 'confirm-deleted', 'apply-restored', 'reset-restored-usage'].includes(args[0])) throw new Error(FAILURE);
+    if (args.length !== 1 || !['inventory', 'initialize-hold', 'hold', 'activate', 'confirm-deleted', 'apply-restored', 'reset-restored-usage', 'reset-restored-auth'].includes(args[0])) throw new Error(FAILURE);
     const body = await readInput(input);
     const config = loadMigrationConfig(env); assertMutationAuthorized(config, env);
     const currentUser = loadMigrationAccountConfirmation(env);

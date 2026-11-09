@@ -22,12 +22,13 @@ import { createPinnedPrimaryHealth } from './retentionPrimaryHealth';
 import { reconcileDeletedRetentionIntent, reconcileKeptRetentionIntent, reconcileRestoredDeletedIntent } from './retentionReconciliation';
 import { executeRetentionReconciliation } from './runRetentionReconciliation';
 import { activateRetentionGuard } from './retentionGuardActivation';
+import { resetRestoredAuthentication, restoredAuthenticationState } from './restoredAuthentication';
 import type { RetentionIntent } from './childInactivityWorkflow';
 import type { RetentionResolution } from './gcsRetentionJournal';
 import { createChildInactivityParentService } from './childInactivityParentService';
 import type { ProviderAuthContext } from '../auth/providerAuthContext';
 import { acknowledgeInactivityWarning, confirmInactivityWarning, deleteInactiveChild, prepareInactivityWarning } from './childInactivityWorkflow';
-import { createAccountSession, revokeAccountSession } from '../auth/accountSessionRepository';
+import { createAccountSession, revokeAccountSession, readLiveSession } from '../auth/accountSessionRepository';
 import { runChildInactivityReview } from './runChildInactivityReview';
 import { runChildInactivityMaintenance } from './childInactivityMaintenance';
 import { prepareChildInactivityDeployment } from './childInactivityDeployment';
@@ -244,6 +245,144 @@ test('operator command pins a real SQL target before confirming a deleted intent
         { confirmation: 'ORIGINAL PRIMARY DRAINED AND ACCOUNT ABSENT', intent }, pins, journal, database, Buffer.alloc(32, 8)),
     { operation: 'confirm-deleted', confirmed: true });
     assert.equal(records, 1);
+});
+
+test('restored authentication reset preserves accounts and results even when the real COMMIT acknowledgement is lost', async () => {
+    // Reuse the full restore fixture. This one pending table uses the same reviewed literal as the handoff rehearsal.
+    const handoffSql = `CREATE TABLE apple_android_handoffs (
+    state_hash BINARY(32) NOT NULL,
+    binding_hash BINARY(32) NOT NULL,
+    nonce CHAR(43) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    client_key VARCHAR(64) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    action VARCHAR(8) CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    account_uuid CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NULL,
+    user_id INT NULL,
+    phase ENUM('pending','ready') CHARACTER SET ascii COLLATE ascii_bin NOT NULL,
+    encrypted_credential VARBINARY(24576) NULL,
+    created_at DATETIME(6) NOT NULL COMMENT 'UTC',
+    expires_at DATETIME(6) NOT NULL COMMENT 'UTC',
+    PRIMARY KEY (state_hash),
+    UNIQUE KEY uq_apple_android_handoff_binding (binding_hash),
+    KEY idx_apple_android_handoff_expiry (expires_at),
+    CONSTRAINT fk_apple_android_handoff_attempt FOREIGN KEY (state_hash)
+        REFERENCES provider_auth_attempts (state_hash) ON DELETE CASCADE ON UPDATE RESTRICT,
+    CONSTRAINT chk_apple_android_handoff_client CHECK (BINARY client_key = BINARY 'apple-android'),
+    CONSTRAINT chk_apple_android_handoff_target CHECK (
+        (BINARY action IN (BINARY 'login', BINARY 'signup') AND account_uuid IS NULL AND user_id IS NULL)
+        OR (BINARY action IN (BINARY 'link', BINARY 'delete') AND account_uuid IS NOT NULL AND user_id IS NOT NULL AND user_id > 0)
+    ),
+    CONSTRAINT chk_apple_android_handoff_phase CHECK (
+        (phase = 'pending' AND encrypted_credential IS NULL)
+        OR (phase = 'ready' AND encrypted_credential IS NOT NULL AND OCTET_LENGTH(encrypted_credential) > 31)
+    ),
+    CONSTRAINT chk_apple_android_handoff_lifetime CHECK (
+        expires_at > created_at AND expires_at <= TIMESTAMPADD(SECOND, 300, created_at)
+    )
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+`;
+    assert.equal(readFileSync(path.resolve(__dirname, '../../migrations/pending/0027_create_apple_android_handoffs.sql'), 'utf8')
+        .replace(/\r\n/gu, '\n'), handoffSql);
+    await admin.query(handoffSql);
+    try {
+        for (const loseCommitAcknowledgement of [false, true]) {
+            const { parentId, childId, unrelatedId } = await managedFixture();
+            const [[parent]] = await admin.query<RowDataPacket[]>('SELECT user_id FROM users WHERE account_uuid=?', [parentId]);
+            const userId = Number(parent.user_id), tokenId = randomUUID(), subjectHash = randomBytes(32), denyBinding = randomBytes(32);
+            const stateHashes = [randomBytes(32), randomBytes(32)];
+            const currentSession = randomBytes(32).toString('base64url'), previousSession = randomBytes(32).toString('base64url');
+            const hash = (value: string) => createHash('sha256').update(value, 'ascii').digest();
+            const [[identity]] = await admin.query<RowDataPacket[]>('SELECT DATABASE() AS db,CURRENT_USER() AS user,@@GLOBAL.server_uuid AS id');
+            const original = randomUUID();
+            const pins = { database: identity.db as string, currentUser: identity.user as string,
+                serverUuid: identity.id as string, originalServerUuid: original };
+            const guard = { state: 'hold' as const, database: pins.database, serverUuid: original, epoch: randomUUID(),
+                expiresAt: '2099-01-01T00:00:00.000Z', generation: '1' };
+            let activated = 0;
+            const journal = { async readRestoreGuard() { return guard; }, async readIntents() { return []; },
+                async readResolution() { return null; }, async writeRestoreGuard() { activated++; return '2'; } };
+            const explicit = { async readDeletionIntents() { return { digest: 'a'.repeat(64), intents: [] }; } };
+            const activate = async () => {
+                const connection = await database.getConnection();
+                try { return await activateRetentionGuard(connection, journal,
+                    { ...pins, confirmation: 'ALL WRITERS FENCED AND INTENTS RECONCILED' }, explicit); }
+                finally { connection.release(); }
+            };
+            const preserved = async () => ({
+                users: (await admin.query<RowDataPacket[]>('SELECT * FROM users WHERE account_uuid IN (?,?,?) ORDER BY account_uuid', [parentId, childId, unrelatedId]))[0],
+                results: (await admin.query<RowDataPacket[]>('SELECT * FROM game_personal_bests WHERE user_id=?', [userId]))[0],
+                identities: (await admin.query<RowDataPacket[]>('SELECT * FROM account_provider_identities WHERE account_uuid=?', [parentId]))[0],
+                tokens: (await admin.query<RowDataPacket[]>('SELECT * FROM apple_provider_tokens WHERE token_id=?', [tokenId]))[0],
+                revocations: (await admin.query<RowDataPacket[]>('SELECT * FROM apple_auth_revocations WHERE subject_hash=?', [subjectHash]))[0],
+                denyMarkers: (await admin.query<RowDataPacket[]>('SELECT * FROM registration_authorizations WHERE binding_hash=?', [denyBinding]))[0],
+                consent: (await admin.query<RowDataPacket[]>('SELECT * FROM parent_child_consents WHERE child_uuid=?', [childId]))[0],
+            });
+            try {
+                await admin.query("INSERT INTO game_personal_bests (game_id,rules_version,user_id,score,completion_time_ms,recorded_at) VALUES ('p4-vega',1,?,4729,NULL,UTC_TIMESTAMP(6))", [userId]);
+                await admin.query("INSERT INTO account_provider_identities (account_uuid,provider,subject,linked_at) VALUES (?,'apple',?,UTC_TIMESTAMP(6))",
+                    [parentId, Buffer.from('synthetic-restore-' + parentId)]);
+                await admin.query("INSERT INTO apple_provider_tokens (token_id,account_uuid,client_id,encrypted_token,created_at) VALUES (?,?,'synthetic',?,UTC_TIMESTAMP(6))",
+                    [tokenId, parentId, randomBytes(64)]);
+                await admin.query('INSERT INTO apple_auth_revocations (subject_hash,revoked_at,expires_at) VALUES (?,1,UTC_TIMESTAMP(6)+INTERVAL 1 DAY)', [subjectHash]);
+                await admin.query("INSERT INTO registration_authorizations (binding_hash,policy_digest,country_code,age_band,expires_at) VALUES (?,?,'ZZ','minor',UTC_TIMESTAMP(6)+INTERVAL 1 DAY)",
+                    [denyBinding, randomBytes(32)]);
+                await admin.query('INSERT INTO account_sessions (session_hash,account_uuid,created_at,expires_at,remembered,previous_session_hash,previous_valid_until) VALUES (?,?,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6)+INTERVAL 1 HOUR,1,?,UTC_TIMESTAMP(6)+INTERVAL 1 HOUR)',
+                    [hash(currentSession), parentId, hash(previousSession)]);
+                for (let index = 0; index < stateHashes.length; index++) {
+                    const binding = randomBytes(32), nonce = randomBytes(32).toString('base64url');
+                    await admin.query("INSERT INTO provider_auth_attempts (state_hash,binding_hash,nonce,client_key,action,expires_at) VALUES (?,?,?,'apple-android','login',UTC_TIMESTAMP(6)+INTERVAL 240 SECOND)",
+                        [stateHashes[index], binding, nonce]);
+                    await admin.query("INSERT INTO apple_android_handoffs (state_hash,binding_hash,nonce,client_key,action,phase,encrypted_credential,created_at,expires_at) VALUES (?,?,?,'apple-android','login',?,?,UTC_TIMESTAMP(6),UTC_TIMESTAMP(6)+INTERVAL 240 SECOND)",
+                        [stateHashes[index], binding, nonce, index ? 'ready' : 'pending', index ? randomBytes(64) : null]);
+                }
+                assert.ok(await readLiveSession(database, userId, parentId, currentSession));
+                assert.ok(await readLiveSession(database, userId, parentId, previousSession));
+                const before = await preserved();
+                assert.equal(before.users.length, 3); assert.equal(before.results.length, 1);
+                await assert.rejects(activate());
+                assert.equal(activated, 0);
+                if (loseCommitAcknowledgement) {
+                    const connection = await database.getConnection();
+                    let committed = false, destroyed = false;
+                    // SQL really commits; only its caller's acknowledgement is suppressed.
+                    const uncertain = { destroy() { destroyed = true; connection.destroy(); },
+                        async query(input: { sql: string; timeout?: number }, values?: unknown[]) {
+                            const result = await connection.query(input, values);
+                            if (input.sql === 'COMMIT') { committed = true; throw new Error('Synthetic lost acknowledgement after actual COMMIT'); }
+                            return result;
+                        } } as unknown as Pick<mysql.PoolConnection, 'query' | 'destroy'>;
+                    try { await assert.rejects(resetRestoredAuthentication(uncertain, journal, pins), /unconfirmed/u); }
+                    finally { connection.release(); }
+                    assert.equal(committed, true); assert.equal(destroyed, true);
+                    assert.equal((await journal.readRestoreGuard()).state, 'hold');
+                    assert.equal(activated, 0);
+                } else {
+                    assert.deepEqual(await executeRetentionReconciliation('reset-restored-auth',
+                        { confirmation: 'ISOLATED RESTORE AND ALL WRITERS FENCED' }, pins, journal as never, database, Buffer.alloc(32, 8)),
+                    { operation: 'reset-restored-auth', confirmed: true });
+                }
+                const readback = await database.getConnection();
+                try {
+                    const [[actual]] = await readback.query<RowDataPacket[]>('SELECT DATABASE() AS db,CURRENT_USER() AS user,@@GLOBAL.server_uuid AS id');
+                    assert.deepEqual(actual, identity);
+                    assert.equal(await restoredAuthenticationState(readback), 'clear');
+                    assert.equal(await readLiveSession(readback, userId, parentId, currentSession), null);
+                    assert.equal(await readLiveSession(readback, userId, parentId, previousSession), null);
+                } finally { readback.release(); }
+                assert.deepEqual(await preserved(), before);
+                assert.equal(await activate(), '2');
+                assert.equal(activated, 1);
+            } finally {
+                await admin.query('DELETE FROM provider_auth_attempts WHERE state_hash IN (?,?)', stateHashes);
+                await admin.query('DELETE FROM account_sessions WHERE account_uuid=?', [parentId]);
+                await admin.query('DELETE FROM game_personal_bests WHERE user_id=?', [userId]);
+                await admin.query('DELETE FROM apple_provider_tokens WHERE token_id=?', [tokenId]);
+                await admin.query('DELETE FROM apple_auth_revocations WHERE subject_hash=?', [subjectHash]);
+                await admin.query('DELETE FROM registration_authorizations WHERE binding_hash=?', [denyBinding]);
+                await admin.query('DELETE FROM users WHERE account_uuid IN (?,?)', [childId, unrelatedId]);
+                await admin.query('DELETE FROM users WHERE account_uuid=?', [parentId]);
+            }
+        }
+    } finally { await admin.query('DROP TABLE apple_android_handoffs'); }
 });
 
 test('guard activation audits an isolated SQL target while runtime writers are drained', async () => {
