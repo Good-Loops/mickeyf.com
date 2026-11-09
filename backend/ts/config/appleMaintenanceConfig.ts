@@ -1,4 +1,5 @@
 import { loadLocalProviderRuntime } from './localProviderRuntime';
+import { assertRecoveryDatabaseTarget, loadRecoveryDatabaseTarget } from './recoveryDatabaseTarget';
 
 type Environment = Readonly<Record<string, string | undefined>>;
 
@@ -17,9 +18,11 @@ export type AppleMaintenanceConfig = Readonly<{
 
 /** This is an independent maintenance switch, not permission to enable Apple login. */
 export function loadAppleMaintenanceConfig(env: Environment = process.env): AppleMaintenanceConfig | undefined {
+    const recoveryTarget = loadRecoveryDatabaseTarget(env);
     if (env.APPLE_MAINTENANCE_HTTP_ENABLED !== 'true') return undefined;
     const callerSubject = env.APPLE_MAINTENANCE_CALLER_SUBJECT;
     const expectedServerUuid = env.APPLE_MAINTENANCE_EXPECTED_SERVER_UUID;
+    assertRecoveryDatabaseTarget(recoveryTarget, env.CLOUD_SQL_CONNECTION_NAME, expectedServerUuid, env.DB_NAME);
     const local = loadLocalProviderRuntime(env);
     if ((env.NODE_ENV !== 'production' && !local)
         || (env.LUDOLUME_ISOLATED_RUNTIME !== undefined && env.LUDOLUME_ISOLATED_RUNTIME !== 'false')

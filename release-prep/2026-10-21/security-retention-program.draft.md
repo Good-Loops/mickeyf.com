@@ -24,7 +24,7 @@ document creates no scheduled automation and sends no messages.
 | --- | --- | --- |
 | Forged, replayed or mismatched consent | Exact request/provider/account/contact/policy binding, one-use grants, private child creation and owner-only review fields. | Synthetic reject/expire/replay tests plus actual owner decision procedure; assess guardian evidence by region. |
 | Provider collection before eligibility | Native/coarse-age gate, protective unknown/conflict handling, retry restriction and child provider restrictions. | Actual supported-device/network behavior; proportionate web assurance and correction handling. |
-| Mailbox or attachment disclosure | Two-step verification is enabled on the form mailbox. The encrypted archive, synthetic mailbox cleanup and recovery on a second computer were exercised. | Verify the mailbox recovery email and access isolation; keep real forms and recovery material out of shared artifacts. |
+| Mailbox or attachment disclosure | Two-step verification is enabled on the form mailbox; Google confirmed the recovery email verified on 9 November. The encrypted archive, synthetic mailbox cleanup and recovery on a second computer were exercised. | Verify access isolation; keep real forms and recovery material out of shared artifacts. |
 | Retention after withdrawal/deletion | SQL cascades/expiry cleanup; owner review and synthetic form-copy lifecycle passed in 2.2–2.3. | Qualify production integration, continuing retention and provider recovery-copy limits. |
 | Restore revives deleted accounts/permission | Existing independent deletion journal/replay and public-permission invalidation. | Qualified recovery procedure and actual retention/restore evidence; do not expire journal records speculatively. |
 | Public nickname/result disclosure | Private new accounts and separately controlled public permission; the live public-score configuration is enabled. | Qualify final-device and supported-client behavior; no blanket all-accounts-private claim. |
@@ -66,10 +66,10 @@ deletion or new TTL has been enabled.
 
 ## Secure storage
 
-The form mailbox has two-step verification enabled; Google reports its recovery
-email is not yet verified. The owner opened the encrypted archive on a second
+The form mailbox has two-step verification enabled; Google confirmed its recovery
+email verified on 9 November 2026. The owner opened the encrypted archive on a second
 computer, and synthetic mailbox, attachment and known-copy cleanup passed. These
-checks used no real family data. Verify mailbox recovery and access isolation,
+checks used no real family data. Verify access isolation,
 and retain no passwords, recovery codes or real forms in shared artifacts.
 Provider-internal recovery copies have separate retention limits.
 

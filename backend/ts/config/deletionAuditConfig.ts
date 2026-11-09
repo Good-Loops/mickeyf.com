@@ -1,4 +1,5 @@
 import type { PoolOptions } from 'mysql2/promise';
+import { assertRecoveryDatabaseTarget, loadRecoveryDatabaseTarget, ORIGINAL_DATABASE_CONNECTION } from './recoveryDatabaseTarget';
 
 type Environment = Readonly<Record<string, string | undefined>>;
 
@@ -16,8 +17,6 @@ export type DeletionAuditConfig = Readonly<{
     databaseOptions: PoolOptions;
     settings: DeletionAuditSettings;
 }>;
-
-const PRODUCTION_CONNECTION_NAME = 'noted-reef-387021:us-central1:cms-mickeyf';
 
 function required(env: Environment, name: string): string {
     const value = env[name];
@@ -44,8 +43,11 @@ function identityEpoch(value: string): string {
 }
 
 function databaseEndpoint(env: Environment, user: string, database: string, currentUser: string): PoolOptions {
+    const recoveryTarget = loadRecoveryDatabaseTarget(env);
     if (env.NODE_ENV === 'production') {
-        if (required(env, 'DELETION_AUDIT_CLOUD_SQL_CONNECTION_NAME') !== PRODUCTION_CONNECTION_NAME
+        const connectionName = required(env, 'DELETION_AUDIT_CLOUD_SQL_CONNECTION_NAME');
+        assertRecoveryDatabaseTarget(recoveryTarget, connectionName, env.DELETION_AUDIT_DB_SERVER_UUID, database);
+        if (connectionName !== (recoveryTarget?.connectionName ?? ORIGINAL_DATABASE_CONNECTION)
             || user !== 'deletion_audit' || database !== 'cms'
             || currentUser !== 'deletion_audit@cloudsqlproxy~%') {
             throw new Error('Production deletion audit requires its fixed Cloud SQL target and dedicated proxy-only account');
@@ -53,7 +55,7 @@ function databaseEndpoint(env: Environment, user: string, database: string, curr
         if (env.DELETION_AUDIT_DB_HOST !== undefined || env.DELETION_AUDIT_DB_PORT !== undefined) {
             throw new Error('Production deletion audit must use only its Cloud SQL socket');
         }
-        return { socketPath: `/cloudsql/${PRODUCTION_CONNECTION_NAME}` };
+        return { socketPath: `/cloudsql/${connectionName}` };
     }
     if (required(env, 'DELETION_AUDIT_DB_HOST') !== '127.0.0.1'
         || env.DELETION_AUDIT_CLOUD_SQL_CONNECTION_NAME !== undefined) {

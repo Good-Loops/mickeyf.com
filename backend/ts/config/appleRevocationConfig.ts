@@ -1,6 +1,7 @@
 import type { PoolOptions } from 'mysql2/promise';
 import { PRODUCTION_RUNTIME_DATABASE_ACCOUNT } from '../security/runtimeGrantManifest';
 import { loadAppleTokenConfig, type AppleTokenLifecycle } from './appleTokenConfig';
+import { assertRecoveryDatabaseTarget, loadRecoveryDatabaseTarget, ORIGINAL_DATABASE_CONNECTION } from './recoveryDatabaseTarget';
 
 type Environment = Readonly<Record<string, string | undefined>>;
 export type AppleRevocationConfig = Readonly<{
@@ -8,7 +9,6 @@ export type AppleRevocationConfig = Readonly<{
     expectedAccount: string;
     expectedServerUuid: string;
 }>;
-const CONNECTION_NAME = 'noted-reef-387021:us-central1:cms-mickeyf';
 
 function required(env: Environment, name: string): string {
     const value = env[name];
@@ -29,9 +29,11 @@ export function loadAppleRevocationConfig(args: readonly string[], env: Environm
     const connectionName = required(env, 'APPLE_REVOCATION_CLOUD_SQL_CONNECTION_NAME');
     const expectedAccount = required(env, 'APPLE_REVOCATION_EXPECTED_ACCOUNT');
     const expectedServerUuid = required(env, 'APPLE_REVOCATION_EXPECTED_SERVER_UUID');
+    const recoveryTarget = loadRecoveryDatabaseTarget(env);
+    assertRecoveryDatabaseTarget(recoveryTarget, connectionName, expectedServerUuid, database);
     const runtime = PRODUCTION_RUNTIME_DATABASE_ACCOUNT;
     if (user !== runtime.user || expectedAccount !== `${runtime.user}@${runtime.host}` || database !== 'cms'
-        || connectionName !== CONNECTION_NAME || expectedServerUuid.length !== 36
+        || connectionName !== (recoveryTarget?.connectionName ?? ORIGINAL_DATABASE_CONNECTION) || expectedServerUuid.length !== 36
         || !/^[0-9a-f]{8}-(?:[0-9a-f]{4}-){3}[0-9a-f]{12}$/u.test(expectedServerUuid)
         || env.APPLE_REVOCATION_DB_HOST !== undefined || env.APPLE_REVOCATION_DB_PORT !== undefined) {
         throw new Error('Apple revocation requires the reviewed production socket, database and runtime identity.');

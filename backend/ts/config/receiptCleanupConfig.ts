@@ -1,4 +1,5 @@
 import { PoolOptions } from 'mysql2/promise';
+import { assertRecoveryDatabaseTarget, loadRecoveryDatabaseTarget } from './recoveryDatabaseTarget';
 
 type Environment = Readonly<Record<string, string | undefined>>;
 export type ReceiptCleanupConfig = Readonly<{
@@ -15,6 +16,7 @@ function required(env: Environment, name: string): string {
 
 /** Deliberately does not import dotenv or fall back to the website credentials. */
 export function loadReceiptCleanupConfig(env: Environment = process.env): ReceiptCleanupConfig {
+    const recoveryTarget = loadRecoveryDatabaseTarget(env);
     if (env.RECEIPT_CLEANUP_ENABLED !== 'true') {
         throw new Error('Receipt cleanup requires explicit activation.');
     }
@@ -44,6 +46,7 @@ export function loadReceiptCleanupConfig(env: Environment = process.env): Receip
 
     if (env.NODE_ENV === 'production') {
         const cloudSql = required(env, 'RECEIPT_CLEANUP_CLOUD_SQL_CONNECTION_NAME');
+        assertRecoveryDatabaseTarget(recoveryTarget, cloudSql, expectedServerUuid, database);
         if (!/^[a-z][a-z0-9-]+:[a-z0-9-]+:[a-z0-9-]+$/.test(cloudSql)
             || user !== 'receipt_cleanup'
             || expectedAccount !== 'receipt_cleanup@cloudsqlproxy~%') {

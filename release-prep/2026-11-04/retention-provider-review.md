@@ -9,7 +9,7 @@ published promises. Reuse the completed 2.2 and 3.2-3.7 evidence.
 | Store / purpose | Evidence and limitation |
 | --- | --- |
 | Brevo warning delivery | Saved retention UI: all senders, one month, never store previews for new messages. Anonymous engagement reporting and actual bilingual delivery were already qualified. Saved delivery evidence in our own database survives provider-log expiry. |
-| Production recovery copies | After the owner's specific approval, the 12 September, 2 October and 6 October manual snapshots were removed. The 4 November checkpoint, all eight automatic backups and seven-day PITR were verified preserved. Count-based rotation does not establish a universal eight-day maximum or complete the continuing retention policy. |
+| Production recovery copies | After the owner's specific approvals, the 12 September, 2 October and 6 October manual snapshots were removed. On 7 November the 4 November manual backup was also removed; readback confirmed eight successful automatic backups and seven-day PITR remained. This did not create the planned recovery checkpoint or start its waiting period. Count-based rotation does not establish a universal eight-day maximum or complete the continuing retention policy. |
 | Independent activity/warning evidence | Private versioned bucket, seven-day soft delete, no expiry rule. Events are signed state/ledger digests, not a copy of every game interaction or an anonymous record. SQL stores account-linked activity and warning state. |
 | Conditional deletion evidence | Separate private bucket and key; signed child/parent identifiers, dates, intent and outcome. Existing guard is held. All eight deletion/recovery checks passed on isolated SQL and real private cloud storage; fixture cleanup passed. |
 | Explicit deletion/score-withdrawal journal | A separate journal retains account IDs, action and request time. Its restore reader rejects any soft-deleted object and fails if its inventory exceeds 10,000 objects. It also needs a qualified finite-retention procedure; the conditional inactivity journal alone does not cover it. Source inspection, not a current object count or proof of an imminent outage. |
@@ -48,6 +48,8 @@ Local evidence is in `C:/Users/User/Ludolume-Release-Evidence-2026-11-01`:
 `privacy-backup-inventory-2026-11-04.json`,
 `deletion-recovery-17d4b341.json`, and the earlier warning/parent-form receipts.
 The later approved backup cleanup receipt is `approved-backup-cleanup-verified.json`.
+The 7 November manual-backup removal receipt is
+`approved-manual-backup-removal-2026-11-07.txt`.
 No retained account evidence was removed by that three-snapshot cleanup.
 
 The 5 November notice/form candidate now explicitly covers the qualified 14-day

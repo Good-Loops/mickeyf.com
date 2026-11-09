@@ -8,6 +8,7 @@ import { loadAppleMaintenanceConfig, type AppleMaintenanceConfig } from './apple
 import { loadLocalProviderRuntime, type LocalProviderRuntime } from './localProviderRuntime';
 import { parentFormRelayEnabled } from './parentFormRelayConfig';
 import { childDailyUsageEnabled, childDailyUsageReceiptRetentionEnabled } from './childDailyUsageConfig';
+import { assertRecoveryDatabaseTarget, loadRecoveryDatabaseTarget, type RecoveryDatabaseTarget } from './recoveryDatabaseTarget';
 
 export type RuntimeEnvironment = 'development' | 'test' | 'production';
 
@@ -47,6 +48,7 @@ export type DatabaseConfig = {
     host?: string;
     port?: number;
     cloudSqlConnectionName?: string;
+    recoveryTarget?: RecoveryDatabaseTarget;
 };
 
 const PRODUCTION_ORIGINS = Object.freeze([
@@ -199,6 +201,7 @@ export function loadRuntimeConfig(env: Environment = process.env): RuntimeConfig
 
 export function loadDatabaseConfig(env: Environment = process.env): DatabaseConfig {
     const nodeEnv = parseRuntimeEnvironment(env);
+    const recoveryTarget = loadRecoveryDatabaseTarget(env);
     const base = {
         nodeEnv,
         isProduction: nodeEnv === 'production',
@@ -208,9 +211,15 @@ export function loadDatabaseConfig(env: Environment = process.env): DatabaseConf
     };
 
     if (base.isProduction) {
+        const cloudSqlConnectionName = requiredValue(env, 'CLOUD_SQL_CONNECTION_NAME');
+        assertRecoveryDatabaseTarget(recoveryTarget, cloudSqlConnectionName, env.APPLE_MAINTENANCE_EXPECTED_SERVER_UUID, base.database);
+        if (recoveryTarget && (base.user !== 'cms_mickeyf' || env.DB_HOST !== undefined || env.DB_PORT !== undefined)) {
+            throw new Error('Restored runtime requires its dedicated account and Cloud SQL socket.');
+        }
         return Object.freeze({
             ...base,
-            cloudSqlConnectionName: requiredValue(env, 'CLOUD_SQL_CONNECTION_NAME'),
+            cloudSqlConnectionName,
+            ...(recoveryTarget ? { recoveryTarget } : {}),
         });
     }
 

@@ -6,6 +6,7 @@
  */
 import mysql from 'mysql2/promise';
 import { loadDatabaseConfig } from '../config/runtimeConfig';
+import { verifyRecoveryDatabaseIdentity } from './recoveryDatabaseIdentity';
 
 const databaseConfig = loadDatabaseConfig();
 
@@ -36,6 +37,12 @@ export const pool = mysql.createPool(
 
 export async function verifyDatabaseConnection(): Promise<void> {
     const connection = await pool.getConnection();
+    try {
+        if (databaseConfig.recoveryTarget) await verifyRecoveryDatabaseIdentity(connection, databaseConfig.recoveryTarget);
+    } catch (error) {
+        connection.destroy();
+        throw error;
+    }
     connection.release();
 }
 
