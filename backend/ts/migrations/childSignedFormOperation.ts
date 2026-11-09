@@ -35,7 +35,7 @@ export type ChildReleaseSafety = Readonly<{
     cloudSqlSha256: string; stableSha256: string;
 }>;
 type Baseline = Readonly<Pick<ChildSignedFormMetadataSnapshot,
-    'identity' | 'history' | 'capability' | 'schemaSha256' | 'grantsSha256'>>;
+    'identity' | 'history' | 'capability' | 'runtimeGrantProfile' | 'schemaSha256' | 'grantsSha256'>>;
 export type ChildSignedFormPlan = Readonly<{
     schemaVersion: 1; operation: 'extend-child-signed-form-schema'; createdAt: string;
     sourceCommit: string; sqlSha256: string; target: ChildSignedFormTarget;
@@ -94,12 +94,14 @@ function source(deps: ChildSignedFormOperationDependencies) {
 }
 function baseline(snapshot: ChildSignedFormMetadataSnapshot): Baseline {
     return { identity: snapshot.identity, history: snapshot.history, capability: snapshot.capability,
+        runtimeGrantProfile: snapshot.runtimeGrantProfile,
         schemaSha256: snapshot.schemaSha256, grantsSha256: snapshot.grantsSha256 };
 }
 async function metadata(deps: ChildSignedFormOperationDependencies, connection = deps.connection) {
     const snapshot = await (deps.observeMetadata ?? observeChildSignedFormMetadata)(connection, deps.settings);
     fresh(snapshot.observedAt, (deps.now ?? Date.now)());
     same(snapshot.target, deps.settings.target);
+    same(snapshot.runtimeGrantProfile, deps.settings.runtimeGrantProfile);
     same(snapshot.identity, { databaseName: deps.settings.target.database, currentUser: deps.settings.expectedCurrentUser,
         serverUuid: deps.settings.target.serverUuid, serverVersion: deps.settings.expectedServerVersion,
         versionComment: deps.settings.expectedVersionComment });

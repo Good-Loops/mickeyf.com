@@ -10,8 +10,11 @@ import { createRuntimeGrantPlan, inspectRuntimeGrantState, type RuntimeGrantConn
 import { PRODUCTION_RUNTIME_DATABASE_ACCOUNT, PRODUCTION_RUNTIME_DATABASE_ROLE } from '../security/runtimeGrantManifest';
 
 export type ChildSignedFormTarget = Readonly<{ project: string; instance: string; database: string; serverUuid: string }>;
+export type ChildSignedFormRuntimeGrantProfile = 'google-apple-parent-signed'
+    | 'google-apple-parent-signed-recovery' | 'google-apple-parent-signed-recovery-usage';
 export type ChildSignedFormMetadataSettings = Readonly<{
     target: ChildSignedFormTarget;
+    runtimeGrantProfile: ChildSignedFormRuntimeGrantProfile;
     expectedCurrentUser: string;
     expectedServerVersion: string;
     expectedVersionComment: string;
@@ -26,6 +29,7 @@ export type ChildSignedFormMetadataSnapshot = Readonly<{
     identity: ChildSignedFormIdentity;
     history: readonly Readonly<{ version: string; checksumSha256: string }>[];
     capability: 'legacy-us' | 'nullable-parent-request-us-br';
+    runtimeGrantProfile: ChildSignedFormRuntimeGrantProfile;
     schema: readonly SchemaInspection[];
     grants: Readonly<Omit<RuntimeGrantSnapshot, 'passwordExpired'> & { credentialExpiryState: 'current' | 'expired' }>;
     schemaSha256: string;
@@ -40,7 +44,7 @@ export type ChildSignedFormSchemaReceipt = Readonly<{
     sqlSha256: string;
     target: ChildSignedFormTarget;
     capability: 'nullable-parent-request-us-br';
-    runtimeGrantProfile: 'google-apple-parent-signed';
+    runtimeGrantProfile: ChildSignedFormRuntimeGrantProfile;
     schemaSha256: string;
     grantsSha256: string;
 }>;
@@ -49,6 +53,12 @@ const observed = new WeakSet<object>();
 const fail = () => { throw new Error('Child signed-form metadata does not match the explicitly reviewed target, history, schema or runtime grants.'); };
 const sha256 = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
 const uuid = /^[a-f0-9]{8}-[a-f0-9]{4}-[1-5][a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/u;
+
+export function parseChildSignedFormRuntimeGrantProfile(value: unknown): ChildSignedFormRuntimeGrantProfile {
+    if (value === 'google-apple-parent-signed' || value === 'google-apple-parent-signed-recovery'
+        || value === 'google-apple-parent-signed-recovery-usage') return value;
+    return fail();
+}
 
 function normalize(value: unknown): MetadataValue {
     if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
@@ -69,6 +79,7 @@ function freeze<T>(value: T): T {
 }
 
 function validateSettings(settings: ChildSignedFormMetadataSettings) {
+    parseChildSignedFormRuntimeGrantProfile(settings?.runtimeGrantProfile);
     const target = settings?.target;
     const separator = settings?.expectedCurrentUser?.lastIndexOf('@') ?? -1;
     if (!target || !/^[a-z][a-z0-9-]{4,62}$/u.test(target.project) || !/^[a-z][a-z0-9-]{0,97}$/u.test(target.instance)
@@ -122,7 +133,7 @@ async function inspect(connection: MigrationConnection, settings: ChildSignedFor
     // Inspect and classify directly: the ordinary verify helper also takes locks and SETs session options.
     const grantConnection: RuntimeGrantConnection = { query: (sql, values) => connection.query(sql, values ? [...values] : []), destroy() {} };
     const grantMetadata = await inspectRuntimeGrantState(grantConnection, settings.target.database, PRODUCTION_RUNTIME_DATABASE_ACCOUNT);
-    const plan = createRuntimeGrantPlan(grantMetadata, { profile: 'google-apple-parent-signed', database: settings.target.database,
+    const plan = createRuntimeGrantPlan(grantMetadata, { profile: settings.runtimeGrantProfile, database: settings.target.database,
         expectedServerUuid: settings.target.serverUuid, maintenanceAccount, approvedRole: PRODUCTION_RUNTIME_DATABASE_ROLE,
         roleRemovalProvider: 'read-only-child-schema-observer', roleRemovalTarget: 'none', advisoryLockTimeoutSeconds: 0,
         lockWaitTimeoutSeconds: 1 }, PRODUCTION_RUNTIME_DATABASE_ACCOUNT);
@@ -133,6 +144,7 @@ async function inspect(connection: MigrationConnection, settings: ChildSignedFor
     const capability = nullable === 'YES' ? 'nullable-parent-request-us-br' as const : 'legacy-us' as const;
     if (JSON.stringify(await identity(connection, settings)) !== JSON.stringify(observedIdentity)) return fail();
     return { target: { ...settings.target }, identity: observedIdentity, history: observedHistory, capability,
+        runtimeGrantProfile: settings.runtimeGrantProfile,
         schema: normalize(schema) as unknown as readonly SchemaInspection[], grants,
         schemaSha256: sha256({ history: observedHistory, capability, schema }), grantsSha256: plan.sha256 };
 }
@@ -158,6 +170,6 @@ export function createChildSignedFormSchemaReceipt(snapshot: ChildSignedFormMeta
         || verifiedAt !== snapshot.observedAt) return fail();
     return freeze({ schemaVersion: 1, operation: 'verify-child-signed-form-schema', verifiedAt,
         sourceCommit: source.sourceCommit, sqlSha256: source.sqlSha256, target: { ...snapshot.target },
-        capability: snapshot.capability, runtimeGrantProfile: 'google-apple-parent-signed',
+        capability: snapshot.capability, runtimeGrantProfile: snapshot.runtimeGrantProfile,
         schemaSha256: snapshot.schemaSha256, grantsSha256: snapshot.grantsSha256 });
 }

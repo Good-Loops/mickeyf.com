@@ -59,6 +59,7 @@ before(async () => {
     const [tables] = await admin.query<RowDataPacket[]>('SELECT TABLE_NAME FROM information_schema.TABLES WHERE TABLE_SCHEMA=DATABASE()');
     assert.equal(tables.length, 0, 'start in a fresh disposable database; never drop existing tables');
     settings = { target: { project: 'synthetic-local', instance: 'synthetic-only', database: config.database, serverUuid: target.serverUuid },
+        runtimeGrantProfile: 'google-apple-parent-signed',
         expectedCurrentUser: target.account, expectedServerVersion: target.version, expectedVersionComment: target.vendor };
     await admin.query(`CREATE TABLE users (user_id INT NOT NULL AUTO_INCREMENT, user_name VARCHAR(255) NOT NULL,
         email VARCHAR(255) NOT NULL, user_password VARCHAR(255) NOT NULL, PRIMARY KEY (user_id), UNIQUE KEY uq_users_email (email))

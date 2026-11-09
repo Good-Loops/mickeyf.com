@@ -17,12 +17,13 @@ const env = { MIGRATION_DB_HOST: '127.0.0.1', MIGRATION_DB_PORT: '13307', MIGRAT
     MIGRATION_CONFIRM_CLOUD_SQL_INSTANCE: PRODUCTION_CLOUD_SQL_TARGET.instance,
     MIGRATION_CONFIRM_CLOUD_SQL_CONNECTION_NAME: PRODUCTION_CLOUD_SQL_TARGET.connectionName,
     MIGRATION_CONFIRM_SERVER_VERSION: '8.0.31-google', MIGRATION_CONFIRM_VERSION_COMMENT: 'synthetic reviewed vendor',
-    CHILD_SIGNED_FORM_SOURCE_COMMIT: source };
+    CHILD_SIGNED_FORM_SOURCE_COMMIT: source, CHILD_SIGNED_FORM_RUNTIME_GRANT_PROFILE: 'google-apple-parent-signed' };
 
 test('privileged CLI settings bind exact proxy/database/admin/server/project/version/vendor and explicit source', () => {
     const settings = childSchemaCommandSettings(env);
     assert.equal(settings.settings.expectedCurrentUser, env.MIGRATION_CONFIRM_ACCOUNT);
     assert.equal(settings.settings.expectedServerVersion, env.MIGRATION_CONFIRM_SERVER_VERSION);
+    assert.equal(settings.settings.runtimeGrantProfile, env.CHILD_SIGNED_FORM_RUNTIME_GRANT_PROFILE);
     for (const key of Object.keys(env)) {
         const missing = { ...env } as Record<string, string | undefined>;
         delete missing[key]; assert.throws(() => childSchemaCommandSettings(missing));
@@ -33,6 +34,7 @@ test('privileged CLI settings bind exact proxy/database/admin/server/project/ver
         { MIGRATION_CONFIRM_CLOUD_SQL_INSTANCE: 'other' }, { MIGRATION_CONFIRM_CLOUD_SQL_CONNECTION_NAME: 'other' },
         { MIGRATION_DB_USER: 'cms_mickeyf', MIGRATION_CONFIRM_ACCOUNT: 'cms_mickeyf@%' }, { MIGRATION_CONFIRM_ACCOUNT: 'other@%' },
         { MIGRATION_CONFIRM_SERVER_VERSION: '8.0.32' }, { CHILD_SIGNED_FORM_SOURCE_COMMIT: 'main' },
+        { CHILD_SIGNED_FORM_RUNTIME_GRANT_PROFILE: 'google' }, { CHILD_SIGNED_FORM_RUNTIME_GRANT_PROFILE: 'auto' },
     ]) assert.throws(() => childSchemaCommandSettings({ ...env, ...fields }));
 });
 

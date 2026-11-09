@@ -6,7 +6,7 @@ import { join } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { providerConfig, childProviderConfig, adultProviderConfig, fixture, deploymentFixture, now, androidPresenterPins } from './test-support/provider-release-fixture.mjs';
 import { providerReleaseEnvironment, providerConfigurationSha256, PROVIDER_CREATION_FLAGS,
-    PROVIDER_ANDROID_PRESENTER_PINS, validateAndroidPresenterPins } from './provider-release-config.mjs';
+    PROVIDER_ANDROID_PRESENTER_PINS, validateAndroidPresenterPins, providerRuntimeGrantProfile } from './provider-release-config.mjs';
 import { providerDeploymentApproval, renderProviderBackendDeployConfig, resolveProviderDeploymentSteps,
     renderSessionBackendDeployConfig, sessionDeploymentApproval, validateProviderPins, frozenDeploymentStepsSha256 } from './render-frozen-backend-deploy.mjs';
 import { fingerprint, SERVICE, sessionRevisionName, revisionConfiguration } from './frozen-backend-traffic.mjs';
@@ -597,4 +597,92 @@ test('provider CLI refuses missing/legacy confirmations before obtaining cloud c
     writeFileSync(file, JSON.stringify(plan));
     await assert.rejects(main(['apply-traffic', '--plan', file, '--confirm-plan', fingerprint(plan), '--confirm-session-promotion']), /Missing option value|Unexpected/);
     await assert.rejects(main(['apply-traffic', '--plan', file, '--confirm-plan', fingerprint(plan), '--confirm-provider-rollback']), /Unexpected/);
+});
+
+test('current BR/US maintenance preparation binds shared notices and keeps collection and creation closed', () => {
+    const config = JSON.parse(read('./provider-release-us-br.json'));
+    const notice = JSON.parse(read('../shared/privacyNotice.json'));
+    const env = providerReleaseEnvironment(config);
+    assert.equal(config.phase, 'prepare-child');
+    assert.equal(providerRuntimeGrantProfile(config), 'google-apple-parent-signed-recovery-usage');
+    assert.deepEqual(config.noticeVersions, { privacy: notice.version, signedParentForm: notice.signedParentForm.version });
+    assert.deepEqual(JSON.parse(env.PARENT_REGISTRATION_COUNTRIES), ['BR', 'US']);
+    assert.deepEqual(JSON.parse(env.PARENT_SIGNED_FORM_COUNTRIES), ['BR', 'US']);
+    assert.equal(env.PARENT_CONSENT_TEXT, notice.consent.parent.text);
+    assert.equal(env.PUBLIC_SCORE_CONSENT_TEXT, notice.consent.publicScores.text);
+    for (const name of [...PROVIDER_CREATION_FLAGS, 'CHILD_ONLINE_ACTIVITY_ENABLED', 'CHILD_INACTIVITY_ENABLED', 'CHILD_DAILY_USAGE_ENABLED']) {
+        assert.equal(env[name], 'false');
+    }
+    assert.equal(env.PARENT_FORM_RELAY_STATE_ENABLED, '0');
+    assert.equal(env.CHILD_DAILY_USAGE_RECEIPT_RETENTION_ENABLED, 'true');
+    assert.deepEqual(providerReleaseEnvironment(config, true), env, 'fallback preserves independent maintenance');
+    const pins = fixture().pins.candidate.deployment;
+    pins.providerRelease = config;
+    const rendered = render(pins);
+    python('compile(data["smoke"],"maintenance-smoke","exec")', { smoke: rendered.steps[7].args.slice(3).join('') });
+    assert.match(rendered.steps[4].args[1], /provider\["environment"\]/u);
+});
+
+test('maintenance preparation rejects collection, secret injection, incomplete pins and mismatched usage grants', () => {
+    const original = JSON.parse(read('./provider-release-us-br.json'));
+    for (const change of [
+        c => { c.runtimeGrantProfile = 'google'; },
+        c => { c.runtimeGrantProfile = null; },
+        c => { c.runtimeGrantProfile = 'google-apple-parent-signed-recovery'; },
+        c => { delete c.runtimeGrantProfile; },
+        c => { delete c.noticeVersions; },
+        c => { c.noticeVersions.signedParentForm = 'signed-parent-form-2026-10-01.1'; },
+        c => { c.environment.CHILD_ONLINE_ACTIVITY_ENABLED = 'true'; },
+        c => { c.environment.CHILD_INACTIVITY_ENABLED = 'true'; },
+        c => { c.environment.CHILD_DAILY_USAGE_ENABLED = 'true'; },
+        c => { c.environment.CHILD_INACTIVITY_KEYS = 'not-a-managed-reference'; },
+        c => { c.environment.PARENT_FORM_RELAY_STATE_ENABLED = 'true'; },
+        c => { delete c.environment.CHILD_DAILY_USAGE_RECEIPT_RETENTION_ENABLED; },
+    ]) {
+        const config = structuredClone(original); change(config);
+        assert.throws(() => providerReleaseEnvironment(config));
+    }
+    const disabled = structuredClone(original);
+    disabled.environment.CHILD_DAILY_USAGE_RECEIPT_RETENTION_ENABLED = 'false';
+    assert.equal(providerReleaseEnvironment(disabled).CHILD_DAILY_USAGE_RECEIPT_RETENTION_ENABLED, 'false');
+    disabled.runtimeGrantProfile = 'google-apple-parent-signed-recovery';
+    assert.equal(providerRuntimeGrantProfile(disabled), 'google-apple-parent-signed-recovery');
+    assert.doesNotThrow(() => providerReleaseEnvironment(disabled));
+});
+
+test('maintenance preparation smoke rejects stale form versions, wrong country coverage and unsafe parent headers', () => {
+    const pins = fixture().pins.candidate.deployment;
+    pins.providerRelease = JSON.parse(read('./provider-release-us-br.json'));
+    const smoke = render(pins).steps[7].args.slice(3).join('');
+    const start = smoke.indexOf('if "noticeVersions" in provider:');
+    const probe = smoke.slice(start, smoke.indexOf('expected_registration = ', start));
+    python(String.raw`
+import copy
+from email.message import Message
+provider=data['pins']['providerRelease']; settings=provider['environment']
+original={'enabled':True,'policyVersion':settings['PARENT_REGISTRATION_POLICY_VERSION'],
+    'consentVersion':settings['PARENT_CONSENT_VERSION'],'consentText':settings['PARENT_CONSENT_TEXT'],
+    'privacyNoticeUrl':settings['PARENT_PRIVACY_NOTICE_URL'],'countries':['BR','US'],
+    'creationEnabled':False,'audience':'children-included','credentialsAfterApproval':True,
+    'signedFormCountries':['BR','US'],'signedFormVersion':provider['noticeVersions']['signedParentForm']}
+body=copy.deepcopy(original); headers=Message(); safe=True
+calls=[]
+def request(path,status):
+    assert path=='/auth/parent-registration/config' and status==200
+    calls.append(path)
+    return body,headers
+def reject(message): raise ValueError(message)
+ns={'json':json,'provider':provider,'settings':settings,'request':request,'reject':reject,'no_store':lambda h:safe}
+def verify(expected):
+    try: exec(compile(data['probe'],'parent-probe','exec'),ns)
+    except ValueError: assert not expected
+    else: assert expected
+verify(True)
+for key,value in [('signedFormVersion','signed-parent-form-2026-11-05.1'),('countries',['US']),('signedFormCountries',['BR']),
+    ('creationEnabled',True),('creationEnabled',0),('consentText','stale'),('credentialsAfterApproval',False)]:
+    body=copy.deepcopy(original);body[key]=value;verify(False)
+body=copy.deepcopy(original);safe=False;verify(False)
+safe=True;headers['Set-Cookie']='unexpected=1';verify(False)
+assert len(calls)==10
+`, { pins, probe });
 });

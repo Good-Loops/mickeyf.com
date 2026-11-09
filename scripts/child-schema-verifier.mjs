@@ -23,7 +23,15 @@ function keys(value, expected, label) {
         && same(Object.keys(value).sort(), [...expected].sort()), `${label}: unexpected fields`);
 }
 
-export function validateChildSchemaReceipt(receipt, sourceCommit, now) {
+const LEGACY_RUNTIME_PROFILE = 'google-apple-parent-signed';
+function reviewedRuntimeProfile(profile) {
+    requireThat([LEGACY_RUNTIME_PROFILE, 'google-apple-parent-signed-recovery',
+        'google-apple-parent-signed-recovery-usage'].includes(profile), 'Child schema runtime grant profile is not reviewed');
+    return profile;
+}
+
+export function validateChildSchemaReceipt(receipt, sourceCommit, now, expectedProfile = LEGACY_RUNTIME_PROFILE) {
+    reviewedRuntimeProfile(expectedProfile);
     keys(receipt, ['schemaVersion', 'operation', 'verifiedAt', 'sourceCommit', 'sqlSha256', 'target',
         'capability', 'runtimeGrantProfile', 'schemaSha256', 'grantsSha256'], 'Child schema receipt');
     keys(receipt.target, ['project', 'instance', 'database', 'serverUuid'], 'Child schema target');
@@ -31,7 +39,7 @@ export function validateChildSchemaReceipt(receipt, sourceCommit, now) {
     requireThat(SOURCE.test(sourceCommit) && receipt.schemaVersion === 1 && receipt.operation === 'verify-child-signed-form-schema'
         && receipt.sourceCommit === sourceCommit && receipt.sqlSha256 === CHILD_SIGNED_FORM_SQL_SHA256
         && same(receipt.target, TARGET) && receipt.capability === 'nullable-parent-request-us-br'
-        && receipt.runtimeGrantProfile === 'google-apple-parent-signed'
+        && receipt.runtimeGrantProfile === expectedProfile
         && SHA.test(receipt.schemaSha256) && SHA.test(receipt.grantsSha256)
         && Number.isFinite(verified) && new Date(verified).toISOString() === receipt.verifiedAt,
     'Child schema receipt identity, SQL, capability or metadata differs');
@@ -45,8 +53,9 @@ const PRIVATE_VERIFY_KEYS = ['MIGRATION_DB_HOST', 'MIGRATION_DB_PORT', 'MIGRATIO
     'MIGRATION_CONFIRM_SERVER_UUID', 'MIGRATION_CONFIRM_CLOUD_SQL_PROJECT', 'MIGRATION_CONFIRM_CLOUD_SQL_INSTANCE',
     'MIGRATION_CONFIRM_CLOUD_SQL_CONNECTION_NAME', 'MIGRATION_CONFIRM_SERVER_VERSION', 'MIGRATION_CONFIRM_VERSION_COMMENT'];
 const OS_KEYS = new Set(['PATH', 'SYSTEMROOT', 'WINDIR', 'TEMP', 'TMP', 'TMPDIR', 'LANG', 'LC_ALL']);
-export function childSchemaVerificationEnvironment(input, sourceCommit) {
+export function childSchemaVerificationEnvironment(input, sourceCommit, expectedProfile = LEGACY_RUNTIME_PROFILE) {
     requireThat(SOURCE.test(sourceCommit), 'Child schema source commit is invalid');
+    reviewedRuntimeProfile(expectedProfile);
     const environment = {};
     for (const [key, value] of Object.entries(input)) if (OS_KEYS.has(key.toUpperCase()) && typeof value === 'string') environment[key] = value;
     for (const key of PRIVATE_VERIFY_KEYS) {
@@ -66,6 +75,7 @@ export function childSchemaVerificationEnvironment(input, sourceCommit) {
     'Child schema verification target confirmations differ');
     environment.MIGRATION_OPERATION_TIMEOUT_MS = '30000';
     environment.CHILD_SIGNED_FORM_SOURCE_COMMIT = sourceCommit;
+    environment.CHILD_SIGNED_FORM_RUNTIME_GRANT_PROFILE = expectedProfile;
     return environment;
 }
 
@@ -74,8 +84,9 @@ const runVerification = (file, args, options) => new Promise(resolve => {
 });
 export function createChildSchemaVerifier({ run = runVerification, environment = () => process.env, now = Date.now } = {}) {
     return async expected => {
-        const env = childSchemaVerificationEnvironment(environment(), expected?.sourceCommit);
-        validateChildSchemaReceipt(expected, expected.sourceCommit, now());
+        const profile = reviewedRuntimeProfile(expected?.runtimeGrantProfile);
+        validateChildSchemaReceipt(expected, expected.sourceCommit, now(), profile);
+        const env = childSchemaVerificationEnvironment(environment(), expected.sourceCommit, profile);
         let result;
         try {
             result = await run(process.execPath, ['-r', 'ts-node/register', 'ts/migrations/runChildSignedFormSchema.ts', 'verify'], {
@@ -88,7 +99,7 @@ export function createChildSchemaVerifier({ run = runVerification, environment =
         let observed;
         try { observed = JSON.parse(result.stdout); }
         catch { throw new Error('Live child schema receipt could not be decoded; private process output was not logged'); }
-        validateChildSchemaReceipt(observed, expected.sourceCommit, now());
+        validateChildSchemaReceipt(observed, expected.sourceCommit, now(), profile);
         requireThat(same({ ...observed, verifiedAt: expected.verifiedAt }, expected), 'Live child schema or runtime grants changed after review');
         return observed;
     };
@@ -139,33 +150,50 @@ export function validateChildMigrationPrerequisiteProof(proof, pins, now = Date.
 }
 
 function approvedProof(plan, confirmation, pins, now) {
-    if (plan?.operation === 'create-inactivity-tables') {
-        keys(plan, ['version', 'operation', 'createdAt', 'sourceCommit', 'sqlHashes', 'snapshot', 'safety', 'sha256'], 'Approved inactivity schema plan');
-        keys(plan.snapshot, ['database', 'user', 'serverUuid', 'serverVersion', 'versionComment', 'history'], 'Approved inactivity target');
+    if (plan?.operation === 'create-inactivity-tables' || plan?.operation === 'create-daily-usage-tables') {
+        const dailyUsage = plan.operation === 'create-daily-usage-tables';
+        const label = dailyUsage ? 'daily usage' : 'inactivity';
+        keys(plan, ['version', 'operation', 'createdAt', 'sourceCommit', 'sqlHashes', 'snapshot', 'safety', 'sha256'], `Approved ${label} schema plan`);
+        keys(plan.snapshot, ['database', 'user', 'serverUuid', 'serverVersion', 'versionComment', 'history',
+            ...(dailyUsage ? ['tables'] : [])], `Approved ${label} target`);
+        if (dailyUsage) {
+            requireThat(Array.isArray(plan.snapshot.tables) && plan.snapshot.tables.length === 2,
+                'Approved daily usage table inventory differs');
+            for (const [index, table] of plan.snapshot.tables.entries()) {
+                keys(table, ['name', 'present'], 'Approved daily usage table');
+                requireThat(table.name === ['parent_child_daily_usage', 'child_daily_usage_withdrawal_receipts'][index]
+                    && typeof table.present === 'boolean', 'Approved daily usage table inventory differs');
+            }
+        }
+        const sqlHashes = dailyUsage
+            ? ['18381cbeb4db9206949a73d9f167c57e6a865679f9ef83dfb8a05c830e7c0f2f',
+                '501ca53cb338161927ae8e33fdb5545ffc3a7476ee72876851804479eacdadaf']
+            : ['bd927931230a1b677b279612c4e1f9958fa80f8bedac614aa4bf84df0a623eff',
+                '67c60d54a5d435a8e8a4204f164943e17c5f2418d7ebea78c4ce5aad439f1add',
+                '66557568ab311ec8165dd47333b14948a1e9699366e2de3a50a8944753a8c0fc',
+                '7de0df0892b38d26c259c6f4daf849338c142cab2df9c7473c063858d39d4b41'];
         const { sha256, ...body } = plan;
         requireThat(SHA.test(confirmation) && sha256 === confirmation && fingerprint(body) === confirmation && plan.version === 1
             && plan.sourceCommit === pins.candidate.deployment.sourceCommit
-            && same(plan.sqlHashes, ['bd927931230a1b677b279612c4e1f9958fa80f8bedac614aa4bf84df0a623eff',
-                '67c60d54a5d435a8e8a4204f164943e17c5f2418d7ebea78c4ce5aad439f1add',
-                '66557568ab311ec8165dd47333b14948a1e9699366e2de3a50a8944753a8c0fc',
-                '7de0df0892b38d26c259c6f4daf849338c142cab2df9c7473c063858d39d4b41'])
+            && same(plan.sqlHashes, sqlHashes)
             && plan.snapshot.database === TARGET.database && plan.snapshot.serverUuid === TARGET.serverUuid && SHA.test(plan.snapshot.history)
             && typeof plan.snapshot.user === 'string' && /^[^\s@'`\x00-\x1f\x7f]+@[^\s@'`\x00-\x1f\x7f]+$/u.test(plan.snapshot.user)
             && plan.snapshot.user !== 'cms_mickeyf@%' && /^8\.0\.31(?:[-.]|$)/u.test(plan.snapshot.serverVersion)
             && typeof plan.snapshot.versionComment === 'string' && plan.snapshot.versionComment.length > 0 && plan.snapshot.versionComment.length <= 255
             && Number.isFinite(instant(plan.createdAt)) && now - instant(plan.createdAt) >= 0 && now - instant(plan.createdAt) <= 300_000
-            && instant(plan.createdAt) >= instant(plan.safety?.observedAt), 'Only the exact fresh approved inactivity plan can reuse its observation');
+            && instant(plan.createdAt) >= instant(plan.safety?.observedAt), `Only the exact fresh approved ${label} plan can reuse its observation`);
         return validateChildMigrationPrerequisiteProof(plan.safety, pins, now, false);
     }
     keys(plan, ['schemaVersion', 'operation', 'createdAt', 'sourceCommit', 'sqlSha256', 'target', 'baseline', 'releaseSafety', 'sha256'], 'Approved child schema plan');
     keys(plan.target, ['project', 'instance', 'database', 'serverUuid'], 'Approved child schema target');
-    keys(plan.baseline, ['identity', 'history', 'capability', 'schemaSha256', 'grantsSha256'], 'Approved child schema baseline');
+    keys(plan.baseline, ['identity', 'history', 'capability', 'runtimeGrantProfile', 'schemaSha256', 'grantsSha256'], 'Approved child schema baseline');
     keys(plan.baseline.identity, ['databaseName', 'currentUser', 'serverUuid', 'serverVersion', 'versionComment'], 'Approved child schema identity');
     const { sha256, ...body } = plan ?? {};
     requireThat(SHA.test(confirmation) && sha256 === confirmation && fingerprint(body) === confirmation
         && plan.schemaVersion === 1 && plan.operation === 'extend-child-signed-form-schema'
         && plan.sourceCommit === pins.candidate.deployment.sourceCommit && plan.sqlSha256 === CHILD_SIGNED_FORM_SQL_SHA256
         && same(plan.target, TARGET) && plan.baseline.capability === 'legacy-us'
+        && plan.baseline.runtimeGrantProfile === reviewedRuntimeProfile(pins.candidate.deployment.providerRelease.runtimeGrantProfile ?? LEGACY_RUNTIME_PROFILE)
         && SHA.test(plan.baseline.schemaSha256) && SHA.test(plan.baseline.grantsSha256)
         && plan.baseline.identity.databaseName === TARGET.database && plan.baseline.identity.serverUuid === TARGET.serverUuid
         && typeof plan.baseline.identity.currentUser === 'string' && /^[^\s@'`\x00-\x1f\x7f]+@[^\s@'`\x00-\x1f\x7f]+$/u.test(plan.baseline.identity.currentUser)

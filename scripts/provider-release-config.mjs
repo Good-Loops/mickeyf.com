@@ -43,8 +43,20 @@ const policyKeys = [...versions, ...noticeNames, ...texts, ...documents];
 const generalPolicyKeys = ['REGISTRATION_GENERAL_AUDIENCE_ENABLED', 'REGISTRATION_GENERAL_AUDIENCE_POLICY_REVIEWED',
     'REGISTRATION_GENERAL_AUDIENCE_POLICY_VERSION'];
 const childPolicyKeys = ['REGISTRATION_AUDIENCE', 'PARENT_SIGNED_FORM_COUNTRIES'];
+const childMaintenanceKeys = ['CHILD_ONLINE_ACTIVITY_ENABLED', 'CHILD_INACTIVITY_ENABLED', 'CHILD_DAILY_USAGE_ENABLED',
+    'CHILD_DAILY_USAGE_RECEIPT_RETENTION_ENABLED', 'PARENT_FORM_RELAY_STATE_ENABLED'];
+const runtimeGrantProfiles = ['google-apple-parent-signed', 'google-apple-parent-signed-recovery',
+    'google-apple-parent-signed-recovery-usage'];
 export const PROVIDER_CREATION_FLAGS = Object.freeze(['REGISTRATION_CREATION_ENABLED', 'PROVIDER_GOOGLE_SIGNUP_ENABLED',
     'PROVIDER_APPLE_SIGNUP_ENABLED', 'PARENT_REGISTRATION_CREATION_ENABLED']);
+
+/** The legacy default does not authorize newly added grants or runtime settings. */
+export function providerRuntimeGrantProfile(config) {
+    const profile = record(config) && Object.hasOwn(config, 'runtimeGrantProfile')
+        ? config.runtimeGrantProfile : 'google-apple-parent-signed';
+    if (!runtimeGrantProfiles.includes(profile)) fail('runtime grant profile must be an exact reviewed profile');
+    return profile;
+}
 
 function document(env, name) {
     try { return JSON.parse(env[name]); } catch { fail(`${name} must be valid JSON`); }
@@ -83,7 +95,10 @@ export function validateAndroidPresenterPins(env, reviewedPins) {
 
 /** Child preparation preserves reviewed login/management while every new-account path is closed. */
 export function providerReleaseEnvironment(config, rollback = false) {
-    keys(config, ['phase', 'environment'], 'configuration');
+    const runtimeProfile = providerRuntimeGrantProfile(config);
+    const childMaintenance = runtimeProfile !== 'google-apple-parent-signed';
+    keys(config, ['phase', 'environment', ...(record(config) && Object.hasOwn(config, 'runtimeGrantProfile') ? ['runtimeGrantProfile'] : []),
+        ...(childMaintenance ? ['noticeVersions'] : [])], 'configuration');
     if (!['prepare', 'prepare-child', 'prepare-adult', 'paused-general', 'active', 'active-adult'].includes(config.phase)) fail('invalid release phase');
     const env = config.environment;
     const adultFirst = ['prepare-adult', 'active-adult'].includes(config.phase);
@@ -91,7 +106,24 @@ export function providerReleaseEnvironment(config, rollback = false) {
     const childAudience = record(env) && childPolicyKeys.some(name => Object.hasOwn(env, name));
     keys(env, [...Object.keys(PROVIDER_FIXED_ENV), ...flags, ...(config.phase !== 'prepare' ? policyKeys : []),
         ...(generalAudience ? generalPolicyKeys : []), ...(childAudience ? childPolicyKeys : []), ...(adultFirst ? ['REGISTRATION_ADULT_ONLY'] : []),
+        ...(childMaintenance ? childMaintenanceKeys : []),
         ...androidEnvironmentKeys.filter(name => record(env) && Object.hasOwn(env, name))], 'environment');
+    if (childMaintenance) {
+        if (!childAudience || config.phase === 'prepare') fail('recovery maintenance requires the explicit child-audience policy');
+        keys(config.noticeVersions, ['privacy', 'signedParentForm'], 'notice versions');
+        const suffix = /^privacy-(\d{4}-\d{2}-\d{2}\.\d+)$/u.exec(config.noticeVersions.privacy)?.[1];
+        if (!suffix || config.noticeVersions.signedParentForm !== `signed-parent-form-${suffix}`) fail('notice and signed form must have matching explicit versions');
+        // This release path prepares maintenance only. Activity, mail and daily collection
+        // require their separately qualified deployment, including secret references.
+        for (const name of ['CHILD_ONLINE_ACTIVITY_ENABLED', 'CHILD_INACTIVITY_ENABLED', 'CHILD_DAILY_USAGE_ENABLED']) {
+            if (env[name] !== 'false') fail(`${name} must remain closed during maintenance preparation`);
+        }
+        if (!['true', 'false'].includes(env.CHILD_DAILY_USAGE_RECEIPT_RETENTION_ENABLED)
+            || env.CHILD_DAILY_USAGE_RECEIPT_RETENTION_ENABLED === 'true' && runtimeProfile !== 'google-apple-parent-signed-recovery-usage') {
+            fail('receipt retention requires the exact usage grant profile');
+        }
+        if (!['0', '1'].includes(env.PARENT_FORM_RELAY_STATE_ENABLED)) fail('parent relay state must be 0 or 1');
+    }
     if (childAudience && (config.phase === 'prepare' || generalAudience || env.REGISTRATION_AUDIENCE !== 'children-included')) {
         fail('children-included registration requires its reviewed staged policy, without general signup');
     }

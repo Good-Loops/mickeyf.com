@@ -58,6 +58,33 @@ test('adult-only creation is explicit, age-screened and incompatible with enabli
     }
 });
 
+test('daily-use opt-in preserves closed registration and independent receipt cleanup on rollback', () => {
+    const ready = { ...productionEnvironment,
+        ACCOUNT_DELETION_ENABLED: 'true', ACCOUNT_DELETION_JOURNAL_BUCKET: DELETION_JOURNAL_BUCKET,
+        ACCOUNT_IDENTITY_EPOCH: '2026-09-12 00:15:39.954172',
+        REGISTRATION_AUDIENCE: 'children-included', REGISTRATION_ENABLED: 'true',
+        REGISTRATION_POLICY_REVIEWED: 'true', REGISTRATION_POLICY_VERSION: 'synthetic-child-v1',
+        REGISTRATION_COUNTRY_RULES: '{"US":{"parentRequiredBelow":13},"BR":{"parentRequiredBelow":18}}',
+        REGISTRATION_CREATION_ENABLED: 'false', PARENT_REGISTRATION_CREATION_ENABLED: 'false',
+        PARENT_REGISTRATION_ENABLED: 'true', PARENT_REGISTRATION_POLICY_REVIEWED: 'true',
+        PARENT_REGISTRATION_POLICY_VERSION: 'synthetic-parent-v1', PARENT_CONSENT_VERSION: 'synthetic-consent-v1',
+        PARENT_CONSENT_TEXT: 'Synthetic parent consent.', PARENT_PRIVACY_NOTICE_URL: 'https://notice.example.test/privacy',
+        PARENT_REGISTRATION_COUNTRIES: '["BR","US"]', PARENT_SIGNED_FORM_COUNTRIES: '["BR","US"]',
+        PARENT_SIGNED_FORMS_ENABLED: 'true', PROVIDER_AUTH_ENABLED: 'true',
+        GOOGLE_WEB_CLIENT_ID: '1234567890-synthetic.apps.googleusercontent.com',
+        APPLE_MAINTENANCE_HTTP_ENABLED: 'true', APPLE_TOKEN_RUNTIME_SECRETS_ENABLED: 'true',
+        APPLE_MAINTENANCE_CALLER_SUBJECT: '123456789012345678901',
+        APPLE_MAINTENANCE_EXPECTED_SERVER_UUID: '12345678-1234-1234-1234-123456789abc',
+        CHILD_DAILY_USAGE_RECEIPT_RETENTION_ENABLED: 'true' };
+    const enabled = loadRuntimeConfig({ ...ready, CHILD_DAILY_USAGE_ENABLED: 'true' });
+    assert.equal(enabled.childDailyUsageEnabled, true);
+    assert.equal(enabled.parentRegistrationPolicy?.creationEnabled, false);
+    assert.equal(enabled.providerAuth.signupEnabled, false);
+    const rollback = loadRuntimeConfig({ ...ready, CHILD_DAILY_USAGE_ENABLED: 'false' });
+    assert.equal(rollback.childDailyUsageEnabled, false);
+    assert.equal(rollback.childDailyUsageReceiptRetentionEnabled, true);
+});
+
 test('production runtime configuration allows only the website, packaged iOS and exact local preview origins', () => {
     const config = loadRuntimeConfig(productionEnvironment);
 

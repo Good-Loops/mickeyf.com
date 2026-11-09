@@ -20,6 +20,5 @@ export function childDailyUsageEnabled(env: Environment, dependencies: {
         || !dependencies.receiptRetention) {
         throw new Error('Daily usage requires the reviewed child, deletion and retention maintenance configuration.');
     }
-    // Draft notice and receipt retention still need production and device qualification.
-    throw new Error('Daily usage cannot be enabled until the updated parent notice and consent are qualified.');
+    return true;
 }

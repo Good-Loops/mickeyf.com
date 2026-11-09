@@ -1,7 +1,7 @@
 // Complete the reviewed provider release with conditional template/traffic writes only.
 import { createChildSchemaVerifier, validateChildSchemaReceipt as validateLiveChildSchemaReceipt } from './child-schema-verifier.mjs';
 export { CHILD_SIGNED_FORM_SQL_SHA256 } from './child-schema-verifier.mjs';
-import { providerReleaseEnvironment } from './provider-release-config.mjs';
+import { providerReleaseEnvironment, providerRuntimeGrantProfile } from './provider-release-config.mjs';
 import { SERVICE, PROJECT, REGION, IMAGE, REVISION_TYPE, fingerprint, revisionConfiguration, serviceConfiguration,
     sessionRevisionName, validateService, validateProviderRevision, trafficShape, createSessionCloudProvider,
     createCloudRequest } from './frozen-backend-traffic.mjs';
@@ -34,9 +34,11 @@ export function validateProviderActivationPins(pins) {
     const active = providerReleaseEnvironment(pins.activeConfiguration);
     requireThat(['active', 'active-adult'].includes(pins.activeConfiguration.phase), 'Activation requires an active policy');
     const closed = pins.closed.candidate.deployment.providerRelease;
+    const matchingRuntime = providerRuntimeGrantProfile(closed) === providerRuntimeGrantProfile(pins.activeConfiguration)
+        && same(closed.noticeVersions ?? null, pins.activeConfiguration.noticeVersions ?? null);
     if (adultFirst) {
         const matchingPreparation = closed.phase === 'prepare-adult'
-            && same(providerReleaseEnvironment(closed), providerReleaseEnvironment(pins.activeConfiguration, true));
+            && same(providerReleaseEnvironment(closed), providerReleaseEnvironment(pins.activeConfiguration, true)) && matchingRuntime;
         // Schema maintenance closes every signup path. Reopen only the exact adult
         // policy bound to the captured pre-maintenance revision, never a new policy.
         const restorePreviousAdult = closed.phase === 'prepare-child'
@@ -46,7 +48,8 @@ export function validateProviderActivationPins(pins) {
             'Adult activation requires matching adult preparation or the exact captured previous adult policy');
     } else if (child) {
         requireThat(closed.phase === 'prepare-child'
-            && same(providerReleaseEnvironment(closed), providerReleaseEnvironment(pins.activeConfiguration, true)),
+            && same(providerReleaseEnvironment(closed), providerReleaseEnvironment(pins.activeConfiguration, true))
+            && matchingRuntime,
         'Child activation requires the exact matching reviewed creation-closed child preparation');
         validateChildSchemaReceipt(pins.childSchemaReceipt, pins);
     } else {
@@ -59,7 +62,8 @@ export function validateProviderActivationPins(pins) {
 
 /** A reviewed input, not live proof: apply separately requires the real metadata verifier. */
 export function validateChildSchemaReceipt(receipt, pins, now) {
-    return validateLiveChildSchemaReceipt(receipt, pins.closed.candidate.deployment.sourceCommit, now);
+    return validateLiveChildSchemaReceipt(receipt, pins.closed.candidate.deployment.sourceCommit, now,
+        providerRuntimeGrantProfile(pins.closed.candidate.deployment.providerRelease));
 }
 function freshChildSchema(pins, now) {
     if (pins.childSchemaReceipt) validateChildSchemaReceipt(pins.childSchemaReceipt, pins, now);

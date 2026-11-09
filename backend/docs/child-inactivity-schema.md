@@ -8,7 +8,8 @@ before DDL. The same source and release checks are repeated immediately before
 the changes. Registration remains closed while this operation is prepared.
 
 Using the existing private, authenticated local SQL proxy and the same
-`MIGRATION_*` target confirmations and `CHILD_SIGNED_FORM_SOURCE_COMMIT`
+`MIGRATION_*` target confirmations, `CHILD_SIGNED_FORM_SOURCE_COMMIT` and
+explicit `CHILD_SIGNED_FORM_RUNTIME_GRANT_PROFILE`
 required for the signed-form operation, generate a private plan:
 
 ```powershell

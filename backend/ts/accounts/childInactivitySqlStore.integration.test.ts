@@ -876,7 +876,7 @@ test('schema plan creates the four reviewed tables and holds partial DDL or chan
             await connection.query(`INSERT INTO schema_migrations SELECT * FROM mickeyf_migration_test.schema_migrations`);
             const [[identity]] = await connection.query<RowDataPacket[]>('SELECT CURRENT_USER() AS user,@@GLOBAL.server_uuid AS uuid,@@version AS version,@@version_comment AS comment');
             const target = { project: 'synthetic', instance: 'synthetic', database: db, serverUuid: identity.uuid as string };
-            const settings = { target, expectedCurrentUser: identity.user, expectedServerVersion: identity.version,
+            const settings = { target, runtimeGrantProfile: 'google-apple-parent-signed', expectedCurrentUser: identity.user, expectedServerVersion: identity.version,
                 expectedVersionComment: identity.comment } as ChildSignedFormMetadataSettings;
             const source = { sourceCommit: 'a'.repeat(40), sqlSha256: CHILD_SIGNED_FORM_SQL_SHA256 };
             const at = Date.now(), observedAt = new Date(at).toISOString(), hash = 'b'.repeat(64);

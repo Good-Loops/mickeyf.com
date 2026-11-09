@@ -3,7 +3,8 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import test from 'node:test';
-import { observeChildSignedFormMetadata, createChildSignedFormSchemaReceipt } from './childSignedFormMetadata';
+import { observeChildSignedFormMetadata, createChildSignedFormSchemaReceipt,
+    type ChildSignedFormRuntimeGrantProfile } from './childSignedFormMetadata';
 import { fixture, settings, legacyCheck } from './childSignedFormMetadata.testFixture';
 
 const sqlSha256 = createHash('sha256').update(readFileSync(path.resolve(__dirname,
@@ -39,6 +40,38 @@ test('identity/version/account mismatch stops before history or schema/grant ins
         { serverVersion: '8.0.32' }, { versionComment: 'Unreviewed vendor' }]) {
         const f = fixture(); Object.assign(f.identity, patch);
         await assert.rejects(observeChildSignedFormMetadata(f.connection, settings), /does not match/u); assert.equal(f.calls.length, 1);
+    }
+});
+
+test('metadata and receipts bind the exact reviewed profile without accepting missing or extra recovery/usage grants', async () => {
+    const profiles: ChildSignedFormRuntimeGrantProfile[] = ['google-apple-parent-signed',
+        'google-apple-parent-signed-recovery', 'google-apple-parent-signed-recovery-usage'];
+    const grants = new Set<string>(), schemas = new Set<string>();
+    for (const actual of profiles) {
+        for (const expected of profiles) {
+            const f = fixture(true, actual);
+            const observation = observeChildSignedFormMetadata(f.connection, { ...settings, runtimeGrantProfile: expected });
+            if (expected !== actual) await assert.rejects(observation, /does not match/u);
+            else {
+                const snapshot = await observation;
+                const receipt = createChildSignedFormSchemaReceipt(snapshot, source);
+                assert.equal(snapshot.runtimeGrantProfile, expected); assert.equal(receipt.runtimeGrantProfile, expected);
+                grants.add(snapshot.grantsSha256); schemas.add(snapshot.schemaSha256);
+            }
+        }
+        const f = fixture(true, actual);
+        f.grants.global = [{ privilegeType: 'SELECT', isGrantable: 'NO' }];
+        await assert.rejects(observeChildSignedFormMetadata(f.connection, { ...settings, runtimeGrantProfile: actual }), /does not match/u);
+    }
+    assert.equal(grants.size, 3); assert.equal(schemas.size, 1);
+});
+
+test('missing or unreviewed profile fails before issuing any SQL', async () => {
+    for (const runtimeGrantProfile of [undefined, 'auto', 'google', 'google-apple-parent-signed-warnings']) {
+        const f = fixture();
+        await assert.rejects(observeChildSignedFormMetadata(f.connection,
+            { ...settings, runtimeGrantProfile: runtimeGrantProfile as ChildSignedFormRuntimeGrantProfile }), /does not match/u);
+        assert.equal(f.calls.length, 0);
     }
 });
 

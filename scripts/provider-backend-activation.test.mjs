@@ -341,7 +341,7 @@ test('receipt-shaped input alone cannot authorize a strict write without fresh m
     }
     assert.equal(f.patches.length,0);
     const adapter=createProviderActivationCloudProvider('synthetic-token-with-sufficient-length',async()=>assert.fail('No cloud request needed'),
-        { verifyChildSchema: createChildSchemaVerifier({ environment: () => ({}) }) });
+        { verifyChildSchema: createChildSchemaVerifier({ environment: () => ({}), now: () => when }) });
     await assert.rejects(adapter.verifyChildSchemaReceipt(plan.pins.childSchemaReceipt),/not configured/);
 });
 
@@ -585,4 +585,34 @@ for (const {retireUnrouted,child} of [{retireUnrouted:false,child:false},{retire
         await assert.rejects(provider.assertSourceQualified(sourcePins), /listing|pagination/);
     }
     assert.equal(calls.filter(call => call.method === 'PATCH').length, 4);
+});
+
+test('maintenance activation binds exact runtime grant profile and matching notice versions', () => {
+    const f = activationFixture({ child: true });
+    const preparation = JSON.parse(readFileSync(new URL('./provider-release-us-br.json', import.meta.url), 'utf8'));
+    f.activationPins.closed.candidate.deployment.providerRelease = preparation;
+    f.activationPins.activeConfiguration = structuredClone(preparation);
+    f.activationPins.activeConfiguration.phase = 'active';
+    for (const name of ['REGISTRATION_CREATION_ENABLED', 'PROVIDER_GOOGLE_SIGNUP_ENABLED',
+        'PROVIDER_APPLE_SIGNUP_ENABLED', 'PARENT_REGISTRATION_CREATION_ENABLED']) {
+        f.activationPins.activeConfiguration.environment[name] = 'true';
+    }
+    f.activationPins.childSchemaReceipt.runtimeGrantProfile = preparation.runtimeGrantProfile;
+    assert.doesNotThrow(() => validateProviderActivationPins(f.activationPins));
+    for (const change of [
+        p => { p.childSchemaReceipt.runtimeGrantProfile = 'google-apple-parent-signed'; },
+        p => { p.childSchemaReceipt.runtimeGrantProfile = 'google-apple-parent-signed-recovery'; },
+        p => { p.activeConfiguration.runtimeGrantProfile = 'google-apple-parent-signed-recovery';
+            p.activeConfiguration.environment.CHILD_DAILY_USAGE_RECEIPT_RETENTION_ENABLED = 'false'; },
+        p => { p.activeConfiguration.noticeVersions = { privacy: 'privacy-2026-11-08.1', signedParentForm: 'signed-parent-form-2026-11-08.1' }; },
+    ]) {
+        const changed = structuredClone(f.activationPins); change(changed);
+        assert.throws(() => validateProviderActivationPins(changed));
+    }
+    const template = activeRevisionTemplate(f.candidate, f.activationPins, true);
+    const environment = Object.fromEntries(template.containers[0].env.map(e => [e.name, e.value]));
+    assert.equal(environment.CHILD_DAILY_USAGE_RECEIPT_RETENTION_ENABLED, 'true');
+    assert.equal(environment.PARENT_REGISTRATION_CREATION_ENABLED, 'false');
+    assert.equal(environment.CHILD_DAILY_USAGE_ENABLED, 'false');
+    assert.equal(environment.CHILD_INACTIVITY_ENABLED, 'false');
 });

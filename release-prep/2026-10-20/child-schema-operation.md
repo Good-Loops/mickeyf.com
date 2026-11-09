@@ -77,6 +77,19 @@ fallback and rejects the runtime account as operator. Required environment names
   `MIGRATION_CONFIRM_VERSION_COMMENT` from independently reviewed target metadata.
   The server UUID must equal the source pin; the version must be the reviewed8.0.31.
 - `CHILD_SIGNED_FORM_SOURCE_COMMIT` equal to the complete clean HEAD/candidate SHA.
+- `CHILD_SIGNED_FORM_RUNTIME_GRANT_PROFILE` equal to the exact reviewed current
+  grant inventory: `google-apple-parent-signed`,
+  `google-apple-parent-signed-recovery`, or
+  `google-apple-parent-signed-recovery-usage`. There is no automatic discovery or
+  superset acceptance. The observed profile is bound into the plan and receipt;
+  activation also requires it to match the reviewed deployment configuration.
+
+The shared inactivity-schema, inactivity-review and signed-form-retention CLIs
+require the same explicit profile input. Retention reports remain read-only;
+this setting only selects the exact expected runtime privileges. Keep existing
+operators on their pinned source and update their profile when adopting this
+source. For the recovery-enabled registration cutover, verify `...-recovery`
+before applying daily-use grants, then verify `...-recovery-usage` afterward.
 
 Do not paste credentials into chat, a command argument, a committed file or an
 output log. Private environment provisioning is separate from these commands.

@@ -14,7 +14,7 @@ const environment = { MIGRATION_DB_HOST: '127.0.0.1', MIGRATION_DB_PORT: '13307'
     MIGRATION_CONFIRM_CLOUD_SQL_INSTANCE: PRODUCTION_CLOUD_SQL_TARGET.instance,
     MIGRATION_CONFIRM_CLOUD_SQL_CONNECTION_NAME: PRODUCTION_CLOUD_SQL_TARGET.connectionName,
     MIGRATION_CONFIRM_SERVER_VERSION: '8.0.31-google', MIGRATION_CONFIRM_VERSION_COMMENT: 'Synthetic test only',
-    CHILD_SIGNED_FORM_SOURCE_COMMIT: sourceCommit };
+    CHILD_SIGNED_FORM_SOURCE_COMMIT: sourceCommit, CHILD_SIGNED_FORM_RUNTIME_GRANT_PROFILE: 'google-apple-parent-signed' };
 const input = () => Readable.from([JSON.stringify({ references: [reference] })]);
 const report: SignedParentFormRetentionReport = { schemaVersion: 1, operation: 'observe-signed-parent-form-retention',
     sourceCommit, observedAt: '2026-10-21T12:00:00.000Z', target: { project: PRODUCTION_CLOUD_SQL_TARGET.project,
@@ -37,7 +37,9 @@ test('CLI has no filesystem/SQL/target/mutation argument and validates stdin bef
 test('real settings parser rejects missing/foreign production confirmations before a connection', async () => {
     for (const env of [{}, { ...environment, MIGRATION_DB_NAME: 'test' },
         { ...environment, MIGRATION_CONFIRM_SERVER_UUID: 'wrong' }, { ...environment, MIGRATION_DB_HOST: 'remote' },
-        { ...environment, MIGRATION_CONFIRM_ACCOUNT: 'other@%' }, { ...environment, CHILD_SIGNED_FORM_SOURCE_COMMIT: 'main' }]) {
+        { ...environment, MIGRATION_CONFIRM_ACCOUNT: 'other@%' }, { ...environment, CHILD_SIGNED_FORM_SOURCE_COMMIT: 'main' },
+        { ...environment, CHILD_SIGNED_FORM_RUNTIME_GRANT_PROFILE: undefined },
+        { ...environment, CHILD_SIGNED_FORM_RUNTIME_GRANT_PROFILE: 'auto' }]) {
         await assert.rejects(runSignedParentFormRetention([], env, { input: input(), connect() { assert.fail('must not connect'); } }),
             { message: SIGNED_FORM_RETENTION_FAILURE });
     }
@@ -56,6 +58,7 @@ test('fixed source/account/target settings reach observer; dedicated session clo
         }, async observe(deps, refs) {
             events.push('observe'); assert.deepEqual(refs, [reference]); assert.deepEqual(deps.settings.target, report.target);
             assert.equal(deps.settings.expectedCurrentUser, 'reviewed_owner@%'); assert.equal(deps.source.sourceCommit, sourceCommit);
+            assert.equal(deps.settings.runtimeGrantProfile, environment.CHILD_SIGNED_FORM_RUNTIME_GRANT_PROFILE);
             deps.assertSource?.(); return report;
         }, write(text) { events.push('stdout'); output += text; } });
     assert.deepEqual(events, ['source', 'connect', 'observe', 'source', 'close', 'stdout']);

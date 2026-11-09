@@ -10,6 +10,8 @@ import { CHILD_SIGNED_FORM_SQL_SHA256, ChildSignedFormOperationError,
     planChildSignedFormOperation, applyChildSignedFormOperation, verifyChildSignedFormOperation,
     type ChildSignedFormOperationDependencies, type ChildSignedFormPlan, type ChildReleaseSafety } from './childSignedFormOperation';
 import type { InactivitySchemaPlan } from './childInactivitySchemaOperation';
+import type { DailyUsageSchemaPlan } from './childDailyUsageSchemaOperation';
+import { parseChildSignedFormRuntimeGrantProfile } from './childSignedFormMetadata';
 
 const BACKEND = path.resolve(__dirname, '../..');
 const ROOT = path.resolve(BACKEND, '..');
@@ -46,7 +48,8 @@ export function childSchemaCommandSettings(env: Environment) {
     const sourceCommit = env.CHILD_SIGNED_FORM_SOURCE_COMMIT ?? '';
     if (!/^[a-f0-9]{40}$/u.test(sourceCommit)) throw new Error(PRIVATE_FAILURE);
     return { config, source: { sourceCommit, sqlSha256: CHILD_SIGNED_FORM_SQL_SHA256 },
-        settings: { target, expectedCurrentUser: currentUser, expectedServerVersion: env.MIGRATION_CONFIRM_SERVER_VERSION!,
+        settings: { target, runtimeGrantProfile: parseChildSignedFormRuntimeGrantProfile(env.CHILD_SIGNED_FORM_RUNTIME_GRANT_PROFILE),
+            expectedCurrentUser: currentUser, expectedServerVersion: env.MIGRATION_CONFIRM_SERVER_VERSION!,
             expectedVersionComment: env.MIGRATION_CONFIRM_VERSION_COMMENT } };
 }
 
@@ -60,7 +63,7 @@ export function childSchemaPrerequisiteEnvironment(env: Environment): NodeJS.Pro
     return filtered;
 }
 
-export function readChildSchemaPrerequisites(pinsPath: string, approvedPlan?: ChildSignedFormPlan | InactivitySchemaPlan,
+export function readChildSchemaPrerequisites(pinsPath: string, approvedPlan?: ChildSignedFormPlan | InactivitySchemaPlan | DailyUsageSchemaPlan,
     env: Environment = process.env, run = spawnSync): ChildReleaseSafety {
     const pins = path.resolve(pinsPath);
     const file = lstatSync(pins);

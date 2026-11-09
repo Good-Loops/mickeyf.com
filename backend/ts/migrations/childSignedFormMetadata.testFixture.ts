@@ -2,26 +2,27 @@ import assert from 'node:assert/strict';
 import type { MigrationConnection } from './leaderboardSchema';
 import { loadMigrationManifest } from './migrationManifest';
 import { runtimeColumnPrivilegeInventory, runtimeTablePrivilegeInventory } from '../security/runtimeGrantManifest';
-import type { ChildSignedFormMetadataSettings } from './childSignedFormMetadata';
+import type { ChildSignedFormMetadataSettings, ChildSignedFormRuntimeGrantProfile } from './childSignedFormMetadata';
 
 // Synthetic SQL metadata only: this helper never connects to a database or proves cloud/source identity.
 export const settings: ChildSignedFormMetadataSettings = { target: { project: 'synthetic-project', instance: 'local-mysql',
     database: 'mickeyf_migration_test', serverUuid: 'aaaaaaaa-bbbb-4ccc-8ddd-eeeeeeeeeeee' },
+    runtimeGrantProfile: 'google-apple-parent-signed',
     expectedCurrentUser: 'root@%', expectedServerVersion: '8.0.31', expectedVersionComment: 'MySQL Community Server - GPL' };
 export const legacyCheck = "((country_code='US')and(public_approvedin(0,1))and(public_withdrawnin(0,1))and((public_approved=0)or(public_policy_digestisnotnull))and(((status='pending')and(reviewed_atisnull)and(reviewerisnull)and(form_sha256isnull)and(child_uuidisnull)and(public_approved=0))or((statusin('approved','rejected'))and(reviewed_atisnotnull)and(reviewerisnotnull)and(form_sha256isnotnull)and(child_uuidisnull))or((status='used')and(reviewed_atisnotnull)and(reviewerisnotnull)and(form_sha256isnotnull)and(child_uuidisnotnull))))";
 
-export function fixture(extended = true) {
+export function fixture(extended = true, runtimeGrantProfile: ChildSignedFormRuntimeGrantProfile = settings.runtimeGrantProfile) {
     const identity = { databaseName: settings.target.database, currentUser: settings.expectedCurrentUser,
         serverUuid: settings.target.serverUuid, serverVersion: settings.expectedServerVersion, versionComment: settings.expectedVersionComment };
     const history = loadMigrationManifest().map(migration => ({ version: migration.version, checksum: Buffer.from(migration.checksum) }));
-    const inventory = runtimeColumnPrivilegeInventory('google-apple-parent-signed');
+    const inventory = runtimeColumnPrivilegeInventory(runtimeGrantProfile);
     const privileges = (items: readonly object[]) => items.map(item => ({ schemaName: settings.target.database, ...item, isGrantable: 'NO' }));
     const grants: Record<string, unknown> = {
         identity: [{ ...identity, mandatoryRoles: '', activateAllRolesOnLogin: 0, partialRevokes: 0 }],
         account: [{ exactAccountCount: 1, accountNameCount: 1, accountLocked: 'N', passwordExpired: 'N', hasPrivilegeRestrictions: 0 }],
         columns: inventory.map(({ tableName, columnName }) => ({ tableName, columnName })),
         global: [{ privilegeType: 'USAGE', isGrantable: 'NO' }],
-        column: privileges(inventory), table: privileges(runtimeTablePrivilegeInventory('google-apple-parent-signed')),
+        column: privileges(inventory), table: privileges(runtimeTablePrivilegeInventory(runtimeGrantProfile)),
         'maintenance-process-privilege': [{ processPrivilegeProof: 1 }],
         'static-global-columns': [{ columnName: 'Select_priv' }, { columnName: 'Process_priv' }],
         'static-global-values': [{ Select_priv: 'N', Process_priv: 'N' }],

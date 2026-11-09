@@ -9,7 +9,7 @@ import { PROJECT, REGION, SERVICE, fingerprint, sessionRevisionName } from './fr
 import { PROVIDER_FIXED_ENV } from './provider-release-config.mjs';
 import { rollbackRevisionName } from './session-backend-traffic.mjs';
 import { CHILD_SIGNED_FORM_SQL_SHA256, createChildSchemaVerifier, childSchemaVerificationEnvironment,
-    createChildMigrationPrerequisiteReader, validateChildMigrationPrerequisiteProof } from './child-schema-verifier.mjs';
+    createChildMigrationPrerequisiteReader, validateChildMigrationPrerequisiteProof, validateChildSchemaReceipt } from './child-schema-verifier.mjs';
 
 const source = 'a'.repeat(40), uuid = PROVIDER_FIXED_ENV.APPLE_MAINTENANCE_EXPECTED_SERVER_UUID;
 function receipt() {
@@ -63,6 +63,30 @@ test('SQL adapter refuses missing/foreign configuration and never logs private s
         const verify = createChildSchemaVerifier({ environment: privateEnvironment, now: () => fixtureNow, run: () => result });
         await assert.rejects(verify(receipt()), error => /private process output was not logged/.test(error.message)
             && !error.message.includes('synthetic-private-value'));
+    }
+});
+
+test('reviewed profile controls receipt validation and subprocess grants, ignoring ambient profile overrides', async () => {
+    for (const runtimeGrantProfile of ['google-apple-parent-signed-recovery', 'google-apple-parent-signed-recovery-usage']) {
+        const expected = { ...receipt(), runtimeGrantProfile };
+        assert.throws(() => validateChildSchemaReceipt(expected, source, fixtureNow), /differs/u);
+        assert.equal(validateChildSchemaReceipt(expected, source, fixtureNow, runtimeGrantProfile), expected);
+        const verify = createChildSchemaVerifier({
+            environment: () => ({ ...privateEnvironment(), CHILD_SIGNED_FORM_RUNTIME_GRANT_PROFILE: 'google' }), now: () => fixtureNow,
+            run: (_file, _args, options) => {
+                assert.equal(options.env.CHILD_SIGNED_FORM_RUNTIME_GRANT_PROFILE, runtimeGrantProfile);
+                return { status: 0, stdout: JSON.stringify(expected) };
+            },
+        });
+        assert.deepEqual(await verify(expected), expected);
+        const wrong = createChildSchemaVerifier({ environment: privateEnvironment, now: () => fixtureNow,
+            run: () => ({ status: 0, stdout: JSON.stringify(receipt()) }) });
+        await assert.rejects(wrong(expected), /differs/u);
+    }
+    for (const runtimeGrantProfile of [undefined, 'auto', 'google', 'google-apple-parent-signed-warnings']) {
+        const verify = createChildSchemaVerifier({ environment: privateEnvironment, now: () => fixtureNow,
+            run: () => { assert.fail('invalid profile must not start a subprocess'); } });
+        await assert.rejects(verify({ ...receipt(), runtimeGrantProfile }), /not reviewed/u);
     }
 });
 
@@ -135,7 +159,8 @@ function approvedPlan(proof, now) {
         baseline: { identity: { databaseName: 'cms', currentUser: 'synthetic-admin@%', serverUuid: uuid,
             serverVersion: '8.0.31', versionComment: 'Synthetic test only' },
             history: Array.from({ length: 26 }, (_, i) => ({ version: `${String(i + 1).padStart(4, '0')}_synthetic`, checksumSha256: 'a'.repeat(64) })),
-            capability: 'legacy-us', schemaSha256: 'b'.repeat(64), grantsSha256: 'c'.repeat(64) }, releaseSafety: proof };
+            capability: 'legacy-us', runtimeGrantProfile: 'google-apple-parent-signed',
+            schemaSha256: 'b'.repeat(64), grantsSha256: 'c'.repeat(64) }, releaseSafety: proof };
     plan.sha256 = fingerprint(plan);
     return plan;
 }
@@ -175,6 +200,30 @@ test('inactivity schema recheck accepts all four actual DDL files and rejects in
         const changed = { ...body, sqlHashes: hashes };
         const bad = { ...changed, sha256: fingerprint(changed) };
         await assert.rejects(f.reader.read(f.pins, { approvedPlan: bad, confirmation: bad.sha256 }), /approved inactivity/u);
+    }
+});
+
+test('daily usage schema recheck binds the two actual SQL files and exact observed table inventory', async () => {
+    const f = cloudFixture(), safety = await f.reader.read(f.pins);
+    const sqlHashes = await Promise.all(['draft_parent_child_daily_usage.sql',
+        'draft_child_daily_usage_withdrawal_receipts.sql'].map(async name => createHash('sha256')
+        .update(await readFile(new URL(`../backend/migrations/pending/${name}`, import.meta.url))).digest('hex')));
+    const body = { version: 1, operation: 'create-daily-usage-tables', createdAt: new Date(f.clock.now).toISOString(),
+        sourceCommit: safety.sourceCommit, sqlHashes,
+        snapshot: { database: 'cms', user: 'synthetic-admin@%', serverUuid: uuid, serverVersion: '8.0.31',
+            versionComment: 'Synthetic', history: 'a'.repeat(64), tables: [
+                { name: 'parent_child_daily_usage', present: true }, { name: 'child_daily_usage_withdrawal_receipts', present: false },
+            ] }, safety };
+    const plan = { ...body, sha256: fingerprint(body) };
+    await f.reader.read(f.pins, { approvedPlan: plan, confirmation: plan.sha256 });
+    assert.equal(f.clock.sleeps.length, 6);
+    for (const change of [b => { b.sqlHashes.reverse(); }, b => { b.sqlHashes[0] = 'f'.repeat(64); },
+        b => { b.sqlHashes.pop(); }, b => { b.snapshot.tables.reverse(); }, b => { b.snapshot.tables.pop(); },
+        b => { b.snapshot.tables[0].present = 1; }, b => { b.snapshot.tables[0].extra = true; },
+        b => { b.operation = 'create-inactivity-tables'; }]) {
+        const changed = structuredClone(body); change(changed);
+        const bad = { ...changed, sha256: fingerprint(changed) };
+        await assert.rejects(f.reader.read(f.pins, { approvedPlan: bad, confirmation: bad.sha256 }), /Approved|approved/u);
     }
 });
 
@@ -244,7 +293,8 @@ test('only a fresh entire approved plan can reuse the bound watch; material drif
     await assert.rejects(f.reader.read(f.pins, { approvedPlan: { ...plan, createdAt: new Date(f.clock.now + 1).toISOString() }, confirmation: plan.sha256 }), /operator-approved/);
     await assert.rejects(f.reader.read(f.pins, { confirmation: plan.sha256 }), /standalone/);
     for (const alter of [p => { delete p.baseline; }, p => { p.sourceCommit = 'f'.repeat(40); }, p => { p.target.database = 'other'; },
-        p => { p.baseline.history.pop(); }, p => { p.baseline.identity.serverUuid = 'wrong'; }, p => { p.createdAt = proof.readerSince; }]) {
+        p => { p.baseline.history.pop(); }, p => { p.baseline.identity.serverUuid = 'wrong'; }, p => { p.createdAt = proof.readerSince; },
+        p => { p.baseline.runtimeGrantProfile = 'google-apple-parent-signed-recovery'; }]) {
         const changed = structuredClone(plan); alter(changed);
         const { sha256: _old, ...body } = changed; changed.sha256 = fingerprint(body);
         await assert.rejects(f.reader.read(f.pins, { approvedPlan: changed, confirmation: changed.sha256 }), /Approved|operator-approved|predates/);
