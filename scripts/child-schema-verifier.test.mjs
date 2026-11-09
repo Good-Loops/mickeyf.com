@@ -118,6 +118,18 @@ function cloudFixture() {
         'd71109da-8350-4f2f-a3be-2053bb6ccd45', 'ef5a2981-95be-4f4d-af91-f997fde73356',
         'eb4a2af9-2d5b-45a2-aba8-63778520566e', 'a0bbef22-8fad-40b1-ab8a-30337488b450',
         '850e052f-be82-4069-824d-2d36ba294a21'].map(id => ({ id, disabled: true }));
+    for (const [id, ref] of [['9b7dec29-ddbf-43a8-af85-d2ee1deabd4c', 'refs/heads/feat/child-registration-production'],
+        ['77ea0cc4-15a2-41bd-bafc-79fad4cfb1ce', 'refs/heads/codex/ludolume-recovery-cleanup']]) {
+        const uri = 'https://github.com/Good-Loops/mickeyf.com';
+        triggers.push({ id, disabled: true, approvalConfig: { approvalRequired: true },
+            serviceAccount: `projects/${PROJECT}/serviceAccounts/cloud-build@${PROJECT}.iam.gserviceaccount.com`,
+            sourceToBuild: { ref, repoType: 'GITHUB', uri },
+            gitFileSource: { path: 'cloudbuild.candidate.yaml', repoType: 'GITHUB', revision: ref, uri } });
+    }
+    triggers.push({ id: '9df2169c-1d44-41b2-a143-b8a935ae6758', disabled: true,
+        approvalConfig: { approvalRequired: true },
+        serviceAccount: `projects/${PROJECT}/serviceAccounts/mickeyf-backend-deploy@${PROJECT}.iam.gserviceaccount.com`,
+        build: { steps: [{ id: 'Synthetic historical deploy configuration; never run by this reader' }] } });
     const instance = { name: 'cms-mickeyf', project: PROJECT, region: REGION, connectionName: `${PROJECT}:${REGION}:cms-mickeyf`,
         databaseVersion: 'MYSQL_8_0_31', state: 'RUNNABLE', settings: { settingsVersion: '1', deletionProtectionEnabled: true,
             availabilityType: 'REGIONAL', backupConfiguration: { enabled: true, binaryLogEnabled: true,
@@ -285,6 +297,25 @@ test('reader rejects incomplete/enabled automation, ongoing operations and stale
     for (const change of changes) {
         const f = cloudFixture(); change(f);
         await assert.rejects(f.reader.read(f.pins), /triggers|builds|operations|protection|backup|PITR/);
+    }
+});
+
+test('the three reviewed manual triggers must stay paused, approval-gated and free of event-driven execution', async () => {
+    const ids = ['9b7dec29-ddbf-43a8-af85-d2ee1deabd4c', '77ea0cc4-15a2-41bd-bafc-79fad4cfb1ce',
+        '9df2169c-1d44-41b2-a143-b8a935ae6758'];
+    for (const id of ids) {
+        for (const change of [t => { t.disabled = false; }, t => { t.approvalConfig.approvalRequired = false; },
+            t => { t.github = { push: { branch: '^main$' } }; }, t => { t.pubsubConfig = { topic: 'unexpected' }; },
+            t => { t.eventType = 'REPO'; }, t => { t.serviceAccount = 'unexpected'; }]) {
+            const f = cloudFixture(); change(f.triggers.find(t => t.id === id));
+            await assert.rejects(f.reader.read(f.pins), /reviewed global triggers/u);
+        }
+    }
+    for (const change of [t => { t.gitFileSource.path = 'cloudbuild.deploy.yaml'; },
+        t => { t.sourceToBuild.uri = 'https://github.com/other/repository'; },
+        t => { t.sourceToBuild.ref = 'refs/heads/main'; }, t => { t.build = { steps: [] }; }]) {
+        const f = cloudFixture(); change(f.triggers.find(t => t.id === ids[0]));
+        await assert.rejects(f.reader.read(f.pins), /reviewed global triggers/u);
     }
 });
 

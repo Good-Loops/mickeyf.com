@@ -109,7 +109,28 @@ const TRIGGERS = ['9fbd63bf-d129-4877-bb26-26d38e1ca468', '181b8f84-2303-4c2b-a0
     '1c9c6502-f53f-4e04-ac9e-06bf49668acf', '648fadca-3cd1-4b57-9d35-0f62a1468443',
     'd71109da-8350-4f2f-a3be-2053bb6ccd45', 'ef5a2981-95be-4f4d-af91-f997fde73356',
     'eb4a2af9-2d5b-45a2-aba8-63778520566e', 'a0bbef22-8fad-40b1-ab8a-30337488b450',
-    '850e052f-be82-4069-824d-2d36ba294a21'].sort();
+    '850e052f-be82-4069-824d-2d36ba294a21', '9b7dec29-ddbf-43a8-af85-d2ee1deabd4c',
+    '77ea0cc4-15a2-41bd-bafc-79fad4cfb1ce', '9df2169c-1d44-41b2-a143-b8a935ae6758'].sort();
+const MANUAL_IMAGE_TRIGGERS = {
+    '9b7dec29-ddbf-43a8-af85-d2ee1deabd4c': ['refs/heads/feat/privacy-data-review', 'refs/heads/feat/child-registration-production'],
+    '77ea0cc4-15a2-41bd-bafc-79fad4cfb1ce': ['refs/heads/codex/ludolume-recovery-cleanup'],
+};
+function reviewedPausedManualTrigger(trigger) {
+    const refs = MANUAL_IMAGE_TRIGGERS[trigger.id];
+    const deployment = trigger.id === '9df2169c-1d44-41b2-a143-b8a935ae6758';
+    if (!refs && !deployment) return true;
+    if (['triggerTemplate', 'github', 'pubsubConfig', 'webhookConfig', 'bitbucketServerTriggerConfig',
+        'repositoryEventConfig', 'developerConnectEventConfig', 'filename', 'autodetect'].some(key => Object.hasOwn(trigger, key))
+        || !same(trigger.approvalConfig, { approvalRequired: true })
+        || trigger.eventType !== undefined && trigger.eventType !== 'MANUAL'
+        || trigger.serviceAccount !== `projects/${PROJECT}/serviceAccounts/${deployment ? 'mickeyf-backend-deploy' : 'cloud-build'}@${PROJECT}.iam.gserviceaccount.com`) return false;
+    if (deployment) return !Object.hasOwn(trigger, 'sourceToBuild') && !Object.hasOwn(trigger, 'gitFileSource')
+        && trigger.build && typeof trigger.build === 'object' && !Array.isArray(trigger.build);
+    const ref = trigger.sourceToBuild?.ref, uri = 'https://github.com/Good-Loops/mickeyf.com';
+    return !Object.hasOwn(trigger, 'build') && refs.includes(ref)
+        && same(trigger.sourceToBuild, { ref, repoType: 'GITHUB', uri })
+        && same(trigger.gitFileSource, { path: 'cloudbuild.candidate.yaml', repoType: 'GITHUB', revision: ref, uri });
+}
 const DRAIN_MS = 300_000;
 const PROOF_FIELDS = ['schemaVersion', 'operation', 'observedAt', 'sourceCommit', 'sqlSha256', 'target',
     'pinsSha256', 'serviceSha256', 'candidateSha256', 'fallbackSha256', 'readerSince', 'readerVerifiedAt',
@@ -243,9 +264,10 @@ export function createChildMigrationPrerequisiteReader(token, fetcher = fetch, {
             list('https://cloudbuild.googleapis.com/v1/', `${global}/builds?filter=${activeFilter}&pageSize=100`, 'builds', []),
             list('https://cloudbuild.googleapis.com/v1/', `${regional}/builds?filter=${activeFilter}&pageSize=100`, 'builds', []),
         ]);
-        requireThat(same(triggers.map(item => item?.id).sort(), TRIGGERS) && triggers.every(item => item.disabled === true)
+        requireThat(same(triggers.map(item => item?.id).sort(), TRIGGERS)
+            && triggers.every(item => item.disabled === true && reviewedPausedManualTrigger(item))
             && regionalTriggers.length === 0 && globalBuilds.length === 0 && regionalBuilds.length === 0,
-        'The exact nine global triggers must remain disabled with no regional triggers or ongoing builds');
+        'The exact twelve reviewed global triggers must remain disabled with no regional triggers or ongoing builds');
         return fingerprint({ triggers: triggers.sort((a, b) => a.id.localeCompare(b.id)), regionalTriggers, globalBuilds, regionalBuilds });
     }
     function settled(service, pins) {
