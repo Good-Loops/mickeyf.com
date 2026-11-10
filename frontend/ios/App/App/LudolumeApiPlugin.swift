@@ -73,10 +73,24 @@ public class LudolumeApiPlugin: CAPPlugin, CAPBridgedPlugin {
 }
 
 private enum LudolumeApiPolicy {
+    #if LUDOLUME_INTERNAL_STAGING && LUDOLUME_STAGING
+    #error("Choose exactly one staging build mode")
+    #endif
     #if LUDOLUME_STAGING && !DEBUG
     #error("Staging API configuration is only allowed in a debug build")
     #endif
-    #if LUDOLUME_STAGING
+    #if LUDOLUME_INTERNAL_STAGING
+    // The signing helper permits this same-ID variant only for internal-only export.
+    static let host: String = {
+        guard Bundle.main.bundleIdentifier == "com.mickeyf.app",
+              Bundle.main.object(forInfoDictionaryKey: "LudolumeInternalStaging") as? Bool == true,
+              Bundle.main.object(forInfoDictionaryKey: "LudolumeGoogleSignInEnabled") as? Bool == false,
+              Bundle.main.object(forInfoDictionaryKey: "LudolumeAppleSignInEnabled") as? Bool == false,
+              let host = Bundle.main.object(forInfoDictionaryKey: "LudolumeStagingAPIHost") as? String,
+              host.range(of: #"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.trycloudflare\.com$"#, options: .regularExpression) != nil else { return "" }
+        return host
+    }()
+    #elseif LUDOLUME_STAGING
     static let host: String = {
         guard Bundle.main.bundleIdentifier == "com.mickeyf.app.staging",
               let host = Bundle.main.object(forInfoDictionaryKey: "LudolumeStagingAPIHost") as? String,
@@ -96,6 +110,8 @@ private enum LudolumeApiPolicy {
         "POST /auth/parent-registration/children", "POST /auth/parent-registration/withdraw",
         "POST /auth/parent-registration/children/list",
         "POST /auth/parent-registration/family/delete",
+        "POST /auth/parent-registration/forms/request", "POST /auth/parent-registration/forms/list",
+        "POST /auth/parent-registration/forms/cancel",
         "POST /auth/child-activity/interaction", "POST /auth/child-activity/keep",
         "POST /auth/child-daily-usage/get", "POST /auth/child-daily-usage/set",
         "POST /auth/child-daily-usage/clear", "POST /auth/child-daily-usage/heartbeat",

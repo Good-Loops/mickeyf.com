@@ -23,6 +23,11 @@ on:
           - follow-repository
           - "on"
           - "off"
+      internal_staging_host:
+        description: Exact temporary Quick Tunnel hostname for synthetic internal-only testing; blank uses production
+        type: string
+        required: false
+        default: ""
       compile_only:
         description: Validate both native targets without signing, deployment, caches or app artifacts
         type: boolean
@@ -65,6 +70,15 @@ concurrency:
   cancel-in-progress: ${{ !inputs.upload_testflight }}
 
 jobs:
+  invalid-staging-mode:
+    if: ${{ inputs.internal_staging_host != '' && (!inputs.upload_testflight || inputs.upload_distribution != 'internal-only' || inputs.compile_only || inputs.audit_privacy_manifests || inputs.capture_store_screenshots || inputs.resolve_native_locks) }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Reject incompatible internal staging options
+        run: |
+          echo 'Synthetic staging requires an internal-only signed upload with locked dependencies and no simulator/screenshot mode.' >&2
+          exit 1
+
   invalid-privacy-mode:
     if: ${{ inputs.audit_privacy_manifests && (!inputs.compile_only || inputs.upload_testflight || inputs.capture_store_screenshots || inputs.resolve_native_locks) }}
     runs-on: ubuntu-latest
@@ -75,7 +89,7 @@ jobs:
           exit 1
 
   simulator:
-    if: ${{ !inputs.upload_testflight }}
+    if: ${{ !inputs.upload_testflight && inputs.internal_staging_host == '' }}
     name: Compile unsigned iOS simulator app
     runs-on: macos-26
     timeout-minutes: 30
@@ -238,7 +252,7 @@ jobs:
 
   testflight:
     # Also restrict the protected environment to this exact branch in GitHub.
-    if: ${{ !inputs.compile_only && inputs.upload_testflight && !inputs.audit_privacy_manifests && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/auth-family-leaderboards' || github.ref == 'refs/heads/feat/device-privacy-qualification') }}
+    if: ${{ !inputs.compile_only && inputs.upload_testflight && !inputs.audit_privacy_manifests && (inputs.internal_staging_host == '' || (inputs.upload_distribution == 'internal-only' && !inputs.capture_store_screenshots && !inputs.resolve_native_locks)) && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/auth-family-leaderboards' || github.ref == 'refs/heads/feat/device-privacy-qualification') }}
     name: Sign and upload (${{ inputs.upload_distribution || 'internal-only' }})
     environment: ios-testflight
     runs-on: macos-26
@@ -252,7 +266,8 @@ jobs:
       NPM_CONFIG_FUND: "false"
       COCOAPODS_DISABLE_STATS: "true"
       DEVELOPER_DIR: /Applications/Xcode_26.6.app/Contents/Developer
-      VITE_PROD_API_URL: https://mickeyf-org-j7yuum4tiq-uc.a.run.app
+      VITE_PROD_API_URL: ${{ inputs.internal_staging_host != '' && format('https://{0}', inputs.internal_staging_host) || 'https://mickeyf-org-j7yuum4tiq-uc.a.run.app' }}
+      IOS_INTERNAL_STAGING_HOST: ${{ inputs.internal_staging_host }}
       VITE_ENABLE_THREE_BOSSES_RELEASE: "1"
       VITE_ENABLE_CHILD_ONLINE_ACTIVITY: ${{ (inputs.child_lifecycle == 'on' || (inputs.child_lifecycle != 'off' && vars.LUDOLUME_CHILD_LIFECYCLE_RELEASE == '1')) && '1' || '0' }}
       VITE_ENABLE_CHILD_INACTIVITY_WARNING: ${{ (inputs.child_lifecycle == 'on' || (inputs.child_lifecycle != 'off' && vars.LUDOLUME_CHILD_LIFECYCLE_RELEASE == '1')) && '1' || '0' }}
@@ -277,7 +292,7 @@ jobs:
 
       - name: Check pinned signing tools and public configuration
         run: |
-          node --test ../scripts/ios-testflight.test.mjs
+          node --test ../scripts/ios-testflight.test.mjs ../scripts/ios-internal-staging.test.mjs
           python3 ../scripts/ios-upload-privacy-test.py
           node ../scripts/ios-testflight.mjs preflight
           pod --version
@@ -305,7 +320,7 @@ jobs:
 
 
   android:
-    if: ${{ inputs.compile_only && !inputs.upload_testflight && !inputs.audit_privacy_manifests }}
+    if: ${{ inputs.compile_only && !inputs.upload_testflight && !inputs.audit_privacy_manifests && inputs.internal_staging_host == '' }}
     name: Compile and test Android without distribution
     runs-on: ubuntu-24.04
     timeout-minutes: 25

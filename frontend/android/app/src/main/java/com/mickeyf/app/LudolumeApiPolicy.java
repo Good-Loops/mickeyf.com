@@ -20,6 +20,8 @@ final class LudolumeApiPolicy {
         "POST /auth/parent-registration/children", "POST /auth/parent-registration/withdraw",
         "POST /auth/parent-registration/children/list",
         "POST /auth/parent-registration/family/delete",
+        "POST /auth/parent-registration/forms/request", "POST /auth/parent-registration/forms/list",
+        "POST /auth/parent-registration/forms/cancel",
         "POST /auth/child-activity/interaction", "POST /auth/child-activity/keep",
         "POST /auth/child-daily-usage/get", "POST /auth/child-daily-usage/set",
         "POST /auth/child-daily-usage/clear", "POST /auth/child-daily-usage/heartbeat",

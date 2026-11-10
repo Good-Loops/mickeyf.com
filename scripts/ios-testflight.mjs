@@ -7,6 +7,7 @@ import { createRequire } from 'node:module';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { verifyAgeFrameworkLinkage } from './ios-age-linkage.mjs';
+import { internalStagingConfiguration, signingInfoPlist, stagingIndexHtml, verifySignedApiConfiguration } from './ios-internal-staging.mjs';
 
 const SIGNING_BRANCHES = new Set(['refs/heads/main', 'refs/heads/feature/auth-family-leaderboards', 'refs/heads/feat/device-privacy-qualification']);
 const TEAM = 'AX4Z7T24C9';
@@ -109,11 +110,13 @@ function configuration() {
         && /^[1-9]\d*$/.test(process.env.GITHUB_RUN_ATTEMPT ?? ''), 'Invalid runner temporary directory or run identifiers.');
     const root = join(resolve(process.env.RUNNER_TEMP),
         `ludolume-testflight-${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT}`);
+    const distribution = uploadDistribution(process.env.IOS_UPLOAD_DISTRIBUTION);
+    const staging = internalStagingConfiguration(process.env.IOS_INTERNAL_STAGING_HOST ?? '', distribution, process.env.VITE_PROD_API_URL);
     return { root, keychain: join(root, 'signing.keychain-db'),
         profilePath: join(homedir(), 'Library/Developer/Xcode/UserData/Provisioning Profiles',
             `ludolume-${process.env.GITHUB_RUN_ID}-${process.env.GITHUB_RUN_ATTEMPT}.mobileprovision`),
         build: buildNumber(process.env.GITHUB_RUN_NUMBER, process.env.GITHUB_RUN_ATTEMPT),
-        distribution: uploadDistribution(process.env.IOS_UPLOAD_DISTRIBUTION) };
+        distribution, staging };
 }
 
 function childEnvironment(extra = {}) {
@@ -258,7 +261,15 @@ export function applySigningSettings(project, config, signing) {
     Object.assign(release.buildSettings, { CODE_SIGN_STYLE: 'Manual', DEVELOPMENT_TEAM: TEAM,
         CODE_SIGN_ENTITLEMENTS: 'App/App.entitlements',
         CODE_SIGN_IDENTITY: signing.fingerprint, PROVISIONING_PROFILE_SPECIFIER: signing.profile.uuid,
-        CURRENT_PROJECT_VERSION: config.build });
+        CURRENT_PROJECT_VERSION: config.build,
+        SWIFT_ACTIVE_COMPILATION_CONDITIONS: config.staging ? 'LUDOLUME_INTERNAL_STAGING' : '""' });
+}
+
+function readWebAssets(app) {
+    const assets = join(app, 'public/assets');
+    const files = readdirSync(assets).filter(name => /^index-[A-Za-z0-9_-]+\.js$/u.test(name));
+    requireThat(files.length === 1, 'Expected one compiled main web bundle.');
+    return { index: readFileSync(join(app, 'public/index.html'), 'utf8'), bundle: readFileSync(join(assets, files[0]), 'utf8') };
 }
 
 function archiveAndExport(config, signing) {
@@ -269,6 +280,14 @@ function archiveAndExport(config, signing) {
     project.parseSync();
     applySigningSettings(project, config, signing);
     writeFileSync(projectPath, project.writeSync());
+    const plistPath = resolve('ios/App/App/Info.plist');
+    const info = signingInfoPlist(readPlist(plistPath), config.staging);
+    writeFileSync(plistPath, JSON.stringify(info));
+    run('Encode prepared application plist', 'plutil', ['-convert', 'xml1', plistPath]);
+    const indexPath = resolve('ios/App/App/public/index.html');
+    writeFileSync(indexPath, stagingIndexHtml(readFileSync(indexPath, 'utf8'), config.staging));
+    const preparedWeb = readWebAssets(resolve('ios/App/App'));
+    verifySignedApiConfiguration(info, preparedWeb.index, preparedWeb.bundle, config.staging, config.distribution);
     const archive = join(config.root, 'Ludolume.xcarchive');
     console.log('Archiving signed iPhone app.');
     run('Signed iPhone archive', 'xcodebuild', ['-quiet', '-workspace', 'ios/App/App.xcworkspace', '-scheme', 'App',
@@ -294,6 +313,8 @@ function verifyIpa(config, signing, ipa) {
     const info = readPlist(join(app, 'Info.plist'));
     requireThat(info.CFBundleIdentifier === BUNDLE && info.CFBundleVersion === config.build && info.CFBundleExecutable === 'App'
         && info.CFBundleSupportedPlatforms?.includes('iPhoneOS'), 'Exported app identity, build number or platform is wrong.');
+    const web = readWebAssets(app);
+    verifySignedApiConfiguration(info, web.index, web.bundle, config.staging, config.distribution);
     run('Verify signed application and embedded frameworks', 'codesign', ['--verify', '--deep', '--strict', app]);
     const embedded = readProfile(join(app, 'embedded.mobileprovision'));
     requireThat(embedded.uuid === signing.profile.uuid, 'Exported IPA uses a different provisioning profile.');
@@ -362,6 +383,7 @@ async function upload() {
             { cwd: config.root, diagnostics: true });
         appendFileSync(process.env.GITHUB_STEP_SUMMARY, `### ${config.distribution} upload command completed\n\nSource commit: ${process.env.GITHUB_SHA}\n\n`
             + `App ${APP}, version ${info.CFBundleShortVersionString}, build ${config.build}.\n\n`
+            + (config.staging ? `SYNTHETIC device test; API host ${config.staging.host}; Google/Apple entry disabled.\n\n` : 'Production API target; no staging marker.\n\n')
             + 'Apple processing, tester assignment and draft association remain separate. No App Review submission or public release was performed.\n');
     } finally { cleanup(config); }
 }

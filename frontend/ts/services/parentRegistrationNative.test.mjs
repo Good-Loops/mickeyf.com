@@ -9,7 +9,7 @@ import { createParentRegistrationApi } from './parentRegistrationApi.ts';
 const origin = 'https://mickeyf-org-j7yuum4tiq-uc.a.run.app';
 const prefix = '/auth/parent-registration/';
 const random = () => randomBytes(32).toString('base64url');
-const expected = ['GET config', 'POST begin', 'POST complete', 'POST cancel', 'POST children', 'POST withdraw', 'POST children/list', 'POST family/delete', 'GET scores/config', 'POST scores/status', 'POST scores/publish', 'POST scores/withdraw']
+const expected = ['GET config', 'POST begin', 'POST complete', 'POST cancel', 'POST children', 'POST withdraw', 'POST children/list', 'POST family/delete', 'POST forms/request', 'POST forms/list', 'POST forms/cancel', 'GET scores/config', 'POST scores/status', 'POST scores/publish', 'POST scores/withdraw']
     .map(route => route.replace(' ', ` ${prefix}`));
 
 for (const [platform, source] of [
@@ -34,6 +34,11 @@ for (const [platform, source] of [
     assert.deepEqual([...routes].sort(), [...expected].sort());
     const policy = { enabled: true, creationEnabled: true, policyVersion: 'test-policy', consentVersion: 'test-consent', consentText: 'Synthetic consent.', privacyNoticeUrl: 'https://notice.example.test/privacy', countries: ['ZZ'] };
     const child = { accountId: randomUUID(), userName: 'private-child', scoreVisibility: 'private' };
+    const formState = random();
+    const form = { reference: randomUUID(), parentAccountId: randomUUID(), country: 'US', userName: child.userName,
+        verifiedContact: 'parent@example.test', policyVersion: policy.policyVersion, consentVersion: policy.consentVersion,
+        status: 'pending', expiresAt: '2026-12-01T00:00:00.000Z',
+        publicPolicyDigest: null, publicConsentText: null, publicConsentVersion: null };
     const seen = new Set(); let purpose;
     const transport = createNativeApiFetch(async request => {
         assert.deepEqual(Object.keys(request).sort(), request.method === 'GET' ? ['method', 'url'] : ['body', 'method', 'url']);
@@ -48,6 +53,18 @@ for (const [platform, source] of [
         else if (path === 'scores/publish') value = {visibility:'public'};
         else if (path === 'scores/withdraw') value = {visibility:'private'};
         else if (path === 'family/delete') value = {deleted:true};
+        else if (path === 'forms/request') {
+            assert.deepEqual(JSON.parse(request.body), { state: formState, idToken: 'synthetic-token', userName: child.userName });
+            value = { form };
+        }
+        else if (path === 'forms/list') {
+            assert.deepEqual(JSON.parse(request.body), {});
+            value = { forms: [form] };
+        }
+        else if (path === 'forms/cancel') {
+            assert.deepEqual(JSON.parse(request.body), { reference: form.reference });
+            value = { cancelled: true };
+        }
         else if (path === 'begin') { purpose = JSON.parse(request.body).purpose; value = { state: random(), nonce: random(), expiresInSeconds: 300 }; }
         else if (path === 'complete') value = { grant: random(), purpose, expiresInSeconds: 250 };
         else if (path === 'children') value = { created: true, child };
@@ -77,7 +94,18 @@ for (const [platform, source] of [
     const family=await api.beginFamilyDeletion(config,'synthetic-native',[child.accountId]);
     const familyProof=await api.complete(family.state,'synthetic-token');
     await auth.deleteFamilyRequest(familyProof.grant,[child.accountId]);
+    assert.deepEqual(await api.requestSignedForm(formState, 'synthetic-token', child.userName), form);
+    assert.deepEqual(await api.listSignedForms(), [form]);
+    await api.cancelSignedForm(form.reference);
     assert.deepEqual([...seen].sort(), [...expected].sort());
     for (const path of ['begin', 'complete', 'cancel', 'children', 'withdraw', 'children/list','family/delete','scores/status','scores/publish','scores/withdraw']) assert.ok(!routes.has(`GET ${prefix}${path}`));
     assert.ok(!routes.has(`POST ${prefix}config`)); assert.ok(!routes.has(`POST ${prefix}children/delete`));
+    for (const path of ['forms/request', 'forms/list', 'forms/cancel']) {
+        for (const method of ['GET', 'PUT', 'DELETE']) assert.ok(!routes.has(`${method} ${prefix}${path}`));
+        assert.ok(!routes.has(`POST ${prefix}${path}?reference=private`));
+        assert.ok(!routes.has(`POST ${prefix}${path}/`));
+    }
+    assert.ok(!routes.has(`POST ${prefix}forms/approve`));
+    // Source contract only; Android's policy tests exercise the actual URL parser.
+    assert.match(native, platform === 'Android' ? /url\.query\(\) != null/ : /components\.query == nil/);
 });

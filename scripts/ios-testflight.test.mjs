@@ -94,6 +94,9 @@ test('manual release signing retains the app entitlement binding without changin
     assert.equal(release.buildSettings.CODE_SIGN_ENTITLEMENTS, 'App/App.entitlements');
     assert.equal(release.buildSettings.CURRENT_PROJECT_VERSION, '20.1.0');
     assert.equal(release.buildSettings.CODE_SIGN_STYLE, 'Manual');
+    assert.equal(release.buildSettings.SWIFT_ACTIVE_COMPILATION_CONDITIONS, '""');
+    applySigningSettings(project, { build: '20.1.0', staging: { host: 'synthetic.trycloudflare.com' } }, signing);
+    assert.equal(release.buildSettings.SWIFT_ACTIVE_COMPILATION_CONDITIONS, 'LUDOLUME_INTERNAL_STAGING');
     assert.equal(debug.buildSettings.CODE_SIGN_STYLE, 'Automatic');
     assert.deepEqual(framework.buildSettings, { CODE_SIGN_STYLE: 'Automatic' });
 });
@@ -143,7 +146,10 @@ test('workflow keeps the default and protected branch gate for both upload modes
     const workflow = await readFile(new URL('../.github/workflows/ios-build.yml', import.meta.url), 'utf8');
     assert.match(workflow, /upload_testflight:[\s\S]*?type: boolean\s+required: false\s+default: false/);
     assert.match(workflow, /upload_distribution:[\s\S]*?type: choice\s+required: true\s+default: internal-only\s+options:\s+- internal-only\s+- app-store-draft/);
-    assert.match(workflow, /if: \$\{\{ !inputs\.compile_only && inputs\.upload_testflight && !inputs\.audit_privacy_manifests && \(github\.ref == 'refs\/heads\/main' \|\| github\.ref == 'refs\/heads\/feature\/auth-family-leaderboards' \|\| github\.ref == 'refs\/heads\/feat\/device-privacy-qualification'\) \}\}/);
+    const signedJob = workflow.slice(workflow.indexOf('  testflight:'), workflow.indexOf('  android:'));
+    assert.match(signedJob, /if: \$\{\{ !inputs\.compile_only && inputs\.upload_testflight && !inputs\.audit_privacy_manifests/);
+    assert.match(signedJob, /\(github\.ref == 'refs\/heads\/main' \|\| github\.ref == 'refs\/heads\/feature\/auth-family-leaderboards' \|\| github\.ref == 'refs\/heads\/feat\/device-privacy-qualification'\) \}\}/);
+    assert.match(signedJob, /inputs\.internal_staging_host == '' \|\| \(inputs\.upload_distribution == 'internal-only' && !inputs\.capture_store_screenshots && !inputs\.resolve_native_locks\)/);
     assert.match(workflow, /environment: ios-testflight/);
     assert.match(workflow, /IOS_UPLOAD_DISTRIBUTION: \$\{\{ inputs\.upload_distribution \|\| 'internal-only' \}\}/);
     assert.match(workflow, /node --test \.\.\/scripts\/ios-testflight\.test\.mjs/);
