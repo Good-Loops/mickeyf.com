@@ -103,7 +103,7 @@ test('auth reconstruction and logout reuse the native store, never JS credential
     assert.equal(urls.filter((url) => url.endsWith('/api/users')).length, 1);
 });
 
-test('the native origin matches all three build jobs and the plugin is included in the iOS target', async () => {
+test('ordinary native builds match the production origin and only explicit internal staging can override it', async () => {
     const [native, workflow, project, scene] = await Promise.all([
         '../../ios/App/App/LudolumeApiPlugin.swift',
         '../../../.github/workflows/ios-build.yml',
@@ -112,9 +112,14 @@ test('the native origin matches all three build jobs and the plugin is included 
     ].map((path) => readFile(new URL(path, import.meta.url), 'utf8')));
     const host = native.match(/static let host = "([^"]+)"/)?.[1];
     assert.ok(host, 'native origin must stay explicit');
-    const buildOrigins = [...workflow.matchAll(/VITE_PROD_API_URL: (\S+)/g)].map((match) => match[1]);
-    assert.equal(buildOrigins.length, 3);
-    assert.ok(buildOrigins.every((origin) => origin === `https://${host}`));
+    const buildOrigins = [...workflow.matchAll(/VITE_PROD_API_URL: ([^\r\n]+)/g)].map((match) => match[1]);
+    const productionOrigin = `https://${host}`;
+    assert.deepEqual(buildOrigins, [productionOrigin,
+        "${{ inputs.internal_staging_host != '' && format('https://{0}', inputs.internal_staging_host) || '" + productionOrigin + "' }}",
+        productionOrigin]);
+    const signing = workflow.slice(workflow.indexOf('  testflight:'), workflow.indexOf('  android:'));
+    assert.match(signing, /inputs\.internal_staging_host == '' \|\| \(inputs\.upload_distribution == 'internal-only'/);
+    assert.match(signing, /IOS_INTERNAL_STAGING_HOST: \$\{\{ inputs\.internal_staging_host \}\}/);
     assert.match(native, /registerPluginInstance\(LudolumeApiPlugin\(\)\)/);
     assert.match(scene, /rootViewController = LudolumeBridgeViewController\(\)/);
     assert.match(project, /LudolumeApiPlugin\.swift in Sources/);
