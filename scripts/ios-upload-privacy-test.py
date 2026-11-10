@@ -5,6 +5,7 @@ import io
 import json
 from pathlib import Path
 import plistlib
+import re
 import sys
 import tempfile
 import unittest
@@ -36,11 +37,25 @@ class UploadPrivacyTest(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temp:
             _, _, env = fixture(temp)
             for ref in ('refs/heads/main', 'refs/heads/feature/auth-family-leaderboards',
-                        'refs/heads/feat/privacy-data-review'):
+                        'refs/heads/feat/device-privacy-qualification'):
                 with self.subTest(ref=ref):
                     self.assertEqual(inventory.inspect_export({**env, 'GITHUB_REF': ref})['build'], '61.1.0')
-            with self.assertRaisesRegex(ValueError, 'Protected manual signing job'):
-                inventory.inspect_export({**env, 'GITHUB_REF': 'refs/heads/feat/privacy-data-review-extra'})
+            for ref in ('refs/heads/feat/privacy-data-review', 'refs/heads/feat/child-registration-production',
+                        'refs/heads/feat/device-privacy-qualification-extra'):
+                with self.assertRaisesRegex(ValueError, 'Protected manual signing job'):
+                    inventory.inspect_export({**env, 'GITHUB_REF': ref})
+
+    def test_inventory_accepts_every_branch_the_signing_helper_accepts(self):
+        source = Path(__file__).with_name('ios-testflight.mjs').read_text(encoding='utf-8')
+        declaration = re.search(r'const SIGNING_BRANCHES = new Set\(\[(.*?)\]\)', source)
+        self.assertIsNotNone(declaration)
+        branches = re.findall(r"'(refs/heads/[^']+)'", declaration.group(1))
+        self.assertGreater(len(branches), 0)
+        with tempfile.TemporaryDirectory() as temp:
+            _, _, env = fixture(temp)
+            for ref in branches:
+                with self.subTest(ref=ref):
+                    self.assertEqual(inventory.inspect_export({**env, 'GITHUB_REF': ref})['build'], '61.1.0')
 
     def test_receipt_identifies_the_actual_export_and_build(self):
         with tempfile.TemporaryDirectory() as temp:

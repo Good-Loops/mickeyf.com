@@ -44,7 +44,7 @@ def real_directory(path):
 def owned_root(env):
     if (env.get('GITHUB_ACTIONS') != 'true' or env.get('GITHUB_EVENT_NAME') != 'workflow_dispatch'
             or env.get('GITHUB_REF') not in ('refs/heads/main', 'refs/heads/feature/auth-family-leaderboards',
-                                              'refs/heads/feat/privacy-data-review')):
+                                              'refs/heads/feat/device-privacy-qualification')):
         raise ValueError('Protected manual signing job required')
     run_id, attempt = env.get('GITHUB_RUN_ID', ''), env.get('GITHUB_RUN_ATTEMPT', '')
     if not re.fullmatch(r'[1-9]\d*', run_id) or not re.fullmatch(r'[1-9]\d?', attempt):
