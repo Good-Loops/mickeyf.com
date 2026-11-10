@@ -112,7 +112,8 @@ const TRIGGERS = ['9fbd63bf-d129-4877-bb26-26d38e1ca468', '181b8f84-2303-4c2b-a0
     '850e052f-be82-4069-824d-2d36ba294a21', '9b7dec29-ddbf-43a8-af85-d2ee1deabd4c',
     '77ea0cc4-15a2-41bd-bafc-79fad4cfb1ce', '9df2169c-1d44-41b2-a143-b8a935ae6758'].sort();
 const MANUAL_IMAGE_TRIGGERS = {
-    '9b7dec29-ddbf-43a8-af85-d2ee1deabd4c': ['refs/heads/feat/privacy-data-review', 'refs/heads/feat/child-registration-production'],
+    '9b7dec29-ddbf-43a8-af85-d2ee1deabd4c': ['refs/heads/feat/privacy-data-review', 'refs/heads/feat/child-registration-production',
+        'refs/heads/feat/device-privacy-qualification'],
     '77ea0cc4-15a2-41bd-bafc-79fad4cfb1ce': ['refs/heads/codex/ludolume-recovery-cleanup'],
 };
 function reviewedPausedManualTrigger(trigger) {

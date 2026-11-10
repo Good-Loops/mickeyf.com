@@ -118,7 +118,7 @@ function cloudFixture() {
         'd71109da-8350-4f2f-a3be-2053bb6ccd45', 'ef5a2981-95be-4f4d-af91-f997fde73356',
         'eb4a2af9-2d5b-45a2-aba8-63778520566e', 'a0bbef22-8fad-40b1-ab8a-30337488b450',
         '850e052f-be82-4069-824d-2d36ba294a21'].map(id => ({ id, disabled: true }));
-    for (const [id, ref] of [['9b7dec29-ddbf-43a8-af85-d2ee1deabd4c', 'refs/heads/feat/child-registration-production'],
+    for (const [id, ref] of [['9b7dec29-ddbf-43a8-af85-d2ee1deabd4c', 'refs/heads/feat/device-privacy-qualification'],
         ['77ea0cc4-15a2-41bd-bafc-79fad4cfb1ce', 'refs/heads/codex/ludolume-recovery-cleanup']]) {
         const uri = 'https://github.com/Good-Loops/mickeyf.com';
         triggers.push({ id, disabled: true, approvalConfig: { approvalRequired: true },
@@ -303,6 +303,11 @@ test('reader rejects incomplete/enabled automation, ongoing operations and stale
 test('the three reviewed manual triggers must stay paused, approval-gated and free of event-driven execution', async () => {
     const ids = ['9b7dec29-ddbf-43a8-af85-d2ee1deabd4c', '77ea0cc4-15a2-41bd-bafc-79fad4cfb1ce',
         '9df2169c-1d44-41b2-a143-b8a935ae6758'];
+    for (const ref of ['refs/heads/feat/device-privacy-qualification', 'refs/heads/feat/child-registration-production', 'refs/heads/feat/privacy-data-review']) {
+        const f = cloudFixture(), trigger = f.triggers.find(t => t.id === ids[0]);
+        trigger.sourceToBuild.ref = trigger.gitFileSource.revision = ref;
+        await f.reader.read(f.pins);
+    }
     for (const id of ids) {
         for (const change of [t => { t.disabled = false; }, t => { t.approvalConfig.approvalRequired = false; },
             t => { t.github = { push: { branch: '^main$' } }; }, t => { t.pubsubConfig = { topic: 'unexpected' }; },
@@ -313,6 +318,7 @@ test('the three reviewed manual triggers must stay paused, approval-gated and fr
     }
     for (const change of [t => { t.gitFileSource.path = 'cloudbuild.deploy.yaml'; },
         t => { t.sourceToBuild.uri = 'https://github.com/other/repository'; },
+        t => { t.sourceToBuild.ref = t.gitFileSource.revision = 'refs/heads/feat/device-privacy-qualification-extra'; },
         t => { t.sourceToBuild.ref = 'refs/heads/main'; }, t => { t.build = { steps: [] }; }]) {
         const f = cloudFixture(); change(f.triggers.find(t => t.id === ids[0]));
         await assert.rejects(f.reader.read(f.pins), /reviewed global triggers/u);
