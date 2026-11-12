@@ -21,6 +21,8 @@ const mocks = {
     registrationAge: `export const registrationAge = { parentRequired: () => ${scope}.parentRequired,
         minorProviderRestricted: () => ${scope}.minorRestricted,
         rememberMinorProvider: () => { ${scope}.minorRestricted = true; },
+        nativeFirst: (...args) => ${scope}.nativeFirst(...args),
+        manual: selected => ${scope}.parentRequired ? 'parent-required' : selected,
         check: (...args) => ${scope}.check(...args) };`,
 };
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -62,6 +64,7 @@ function mount(t, policy, purpose = 'signup') {
         async observe() { return true; },
         async beginNative() { return 'synthetic-attempt'; },
         async finishNative() { return true; },
+        async nativeFirst() { return { kind: 'manual' }; },
         async check(selected) { if (selected === 'parent-required') hooks.parentRequired = true; return selected; },
     };
     Object.defineProperty(globalThis, key, { configurable: true, value: hooks });
@@ -73,10 +76,15 @@ function mount(t, policy, purpose = 'signup') {
         await new Promise(resolve => setImmediate(resolve)); if (!dirty) return; render();
     } assert.fail('Registration view did not settle'); };
     const find = predicate => nodes(tree).find(predicate);
-    const change = async (id, value) => { find(node => node.props?.id === id).props.onChange({ target: { value } }); render(); await settle(); };
+    const ensureManual = async () => {
+        if (find(node => node.props?.id === 'registration-age')) return;
+        await find(node => node.type === 'form').props.onSubmit({ preventDefault() {} }); render(); await settle();
+    };
+    const change = async (id, value) => { if (id === 'registration-age') await ensureManual();
+        find(node => node.props?.id === id).props.onChange({ target: { value } }); render(); await settle(); };
     const start = async () => { await settle(); };
     const unmount = () => slots.forEach(slot => slot.cleanup?.());
-    return { calls, children, render, settle, find, change, start, hooks, unmount };
+    return { calls, children, render, settle, find, change, ensureManual, start, hooks, unmount };
 }
 
 test('numeric ages classify at the reviewed country boundaries and reject malformed input', () => {
@@ -91,9 +99,65 @@ test('numeric ages classify at the reviewed country boundaries and reject malfor
     }
 });
 
+test('a shared device age skips manual entry and is recorded before provider controls mount', async t => {
+    const view = mount(t, undefined, 'provider-login'); const order = [];
+    view.hooks.beginNative = async () => { order.push('reserve'); return 'synthetic-attempt'; };
+    view.hooks.nativeFirst = async (_threshold, reserve) => { assert.equal(await reserve(), true); order.push('device'); return { kind: 'shared', ageBand: 'adult' }; };
+    view.hooks.finishNative = async input => { order.push(`finish:${input.ageBand}`); return true; };
+    view.hooks.begin = async input => { order.push(`begin:${input.ageBand}`); return { authorized: true, expiresInSeconds: 300, scoreVisibility: 'private' }; };
+    view.render(); await view.settle(); await view.change('registration-country', 'US');
+    assert.equal(view.find(node => node.props?.id === 'registration-age'), undefined);
+    await view.find(node => node.type === 'form').props.onSubmit({ preventDefault() {} }); view.render(); await view.settle();
+    assert.deepEqual(order, ['reserve', 'device', 'finish:adult', 'begin:adult']);
+    assert.equal(view.children.length, 1);
+});
+
+test('unshared device age asks manually and completes its reservation without a second prompt', async t => {
+    const view = mount(t); const order = [];
+    view.hooks.beginNative = async () => { order.push('reserve'); return 'synthetic-attempt'; };
+    view.hooks.nativeFirst = async (_threshold, reserve) => { assert.equal(await reserve(), true); order.push('device'); return { kind: 'manual' }; };
+    view.hooks.check = async () => { assert.fail('must not prompt again after manual fallback'); };
+    view.hooks.finishNative = async input => { order.push(`finish:${input.ageBand}`); return true; };
+    view.hooks.begin = async input => { order.push(`begin:${input.ageBand}`); return { authorized: true, expiresInSeconds: 300, scoreVisibility: 'private' }; };
+    view.render(); await view.settle(); await view.change('registration-country', 'US'); await view.ensureManual();
+    assert.equal(view.find(node => node.props?.id === 'registration-country').props.disabled, true);
+    await view.change('registration-age', '18');
+    await view.find(node => node.type === 'form').props.onSubmit({ preventDefault() {} }); view.render(); await view.settle();
+    assert.deepEqual(order, ['reserve', 'device', 'finish:adult', 'begin:adult']);
+    assert.equal(view.children.length, 1);
+});
+
+test('a platform verification requirement never falls through to manual age or provider credentials', async t => {
+    const view = mount(t, undefined, 'provider-login');
+    view.hooks.nativeFirst = async () => ({ kind: 'verification-required' });
+    view.render(); await view.settle(); await view.change('registration-country', 'US');
+    await view.find(node => node.type === 'form').props.onSubmit({ preventDefault() {} }); view.render(); await view.settle();
+    assert.equal(view.find(node => node.props?.id === 'registration-age'), undefined);
+    assert.equal(view.children.length, 0);
+    assert(view.find(node => node.type === 'p' && node.props.role === 'alert' && node.props.children.includes('requires age verification')));
+});
+
+test('a late native-first child result is recorded even after the screen closes', async t => {
+    const view = mount(t); let resolveRange; const recorded = [];
+    view.hooks.nativeFirst = async (_threshold, reserve) => {
+        assert.equal(await reserve(), true);
+        return new Promise(resolve => { resolveRange = resolve; });
+    };
+    view.hooks.finishNative = async input => { recorded.push(input.ageBand); return true; };
+    view.render(); await view.settle(); await view.change('registration-country', 'US');
+    const pending = view.find(node => node.type === 'form').props.onSubmit({ preventDefault() {} });
+    await new Promise(resolve => setImmediate(resolve));
+    view.unmount(); resolveRange({ kind: 'shared', ageBand: 'parent-required' });
+    await pending; await new Promise(resolve => setImmediate(resolve));
+    assert.deepEqual(recorded, ['parent-required']);
+    assert.equal(view.children.length, 0);
+    assert.equal(view.calls.some(call => call[0] === 'begin'), false);
+});
+
 test('the age input does not expose threshold choices and rejects invalid values', async t => {
     const view = mount(t); view.render(); await view.settle();
     await view.change('registration-country', 'US');
+    await view.ensureManual();
     const input = view.find(node => node.props?.id === 'registration-age');
     assert.equal(input.type, 'input');
     assert.equal(input.props.inputMode, 'numeric');
@@ -112,6 +176,7 @@ test('changing countries clears the entered age and uses the new country policy'
     await view.change('registration-country', 'US');
     await view.change('registration-age', '17');
     await view.change('registration-country', 'BR');
+    await view.ensureManual();
     assert.equal(view.find(node => node.props?.id === 'registration-age').props.value, '');
     await view.change('registration-age', '17');
     await view.find(node => node.type === 'form').props.onSubmit({ preventDefault() {} });
@@ -548,14 +613,14 @@ test('provider availability is clearly labeled while loading and can be checked 
     policy = creationPaused;
     view.find(node => node.type === 'button' && node.props.children === 'Check again').props.onClick();
     view.render(); await view.settle();
-    assert(view.find(node => node.type === 'p' && node.props.children === 'Enter your country and age to continue.'));
+    assert(view.find(node => node.type === 'p' && node.props.children.startsWith('Choose your country.')));
     assert.equal(view.children.length, 0, 'retry must not mount provider controls without a grant');
     assert.deepEqual(view.calls, [['config'], ['config']]);
 });
 
 test('provider eligibility asks for age only when the eligibility form is actually available', async t => {
     const view = mount(t, creationPaused, 'provider-login'); view.render(); await view.settle();
-    assert(view.find(node => node.type === 'p' && node.props.children === 'Enter your country and age to continue.'));
+    assert(view.find(node => node.type === 'p' && node.props.children.startsWith('Choose your country.')));
     assert(view.find(node => node.type === 'form'));
     assert.equal(view.children.length, 0);
 });

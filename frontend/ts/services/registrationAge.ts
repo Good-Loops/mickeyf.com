@@ -6,6 +6,8 @@ export type NativeAgeRange = Readonly<{
     maximumAge: number | null;
 }>;
 type AgeSource = { request: () => Promise<unknown>; legacyIosFallback?: boolean } | null;
+export type NativeFirstResult = Readonly<{ kind: 'shared'; ageBand: RegistrationAgeBand }>
+    | Readonly<{ kind: 'manual' }> | Readonly<{ kind: 'verification-required' }> | Readonly<{ kind: 'unavailable' }>;
 const unavailable: NativeAgeRange = { status: 'unavailable', minimumAge: null, maximumAge: null };
 const parentKey = 'ludolume.parent-registration-until';
 const minorProviderKey = 'ludolume.minor-provider-until';
@@ -82,6 +84,29 @@ export function createRegistrationAge({ load = loadAgeSource, storage = () => ty
         parentRequired,
         minorProviderRestricted,
         rememberMinorProvider,
+        /** Ask the platform first; absence of a shared range is not evidence of adulthood. */
+        async nativeFirst(parentRequiredBelow: number, beforeNativeCheck?: () => Promise<boolean>): Promise<NativeFirstResult> {
+            if (parentRequired()) return { kind: 'shared', ageBand: 'parent-required' };
+            if (!Number.isInteger(parentRequiredBelow) || parentRequiredBelow < 1 || parentRequiredBelow > 18) return { kind: 'unavailable' };
+            try {
+                const source = await load();
+                if (!source) return { kind: 'manual' };
+                if (beforeNativeCheck && !await beforeNativeCheck()) return { kind: 'unavailable' };
+                const range = readNativeAgeRange(await source.request());
+                if (parentRequired()) return { kind: 'shared', ageBand: 'parent-required' };
+                if (range.status === 'verification-required') return { kind: 'verification-required' };
+                if (range.status !== 'shared') return { kind: 'manual' };
+                const youngest = range.minimumAge ?? 0;
+                const ageBand = youngest < parentRequiredBelow ? 'parent-required' : youngest < 18 ? 'minor' : 'adult';
+                if (ageBand === 'parent-required') rememberParent();
+                return { kind: 'shared', ageBand };
+            } catch { return { kind: 'unavailable' }; }
+        },
+        /** Preserve earlier restrictions when the platform does not share a range. */
+        manual(selected: RegistrationAgeBand): RegistrationAgeBand {
+            if (selected === 'parent-required') { rememberParent(); return selected; }
+            return parentRequired() ? 'parent-required' : selected;
+        },
         async check(selected: RegistrationAgeBand, parentRequiredBelow: number,
             beforeNativeCheck?: () => Promise<boolean>): Promise<RegistrationAgeBand | null> {
             if (selected === 'parent-required') { rememberParent(); return selected; }
