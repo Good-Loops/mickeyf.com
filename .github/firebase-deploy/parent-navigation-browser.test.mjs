@@ -88,7 +88,10 @@ test('account waits for its controls and keeps the link confirmation after refre
     await link.waitFor();
     assert.equal(await page.locator('.page-status--loading').count(), 0);
     await link.click();
-    await page.locator('input[type="password"]').last().fill('synthetic-password');
+    const password = page.locator('.swal2-popup input[type="password"]');
+    assert.ok(parseFloat(await password.evaluate(input => getComputedStyle(input).fontSize)) >= 16,
+        'the password input must be large enough to avoid iPhone focus zoom');
+    await password.fill('synthetic-password');
     await page.getByRole('button', { name:'Continue', exact:true }).click();
     await page.waitForFunction(() => window.__appleCalls === 1);
     await page.evaluate(() => window.__finishApple());

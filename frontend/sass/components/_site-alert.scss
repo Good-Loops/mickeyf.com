@@ -36,6 +36,11 @@
     font-family: inherit;
     font-size: 1.4rem;
 
+    // Smaller inputs can trigger iOS focus zoom and move the dialog behind the keyboard.
+    .swal2-input {
+        font-size: 1.6rem;
+    }
+
     .site-alert__title {
         padding: .8rem 0 0;
         color: $white;
