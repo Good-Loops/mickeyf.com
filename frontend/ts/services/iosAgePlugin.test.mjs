@@ -38,7 +38,7 @@ test('iOS age request is explicit, foreground-only and serialized, with protecti
     assert.match(source, /^import DeclaredAgeRange$/m);
     assert.doesNotMatch(source, /canImport\(DeclaredAgeRange\)/);
     assert.match(source, /public let jsName = "LudolumeAge"/);
-    assert.deepEqual([...source.matchAll(/CAPPluginMethod\(name: "([^"]+)"/g)].map(match => match[1]), ['requestAgeRange']);
+    assert.deepEqual([...source.matchAll(/CAPPluginMethod\(name: "([^"]+)"/g)].map(match => match[1]), ['requestAgeRange', 'checkRegionalAge']);
     assert.match(source, /guard call\.options\.count == 0 else/);
     assert.match(source, /Task \{ @MainActor in/);
     assert.match(source, /guard #available\(iOS 26\.0, \*\) else \{\s*call\.resolve\(LudolumeAgeRangeResult\.nonShared\(\.unsupported\)\)/);
