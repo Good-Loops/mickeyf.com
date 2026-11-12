@@ -14,6 +14,7 @@
  * in interactive visuals.
  */
 import { PitchDetector } from "pitchy";
+import { Capacitor } from "@capacitor/core";
 
 /**
  * Beat detection output for the current analysis frame.
@@ -204,12 +205,19 @@ export class AudioEngine {
      */
     pause() {
         this.playbackRequest = null;
-        if (!this.audioElement) return;
+        const audio = this.audioElement;
+        if (!audio) return;
 
         this.silenceOutput();
         this.patchState({ playing: false });
-        this.audioElement.pause();
+        audio.pause();
         this.stopAnalysisLoop();
+        // WebKit may replay a small amount of buffered audio after a pause. Prepare
+        // a fresh media element at the same position before the next user gesture.
+        if (Capacitor.getPlatform() === "ios" && this.audioElement === audio
+            && this.playbackRequest === null && Number.isFinite(audio.currentTime)) {
+            this.replaceMediaElement(audio, audio.currentTime);
+        }
     }
 
     /**
@@ -231,7 +239,7 @@ export class AudioEngine {
             audio.currentTime = 0;
         } catch {}
 
-        this.replaceStoppedElement(audio);
+        this.replaceMediaElement(audio, 0);
 
         this.volumeHistory = [];
         this.patchState({ 
@@ -430,22 +438,25 @@ export class AudioEngine {
         audio.addEventListener("seeked", this.seekedListener);
     }
 
-    /** A fresh media element avoids replaying WebKit's buffered pre-seek audio after Stop. */
-    private replaceStoppedElement(previous: HTMLAudioElement): void {
+    /** Replace the media element without changing the selected file or analysis graph. */
+    private replaceMediaElement(previous: HTMLAudioElement, position: number): void {
         const context = this.audioContext;
         const analyser = this.analyserNode;
         const oldSource = this.sourceNode;
         const url = this.objectUrl;
         if (!context || !analyser || !oldSource || !url) return;
 
-        let next: HTMLAudioElement;
+        let next: HTMLAudioElement | null = null;
         let nextSource: MediaElementAudioSourceNode | null = null;
         try {
             next = new Audio(url);
+            next.load();
+            if (position > 0) next.currentTime = position;
             nextSource = context.createMediaElementSource(next);
             nextSource.connect(analyser);
         } catch {
             try { nextSource?.disconnect(); } catch {}
+            try { next?.removeAttribute("src"); next?.load(); } catch {}
             return;
         }
 
@@ -456,7 +467,6 @@ export class AudioEngine {
         this.audioElement = next;
         this.sourceNode = nextSource;
         this.attachAudioListeners(next);
-        try { next.load(); } catch {}
     }
 
     // All playback paths respect the latest transport command across browser waits.

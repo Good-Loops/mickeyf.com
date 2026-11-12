@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { Capacitor } from '@capacitor/core';
 import { AudioEngine } from './AudioEngine.ts';
 
 function deferred() {
@@ -151,6 +152,66 @@ test('Stop and immediate Play use a fresh element rather than replaying a buffer
         assert.equal(gain.gain.value, 1);
         audio.dispatchEvent(new Event('seeked'));
         assert.equal(engine.state.playing, true, 'a stale seek does not affect the new playback');
+    });
+});
+
+test('iOS Pause prepares a fresh element at the paused position and waits for its seek', async t => {
+    t.mock.method(Capacitor, 'getPlatform', () => 'ios');
+    await withAudio([], async ({ engine, contexts, audios }) => {
+        await engine.processAudio(track('ios-pause'));
+        const previous = audios[0];
+        previous.currentTime = 12.25;
+        engine.pause();
+        const next = audios[1];
+        assert.equal(previous.paused, true);
+        assert.equal(previous.src, '');
+        assert.equal(contexts[0].sources[0].disconnectCount, 1);
+        assert.equal(next.currentTime, 12.25);
+        next.seeking = true;
+        await engine.play();
+        assert.equal(next.paused, false);
+        assert.equal(contexts[0].gains[0].gain.value, 0);
+        next.seeking = false;
+        next.dispatchEvent(new Event('seeked'));
+        assert.equal(contexts[0].gains[0].gain.value, 1);
+        assert.equal(engine.state.playing, true);
+    });
+});
+
+test('an old iOS Play cannot interrupt playback after a second Pause', async t => {
+    t.mock.method(Capacitor, 'getPlatform', () => 'ios');
+    const pendingPlay = deferred();
+    await withAudio([], async ({ engine, audios }) => {
+        await engine.processAudio(track('ios-pause-race'));
+        audios[0].currentTime = 12;
+        engine.pause();
+        audios[1].plan.play = pendingPlay;
+        const previous = engine.play();
+        await flush();
+        engine.pause();
+        await engine.play();
+        pendingPlay.resolve();
+        await previous;
+        assert.equal(audios[1].paused, true);
+        assert.equal(audios[2].paused, false);
+        assert.equal(audios[2].currentTime, 12);
+        assert.equal(engine.state.playing, true);
+    });
+});
+
+test('iOS Pause keeps the original player if a replacement cannot be connected', async t => {
+    t.mock.method(Capacitor, 'getPlatform', () => 'ios');
+    await withAudio([], async ({ engine, contexts, audios }) => {
+        await engine.processAudio(track('ios-pause-fallback'));
+        audios[0].currentTime = 12;
+        t.mock.method(contexts[0], 'createMediaElementSource', () => { throw new Error('unavailable'); });
+        engine.pause();
+        assert.equal(audios[1].src, '', 'the failed replacement is released');
+        assert.equal(contexts[0].sources[0].disconnectCount, 0);
+        await engine.play();
+        assert.equal(audios[0].currentTime, 12);
+        assert.equal(audios[0].paused, false);
+        assert.equal(engine.state.playing, true);
     });
 });
 
