@@ -95,6 +95,7 @@ for (const width of [320, 390, 1024]) test(`account leaderboard choice stays usa
     const {page, calls} = await fixture(t);
     await page.setViewportSize({ width, height: 850 });
     await page.goto(`${origin}/account`);
+    await page.getByText('Linked sign-in: Apple', { exact: true }).waitFor();
     const choice = page.getByLabel('Synthetic publication consent');
     await choice.waitFor();
     const join = page.getByRole('button', { name: 'Join leaderboards with Apple' });

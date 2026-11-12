@@ -152,6 +152,9 @@ export default function ManageAccount() {
                     <>
                         <p className="manage-account__identity">Signed in as <strong>{userName}</strong></p>
                         <p className="manage-account__family"><Link to="/parent-accounts">Manage parent and child accounts</Link></p>
+                        {methods && (methods.googleLinked || methods.appleLinked) && <p role="status">
+                            Linked sign-in: {[methods.googleLinked && 'Google', methods.appleLinked && 'Apple'].filter(Boolean).join(', ')}
+                        </p>}
                         {methods?.hasPassword && methods.providerCollectionAllowed === true && <ProviderSignInControls action="link" disabled={busy}
                             operationLock={submitting} onBusyChange={setProviderBusy}
                             onSuccess={() => setMethodsRetry(value => value + 1)} />}
