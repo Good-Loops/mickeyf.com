@@ -308,8 +308,8 @@ function verifyIpa(config, signing, ipa) {
     const unpacked = join(config.root, 'ipa-check');
     run('Inspect exported IPA', 'ditto', ['-x', '-k', ipa, unpacked]);
     const apps = readdirSync(join(unpacked, 'Payload')).filter(file => file.endsWith('.app'));
-    requireThat(apps.length === 1, 'Expected one application in the IPA.');
-    const app = join(unpacked, 'Payload', apps[0]);
+    requireThat(apps.length === 1 && apps[0] === 'App.app', 'Expected the Ludolume application in the IPA.');
+    const app = join(unpacked, 'Payload', 'App.app');
     const info = readPlist(join(app, 'Info.plist'));
     requireThat(info.CFBundleIdentifier === BUNDLE && info.CFBundleVersion === config.build && info.CFBundleExecutable === 'App'
         && info.CFBundleSupportedPlatforms?.includes('iPhoneOS'), 'Exported app identity, build number or platform is wrong.');
