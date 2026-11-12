@@ -9,6 +9,7 @@
 /* Begin PBXBuildFile section */
 		A4312D720ED74634B529A2B1 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = A4312D720ED74634B529A2B2 /* PrivacyInfo.xcprivacy */; };
 		57B4F1588E594DCEB396C8D1 /* LudolumeAgePlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = 57B4F1588E594DCEB396C8D2 /* LudolumeAgePlugin.swift */; };
+		9A65CBDEE4C7408034F75401 /* LudolumeAppTransactionPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = CE1A14C2D172BAD2D8A60185 /* LudolumeAppTransactionPlugin.swift */; };
 		A7D73F65B6E64B7E8E4686D1 /* LudolumePresentationPlugin.swift in Sources */ = {isa = PBXBuildFile; fileRef = A7D73F65B6E64B7E8E4686D2 /* LudolumePresentationPlugin.swift */; };
 		2FAD9763203C412B000D30F8 /* config.xml in Resources */ = {isa = PBXBuildFile; fileRef = 2FAD9762203C412B000D30F8 /* config.xml */; };
 		50379B232058CBB4000EE86E /* capacitor.config.json in Resources */ = {isa = PBXBuildFile; fileRef = 50379B222058CBB4000EE86E /* capacitor.config.json */; };
@@ -26,6 +27,7 @@
 /* Begin PBXFileReference section */
 		A4312D720ED74634B529A2B2 /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		57B4F1588E594DCEB396C8D2 /* LudolumeAgePlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LudolumeAgePlugin.swift; sourceTree = "<group>"; };
+		CE1A14C2D172BAD2D8A60185 /* LudolumeAppTransactionPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LudolumeAppTransactionPlugin.swift; sourceTree = "<group>"; };
 		A7D73F65B6E64B7E8E4686D2 /* LudolumePresentationPlugin.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = LudolumePresentationPlugin.swift; sourceTree = "<group>"; };
 		2FAD9762203C412B000D30F8 /* config.xml */ = {isa = PBXFileReference; lastKnownFileType = text.xml; path = config.xml; sourceTree = "<group>"; };
 		50379B222058CBB4000EE86E /* capacitor.config.json */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.json; path = capacitor.config.json; sourceTree = "<group>"; };
@@ -88,6 +90,7 @@
 			children = (
 				A4312D720ED74634B529A2B2 /* PrivacyInfo.xcprivacy */,
 				57B4F1588E594DCEB396C8D2 /* LudolumeAgePlugin.swift */,
+				CE1A14C2D172BAD2D8A60185 /* LudolumeAppTransactionPlugin.swift */,
 				A7D73F65B6E64B7E8E4686D2 /* LudolumePresentationPlugin.swift */,
 				9582B6842FE996800072D4E8 /* SceneDelegate.swift */,
 				C923DA512EBBA7500062420A /* LudolumeApiPlugin.swift */,
@@ -236,6 +239,7 @@
 			buildActionMask = 2147483647;
 			files = (
 				57B4F1588E594DCEB396C8D1 /* LudolumeAgePlugin.swift in Sources */,
+				9A65CBDEE4C7408034F75401 /* LudolumeAppTransactionPlugin.swift in Sources */,
 				A7D73F65B6E64B7E8E4686D1 /* LudolumePresentationPlugin.swift in Sources */,
 				504EC3081FED79650016851F /* AppDelegate.swift in Sources */,
 				9582B6852FE996820072D4E8 /* SceneDelegate.swift in Sources */,
