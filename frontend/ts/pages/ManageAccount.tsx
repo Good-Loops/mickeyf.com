@@ -50,7 +50,7 @@ export default function ManageAccount() {
         setMethods(null);
         setDeletionClient(undefined);
         void providerAccountMethodsRequest(controller.signal).then(async availableMethods => {
-                const clients = availableMethods?.providerCollectionAllowed === false ? [] : await getAvailableProviderClients().catch(() => []);
+                const clients = !availableMethods || availableMethods.providerCollectionAllowed === false ? [] : await getAvailableProviderClients().catch(() => []);
                 if (!active) return;
                 setMethods(availableMethods);
                 setDeletionClient(selectProviderDeletionClient(clients, availableMethods));

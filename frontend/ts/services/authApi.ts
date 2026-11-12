@@ -339,7 +339,9 @@ export function createAuthApi(apiBase: string, fetchRequest: typeof fetch = fetc
 
     async function providerAccountMethodsRequest(signal?: AbortSignal): Promise<ProviderAccountMethods | null> {
         try {
-            const response = await fetchRequest(`${apiBase}/auth/providers/account`, { method: 'GET', credentials: 'include', signal });
+            const response = await fetchRequest(`${apiBase}/auth/providers/account`, {
+                method: 'GET', credentials: 'include', ...(signal ? { signal } : {}),
+            });
             if (!response.ok) return null;
             const result: unknown = await response.json();
             if (!isRecord(result) || typeof result.hasPassword !== 'boolean' || typeof result.googleLinked !== 'boolean'
