@@ -16,6 +16,15 @@ test('qualified Android build explicitly packages both child lifecycle features'
     assert.throws(() => androidReleaseEnvironment(['--qualified-android'], { VITE_ENABLE_CHILD_DAILY_USAGE: '1' }), /conflicts/);
 });
 
+test('internal baseline disables child features until the matching backend is qualified', () => {
+    const env = androidReleaseEnvironment(['--internal-baseline'], {});
+    assert.equal(env.VITE_ENABLE_CHILD_ONLINE_ACTIVITY, '0');
+    assert.equal(env.VITE_ENABLE_CHILD_INACTIVITY_WARNING, '0');
+    assert.equal(env.VITE_ENABLE_CHILD_DAILY_USAGE, '0');
+    assert.throws(() => androidReleaseEnvironment(['--internal-baseline', '--qualified-daily-usage'], {}));
+    assert.throws(() => androidReleaseEnvironment(['--internal-baseline'], { VITE_ENABLE_CHILD_DAILY_USAGE: '1' }), /conflicts/);
+});
+
 test('website and native workflows use the same paired opt-in and default-off selection', async () => {
     const expression = "${{ (inputs.child_lifecycle == 'on' || (inputs.child_lifecycle != 'off' && vars.LUDOLUME_CHILD_LIFECYCLE_RELEASE == '1')) && '1' || '0' }}";
     const usageExpression = "${{ (inputs.child_daily_usage == 'on' || (inputs.child_daily_usage != 'off' && vars.LUDOLUME_CHILD_DAILY_USAGE_RELEASE == '1')) && '1' || '0' }}";

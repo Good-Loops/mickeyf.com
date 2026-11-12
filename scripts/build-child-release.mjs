@@ -11,11 +11,14 @@ const requiredSettings = {
 };
 
 export function androidReleaseEnvironment(args, environment) {
-    if (!args.includes('--qualified-android') || args.length > 2 || new Set(args).size !== args.length
-        || args.some(arg => !['--qualified-android', '--qualified-daily-usage'].includes(arg))) {
-        throw new Error('Use --qualified-android, and --qualified-daily-usage only after its backend and release are qualified.');
+    const internalBaseline = args.length === 1 && args[0] === '--internal-baseline';
+    if (!internalBaseline && (!args.includes('--qualified-android') || args.length > 2 || new Set(args).size !== args.length
+        || args.some(arg => !['--qualified-android', '--qualified-daily-usage'].includes(arg)))) {
+        throw new Error('Use --internal-baseline, or --qualified-android with --qualified-daily-usage only after qualification.');
     }
-    const settings = { ...requiredSettings, VITE_ENABLE_CHILD_DAILY_USAGE: args.includes('--qualified-daily-usage') ? '1' : '0' };
+    const settings = { ...requiredSettings,
+        ...(internalBaseline ? { VITE_ENABLE_CHILD_ONLINE_ACTIVITY: '0', VITE_ENABLE_CHILD_INACTIVITY_WARNING: '0' } : {}),
+        VITE_ENABLE_CHILD_DAILY_USAGE: args.includes('--qualified-daily-usage') ? '1' : '0' };
     for (const [name, value] of Object.entries(settings)) {
         if (environment[name] && environment[name] !== value) {
             throw new Error(`${name} conflicts with the qualified release configuration.`);
