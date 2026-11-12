@@ -36,9 +36,11 @@ test('native-first uses a shared range and otherwise requests a neutral manual a
         [shared(null, 12), 13, 'parent-required'], [shared(13, 15), 13, 'minor'],
         [shared(16, 17), 18, 'parent-required'], [shared(18, null), 18, 'adult'],
     ]) assert.deepEqual(await fixture(range).nativeFirst(threshold), { kind: 'shared', ageBand: expected });
-    for (const status of ['not-shared', 'unsupported', 'unavailable']) {
+    for (const status of ['not-shared', 'unsupported']) {
         assert.deepEqual(await fixture({ status, minimumAge: null, maximumAge: null }).nativeFirst(13), { kind: 'manual' });
     }
+    assert.deepEqual(await fixture(unavailable).nativeFirst(13), { kind: 'unavailable' });
+    assert.deepEqual(await fixture({ status: 'shared', minimumAge: null, maximumAge: null }).nativeFirst(13), { kind: 'unavailable' });
     assert.deepEqual(await fixture({ status: 'verification-required', minimumAge: null, maximumAge: null }).nativeFirst(13), { kind: 'verification-required' });
     const web = createRegistrationAge({ storage: () => store(), load: async () => null });
     assert.deepEqual(await web.nativeFirst(13), { kind: 'manual' });

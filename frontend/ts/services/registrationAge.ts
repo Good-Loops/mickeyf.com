@@ -95,6 +95,8 @@ export function createRegistrationAge({ load = loadAgeSource, storage = () => ty
                 const range = readNativeAgeRange(await source.request());
                 if (parentRequired()) return { kind: 'shared', ageBand: 'parent-required' };
                 if (range.status === 'verification-required') return { kind: 'verification-required' };
+                // An API error may conceal a required verification; it is not a refusal to share.
+                if (range.status === 'unavailable') return { kind: 'unavailable' };
                 if (range.status !== 'shared') return { kind: 'manual' };
                 const youngest = range.minimumAge ?? 0;
                 const ageBand = youngest < parentRequiredBelow ? 'parent-required' : youngest < 18 ? 'minor' : 'adult';
