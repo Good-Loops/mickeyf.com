@@ -1,6 +1,6 @@
 {
   "android_lockfile_sha256": "36ef8ef3b3210f462f043e646c541dff3dad60e0f28507aa39a37973fbbf88de",
-  "ios_lockfile_sha256": "6c9c58abd7717b2b734b97861fe6185ae0db607753e362230ebcc5fb34ee26b5",
+  "ios_lockfile_sha256": "83056d3f056e388a832dc97912bd9dfe25ff5fa94c6adb24cab4060c4098c2dd",
   "android_archives": [
     {
       "coordinate": "com.google.android.gms:play-services-auth-api-phone:18.0.2",
