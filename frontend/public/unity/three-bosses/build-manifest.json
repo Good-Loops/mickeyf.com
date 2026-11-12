@@ -1,39 +1,39 @@
 {
   "version": 2,
-  "buildId": "75124b8127d66de8d1e92ae776585b907061d9428eaa2208853018e817969ca0",
-  "certifiedBuildId": "920a3d13e8c0b9348afb63501833ffdaa6cbb879c5738344042c04a0aa8e064c",
-  "sourceCommit": "b41fc6b79b06d6072c9973cb34bce6cfd9bf25a1",
-  "unitySourceDigest": "b843f34607243d6e35bb55b8b0312cd2b96c016ae7063add15d3e1ad63c14f79",
+  "buildId": "4cb6d811e93c01c053e320a62a7dea2d2f0a62b2b9d0e7e51270df8e29cf47bf",
+  "certifiedBuildId": "344655af301ea8a3f8f079eafd17eabf27654c76fc207747a78551e5ed38b456",
+  "sourceCommit": "5049ed8ad52fcdd5e33b4eaab5670306c6ee3743",
+  "unitySourceDigest": "4da54477aa6892794b476d18716e44d9e1f15a0220e746050f8884afea0a571f",
   "unitySourceFileCount": 1046,
   "unityEditorVersion": "6000.3.27f2",
-  "loaderUrl": "releases/75124b8127d66de8d1e92ae776585b907061d9428eaa2208853018e817969ca0/Build/unity-security-webgl-retry-2026-11-05.loader.js",
-  "dataUrl": "releases/75124b8127d66de8d1e92ae776585b907061d9428eaa2208853018e817969ca0/Build/unity-security-webgl-retry-2026-11-05.data",
-  "frameworkUrl": "releases/75124b8127d66de8d1e92ae776585b907061d9428eaa2208853018e817969ca0/Build/unity-security-webgl-retry-2026-11-05.framework.js",
-  "codeUrl": "releases/75124b8127d66de8d1e92ae776585b907061d9428eaa2208853018e817969ca0/Build/unity-security-webgl-retry-2026-11-05.wasm",
-  "streamingAssetsUrl": "releases/75124b8127d66de8d1e92ae776585b907061d9428eaa2208853018e817969ca0/StreamingAssets",
+  "loaderUrl": "releases/4cb6d811e93c01c053e320a62a7dea2d2f0a62b2b9d0e7e51270df8e29cf47bf/Build/webgl-mute-fix-2026-11-12.loader.js",
+  "dataUrl": "releases/4cb6d811e93c01c053e320a62a7dea2d2f0a62b2b9d0e7e51270df8e29cf47bf/Build/webgl-mute-fix-2026-11-12.data",
+  "frameworkUrl": "releases/4cb6d811e93c01c053e320a62a7dea2d2f0a62b2b9d0e7e51270df8e29cf47bf/Build/webgl-mute-fix-2026-11-12.framework.js",
+  "codeUrl": "releases/4cb6d811e93c01c053e320a62a7dea2d2f0a62b2b9d0e7e51270df8e29cf47bf/Build/webgl-mute-fix-2026-11-12.wasm",
+  "streamingAssetsUrl": "releases/4cb6d811e93c01c053e320a62a7dea2d2f0a62b2b9d0e7e51270df8e29cf47bf/StreamingAssets",
   "companyName": "DefaultCompany",
   "productName": "Three Bosses",
   "productVersion": "1.0",
   "assets": [
     {
-      "path": "releases/75124b8127d66de8d1e92ae776585b907061d9428eaa2208853018e817969ca0/Build/unity-security-webgl-retry-2026-11-05.data",
-      "sha256": "b923cf6ff8f51605b0c024e075c380e47dc73852c481f9d53c00a1bde81e4ebb",
-      "size": 41843269
+      "path": "releases/4cb6d811e93c01c053e320a62a7dea2d2f0a62b2b9d0e7e51270df8e29cf47bf/Build/webgl-mute-fix-2026-11-12.data",
+      "sha256": "e8f4400b5daffdd0c36dfdad4f606099d2fab96cf7b9625b2513875fbd2dfa94",
+      "size": 41846311
     },
     {
-      "path": "releases/75124b8127d66de8d1e92ae776585b907061d9428eaa2208853018e817969ca0/Build/unity-security-webgl-retry-2026-11-05.framework.js",
-      "sha256": "0978fa19f6891bfa133c5fbf392d67057dde550de2101e1ca8f5564289db3458",
+      "path": "releases/4cb6d811e93c01c053e320a62a7dea2d2f0a62b2b9d0e7e51270df8e29cf47bf/Build/webgl-mute-fix-2026-11-12.framework.js",
+      "sha256": "296cb88ac1d9997a30e17544f95a34ead41f7f4817944923b27c7301a5f3ffdc",
       "size": 465633
     },
     {
-      "path": "releases/75124b8127d66de8d1e92ae776585b907061d9428eaa2208853018e817969ca0/Build/unity-security-webgl-retry-2026-11-05.loader.js",
-      "sha256": "7c486cdd74b6465dd595931431f858722c1c6610abd0df377d0893a80d71c65b",
+      "path": "releases/4cb6d811e93c01c053e320a62a7dea2d2f0a62b2b9d0e7e51270df8e29cf47bf/Build/webgl-mute-fix-2026-11-12.loader.js",
+      "sha256": "f59676ac663f3a6d1bb4b40354b834004412550ab7f03db444b6bf397dfcc6a1",
       "size": 26983
     },
     {
-      "path": "releases/75124b8127d66de8d1e92ae776585b907061d9428eaa2208853018e817969ca0/Build/unity-security-webgl-retry-2026-11-05.wasm",
-      "sha256": "e853b2bdc545ea01205dd43fbee632f5325d0a639bbf1c12ff1f19313791e56e",
-      "size": 51877506
+      "path": "releases/4cb6d811e93c01c053e320a62a7dea2d2f0a62b2b9d0e7e51270df8e29cf47bf/Build/webgl-mute-fix-2026-11-12.wasm",
+      "sha256": "eea4a9f600fa831ace8156630b52b954f5742bc7c7a93051f84f6f618b057eb5",
+      "size": 51903596
     }
   ]
 }

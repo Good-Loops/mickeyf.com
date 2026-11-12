@@ -436,6 +436,7 @@ export class AudioEngine {
             return;
         }
         this.patchState({ playing: true });
+        if (!this.isCurrentPlayback(audio, request)) return;
         // iOS can still be seeking after Stop; never expose the previous position while it rewinds.
         if (!audio.seeking && this.outputGain) this.outputGain.gain.value = 1;
         if (this.rafId === null && this.analyserNode) this.startAnalysis();

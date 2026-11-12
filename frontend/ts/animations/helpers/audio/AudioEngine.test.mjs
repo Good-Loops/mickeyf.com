@@ -477,6 +477,25 @@ test('Pause at the play-resolution boundary cannot be overwritten by a caller co
     });
 });
 
+test('a synchronous Stop during the playing notification keeps the output silent', async () => {
+    await withAudio([], async ({ engine, contexts, audios }) => {
+        await engine.processAudio(track('stop-during-notification'));
+        engine.pause();
+        let armed = true;
+        const unsubscribe = engine.subscribe(state => {
+            if (armed && state.playing) {
+                armed = false;
+                engine.stop();
+            }
+        });
+        await engine.play();
+        unsubscribe();
+        assert.equal(engine.state.playing, false);
+        assert.equal(audios[0].paused, true);
+        assert.equal(contexts[0].gains[0].gain.value, 0);
+    });
+});
+
 test('a current Play failure remains reported and stops analysis', async t => {
     const plan = {};
     const play = deferred();
