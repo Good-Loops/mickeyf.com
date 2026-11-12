@@ -66,6 +66,21 @@ test('inactivity warning is absent by default even after selecting a child',asyn
     assert.equal(view.find(node=>typeof node.type==='function'&&node.type.name==='ParentInactivityWarning'),undefined);
 });
 
+test('the child list does not claim it is empty while loading or after a failed request',async t=>{
+    const view=mount(t);const list=deferred();
+    globalThis[key].api.listChildren=()=>list.promise;
+    view.render();await view.settle();
+    assert.match(view.text(),/Loading child accounts/u);
+    assert.doesNotMatch(view.text(),/No child accounts are listed/u);
+    list.reject(new Error('synthetic network failure'));await view.settle();
+    assert.match(view.text(),/Child accounts could not be loaded/u);
+    assert.doesNotMatch(view.text(),/No child accounts are listed/u);
+    globalThis[key].api.listChildren=async()=>[view.child];
+    view.button('Refresh child accounts').props.onClick();view.render();await view.settle();
+    assert.ok(view.find(node=>node.type==='select'));
+    assert.doesNotMatch(view.text(),/Child accounts could not be loaded/u);
+});
+
 test('the selected child receives the enabled parent usage controls',async t=>{
     const view=mount(t);view.render();await view.settle();
     view.find(node=>node.type==='select').props.onChange({target:{value:view.child.accountId}});view.render();await view.settle();

@@ -61,7 +61,10 @@ export default function ParentAccounts() {
                 setConfig(policy); setClients(available);
                 if (policy.enabled) {
                     const current = await api.listChildren(controller.signal);
-                    if (!controller.signal.aborted) { setChildren(current); setChildrenLoaded(true); }
+                    if (!controller.signal.aborted) {
+                        setChildren(current); setChildrenLoaded(true);
+                        setFeedback(previous => previous === 'loadFailed' ? '' : previous);
+                    }
                 }
             }).catch(() => { if (!controller.signal.aborted) setFeedback('loadFailed'); });
         }
@@ -174,7 +177,7 @@ export default function ParentAccounts() {
             <h2>{text.children}</h2>
             <p>{text.guidance}</p>
             <button type="button" disabled={busy} onClick={() => setRetry(value => value + 1)}>{text.refresh}</button>
-            {children.length === 0 ? <p>{text.empty}</p> : <>
+            {!childrenLoaded ? <p role="status">{feedback === 'loadFailed' ? text.loadFailed : text.checkingChildren}</p> : children.length === 0 ? <p>{text.empty}</p> : <>
                 <label>{text.child}<select disabled={busy} value={selected} onChange={event => { selectedNow.current = event.target.value; setSelected(event.target.value); setConfirmation(''); }}>
                     <option value="">{text.choose}</option>{children.map(child => <option key={child.accountId} value={child.accountId}>{child.userName}</option>)}
                 </select></label>
@@ -218,6 +221,6 @@ export default function ParentAccounts() {
             </div>
             </section>
         </details>}
-        {feedback && <p role="status">{text[feedback]}</p>}<p><Link to="/account">{text.ownAccount}</Link></p>
+        {feedback && !(feedback === 'loadFailed' && isAuthenticated && config?.enabled && !childrenLoaded) && <p role="status">{text[feedback]}</p>}<p><Link to="/account">{text.ownAccount}</Link></p>
     </div></section>;
 }
