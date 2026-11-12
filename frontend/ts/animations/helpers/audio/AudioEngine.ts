@@ -95,6 +95,7 @@ export class AudioEngine {
     private sessionId: number = 0;
     // Null means playback is no longer wanted, without cancelling the loaded track.
     private playbackRequest: symbol | null = null;
+    private recoveryInFlight: { audio: HTMLAudioElement; request: symbol } | null = null;
     private listeners = new Set<(state: AudioState) => void>();
     
     /**
@@ -328,8 +329,13 @@ export class AudioEngine {
                 if (!music.paused) music.pause();
             } else {
                 const request = this.playbackRequest;
-                if (music.paused && request) {
-                    void this.resumePlayback(music, request).catch(() => {});
+                if (music.paused && request && !(this.recoveryInFlight?.audio === music
+                    && this.recoveryInFlight.request === request)) {
+                    const attempt = { audio: music, request };
+                    this.recoveryInFlight = attempt;
+                    void this.resumePlayback(music, request).catch(() => {}).finally(() => {
+                        if (this.recoveryInFlight === attempt) this.recoveryInFlight = null;
+                    });
                 }
             }
 

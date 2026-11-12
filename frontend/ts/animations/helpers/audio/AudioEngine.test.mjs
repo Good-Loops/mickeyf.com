@@ -82,7 +82,7 @@ async function withAudio(plans, check) {
             }
             removeAttribute(name) { if (name === 'src') this.src = ''; }
             load() {}
-            play() { this.playCount++; this.paused = false; return this.plan.play?.promise ?? Promise.resolve(); }
+            play() { this.playCount++; if (!this.plan.holdPaused) this.paused = false; return this.plan.play?.promise ?? Promise.resolve(); }
             pause() { this.paused = true; }
         },
         URL: { createObjectURL: () => `blob:track-${++nextUrl}`, revokeObjectURL: url => revoked.push(url) },
@@ -186,6 +186,27 @@ test('a pending old Play cannot interrupt the fresh playback after Stop', async 
         assert.equal(contexts[0].sources[0].disconnectCount, 1);
         assert.equal(audios[1].paused, false);
         assert.equal(audios[1].currentTime, 0);
+        assert.equal(engine.state.playing, true);
+    });
+});
+
+test('a slow browser resume is not restarted every animation frame', async () => {
+    const plan = {};
+    const resume = deferred();
+    await withAudio([plan], async ({ engine, audios, frames }) => {
+        await engine.processAudio(track('slow-resume'));
+        plan.play = resume;
+        plan.holdPaused = true;
+        audios[0].paused = true;
+        for (let i = 0; i < 3; i++) {
+            const [id, frame] = frames.entries().next().value;
+            frames.delete(id);
+            frame();
+        }
+        assert.equal(audios[0].playCount, 2, 'only one recovery Play is pending');
+        audios[0].paused = false;
+        resume.resolve();
+        await flush();
         assert.equal(engine.state.playing, true);
     });
 });
