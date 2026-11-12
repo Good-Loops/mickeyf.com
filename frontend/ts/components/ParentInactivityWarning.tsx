@@ -74,10 +74,13 @@ export default function ParentInactivityWarning({ language = 'en', childAccountI
     if (status.kind === 'loading') return <p>{tr('Checking for an inactivity warning.', 'Verificando se há aviso de inatividade.')}</p>;
     if (status.kind === 'empty') return null;
     if (status.kind === 'unavailable') return <p role="status">{tr('We could not check the inactivity warning.', 'Não foi possível consultar o aviso de inatividade.')} <button type="button" onClick={() => setRetry(value => value + 1)}>{tr('Try again', 'Tentar novamente')}</button></p>;
-    return <section aria-label={tr('Child account inactivity warning', 'Aviso de inatividade da conta infantil')} lang={language}>
+    return <section className="parent-accounts__section parent-accounts__warning" aria-label={tr('Child account inactivity warning', 'Aviso de inatividade da conta infantil')} lang={language}>
         <h3>{tr('Inactivity warning', 'Aviso de inatividade')}</h3>
-        <p lang="en">{status.warning.notice.en}</p>
-        <p lang="pt-BR">{status.warning.notice.ptBR}</p>
+        {language === 'pt-BR' ? <p lang="pt-BR">{status.warning.notice.ptBR}</p> : <p lang="en">{status.warning.notice.en}</p>}
+        <details className="parent-accounts__notice">
+            <summary>{language === 'pt-BR' ? 'Read this notice in English' : 'Ler este aviso em português'}</summary>
+            {language === 'pt-BR' ? <p lang="en">{status.warning.notice.en}</p> : <p lang="pt-BR">{status.warning.notice.ptBR}</p>}
+        </details>
         {status.warning.notice.version.startsWith('child-inactivity-nonresponse-')
             ? <p>{tr('Use “Keep this child account active” below to restart the timer.', 'Use “Manter esta conta infantil ativa” abaixo para reiniciar o prazo.')}</p>
             : status.warning.acknowledged ? <p role="status">{tr('You acknowledged this warning.', 'Você confirmou a leitura deste aviso.')}</p> :

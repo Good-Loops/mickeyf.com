@@ -158,16 +158,19 @@ export default function ParentAccounts() {
     }
     if (LEGACY_PUBLIC_API_PREVIEW) return <p lang={language}>{text.preview}</p>;
     return <section className="manage-account parent-accounts" lang={language}><div className="manage-account__form-wrapper">
-        <div role="group" aria-label="Language / Idioma">
+        <div className="parent-accounts__language" role="group" aria-label="Language / Idioma">
             <button type="button" lang="en" aria-pressed={language === 'en'} disabled={busy} onClick={() => chooseLanguage('en')}>English</button>{' '}
             <button type="button" lang="pt-BR" aria-pressed={language === 'pt-BR'} disabled={busy} onClick={() => chooseLanguage('pt-BR')}>Português</button>
         </div>
         <h1 className="manage-account__title">{text.title}</h1>
-        {loading ? <p>{text.checking}</p> : <ParentRegistration api={api} authenticated={isAuthenticated} language={language}
+        {loading ? <p>{text.checking}</p> : <details className="parent-accounts__panel">
+            <summary>{language === 'pt-BR' ? 'Criar uma conta infantil' : 'Create a child account'}</summary>
+            <ParentRegistration api={api} authenticated={isAuthenticated} language={language}
             requireChildAudience
             accountKey={userName ?? ''} sessionGeneration={sessionGeneration} captureAccountAction={captureAccountAction} captureSessionGeneration={captureSessionGeneration}
-            clients={clients} acquire={acquireProviderCredential} onCreated={() => setRetry(value => value + 1)} />}
-        {isAuthenticated && config?.enabled && <section aria-label={text.manage}>
+            clients={clients} acquire={acquireProviderCredential} onCreated={() => setRetry(value => value + 1)} />
+        </details>}
+        {isAuthenticated && config?.enabled && <section className="parent-accounts__section" aria-label={text.manage}>
             <h2>{text.children}</h2>
             <p>{text.guidance}</p>
             <button type="button" disabled={busy} onClick={() => setRetry(value => value + 1)}>{text.refresh}</button>
@@ -175,25 +178,32 @@ export default function ParentAccounts() {
                 <label>{text.child}<select disabled={busy} value={selected} onChange={event => { selectedNow.current = event.target.value; setSelected(event.target.value); setConfirmation(''); }}>
                     <option value="">{text.choose}</option>{children.map(child => <option key={child.accountId} value={child.accountId}>{child.userName}</option>)}
                 </select></label>
-                {selected && <ScoreParticipation language={language} childAccountId={selected} authenticated={isAuthenticated} accountKey={userName ?? ''} sessionGeneration={sessionGeneration}
-                    selectionIsCurrent={() => selectedNow.current === selected} captureAccountAction={captureAccountAction} captureSessionGeneration={captureSessionGeneration} />}
-                {selected && import.meta.env.VITE_ENABLE_CHILD_DAILY_USAGE === '1' && <ParentDailyUsage language={language}
-                    key={`${sessionGeneration}:${selected}`} childAccountId={selected} sessionGeneration={sessionGeneration}
-                    selectionIsCurrent={() => selectedNow.current === selected} captureAccountAction={captureAccountAction} captureSessionGeneration={captureSessionGeneration} />}
                 {selected && childLifecycleEnabled && <ParentInactivityWarning language={language}
                     key={`${sessionGeneration}:${selected}`} childAccountId={selected} sessionGeneration={sessionGeneration} refreshKey={warningRevision}
                     selectionIsCurrent={() => selectedNow.current === selected} captureAccountAction={captureAccountAction} captureSessionGeneration={captureSessionGeneration} />}
                 {selected && childLifecycleEnabled && <p><button type="button" disabled={busy} onClick={() => void keepChild()}>{text.keep}</button></p>}
+                {selected && import.meta.env.VITE_ENABLE_CHILD_DAILY_USAGE === '1' && <ParentDailyUsage language={language}
+                    key={`${sessionGeneration}:${selected}`} childAccountId={selected} sessionGeneration={sessionGeneration}
+                    selectionIsCurrent={() => selectedNow.current === selected} captureAccountAction={captureAccountAction} captureSessionGeneration={captureSessionGeneration} />}
+                {selected && <details className="parent-accounts__panel">
+                    <summary>{language === 'pt-BR' ? 'Rankings públicos' : 'Public leaderboards'}</summary>
+                    <ScoreParticipation language={language} childAccountId={selected} authenticated={isAuthenticated} accountKey={userName ?? ''} sessionGeneration={sessionGeneration}
+                        selectionIsCurrent={() => selectedNow.current === selected} captureAccountAction={captureAccountAction} captureSessionGeneration={captureSessionGeneration} />
+                </details>}
+                {selected && <details className="parent-accounts__panel parent-accounts__panel--danger">
+                <summary>{language === 'pt-BR' ? 'Excluir esta conta infantil' : 'Delete this child account'}</summary>
                 <p>{text.withdrawal}</p>
                 <label>{text.type} {text.withdrawPhrase}<input name="withdraw-confirmation" disabled={busy} value={confirmation} onChange={event => setConfirmation(event.target.value)} /></label>
                 <div className="manage-account__actions">
                     {clients.map(client => <button key={client.clientKey} type="button" disabled={busy || !selected || confirmation !== text.withdrawPhrase}
                         onClick={() => void withdraw(client)}>{text.confirmDeletion} {client.provider === 'google' ? 'Google' : 'Apple'}</button>)}
                 </div>
+                </details>}
             </>}
         </section>}
-        {isAuthenticated && config?.enabled && <section aria-label={text.deleteFamily}>
-            <h2>{text.familyTitle}</h2>
+        {isAuthenticated && config?.enabled && <details className="parent-accounts__panel parent-accounts__panel--danger">
+            <summary>{text.familyTitle}</summary>
+            <section className="parent-accounts__section" aria-label={text.deleteFamily}>
             <p>{text.familyBeforeName} ({userName}) {text.familyAfterName}</p>
             {childrenLoaded ? <ul>{children.map(child => <li key={child.accountId}>{child.userName}</li>)}</ul> : <p>{text.loadList}</p>}
             {childrenLoaded && children.length === 0 && <p>{text.noLinkedChildren}</p>}
@@ -206,7 +216,8 @@ export default function ParentAccounts() {
                     disabled={busy || !childrenLoaded || !familyAcknowledged || familyConfirmation !== text.familyPhrase}
                     onClick={() => void deleteFamily(client)}>{text.deleteFamilyWith} {client.provider === 'google' ? 'Google' : 'Apple'}</button>)}
             </div>
-        </section>}
+            </section>
+        </details>}
         {feedback && <p role="status">{text[feedback]}</p>}<p><Link to="/account">{text.ownAccount}</Link></p>
     </div></section>;
 }

@@ -83,20 +83,25 @@ export default function ParentDailyUsage({ language, childAccountId, sessionGene
     if (status === 'loading') return <p>{tr('Checking daily use…', 'Consultando o uso diário…')}</p>;
     if (status === 'unavailable') return <p role="status">{tr('Could not check daily use.', 'Não foi possível consultar o uso diário.')}{' '}
         <button type="button" onClick={() => setRetry(value => value + 1)}>{tr('Try again', 'Tentar novamente')}</button></p>;
-    return <section lang={language} aria-label={tr('Daily use', 'Uso diário')}>
+    return <section className="parent-accounts__section parent-accounts__control" lang={language} aria-label={tr('Daily use', 'Uso diário')}>
         <h3>{tr('Daily use', 'Uso diário')}</h3>
         <p>{usage ? tr(`Used on ${usage.day}: ${Math.floor(usage.usedMs / 60_000)} min.`, `Uso em ${usage.day}: ${Math.floor(usage.usedMs / 60_000)} min.`)
             : tr('No daily limit is set.', 'Nenhum limite diário definido.')}</p>
-        <p>{language === 'pt-BR' ? notice.ptBR : notice.en}</p>
-        <p><PrivacyNoticeLink url={notice.privacyUrl} portuguese={language === 'pt-BR'} /></p>
+        <p>{tr('Optionally set a daily limit. Ludolume stores the limit, time zone and estimated online use; it does not limit guest or offline use.', 'Defina um limite diário opcional. O Ludolume guarda o limite, o fuso e o uso on-line estimado; o limite não se aplica ao uso como visitante ou off-line.')}</p>
+        <details className="parent-accounts__notice">
+            <summary>{tr('How daily use and privacy work', 'Como funcionam o uso diário e a privacidade')}</summary>
+            <p>{language === 'pt-BR' ? notice.ptBR : notice.en}</p>
+            <p><PrivacyNoticeLink url={notice.privacyUrl} portuguese={language === 'pt-BR'} /></p>
+        </details>
         <label>{tr('Daily limit in minutes (1–1440)', 'Limite diário em minutos (1–1440)')}{' '}
             <input type="number" min="1" max="1440" step="1" value={minutes} disabled={busy} onChange={event => setMinutes(event.target.value)} /></label>
         <label>{tr('Time zone for the daily reset', 'Fuso horário para o reinício diário')}{' '}
             <input value={timeZone} maxLength={100} disabled={busy} onChange={event => setTimeZone(event.target.value)} /></label>
-        <label><input type="checkbox" checked={consent} disabled={busy} onChange={event => setConsent(event.target.checked)} />
-            {tr('I agree to this optional usage collection for this child.', 'Concordo com esta coleta opcional de uso para esta criança.')}</label>{' '}
-        <button type="button" disabled={busy || !minutes || !timeZone || !consent} onClick={() => void update(false)}>{tr('Save limit', 'Salvar limite')}</button>{' '}
+        <label className="parent-accounts__check"><input type="checkbox" checked={consent} disabled={busy} onChange={event => setConsent(event.target.checked)} />
+            <span>{tr('I agree to this optional usage collection for this child.', 'Concordo com esta coleta opcional de uso para esta criança.')}</span></label>
+        <div className="manage-account__actions"><button type="button" disabled={busy || !minutes || !timeZone || !consent} onClick={() => void update(false)}>{tr('Save limit', 'Salvar limite')}</button>
         <button type="button" disabled={busy} onClick={() => void update(true)}>{tr('Turn off limit', 'Desativar limite')}</button>
+        </div>
         {feedback && <p role="status">{feedback === 'saved' ? tr('Limit saved.', 'Limite salvo.') : feedback === 'cleared'
             ? tr('Limit and current total removed.', 'Limite e total atual removidos.') : tr('Could not confirm the change. Refresh and try again.', 'Não foi possível confirmar a alteração. Atualize e tente novamente.')}</p>}
     </section>;

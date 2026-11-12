@@ -214,7 +214,7 @@ export default function ParentRegistration({ language = 'en', api, authenticated
         finally { if (current === generation.current && !controller.signal.aborted) { operation.current = null; setBusy(false); } }
     };
 
-    return <section lang={portuguese || language === 'pt-BR' ? 'pt-BR' : 'en'} aria-label={tr('Parent-led registration', 'Cadastro por responsável')}>
+    return <section className="parent-accounts__section" lang={portuguese || language === 'pt-BR' ? 'pt-BR' : 'en'} aria-label={tr('Parent-led registration', 'Cadastro por responsável')}>
         <h2>{tr('Create a private child account', 'Criar uma conta infantil privada')}</h2>
         <p>{tr('Google or Apple confirms your provider account and may confirm your email. Your adult and guardian declarations are separate; provider sign-in does not verify guardianship.', 'Google ou Apple confirma sua conta no provedor e pode confirmar seu e-mail. Suas declarações de maioridade e responsabilidade legal são separadas; o acesso pelo provedor não comprova responsabilidade legal.')}</p>
         {config?.enabled && <p><PrivacyNoticeLink url={config.privacyNoticeUrl} portuguese={portuguese || language === 'pt-BR'} /></p>}
