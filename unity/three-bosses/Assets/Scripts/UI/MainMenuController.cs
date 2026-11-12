@@ -29,7 +29,6 @@ public sealed class MainMenuController : MonoBehaviour
     [SerializeField] private Texture2D menuArtwork;
     [SerializeField] private StyleSheet presentationStyle;
     [SerializeField] private Texture2D enabledIcon;
-    [SerializeField] private Texture2D mutedIcon;
 
     private VisualElement documentRoot;
     private VisualElement master;
@@ -37,6 +36,7 @@ public sealed class MainMenuController : MonoBehaviour
     private Button playButton;
     private Button audioButton;
     private Image audioIcon;
+    private bool audioMuted;
     private bool addedPresentationStyle;
     private bool isLoading;
     private Rect lastScreenSafeArea;
@@ -86,9 +86,9 @@ public sealed class MainMenuController : MonoBehaviour
         document ??= GetComponent<UIDocument>();
         documentRoot = document != null ? document.rootVisualElement : null;
         if (documentRoot == null || document.panelSettings == null || menuArtwork == null || presentationStyle == null ||
-            enabledIcon == null || mutedIcon == null)
+            enabledIcon == null)
         {
-            error = "Assign the UIDocument with PanelSettings, existing menu artwork, presentation stylesheet, and both audio icons.";
+            error = "Assign the UIDocument with PanelSettings, existing menu artwork, presentation stylesheet, and audio icon.";
             return false;
         }
 
@@ -141,6 +141,7 @@ public sealed class MainMenuController : MonoBehaviour
             pickingMode = PickingMode.Ignore,
             scaleMode = ScaleMode.ScaleToFit
         };
+        audioIcon.generateVisualContent += DrawMutedIcon;
         audioButton.Add(audioIcon);
         error = null;
         return true;
@@ -289,9 +290,43 @@ public sealed class MainMenuController : MonoBehaviour
         if (audioIcon == null)
             return;
 
-        audioIcon.image = isEnabled ? enabledIcon : mutedIcon;
+        audioMuted = !isEnabled;
+        audioIcon.image = isEnabled ? enabledIcon : null;
+        audioIcon.MarkDirtyRepaint();
         audioButton.tooltip = isEnabled ? "Mute audio" : "Enable audio";
         audioButton.EnableInClassList("audio-muted", !isEnabled);
+    }
+
+    private void DrawMutedIcon(MeshGenerationContext context)
+    {
+        if (!audioMuted || audioIcon == null)
+            return;
+
+        Rect rect = audioIcon.contentRect;
+        if (rect.width <= 0f || rect.height <= 0f)
+            return;
+
+        Vector2 Point(float x, float y) => new(rect.x + rect.width * x / 64f, rect.y + rect.height * y / 44f);
+        var painter = context.painter2D;
+        painter.fillColor = new Color32(226, 233, 244, 255);
+        painter.BeginPath();
+        painter.MoveTo(Point(9f, 16f));
+        painter.LineTo(Point(17f, 16f));
+        painter.LineTo(Point(29f, 8f));
+        painter.LineTo(Point(29f, 36f));
+        painter.LineTo(Point(17f, 28f));
+        painter.LineTo(Point(9f, 28f));
+        painter.ClosePath();
+        painter.Fill();
+        painter.strokeColor = new Color32(226, 233, 244, 255);
+        painter.lineWidth = Mathf.Max(1f, rect.height * 3f / 44f);
+        painter.lineCap = LineCap.Round;
+        painter.BeginPath();
+        painter.MoveTo(Point(39f, 15f));
+        painter.LineTo(Point(51f, 29f));
+        painter.MoveTo(Point(51f, 15f));
+        painter.LineTo(Point(39f, 29f));
+        painter.Stroke();
     }
 
     private void OnDisable()
@@ -302,7 +337,11 @@ public sealed class MainMenuController : MonoBehaviour
             audioButton.clicked -= ToggleAudio;
         GameAudioSettings.Changed -= RefreshAudioIcon;
         documentRoot?.UnregisterCallback<GeometryChangedEvent>(OnGeometryChanged);
-        audioIcon?.RemoveFromHierarchy();
+        if (audioIcon != null)
+        {
+            audioIcon.generateVisualContent -= DrawMutedIcon;
+            audioIcon.RemoveFromHierarchy();
+        }
         audioIcon = null;
         if (addedPresentationStyle && documentRoot != null)
             documentRoot.styleSheets.Remove(presentationStyle);

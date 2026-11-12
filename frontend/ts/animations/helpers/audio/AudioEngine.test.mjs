@@ -28,6 +28,7 @@ async function withAudio(plans, check) {
                     this.state = 'running';
                     this.closeCount = 0;
                     this.sources = [];
+                    this.gains = [];
                     contexts.push(this);
                 }
                 resume() { return this.plan.resume?.promise ?? Promise.resolve(); }
@@ -38,6 +39,11 @@ async function withAudio(plans, check) {
                 }
                 createAnalyser() {
                     return { fftSize: 0, connect() {}, getFloatTimeDomainData(input) { input.fill(0); } };
+                }
+                createGain() {
+                    const gain = { gain: { value: 1 }, connect() {}, disconnect() {} };
+                    this.gains.push(gain);
+                    return gain;
                 }
                 createMediaElementSource() {
                     const connectError = this.plan.connectError;
@@ -57,6 +63,7 @@ async function withAudio(plans, check) {
                 this.plan = plans[audios.length] ?? {};
                 this.src = url;
                 this.currentTime = 0;
+                this.seeking = false;
                 this.duration = 60;
                 this.ended = false;
                 this.paused = true;
@@ -117,6 +124,42 @@ test('normal loading starts playback and disposal releases the owned resources o
         assert.equal(audios[0].paused, true);
         assert.deepEqual(revoked, ['blob:track-1']);
         assert.equal(frames.size, 0);
+    });
+});
+
+test('Stop keeps audio silent until a delayed rewind finishes, even if Play is pressed immediately', async () => {
+    await withAudio([], async ({ engine, contexts, audios }) => {
+        await engine.processAudio(track('delayed-seek'));
+        const audio = audios[0];
+        const gain = contexts[0].gains[0];
+        audio.currentTime = 12;
+        engine.stop();
+        audio.seeking = true;
+        assert.equal(gain.gain.value, 0, 'Stop immediately silences output');
+        await engine.play();
+        assert.equal(audio.paused, false, 'Play still runs during the user action');
+        assert.equal(gain.gain.value, 0, 'old-position audio remains silent during the seek');
+        audio.seeking = false;
+        audio.dispatchEvent(new Event('seeked'));
+        assert.equal(gain.gain.value, 1, 'sound returns after the rewind finishes');
+        assert.equal(audio.currentTime, 0);
+    });
+});
+
+test('a late seek completion cannot restore sound after another Stop', async () => {
+    await withAudio([], async ({ engine, contexts, audios }) => {
+        await engine.processAudio(track('cancelled-seek'));
+        const audio = audios[0];
+        audio.currentTime = 12;
+        engine.stop();
+        audio.seeking = true;
+        await engine.play();
+        engine.stop();
+        audio.seeking = false;
+        audio.dispatchEvent(new Event('seeked'));
+        assert.equal(contexts[0].gains[0].gain.value, 0);
+        assert.equal(audio.paused, true);
+        assert.equal(engine.state.playing, false);
     });
 });
 

@@ -82,12 +82,14 @@ export class AudioEngine {
     private audioContext: AudioContext | null = null;
     private sourceNode: MediaElementAudioSourceNode | null = null;
     private analyserNode: AnalyserNode | null = null;
+    private outputGain: GainNode | null = null;
     private volumeHistory: number[] = [];
     private readonly VOLUME_HISTORY_SIZE = 10;
 
     private rafId: number | null = null;
     private objectUrl: string | null = null;
     private endedListener: (() => void) | null = null;
+    private seekedListener: (() => void) | null = null;
 
     // Invalidates pending uploads and analysis loops when a track is replaced or disposed.
     private sessionId: number = 0;
@@ -135,6 +137,7 @@ export class AudioEngine {
 
             this.endedListener = () => {
                 this.playbackRequest = null;
+                this.silenceOutput();
                 // Treat natural end like "paused at end": stop analysis, mark not playing, reset time
                 this.patchState({ playing: false });
                 this.stopAnalysisLoop();
@@ -145,6 +148,13 @@ export class AudioEngine {
             };
 
             audio.addEventListener("ended", this.endedListener);
+            this.seekedListener = () => {
+                if (this.audioElement === audio && this.playbackRequest && this.state.playing
+                    && !audio.paused && !audio.seeking && this.outputGain) {
+                    this.outputGain.gain.value = 1;
+                }
+            };
+            audio.addEventListener("seeked", this.seekedListener);
 
             const audioContext = new window.AudioContext();
             // Disposal must own these resources even while the browser is resuming audio.
@@ -159,8 +169,11 @@ export class AudioEngine {
 
             const source = audioContext.createMediaElementSource(audio);
             this.sourceNode = source;
+            const outputGain = audioContext.createGain();
+            this.outputGain = outputGain;
             source.connect(analyser);
-            analyser.connect(audioContext.destination);
+            analyser.connect(outputGain);
+            outputGain.connect(audioContext.destination);
 
             this.patchState({ hasAudio: true });
 
@@ -211,6 +224,7 @@ export class AudioEngine {
         this.playbackRequest = null;
         if (!this.audioElement) return;
 
+        this.silenceOutput();
         this.patchState({ playing: false });
         this.audioElement.pause();
         this.stopAnalysisLoop();
@@ -227,6 +241,7 @@ export class AudioEngine {
         const audio = this.audioElement;
         if (!audio) return;
 
+        this.silenceOutput();
         this.stopAnalysisLoop();
 
         try {
@@ -403,6 +418,10 @@ export class AudioEngine {
         return this.playbackRequest === request && this.audioElement === audio;
     }
 
+    private silenceOutput(): void {
+        if (this.outputGain) this.outputGain.gain.value = 0;
+    }
+
     // All playback paths respect the latest transport command across browser waits.
     private async resumePlayback(audio: HTMLAudioElement, request: symbol): Promise<void> {
         const context = this.audioContext;
@@ -417,6 +436,8 @@ export class AudioEngine {
             return;
         }
         this.patchState({ playing: true });
+        // iOS can still be seeking after Stop; never expose the previous position while it rewinds.
+        if (!audio.seeking && this.outputGain) this.outputGain.gain.value = 1;
         if (this.rafId === null && this.analyserNode) this.startAnalysis();
     }
 
@@ -433,18 +454,23 @@ export class AudioEngine {
         const audio = this.audioElement;
         const audioContext = this.audioContext;
         const source = this.sourceNode;
+        const outputGain = this.outputGain;
         const objectUrl = this.objectUrl;
         const endedListener = this.endedListener;
+        const seekedListener = this.seekedListener;
 
         // A new upload may start while close() waits; only release this captured track.
         this.audioElement = null;
         this.audioContext = null;
         this.sourceNode = null;
         this.analyserNode = null;
+        this.outputGain = null;
         this.objectUrl = null;
         this.endedListener = null;
+        this.seekedListener = null;
 
         if (audio && endedListener) audio.removeEventListener("ended", endedListener);
+        if (audio && seekedListener) audio.removeEventListener("seeked", seekedListener);
 
         try {
             audio?.pause();
@@ -452,6 +478,10 @@ export class AudioEngine {
 
         try {
             source?.disconnect();
+        } catch {}
+
+        try {
+            outputGain?.disconnect();
         } catch {}
 
         if (audioContext) {

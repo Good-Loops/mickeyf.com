@@ -198,7 +198,7 @@
 
             border: .1rem solid rgba($white, .14);
             border-radius: .85rem;
-            background: linear-gradient(145deg, rgba($space-surface, .38), rgba($space-background, .18));
+            background: linear-gradient(145deg, rgba($space-surface, .88), rgba($space-background, .82));
             box-shadow:
                 0 1.2rem 3rem rgba(black, .28),
                 0 .1rem 0 rgba($white, .08) inset;
@@ -216,7 +216,7 @@
                 height: .65rem;
                 border-top: .1rem solid rgba($white, .14);
                 border-left: .1rem solid rgba($white, .14);
-                background: rgba($space-surface, .52);
+                background: rgba($space-surface, .88);
                 transform: translateX(-50%) rotate(45deg);
             }
 

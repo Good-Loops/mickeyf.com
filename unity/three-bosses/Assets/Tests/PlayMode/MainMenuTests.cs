@@ -247,8 +247,10 @@ namespace ThreeBosses.Tests
                     using (var submit = NavigationSubmitEvent.GetPooled()) audio.SendEvent(submit);
                     Assert.That((bool)enabled.GetValue(null), Is.EqualTo(state == 0 ? !original : original));
                     var controller = document.GetComponent(Type.GetType("MainMenuController, Assembly-CSharp"));
-                    string field = (bool)enabled.GetValue(null) ? "enabledIcon" : "mutedIcon";
-                    Assert.That(icon.image, Is.SameAs(controller.GetType().GetField(field, PrivateInstance).GetValue(controller)));
+                    if ((bool)enabled.GetValue(null))
+                        Assert.That(icon.image, Is.SameAs(controller.GetType().GetField("enabledIcon", PrivateInstance).GetValue(controller)));
+                    else
+                        Assert.That(icon.image, Is.Null, "Muted icon is drawn without an opaque texture background.");
                     Assert.That(audio.Query<Image>().ToList().Count, Is.EqualTo(1));
                 }
                 play.Focus();
@@ -268,6 +270,54 @@ namespace ThreeBosses.Tests
                 foreach (Behaviour countdown in UnityEngine.Object.FindObjectsByType(countdownType, FindObjectsSortMode.None))
                     countdown.enabled = false;
                 SceneManager.LoadScene("MainMenu");
+            }
+        }
+
+        [UnityTest]
+        public IEnumerator MutedIconRendersSpeakerAndCrossWithoutAWhiteBox()
+        {
+            EditorSceneManager.LoadSceneInPlayMode(MenuScene, new LoadSceneParameters(LoadSceneMode.Single));
+            yield return null;
+            yield return null;
+            var document = UnityEngine.Object.FindFirstObjectByType<UIDocument>();
+            var originalPanel = document.panelSettings;
+            var panel = UnityEngine.Object.Instantiate(originalPanel);
+            var target = new RenderTexture(844, 390, 24);
+            var settings = Type.GetType("GameAudioSettings, Assembly-CSharp");
+            bool original = (bool)settings.GetProperty("IsEnabled").GetValue(null);
+            Texture2D image = null;
+            var previous = RenderTexture.active;
+            try
+            {
+                target.Create();
+                panel.targetTexture = target;
+                panel.SetScreenToPanelSpaceFunction(position => position);
+                document.panelSettings = panel;
+                settings.GetMethod("SetEnabled").Invoke(null, new object[] { false });
+                yield return null;
+                yield return null;
+                var icon = document.rootVisualElement.Q<Image>("pilot-audio-icon");
+                Rect bounds = icon.worldBound;
+                Assert.That(bounds.width, Is.GreaterThan(10f));
+                RenderTexture.active = target;
+                image = new Texture2D(target.width, target.height, TextureFormat.RGBA32, false);
+                image.ReadPixels(new Rect(0, 0, target.width, target.height), 0, 0);
+                image.Apply();
+                Color Pixel(float x, float y) => image.GetPixel(
+                    Mathf.RoundToInt(bounds.xMin + bounds.width * x),
+                    image.height - 1 - Mathf.RoundToInt(bounds.yMin + bounds.height * y));
+                Assert.That(Pixel(.20f, .50f).grayscale, Is.GreaterThan(.55f), "Speaker must be visible.");
+                Assert.That(Pixel(.70f, .50f).grayscale, Is.GreaterThan(.55f), "Mute cross must be visible.");
+                Assert.That(Pixel(.05f, .10f).grayscale, Is.LessThan(.55f), "Icon background must not be a white rectangle.");
+            }
+            finally
+            {
+                RenderTexture.active = previous;
+                settings.GetMethod("SetEnabled").Invoke(null, new object[] { original });
+                document.panelSettings = originalPanel;
+                if (image != null) UnityEngine.Object.Destroy(image);
+                UnityEngine.Object.Destroy(panel);
+                UnityEngine.Object.Destroy(target);
             }
         }
 
