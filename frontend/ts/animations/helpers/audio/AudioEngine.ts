@@ -135,26 +135,7 @@ export class AudioEngine {
             const audio = new Audio(url);
             this.audioElement = audio;
 
-            this.endedListener = () => {
-                this.playbackRequest = null;
-                this.silenceOutput();
-                // Treat natural end like "paused at end": stop analysis, mark not playing, reset time
-                this.patchState({ playing: false });
-                this.stopAnalysisLoop();
-
-                try {
-                    audio.currentTime = 0;
-                } catch {}
-            };
-
-            audio.addEventListener("ended", this.endedListener);
-            this.seekedListener = () => {
-                if (this.audioElement === audio && this.playbackRequest && this.state.playing
-                    && !audio.paused && !audio.seeking && this.outputGain) {
-                    this.outputGain.gain.value = 1;
-                }
-            };
-            audio.addEventListener("seeked", this.seekedListener);
+            this.attachAudioListeners(audio);
 
             const audioContext = new window.AudioContext();
             // Disposal must own these resources even while the browser is resuming audio.
@@ -248,6 +229,8 @@ export class AudioEngine {
             audio.pause();
             audio.currentTime = 0;
         } catch {}
+
+        this.replaceStoppedElement(audio);
 
         this.volumeHistory = [];
         this.patchState({ 
@@ -420,6 +403,54 @@ export class AudioEngine {
 
     private silenceOutput(): void {
         if (this.outputGain) this.outputGain.gain.value = 0;
+    }
+
+    private attachAudioListeners(audio: HTMLAudioElement): void {
+        this.endedListener = () => {
+            if (this.audioElement !== audio) return;
+            this.playbackRequest = null;
+            this.silenceOutput();
+            this.patchState({ playing: false });
+            this.stopAnalysisLoop();
+            try { audio.currentTime = 0; } catch {}
+        };
+        this.seekedListener = () => {
+            if (this.audioElement === audio && this.playbackRequest && this.state.playing
+                && !audio.paused && !audio.seeking && this.outputGain) {
+                this.outputGain.gain.value = 1;
+            }
+        };
+        audio.addEventListener("ended", this.endedListener);
+        audio.addEventListener("seeked", this.seekedListener);
+    }
+
+    /** A fresh media element avoids replaying WebKit's buffered pre-seek audio after Stop. */
+    private replaceStoppedElement(previous: HTMLAudioElement): void {
+        const context = this.audioContext;
+        const analyser = this.analyserNode;
+        const oldSource = this.sourceNode;
+        const url = this.objectUrl;
+        if (!context || !analyser || !oldSource || !url) return;
+
+        let next: HTMLAudioElement;
+        let nextSource: MediaElementAudioSourceNode | null = null;
+        try {
+            next = new Audio(url);
+            nextSource = context.createMediaElementSource(next);
+            nextSource.connect(analyser);
+        } catch {
+            try { nextSource?.disconnect(); } catch {}
+            return;
+        }
+
+        if (this.endedListener) previous.removeEventListener("ended", this.endedListener);
+        if (this.seekedListener) previous.removeEventListener("seeked", this.seekedListener);
+        try { oldSource.disconnect(); } catch {}
+        try { previous.removeAttribute("src"); previous.load(); } catch {}
+        this.audioElement = next;
+        this.sourceNode = nextSource;
+        this.attachAudioListeners(next);
+        try { next.load(); } catch {}
     }
 
     // All playback paths respect the latest transport command across browser waits.

@@ -45,9 +45,10 @@ async function withAudio(plans, check) {
                     this.gains.push(gain);
                     return gain;
                 }
-                createMediaElementSource() {
+                createMediaElementSource(element) {
                     const connectError = this.plan.connectError;
                     const source = {
+                        element,
                         disconnectCount: 0,
                         connect() { if (connectError) throw connectError; },
                         disconnect() { this.disconnectCount++; },
@@ -79,6 +80,7 @@ async function withAudio(plans, check) {
                 super.removeEventListener(type, listener);
                 if (type === 'ended') this.endedListeners.delete(listener);
             }
+            removeAttribute(name) { if (name === 'src') this.src = ''; }
             load() {}
             play() { this.playCount++; this.paused = false; return this.plan.play?.promise ?? Promise.resolve(); }
             pause() { this.paused = true; }
@@ -127,39 +129,64 @@ test('normal loading starts playback and disposal releases the owned resources o
     });
 });
 
-test('Stop keeps audio silent until a delayed rewind finishes, even if Play is pressed immediately', async () => {
+test('Stop and immediate Play use a fresh element rather than replaying a buffered old position', async () => {
     await withAudio([], async ({ engine, contexts, audios }) => {
         await engine.processAudio(track('delayed-seek'));
         const audio = audios[0];
+        const originalUrl = audio.src;
         const gain = contexts[0].gains[0];
         audio.currentTime = 12;
         engine.stop();
-        audio.seeking = true;
         assert.equal(gain.gain.value, 0, 'Stop immediately silences output');
+        assert.equal(contexts[0].sources[0].disconnectCount, 1, 'the old stream is disconnected');
+        assert.notEqual(audios[1], audio);
+        assert.equal(audio.src, '', 'the old media resource is released');
+        assert.equal(audios[1].src, originalUrl, 'the same selected file is retained');
+        assert.equal(audios[1].currentTime, 0);
         await engine.play();
-        assert.equal(audio.paused, false, 'Play still runs during the user action');
-        assert.equal(gain.gain.value, 0, 'old-position audio remains silent during the seek');
-        audio.seeking = false;
+        assert.equal(audio.paused, true, 'the old element remains stopped');
+        assert.equal(audios[1].paused, false, 'Play starts the new element');
+        assert.equal(audios[1].playCount, 1);
+        assert.equal(contexts[0].sources[1].element, audios[1]);
+        assert.equal(gain.gain.value, 1);
         audio.dispatchEvent(new Event('seeked'));
-        assert.equal(gain.gain.value, 1, 'sound returns after the rewind finishes');
-        assert.equal(audio.currentTime, 0);
+        assert.equal(engine.state.playing, true, 'a stale seek does not affect the new playback');
     });
 });
 
-test('a late seek completion cannot restore sound after another Stop', async () => {
+test('a late event from a stopped element cannot restore sound after another Stop', async () => {
     await withAudio([], async ({ engine, contexts, audios }) => {
         await engine.processAudio(track('cancelled-seek'));
         const audio = audios[0];
         audio.currentTime = 12;
         engine.stop();
-        audio.seeking = true;
         await engine.play();
         engine.stop();
-        audio.seeking = false;
         audio.dispatchEvent(new Event('seeked'));
         assert.equal(contexts[0].gains[0].gain.value, 0);
         assert.equal(audio.paused, true);
         assert.equal(engine.state.playing, false);
+    });
+});
+
+test('a pending old Play cannot interrupt the fresh playback after Stop', async () => {
+    const plan = {};
+    const oldPlay = deferred();
+    await withAudio([plan], async ({ engine, audios, contexts }) => {
+        await engine.processAudio(track('stop-race'));
+        engine.pause();
+        plan.play = oldPlay;
+        const previous = engine.play();
+        await flush();
+        engine.stop();
+        await engine.play();
+        oldPlay.resolve();
+        await previous;
+        assert.equal(audios[0].paused, true);
+        assert.equal(contexts[0].sources[0].disconnectCount, 1);
+        assert.equal(audios[1].paused, false);
+        assert.equal(audios[1].currentTime, 0);
+        assert.equal(engine.state.playing, true);
     });
 });
 
