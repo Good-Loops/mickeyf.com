@@ -8,9 +8,29 @@ public class LudolumeAgePlugin: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "LudolumeAgePlugin"
     public let jsName = "LudolumeAge"
     public let pluginMethods: [CAPPluginMethod] = [
-        CAPPluginMethod(name: "requestAgeRange", returnType: CAPPluginReturnPromise)
+        CAPPluginMethod(name: "requestAgeRange", returnType: CAPPluginReturnPromise),
+        CAPPluginMethod(name: "checkRegionalAge", returnType: CAPPluginReturnPromise)
     ]
     private var requestIsActive = false
+
+    @objc func checkRegionalAge(_ call: CAPPluginCall) {
+        guard call.options.count == 0 else {
+            call.resolve(["status": "unavailable"])
+            return
+        }
+        Task { @MainActor in
+            guard #available(iOS 26.2, *) else {
+                call.resolve(["status": "unsupported"])
+                return
+            }
+            do {
+                let required = try await AgeRangeService.shared.isEligibleForAgeFeatures
+                call.resolve(["status": required ? "required" : "not-required"])
+            } catch {
+                call.resolve(["status": "unavailable"])
+            }
+        }
+    }
 
     @objc func requestAgeRange(_ call: CAPPluginCall) {
         guard call.options.count == 0 else {

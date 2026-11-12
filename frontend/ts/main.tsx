@@ -15,6 +15,7 @@ import ReactDOM from "react-dom/client";
 import { Capacitor } from '@capacitor/core';
 import { BrowserRouter } from "react-router-dom";
 import { AuthProvider } from "@/context/AuthContext";
+import RegionalAgeBoundary from '@/components/RegionalAgeBoundary';
 import App from "@/App";
 import { loadAppFonts } from "@/layout/loadAppFonts";
 import "../sass/style.scss";
@@ -26,8 +27,10 @@ if (Capacitor.isNativePlatform()) document.documentElement.dataset.nativeApp = C
 
 ReactDOM.createRoot(document.getElementById("root")!).render(
 	<BrowserRouter>
+		<RegionalAgeBoundary>
     	<AuthProvider>
 			<App />
     	</AuthProvider>
+		</RegionalAgeBoundary>
   	</BrowserRouter>
 );

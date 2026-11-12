@@ -204,6 +204,37 @@ test('the actual account link prompt keeps password and actions above a simulate
     await page.getByRole('button', { name: 'Cancel', exact: true }).click();
 });
 
+test('a required regional age check provides retry without opening the app prematurely', async t => {
+    const { page } = await fixture(t);
+    await page.evaluate(async () => {
+        const { mountRegionalAge } = await import('/ts/testSupport/regionalAgeHarness.tsx');
+        const container = document.createElement('div');
+        container.id = 'regional-age-test';
+        document.body.append(container);
+        window.__regionalAgeTest = mountRegionalAge(container, ['required-unavailable', 'shared']);
+    });
+    const boundary = page.locator('#regional-age-test');
+    await boundary.getByRole('alert').waitFor();
+    assert.equal(await boundary.getByText('Guest content').count(), 0);
+    await boundary.getByRole('button', { name: 'Try again' }).click();
+    await boundary.getByText('Guest content').waitFor();
+    assert.equal(await page.evaluate(() => window.__regionalAgeTest.calls()), 2);
+    await page.evaluate(() => window.__regionalAgeTest.unmount());
+});
+
+test('an unknown regional signal preserves guest access', async t => {
+    const { page } = await fixture(t);
+    await page.evaluate(async () => {
+        const { mountRegionalAge } = await import('/ts/testSupport/regionalAgeHarness.tsx');
+        const container = document.createElement('div');
+        container.id = 'regional-age-test';
+        document.body.append(container);
+        window.__regionalAgeTest = mountRegionalAge(container, ['unknown']);
+    });
+    await page.locator('#regional-age-test').getByText('Guest content').waitFor();
+    await page.evaluate(() => window.__regionalAgeTest.unmount());
+});
+
 test('a direct privacy deletion link opens at the account deletion instructions', async t => {
     const context = await browser.newContext({ viewport: { width: 1024, height: 768 } });
     t.after(() => context.close());
