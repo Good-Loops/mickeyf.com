@@ -590,6 +590,7 @@ test('browser creates a chosen nickname, separately publishes and removes scores
         const page = await context.newPage(); page.setDefaultTimeout(15_000);
         page.on('pageerror', (error: Error) => console.error(error.message));
         await page.goto(`${origin}/__parent-test`);
+        await page.getByText('Create a child account', { exact: true }).click();
         await page.getByLabel(/Child's country/).selectOption('BR');
         await page.getByLabel(brLabels.adult, { exact: true }).check(); await page.getByLabel(brLabels.guardianCheck, { exact: true }).check();
         await page.getByLabel(brLabels.consentCheck, { exact: true }).check();
@@ -621,6 +622,7 @@ test('browser creates a chosen nickname, separately publishes and removes scores
         const [scoreUser] = (await admin.query<RowDataPacket[]>('SELECT user_id FROM users WHERE account_uuid=?',[created.accountId]))[0];
         await submitP4VegaScore(database, scoreUser.user_id, 40);
         await page.getByLabel(/^Child account/).selectOption(created.accountId);
+        await page.getByText('Public leaderboards', { exact: true }).click();
         const scoreSection=page.getByRole('region',{name:'Child leaderboard participation'});
         await scoreSection.getByLabel(browserPublicPolicy.consentText,{exact:true}).check();
         await scoreSection.getByRole('button',{name:'Join leaderboards with Google',exact:true}).click();
@@ -629,6 +631,7 @@ test('browser creates a chosen nickname, separately publishes and removes scores
         await scoreSection.getByRole('button',{name:'Remove public entries',exact:true}).click();
         await scoreSection.getByText('Public entries have been removed. Your account and private scores are kept.',{exact:true}).waitFor();
         assert.ok(!(await readP4VegaLeaderboard(database,browserPublicPolicy.digest,true)).some(row=>row.userName===nickname));
+        await page.getByText('Delete this child account', { exact: true }).click();
         await page.getByLabel('Type WITHDRAW AND DELETE').fill('WITHDRAW AND DELETE');
         await page.getByRole('button', { name: 'Confirm deletion with Google', exact: true }).click();
         await page.getByText('Consent withdrawn and child account deleted. Your parent account is unchanged.', { exact: true }).waitFor();
@@ -640,6 +643,7 @@ test('browser creates a chosen nickname, separately publishes and removes scores
         const second = await p.flow.createChild(p.context, { grant: nextGrant.proof.grant, formReference: nextForm.form.reference,
             userName: `family-browser-${randomUUID()}`, password }); assert.ok('created' in second);
         await page.getByRole('button',{name:'Refresh child accounts',exact:true}).click();
+        await page.getByText('Delete your family accounts', { exact: true }).click();
         const familySection=page.getByRole('region',{name:'Delete family accounts'});
         await familySection.getByText(second.child.userName,{exact:true}).waitFor();
         assert.equal(await familySection.getByRole('button',{name:'Delete family with Google',exact:true}).isEnabled(),false);
