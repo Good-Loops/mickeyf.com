@@ -81,10 +81,11 @@ test('provider choices precede eligibility without starting provider authenticat
     await google.click();
     assert.equal(await google.getAttribute('aria-pressed'), 'true');
     assert.equal(await page.locator('#registration-country').evaluate(node => node === document.activeElement), true);
-    assert.match(await page.getByRole('status').last().innerText(), /country and age.*Continue with Google/i);
+    assert.match(await page.getByRole('status').last().innerText(), /country and continue.*Google/i);
     assert.equal(calls.filter(call => ['/auth/providers/begin', '/auth/providers/complete', '/api/users'].includes(call.path)).length, 0);
     assert.deepEqual(external, []);
     await page.locator('#registration-country').selectOption('US');
+    await page.getByRole('button', { name: 'Continue', exact: true }).click();
     await page.locator('#registration-age').fill('12');
     await page.getByRole('button', { name: 'Continue', exact: true }).click();
     await page.getByRole('link', { name: 'Continue to parent-led registration', exact: true }).waitFor();
@@ -119,6 +120,7 @@ async function fillSynthetic(page) {
 
 async function approveAdult(page) {
     await page.locator('#registration-country').selectOption('US');
+    await page.getByRole('button', { name: 'Continue', exact: true }).click();
     await page.locator('#registration-age').fill('18');
     await page.getByRole('button', { name: 'Continue', exact: true }).click();
     await page.locator('#signup-password').waitFor();
@@ -141,6 +143,7 @@ test('signup collects country and coarse age before mounting account credentials
 for (const country of ['US', 'BR']) test(`${country} parent-required signup preserves restriction across reload and navigation without credentials or a grant`, async t => {
     const { page, calls } = await fixture(t, undefined, { eligible: false });
     await page.locator('#registration-country').selectOption(country);
+    await page.getByRole('button', { name: 'Continue', exact: true }).click();
     await page.locator('#registration-age').fill(country === 'US' ? '12' : '17');
     const restricted = page.waitForResponse(response => new URL(response.url()).pathname === '/auth/registration/begin');
     await page.getByRole('button', { name: 'Continue', exact: true }).click();

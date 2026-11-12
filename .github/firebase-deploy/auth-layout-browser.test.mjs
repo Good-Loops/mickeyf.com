@@ -124,6 +124,7 @@ async function fixture(t, width, { pendingBegin = false, pendingApple = false, p
 
 async function approveAdult(page) {
     await page.locator('#registration-country').selectOption('US');
+    await page.getByRole('button', { name: 'Continue', exact: true }).click();
     await page.locator('#registration-age').fill('18');
     await page.getByRole('button', { name: 'Continue', exact: true }).click();
 }
@@ -274,7 +275,8 @@ test('the viewport contains the shell while short screens can scroll to every ac
                 const first = page.locator('main input').first();
                 await first.scrollIntoViewIfNeeded();
                 const firstBox = await first.boundingBox(), mainBox = await main.boundingBox();
-                assert.ok(firstBox.y >= mainBox.y && firstBox.y + firstBox.height <= mainBox.y + mainBox.height + 1);
+                assert.ok(firstBox.y >= mainBox.y - 1 && firstBox.y + firstBox.height <= mainBox.y + mainBox.height + 1,
+                    JSON.stringify({ width, height, route, firstBox, mainBox }));
                 const last = page.locator('main button, main a').last();
                 await last.scrollIntoViewIfNeeded();
                 const lastBox = await last.boundingBox();

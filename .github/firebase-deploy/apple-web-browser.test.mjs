@@ -74,6 +74,7 @@ async function fixture(t, mode = 'success') {
     // A fresh isolated Vite cache compiles the module graph before DOMContentLoaded.
     await page.goto(`${origin}/login`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
     await page.locator('#registration-country').selectOption('US');
+    await page.getByRole('button', { name: 'Continue', exact: true }).click();
     await page.locator('#registration-age').fill('18');
     await page.getByRole('button', { name: 'Continue', exact: true }).click();
     return { page, calls };

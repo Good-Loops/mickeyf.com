@@ -104,6 +104,7 @@ test('built website requires country and age eligibility before signup when regi
     assert.equal(await page.locator('#signup-username, #signup-email, #signup-password').count(), 0);
     assertNoSignupRequests(calls);
     await page.locator('#registration-country').selectOption('US');
+    await page.getByRole('button', { name: 'Continue', exact: true }).click();
     await page.locator('#registration-age').fill('18');
     await page.getByRole('button', { name: 'Continue', exact: true }).click();
     await page.locator('#signup-password').waitFor();
@@ -117,6 +118,7 @@ test('built website requires country and age eligibility before signup when regi
 test('built website does not reveal credentials when the registration bootstrap fails', async t => {
     const { page, calls } = await fixture(t, policy, { bootstrapAvailable: false });
     await page.locator('#registration-country').selectOption('US');
+    await page.getByRole('button', { name: 'Continue', exact: true }).click();
     await page.locator('#registration-age').fill('18');
     await page.getByRole('button', { name: 'Continue', exact: true }).click();
     await page.getByRole('alert').filter({ hasText: 'We could not confirm this registration step.' }).waitFor();
@@ -128,6 +130,7 @@ for (const { country, age } of [{ country: 'US', age: '12' }, { country: 'BR', a
     test(`built website routes ${country} age ${age} to parent-led registration`, async t => {
         const { page, calls } = await fixture(t, policy);
         await page.locator('#registration-country').selectOption(country);
+        await page.getByRole('button', { name: 'Continue', exact: true }).click();
         await page.locator('#registration-age').fill(age);
         const begin = page.waitForResponse(response => new URL(response.url()).pathname === '/auth/registration/begin');
         await page.getByRole('button', { name: 'Continue', exact: true }).click();

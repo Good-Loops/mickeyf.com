@@ -129,9 +129,11 @@ for (const mode of ['withdraw-child','delete-family']) test(`navigation prevents
     const {page,calls,external,cancelled} = await fixture(t);
     if (mode === 'withdraw-child') {
         await page.locator('section[aria-label="Manage child accounts"] select').selectOption(children[0]);
+        await page.locator('summary').filter({hasText:'Delete this child account'}).click();
         await page.getByLabel('Type WITHDRAW AND DELETE').fill('WITHDRAW AND DELETE');
         await page.getByRole('button',{name:'Confirm deletion with Apple'}).click();
     } else {
+        await page.locator('summary').filter({hasText:'Delete your family accounts'}).click();
         await page.getByLabel('I have checked this list and want to delete all these accounts.').check();
         await page.getByLabel('Type DELETE MY FAMILY').fill('DELETE MY FAMILY');
         await page.getByRole('button',{name:'Delete family with Apple'}).click();
@@ -152,6 +154,7 @@ test('changing the selected child before React cleanup cancels pending leaderboa
     const {page,calls,external,cancelled} = await fixture(t);
     const select = page.locator('section[aria-label="Manage child accounts"] select');
     await select.selectOption(children[0]);
+    await page.locator('summary').filter({hasText:'Public leaderboards'}).click();
     await page.getByText('Synthetic publication consent',{exact:false}).waitFor();
     await page.getByLabel('Synthetic publication consent').check();
     await page.getByRole('button',{name:'Join leaderboards with Apple'}).click();
