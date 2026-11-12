@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { createHash, X509Certificate } from 'node:crypto';
+import { createHash, generateKeyPairSync, type KeyObject, X509Certificate } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import test from 'node:test';
@@ -44,4 +44,31 @@ test('Apple library verifies its signed public fixture and rejects tampering and
     assert.deepEqual(await readAppStoreConsentNotification(parts.join('.'), verifier), { kind: 'invalid' });
     const wrongApp = new SignedDataVerifier([root], false, Environment.SANDBOX, 'com.other');
     assert.deepEqual(await readAppStoreConsentNotification(signed, wrongApp), { kind: 'invalid' });
+});
+
+test('the Apple verifier checks both signed layers of a consent withdrawal', async () => {
+    // Use ephemeral test keys and the public fixture's parseable certificate headers.
+    // Chain validation is covered separately above; this exercises both JWS signatures and app binding.
+    const fixture = readFileSync(join(__dirname, 'fixtures', 'apple', 'test-notification.jws'), 'utf8').trim();
+    const chain = JSON.parse(Buffer.from(fixture.split('.')[0], 'base64url').toString('utf8')).x5c as string[];
+    const keys = generateKeyPairSync('ec', { namedCurve: 'prime256v1' });
+    class TestVerifier extends SignedDataVerifier {
+        protected async verifyCertificateChain(): Promise<KeyObject> { return keys.publicKey; }
+    }
+    const verifier = new TestVerifier([], false, Environment.PRODUCTION, 'com.example', 123);
+    const sign = (value: object, key: KeyObject = keys.privateKey) => jwt.sign(value, key,
+        { algorithm: 'ES256', noTimestamp: true, header: { alg: 'ES256', x5c: chain } });
+    const transaction = { bundleId: 'com.example', appAppleId: 123, receiptType: 'Production',
+        appTransactionId: 'fictional-app-transaction' };
+    const notification = (signedAppTransactionInfo: string) => ({ notificationType: 'RESCIND_CONSENT',
+        notificationUUID: '6a45449e-988e-4a66-9968-211e92b3331c', signedDate: 1_800_000_000_000,
+        appData: { bundleId: 'com.example', appAppleId: 123, environment: 'Production', signedAppTransactionInfo } });
+    const good = sign(notification(sign(transaction)));
+    assert.deepEqual(await readAppStoreConsentNotification(good, verifier), { kind: 'consent-withdrawn',
+        notificationId: '6a45449e-988e-4a66-9968-211e92b3331c', signedAt: 1_800_000_000_000,
+        appTransactionId: 'fictional-app-transaction' });
+    const otherKey = generateKeyPairSync('ec', { namedCurve: 'prime256v1' }).privateKey;
+    assert.deepEqual(await readAppStoreConsentNotification(sign(notification(sign(transaction, otherKey))), verifier), { kind: 'invalid' });
+    assert.deepEqual(await readAppStoreConsentNotification(sign(notification(sign({ ...transaction, bundleId: 'com.other' }))), verifier),
+        { kind: 'invalid' });
 });
