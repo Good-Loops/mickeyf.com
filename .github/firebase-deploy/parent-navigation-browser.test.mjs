@@ -23,7 +23,7 @@ before(async () => {
 after(async () => { await browser?.close(); await server?.close(); });
 
 async function fixture(t, options = {}) {
-    const context = await browser.newContext(); t.after(() => context.close());
+    const context = await browser.newContext(options.locale ? { locale: options.locale } : {}); t.after(() => context.close());
     const page = await context.newPage(); page.setDefaultTimeout(15_000);
     const calls = [], external = [];
     let purpose, cancelResolve, releaseScores;
@@ -232,6 +232,25 @@ test('an unknown regional signal preserves guest access', async t => {
         window.__regionalAgeTest = mountRegionalAge(container, ['unknown']);
     });
     await page.locator('#regional-age-test').getByText('Guest content').waitFor();
+    await page.evaluate(() => window.__regionalAgeTest.unmount());
+});
+
+test('the regional retry screen follows the Portuguese device language', async t => {
+    const { page } = await fixture(t, { locale: 'pt-BR' });
+    await page.evaluate(async () => {
+        const { mountRegionalAge } = await import('/ts/testSupport/regionalAgeHarness.tsx');
+        const container = document.createElement('div');
+        container.id = 'regional-age-test';
+        document.body.append(container);
+        window.__regionalAgeTest = mountRegionalAge(container, ['required-unavailable', 'shared']);
+    });
+    const boundary = page.locator('#regional-age-test');
+    const alert = boundary.getByRole('alert');
+    await alert.waitFor();
+    assert.equal(await alert.getAttribute('lang'), 'pt-BR');
+    assert.equal(await alert.getByText('Informação de idade indisponível').count(), 1);
+    await alert.getByRole('button', { name: 'Tentar novamente' }).click();
+    await boundary.getByText('Guest content').waitFor();
     await page.evaluate(() => window.__regionalAgeTest.unmount());
 });
 
