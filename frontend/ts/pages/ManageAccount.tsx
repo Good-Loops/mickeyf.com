@@ -44,10 +44,12 @@ export default function ManageAccount() {
     useEffect(() => {
         if (LEGACY_PUBLIC_API_PREVIEW || loading || !isAuthenticated) return;
         let active = true;
+        const controller = new AbortController();
+        const timeout = setTimeout(() => controller.abort(), 10_000);
         setMethodsLoading(true);
         setMethods(null);
         setDeletionClient(undefined);
-        void providerAccountMethodsRequest().then(async availableMethods => {
+        void providerAccountMethodsRequest(controller.signal).then(async availableMethods => {
                 const clients = availableMethods?.providerCollectionAllowed === false ? [] : await getAvailableProviderClients().catch(() => []);
                 if (!active) return;
                 setMethods(availableMethods);
@@ -55,8 +57,8 @@ export default function ManageAccount() {
                 setMethodsLoading(false);
             }).catch(() => {
                 if (active) setMethodsLoading(false);
-            });
-        return () => { active = false; };
+            }).finally(() => clearTimeout(timeout));
+        return () => { active = false; controller.abort(); clearTimeout(timeout); };
     }, [loading, isAuthenticated, userName, methodsRetry]);
 
     useEffect(() => () => {

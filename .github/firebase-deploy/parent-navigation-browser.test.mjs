@@ -43,8 +43,11 @@ async function fixture(t, options = {}) {
         const body = request.postDataJSON(); calls.push({path:url.pathname,body});
         let value = {};
         if (url.pathname === '/auth/verify-token' || url.pathname === '/auth/renew') value = {loggedIn:true,user_name:'Synthetic'};
-        else if (url.pathname === '/auth/providers/account') value = {hasPassword:!!options.passwordAccount,googleLinked:false,googleDeletionEnabled:false,
-            appleLinked:linked,appleDeletionEnabled:linked,providerCollectionAllowed:true};
+        else if (url.pathname === '/auth/providers/account') {
+            if (options.holdMethods) await new Promise(resolve => setTimeout(resolve, 12_000));
+            value = {hasPassword:!!options.passwordAccount,googleLinked:false,googleDeletionEnabled:false,
+                appleLinked:linked,appleDeletionEnabled:linked,providerCollectionAllowed:true};
+        }
         else if (url.pathname === '/auth/providers/config') value = {clients:[{clientKey:'apple-web',provider:'apple',platform:'web',
             clientId:'com.example.web',redirectUri:'https://example.test/login'}]};
         else if (url.pathname === '/auth/parent-registration/config') value = {enabled:true,creationEnabled:false,policyVersion:'synthetic',
@@ -97,6 +100,14 @@ test('account opens with a retry message if leaderboard status fails', async t =
     const { page } = await fixture(t, { failScores:true });
     await page.goto(`${origin}/account`);
     await page.getByText('Leaderboard choices could not be loaded. Please retry.', {exact:true}).waitFor();
+    assert.equal(await page.locator('.manage-account').isVisible(), true);
+    assert.equal(await page.locator('.page-status--loading').count(), 0);
+});
+
+test('account stops loading and offers retry when account methods time out', async t => {
+    const { page } = await fixture(t, { holdMethods:true });
+    await page.goto(`${origin}/account`);
+    await page.getByRole('button', {name:'Try again', exact:true}).waitFor({timeout:14_000});
     assert.equal(await page.locator('.manage-account').isVisible(), true);
     assert.equal(await page.locator('.page-status--loading').count(), 0);
 });
