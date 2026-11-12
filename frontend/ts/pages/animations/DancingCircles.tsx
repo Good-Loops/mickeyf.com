@@ -11,6 +11,7 @@ import {
 import FullscreenButton from "@/components/FullscreenButton";
 import MusicControls from "@/components/MusicControls";
 import MusicUpload from "@/components/MusicUpload";
+import PageStatus from "@/components/PageStatus";
 import { audioEngine } from "@/animations/helpers/audio/AudioEngine";
 import { useAudioEngineState } from "@/hooks/useAudioEngineState";
 import { CANVAS_WIDTH } from "@/utils/constants";
@@ -58,6 +59,7 @@ const DancingCircles: React.FC = () => {
 	const [isColorPickerOpen, setIsColorPickerOpen] = useState(false);
 	const [pickerColor, setPickerColor] = useState<HsvColor>(() => hexToHsv(DEFAULT_DANCING_CIRCLES_CUSTOM_COLOR));
 	const [startupError, setStartupError] = useState<Error | null>(null);
+	const [ready, setReady] = useState(false);
 	const audio = useAudioEngineState();
 
 	useEffect(() => {
@@ -75,6 +77,7 @@ const DancingCircles: React.FC = () => {
 				return;
 			}
 			dispose = release;
+			setReady(true);
 		})().catch(() => {
 			if (!cancelled) setStartupError(new Error("Dancing Circles could not start."));
 		});
@@ -162,14 +165,18 @@ const DancingCircles: React.FC = () => {
 
 	return (
 		<section
-            className={`dancing-circles${usesAnimatedBackground ? "" : " dancing-circles--custom-background"}`}
+			className={`dancing-circles${ready ? "" : " dancing-circles--loading"}${usesAnimatedBackground ? "" : " dancing-circles--custom-background"}`}
             style={pageStyle}
         >
 			<h1 className="u-visually-hidden">Dancing Circles</h1>
 
+            {!ready && <div className="dancing-circles__loader"><PageStatus variant="loading" /></div>}
+
 			<div 
 				className="dancing-circles__canvas-wrapper" 
 				ref={canvasWrapperRef}
+				aria-hidden={!ready}
+				inert={!ready}
 			>
 				<FullscreenButton
 					targetRef={canvasWrapperRef}
@@ -177,7 +184,7 @@ const DancingCircles: React.FC = () => {
 				/>
     	   </div>
 
-			<div className="dancing-circles__transport">
+			<div className="dancing-circles__transport" aria-hidden={!ready} inert={!ready}>
                 <div className="dancing-circles__transport-controls">
                     <MusicControls
                         hasAudio={audio.hasAudio}

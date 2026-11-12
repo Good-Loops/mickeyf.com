@@ -6,6 +6,7 @@ import { acquireGoogleCredentialInline, acquireProviderCredential, getAvailableP
 import Swal from './siteAlert';
 import { requestProviderUsername } from './providerSignupPrompt';
 import { LEGACY_PUBLIC_API_PREVIEW } from '@/config/apiConfig';
+import { keepDialogInputVisible } from './dialogKeyboard';
 
 const currentPagePath = () => typeof window === 'undefined' ? null : window.location.pathname;
 
@@ -18,7 +19,8 @@ type ProviderSignInControlsProps = {
     /** Shared with the surrounding form to guard clicks before React renders disabled controls. */
     operationLock?: { current: boolean };
     onBusyChange?: (busy: boolean) => void;
-    onSuccess?: () => void;
+    onSuccess?: (provider?: 'google' | 'apple') => void;
+    onReady?: () => void;
     onEligibilityRequired?: () => void;
 };
 
@@ -240,7 +242,7 @@ export function InlineGoogleSignIn({ client, action = 'login', userName = '', re
 }
 
 export default function ProviderSignInControls({ action, userName = '', rememberMe = false, disabled = false,
-    operationLock, onBusyChange, onSuccess, onEligibilityRequired }: ProviderSignInControlsProps) {
+    operationLock, onBusyChange, onSuccess, onEligibilityRequired, onReady }: ProviderSignInControlsProps) {
     const { authenticateWithProvider, prepareProviderLogin, completeProviderLogin } = useAuth();
     const [clients, setClients] = useState<PublicProviderClient[]>([]);
     const [configurationLoading, setConfigurationLoading] = useState(true);
@@ -253,6 +255,8 @@ export default function ProviderSignInControls({ action, userName = '', remember
     const passwordPopup = useRef<HTMLElement | null>(null);
     const busyCallback = useRef(onBusyChange);
     busyCallback.current = onBusyChange;
+    const readyCallback = useRef(onReady);
+    readyCallback.current = onReady;
 
     useEffect(() => {
         if (LEGACY_PUBLIC_API_PREVIEW) return;
@@ -289,12 +293,14 @@ export default function ProviderSignInControls({ action, userName = '', remember
                     // A valid empty configuration explicitly disables provider choices.
                     setClients(available);
                     setConfigurationLoading(false);
+                    readyCallback.current?.();
                     return;
                 }
                 setClients([]);
                 if (attempt === backoff.length) {
                     setConfigurationUnavailable(true);
                     setConfigurationLoading(false);
+                    readyCallback.current?.();
                     return;
                 }
                 await new Promise<void>(resolve => {
@@ -345,6 +351,7 @@ export default function ProviderSignInControls({ action, userName = '', remember
         try {
             if (action === 'link') {
                 let confirmPromptClosed!: () => void;
+                let releaseKeyboardAdjustment = () => {};
                 const promptClosed = new Promise<void>(resolve => { confirmPromptClosed = resolve; });
                 const decision = await Swal.fire<string>({
                     title: 'Confirm your current password',
@@ -358,9 +365,11 @@ export default function ProviderSignInControls({ action, userName = '', remember
                     cancelButtonText: 'Cancel',
                     didOpen: popup => {
                         passwordPopup.current = popup;
+                        const input = popup.querySelector?.<HTMLInputElement>('input[type="password"]');
+                        if (input) releaseKeyboardAdjustment = keepDialogInputVisible(popup, input);
                         if (controller.signal.aborted && Swal.getPopup() === popup) Swal.close();
                     },
-                    didDestroy: confirmPromptClosed,
+                    didDestroy: () => { releaseKeyboardAdjustment(); confirmPromptClosed(); },
                 });
                 // fire() resolves before the closing animation finishes; the provider needs a free dialog.
                 await promptClosed;
@@ -415,7 +424,7 @@ export default function ProviderSignInControls({ action, userName = '', remember
             if (action === 'link') setFeedback({
                 text: `${client.provider === 'google' ? 'Google' : 'Apple'} account linked.`, error: false,
             });
-            onSuccess?.();
+            onSuccess?.(action === 'link' ? client.provider : undefined);
         } catch (error) {
             const code = error && typeof error === 'object' && 'code' in error && error.code === 'CANCELLED'
                 ? 'CANCELLED' : 'UNAVAILABLE';

@@ -34,11 +34,21 @@
 }
 
 .dancing-circles {
+    position: relative;
     display: grid;
     justify-items: center;
     row-gap: clamp(1.5rem, 3vh, 2.4rem);
     width: fit-content;
     max-width: 90vw;
+
+    &--loading > :not(.dancing-circles__loader) { visibility: hidden; }
+
+    &__loader {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        place-items: center;
+    }
 
     &__canvas-wrapper {
         isolation: isolate;

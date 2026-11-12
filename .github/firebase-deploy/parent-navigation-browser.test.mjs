@@ -22,11 +22,13 @@ before(async () => {
 });
 after(async () => { await browser?.close(); await server?.close(); });
 
-async function fixture(t) {
+async function fixture(t, options = {}) {
     const context = await browser.newContext(); t.after(() => context.close());
     const page = await context.newPage(); page.setDefaultTimeout(15_000);
     const calls = [], external = [];
-    let purpose, cancelResolve;
+    let purpose, cancelResolve, releaseScores;
+    let linked = !options.passwordAccount;
+    const scoresReady = new Promise(resolve => { releaseScores = resolve; });
     const cancelled = new Promise(resolve => { cancelResolve = resolve; });
     await context.route('**/*', async route => {
         const request = route.request(), url = new URL(request.url());
@@ -41,8 +43,8 @@ async function fixture(t) {
         const body = request.postDataJSON(); calls.push({path:url.pathname,body});
         let value = {};
         if (url.pathname === '/auth/verify-token' || url.pathname === '/auth/renew') value = {loggedIn:true,user_name:'Synthetic'};
-        else if (url.pathname === '/auth/providers/account') value = {hasPassword:false,googleLinked:false,googleDeletionEnabled:false,
-            appleLinked:true,appleDeletionEnabled:true,providerCollectionAllowed:true};
+        else if (url.pathname === '/auth/providers/account') value = {hasPassword:!!options.passwordAccount,googleLinked:false,googleDeletionEnabled:false,
+            appleLinked:linked,appleDeletionEnabled:linked,providerCollectionAllowed:true};
         else if (url.pathname === '/auth/providers/config') value = {clients:[{clientKey:'apple-web',provider:'apple',platform:'web',
             clientId:'com.example.web',redirectUri:'https://example.test/login'}]};
         else if (url.pathname === '/auth/parent-registration/config') value = {enabled:true,creationEnabled:false,policyVersion:'synthetic',
@@ -56,7 +58,13 @@ async function fixture(t) {
         else if (url.pathname === '/auth/parent-registration/cancel') { value={cancelled:true}; cancelResolve(); }
         else if (url.pathname === '/auth/parent-registration/scores/config') value = {enabled:true,policyVersion:'synthetic',
             consentVersion:'synthetic',consentText:'Synthetic publication consent',privacyNoticeUrl:'https://mickeyf.com/privacy'};
-        else if (url.pathname === '/auth/parent-registration/scores/status') value = {visibility:'private',canPublish:true};
+        else if (url.pathname === '/auth/parent-registration/scores/status') {
+            if (options.holdScores) await scoresReady;
+            if (options.failScores) return route.fulfill({status:500,contentType:'application/json',body:'{}'});
+            value = {visibility:'private',canPublish:true};
+        }
+        else if (url.pathname === '/auth/providers/begin') value = {state,nonce,expiresInSeconds:300};
+        else if (url.pathname === '/auth/providers/complete') { linked = true; value = {success:true,linked:true}; }
         else if (url.pathname === '/auth/parent-registration/forms/list') value = {forms:[]};
         else if (url.pathname === '/auth/parent-registration/withdraw' || url.pathname === '/auth/parent-registration/family/delete') value = {deleted:true};
         else if (url.pathname === '/auth/parent-registration/scores/publish') value = {visibility:'public'};
@@ -64,8 +72,66 @@ async function fixture(t) {
     });
     await page.goto(`${origin}/parent-accounts`, {waitUntil:'domcontentloaded',timeout:45_000});
     await page.getByRole('button',{name:'Refresh child accounts'}).waitFor();
-    return {page,calls,external,cancelled};
+    return {page,calls,external,cancelled,releaseScores};
 }
+
+test('account waits for its controls and keeps the link confirmation after refreshing', async t => {
+    const { page, releaseScores } = await fixture(t, { passwordAccount:true, holdScores:true });
+    await page.goto(`${origin}/account`);
+    await page.locator('.page-status--loading').waitFor();
+    assert.equal(await page.locator('.manage-account').isVisible(), false);
+    releaseScores();
+    const link = page.getByRole('button', { name:'Continue with Apple' });
+    await link.waitFor();
+    assert.equal(await page.locator('.page-status--loading').count(), 0);
+    await link.click();
+    await page.locator('input[type="password"]').last().fill('synthetic-password');
+    await page.getByRole('button', { name:'Continue', exact:true }).click();
+    await page.waitForFunction(() => window.__appleCalls === 1);
+    await page.evaluate(() => window.__finishApple());
+    await page.getByText('Apple account linked successfully.', {exact:true}).waitFor();
+    await page.getByText('Linked sign-in: Apple', {exact:true}).waitFor();
+});
+
+test('account opens with a retry message if leaderboard status fails', async t => {
+    const { page } = await fixture(t, { failScores:true });
+    await page.goto(`${origin}/account`);
+    await page.getByText('Leaderboard choices could not be loaded. Please retry.', {exact:true}).waitFor();
+    assert.equal(await page.locator('.manage-account').isVisible(), true);
+    assert.equal(await page.locator('.page-status--loading').count(), 0);
+});
+
+test('password dialog moves only when a simulated keyboard covers its input', async t => {
+    const { page } = await fixture(t);
+    const result = await page.evaluate(async () => {
+        const { keepDialogInputVisible } = await import('/ts/components/dialogKeyboard.ts');
+        const viewport = new EventTarget();
+        Object.assign(viewport, { offsetTop:0, height:700 });
+        Object.defineProperty(window, 'visualViewport', { configurable:true, value:viewport });
+        const popup = document.createElement('div');
+        popup.style.cssText = 'position:fixed;top:150px;left:20px;width:250px;height:240px';
+        popup.innerHTML = '<input type="password" style="position:absolute;top:180px">';
+        document.body.append(popup);
+        const input = popup.querySelector('input');
+        input.focus();
+        const release = keepDialogInputVisible(popup, input);
+        await new Promise(requestAnimationFrame);
+        const before = popup.style.translate;
+        viewport.height = 300;
+        viewport.dispatchEvent(new Event('resize'));
+        await new Promise(requestAnimationFrame);
+        const after = popup.style.translate;
+        const bottom = input.getBoundingClientRect().bottom;
+        release();
+        const restored = popup.style.translate;
+        popup.remove();
+        return {before, after, bottom, restored};
+    });
+    assert.equal(result.before, '');
+    assert.notEqual(result.after, '');
+    assert.ok(result.bottom <= 300, JSON.stringify(result));
+    assert.equal(result.restored, '');
+});
 
 test('a direct privacy deletion link opens at the account deletion instructions', async t => {
     const context = await browser.newContext({ viewport: { width: 1024, height: 768 } });

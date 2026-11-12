@@ -20,6 +20,7 @@ const mocks = {
     FullscreenButton: 'export default () => null;',
     MusicControls: 'export default () => null;',
     MusicUpload: 'export default () => null;',
+    PageStatus: 'export default () => null;',
 };
 const server = await createViteTestServer({
     root: frontendRoot, configFile: `${frontendRoot}/vite.config.ts`,
@@ -80,11 +81,12 @@ test('a renderer that finishes after unmount is immediately released', async con
 });
 
 test('an active renderer lives until its page is unmounted', async context => {
-    const { mount, starts } = mountFixture(context);
+    const { mount, starts, stateUpdates } = mountFixture(context);
     let releases = 0;
     const unmount = mount();
     starts[0].resolve(() => { releases += 1; });
     await settle();
+    assert.deepEqual(stateUpdates, [true], 'the loading state ends only after the renderer starts');
     assert.equal(releases, 0);
     unmount();
     assert.equal(releases, 1);

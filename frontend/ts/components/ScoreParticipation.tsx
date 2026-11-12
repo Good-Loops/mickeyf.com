@@ -17,9 +17,10 @@ const portugueseFeedback: Record<string, string> = {
 };
 
 const api = createParentRegistrationApi(API_BASE, apiFetch);
-export default function ScoreParticipation({ language = 'en', childAccountId = null, authenticated, accountKey, sessionGeneration, selectionIsCurrent, captureAccountAction, captureSessionGeneration }: {
+export default function ScoreParticipation({ language = 'en', childAccountId = null, authenticated, accountKey, sessionGeneration, selectionIsCurrent, captureAccountAction, captureSessionGeneration, onReady }: {
     language?: ParentLanguage; childAccountId?: string | null; authenticated: boolean; accountKey: string; sessionGeneration: number; selectionIsCurrent?: () => boolean;
     captureAccountAction?: () => number; captureSessionGeneration?: () => number;
+    onReady?: () => void;
 }) {
     const tr = (en: string, pt: string) => language === 'pt-BR' ? pt : en;
     const [policy, setPolicy] = useState<ScoreParticipationConfig | null>(null);
@@ -48,7 +49,8 @@ export default function ScoreParticipation({ language = 'en', childAccountId = n
         const generation = ++loadGeneration.current;
         if (authenticated) void Promise.all([api.scoreConfig(controller.signal), api.scoreStatus(childAccountId, controller.signal), getAvailableProviderClients()])
             .then(([next, current, available]) => { if (!controller.signal.aborted && generation === loadGeneration.current) { setPolicy(next); setStatus(current); setClients(available); } })
-            .catch(() => { if (!controller.signal.aborted && generation === loadGeneration.current) setFeedback('Leaderboard choices could not be loaded. Please retry.'); });
+            .catch(() => { if (!controller.signal.aborted && generation === loadGeneration.current) setFeedback('Leaderboard choices could not be loaded. Please retry.'); })
+            .finally(() => { if (!controller.signal.aborted && generation === loadGeneration.current) onReady?.(); });
         return () => controller.abort();
     }, [childAccountId, authenticated, accountKey, sessionGeneration, retry]);
     async function change(client?: PublicProviderClient) {

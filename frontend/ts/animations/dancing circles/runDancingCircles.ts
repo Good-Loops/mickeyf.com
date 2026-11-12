@@ -231,6 +231,9 @@ export async function runDancingCircles({ container }: DancingCirclesDeps) {
     app.ticker.add(onTick);
 
     load();
+    // Paint the initial composition before the page replaces its loading state.
+    onTick();
+    app.render();
 
     return () => {
         app.ticker.remove(onTick);

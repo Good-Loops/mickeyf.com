@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, type FormEvent } from 'react';
+import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { RouteHeading } from '@/components/RouteHeading';
 import ProviderSignInControls, { providerSignInErrorMessage } from '@/components/ProviderSignInControls';
@@ -10,6 +10,7 @@ import { useAuth } from '@/context/AuthContext';
 import { LEGACY_PUBLIC_API_PREVIEW } from '@/config/apiConfig';
 import ScoreParticipation from '@/components/ScoreParticipation';
 import PublicAccountPreviewNotice from '@/components/PublicAccountPreviewNotice';
+import PageStatus from '@/components/PageStatus';
 
 export default function ManageAccount() {
     const { userName, isAuthenticated, loading, sessionGeneration, deleteAccount, authenticateWithProvider, captureAccountAction, captureSessionGeneration } = useAuth();
@@ -17,6 +18,9 @@ export default function ManageAccount() {
     const [deletionClient, setDeletionClient] = useState<PublicProviderClient | undefined>();
     const [methodsLoading, setMethodsLoading] = useState(true);
     const [methodsRetry, setMethodsRetry] = useState(0);
+    const [providersReady, setProvidersReady] = useState(false);
+    const [scoresReady, setScoresReady] = useState(false);
+    const [linkFeedback, setLinkFeedback] = useState('');
     const [password, setPassword] = useState('');
     const [confirmation, setConfirmation] = useState('');
     const [busy, setBusy] = useState(false);
@@ -30,6 +34,12 @@ export default function ManageAccount() {
     const passwordless = methods?.hasPassword === false;
     const deletionReady = !!methods && (methods.hasPassword || !!deletionClient);
     const deletionProviderName = deletionClient?.provider === 'apple' ? 'Apple' : 'Google';
+    const markProvidersReady = useCallback(() => setProvidersReady(true), []);
+    const markScoresReady = useCallback(() => setScoresReady(true), []);
+    const pageLoading = !LEGACY_PUBLIC_API_PREVIEW && (loading || isAuthenticated && (methodsLoading || !scoresReady
+        || !!(methods?.hasPassword && methods.providerCollectionAllowed === true && !providersReady)));
+
+    useEffect(() => { setProvidersReady(false); setScoresReady(false); setLinkFeedback(''); }, [userName, sessionGeneration]);
 
     useEffect(() => {
         if (LEGACY_PUBLIC_API_PREVIEW || loading || !isAuthenticated) return;
@@ -43,6 +53,8 @@ export default function ManageAccount() {
                 setMethods(availableMethods);
                 setDeletionClient(selectProviderDeletionClient(clients, availableMethods));
                 setMethodsLoading(false);
+            }).catch(() => {
+                if (active) setMethodsLoading(false);
             });
         return () => { active = false; };
     }, [loading, isAuthenticated, userName, methodsRetry]);
@@ -133,10 +145,11 @@ export default function ManageAccount() {
         }
     };
 
-    return (
-        <section className="manage-account" aria-labelledby="manage-account-title">
+    return (<>
+        {pageLoading && <PageStatus variant="loading" />}
+        <section hidden={pageLoading} style={pageLoading ? { display: 'none' } : undefined} className="manage-account" aria-labelledby="manage-account-title">
             <div className="manage-account__form-wrapper">
-                <RouteHeading id="manage-account-title" className="manage-account__title" focusKey={loading}>
+                <RouteHeading id="manage-account-title" className="manage-account__title" focusKey={pageLoading}>
                     Manage account
                 </RouteHeading>
                 <PublicAccountPreviewNotice />
@@ -155,11 +168,12 @@ export default function ManageAccount() {
                         {methods && (methods.googleLinked || methods.appleLinked) && <p role="status">
                             Linked sign-in: {[methods.googleLinked && 'Google', methods.appleLinked && 'Apple'].filter(Boolean).join(', ')}
                         </p>}
+                        {linkFeedback && <p role="status">{linkFeedback}</p>}
                         {methods?.hasPassword && methods.providerCollectionAllowed === true && <ProviderSignInControls action="link" disabled={busy}
-                            operationLock={submitting} onBusyChange={setProviderBusy}
-                            onSuccess={() => setMethodsRetry(value => value + 1)} />}
+                            operationLock={submitting} onReady={markProvidersReady} onBusyChange={value => { setProviderBusy(value); if (value) setLinkFeedback(''); }}
+                            onSuccess={provider => { if (provider) setLinkFeedback(`${provider === 'google' ? 'Google' : 'Apple'} account linked successfully.`); setProvidersReady(false); setMethodsRetry(value => value + 1); }} />}
                         <ScoreParticipation authenticated={isAuthenticated} accountKey={userName ?? ''} sessionGeneration={sessionGeneration}
-                            captureAccountAction={captureAccountAction} captureSessionGeneration={captureSessionGeneration} />
+                            captureAccountAction={captureAccountAction} captureSessionGeneration={captureSessionGeneration} onReady={markScoresReady} />
                         <section className="manage-account__danger" aria-labelledby="delete-account-heading">
                             <h2 id="delete-account-heading" className="manage-account__subtitle">Delete account</h2>
                             <p id="deletion-consequences">
@@ -213,5 +227,5 @@ export default function ManageAccount() {
                 )}
             </div>
         </section>
-    );
+    </>);
 }
