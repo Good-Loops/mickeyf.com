@@ -622,7 +622,7 @@ test('browser creates a chosen nickname, separately publishes and removes scores
         const [scoreUser] = (await admin.query<RowDataPacket[]>('SELECT user_id FROM users WHERE account_uuid=?',[created.accountId]))[0];
         await submitP4VegaScore(database, scoreUser.user_id, 40);
         await page.getByLabel(/^Child account/).selectOption(created.accountId);
-        await page.getByText('Public leaderboards', { exact: true }).click();
+        await page.locator('summary').filter({ hasText: 'Public leaderboards' }).click();
         const scoreSection=page.getByRole('region',{name:'Child leaderboard participation'});
         await scoreSection.getByLabel(browserPublicPolicy.consentText,{exact:true}).check();
         await scoreSection.getByRole('button',{name:'Join leaderboards with Google',exact:true}).click();
