@@ -299,12 +299,12 @@ test('a transient discovery outage retries and restores both trusted web provide
     assert.equal(view.preparation.length, 0);
 });
 
-test('a trusted empty provider configuration stays empty without automatic retries or error feedback', async t => {
+test('an empty provider configuration explains why choices are unavailable without automatic retries', async t => {
     t.mock.timers.enable({ apis: ['setTimeout'] });
     const view = mount(t, ProviderSignInControls, { action: 'login' });
     view.hooks.clients = t.mock.fn(async () => []);
     view.render(); await view.settle();
-    assert.equal(view.render(), null);
+    assert.match(view.find(node => node.props?.role === 'status').props.children, /not available on this device/u);
     t.mock.timers.tick(10000); await view.settle();
     assert.equal(view.hooks.clients.mock.callCount(), 1);
     assert.equal(view.find(node => node.props?.role === 'alert'), undefined);

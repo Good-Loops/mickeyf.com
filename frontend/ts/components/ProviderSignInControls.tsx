@@ -447,7 +447,8 @@ export default function ProviderSignInControls({ action, userName = '', remember
                 if (!operationLock?.current && busyClient === null) setConfigurationRetry(value => value + 1);
             }}>Retry sign-in options</button>
     </div>;
-    if (clients.length === 0) return null;
+    if (clients.length === 0) return action === 'link' ? null :
+        <p role="status">Google and Apple sign-in are not available on this device right now. You can use your username and password.</p>;
     const inlineGoogle = action !== 'link' ? clients.find(client => client.clientKey === 'google-web'
         && client.issuance !== false && (action !== 'signup' || client.signup === true)) : undefined;
     const unavailableApple = !configurationLoading && clients.some(client => client.provider === 'apple' && client.issuance === false);
