@@ -1,4 +1,4 @@
-/** Move an input dialog only when the visible viewport no longer contains its input. */
+/** Keep the password dialog, including its actions, inside the keyboard-free viewport. */
 export function keepDialogInputVisible(popup: HTMLElement, input: HTMLInputElement): () => void {
     const viewport = window.visualViewport;
     if (!viewport) return () => {};
@@ -12,19 +12,26 @@ export function keepDialogInputVisible(popup: HTMLElement, input: HTMLInputEleme
         popup.style.maxHeight = originalMaxHeight;
         if (document.activeElement !== input) return;
         const bottom = viewport.offsetTop + viewport.height;
-        const overlap = input.getBoundingClientRect().bottom - bottom + 12;
-        if (overlap <= 0) return;
+        if (popup.getBoundingClientRect().bottom <= bottom - 12) return;
         popup.style.maxHeight = `${Math.max(0, viewport.height - 24)}px`;
+        const overlap = popup.getBoundingClientRect().bottom - bottom + 12;
         const available = Math.max(0, popup.getBoundingClientRect().top - viewport.offsetTop - 12);
         const shift = Math.min(overlap, available);
         if (shift > 0) popup.style.translate = `0 -${shift}px`;
         if (overlap > shift) popup.scrollTop += overlap - shift;
+        const actions = popup.querySelector<HTMLElement>('.swal2-actions');
+        if (actions) {
+            const popupBottom = popup.getBoundingClientRect().bottom;
+            const actionsOverlap = actions.getBoundingClientRect().bottom - popupBottom + 12;
+            if (actionsOverlap > 0) popup.scrollTop += actionsOverlap;
+        }
     };
     const schedule = () => { if (!frame) frame = requestAnimationFrame(adjust); };
     viewport.addEventListener('resize', schedule);
     viewport.addEventListener('scroll', schedule);
     input.addEventListener('focus', schedule);
     input.addEventListener('blur', schedule);
+    popup.addEventListener('animationend', schedule);
     window.addEventListener('resize', schedule);
     schedule();
     return () => {
@@ -33,6 +40,7 @@ export function keepDialogInputVisible(popup: HTMLElement, input: HTMLInputEleme
         viewport.removeEventListener('scroll', schedule);
         input.removeEventListener('focus', schedule);
         input.removeEventListener('blur', schedule);
+        popup.removeEventListener('animationend', schedule);
         window.removeEventListener('resize', schedule);
         popup.style.translate = originalTranslate;
         popup.style.maxHeight = originalMaxHeight;

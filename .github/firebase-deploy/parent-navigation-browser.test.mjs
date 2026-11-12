@@ -147,6 +147,63 @@ test('password dialog moves only when a simulated keyboard covers its input', as
     assert.equal(result.restored, '');
 });
 
+test('password dialog keeps its buttons visible when the input already clears the keyboard', async t => {
+    const { page } = await fixture(t);
+    const result = await page.evaluate(async () => {
+        const { keepDialogInputVisible } = await import('/ts/components/dialogKeyboard.ts');
+        const viewport = new EventTarget();
+        Object.assign(viewport, { offsetTop: 0, height: 700 });
+        Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+        const popup = document.createElement('div');
+        popup.style.cssText = 'position:fixed;top:150px;left:20px;width:250px;height:240px;overflow:auto;box-sizing:border-box';
+        popup.innerHTML = '<input type="password" style="position:absolute;top:100px"><button style="position:absolute;top:200px">Cancel</button><button style="position:absolute;top:200px;left:80px">Continue</button>';
+        document.body.append(popup);
+        const input = popup.querySelector('input');
+        input.focus();
+        const release = keepDialogInputVisible(popup, input);
+        await new Promise(requestAnimationFrame);
+        viewport.height = 300;
+        viewport.dispatchEvent(new Event('resize'));
+        await new Promise(requestAnimationFrame);
+        const bounds = [input, ...popup.querySelectorAll('button')].map(element => {
+            const { top, bottom } = element.getBoundingClientRect();
+            return { top, bottom };
+        });
+        release();
+        popup.remove();
+        return bounds;
+    });
+    for (const bounds of result) assert.ok(bounds.top >= 0 && bounds.bottom <= 300, JSON.stringify(result));
+});
+
+test('the actual account link prompt keeps password and actions above a simulated keyboard', async t => {
+    const { page } = await fixture(t, { passwordAccount: true });
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto(`${origin}/account`);
+    await page.evaluate(() => {
+        const viewport = new EventTarget();
+        Object.assign(viewport, { offsetTop: 0, height: 844 });
+        Object.defineProperty(window, 'visualViewport', { configurable: true, value: viewport });
+    });
+    await page.getByRole('button', { name: 'Continue with Apple' }).click();
+    const input = page.locator('.swal2-popup input[type="password"]');
+    await input.waitFor();
+    await input.focus();
+    await page.evaluate(() => {
+        window.visualViewport.height = 400;
+        window.visualViewport.dispatchEvent(new Event('resize'));
+    });
+    await page.waitForTimeout(700);
+    const bounds = await page.locator('.swal2-popup input[type="password"], .swal2-actions button').evaluateAll(elements =>
+        elements.filter(element => getComputedStyle(element).display !== 'none').map(element => {
+            const { top, bottom } = element.getBoundingClientRect();
+            return { top, bottom };
+        }));
+    assert.equal(bounds.length, 3, JSON.stringify(bounds));
+    for (const rect of bounds) assert.ok(rect.top >= 0 && rect.bottom <= 400, JSON.stringify(bounds));
+    await page.getByRole('button', { name: 'Cancel', exact: true }).click();
+});
+
 test('a direct privacy deletion link opens at the account deletion instructions', async t => {
     const context = await browser.newContext({ viewport: { width: 1024, height: 768 } });
     t.after(() => context.close());
