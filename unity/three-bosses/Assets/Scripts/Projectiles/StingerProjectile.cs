@@ -5,6 +5,7 @@ public sealed class StingerProjectile : MonoBehaviour, IProjectile
 {
     [SerializeField] private int damage = 10;
     [SerializeField] private GameObject impactPrefab;
+    [SerializeField, Min(0.1f)] private float lifeSeconds = 5f;
 
     private Rigidbody2D rb;
     private DamageSource source;
@@ -15,6 +16,7 @@ public sealed class StingerProjectile : MonoBehaviour, IProjectile
     [SerializeField, Min(0.01f)] private float normalProbeDistance = 0.25f;
 
     private Vector2 lastDir = Vector2.right;
+    private bool hasImpacted;
 
     private void Awake()
     {
@@ -41,10 +43,19 @@ public sealed class StingerProjectile : MonoBehaviour, IProjectile
         if (!spriteFacesRight) angle += 180f;
 
         transform.rotation = Quaternion.Euler(0f, 0f, angle);
+
+        // The arena has an open top, so missed shots cannot rely on collisions for cleanup.
+        Destroy(gameObject, lifeSeconds);
     }
 
     private void OnTriggerEnter2D(Collider2D other)
     {
+        if (hasImpacted)
+            return;
+
+        // Destruction is deferred, so other colliders can still report this hit.
+        hasImpacted = true;
+
         var damageable = other.GetComponentInParent<IDamageable>();
         if (damageable != null)
         {

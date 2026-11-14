@@ -363,6 +363,7 @@ test('times out a stalled request and permits only the exact run retry', async (
     const { instance, messages } = createInstance();
     const stalled = deferred();
     const observedSignals = [];
+    const acceptedResponses = [];
     let attempt = 0;
     const cleanup = bindThreeBossesSubmissionBridge(
         instance,
@@ -374,6 +375,7 @@ test('times out a stalled request and permits only the exact run retry', async (
         },
         bridgeWindow,
         5,
+        (response) => { acceptedResponses.push(response); },
     );
 
     const submit = bridgeWindow[THREE_BOSSES_SUBMISSION_BRIDGE_FUNCTION];
@@ -382,6 +384,7 @@ test('times out a stalled request and permits only the exact run retry', async (
     await new Promise((resolve) => setTimeout(resolve, 15));
 
     assert.equal(observedSignals[0].aborted, true);
+    assert.deepEqual(acceptedResponses, []);
     assert.deepEqual(callbackAt(messages, 0), {
         success: false,
         runId: firstPayload.runId,
@@ -406,12 +409,17 @@ test('times out a stalled request and permits only the exact run retry', async (
         response: responseFor(firstPayload, true),
     });
 
+    stalled.resolve(responseFor(firstPayload));
+    await flush();
+    assert.deepEqual(acceptedResponses, [responseFor(firstPayload, true)]);
+
     cleanup();
 });
 
 test('serializes typed API failures without exposing their private messages', async () => {
     const bridgeWindow = {};
     const { instance, messages } = createInstance();
+    const acceptedResponses = [];
     const cleanup = bindThreeBossesSubmissionBridge(
         instance,
         issueTicket,
@@ -419,6 +427,8 @@ test('serializes typed API failures without exposing their private messages', as
             throw new LeaderboardRequestError('private diagnostic', 401, 'UNAUTHORIZED');
         },
         bridgeWindow,
+        undefined,
+        (response) => { acceptedResponses.push(response); },
     );
 
     bridgeWindow[THREE_BOSSES_RUN_BEGIN_BRIDGE_FUNCTION](firstPayload.runId);
@@ -432,6 +442,7 @@ test('serializes typed API failures without exposing their private messages', as
         error: 'UNAUTHORIZED',
     });
     assert.equal(messages[0][2].includes('private diagnostic'), false);
+    assert.deepEqual(acceptedResponses, []);
     cleanup();
 });
 
@@ -476,6 +487,7 @@ test('cleanup aborts active work, removes only its global, and suppresses late c
     const bridgeWindow = {};
     const { instance, messages } = createInstance();
     const pending = deferred();
+    const acceptedResponses = [];
     let observedSignal;
     const cleanup = bindThreeBossesSubmissionBridge(
         instance,
@@ -485,6 +497,8 @@ test('cleanup aborts active work, removes only its global, and suppresses late c
             return pending.promise;
         },
         bridgeWindow,
+        undefined,
+        (response) => { acceptedResponses.push(response); },
     );
 
     bridgeWindow[THREE_BOSSES_RUN_BEGIN_BRIDGE_FUNCTION](firstPayload.runId);
@@ -498,4 +512,72 @@ test('cleanup aborts active work, removes only its global, and suppresses late c
     pending.resolve(responseFor(firstPayload));
     await flush();
     assert.deepEqual(messages, []);
+    assert.deepEqual(acceptedResponses, []);
+});
+
+test('observes accepted runs after Unity delivery, including replayed personal bests', async () => {
+    const bridgeWindow = {};
+    const { instance, messages } = createInstance();
+    const acceptedResponses = [];
+    let attempt = 0;
+    const cleanup = bindThreeBossesSubmissionBridge(
+        instance,
+        issueTicket,
+        async () => ({ ...responseFor(firstPayload), replayed: attempt++ > 0 }),
+        bridgeWindow,
+        undefined,
+        (response) => {
+            assert.equal(callbackAt(messages, acceptedResponses.length).success, true);
+            acceptedResponses.push(response);
+        },
+    );
+
+    try {
+        bridgeWindow[THREE_BOSSES_RUN_BEGIN_BRIDGE_FUNCTION](firstPayload.runId);
+        const submit = bridgeWindow[THREE_BOSSES_SUBMISSION_BRIDGE_FUNCTION];
+        submit(JSON.stringify(firstPayload));
+        await flush();
+        submit(JSON.stringify(firstPayload));
+        await flush();
+
+        assert.deepEqual(acceptedResponses, [
+            responseFor(firstPayload),
+            { ...responseFor(firstPayload), replayed: true },
+        ]);
+    } finally {
+        cleanup();
+    }
+});
+
+test('observer throws and rejections do not recategorize an accepted run', async () => {
+    for (const observer of [
+        () => { throw new Error('Presentation failed'); },
+        async () => { throw new Error('Presentation failed asynchronously'); },
+    ]) {
+        const bridgeWindow = {};
+        const { instance, messages } = createInstance();
+        const cleanup = bindThreeBossesSubmissionBridge(
+            instance,
+            issueTicket,
+            async () => responseFor(firstPayload),
+            bridgeWindow,
+            undefined,
+            observer,
+        );
+
+        try {
+            bridgeWindow[THREE_BOSSES_RUN_BEGIN_BRIDGE_FUNCTION](firstPayload.runId);
+            bridgeWindow[THREE_BOSSES_SUBMISSION_BRIDGE_FUNCTION](JSON.stringify(firstPayload));
+            await flush();
+
+            assert.equal(messages.length, 1);
+            assert.deepEqual(callbackAt(messages, 0), {
+                success: true,
+                runId: firstPayload.runId,
+                response: responseFor(firstPayload),
+            });
+        } finally {
+            cleanup();
+        }
+    }
 });

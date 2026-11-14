@@ -3,7 +3,7 @@
  * Depends on React state and a document click listener to close on outside interaction.
  * Cleanup must remove the document listener on unmount.
  */
-import React, { ReactNode, useEffect, useRef, useState } from 'react';
+import React, { ReactNode, useEffect, useId, useRef, useState } from 'react';
 
 type DropdownOption = { value: string; label: string };
 
@@ -38,8 +38,17 @@ const Dropdown: React.FC<DropdownProps> = ({
 }) => {
     const [open, setOpen] = useState(false);
     const wrapperRef = useRef<HTMLDivElement | null>(null);
+    const buttonRef = useRef<HTMLButtonElement | null>(null);
+    const menuId = useId();
+    const isOpen = open && !disabled;
 
     useEffect(() => {
+        if (disabled) {
+            setOpen(false);
+            return;
+        }
+        if (!open) return;
+
         const handleDocClick = (e: MouseEvent) => {
             if (wrapperRef.current && !wrapperRef.current.contains(e.target as Node)) {
                 setOpen(false);
@@ -49,7 +58,12 @@ const Dropdown: React.FC<DropdownProps> = ({
         // Must unregister on unmount to prevent leaked listeners.
         document.addEventListener('click', handleDocClick);
         return () => document.removeEventListener('click', handleDocClick);
-    }, []);
+    }, [open, disabled]);
+
+    const closeAndFocusButton = () => {
+        setOpen(false);
+        buttonRef.current?.focus();
+    };
 
     const handleToggle = () => {
         if (disabled) return;
@@ -57,9 +71,9 @@ const Dropdown: React.FC<DropdownProps> = ({
     };
 
     const handleSelect = (val: string) => {
-        if (disabled) return;
+        if (!isOpen) return;
         onChange(val);
-        setOpen(false);
+        closeAndFocusButton();
     };
 
     const selectedOption = options.find((o) => o.value === value) ?? null;
@@ -67,15 +81,26 @@ const Dropdown: React.FC<DropdownProps> = ({
 
     return (
         <div
-            className={`dropdown ${open ? 'dropdown--open active' : ''} ${className}`.trim()}
+            className={`dropdown ${isOpen ? 'dropdown--open active' : ''} ${className}`.trim()}
             ref={wrapperRef}
+            onBlur={(event) => {
+                // Some browsers report null before an option click; let click dismissal handle it.
+                if (event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) setOpen(false);
+            }}
+            onKeyDown={(event) => {
+                if (event.key !== 'Escape' || !isOpen) return;
+                event.preventDefault();
+                event.stopPropagation();
+                closeAndFocusButton();
+            }}
         >
             <button
                 type="button"
+                ref={buttonRef}
                 className={`dropdown__button ${buttonClassName}`.trim()}
                 disabled={disabled}
-                aria-haspopup="true"
-                aria-expanded={open}
+                aria-controls={menuId}
+                aria-expanded={isOpen}
                 onClick={handleToggle}
             >
                 <span className={`dropdown__selected ${selectedClassName}`.trim()}>
@@ -85,8 +110,10 @@ const Dropdown: React.FC<DropdownProps> = ({
             </button>
 
             <ul
+                id={menuId}
                 className={`dropdown__menu ${menuClassName}`.trim()}
-                role="menu"
+                // Keep the fade animation without leaving invisible options focusable.
+                inert={!isOpen}
             >
                 {options.map((opt) => (
                     <li key={opt.value}>

@@ -96,7 +96,7 @@
 }
 
 @media (prefers-reduced-motion: reduce) {
-    .games__visual {
+    .games .games__visual {
         animation: none;
     }
 }

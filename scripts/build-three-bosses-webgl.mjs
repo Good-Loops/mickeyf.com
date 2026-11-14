@@ -655,6 +655,13 @@ const assertEditorReady = async (invokeUnity, projectPath) => {
   ) {
     throw new Error("Unity Editor must be ready, stopped, and finished compiling before a build.");
   }
+
+  const settings = await commandResult(invokeUnity, [
+    "command", "get_build_settings", "--project-path", projectPath, "--format", "json",
+  ], "Unity build settings");
+  if (settings?.activeBuildTarget !== "WebGL") {
+    throw new Error("Switch the Unity Editor's active build target to WebGL before building.");
+  }
 };
 
 const submitBuild = async (invokeUnity, projectPath, outputPath) => {

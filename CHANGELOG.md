@@ -15,6 +15,7 @@ Changes since v0.6.0-alpha; public availability depends on rollout.
 ### Changed
 
 - P4-Vega runs now finish at 1,000 points, warn before new hazards become dangerous, and support pause and resume.
+- Expanded English and Portuguese privacy information for parent-led accounts, optional daily limits, inactivity warnings and data retention, pending rollout.
 
 ### Fixed
 

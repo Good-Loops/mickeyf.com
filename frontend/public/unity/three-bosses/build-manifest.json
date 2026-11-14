@@ -1,39 +1,39 @@
 {
   "version": 2,
-  "buildId": "97daf31ca0b4e854ef5e327ae68db24abe0d9f66d7259ae56df538a40ed8c098",
-  "certifiedBuildId": "5473694d7730f316a5e72cd67fe30d49ecc05f61f8c809c4ffd02b1b7fb14ba7",
-  "sourceCommit": "346491b4f07d3d7325813a2470ebd0819bbee6a5",
-  "unitySourceDigest": "83c9a133ca8024737af2b4e58ed52bf24fc902e65b5778dea229cb262c7c52fe",
-  "unitySourceFileCount": 1004,
-  "unityEditorVersion": "6000.3.8f1",
-  "loaderUrl": "releases/97daf31ca0b4e854ef5e327ae68db24abe0d9f66d7259ae56df538a40ed8c098/Build/three-bosses-webgl-release-20260910.loader.js",
-  "dataUrl": "releases/97daf31ca0b4e854ef5e327ae68db24abe0d9f66d7259ae56df538a40ed8c098/Build/three-bosses-webgl-release-20260910.data",
-  "frameworkUrl": "releases/97daf31ca0b4e854ef5e327ae68db24abe0d9f66d7259ae56df538a40ed8c098/Build/three-bosses-webgl-release-20260910.framework.js",
-  "codeUrl": "releases/97daf31ca0b4e854ef5e327ae68db24abe0d9f66d7259ae56df538a40ed8c098/Build/three-bosses-webgl-release-20260910.wasm",
-  "streamingAssetsUrl": "releases/97daf31ca0b4e854ef5e327ae68db24abe0d9f66d7259ae56df538a40ed8c098/StreamingAssets",
+  "buildId": "4cb6d811e93c01c053e320a62a7dea2d2f0a62b2b9d0e7e51270df8e29cf47bf",
+  "certifiedBuildId": "344655af301ea8a3f8f079eafd17eabf27654c76fc207747a78551e5ed38b456",
+  "sourceCommit": "5049ed8ad52fcdd5e33b4eaab5670306c6ee3743",
+  "unitySourceDigest": "4da54477aa6892794b476d18716e44d9e1f15a0220e746050f8884afea0a571f",
+  "unitySourceFileCount": 1046,
+  "unityEditorVersion": "6000.3.27f2",
+  "loaderUrl": "releases/4cb6d811e93c01c053e320a62a7dea2d2f0a62b2b9d0e7e51270df8e29cf47bf/Build/webgl-mute-fix-2026-11-12.loader.js",
+  "dataUrl": "releases/4cb6d811e93c01c053e320a62a7dea2d2f0a62b2b9d0e7e51270df8e29cf47bf/Build/webgl-mute-fix-2026-11-12.data",
+  "frameworkUrl": "releases/4cb6d811e93c01c053e320a62a7dea2d2f0a62b2b9d0e7e51270df8e29cf47bf/Build/webgl-mute-fix-2026-11-12.framework.js",
+  "codeUrl": "releases/4cb6d811e93c01c053e320a62a7dea2d2f0a62b2b9d0e7e51270df8e29cf47bf/Build/webgl-mute-fix-2026-11-12.wasm",
+  "streamingAssetsUrl": "releases/4cb6d811e93c01c053e320a62a7dea2d2f0a62b2b9d0e7e51270df8e29cf47bf/StreamingAssets",
   "companyName": "DefaultCompany",
   "productName": "Three Bosses",
   "productVersion": "1.0",
   "assets": [
     {
-      "path": "releases/97daf31ca0b4e854ef5e327ae68db24abe0d9f66d7259ae56df538a40ed8c098/Build/three-bosses-webgl-release-20260910.data",
-      "sha256": "9aea78a8348495ab2f2d5dd0a08e2780db17b4e3748eeb5ea89979835de51943",
-      "size": 41818046
+      "path": "releases/4cb6d811e93c01c053e320a62a7dea2d2f0a62b2b9d0e7e51270df8e29cf47bf/Build/webgl-mute-fix-2026-11-12.data",
+      "sha256": "e8f4400b5daffdd0c36dfdad4f606099d2fab96cf7b9625b2513875fbd2dfa94",
+      "size": 41846311
     },
     {
-      "path": "releases/97daf31ca0b4e854ef5e327ae68db24abe0d9f66d7259ae56df538a40ed8c098/Build/three-bosses-webgl-release-20260910.framework.js",
-      "sha256": "6db9c229fa7d921b9f0528ce5e821fbbbe0749f7ab0a68f6521f073ff287c4f7",
-      "size": 464049
+      "path": "releases/4cb6d811e93c01c053e320a62a7dea2d2f0a62b2b9d0e7e51270df8e29cf47bf/Build/webgl-mute-fix-2026-11-12.framework.js",
+      "sha256": "296cb88ac1d9997a30e17544f95a34ead41f7f4817944923b27c7301a5f3ffdc",
+      "size": 465633
     },
     {
-      "path": "releases/97daf31ca0b4e854ef5e327ae68db24abe0d9f66d7259ae56df538a40ed8c098/Build/three-bosses-webgl-release-20260910.loader.js",
-      "sha256": "f724c35fdb96c400fc6cd0e790bf12b825a357b62cf0515db7bdfa52c99d3e65",
-      "size": 26982
+      "path": "releases/4cb6d811e93c01c053e320a62a7dea2d2f0a62b2b9d0e7e51270df8e29cf47bf/Build/webgl-mute-fix-2026-11-12.loader.js",
+      "sha256": "f59676ac663f3a6d1bb4b40354b834004412550ab7f03db444b6bf397dfcc6a1",
+      "size": 26983
     },
     {
-      "path": "releases/97daf31ca0b4e854ef5e327ae68db24abe0d9f66d7259ae56df538a40ed8c098/Build/three-bosses-webgl-release-20260910.wasm",
-      "sha256": "e3c6aef2b7151043c94767f2eddad34833c7b56bc529f7e03611ada6b8adfff2",
-      "size": 52031665
+      "path": "releases/4cb6d811e93c01c053e320a62a7dea2d2f0a62b2b9d0e7e51270df8e29cf47bf/Build/webgl-mute-fix-2026-11-12.wasm",
+      "sha256": "eea4a9f600fa831ace8156630b52b954f5742bc7c7a93051f84f6f618b057eb5",
+      "size": 51903596
     }
   ]
 }

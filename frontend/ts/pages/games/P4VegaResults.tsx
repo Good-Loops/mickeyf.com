@@ -1,11 +1,14 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, type RefObject } from 'react';
 import type { P4RunResult } from '@/games/p4-Vega/p4RunResult';
+import PersonalBestAlert from '@/components/PersonalBestAlert';
 
 type P4VegaResultsProps = {
     result: P4RunResult;
     onRestart: () => void;
     onRetrySubmission: () => void;
     onHelp: () => void;
+    fullscreenTargetRef: RefObject<HTMLDivElement | null>;
+    helpDialogRef: RefObject<HTMLDialogElement | null>;
 };
 
 const submissionMessages: Record<P4RunResult['submission'], string> = {
@@ -21,6 +24,8 @@ export default function P4VegaResults({
     onRestart,
     onRetrySubmission,
     onHelp,
+    fullscreenTargetRef,
+    helpDialogRef,
 }: P4VegaResultsProps) {
     const restartRef = useRef<HTMLButtonElement | null>(null);
     const completed = result.outcome === 'completed';
@@ -32,6 +37,15 @@ export default function P4VegaResults({
 
     return (
         <div className="p4-vega__results-overlay" onKeyDown={(event) => event.stopPropagation()}>
+            {result.submission === 'submitted' && result.personalBest && (
+                <PersonalBestAlert
+                    gameName="p4-Vega"
+                    score={result.score}
+                    fullscreenTargetRef={fullscreenTargetRef}
+                    focusTargetRef={restartRef}
+                    deferWhileOpenRef={helpDialogRef}
+                />
+            )}
             <section
                 className="p4-vega__results-card"
                 role="dialog"

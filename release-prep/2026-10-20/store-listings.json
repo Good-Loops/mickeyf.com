@@ -1,0 +1,40 @@
+{
+  "status": "draft-not-submitted",
+  "appName": "Ludolume",
+  "packageName": "com.mickeyf.app",
+  "googlePlayAppId": "4974292717500321843",
+  "googlePlayRecordStatus": "draft-created-no-release",
+  "price": "free",
+  "initialCountries": ["BR", "US"],
+  "defaultLanguage": "en-US",
+  "googlePlayType": "app",
+  "applePrimaryCategory": "Entertainment",
+  "appleSecondaryCategory": "Music",
+  "privacyPolicyUrl": "https://mickeyf.com/privacy",
+  "supportUrl": "https://mickeyf.com/connect",
+  "marketingUrl": "https://mickeyf.com/",
+  "supportEmail": "mickeyf.plays@gmail.com",
+  "localizations": {
+    "en-US": {
+      "subtitle": "Games, music and visual play",
+      "shortDescription": "Games, music and interactive visuals in one playful space.",
+      "promotionalText": "Explore arcade games and music-reactive visuals. Play, experiment and discover a little creative space of your own.",
+      "description": "Explore Ludolume's games and interactive visual experiences in one place.\n\nPlay p4-Vega and Three Bosses, or experiment with Dancing Circles and Dancing Fractals. Choose music from your device for local playback and visual analysis.\n\nYou can explore without an account. An account lets you save eligible game results; public leaderboard participation is a separate optional choice where available.\n\nAccount and sign-in features vary by platform and availability. See the privacy notice for account, leaderboard and deletion choices.\n\nFor help or feedback, visit mickeyf.com/connect.",
+      "keywords": "arcade,games,music,visualizer,fractals,circles,interactive,play"
+    },
+    "pt-BR": {
+      "subtitle": "Jogos, música e formas",
+      "shortDescription": "Jogos, música e visuais interativos em um espaço para explorar.",
+      "promotionalText": "Explore jogos de arcade e visuais que reagem à música. Jogue, experimente e descubra seu espaço criativo.",
+      "description": "Explore os jogos e as experiências visuais interativas do Ludolume em um só lugar.\n\nJogue p4-Vega e Three Bosses ou experimente Dancing Circles e Dancing Fractals. Escolha músicas do seu dispositivo para reprodução e análise visual locais.\n\nVocê pode explorar sem uma conta. Uma conta permite salvar resultados de jogos compatíveis; participar dos placares públicos é uma escolha separada e opcional, quando disponível.\n\nOs recursos de conta e as formas de acesso variam conforme a plataforma e a disponibilidade. Consulte o aviso de privacidade para conhecer as opções de conta, placares e exclusão.\n\nPara ajuda ou sugestões, visite mickeyf.com/connect.\n\nA interface do aplicativo está em inglês.",
+      "keywords": "jogos,arcade,música,visualizador,fractais,círculos,interativo"
+    }
+  },
+  "reviewRequired": [
+    "Verify every advertised experience in the final signed Android and App Store eligible iOS candidates.",
+    "Confirm support and privacy URLs are reachable and accurately describe the released account and deletion behavior.",
+    "Confirm whether the app should be described with its in-app p4-Vega/Three Bosses labels or its packaged Before Vega/BeeBoss names.",
+    "Complete actual data handling, age rating, target audience, content rights and restricted-feature reviewer access declarations.",
+    "Capture actual screenshots and prepare the Play feature graphic; do not claim the text draft is a complete store submission."
+  ]
+}

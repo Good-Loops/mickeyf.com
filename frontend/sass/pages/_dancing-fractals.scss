@@ -385,3 +385,67 @@
         &__upload-btn:active { transform: none; }
     }
 }
+
+// Short landscape screens need a compact settings grid, not a desktop sidebar
+// with its own scrollbar competing with the page's scroll surface.
+@media (orientation: landscape) and (max-height: $bp-compact-height) {
+    .dancing-fractals {
+        container-type: size;
+        grid-template-columns: minmax(0, 1fr) minmax(27rem, 42%);
+        grid-template-areas: 'stage ui';
+        align-items: center;
+        gap: 1rem;
+        width: 96vw;
+        max-width: 110rem;
+        height: 100%;
+        min-height: 0;
+
+        &__stage {
+            grid-template-rows: minmax(0, 1fr) auto;
+            width: 100%;
+            height: 100%;
+            min-height: 0;
+            gap: .6rem;
+        }
+
+        &__canvas-wrapper {
+            align-self: center;
+            width: fit-content;
+            max-width: 100%;
+        }
+
+        &__canvas {
+            width: auto;
+            height: auto;
+            max-width: 100%;
+            max-height: calc(100cqh - 9rem);
+        }
+
+        &__transport { width: 100%; }
+        &__upload-btn { min-height: 4.4rem; }
+        .music-controls__btn { width: 4.4rem; height: 4.4rem; }
+
+        &__ui {
+            position: relative;
+            top: auto;
+            width: 100%;
+            max-height: none;
+            overflow: visible;
+            gap: .6rem;
+            padding: .7rem;
+        }
+
+        &__ui--dropdown .dropdown__button { min-height: 3.6rem; font-size: 1.05rem; }
+        &__ui--restart-btn { min-height: 3.6rem; font-size: 1rem; }
+        &__ui--lifetime { grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: .65rem; }
+        &__ui--controls { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: .8rem; }
+        &__ui--controls__group { min-width: 0; }
+        &__ui--checkbox,
+        &__ui--lifetime-slider,
+        &__ui--controls__group label { font-size: 1rem; }
+        &__ui--lifetime,
+        &__ui--controls-wrapper { padding-top: .5rem; }
+        &__ui--slider { min-height: 1.6rem; background-size: 100% .32rem; background-repeat: no-repeat; background-position: center; }
+        &__orientation-hint { display: none; }
+    }
+}

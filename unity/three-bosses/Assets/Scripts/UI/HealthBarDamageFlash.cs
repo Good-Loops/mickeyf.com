@@ -43,13 +43,20 @@ public sealed class HealthBarDamageFlash : MonoBehaviour
                 frameImage.color = Color.Lerp(frameBase, Color.red, a * intensity);
 
             if (fillImage != null)
-                fillImage.color = Color.Lerp(fillBase, Color.red, a * intensity);
+                SetFillTint(Color.Lerp(fillBase, Color.red, a * intensity));
 
             yield return null;
         }
 
         if (frameImage != null) frameImage.color = frameBase;
-        if (fillImage != null) fillImage.color = fillBase;
+        if (fillImage != null) SetFillTint(fillBase);
         routine = null;
+    }
+
+    private void SetFillTint(Color color)
+    {
+        // Preserve opacity controlled independently by the low-health pulse.
+        color.a = fillImage.color.a;
+        fillImage.color = color;
     }
 }

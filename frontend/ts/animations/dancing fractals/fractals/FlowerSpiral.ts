@@ -233,6 +233,13 @@ export class FlowerSpiral implements FractalAnimation<FlowerSpiralConfig> {
         this.isDisposing = false;
     }
     
+    /** Cancels the countdown without changing an active flower fade-out. */
+    cancelScheduledDisposal(): void {
+        this.autoDispose = false;
+        this.disposalDelay = 0;
+        this.disposalTimer = 0;
+    }
+
     /** Starts the disposal fade-out immediately (flower count decreases until it reaches zero). */
     startDisposal(): void {
         if (this.isDisposing) return;

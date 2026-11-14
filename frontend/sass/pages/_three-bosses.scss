@@ -235,17 +235,6 @@ $three-bosses-fullscreen-button-size: 3.4rem;
         }
     }
 
-    &__loading-title {
-        color: rgba($white, .9);
-        font-family: $game-font;
-        font-size: clamp(1.55rem, 3.6vw, 2.4rem);
-        font-weight: 700;
-        letter-spacing: .12em;
-        line-height: 1;
-        text-transform: uppercase;
-        text-shadow: 0 0 1.2rem rgba($primary-light, .14);
-    }
-
     &__loading-progress {
         display: grid;
         grid-template-columns: minmax(0, 1fr) auto;
@@ -575,6 +564,27 @@ $three-bosses-fullscreen-button-size: 3.4rem;
 
 @include viewport-at-most($bp-m) {
     .three-bosses__controls { display: none; }
+}
+
+html[data-native-app] .three-bosses__controls {
+    display: none;
+}
+
+@media (any-pointer: coarse) {
+    .three-bosses__controls { display: none; }
+}
+
+// Leave room for the surrounding page in landscape; fullscreen keeps its own sizing.
+@media (orientation: landscape) {
+    html[data-native-app] .three-bosses__canvas-wrapper:not(:is(:fullscreen, :-webkit-full-screen, [data-canvas-fullscreen])) {
+        width: min(calc(100% - 1.1rem), calc(max(12rem, 100dvh - 17rem) * 1672 / 941));
+    }
+
+    @media (any-pointer: coarse) {
+        .three-bosses__canvas-wrapper:not(:is(:fullscreen, :-webkit-full-screen, [data-canvas-fullscreen])) {
+            width: min(calc(100% - 1.1rem), calc(max(12rem, 100dvh - 17rem) * 1672 / 941));
+        }
+    }
 }
 
 @media (prefers-reduced-motion: reduce) {

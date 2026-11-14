@@ -374,7 +374,10 @@ export const createThreeBossesWebGlServer = ({
     return pending;
   };
 
-  return createHttpServer(async (request, response) => {
+  // A slow phone can leave the final bytes queued behind Vite's backpressure
+  // after Node considers this response finished. Do not expire that loopback
+  // connection before the proxy drains it; request/header timeouts still apply.
+  return createHttpServer({ keepAliveTimeout: 0 }, async (request, response) => {
     const method = request.method ?? "GET";
     if (!isAllowedHost(request.headers.host)) {
       sendJson(response, 421, { error: "INVALID_HOST" }, method);

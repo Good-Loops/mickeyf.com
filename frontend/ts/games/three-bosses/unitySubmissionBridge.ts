@@ -53,6 +53,10 @@ export type ThreeBossesRunTicketIssuer = (
     signal: AbortSignal
 ) => Promise<ThreeBossesRunTicketResponse>;
 
+export type ThreeBossesSubmissionObserver = (
+    response: ThreeBossesRunSubmissionResponse,
+) => void | Promise<void>;
+
 export type UnitySubmissionBridgeInstance = Readonly<{
     SendMessage?: (
         gameObjectName: string,
@@ -201,6 +205,7 @@ export function bindThreeBossesSubmissionBridge(
     submitRun: ThreeBossesRunSubmitter,
     bridgeWindow: SubmissionBridgeWindow = window as unknown as SubmissionBridgeWindow,
     submissionTimeoutMs: number = THREE_BOSSES_SUBMISSION_TIMEOUT_MS,
+    onSubmissionAccepted?: ThreeBossesSubmissionObserver,
 ): () => void {
     const sendMessage = instance.SendMessage;
     if (typeof sendMessage !== 'function') {
@@ -356,6 +361,18 @@ export function bindThreeBossesSubmissionBridge(
                     runId: payload.runId,
                     response: outcome.response,
                 });
+
+                if (onSubmissionAccepted) {
+                    void Promise.resolve()
+                        .then(() => {
+                            if (disposed || controller.signal.aborted) return;
+                            return onSubmissionAccepted(outcome.response);
+                        })
+                        .catch(() => {
+                            // Presentation failures cannot turn a saved run
+                            // into a submission error or an unhandled task.
+                        });
+                }
             })
             .catch((error: unknown) => {
                 cancelTimeout();

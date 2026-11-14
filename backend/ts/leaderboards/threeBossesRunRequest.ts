@@ -1,4 +1,7 @@
-import { Request } from 'express';
+export {
+    hasAllowedMutationOrigin as hasAllowedThreeBossesMutationOrigin,
+    isJsonMutationRequest as isJsonSubmissionRequest,
+} from '../security/mutationRequest';
 import {
     isCanonicalV4RunId,
     isValidThreeBossesCompletionTimeMs,
@@ -42,8 +45,6 @@ export type ThreeBossesRunTicketValidationResult =
               | 'INVALID_RUN';
       };
 
-type SubmissionSecurityRequest = Pick<Request, 'headers' | 'signedCookies'>;
-
 function isPlainObject(value: unknown): value is Record<string, unknown> {
     return typeof value === 'object'
         && value !== null
@@ -81,34 +82,6 @@ function validateVersionedRunIdentity(
             runId: body.runId,
         },
     };
-}
-
-/** Accepts JSON media types with optional parameters, but no type coercion. */
-export function isJsonSubmissionRequest(
-    req: Pick<Request, 'headers'>
-): boolean {
-    const contentType = req.headers['content-type'];
-    if (typeof contentType !== 'string') return false;
-    const [mediaType] = contentType.split(';', 1);
-    return mediaType.trim().toLowerCase() === 'application/json';
-}
-
-/**
- * Cookie-authenticated mutations require an exact trusted browser Origin.
- * Bearer-only non-browser clients may omit Origin; if they send one, it must
- * still match the configured allow-list exactly.
- */
-export function hasAllowedThreeBossesMutationOrigin(
-    req: SubmissionSecurityRequest,
-    allowedOrigins: readonly string[]
-): boolean {
-    const origin = req.headers.origin;
-    if (origin !== undefined) {
-        return typeof origin === 'string' && allowedOrigins.includes(origin);
-    }
-
-    const signedSession = req.signedCookies?.session;
-    return !(typeof signedSession === 'string' && signedSession.length > 0);
 }
 
 /** Validates the exact version-one wire shape without accepting extra keys. */

@@ -10,6 +10,8 @@ import {
 } from "@/animations/dancing circles/runDancingCircles";
 import FullscreenButton from "@/components/FullscreenButton";
 import MusicControls from "@/components/MusicControls";
+import MusicUpload from "@/components/MusicUpload";
+import PageStatus from "@/components/PageStatus";
 import { audioEngine } from "@/animations/helpers/audio/AudioEngine";
 import { useAudioEngineState } from "@/hooks/useAudioEngineState";
 import { CANVAS_WIDTH } from "@/utils/constants";
@@ -52,37 +54,40 @@ const hexToHsv = (hex: string): HsvColor => {
 
 const DancingCircles: React.FC = () => {
 	const canvasWrapperRef = useRef<HTMLDivElement | null>(null);
-	const audioInputRef = useRef<HTMLInputElement | null>(null);
 	const [backgroundColor, setBackgroundColor] = useState(DEFAULT_DANCING_CIRCLES_CUSTOM_COLOR);
 	const [usesAnimatedBackground, setUsesAnimatedBackground] = useState(true);
 	const [isColorPickerOpen, setIsColorPickerOpen] = useState(false);
 	const [pickerColor, setPickerColor] = useState<HsvColor>(() => hexToHsv(DEFAULT_DANCING_CIRCLES_CUSTOM_COLOR));
+	const [startupError, setStartupError] = useState<Error | null>(null);
+	const [ready, setReady] = useState(false);
 	const audio = useAudioEngineState();
 
 	useEffect(() => {
-		if (!canvasWrapperRef.current) return;
+		const container = canvasWrapperRef.current;
+		if (!container) return;
 
+		let cancelled = false;
 		let dispose: (() => void) | undefined;
 
 		(async () => {
-			dispose = await runDancingCircles({
-				container: canvasWrapperRef.current!,
-			});
-		})();
+			const release = await runDancingCircles({ container });
+			if (cancelled) {
+                // Initialization may finish after React has already cleaned up this mount.
+				release();
+				return;
+			}
+			dispose = release;
+			setReady(true);
+		})().catch(() => {
+			if (!cancelled) setStartupError(new Error("Dancing Circles could not start."));
+		});
 
 		return () => {
             // Must dispose on unmount to prevent duplicate loops.
+			cancelled = true;
 			dispose?.();
 		};
 	}, []);
-
-    // Hook upload button to audio engine
-	useEffect(() => {
-        const input = audioInputRef.current;
-        if (!input) return;
-
-        return audioEngine.initializeUploadButton(input);
-    }, []);
 
 	// Stop audio on unmount
 	useEffect(() => {
@@ -94,13 +99,6 @@ const DancingCircles: React.FC = () => {
 	const handlePlay = () => audioEngine.play();
     const handlePause = () => audioEngine.pause();
     const handleStop = () => audioEngine.stop();
-
-    const handleUploadKeyDown = (event: React.KeyboardEvent<HTMLLabelElement>) => {
-        if (event.key !== "Enter" && event.key !== " ") return;
-
-        event.preventDefault();
-        audioInputRef.current?.click();
-    };
 
     const applyBackgroundColor = (nextColor: string, nextPickerColor = hexToHsv(nextColor)) => {
         setBackgroundColor(nextColor);
@@ -158,6 +156,8 @@ const DancingCircles: React.FC = () => {
         applyBackgroundColor(hsvToHex(nextPickerColor), nextPickerColor);
     };
 
+    if (startupError) throw startupError;
+
     const pageStyle = {
         "--canvas-width": `${CANVAS_WIDTH}px`,
         "--dancing-circles-background": backgroundColor,
@@ -165,14 +165,18 @@ const DancingCircles: React.FC = () => {
 
 	return (
 		<section
-            className={`dancing-circles${usesAnimatedBackground ? "" : " dancing-circles--custom-background"}`}
+			className={`dancing-circles${ready ? "" : " dancing-circles--loading"}${usesAnimatedBackground ? "" : " dancing-circles--custom-background"}`}
             style={pageStyle}
         >
 			<h1 className="u-visually-hidden">Dancing Circles</h1>
 
+            {!ready && <div className="dancing-circles__loader"><PageStatus variant="loading" /></div>}
+
 			<div 
 				className="dancing-circles__canvas-wrapper" 
 				ref={canvasWrapperRef}
+				aria-hidden={!ready}
+				inert={!ready}
 			>
 				<FullscreenButton
 					targetRef={canvasWrapperRef}
@@ -180,7 +184,7 @@ const DancingCircles: React.FC = () => {
 				/>
     	   </div>
 
-			<div className="dancing-circles__transport">
+			<div className="dancing-circles__transport" aria-hidden={!ready} inert={!ready}>
                 <div className="dancing-circles__transport-controls">
                     <MusicControls
                         hasAudio={audio.hasAudio}
@@ -191,24 +195,11 @@ const DancingCircles: React.FC = () => {
                     />
                 </div>
 
-                <div className="dancing-circles__upload">
-                    <label
-                        className="dancing-circles__upload-btn"
-                        htmlFor="dancing-circles-file-upload"
-                        role="button"
-                        tabIndex={0}
-                        onKeyDown={handleUploadKeyDown}
-                    >
-                        Upload Music
-                    </label>
-                    <input
-                        id="dancing-circles-file-upload"
-                        type="file"
-                        accept="audio/*"
-                        className="dancing-circles__input"
-                        ref={audioInputRef}
-                    />
-                </div>
+                <MusicUpload
+                    id="dancing-circles-file-upload"
+                    classPrefix="dancing-circles"
+                    onFileSelect={(file) => audioEngine.processAudio(file)}
+                />
 
                 <div
                     className="dancing-circles__background-controls"

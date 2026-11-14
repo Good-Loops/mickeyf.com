@@ -1,8 +1,9 @@
 /** Environment-configured leaderboard service used by React pages. */
 import { API_BASE } from '@/config/apiConfig';
 import { createLeaderboardApi } from '@/services/leaderboardApi';
+import { apiFetch } from './apiFetch.ts';
 
-const leaderboardApi = createLeaderboardApi(API_BASE);
+const leaderboardApi = createLeaderboardApi(API_BASE, apiFetch);
 
 export const getLeaderboardCatalog = leaderboardApi.getCatalog;
 export const getGameLeaderboard = leaderboardApi.getGame;

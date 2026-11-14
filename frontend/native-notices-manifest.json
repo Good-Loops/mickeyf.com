@@ -1,0 +1,68 @@
+{
+  "android_lockfile_sha256": "36ef8ef3b3210f462f043e646c541dff3dad60e0f28507aa39a37973fbbf88de",
+  "ios_lockfile_sha256": "83056d3f056e388a832dc97912bd9dfe25ff5fa94c6adb24cab4060c4098c2dd",
+  "android_archives": [
+    {
+      "coordinate": "com.google.android.gms:play-services-auth-api-phone:18.0.2",
+      "aar_sha256": "bfdf380e7400a9d950cba4dedc152b1bce614a87353009e851087428927cc240",
+      "notice_count": 16
+    },
+    {
+      "coordinate": "com.google.android.gms:play-services-auth-base:18.0.10",
+      "aar_sha256": "d8bff2c98d239633fb550229e527779425bfb51ff04b96ac0f12d3acba0b1f42",
+      "notice_count": 21
+    },
+    {
+      "coordinate": "com.google.android.gms:play-services-auth-blockstore:16.4.0",
+      "aar_sha256": "7e70f20ca8710a783bfbdb268b35603105089e55134313c977e5ba6a0fae4938",
+      "notice_count": 16
+    },
+    {
+      "coordinate": "com.google.android.gms:play-services-auth:21.1.1",
+      "aar_sha256": "d73155e83e97875e93634ca9fd27d0159e2218f3347c53aeaaf0faa2efaa280f",
+      "notice_count": 26
+    },
+    {
+      "coordinate": "com.google.android.gms:play-services-base:18.5.0",
+      "aar_sha256": "59a5c0c2da12311d75d965ce1f419498536b1a167fb28ff7dfc2dfd9cefa4157",
+      "notice_count": 16
+    },
+    {
+      "coordinate": "com.google.android.gms:play-services-basement:18.9.0",
+      "aar_sha256": "c6ed7236b1b3ce0296b508a5c0a09108fd52d83559d35cad2639505cd04ab255",
+      "notice_count": 17
+    },
+    {
+      "coordinate": "com.google.android.gms:play-services-fido:21.0.0",
+      "aar_sha256": "e5c10dad0192a37768a412650567e2e3457c7092b00dd8c11ec97bc36f8fa860",
+      "notice_count": 25
+    },
+    {
+      "coordinate": "com.google.android.gms:play-services-identity-credentials:16.0.0-alpha08",
+      "aar_sha256": "8d001d314c54d6c7c011415c4df74a55d2fec3c2a7fc9d5fff59a8d882ff941e",
+      "notice_count": 17
+    },
+    {
+      "coordinate": "com.google.android.gms:play-services-tasks:18.2.0",
+      "aar_sha256": "7f2aaa8f502068eaf54356ca92aec04271d6e7c416c52c45c0d23440fcbd1654",
+      "notice_count": 16
+    },
+    {
+      "coordinate": "com.google.android.libraries.identity.googleid:googleid:1.2.0",
+      "aar_sha256": "f49e88107f90ef0d1250d8504e8eba18be8532b1286203c92f28bf6bd15814ff",
+      "notice_count": 62
+    },
+    {
+      "coordinate": "com.google.android.play:age-signals:0.0.4",
+      "aar_sha256": "0f47c1dcef35feb637d879cd7fffff555a19398b850b2cc9814f61f54876e989",
+      "notice_count": 62
+    },
+    {
+      "coordinate": "com.google.android.play:core-common:2.0.4",
+      "aar_sha256": "36400824014fc61d9379b13dd1ab13f6514847fb04347c0fdfe618bace78f3ed",
+      "notice_count": 55
+    }
+  ],
+  "unique_notice_entries": 84,
+  "notices_sha256": "13428fbd42b2720a92408fcc1289e943ea44a83e3997594bb2bf68818e40a0eb"
+}

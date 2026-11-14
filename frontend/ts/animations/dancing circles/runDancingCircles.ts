@@ -10,6 +10,8 @@
  * - It does not own the underlying circle dynamics, rendering details, or tuning logic; those live in the
  *   controller/renderer/tuning modules.
  */
+// Required by CSP-restricted native renderers; loaded with this experience, not Home.
+import 'pixi.js/unsafe-eval';
 import { Application, Graphics } from "pixi.js";
 
 import { CANVAS_HEIGHT, CANVAS_WIDTH } from "@/utils/constants";
@@ -229,6 +231,9 @@ export async function runDancingCircles({ container }: DancingCirclesDeps) {
     app.ticker.add(onTick);
 
     load();
+    // Paint the initial composition before the page replaces its loading state.
+    onTick();
+    app.render();
 
     return () => {
         app.ticker.remove(onTick);

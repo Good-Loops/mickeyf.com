@@ -1,0 +1,10 @@
+# Only used with the disposable migration-test compose file.
+services:
+  mysql:
+    volumes:
+      - schema-image-socket:/var/run/mysqld
+
+volumes:
+  schema-image-socket:
+    labels:
+      com.mickeyf.purpose: child-schema-image-test

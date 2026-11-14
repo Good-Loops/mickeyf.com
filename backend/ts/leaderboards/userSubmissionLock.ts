@@ -11,6 +11,7 @@ import {
     PoolConnection,
     RowDataPacket,
 } from 'mysql2/promise';
+import { guardConnectionQueries } from '../db/queryTimeoutConnection';
 
 type UserSubmissionLockDatabase = Pick<Pool, 'getConnection'>;
 
@@ -21,6 +22,8 @@ type LockResultRow = RowDataPacket & {
 export type UserSubmissionLockContext = Readonly<{
     connection: PoolConnection;
     invalidateConnection(): void;
+    /** Acquire a dependent account lock sequentially, using this same pool connection. */
+    withAdditionalLock<T>(userId: number, operation: (context: UserSubmissionLockContext) => Promise<T>): Promise<T>;
 }>;
 
 const DATABASE_QUERY_TIMEOUT_MS = 10_000;
@@ -57,10 +60,20 @@ export async function withUserSubmissionLock<T>(
         throw new TypeError('User submission locks require a valid user ID.');
     }
 
-    const connection = await database.getConnection();
+    const connection = guardConnectionQueries(await database.getConnection());
     let connectionReusable = true;
+    const heldIds = new Set<number>();
+    const context: UserSubmissionLockContext = {
+        connection,
+        invalidateConnection() { connectionReusable = false; },
+        withAdditionalLock: locked,
+    };
 
-    try {
+    async function locked<R>(id: number, run: (context: UserSubmissionLockContext) => Promise<R>): Promise<R> {
+        if (!Number.isSafeInteger(id) || id <= 0 || heldIds.has(id)) {
+            throw new TypeError('Additional submission locks require a distinct valid user ID.');
+        }
+        if (!connectionReusable) throw new UserSubmissionLockError('The submission lock connection is no longer usable.');
         let acquiredRows: LockResultRow[];
         try {
             [acquiredRows] = await connection.query<LockResultRow[]>(
@@ -71,11 +84,10 @@ export async function withUserSubmissionLock<T>(
                         ) AS lockResult`,
                     timeout: DATABASE_QUERY_TIMEOUT_MS,
                 },
-                [userId, LOCK_WAIT_TIMEOUT_SECONDS]
+                [id, LOCK_WAIT_TIMEOUT_SECONDS]
             );
         } catch (error) {
             connectionReusable = false;
-            connection.destroy();
             throw new UserSubmissionLockError(
                 'The user submission lock acquisition was indeterminate.',
                 error
@@ -90,27 +102,21 @@ export async function withUserSubmissionLock<T>(
         }
         if (acquired !== 1) {
             connectionReusable = false;
-            connection.destroy();
             throw new UserSubmissionLockError(
                 'The user submission lock acquisition returned an invalid state.'
             );
         }
 
+        heldIds.add(id);
         let operationFailed = false;
         try {
-            return await operation({
-                connection,
-                invalidateConnection() {
-                    connectionReusable = false;
-                },
-            });
+            return await run(context);
         } catch (error) {
             operationFailed = true;
             throw error;
         } finally {
-            if (!connectionReusable) {
-                connection.destroy();
-            } else {
+            heldIds.delete(id);
+            if (connectionReusable) {
                 try {
                     const [releasedRows] = await connection.query<LockResultRow[]>(
                         {
@@ -119,7 +125,7 @@ export async function withUserSubmissionLock<T>(
                                 ) AS lockResult`,
                             timeout: DATABASE_QUERY_TIMEOUT_MS,
                         },
-                        [userId]
+                        [id]
                     );
                     if (lockResult(releasedRows) !== 1) {
                         throw new UserSubmissionLockError(
@@ -128,7 +134,6 @@ export async function withUserSubmissionLock<T>(
                     }
                 } catch (error) {
                     connectionReusable = false;
-                    connection.destroy();
                     if (!operationFailed) {
                         throw error instanceof UserSubmissionLockError
                             ? error
@@ -140,7 +145,7 @@ export async function withUserSubmissionLock<T>(
                 }
             }
         }
-    } finally {
-        if (connectionReusable) connection.release();
     }
+    try { return await locked(userId, operation); }
+    finally { if (connectionReusable) connection.release(); else connection.destroy(); }
 }

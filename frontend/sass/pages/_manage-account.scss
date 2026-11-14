@@ -1,0 +1,282 @@
+@use '../abstracts' as *;
+
+.manage-account {
+    @include account-form;
+    width: min(90vw, 52rem);
+    padding-block: 2rem;
+    color: rgba($white, .86);
+    font-size: 1.4rem;
+    line-height: 1.6;
+    overflow-wrap: anywhere;
+
+    &__form-wrapper {
+        display: flex;
+        flex-direction: column;
+        gap: 2rem;
+    }
+
+    &__title {
+        color: $primary-light;
+        font-size: clamp(2.2rem, 4vw, 2.8rem);
+        line-height: 1.2;
+
+        &:focus-visible {
+            outline: .15rem solid rgba($primary-light, .65);
+            outline-offset: .35rem;
+            border-radius: .3rem;
+        }
+    }
+
+    &__subtitle {
+        font-size: 1.8rem;
+    }
+
+    &__identity {
+        color: rgba($white, .7);
+
+        strong { color: $white; }
+    }
+
+    &__family {
+        padding: 1.2rem 1.4rem;
+        border: .1rem solid rgba($primary-light, .18);
+        border-radius: .9rem;
+        background: rgba($primary, .07);
+    }
+
+    .score-participation,
+    &__danger {
+        padding: clamp(1.5rem, 3vw, 2rem);
+        border: .1rem solid rgba($white, .13);
+        border-radius: 1rem;
+        background: rgba($space-background, .28);
+    }
+
+    .score-participation__status {
+        align-self: flex-start;
+        padding: .4rem .9rem;
+        border-radius: 99rem;
+        background: rgba($primary-light, .12);
+        font-size: 1.2rem;
+
+        strong { color: $white; text-transform: capitalize; }
+    }
+
+    .score-participation__consent {
+        display: flex;
+        align-items: flex-start;
+        gap: 1.2rem;
+        padding: 1.3rem;
+        border: .1rem solid rgba($primary-light, .25);
+        border-radius: .8rem;
+        background: rgba($primary, .08);
+        cursor: pointer;
+
+        input {
+            flex: 0 0 2rem;
+            width: 2rem;
+            height: 2rem;
+            margin: .15rem 0 0;
+            accent-color: $primary-light;
+            color-scheme: dark;
+        }
+
+        input:focus-visible { outline: .2rem solid $primary-light; outline-offset: .3rem; }
+    }
+
+    &:not(.parent-accounts) .score-participation > button:not([class]) {
+        align-self: stretch;
+        width: 100%;
+        min-height: 4.4rem;
+        text-align: center;
+    }
+
+    &:not(.parent-accounts) .provider-sign-in__button { min-height: 4.4rem; }
+
+    &__danger {
+        display: flex;
+        flex-direction: column;
+        gap: 1.2rem;
+        border-color: rgba(#ffb3bd, .2);
+    }
+
+    :is([aria-label='Your leaderboard participation'], [aria-label='Child leaderboard participation'],
+        [aria-label='Parent-led registration'], [aria-label='Manage child accounts'], [aria-label='Delete family accounts']) {
+        display: flex;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 1.2rem;
+
+        > h2 {
+            color: $primary-light;
+            font-size: 1.8rem;
+            line-height: 1.3;
+        }
+
+        > button {
+            align-self: flex-start;
+        }
+    }
+
+    &__actions {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 1rem;
+    }
+
+    :is([aria-label='Your leaderboard participation'], [aria-label='Child leaderboard participation'],
+        [aria-label='Parent-led registration'], [aria-label='Manage child accounts'], [aria-label='Delete family accounts'])
+        :is(button:not([class]), .manage-account__actions > button) {
+        min-height: 4.4rem;
+        padding: .8rem 1.2rem;
+        border: .1rem solid rgba($primary-light, .35);
+        border-radius: .7rem;
+        background: rgba($primary, .1);
+        text-align: left;
+
+        &:hover:not(:disabled),
+        &:focus-visible {
+            border-color: rgba($primary-light, .75);
+            background: rgba($primary, .2);
+        }
+
+        &:focus-visible {
+            outline: .15rem solid rgba($primary-light, .7);
+            outline-offset: .2rem;
+        }
+
+        &:disabled {
+            opacity: .55;
+            cursor: not-allowed;
+        }
+    }
+
+    &.parent-accounts &__form-wrapper {
+        .parent-accounts__section,
+        .parent-accounts__section > div:not(.manage-account__actions),
+        .parent-accounts__section > form {
+            display: flex;
+            flex-direction: column;
+            gap: 1.2rem;
+        }
+
+        .parent-accounts__language {
+            display: flex;
+            flex-wrap: wrap;
+            gap: .8rem;
+        }
+
+        .parent-accounts__language button {
+            padding: .6rem 1rem;
+            border: .1rem solid rgba($primary-light, .3);
+            border-radius: 99rem;
+            color: inherit;
+            background: transparent;
+        }
+
+        .parent-accounts__language button[aria-pressed='true'] {
+            color: $white;
+            border-color: $primary-light;
+            background: rgba($primary-light, .16);
+        }
+
+        .parent-accounts__panel,
+        .parent-accounts__control,
+        .parent-accounts__warning {
+            padding: clamp(1.4rem, 3vw, 2rem);
+            border: .1rem solid rgba($white, .16);
+            border-radius: 1rem;
+            background: rgba($space-background, .28);
+        }
+
+        .parent-accounts__panel--danger {
+            border-color: rgba(#ffb3bd, .3);
+        }
+
+        .parent-accounts__panel > summary,
+        .parent-accounts__notice > summary {
+            color: $primary-light;
+            cursor: pointer;
+            font-weight: 600;
+        }
+
+        .parent-accounts__panel > summary { font-size: 1.7rem; }
+        .parent-accounts__panel[open] > summary,
+        .parent-accounts__notice[open] > summary { margin-bottom: 1.4rem; }
+        .parent-accounts__notice > p + p { margin-top: 1rem; }
+
+        .parent-accounts__section > :is(h2, h3) {
+            color: $primary-light;
+            line-height: 1.3;
+        }
+
+        label { display: block; }
+
+        .parent-accounts__check {
+            display: flex;
+            align-items: flex-start;
+            gap: .8rem;
+        }
+
+        input[type='checkbox'] {
+            margin-right: .8rem;
+            flex: 0 0 auto;
+        }
+
+        input:not([type='checkbox']),
+        select {
+            display: block;
+            margin-top: .8rem;
+            width: 100%;
+            max-width: 100%;
+            min-height: 4.4rem;
+            padding: .8rem 1rem;
+            border: .1rem solid rgba($white, .25);
+            border-radius: .7rem;
+            color: $white;
+            background: $space-background;
+            font: inherit;
+            user-select: text;
+        }
+
+        button:not(.provider-sign-in__button) {
+            min-height: 4.4rem;
+            padding: .8rem 1.2rem;
+            border: .1rem solid rgba($primary-light, .35);
+            border-radius: .7rem;
+            color: inherit;
+            background: rgba($primary, .1);
+            text-align: left;
+
+            &:hover:not(:disabled), &:focus-visible {
+                border-color: rgba($primary-light, .75);
+                background: rgba($primary, .2);
+            }
+            &:focus-visible { outline: .2rem solid $primary-light; outline-offset: .2rem; }
+            &:disabled { opacity: .55; cursor: not-allowed; }
+        }
+
+        summary:focus-visible,
+        :is(input, select):focus-visible { outline: .2rem solid $primary-light; outline-offset: .2rem; }
+    }
+
+    &__form {
+        margin-top: .4rem;
+    }
+
+    &__submit {
+        min-height: 4.4rem;
+        border-color: rgba(#ffb3bd, .5);
+        color: #ffd5db;
+        background: rgba(#9a2941, .18);
+    }
+
+    &__error {
+        color: #ffd5db;
+    }
+
+    a {
+        color: $primary-light;
+        text-decoration: underline;
+    }
+}

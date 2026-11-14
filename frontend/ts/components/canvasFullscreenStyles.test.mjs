@@ -44,6 +44,15 @@ test('all fullscreen modes override embedded canvas page gestures', () => {
     }
 });
 
+test('fullscreen removes the embedded decorative frame and canvas corner rounding', () => {
+    const frame = desktopCss.split('}').find(part => part.includes('display: flex;'));
+    for (const declaration of ['padding: 0;', 'border: 0;', 'border-radius: 0;', 'box-shadow: none;', 'backdrop-filter: none;']) {
+        assert.ok(frame?.includes(declaration), declaration);
+    }
+    const canvas = desktopCss.split('}').find(part => part.includes('touch-action: none !important;'));
+    assert.ok(canvas?.includes('border-radius: 0;'));
+});
+
 test('p4-Vega disables selection and touch callouts only inside fullscreen gameplay', () => {
     const gameCss = compileString("@use 'pages/p4-vega';", {
         loadPaths: [fileURLToPath(new URL('../../sass', import.meta.url))],
@@ -77,6 +86,30 @@ test('p4-Vega fullscreen joystick uses safe bottom corners and leaves the exit b
     const leftRule = gameCss.split('}').find(part => part.includes('[data-joystick-side=left]')
         && part.includes('left: max(2rem, env(safe-area-inset-left))'));
     assert.ok(leftRule?.includes('right: auto;'));
+});
+
+test('p4-Vega applies device safe insets only to fullscreen HUD controls', () => {
+    const gameCss = compileString("@use 'pages/p4-vega';", {
+        loadPaths: [fileURLToPath(new URL('../../sass', import.meta.url))],
+    }).css;
+    for (const [control, side] of [['score', 'left'], ['pause-btn', 'right']]) {
+        const selector = `.p4-vega__${control}`;
+        const embedded = gameCss.split('}').find(part => part.trim().startsWith(`${selector} {`)
+            && part.includes('position: absolute;'));
+        assert.ok(embedded, `embedded ${control}`);
+        assert.ok(embedded.includes('top: 0.85rem;'));
+        assert.ok(embedded.includes(`${side}: 0.85rem;`));
+        assert.doesNotMatch(embedded, /safe-area-inset/);
+
+        for (const edge of ['top', side]) {
+            const insetRules = gameCss.split('}').filter(part => part.includes(selector)
+                && part.includes(`${edge}: max(0.85rem, env(safe-area-inset-${edge}));`));
+            assert.equal(insetRules.length, 1, `${control} ${edge} inset`);
+            for (const mode of [':fullscreen', ':-webkit-full-screen', '[data-canvas-fullscreen=fallback]']) {
+                assert.ok(insetRules[0].includes(`__canvas-wrapper${mode} ${selector}`));
+            }
+        }
+    }
 });
 
 test('compact Three Bosses fullscreen keeps the exit control at the safe screen corner', () => {

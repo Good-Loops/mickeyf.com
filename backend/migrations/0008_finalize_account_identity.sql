@@ -1,0 +1,2 @@
+ALTER TABLE users
+    MODIFY COLUMN account_uuid CHAR(36) CHARACTER SET ascii COLLATE ascii_bin NOT NULL DEFAULT (UUID());

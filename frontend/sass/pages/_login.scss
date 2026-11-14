@@ -3,3 +3,32 @@
 .login {
     @include account-form;
 }
+
+.provider-eligibility {
+    margin-top: 2.4rem;
+    padding-top: 2rem;
+    border-top: 1px solid rgba($white, .16);
+    color: rgba($white, .9);
+    font-size: 1.4rem;
+    line-height: 1.5;
+
+    &__content, &__message { display: grid; gap: 1.2rem; }
+
+    h2 { margin: 0; font-size: 1.6rem; line-height: 1.35; }
+    p { margin: 0; }
+
+    a, a:visited { color: $white; text-decoration: underline; text-underline-offset: .2em; }
+    a:focus-visible { outline: 2px solid $primary-light; outline-offset: 4px; border-radius: 2px; }
+
+    &__retry {
+        justify-self: start;
+        min-height: 44px;
+        padding: .8rem 1.2rem;
+        border: 1px solid rgba($primary-light, .45);
+        border-radius: .7rem;
+        color: $white;
+
+        &:hover { background: rgba($white, .08); }
+        &:focus-visible { outline: 2px solid $primary-light; outline-offset: 3px; }
+    }
+}

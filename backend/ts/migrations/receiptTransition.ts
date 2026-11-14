@@ -161,7 +161,7 @@ async function buildPlan(
     }
     const blockers: string[] = [];
     const legacyComplete = migrations.filter(({ effect }) =>
-        !TRANSITION_EFFECTS.some((expected) => expected === effect)
+        effect === 'create-table' || effect === 'drop-column'
     ).every(({ version }) => schema.applied.includes(version));
     if (!legacyComplete) blockers.push('all historical migrations must be recorded first');
     if (legacyComplete) await verifyNoObsoleteDependencies(connection);
