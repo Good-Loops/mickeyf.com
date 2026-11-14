@@ -16,6 +16,7 @@ import { Capacitor } from '@capacitor/core';
 import { BrowserRouter } from "react-router-dom";
 import { AuthProvider } from "@/context/AuthContext";
 import RegionalAgeBoundary from '@/components/RegionalAgeBoundary';
+import AppStoreConsentBoundary from '@/components/AppStoreConsentBoundary';
 import App from "@/App";
 import { loadAppFonts } from "@/layout/loadAppFonts";
 import "../sass/style.scss";
@@ -29,7 +30,9 @@ ReactDOM.createRoot(document.getElementById("root")!).render(
 	<BrowserRouter>
 		<RegionalAgeBoundary>
     	<AuthProvider>
+			<AppStoreConsentBoundary>
 			<App />
+			</AppStoreConsentBoundary>
     	</AuthProvider>
 		</RegionalAgeBoundary>
   	</BrowserRouter>

@@ -34,7 +34,7 @@ const server = await createViteTestServer({ root, configFile: `${root}/vite.conf
         }, load(id) { if (id.startsWith('\0registration-gate:')) return mocks[id.slice('\0registration-gate:'.length)]; },
     }] });
 after(() => server.close());
-const { default: Component, classifyRegistrationAge } = await server.ssrLoadModule('/ts/components/RegistrationGate.tsx');
+const { default: Component, classifyRegistrationAge, ParentRegistrationUnavailable } = await server.ssrLoadModule('/ts/components/RegistrationGate.tsx');
 const nodes = node => !node || typeof node !== 'object' ? [] : [node, ...[node.props?.children].flat(Infinity).flatMap(nodes)];
 
 function mount(t, policy, purpose = 'signup') {
@@ -110,6 +110,23 @@ test('a shared device age skips manual entry and is recorded before provider con
     await view.find(node => node.type === 'form').props.onSubmit({ preventDefault() {} }); view.render(); await view.settle();
     assert.deepEqual(order, ['reserve', 'device', 'finish:adult', 'begin:adult']);
     assert.equal(view.children.length, 1);
+});
+
+test('a shared under-13 age shows parent guidance without opening provider controls', async t => {
+    const view = mount(t, undefined, 'provider-login'); const order = [];
+    view.hooks.beginNative = async () => { order.push('reserve'); return 'synthetic-attempt'; };
+    view.hooks.nativeFirst = async (threshold, reserve) => {
+        assert.equal(threshold, 13); assert.equal(await reserve(), true);
+        return { kind: 'shared', ageBand: 'parent-required' };
+    };
+    view.hooks.finishNative = async input => { order.push(`finish:${input.ageBand}`); return true; };
+    view.hooks.begin = async input => { order.push(`begin:${input.ageBand}`); return { error: 'PARENT_REQUIRED' }; };
+    view.render(); await view.settle(); await view.change('registration-country', 'US');
+    await view.find(node => node.type === 'form').props.onSubmit({ preventDefault() {} }); view.render(); await view.settle();
+    assert.deepEqual(order, ['reserve', 'finish:parent-required', 'begin:parent-required']);
+    assert.equal(view.children.length, 0);
+    assert.equal(view.hooks.minorRestricted, true);
+    assert(view.find(node => node.type === ParentRegistrationUnavailable));
 });
 
 test('unshared device age asks manually and completes its reservation without a second prompt', async t => {

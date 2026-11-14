@@ -21,6 +21,7 @@ class LudolumeBridgeViewController: CAPBridgeViewController {
         bridge?.registerPluginInstance(LudolumeIdentityPlugin())
         bridge?.registerPluginInstance(LudolumePresentationPlugin())
         bridge?.registerPluginInstance(LudolumeAgePlugin())
+        bridge?.registerPluginInstance(LudolumeAppTransactionPlugin())
     }
 }
 
@@ -117,6 +118,7 @@ private enum LudolumeApiPolicy {
         "POST /auth/child-daily-usage/clear", "POST /auth/child-daily-usage/heartbeat",
         "POST /auth/child-inactivity/warning", "POST /auth/child-inactivity/acknowledge",
         "POST /auth/child-inactivity/pending",
+        "POST /auth/app-store/transaction", "POST /auth/app-store/transaction/prepare",
         "GET /auth/parent-registration/scores/config",
         "POST /auth/parent-registration/scores/status",
         "POST /auth/parent-registration/scores/publish",
@@ -154,7 +156,9 @@ private enum LudolumeApiPolicy {
         guard call.options["body"] == nil || body != nil else { return nil }
         guard method != "GET" || body == nil else { return nil }
         let bodyData = body.map { Data($0.utf8) }
-        guard (bodyData?.count ?? 0) <= maximumRequestBytes else { return nil }
+        // The Apple-signed app transaction can exceed the ordinary JSON limit.
+        let requestLimit = components.path == "/auth/app-store/transaction" ? 96 * 1024 : maximumRequestBytes
+        guard (bodyData?.count ?? 0) <= requestLimit else { return nil }
 
         var request = URLRequest(url: url, cachePolicy: .reloadIgnoringLocalCacheData, timeoutInterval: 30)
         request.httpMethod = method

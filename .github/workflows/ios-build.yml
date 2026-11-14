@@ -28,6 +28,14 @@ on:
         type: string
         required: false
         default: ""
+      app_store_consent:
+        description: Test the draft Apple child-consent client only in compile-only or synthetic internal builds
+        type: choice
+        required: false
+        default: "off"
+        options:
+          - "off"
+          - "on"
       compile_only:
         description: Validate both native targets without signing, deployment, caches or app artifacts
         type: boolean
@@ -70,6 +78,15 @@ concurrency:
   cancel-in-progress: ${{ !inputs.upload_testflight }}
 
 jobs:
+  invalid-consent-mode:
+    if: ${{ inputs.app_store_consent == 'on' && !inputs.compile_only && (inputs.internal_staging_host == '' || !inputs.upload_testflight || inputs.upload_distribution != 'internal-only') }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Keep the unqualified child-consent client out of production builds
+        run: |
+          echo 'Apple child-consent testing requires compile-only or a synthetic internal-only build.' >&2
+          exit 1
+
   invalid-staging-mode:
     if: ${{ inputs.internal_staging_host != '' && (!inputs.upload_testflight || inputs.upload_distribution != 'internal-only' || inputs.compile_only || inputs.audit_privacy_manifests || inputs.capture_store_screenshots || inputs.resolve_native_locks) }}
     runs-on: ubuntu-latest
@@ -107,6 +124,7 @@ jobs:
       VITE_ENABLE_CHILD_ONLINE_ACTIVITY: ${{ (inputs.child_lifecycle == 'on' || (inputs.child_lifecycle != 'off' && vars.LUDOLUME_CHILD_LIFECYCLE_RELEASE == '1')) && '1' || '0' }}
       VITE_ENABLE_CHILD_INACTIVITY_WARNING: ${{ (inputs.child_lifecycle == 'on' || (inputs.child_lifecycle != 'off' && vars.LUDOLUME_CHILD_LIFECYCLE_RELEASE == '1')) && '1' || '0' }}
       VITE_ENABLE_CHILD_DAILY_USAGE: ${{ (inputs.child_daily_usage == 'on' || (inputs.child_daily_usage != 'off' && vars.LUDOLUME_CHILD_DAILY_USAGE_RELEASE == '1')) && '1' || '0' }}
+      VITE_ENABLE_APP_STORE_CHILD_CONSENT: ${{ inputs.app_store_consent == 'on' && '1' || '0' }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -252,7 +270,7 @@ jobs:
 
   testflight:
     # Also restrict the protected environment to this exact branch in GitHub.
-    if: ${{ !inputs.compile_only && inputs.upload_testflight && !inputs.audit_privacy_manifests && (inputs.internal_staging_host == '' || (inputs.upload_distribution == 'internal-only' && !inputs.capture_store_screenshots && !inputs.resolve_native_locks)) && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/auth-family-leaderboards' || github.ref == 'refs/heads/feat/device-privacy-qualification') }}
+    if: ${{ !inputs.compile_only && inputs.upload_testflight && !inputs.audit_privacy_manifests && (inputs.internal_staging_host == '' || (inputs.upload_distribution == 'internal-only' && !inputs.capture_store_screenshots && !inputs.resolve_native_locks)) && (inputs.app_store_consent != 'on' || inputs.internal_staging_host != '') && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/feature/auth-family-leaderboards' || github.ref == 'refs/heads/feat/device-privacy-qualification') }}
     name: Sign and upload (${{ inputs.upload_distribution || 'internal-only' }})
     environment: ios-testflight
     runs-on: macos-26
@@ -272,6 +290,7 @@ jobs:
       VITE_ENABLE_CHILD_ONLINE_ACTIVITY: ${{ (inputs.child_lifecycle == 'on' || (inputs.child_lifecycle != 'off' && vars.LUDOLUME_CHILD_LIFECYCLE_RELEASE == '1')) && '1' || '0' }}
       VITE_ENABLE_CHILD_INACTIVITY_WARNING: ${{ (inputs.child_lifecycle == 'on' || (inputs.child_lifecycle != 'off' && vars.LUDOLUME_CHILD_LIFECYCLE_RELEASE == '1')) && '1' || '0' }}
       VITE_ENABLE_CHILD_DAILY_USAGE: ${{ (inputs.child_daily_usage == 'on' || (inputs.child_daily_usage != 'off' && vars.LUDOLUME_CHILD_DAILY_USAGE_RELEASE == '1')) && '1' || '0' }}
+      VITE_ENABLE_APP_STORE_CHILD_CONSENT: ${{ inputs.app_store_consent == 'on' && '1' || '0' }}
       ASC_KEY_ID: ${{ vars.ASC_KEY_ID }}
       ASC_ISSUER_ID: ${{ vars.ASC_ISSUER_ID }}
       ASC_APP_ID: ${{ vars.ASC_APP_ID }}
@@ -336,6 +355,7 @@ jobs:
       VITE_ENABLE_CHILD_ONLINE_ACTIVITY: ${{ (inputs.child_lifecycle == 'on' || (inputs.child_lifecycle != 'off' && vars.LUDOLUME_CHILD_LIFECYCLE_RELEASE == '1')) && '1' || '0' }}
       VITE_ENABLE_CHILD_INACTIVITY_WARNING: ${{ (inputs.child_lifecycle == 'on' || (inputs.child_lifecycle != 'off' && vars.LUDOLUME_CHILD_LIFECYCLE_RELEASE == '1')) && '1' || '0' }}
       VITE_ENABLE_CHILD_DAILY_USAGE: ${{ (inputs.child_daily_usage == 'on' || (inputs.child_daily_usage != 'off' && vars.LUDOLUME_CHILD_DAILY_USAGE_RELEASE == '1')) && '1' || '0' }}
+      VITE_ENABLE_APP_STORE_CHILD_CONSENT: ${{ inputs.app_store_consent == 'on' && '1' || '0' }}
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

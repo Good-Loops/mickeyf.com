@@ -3,7 +3,7 @@ import Capacitor
 import CryptoKit
 import StoreKit
 
-// Deliberately not registered until the consent-withdrawal flow is integrated.
+// Read only after the server identifies an eligible child and the client switch is enabled.
 @objc(LudolumeAppTransactionPlugin)
 public class LudolumeAppTransactionPlugin: CAPPlugin, CAPBridgedPlugin {
     public let identifier = "LudolumeAppTransactionPlugin"

@@ -8,7 +8,7 @@ import { spawnSync } from 'node:child_process';
 
 const sourceUrl = new URL('../../ios/App/App/LudolumeAppTransactionPlugin.swift', import.meta.url);
 
-test('the prepared App Store bridge is compiled but not yet exposed to web content', async () => {
+test('the App Store bridge is compiled and registered once for the opt-in client', async () => {
     const { default: xcode } = await import('xcode');
     const project = xcode.project(fileURLToPath(new URL('../../ios/App/App.xcodeproj/project.pbxproj', import.meta.url)));
     project.parseSync();
@@ -20,7 +20,7 @@ test('the prepared App Store bridge is compiled but not yet exposed to web conte
     const reference = project.pbxBuildFileSection()[matches[0].value].fileRef;
     assert.equal(project.pbxFileReferenceSection()[reference].path, 'LudolumeAppTransactionPlugin.swift');
     const bridge = await readFile(new URL('../../ios/App/App/LudolumeApiPlugin.swift', import.meta.url), 'utf8');
-    assert.doesNotMatch(bridge, /registerPluginInstance\(LudolumeAppTransactionPlugin\(\)\)/u);
+    assert.equal(bridge.split('registerPluginInstance(LudolumeAppTransactionPlugin())').length - 1, 1);
 });
 
 test('device verification uses Apple nonce ordering and rejects a different device', {

@@ -162,8 +162,21 @@ test('native provider transport admits only explicit provider routes within the 
         'POST /auth/providers/begin', 'POST /auth/providers/complete',
     ]);
     assert.match(native, /maximumRequestBytes = 32 \* 1024/);
-    assert.match(native, /bodyData\?\.count \?\? 0\) <= maximumRequestBytes/);
+    assert.match(native, /components\.path == "\/auth\/app-store\/transaction" \? 96 \* 1024 : maximumRequestBytes/);
+    assert.match(native, /bodyData\?\.count \?\? 0\) <= requestLimit/);
     assert.match(native, /components\.query == nil, components\.fragment == nil/);
+});
+
+test('the prepared iOS App Store binding route matches the backend and has no GET variant', async () => {
+    const [native, backend] = await Promise.all([
+        readFile(new URL('../../ios/App/App/LudolumeApiPlugin.swift', import.meta.url), 'utf8'),
+        readFile(new URL('../../../backend/ts/routers/appStoreTransactionBindingRouter.ts', import.meta.url), 'utf8'),
+    ]);
+    const route = /APP_STORE_TRANSACTION_BINDING_PATH = '([^']+)'/u.exec(backend)?.[1];
+    assert.equal(route, '/auth/app-store/transaction');
+    const matches = [...native.matchAll(/"((?:GET|POST) \/auth\/app-store\/[^"\n]+)"/gu)].map(match => match[1]);
+    assert.deepEqual(matches, [`POST ${route}`, `POST ${route}/prepare`]);
+    assert.match(backend, /json\(\{ limit: '96kb', strict: true \}\)/u);
 });
 
 test('native bridge diagnostics cannot log provider credentials in debug builds', async () => {

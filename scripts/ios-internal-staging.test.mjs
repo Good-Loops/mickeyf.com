@@ -73,6 +73,9 @@ test('manual workflow scopes staging to the protected signing job and never shel
     assert.match(workflow, /invalid-staging-mode:[\s\S]*?inputs\.upload_distribution != 'internal-only'/);
     const signed = workflow.slice(workflow.indexOf('  testflight:'), workflow.indexOf('  android:'));
     assert.match(signed, /IOS_INTERNAL_STAGING_HOST: \$\{\{ inputs\.internal_staging_host \}\}/);
+    assert.match(workflow, /app_store_consent:[\s\S]*?default: "off"/);
+    assert.match(workflow, /invalid-consent-mode:[\s\S]*?inputs\.app_store_consent == 'on'[\s\S]*?inputs\.upload_distribution != 'internal-only'/);
+    assert.match(signed, /inputs\.app_store_consent != 'on' \|\| inputs\.internal_staging_host != ''/);
     assert.match(signed, /VITE_PROD_API_URL: \$\{\{ inputs\.internal_staging_host != '' && format\('https:\/\/\{0\}', inputs\.internal_staging_host\)/);
     assert.match(signed, /ios-internal-staging\.test\.mjs/);
     for (const script of signed.split(/\n {8}run:/u).slice(1)) {
